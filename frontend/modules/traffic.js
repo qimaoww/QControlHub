@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { createTrafficFormView } from "./traffic-form-view.js";
 import { createTrafficOrder } from "./traffic-order.js";
 import { createTrafficCardInteractions } from "./traffic-card-interactions.js";
@@ -85,7 +86,7 @@ export function installTraffic(ctx) {
         status.dataset.refreshError = "1";
         status.title = error.message;
         const label = status.querySelector("[data-traffic-refresh-label]");
-        if (label) label.textContent = "刷新失败，保留上次数据";
+        if (label) updateFeedback(label, "刷新失败，保留上次数据");
       }
       poller.start();
       return false;

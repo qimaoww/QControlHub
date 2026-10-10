@@ -1,3 +1,4 @@
+import { updateFeedback, removePresented } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { diagnosticError } from "./errors.js";
 import { submitLiveConfigChange } from "./live-config-state.js";
@@ -24,11 +25,11 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
       formElement.dataset.saving = "1";
       formElement.setAttribute("aria-busy", "true");
       controls.forEach(([element]) => { element.disabled = true; });
-      formElement.querySelector("[data-live-save-status]")?.remove();
+      removePresented(formElement.querySelector("[data-live-save-status]"));
       const status = document.createElement("span");
       status.dataset.liveSaveStatus = "";
       status.setAttribute("role", "status");
-      status.textContent = "正在检查配置…";
+      updateFeedback(status, "正在检查配置…");
       formElement.querySelector(".code-workspace>footer").prepend(status);
       try {
         if (configFiles) form.set("content", configFiles.content());
@@ -50,8 +51,8 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           return;
         if (accountData !== state.data || !formElement.isConnected) return;
         submitted = true;
-        if (submitter) submitter.textContent = "正在提交…";
-        status.textContent = "正在保存配置并提交任务…";
+        if (submitter) updateFeedback(submitter, "正在提交…");
+        updateFeedback(status, "正在保存配置并提交任务…");
         const result = await submitLiveConfigChange({
           api,
           submitTask,
@@ -63,11 +64,11 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           existingAvailable: importSource,
           savedConfig: saved,
           beforeDeploy: beforeDeploy ? async () => {
-            status.textContent = "正在核验 Agent 当前配置…";
-            if (submitter) submitter.textContent = "正在核验…";
+            updateFeedback(status, "正在核验 Agent 当前配置…");
+            if (submitter) updateFeedback(submitter, "正在核验…");
             await beforeDeploy();
-            status.textContent = "正在保存配置并提交任务…";
-            if (submitter) submitter.textContent = "正在提交…";
+            updateFeedback(status, "正在保存配置并提交任务…");
+            if (submitter) updateFeedback(submitter, "正在提交…");
           } : null,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
@@ -93,7 +94,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
         liveSaveUncertain = !error.deployPreflight && submitted &&
           Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
         const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
-        status.textContent = message;
+        updateFeedback(status, message);
         status.setAttribute("role", "alert");
         notify(message, "error");
       } finally {
@@ -101,8 +102,8 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
         delete formElement.dataset.saving;
         formElement.removeAttribute("aria-busy");
         controls.forEach(([element, disabled]) => { element.disabled = disabled || liveSaveUncertain && element.matches("[data-live-intent]"); });
-        if (submitter) submitter.textContent = label;
-        if (status.getAttribute("role") !== "alert") status.remove();
+        if (submitter) updateFeedback(submitter, label);
+        if (status.getAttribute("role") !== "alert") removePresented(status);
       }
   });
 

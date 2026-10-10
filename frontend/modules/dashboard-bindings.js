@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { utcMonth } from "./dashboard-model.js";
 import { bindDialogBackdrop, closePopup } from "./popup.js";
 export function createDashboardBindings({ state, notify }, { panelMetrics, dashboard }) {
@@ -50,7 +51,7 @@ export function createDashboardBindings({ state, notify }, { panelMetrics, dashb
       const chart = document.querySelector(".dashboard-traffic-chart");
       const hint = document.querySelector(".dashboard-traffic-title small");
       chart?.setAttribute("aria-busy", "true");
-      if (hint) { hint.textContent = "UTC 自然日 · 正在读取…"; hint.setAttribute("role", "status"); }
+      if (hint) { updateFeedback(hint, "UTC 自然日 · 正在读取…"); hint.setAttribute("role", "status"); }
       closePopup(trafficMonthPicker);
       trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
       try {
@@ -60,7 +61,7 @@ export function createDashboardBindings({ state, notify }, { panelMetrics, dashb
             state.route !== "dashboard" || data.dashboardTrafficMonth !== value) return;
         data.dashboardTrafficMonth = previousMonth;
         chart?.removeAttribute("aria-busy");
-        if (hint?.isConnected) hint.textContent = "UTC 自然日";
+        if (hint?.isConnected) updateFeedback(hint, "UTC 自然日");
         notify?.(`读取流量月份失败：${error.message}`, "error");
       }
     };

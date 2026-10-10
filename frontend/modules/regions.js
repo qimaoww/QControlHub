@@ -1,3 +1,5 @@
+import { updateFeedback, setVisible } from "./presence-motion.js";
+import { closeRetiringDialog } from "./popup.js";
 // Preserve the panel's existing display policy for Taiwan in every view.
 export function geoRegionDetails(value) {
   const code = String(value || "").trim().toUpperCase();
@@ -120,7 +122,7 @@ export function openRegionPicker(agent, { api, esc, onSave, onClose }) {
       icon.setAttribute("aria-label", "自动识别");
       icon.title = "自动识别";
     }
-    form.querySelector("[data-region-description]").textContent = region ? `${region.name} · ${region.code}` : "自动识别";
+    updateFeedback(form.querySelector("[data-region-description]"), region ? `${region.name} · ${region.code}` : "自动识别");
     auto.setAttribute("aria-pressed", String(!selected));
     grid.querySelectorAll("[data-region-choice]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.regionChoice === selected));
@@ -131,19 +133,19 @@ export function openRegionPicker(agent, { api, esc, onSave, onClose }) {
     const matches = regions.filter((region) => `${region.code} ${region.name} ${region.english}`.toLowerCase().includes(query));
     grid.innerHTML = matches.map((region) => `<button type="button" class="region-choice" data-region-choice="${esc(region.code)}" aria-label="${esc(region.name)} (${esc(region.code)})" aria-pressed="${region.code === selected}" title="${esc(region.name)} (${esc(region.code)})"><span class="region-choice-flag"><img src="/api/v1/region-flags/${region.flagCode.toLowerCase()}" alt="" loading="lazy" decoding="async" draggable="false"><i aria-hidden="true">✓</i></span><strong>${esc(region.name)}</strong><small>${esc(region.code)}</small></button>`).join("");
     grid.scrollTop = 0;
-    form.querySelector("[data-region-list-label]").textContent = query ? "搜索结果" : "全部国家 / 地区";
-    form.querySelector("[data-region-count]").textContent = `${matches.length} 个${query ? "" : " · 常用优先"}`;
-    form.querySelector("[data-region-empty]").hidden = matches.length > 0;
-    grid.hidden = !matches.length;
+    updateFeedback(form.querySelector("[data-region-list-label]"), query ? "搜索结果" : "全部国家 / 地区");
+    updateFeedback(form.querySelector("[data-region-count]"), `${matches.length} 个${query ? "" : " · 常用优先"}`);
+    setVisible(form.querySelector("[data-region-empty]"), matches.length === 0);
+    setVisible(grid, matches.length > 0);
     grid.querySelectorAll("img").forEach((image) => image.addEventListener("error", () => {
       image.hidden = true;
       image.parentNode.classList.add("unavailable");
     }, { once: true }));
   };
-  const close = () => { if (!saving) dialog.close(); };
-  const navigate = () => dialog.close();
+  const close = () => { if (!saving) closeRetiringDialog(dialog); };
+  const navigate = () => closeRetiringDialog(dialog);
   dialog.querySelectorAll("[data-region-close]").forEach((button) => { button.onclick = close; });
-  dialog.addEventListener("cancel", (event) => { if (saving) event.preventDefault(); });
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
   dialog.addEventListener("close", () => {
     window.removeEventListener("hashchange", navigate);
     dialog.remove();
@@ -172,13 +174,13 @@ export function openRegionPicker(agent, { api, esc, onSave, onClose }) {
     const code = selected;
     saving = true;
     dialog.querySelectorAll("input, button").forEach((control) => { control.disabled = true; });
-    status.textContent = "正在保存…";
+    updateFeedback(status, "正在保存…");
     try {
       await api(`/agents/${encodeURIComponent(agent.id)}/region`, { method: "PUT", body: JSON.stringify({ country_code: code }) });
       onSave(code);
-      dialog.close();
+      closeRetiringDialog(dialog);
     } catch (error) {
-      status.textContent = error.message || "保存失败，请重试。";
+      updateFeedback(status, error.message || "保存失败，请重试。");
     } finally {
       saving = false;
       dialog.querySelectorAll("input, button").forEach((control) => { control.disabled = false; });
@@ -198,7 +200,7 @@ export function openRegionPicker(agent, { api, esc, onSave, onClose }) {
       return { ...region, english };
     }).sort((a, b) => rank(a.code) - rank(b.code) || a.name.localeCompare(b.name, "zh-CN"));
     renderOptions();
-    status.textContent = "";
+    updateFeedback(status, "");
     submit.disabled = false;
-  }).catch((error) => { if (dialog.isConnected) status.textContent = `国家/地区加载失败：${error.message}，请关闭后重试。`; });
+  }).catch((error) => { if (dialog.isConnected) updateFeedback(status, `国家/地区加载失败：${error.message}，请关闭后重试。`); });
 }

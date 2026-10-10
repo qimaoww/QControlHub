@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { bindDialogBackdrop } from "./popup.js";
+import { bindDialogBackdrop, closeRetiringDialog } from "./popup.js";
 export function createAccessControlDialog({ state, engineName, confirmAction }, { card, bind }) {
   return (entry, { trigger, isCurrent, onSaved }) => {
     const dialog = document.createElement("dialog");
@@ -32,7 +32,7 @@ export function createAccessControlDialog({ state, engineName, confirmAction }, 
       dialog.remove();
       if (trigger.isConnected) { trigger.setAttribute("aria-expanded", "false"); trigger.focus({ preventScroll: true }); }
     };
-    const dispose = () => { dialog.close(); cleanup(); };
+    const dispose = () => { closeRetiringDialog(dialog); cleanup(); };
     const close = async () => {
       if (confirming || dialog.querySelector('[data-access-control-form][data-busy="1"]')) return;
       confirming = true;

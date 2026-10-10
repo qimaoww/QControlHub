@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { batchCoreVersionLabel } from "./agent-batch.js";
 
 const actions = {
@@ -39,5 +40,5 @@ export function updateBatchResultSummary(form) {
   const results = form.querySelector("[data-batch-results]");
   const summary = results.querySelector("[data-batch-result-summary]");
   const failure = results.querySelectorAll("[data-batch-retry]").length;
-  summary.textContent = resultText(Number(summary.dataset.total) - failure, failure);
+  updateFeedback(summary, resultText(Number(summary.dataset.total) - failure, failure));
 }

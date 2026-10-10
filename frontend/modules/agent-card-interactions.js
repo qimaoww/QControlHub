@@ -95,8 +95,9 @@ function enableCardDrag(grid) {
       if (event.key === "Escape") return reset();
       if (["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); return; }
       if (!event.key.startsWith("Arrow")) return;
+      const paintedRects = new Map([...grid.querySelectorAll(".node-card")].map(card => [card, card.getBoundingClientRect()]));
       reset();
-      const moved = moveCardByKey(event, grid, ".node-card");
+      const moved = moveCardByKey(event, grid, ".node-card", paintedRects);
       if (!moved) return;
       saveNodeOrder(moved.cards.map(item => item.dataset.agentNode));
       const release = cardInteractions.begin();

@@ -1,3 +1,4 @@
+import { setVisible } from "./presence-motion.js";
 function monthBoundary(year, month, resetDay) {
   const lastDay = new Date(year, month + 1, 0).getDate();
   return new Date(year, month, Math.min(resetDay, lastDay));
@@ -60,7 +61,7 @@ export function createAgentKomariDisplay({ api, state, esc, bytes }) {
       if (cycle) cycle.textContent = "检查联动设置";
       if (progress) {
         progress.value = 0;
-        progress.hidden = false;
+        setVisible(progress, true);
       }
       card.classList.add("unavailable");
       return;
@@ -78,7 +79,7 @@ export function createAgentKomariDisplay({ api, state, esc, bytes }) {
     if (cycle)
       cycle.textContent = komariCycleRange(resetDay) || "周期日期未设置";
     if (progress) {
-      progress.hidden = !(limit > 0);
+      setVisible(progress, !(!(limit > 0)));
       progress.value = limit > 0 && usedAvailable
         ? Math.min(100, (used / limit) * 100)
         : 0;

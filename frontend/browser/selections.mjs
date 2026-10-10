@@ -1,11 +1,12 @@
 import { bindLiveConfigNavigation } from "../modules/live-config-navigation.js";
+import { syncSelectionMotion } from "../modules/motion.js";
 import { assert, delay, waitFor } from "./assertions.mjs";
 
 const ready = () => !document.querySelector(".is-route-pending");
 const route = async (hash, selector) => {
   location.hash = hash;
   await waitFor(() => ready() && document.querySelector(selector), `missing route ${hash}`);
-  await waitFor(() => !document.querySelector('[data-motion-ready="false"]') && !document.getAnimations().some(animation => animation.id === "qch-route"), `route did not settle ${hash}`);
+  await waitFor(() => !document.querySelector('[data-motion-ready="false"]') && !document.getAnimations().some(animation => animation.id.startsWith("qch-route")), `route did not settle ${hash}`);
 };
 const emit = (element, type) => element.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
 const selected = () => document.getAnimations().filter(animation => animation.id === "qch-selection");
@@ -52,11 +53,28 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
     return fallback(input, options);
   };
   if (preview) await new Promise(() => {});
+  // A first result can arrive after the shell animation. Its loading paint
+  // must not consume the semantic key or replay on later polling.
+  const delayed = document.createElement("section");
+  delayed.innerHTML = '<div data-motion-region="delayed-first" data-motion-key="initial" data-motion-ready="false">Loading</div>';
+  document.body.append(delayed);
+  const delayedRegion = delayed.firstElementChild;
+  syncSelectionMotion(delayed, { animate: false });
+  await delay(600);
+  delayedRegion.dataset.motionReady = "true";
+  delayedRegion.textContent = "Completed first result";
+  syncSelectionMotion(delayed);
+  assert.equal(delayedRegion.getAnimations().filter(animation => animation.id === "qch-selection").length,
+    reduced ? 0 : 1, "slow initial results must animate when they become visible");
+  await waitFor(() => delayedRegion.getAnimations().length === 0, "first-result entrance did not settle");
+  syncSelectionMotion(delayed);
+  assert.equal(delayedRegion.getAnimations().length, 0, "identical first results remain quiet");
+  delayed.remove();
   const checkFeedback = async (region, start) => {
     await delay(20);
     assert.equal(records.slice(start).filter(name => name === region).length, reduced ? 0 : 1, `${region} receives one completed selection fade`);
     assert.ok(selected().every(animation => !animation.effect.target.querySelector('[data-motion-region]')), "only one region owns feedback");
-    await delay(250);
+    await waitFor(() => selected().length === 0, "selection feedback settles");
     assert.equal(selected().length, 0, "selection feedback settles");
   };
 
@@ -70,11 +88,11 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
   assert.equal(document.querySelector(".workspace-main"), trafficMain, "filter keeps workspace mounted");
   assert.equal(document.querySelector('[data-motion-region="traffic-results"]'), trafficGrid, "empty/nonempty result keeps its region");
   await checkFeedback("traffic-results", start);
-  start = records.length; emit(status, "change"); await delay(250);
+  start = records.length; emit(status, "change"); await waitFor(() => selected().length === 0, "selection feedback settles");
   assert.equal(records.length, start, "same status does not replay");
   status.value = "blocked"; emit(status, "change");
   status.value = ""; emit(status, "change");
-  await delay(250); assert.equal(selected().length, 0);
+  await waitFor(() => selected().length === 0, "selection feedback settles"); assert.equal(selected().length, 0);
   const trafficNode = document.querySelector('[data-context-traffic-agent="alpha"]');
   trafficNode.focus(); trafficNode.click();
   await waitFor(() => ready() && trafficNode.classList.contains("active"), "node filter missing");
@@ -94,7 +112,7 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
   await route("#core-logs", "[data-core-log-level]");
   const level = document.querySelector('[data-core-log-level][value="error"]');
   start = records.length; level.focus(); level.click(); await checkFeedback("core-log-results", start);
-  level.click(); await delay(250); assert.equal(selected().length, 0);
+  level.click(); await waitFor(() => selected().length === 0, "selection feedback settles"); assert.equal(selected().length, 0);
   const keyword = document.querySelector('#core-log-filters input[name=q]');
   keyword.focus(); keyword.value = "pressure"; keyword.setSelectionRange(2, 4); start = records.length;
   emit(keyword, "input"); await delay(25);

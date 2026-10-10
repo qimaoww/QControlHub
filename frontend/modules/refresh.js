@@ -1,9 +1,11 @@
+import { captureListMotion, finishListMotion } from "./list-motion.js";
 import { enterSurface } from "./motion.js";
 
 const boundEvents = new WeakMap();
 
 const insertedMotionSelector = [
   ".qch-swap-panel",
+  ".task-event",
   ".node-card",
   ".traffic-policy-card",
   ".user-account-card",
@@ -105,11 +107,26 @@ function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
   const preserveInert = current.classList?.contains("desktop-app") && current.inert;
   const preserveRetiredDialog = current.tagName === "DIALOG" && !current.open && current.inert;
-  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null;
+  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null ||
+    current.hidden && current.getAttribute("data-motion-panel") != null;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
+    if (attribute.name === "data-motion-title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else current.removeAttribute(attribute.name);
+      return;
+    }
+    if (["data-motion-title", "data-motion-description", "data-motion-invalid"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-description") != null && attribute.name === "aria-description") return;
+    if (current.getAttribute("data-motion-invalid") != null && ["aria-invalid", "aria-errormessage"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-title") != null && attribute.name === "title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else delete current.dataset.motionTitle;
+      return;
+    }
+    if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if (current.tagName === "DETAILS" && ["data-motion-disclosure", "data-motion-popup"].includes(attribute.name)) return;
     if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
@@ -121,6 +138,15 @@ function syncAttributes(current, fresh, metrics) {
     }
   });
   [...fresh.attributes].forEach((attribute) => {
+    if (["data-motion-title", "data-motion-description", "data-motion-invalid"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-description") != null && attribute.name === "aria-description") return;
+    if (current.getAttribute("data-motion-invalid") != null && ["aria-invalid", "aria-errormessage"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-title") != null && attribute.name === "title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else delete current.dataset.motionTitle;
+      return;
+    }
+    if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
     if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
@@ -171,6 +197,7 @@ function restoreControlState(element, state) {
 }
 
 function reconcileChildren(current, fresh, metrics) {
+  const listMotion = captureListMotion(current, fresh, nodeKey);
   const existing = [...current.childNodes];
   const existingNodes = new Set(existing);
   const used = new Set();
@@ -210,13 +237,21 @@ function reconcileChildren(current, fresh, metrics) {
   const notice = current.classList?.contains("workspace-main")
     ? existing.find(child => child.nodeType === 1 && child.getAttribute("data-spa-notice") != null) : null;
   if (notice && !desired.includes(notice)) desired.unshift(notice);
+  // Native validity feedback belongs to the live control. A background render
+  // cannot remove its message while keeping the invalid draft and ARIA link.
+  existing.filter(child => child.nodeType === 1 && child.getAttribute("data-motion-validation") != null)
+    .forEach(label => {
+      if (desired.includes(label) || !current.querySelector?.(`[data-motion-invalid][aria-errormessage="${label.id}"]`)) return;
+      const index = desired.indexOf(label.previousSibling);
+      desired.splice(index >= 0 ? index + 1 : desired.length, 0, label);
+    });
   desired.forEach((child, index) => {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
     // Only the inserted branch fades. Logs and task polling stay immediate;
     // descendants never receive a second entrance.
     if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
-      enterSurface(child, { token: "--motion-fast" });
+      enterSurface(child, { token: "--motion-base", id: "qch-insert" });
   });
   const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
@@ -225,6 +260,7 @@ function reconcileChildren(current, fresh, metrics) {
       metrics.removed += 1;
     }
   });
+  finishListMotion(current, listMotion);
 }
 
 function reconcileNode(current, fresh, metrics) {

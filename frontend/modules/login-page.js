@@ -1,4 +1,6 @@
+import { installInteractionFeedback } from "./interaction-feedback.js";
 import { enterSurface } from "./motion.js";
+import { observeFeedback, updateFeedback } from "./presence-motion.js";
 import { setStorageAccount } from "./account-storage.js";
 
 // Session/route cleanup stays at the application boundary. A failed login
@@ -15,6 +17,8 @@ export function createLoginPage({
   applyUIFontScale(100);
   applyTheme();
   if (firstVisit) enterSurface(app.querySelector(".login-shell"), { token: "--motion-slow" });
+  observeFeedback(app);
+  installInteractionFeedback();
   document.querySelector("[data-theme-toggle]").onclick = toggleTheme;
   document
     .querySelector("#login-form")
@@ -39,9 +43,7 @@ export function createLoginPage({
       } catch (error) {
         const notice = app.querySelector("[data-login-error]");
         if (!button.isConnected || !notice) return;
-        notice.hidden = false;
-        notice.textContent = error.message;
-        enterSurface(notice, { token: "--motion-feedback" });
+        updateFeedback(notice, error.message);
         button.disabled = false;
         button.removeAttribute("aria-busy");
       }

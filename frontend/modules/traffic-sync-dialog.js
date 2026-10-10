@@ -1,6 +1,6 @@
 import { protocolName } from "./traffic-model.js";
-import { bindDialogBackdrop } from "./popup.js";
-import { updateFeedback } from "./motion.js";
+import { bindDialogBackdrop, closeRetiringDialog } from "./popup.js";
+import { updateFeedback, setVisible, updateFeedbackHTML } from "./presence-motion.js";
 export function createTrafficSyncDialog({ api, state, esc, engineName, notify }, { traffic }) {
   let trafficSyncPending = false;
   function openTrafficSync() {
@@ -28,7 +28,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     const selectedInputs = () => [...list.querySelectorAll("[data-sync-choice]:checked")];
     const updateSelection = () => {
       const count = selectedInputs().length;
-      dialog.querySelector("[data-sync-count]").textContent = `已选 ${count} 项`;
+      updateFeedback(dialog.querySelector("[data-sync-count]"), `已选 ${count} 项`);
       submit.disabled = saving || count === 0 || count > 4096;
       const all = list.querySelector("[data-sync-all]");
       if (all) { all.checked = count === candidates.length; all.indeterminate = count > 0 && count < candidates.length; }
@@ -45,8 +45,8 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       const button = document.querySelector("[data-traffic-sync]");
       if (button) button.disabled = false;
     };
-    const navigate = () => { dialog.close(); cleanup(); };
-    const close = () => { if (!saving) { dialog.close(); cleanup(); } };
+    const navigate = () => { closeRetiringDialog(dialog); cleanup(); };
+    const close = () => { if (!saving) { closeRetiringDialog(dialog); cleanup(); } };
     window.addEventListener("hashchange", navigate);
     routeSignal?.addEventListener("abort", navigate, { once: true });
     dialog.addEventListener("close", cleanup);
@@ -54,23 +54,23 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     dialog.querySelectorAll("[data-sync-close]").forEach(button => { button.onclick = close; });
     bindDialogBackdrop(dialog, close);
     async function loadCandidates() {
-      errorBox.hidden = true;
-      retry.hidden = true;
+      setVisible(errorBox, false);
+      setVisible(retry, false);
       try {
         const resource = await api("/traffic-endpoints/sync", { signal: controller.signal });
         if (closed || !isCurrent()) { cleanup(); return; }
         candidates = resource.candidates || [];
         const agentNames = new Map((state.data.agents || []).map(agent => [agent.id, agent.name]));
-        list.innerHTML = candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选 · ${candidates.length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${candidate.kind === "deleted" ? "恢复" : "添加"}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · :${Number(candidate.port)} · ${esc(protocolName(candidate.protocol))}</small></span><span class="status-label ${candidate.kind === "deleted" ? "warn" : "muted"}">${candidate.kind === "deleted" ? "已删除 · 可恢复" : "未监控 · 可添加"}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>';
+        updateFeedbackHTML(list, candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选 · ${candidates.length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${candidate.kind === "deleted" ? "恢复" : "添加"}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · :${Number(candidate.port)} · ${esc(protocolName(candidate.protocol))}</small></span><span class="status-label ${candidate.kind === "deleted" ? "warn" : "muted"}">${candidate.kind === "deleted" ? "已删除 · 可恢复" : "未监控 · 可添加"}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>');
         const all = list.querySelector("[data-sync-all]");
         if (all) all.onchange = () => { list.querySelectorAll("[data-sync-choice]").forEach(input => { input.checked = all.checked; }); updateSelection(); };
         list.querySelectorAll("[data-sync-choice]").forEach(input => { input.onchange = updateSelection; });
         updateSelection();
       } catch (error) {
         if (closed || !isCurrent()) { cleanup(); return; }
-        list.textContent = "无法读取待同步端口";
+        updateFeedback(list, "无法读取待同步端口");
         showError(error.message);
-        retry.hidden = false;
+        setVisible(retry, true);
       }
     }
     retry.onclick = loadCandidates;
@@ -80,14 +80,14 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       const chosen = selectedInputs().map(input => candidates[Number(input.dataset.syncChoice)]);
       if (!chosen.length || chosen.length > 4096) return;
       saving = true;
-      errorBox.hidden = true;
+      setVisible(errorBox, false);
       dialog.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
       submit.textContent = "同步中…";
       try {
         await api("/traffic-endpoints/sync", { method: "POST", body: JSON.stringify({ selections: chosen.map(({ agent_id, port }) => ({ agent_id, port })) }) });
         if (closed || !isCurrent()) { cleanup(); return; }
         const restored = chosen.filter(candidate => candidate.kind === "deleted").length;
-        dialog.close();
+        closeRetiringDialog(dialog);
         cleanup();
         const refreshed = await traffic();
         if (isCurrent()) notify(`所选端口已同步：恢复 ${restored} 项，添加 ${chosen.length - restored} 项${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);

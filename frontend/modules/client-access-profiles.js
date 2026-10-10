@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { bindDialogBackdrop } from "./popup.js";
 
@@ -12,7 +13,7 @@ export function createClientAccessProfiles({ api, state, can, notify }, { client
           : input.type === "password";
         if (input.matches("textarea")) input.classList.toggle("is-masked", !reveal);
         else input.type = reveal ? "text" : "password";
-        button.textContent = reveal ? "隐藏" : "显示";
+        updateFeedback(button, reveal ? "隐藏" : "显示");
         button.setAttribute("aria-pressed", String(reveal));
       };
     });
@@ -52,11 +53,11 @@ export function createClientAccessProfiles({ api, state, can, notify }, { client
         const input = document.querySelector(button.dataset.copyTarget);
         try {
           await copyClientValue(input);
-          button.textContent = "已复制";
+          updateFeedback(button, "已复制");
           button.dataset.copyState = "success";
           setTimeout(() => {
             if (!button.isConnected) return;
-            button.textContent = "复制";
+            updateFeedback(button, "复制");
             delete button.dataset.copyState;
           }, 1600);
         } catch (error) {

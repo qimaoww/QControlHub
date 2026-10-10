@@ -1,5 +1,6 @@
+import { closeRetiringDialog } from "./popup.js";
 import { bindEvent } from "./refresh.js";
-import { updateFeedback } from "./motion.js";
+import { updateFeedback, setVisible } from "./presence-motion.js";
 
 import { createUserQuotaView } from "./user-quota-view.js";
 export function createUserQuota(ctx, { lifecycle, myQuota }) {
@@ -10,7 +11,7 @@ export function createUserQuota(ctx, { lifecycle, myQuota }) {
     if (!activeInvitation) return;
     const { dialog, trigger } = activeInvitation;
     activeInvitation = null;
-    dialog.close();
+    closeRetiringDialog(dialog);
     dialog.remove();
     if (trigger?.isConnected) trigger.focus();
   }
@@ -54,7 +55,7 @@ export function createUserQuota(ctx, { lifecycle, myQuota }) {
         renderQuota(latest, data);
       } catch (error) {
         if (activeInvitation === previous && data === state.data && error.name !== "AbortError")
-          dialog.querySelector("[role=alert]").textContent = error.message;
+          updateFeedback(dialog.querySelector("[role=alert]"), error.message);
       } finally {
         previous.loading = false;
         button.disabled = false;
@@ -85,7 +86,7 @@ export function createUserQuota(ctx, { lifecycle, myQuota }) {
       if (data !== state.data || error.name === "AbortError") return;
       if (activeInvitation?.data === data && activeInvitation.share.id === share.id) {
         const output = activeInvitation.dialog.querySelector("[data-invitation-error]");
-        output.hidden = false;
+        setVisible(output, true);
         updateFeedback(output.querySelector("[role=alert]"), error.message);
       } else {
         const output = state.route === "my-quota" && document.querySelector("[data-quota-error]");

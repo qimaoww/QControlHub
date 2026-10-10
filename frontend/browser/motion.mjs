@@ -21,17 +21,74 @@ const gesture = async (grip, target, action = "drop") => {
   } };
   await waitFor(() => window.__motionGesture === null, "browser pointer gesture did not run");
 };
-const settled = async () => waitFor(() => !animations().some(a => a.id.startsWith("qch-")), "native motion did not settle");
+// Deferred entrances are briefly paused while waiting for their first frame.
+// They still own paint; excluding them can mistake an initial disclosure for
+// a replay when the next poll completes after playback starts.
+const settled = async () => waitFor(() => !document.getAnimations().some(a => a.id.startsWith("qch-")), "native motion did not settle");
+
+async function checkNavigationReversal(main, reduced) {
+  const originalFetch = window.fetch;
+  window.fetch = async (...args) => {
+    if (String(args[0]).includes("traffic-policies")) await delay(700);
+    return originalFetch(...args);
+  };
+  try {
+    location.hash = "#traffic";
+    await waitFor(() => main.classList.contains("is-route-departing"), "pending route departure missing");
+    await delay(60);
+    const departingOpacity = Number(getComputedStyle(main).opacity);
+    location.hash = "#node-settings";
+    await waitFor(() => !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
+    assert.ok(Math.abs(Number(getComputedStyle(main).opacity) - departingOpacity) < .2,
+      "reverse navigation must not flash to a fully opaque frame");
+    await waitFor(() => getComputedStyle(main).opacity === "1", "reversed workspace must restore its painted state");
+    if (!reduced) assert.ok(document.querySelector(".is-route-pending"), "paint restoration must not wait for the cancelled slow request");
+    await waitFor(() => !document.querySelector(".is-route-pending"), "latest reversed route must complete");
+    assert.equal(document.querySelector(".workspace-main"), main, "reversal retains the mounted workspace");
+  } finally { window.fetch = originalFetch; }
+}
+
+async function checkListReversal(reduced) {
+  const host = document.createElement("section");
+  host.className = "node-card-grid";
+  host.style.cssText = "position:fixed;left:10px;top:100px;width:calc(100vw - 20px);display:grid;grid-template-columns:repeat(3,1fr);gap:12px";
+  host.innerHTML = ["a", "b", "c"].map(key => `<article class="node-card" data-refresh-key="${key}">${key}</article>`).join("");
+  document.body.append(host);
+  const fresh = host.cloneNode(true); fresh.prepend(fresh.lastElementChild);
+  reconcileView(host, fresh);
+  if (!reduced) await waitFor(() => host.firstElementChild.getAnimations().some(animation => animation.currentTime > 60), "list landing must start");
+  const before = new Map([...host.children].map(child => [child.dataset.refreshKey, child.getBoundingClientRect().left]));
+  const reverse = host.cloneNode(true); reverse.append(reverse.firstElementChild);
+  reconcileView(host, reverse);
+  await new Promise(requestAnimationFrame);
+  if (!reduced) [...host.children].forEach(child => assert.ok(Math.abs(child.getBoundingClientRect().left - before.get(child.dataset.refreshKey)) < 2,
+    "interrupted list reflow must start at its painted position without a flash or jump"));
+  await waitFor(() => host.getAnimations({ subtree: true }).length === 0, "list reversal must settle");
+  host.remove();
+}
 
 export async function testMotionRuntime({ mode, testAPI }, preview) {
   const reduced = mode.endsWith("reduced");
   if (!preview) assert.equal(matchMedia("(prefers-reduced-motion: reduce)").matches, reduced);
   const grid = await waitFor(() => document.querySelector(".node-card-grid"), "nodes missing");
   if (preview) await new Promise(() => {});
-  assert.equal([...grid.querySelectorAll(".node-card")].some(card => card.getAnimations().length), false,
-    "route entrance must not animate nested cards");
+  if (!reduced) {
+    const main = grid.closest(".workspace-main");
+    const entrance = main.getAnimations().find(animation => animation.id === "qch-route");
+    assert.ok(entrance, "default mode must retain a visible canvas entrance after binding");
+    await waitFor(() => entrance.currentTime > 0, "route playback did not start");
+    const firstOpacity = Number.parseFloat(getComputedStyle(main).opacity);
+    assert.ok(firstOpacity < .85, `entrance was spent before its first visible frame: ${firstOpacity}`);
+    const layers = main.getAnimations({ subtree: true }).filter(animation => animation.id === "qch-route-layer");
+    assert.ok(layers.length, "visible route surfaces must move in a staggered sequence");
+    assert.ok(layers.some(animation => getComputedStyle(animation.effect.target).translate !== "0px"), "layer displacement must be perceptible");
+    assert.ok([...grid.querySelectorAll(".node-card")].every(card =>
+      card.getAnimations().filter(animation => animation.id.startsWith("qch-")).length <= 1), "cards must have one entrance owner");
+  }
   await settled();
   if (reduced) assert.equal(animations().length, 0, "reduced motion disables CSS and JS entrances");
+  await checkNavigationReversal(grid.closest(".workspace-main"), reduced);
+  await checkListReversal(reduced);
   const originalCards = [...grid.querySelectorAll(".node-card")];
   await gesture(originalCards[0].querySelector(".node-card-grip"), originalCards[1]);
   await settled();
@@ -168,6 +225,37 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   assert.equal(document.querySelector("[data-task-id]"), task);
   assert.equal(result.open, true, "task output refresh retains open results");
   assert.equal(task.getAnimations({ subtree: true }).filter(a => a.id || a.animationName).length, 0, `task polling does not replay entrance: ${task.getAnimations({ subtree: true }).map(a => a.id || a.transitionProperty || a.animationName).join(",")}`);
+
+  // Task list identity belongs to the outer event, not its inner card skin.
+  // Membership and ordering use the same complete exit/FLIP as other lists.
+  testAPI.tasks.push({ ...testAPI.tasks[0], id: "motion-task-new", output: "added result" });
+  document.querySelector("#refresh").click();
+  const added = await waitFor(() => document.querySelector('[data-task-id="motion-task-new"]'), "new task missing");
+  await new Promise(requestAnimationFrame);
+  if (!reduced) assert.ok(added.getAnimations().some(a => ["qch-task-added", "qch-insert"].includes(a.id)), "new task must visibly enter");
+  await settled();
+  testAPI.tasks.reverse(); document.querySelector("#refresh").click();
+  await waitFor(() => added.parentElement.firstElementChild === added, "task reorder missing");
+  await new Promise(requestAnimationFrame);
+  if (!reduced) assert.ok(added.getAnimations().some(a => a.id === "qch-list"), "task outer events must participate in reordering");
+  await settled();
+  const retiredTasks = [];
+  const attachShadow = HTMLElement.prototype.attachShadow;
+  HTMLElement.prototype.attachShadow = function(options) {
+    const shadow = attachShadow.call(this, options);
+    if (this.classList.contains("motion-exit-host")) retiredTasks.push(shadow);
+    return shadow;
+  };
+  try {
+    testAPI.tasks = testAPI.tasks.filter(item => item.id !== "motion-task-new");
+    document.querySelector("#refresh").click();
+    await waitFor(() => !added.isConnected, "removed task must release its live row");
+    if (!reduced) {
+      const tail = retiredTasks.map(shadow => shadow.querySelector('[data-task-id="motion-task-new"]')).find(Boolean);
+      assert.ok(tail?.isConnected && tail.closest("[inert]"), "removed task must keep its complete inert paint tail");
+      await waitFor(() => !tail.isConnected, "removed task paint must completely exit");
+    }
+  } finally { HTMLElement.prototype.attachShadow = attachShadow; }
 
   // Removed elements release native animations without finish events.
   const temporary = document.createElement("div"); document.body.append(temporary);

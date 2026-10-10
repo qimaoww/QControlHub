@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 export function createAccessControlBindings({ api, state, notify, confirmAction, beforeDeploy }, { editable, accessControl }) {
   function bind(entries, root = document, onSaved = null, isCurrent = () => true) {
@@ -50,13 +51,13 @@ export function createAccessControlBindings({ api, state, notify, confirmAction,
           if (label?.querySelector("em")) {
             const unchanged =
               input.checked === (input.dataset.initialChecked === "true");
-            label.querySelector("em").textContent = unchanged
+            updateFeedback(label.querySelector("em"), unchanged
               ? input.checked
                 ? "已启用"
                 : "未启用"
               : input.checked
                 ? "待保存"
-                : "待关闭";
+                : "待关闭");
           }
           const dirty = inputs.some(
             (candidate) =>
@@ -68,7 +69,7 @@ export function createAccessControlBindings({ api, state, notify, confirmAction,
             "[data-access-control-state-text]",
           );
           if (stateText)
-            stateText.textContent = dirty ? "有未保存更改" : cleanState;
+            updateFeedback(stateText, dirty ? "有未保存更改" : cleanState);
         };
       });
       bindEvent(form, "submit", async (event) => {
@@ -92,11 +93,11 @@ export function createAccessControlBindings({ api, state, notify, confirmAction,
         buttons.forEach((button) => (button.disabled = true));
         try {
           if (intent === "deploy" && beforeDeploy) {
-            if (stateText) stateText.textContent = "正在核验 Agent 当前配置…";
+            if (stateText) updateFeedback(stateText, "正在核验 Agent 当前配置…");
             await beforeDeploy();
             if (state.data !== data || !isCurrent()) return;
           }
-          if (stateText) stateText.textContent = "正在保存配置并提交任务…";
+          if (stateText) updateFeedback(stateText, "正在保存配置并提交任务…");
           const result = await api("/access-controls", {
             method: "PUT",
             body: JSON.stringify({
@@ -123,7 +124,7 @@ export function createAccessControlBindings({ api, state, notify, confirmAction,
         } catch (error) {
           delete form.dataset.busy;
           if (state.data !== data || !isCurrent() || error.name === "AbortError") return;
-          if (stateText) stateText.textContent = error.deployPreflight ? "部署前核验未通过，未保存" : "保存失败，可重试";
+          if (stateText) updateFeedback(stateText, error.deployPreflight ? "部署前核验未通过，未保存" : "保存失败，可重试");
           notify(error.message, "error");
           buttons.forEach((button) => (button.disabled = false));
         }

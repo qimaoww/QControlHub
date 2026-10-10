@@ -45,7 +45,7 @@ export async function testPresetFieldLayoutRuntime() {
             }
             for (const grid of form.querySelectorAll(".plan-fields")) {
               if (!grid.checkVisibility()) continue;
-              assert(grid.scrollWidth <= grid.clientWidth + 1, `${context}: fields overflow`);
+              assert(grid.scrollWidth <= grid.clientWidth + 1, `${context}: fields overflow (${grid.scrollWidth}/${grid.clientWidth}; ${grid.className}; ${getComputedStyle(grid).translate}; ${getComputedStyle(grid).transform}; ${grid.getAnimations({subtree:true}).map(a => a.id).join(',')})`);
               for (const input of grid.querySelectorAll("input, select, textarea")) {
                 if (["hidden", "checkbox", "radio"].includes(input.type) || !input.checkVisibility()) continue;
                 assert(input.getBoundingClientRect().width >= 48, `${context}: ${input.name} is too narrow to use`);

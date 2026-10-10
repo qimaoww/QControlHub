@@ -1,3 +1,4 @@
+import { updateFeedback, updateFeedbackHTML } from "./presence-motion.js";
 import { enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import { selectedDefaultEngines } from "./engine-capabilities.js";
@@ -12,7 +13,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
     const showDirty = () => {
       if (!saveButton) return;
       saveButton.disabled = false;
-      stateBadge.textContent = "有未保存更改";
+      updateFeedback(stateBadge, "有未保存更改");
       stateBadge.classList.add("dirty");
     };
     const markDirty = () => { draft.revision++; draft.dirty = true; showDirty(); };
@@ -49,7 +50,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
       saveButton.disabled = true;
       saveButton.setAttribute("aria-busy", "true");
       form.setAttribute("aria-busy", "true");
-      stateBadge.textContent = "正在保存…";
+      updateFeedback(stateBadge, "正在保存…");
       try {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
         if (state.data !== accountData) return;
@@ -61,15 +62,14 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         const stillDirty = draft.revision !== savingRevision;
         draft.dirty = stillDirty;
         saveButton.disabled = !stillDirty;
-        stateBadge.textContent = stillDirty ? "已保存 · 仍有未保存更改" : `已保存 · v${saved.revision}`;
+        updateFeedback(stateBadge, stillDirty ? "已保存 · 仍有未保存更改" : `已保存 · v${saved.revision}`);
         stateBadge.classList.toggle("dirty", stillDirty);
-        enterSurface(stateBadge, { token: "--motion-feedback" });
         notify("设置已保存");
       } catch (error) {
         if (state.data !== accountData || error.name === "AbortError") return;
         draft.dirty = true;
         saveButton.disabled = false;
-        stateBadge.textContent = "保存失败 · 有未保存更改";
+        updateFeedback(stateBadge, "保存失败 · 有未保存更改");
         notify(error.message, "error");
       } finally {
         saveButton.removeAttribute("aria-busy");
@@ -81,20 +81,20 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
       const button = event.currentTarget;
       const output = document.querySelector("[data-update-result]");
       button.disabled = true;
-      output.textContent = "正在检查 GitHub 最新正式版…";
+      updateFeedback(output, "正在检查 GitHub 最新正式版…");
       try {
         const result = await api("/settings/check-update", { method: "POST" });
         if (state.data !== accountData) return;
         if (!result.comparable) {
-          output.innerHTML = `GHCR latest 当前为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>；当前构建 ${esc(result.current_control_plane)} 不是可比较的提交或版本号。`;
+          updateFeedbackHTML(output, `GHCR latest 当前为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>；当前构建 ${esc(result.current_control_plane)} 不是可比较的提交或版本号。`);
         } else if (result.update_available) {
-          output.innerHTML = `GHCR latest 已更新为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>，请审核变更后再升级。`;
+          updateFeedbackHTML(output, `GHCR latest 已更新为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>，请审核变更后再升级。`);
         } else {
-          output.textContent = `已是 GHCR latest 对应版本（${result.latest_version}）。`;
+          updateFeedback(output, `已是 GHCR latest 对应版本（${result.latest_version}）。`);
         }
       } catch (error) {
         if (state.data !== accountData || error.name === "AbortError") return;
-        output.textContent = `检查失败：${error.message}`;
+        updateFeedback(output, `检查失败：${error.message}`);
       } finally {
         button.disabled = false;
       }

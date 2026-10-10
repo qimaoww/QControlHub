@@ -1,5 +1,7 @@
+import { closeRetiringDialog } from "./popup.js";
+import { enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
-import { updateFeedback } from "./motion.js";
+import { updateFeedback, removePresented } from "./presence-motion.js";
 import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./user-model.js";
 import { sharedEngineChoices } from "./engine-capabilities.js";
 
@@ -33,7 +35,7 @@ export function createAgentSharing(ctx, interactions) {
     const previous = active;
     active = null;
     previous.capture();
-    previous.dialog.close();
+    closeRetiringDialog(previous.dialog);
     previous.dialog.remove();
     previous.release();
   };
@@ -101,6 +103,7 @@ export function createAgentSharing(ctx, interactions) {
     bindEvent(form.querySelector("[data-recipient-add]"), "click", () => {
       const rows = form.querySelector("[data-recipients]");
       rows.insertAdjacentHTML("beforeend", rowMarkup({ enabled: true }, agent));
+      enterSurface(rows.lastElementChild, { id: "qch-recipient" });
       rows.lastElementChild.querySelector('[name="username"]').focus();
       capture();
     });
@@ -110,14 +113,14 @@ export function createAgentSharing(ctx, interactions) {
         const row = reinvite.closest("[data-recipient]");
         row.dataset.reinvite = "true";
         row.querySelector('[name="enabled"]').checked = true;
-        row.querySelector("[data-share-status]").textContent = "待发送";
+        updateFeedback(row.querySelector("[data-share-status]"), "待发送");
         reinvite.disabled = true;
         capture();
         return;
       }
       const row = event.target.closest("[data-recipient-remove]")?.closest("[data-recipient]");
       if (!row || data !== state.data || data.agentSharingSaves.has(agent.id)) return;
-      row.remove();
+      removePresented(row);
       capture();
       form.querySelector("[data-recipient-add]").focus();
     });

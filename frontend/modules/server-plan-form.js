@@ -1,3 +1,4 @@
+import { setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 
 // Config views render user-controlled values into HTML before binding their
@@ -108,7 +109,7 @@ function installGeneratedFieldButtons(form, protocol) {
     if (name === "transport_path") {
       const transport = form.elements.namedItem("transport");
       const updateVisibility = () => {
-        button.hidden = transport?.value === "raw";
+        setVisible(button, !(transport?.value === "raw"));
       };
       bindEvent(transport, "change", updateVisibility);
       updateVisibility();
@@ -271,7 +272,7 @@ function bindProtocolOptionVisibility(form) {
   }
   const show = (selector, visible) => {
     form.querySelectorAll(selector).forEach((element) => {
-      element.hidden = !visible;
+      setVisible(element, visible);
     });
   };
   const mieruMode = form.elements.namedItem("mieru_traffic_pattern");
@@ -304,7 +305,7 @@ function bindProtocolOptionVisibility(form) {
   const updateMieru = () => {
     if (!mieruMode || !mieruCustom) return;
     const custom = mieruMode.value === "custom";
-    mieruCustom.hidden = !custom;
+    setVisible(mieruCustom, custom);
     show("[data-mieru-fragment-sleep]", Boolean(mieruFragment?.checked));
     show("[data-mieru-nonce-range]", ["PRINTABLE", "PRINTABLE_SUBSET"].includes(mieruNonce?.value));
     show("[data-mieru-nonce-fixed]", mieruNonce?.value === "FIXED");

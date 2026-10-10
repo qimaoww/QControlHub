@@ -1,28 +1,7 @@
+import { updateFeedback, removePresented } from "./presence-motion.js";
 // Enrollment commands and node-directory dialogs own their modal lifecycle.
-import { cancelMotion, reducedMotion, retireSurface } from "./motion.js";
-let exitStyles;
-// A visual tail must not match document-level component/binding queries. Share
-// one parsed copy of the existing stylesheet inside an inert closed shadow tree.
-function isolateExit(wrap) {
-  if (reducedMotion() || !globalThis.CSSStyleSheet?.prototype.replaceSync || !wrap.attachShadow) return null;
-  try {
-    if (!exitStyles) {
-      const source = [...document.styleSheets].find(sheet =>
-        (sheet.href || "").split(/[?#]/, 1)[0].endsWith("/app.css"));
-      if (!source) return null;
-      exitStyles = new CSSStyleSheet();
-      exitStyles.replaceSync([...source.cssRules].map(rule => rule.cssText).join("\n"));
-    }
-    const host = document.createElement("div");
-    host.className = "motion-exit-host";
-    const shadow = host.attachShadow({ mode: "closed" });
-    shadow.adoptedStyleSheets = [exitStyles];
-    wrap.inert = true;
-    shadow.append(wrap);
-    document.body.append(host);
-    return host;
-  } catch { return null; }
-}
+import { cancelMotion, retireSurface } from "./motion.js";
+import { isolateMotionSurface as isolateExit } from "./motion-isolation.js";
 export function createAgentEnrollment({ api, state, esc, engineName, notify, refreshAgentPage }) {
 let activeModal;
 let retiringModal;
@@ -87,7 +66,7 @@ function bindModalLifecycle(wrap, onClose) {
     if (animate && wrap.isConnected) {
       const card = wrap.querySelector('[role="dialog"]');
       const computed = getComputedStyle(card), layout = getComputedStyle(wrap);
-      const from = { opacity: computed.opacity, translate: computed.translate };
+      const from = { opacity: computed.opacity, translate: computed.translate, scale: computed.scale };
       wrap.style.setProperty("--motion-exit-opacity", getComputedStyle(wrap, "::before").opacity);
       wrap.style.padding = layout.padding;
       wrap.style.alignItems = layout.alignItems;
@@ -233,7 +212,7 @@ async function showAgentDirectoryDialog() {
         await api(`/agents/${encodeURIComponent(button.dataset.deleteDirectoryNode)}`, { method: "DELETE" });
         if (!wrap.isConnected || wrap.inert) return;
         const name = button.dataset.nodeName || "";
-        button.closest("article")?.remove();
+        removePresented(button.closest("article"));
         notify(name ? `节点 ${name} 已删除` : "节点已删除");
         try {
           await refreshAgentPage();
@@ -301,7 +280,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
       try {
         await onDelete(button.dataset.deleteEnrollment);
         if (!wrap.isConnected || wrap.inert) return;
-        button.closest("article")?.remove();
+        removePresented(button.closest("article"));
         const list = wrap.querySelector("[data-enrollment-history-list]");
         const count = list?.querySelectorAll("article").length || 0;
         const countLabel = wrap.querySelector("[data-enrollment-history-count]");
@@ -363,11 +342,11 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
     if (!wrap.isConnected || wrap.inert) return;
     const copyLabel = copyButton.querySelector("[data-copy-label]");
     copyButton.classList.add("copied");
-    copyLabel.textContent = "已复制";
+    updateFeedback(copyLabel, "已复制");
     window.clearTimeout(resetCopyLabel);
     resetCopyLabel = window.setTimeout(() => {
       copyButton.classList.remove("copied");
-      copyLabel.textContent = "复制部署命令";
+      updateFeedback(copyLabel, "复制部署命令");
     }, 1800);
   };
   copyButton.focus();

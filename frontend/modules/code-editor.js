@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
 
@@ -89,19 +90,19 @@ export function bindCodeEditors() {
       input.classList.toggle("is-invalid", !result.valid);
       if (reset) reset.disabled = !(editor.configFileController?.currentDirty?.() ?? dirty) || input.readOnly;
       if (!result.valid) {
-        if (status) status.textContent = result.status;
-        if (validation) validation.textContent = result.message;
+        if (status) updateFeedback(status, result.status);
+        if (validation) updateFeedback(validation, result.message);
         if (statusDot) statusDot.style.background = "var(--red)";
       } else if (dirty) {
-        if (status) status.textContent = "未保存";
+        if (status) updateFeedback(status, "未保存");
         if (validation)
-          validation.textContent = result.json
+          updateFeedback(validation, result.json
             ? "JSON 语法有效；提交后仍会由节点内核校验。"
-            : baselineValidation;
+            : baselineValidation);
         if (statusDot) statusDot.style.background = "var(--amber)";
       } else {
-        if (status) status.textContent = baselineStatus;
-        if (validation) validation.textContent = baselineValidation;
+        if (status) updateFeedback(status, baselineStatus);
+        if (validation) updateFeedback(validation, baselineValidation);
         if (statusDot) statusDot.style.background = "var(--green)";
       }
       blockSubmit(!result.valid);
@@ -158,8 +159,8 @@ export function bindCodeEditors() {
       const scrollTop = input.scrollTop;
       const scrollLeft = input.scrollLeft;
       if (new Blob([input.value]).size > maxBytes) {
-        if (validation) validation.textContent = "配置源码超过 2 MiB 上限，无法格式化。";
-        if (status) status.textContent = "内容过大";
+        if (validation) updateFeedback(validation, "配置源码超过 2 MiB 上限，无法格式化。");
+        if (status) updateFeedback(status, "内容过大");
         if (statusDot) statusDot.style.background = "var(--red)";
         return;
       }
@@ -170,13 +171,13 @@ export function bindCodeEditors() {
         );
         if (formatted === input.value) {
           if (validation)
-            validation.textContent = "内容已符合排版格式。";
+            updateFeedback(validation, "内容已符合排版格式。");
           return;
         }
         if (new Blob([formatted]).size > maxBytes) {
           if (validation)
-            validation.textContent = "格式化后超过 2 MiB 上限，已保留原文。";
-          if (status) status.textContent = "内容过大";
+            updateFeedback(validation, "格式化后超过 2 MiB 上限，已保留原文。");
+          if (status) updateFeedback(status, "内容过大");
           if (statusDot) statusDot.style.background = "var(--red)";
           return;
         }
@@ -190,7 +191,7 @@ export function bindCodeEditors() {
         input.scrollLeft = scrollLeft;
         update();
         if (validation)
-          validation.textContent = "已格式化；内容未保存，需提交校验。";
+          updateFeedback(validation, "已格式化；内容未保存，需提交校验。");
         input.focus();
       } catch (error) {
         input.setSelectionRange(
@@ -200,11 +201,10 @@ export function bindCodeEditors() {
         input.scrollTop = scrollTop;
         input.scrollLeft = scrollLeft;
         if (validation)
-          validation.textContent =
-            error instanceof ConfigFormatError
+          updateFeedback(validation, error instanceof ConfigFormatError
               ? error.message
-              : "当前内容无法安全格式化。";
-        if (status) status.textContent = "无法格式化";
+              : "当前内容无法安全格式化。");
+        if (status) updateFeedback(status, "无法格式化");
         if (statusDot) statusDot.style.background = "var(--red)";
       }
     };

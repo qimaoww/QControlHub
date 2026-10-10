@@ -1,3 +1,4 @@
+import { setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 
 export function createSubStoreTargets({ api, esc, notify }, { lifecycle, subStoreSync }) {
@@ -48,9 +49,9 @@ export function createSubStoreTargets({ api, esc, notify }, { lifecycle, subStor
       const remoteButton = targetDialog.querySelector("[data-substore-remote-import-button]");
       if (remoteButton) remoteButton.textContent = target ? "切换关联组" : "加入同步组";
       const remove = targetDialog.querySelector("[data-substore-target-delete]");
-      if (remove) remove.hidden = !target;
+      if (remove) setVisible(remove, target);
       const renameOptions = targetDialog.querySelector("[data-substore-rename-options]");
-      if (renameOptions) renameOptions.hidden = !target;
+      if (renameOptions) setVisible(renameOptions, target);
       targetDialog.showModal();
       targetForm.elements.display_name.focus();
       loadRemoteTargets(target);
@@ -111,7 +112,7 @@ export function createSubStoreTargets({ api, esc, notify }, { lifecycle, subStor
       select.dataset.substoreRemoteChosen = changedRemote ? "true" : "";
       if (button) button.disabled = !changedRemote;
       const renameOptions = targetDialog?.querySelector("[data-substore-rename-options]");
-      if (renameOptions) renameOptions.hidden = !targetID || Boolean(changedRemote);
+      if (renameOptions) setVisible(renameOptions, !(!targetID || Boolean(changedRemote)));
     });
     bindEvent(document.querySelector("[data-substore-remote-import-button]"), "click", async (event) => {
       const select = targetDialog?.querySelector("[data-substore-remote-select]");

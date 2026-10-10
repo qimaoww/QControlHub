@@ -1,3 +1,4 @@
+import { updateFeedback, removePresented } from "./presence-motion.js";
 import { presetRoute } from "./preset-route.js";
 
 export function bindLiveConfigNavigation({ state, notify, confirmAction, engineName },
@@ -59,11 +60,11 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
           tab.classList.toggle("active", tab === link);
           tab.setAttribute("aria-pressed", String(tab === link));
         });
-        workspaceElement.querySelector(".live-engine-loading")?.remove();
+        removePresented(workspaceElement.querySelector(".live-engine-loading"));
         const status = document.createElement("span");
         status.className = "live-engine-loading";
         status.setAttribute("role", "status");
-        status.textContent = `正在切换到 ${engineName(link.dataset.liveEngine)}…`;
+        updateFeedback(status, `正在切换到 ${engineName(link.dataset.liveEngine)}…`);
         workspaceElement.querySelector(".live-config-details").append(status);
         try { await liveConfig(); }
         catch (error) {
@@ -79,7 +80,7 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
           notify(`切换内核失败：${error.message}`, "error");
         } finally {
           if (workspaceElement.isConnected && engineSwitch === switchRequest) {
-            workspaceElement.removeAttribute("aria-busy"); status.remove();
+            workspaceElement.removeAttribute("aria-busy"); removePresented(status);
             frozenForSwitch.forEach((inert, element) => { element.inert = inert; });
             frozenForSwitch.clear();
             tabs.forEach(tab => { tab.disabled = false; });

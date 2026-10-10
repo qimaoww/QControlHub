@@ -73,12 +73,12 @@ export function animateNodeCardDrop(
   if (!remaining) { settle(); return () => {}; }
   const cancels = moves.map(({ item, dx, dy }) => animate(item, [
     { transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" },
-  ], { id: "qch-drop", onSettled: () => { if (!--remaining) settle(); } }));
+  ], { id: "qch-drop", token: "--motion-reorder", retarget: false, onSettled: () => { if (!--remaining) settle(); } }));
   return () => { cancels.forEach(cancel => cancel()); settle(); };
 }
 
 // Arrow keys provide the same order commit as dragging, without a gesture.
-export function moveCardByKey(event, grid, selector) {
+export function moveCardByKey(event, grid, selector, paintedRects) {
   const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
   if (!direction) return null;
   event.preventDefault();
@@ -87,8 +87,8 @@ export function moveCardByKey(event, grid, selector) {
   const card = event.currentTarget.closest(selector), index = cards.indexOf(card);
   const target = cards[index + direction];
   if (!target) return null;
+  const oldRects = paintedRects || new Map(cards.map(item => [item, item.getBoundingClientRect()]));
   cards.forEach(cancelMotion);
-  const oldRects = new Map(cards.map(item => [item, item.getBoundingClientRect()]));
   if (direction < 0) target.before(card); else target.after(card);
   event.currentTarget.focus({ preventScroll: true });
   let status = grid.parentElement.querySelector("[data-card-order-status]");

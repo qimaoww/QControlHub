@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { coreLogFilterCounts } from "./core-log-model.js";
 import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
@@ -139,7 +140,7 @@ export function installCoreLogs(ctx) {
         status.dataset.refreshError = "1";
         status.title = error.message;
         const label = status.querySelector("[data-core-log-refresh-label]");
-        if (label) label.textContent = incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据";
+        if (label) updateFeedback(label, incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据");
       }
       if (state.data.coreLogAutoRefresh !== false) poller.start();
       return false;

@@ -1,3 +1,4 @@
+import { setVisible } from "./presence-motion.js";
 import { prepareDisclosure } from "./popup.js";
 import { bindEvent } from "./refresh.js";
 
@@ -186,10 +187,10 @@ async function submitTask(payload) {
         input.required = enabled;
       }
       if (developmentSource) {
-        developmentSource.hidden = !developmentSourceVisible(
+        setVisible(developmentSource, developmentSourceVisible(
           form.dataset.versionEngine,
           channel,
-        );
+        ));
       }
     };
     form

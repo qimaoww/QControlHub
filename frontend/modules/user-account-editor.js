@@ -1,3 +1,5 @@
+import { closeRetiringDialog } from "./popup.js";
+import { setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 
 import { userPermissions, defaultPermissions } from "./user-model.js";
@@ -18,9 +20,9 @@ export function createUserAccountEditor({ api, state, esc, notify }, { users, re
     dialog.querySelectorAll("[data-user-close]").forEach((button) => bindEvent(button, "click", () => dialog.close()));
     const form = dialog.querySelector("form");
     bindEvent(form.elements.role, "change", () => {
-      dialog.querySelector(".user-permissions").hidden = form.elements.role.value === "admin";
+      setVisible(dialog.querySelector(".user-permissions"), !(form.elements.role.value === "admin"));
       const hint = dialog.querySelector("[data-user-default-isolation]");
-      if (hint) hint.hidden = form.elements.role.value === "admin";
+      if (hint) setVisible(hint, !(form.elements.role.value === "admin"));
     });
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
@@ -35,7 +37,7 @@ export function createUserAccountEditor({ api, state, esc, notify }, { users, re
       try {
         const saved = await api(user ? `/users/${encodeURIComponent(user.id)}` : "/users", { method: user ? "PUT" : "POST", body: JSON.stringify(body) });
         if (!dialog.isConnected || state.route !== "users") return;
-        dialog.close();
+        closeRetiringDialog(dialog);
         state.data.userID = saved.id;
         await users();
         notify("账号已保存");
