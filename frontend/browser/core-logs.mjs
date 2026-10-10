@@ -75,9 +75,11 @@ await waitFor(() => document.querySelector(".desktop-app"), "initial shell missi
   assert.equal(storedPreference.limit, 2000, "the expanded per-engine window must be remembered");
   assert.equal(storedPreference.auto_refresh, false, "a paused live stream must be remembered");
   assert.equal("engine" in storedPreference || "level" in storedPreference || "q" in storedPreference, false, "cleared local filters must not be remembered");
-  assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000, "large log UI exceeded smoke responsiveness budget");
-  assert.ok(acknowledgement < 500 && previewTime < 1000 && cachedTime < 500, "node switch exceeded local rendering budget");
   window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime), switchAckMs: Math.round(acknowledgement), previewRenderMs: Math.round(previewTime), cachedSwitchMs: Math.round(cachedTime) };
+  assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000,
+    `large log UI exceeded smoke responsiveness budget: ${JSON.stringify(window.logPressureResult)}`);
+  assert.ok(acknowledgement < 500 && previewTime < 1000 && cachedTime < 500,
+    `node switch exceeded local rendering budget: ${JSON.stringify(window.logPressureResult)}`);
 }
 
 export async function testLogPreferenceRestoreRuntime({ testAPI }) {

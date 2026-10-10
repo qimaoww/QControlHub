@@ -23,7 +23,9 @@ export async function testAgentEnrollmentActions({ testAPI }) {
   const backdropStyle = getComputedStyle(backdrop);
   assert.equal(backdropStyle.position, "fixed");
   assert.equal(backdropStyle.display, "grid");
-  assert.notEqual(backdropStyle.backgroundColor, "rgba(0, 0, 0, 0)");
+  assert.equal(getComputedStyle(backdrop, "::before").backgroundColor, "rgba(8, 10, 17, 0.62)",
+    "independent scrim retains the existing dimming color");
+  assert.equal(backdrop.getAnimations().length, 0, "scrim reveal never fades modal children twice");
   assert.equal(getComputedStyle(dialog).display, "flex");
   assert.equal(responsiveDialogRuleExists(), true, "浏览器 CSSOM 未包含窄屏 modal 最终规则");
 
@@ -101,7 +103,8 @@ export async function testAgentEnrollmentActions({ testAPI }) {
   );
   assert.equal(secondRecordDialog.querySelector("[data-command]").value, recordCommand);
   secondRecordDialog.querySelector("[data-close]").click();
-  recordsDialog.querySelector("[data-close]").click();
+  assert.equal(recordsDialog.isConnected, false, "superseded enrollment surface must be removed");
+  assert.equal(document.querySelector(".modal-backdrop"), null, "closing the command leaves no active modal");
   location.hash = "#dashboard";
   await waitFor(() => document.querySelector(".dashboard-head"), "路由离开后未完成刷新");
   location.hash = "#node-settings";

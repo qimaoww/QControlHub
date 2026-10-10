@@ -47,5 +47,6 @@ export function installClientAccess(ctx) {
     return true;
   }
 
+  clientAccess.dispose = () => { refresh.invalidate(); masonry.disconnect(); };
   return clientAccess;
 }

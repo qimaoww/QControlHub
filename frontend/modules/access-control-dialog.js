@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { bindDialogBackdrop } from "./popup.js";
 export function createAccessControlDialog({ state, engineName, confirmAction }, { card, bind }) {
   return (entry, { trigger, isCurrent, onSaved }) => {
     const dialog = document.createElement("dialog");
@@ -23,10 +24,13 @@ export function createAccessControlDialog({ state, engineName, confirmAction }, 
     document.body.append(dialog);
     const signal = state.routeSignal;
     let confirming = false;
+    let closed = false;
     const cleanup = () => {
+      if (closed) return;
+      closed = true;
       signal?.removeEventListener("abort", dispose);
       dialog.remove();
-      if (trigger.isConnected) { trigger.setAttribute("aria-expanded", "false"); trigger.focus(); }
+      if (trigger.isConnected) { trigger.setAttribute("aria-expanded", "false"); trigger.focus({ preventScroll: true }); }
     };
     const dispose = () => { dialog.close(); cleanup(); };
     const close = async () => {
@@ -39,10 +43,7 @@ export function createAccessControlDialog({ state, engineName, confirmAction }, 
     };
     bindEvent(dialog.querySelector("[data-access-close]"), "click", close);
     bindEvent(dialog, "cancel", event => { event.preventDefault(); void close(); });
-    bindEvent(dialog, "click", event => {
-      const rect = dialog.getBoundingClientRect();
-      if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) void close();
-    });
+    bindDialogBackdrop(dialog, () => { void close(); });
     bindEvent(dialog, "close", cleanup);
     signal?.addEventListener("abort", dispose, { once: true });
     bind([entry], dialog, async result => { dispose(); await onSaved(result); }, () => isCurrent() && dialog.isConnected);

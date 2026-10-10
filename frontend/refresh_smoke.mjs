@@ -129,6 +129,7 @@ class FakeElement {
   matches(selector) {
     return selector.split(",").some((part) => {
       const value = part.trim();
+      if (value === "*") return true;
       if (value === "[data-refresh-scroll]")
         return this.getAttribute("data-refresh-scroll") != null;
       if (value === ".workspace-main")
@@ -486,49 +487,22 @@ assert.equal(
   2,
   "pointer move keeps cross-row hit testing available while refresh waits",
 );
-const transitionListeners = new Map();
 const animatedCard = {
   style: { transition: "", transform: "" },
-  get offsetWidth() {
-    return 100;
-  },
   getBoundingClientRect: () => ({ left: 120, top: 0 }),
-  addEventListener: (type, listener) => transitionListeners.set(type, listener),
-  removeEventListener: (type, listener) => {
-    if (transitionListeners.get(type) === listener) transitionListeners.delete(type);
-  },
 };
-let frame;
-const animationTimers = new Map();
-let animationTimerID = 1;
+let settleDrop;
 animateNodeCardDrop(
-  [animatedCard],
-  new Map([[animatedCard, { left: 20, top: 0 }]]),
-  {
-    requestFrame: (callback) => {
-      frame = callback;
-      return 1;
-    },
-    cancelFrame: () => {},
-    setTimer: (callback) => {
-      const id = animationTimerID++;
-      animationTimers.set(id, callback);
-      return id;
-    },
-    clearTimer: (id) => animationTimers.delete(id),
+  [animatedCard], new Map([[animatedCard, { left: 20, top: 0 }]]), {
+    animate: (_card, _frames, { onSettled }) => { settleDrop = onSettled; return onSettled; },
     onSettled: releasePointer,
   },
 );
 assert.equal(structuralRefreshes, 0, "drop keeps refresh deferred during FLIP");
-frame();
-transitionListeners.get("transitionend")({
-  target: animatedCard,
-  propertyName: "transform",
-});
+settleDrop();
 assert.equal(structuralRefreshes, 1, "FLIP settlement applies one merged refresh");
 assert.equal(metricPatches, 1, "FLIP settlement applies the latest metric patch");
-assert.equal(animatedCard.style.transform, "", "FLIP cleanup completes before refresh");
-assert.equal(animationTimers.size, 0, "FLIP fallback timer is cleared");
+assert.equal(animatedCard.style.transform, "", "FLIP does not write temporary transforms");
 
 const canceledGate = createInteractionGate();
 const releaseCanceledInteraction = canceledGate.begin();

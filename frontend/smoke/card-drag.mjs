@@ -57,91 +57,34 @@ const fakeCard = (left) => {
     },
   };
 };
-const animationRuntime = () => {
-  const frames = new Map();
-  const timers = new Map();
-  let nextID = 1;
-  return {
-    frames,
-    timers,
-    requestFrame(callback) {
-      const id = nextID++;
-      frames.set(id, callback);
-      return id;
-    },
-    cancelFrame(id) {
-      frames.delete(id);
-    },
-    setTimer(callback) {
-      const id = nextID++;
-      timers.set(id, callback);
-      return id;
-    },
-    clearTimer(id) {
-      timers.delete(id);
-    },
-    runFrame() {
-      const pending = [...frames.values()];
-      frames.clear();
-      pending.forEach((callback) => callback());
-    },
-    runTimer() {
-      const pending = [...timers.values()];
-      timers.clear();
-      pending.forEach((callback) => callback());
-    },
-  };
+const pending = new Map();
+const animate = (card, frames, { onSettled }) => {
+  assert.match(frames[0].transform, /translate/);
+  let active = true;
+  const settle = () => { if (active) { active = false; pending.delete(card); onSettled(); } };
+  pending.set(card, settle);
+  return settle;
 };
-
-const landingCard = fakeCard(120);
-const landingRuntime = animationRuntime();
-const cancelLanding = animateNodeCardDrop(
-  [landingCard],
-  new Map([[landingCard, { left: 20, top: 0 }]]),
-  landingRuntime,
-);
-assert.equal(landingCard.style.transition, "none");
-assert.equal(landingCard.style.transform, "translate(-100px, 0px)");
-assert.equal(landingCard.forcedLayouts, 1);
-assert.equal(landingRuntime.frames.size, 1);
-landingRuntime.runFrame();
-assert.equal(landingCard.style.transition, "");
-assert.equal(landingCard.style.transform, "");
-assert.equal(landingRuntime.timers.size, 1);
-assert.equal(landingCard.hasTransitionListener(), true);
-landingCard.dispatchTransitionEnd();
-assert.equal(landingRuntime.timers.size, 0);
-assert.equal(landingCard.hasTransitionListener(), false);
-assert.equal(landingCard.style.transition, "");
-assert.equal(landingCard.style.transform, "");
-
-const interruptedCard = fakeCard(120);
-const interruptedRuntime = animationRuntime();
-const interruptLanding = animateNodeCardDrop(
-  [interruptedCard],
-  new Map([[interruptedCard, { left: 20, top: 0 }]]),
-  interruptedRuntime,
-);
-interruptLanding();
-assert.equal(interruptedRuntime.frames.size, 0);
-assert.equal(interruptedCard.hasTransitionListener(), false);
-assert.equal(interruptedCard.style.transition, "");
-assert.equal(interruptedCard.style.transform, "");
-assert.equal(interruptedCard.forcedLayouts, 2);
-
-const timedOutCard = fakeCard(120);
-const timedOutRuntime = animationRuntime();
-animateNodeCardDrop(
-  [timedOutCard],
-  new Map([[timedOutCard, { left: 20, top: 0 }]]),
-  timedOutRuntime,
-);
-timedOutRuntime.runFrame();
-timedOutRuntime.runTimer();
-assert.equal(timedOutCard.hasTransitionListener(), false);
-assert.equal(timedOutCard.style.transition, "");
-assert.equal(timedOutCard.style.transform, "");
-cancelLanding();
+const first = fakeCard(120), second = fakeCard(240);
+let settlements = 0;
+const cancel = animateNodeCardDrop([first, second], new Map([
+  [first, { left: 20, top: 0 }], [second, { left: 120, top: 0 }],
+]), { animate, onSettled: () => settlements++ });
+assert.equal(first.style.transform, "", "native landing keeps inline geometry clean");
+assert.equal(first.forcedLayouts, 0, "landing does not force per-card layout");
+pending.get(first)();
+assert.equal(settlements, 0, "all moving cards settle before releasing the gate");
+cancel(); cancel();
+assert.equal(settlements, 1, "interruption releases the gate exactly once");
+assert.equal(pending.size, 0);
+let immediate = 0;
+animateNodeCardDrop([first], new Map(), { animate, onSettled: () => immediate++ });
+assert.equal(immediate, 1, "unchanged layout releases immediately");
+animateNodeCardDrop([first], new Map([[first, { left: 0, top: 0 }]]), {
+  animate: (_card, _frames, { onSettled }) => { onSettled(); return () => {}; },
+  onSettled: () => immediate++,
+});
+assert.equal(immediate, 2, "reduced motion can settle synchronously");
 
 const releaseCard = fakeCard(0);
 const releaseTarget = fakeCard(120);

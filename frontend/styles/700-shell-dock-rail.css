@@ -2,7 +2,7 @@
    context sidebar on pointer hover or keyboard focus to reveal grouped labels.
    Grid tracks stay fixed, so expanding never reflows the workspace. */
 @media(min-width:821px),(pointer:fine){
-  .app-dock{--dock-rail-collapsed:68px;--dock-rail-expanded:212px;--dock-rail-pad:7px;--dock-rail-icon:20px;position:relative;width:var(--dock-rail-collapsed);justify-self:start;align-items:stretch;padding-inline:var(--dock-rail-pad);overflow:hidden;transition:width 200ms cubic-bezier(.2,.8,.2,1),box-shadow 200ms ease}
+  .app-dock{--dock-rail-collapsed:68px;--dock-rail-expanded:212px;--dock-rail-pad:7px;--dock-rail-icon:20px;position:relative;width:var(--dock-rail-collapsed);justify-self:start;align-items:stretch;padding-inline:var(--dock-rail-pad);overflow:hidden;transition:width var(--motion-base) var(--motion-ease-out),box-shadow var(--motion-base) ease}
   .app-dock:is(:hover,:has(:focus-visible)){width:var(--dock-rail-expanded);box-shadow:22px 0 48px -30px rgba(5,7,16,.78);transition-delay:80ms}
   .app-dock>.dock-logo{align-self:flex-start;margin-left:calc((var(--dock-rail-collapsed) - 2 * var(--dock-rail-pad) - 42px) / 2)}
   .app-dock .dock-nav{width:100%;gap:2px;margin-top:16px;overflow-x:hidden}
@@ -10,14 +10,14 @@
   .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button){width:100%;min-width:0;min-height:38px;display:flex;align-items:center;justify-content:flex-start;gap:12px;margin:0;padding:0 calc((var(--dock-rail-collapsed) - 2 * var(--dock-rail-pad) - var(--dock-rail-icon)) / 2);border-radius:10px;white-space:nowrap}
   .app-dock :is(.dock-nav,.dock-tools) svg{width:var(--dock-rail-icon);height:var(--dock-rail-icon);flex:0 0 var(--dock-rail-icon)}
   /* Labels do not contribute to the grid's minimum width while the rail closes. */
-  .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{position:absolute;left:calc((var(--dock-rail-collapsed) - 2 * var(--dock-rail-pad) + var(--dock-rail-icon)) / 2 + 12px);right:12px;top:50%;min-width:0;overflow:hidden;padding:0;background:transparent;color:inherit;font-size:calc(13px * var(--ui-font-scale));font-weight:600;letter-spacing:.01em;text-overflow:ellipsis;text-align:left;opacity:0;pointer-events:none;transform:translate(-6px,-50%);transition:opacity 120ms ease,transform 180ms cubic-bezier(.2,.8,.2,1)}
-  .app-dock:is(:hover,:has(:focus-visible)) :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{opacity:1;transform:translateY(-50%);transition-delay:120ms}
+  .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{position:absolute;left:calc((var(--dock-rail-collapsed) - 2 * var(--dock-rail-pad) + var(--dock-rail-icon)) / 2 + 12px);right:12px;top:50%;min-width:0;overflow:hidden;padding:0;background:transparent;color:inherit;font-size:calc(13px * var(--ui-font-scale));font-weight:600;letter-spacing:.01em;text-overflow:ellipsis;text-align:left;opacity:0;pointer-events:none;transform:translate(-6px,-50%);transition:opacity var(--motion-fast) ease,transform var(--motion-base) var(--motion-ease-out)}
+  .app-dock:is(:hover,:has(:focus-visible)) :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{opacity:1;transform:translateY(-50%);transition-delay:80ms}
   .app-dock .dock-nav a.active,.app-dock .dock-tools .dock-settings.active{background:var(--accent);color:var(--on-accent);box-shadow:none}
   .app-dock .dock-nav a.active::before,.app-dock .dock-tools .dock-settings.active::before{left:calc(-1 * var(--dock-rail-pad))}
   .app-dock:is(:hover,:has(:focus-visible)) .dock-nav b{top:50%;right:10px;transform:translateY(-50%)}
   .app-dock .dock-nav a.dock-group-start{margin-top:11px}
-  .app-dock .dock-nav a.dock-group-start::after{content:"";position:absolute;left:12px;right:12px;top:-7px;height:1px;background:rgba(255,255,255,.1);pointer-events:none;transition:left 200ms ease,right 200ms ease}
-  .app-dock:is(:hover,:has(:focus-visible)) .dock-nav a.dock-group-start::after{left:6px;right:6px}
+  .app-dock .dock-nav a.dock-group-start::after{content:"";position:absolute;left:12px;right:12px;top:-7px;height:1px;background:rgba(255,255,255,.1);pointer-events:none;transition:transform var(--motion-base) var(--motion-ease-out)}
+  .app-dock:is(:hover,:has(:focus-visible)) .dock-nav a.dock-group-start::after{transform:scaleX(1.06)}
 }
 /* Narrow mouse windows keep the horizontal bottom dock on dense workspaces. */
 @media(max-width:820px) and (pointer:fine){

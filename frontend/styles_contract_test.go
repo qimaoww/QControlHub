@@ -15,32 +15,23 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	}
 	content := string(styles)
 	for _, required := range []string{
-		"@keyframes qch-page-enter",
-		"@keyframes qch-card-enter",
+		"--motion-fast:120ms",
+		"--motion-base:200ms",
+		"--motion-slow:280ms",
+		"--motion-feedback:160ms",
+		"--motion-distance:6px",
 		"@keyframes qch-dialog-enter",
+		"@keyframes qch-fade-enter",
 		"@keyframes qch-route-progress",
-		"@keyframes qch-boot-enter",
-		"@keyframes qch-first-screen-enter",
-		"@keyframes qch-context-enter",
-		"@keyframes qch-task-result-enter",
-		"@keyframes qch-reconcile-enter",
-		"@keyframes qch-config-read-enter",
+		"@keyframes qch-boot-orbit",
 		".boot-content",
 		".boot-mark::before",
-		".workspace-main.first-screen.page-enter>",
-		".workspace-main.first-screen.page-enter> *:nth-child(n){animation-delay:0ms}",
-		".workspace-main.page-enter>",
 		".workspace-main.is-route-pending::before",
-		".context-sidebar.context-enter>",
-		".page-tasks [data-task-result][open]>.task-result-block",
-		".page-live-config .live-config-workspace[data-live-config-phase]",
-		".client-access-toolbar>nav a.active",
-		".substore-target-bar>nav>button.active",
-		".core-log-filter-group button[aria-pressed=true]",
-		".qch-reconcile-enter",
 		"dialog[open]::backdrop",
+		".modal-backdrop::before",
 		".modal-backdrop>[role=dialog]",
 		"@media(prefers-reduced-motion:reduce)",
+		"animation:none!important;transition:none!important;scroll-behavior:auto!important",
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("motion system is missing %q", required)
@@ -50,8 +41,27 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(refresh), "markInsertedMotion(freshChild.cloneNode(true))") {
+	if !strings.Contains(string(refresh), "!existingNodes.has(child)") || !strings.Contains(string(refresh), "enterSurface(child") {
 		t.Error("reconciled dynamic content must animate only when inserted")
+	}
+	for _, forbidden := range []string{".workspace-main.page-enter", ".qch-reconcile-enter", "@keyframes qch-nav-active"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("motion must not retain refresh-replayed entrances: %s", forbidden)
+		}
+	}
+	// Behavior is verified by the module and real browser suites, rather than
+	// requiring the retired CSS classes/keyframe names as the implementation.
+	for _, suite := range []struct{ path, marker string }{
+		{"module_smoke.mjs", `import("./smoke/motion.mjs")`},
+		{"agents_browser_runtime.mjs", `import { testMotionRuntime }`},
+	} {
+		source, err := os.ReadFile(suite.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(source), suite.marker) {
+			t.Errorf("motion regressions must run from %s", suite.path)
+		}
 	}
 	configs, err := os.ReadFile("modules/live-config-view.js")
 	if err != nil {

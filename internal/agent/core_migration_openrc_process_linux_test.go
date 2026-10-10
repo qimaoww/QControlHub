@@ -344,10 +344,9 @@ func TestOpenRCBoundServiceProcessRealSupervisedService(t *testing.T) {
 		t.Fatalf("rc-service start failed: %v: %s", err, output)
 	}
 	childPID := waitForOpenRCChildPID(t, service, 3*time.Second)
-	identity, err := boundOpenRCServiceProcess(context.Background(), service)
-	if err != nil {
-		t.Fatalf("boundOpenRCServiceProcess() error on real service: %v", err)
-	}
+	// Child and supervisor PID files are published separately. Validate the
+	// complete binding once both have reached their protected final state.
+	identity := waitForOpenRCServiceProcess(t, service, 3*time.Second)
 	childIdentity = &identity.Child
 	if identity.Child.PID != childPID {
 		t.Fatalf("bound child = %d, metadata child = %d", identity.Child.PID, childPID)

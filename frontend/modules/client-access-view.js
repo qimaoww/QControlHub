@@ -44,9 +44,9 @@ export function createClientAccessView(ctx, { masonry }) {
       : `<section class="client-access-toolbar empty">${formatMarkup}<button class="button small" type="button" data-refresh-client-access>刷新</button></section>`;
     masonry.disconnect();
     shell(
-      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid qch-swap-panel${filtered.length ? "" : " empty"}" data-refresh-key="client-results-${esc(filters.agent || "all")}-${esc(filters.engine || "all")}-${esc(filters.query || "all")}-${displayFormat}">${results}</div></section>`,
+      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid qch-swap-panel${filtered.length ? "" : " empty"}" data-refresh-key="client-results" data-motion-region="client-results" data-motion-key="${esc(JSON.stringify([filters.agent, filters.engine, filters.query, displayFormat]))}">${results}</div></section>`,
       "客户端配置",
-      { viewKey: `client-access-${filters.agent || "all"}-${filters.engine || "all"}-${filters.query || "all"}-${displayFormat}` },
+      { viewKey: "client-access" },
     );
   }
 

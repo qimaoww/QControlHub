@@ -1,3 +1,4 @@
+import { enterSurface } from "./motion.js";
 import { taskTerminal } from "./task-monitor.js";
 
 // Operation feedback remains account-scoped and follows the same deployment
@@ -29,10 +30,13 @@ function renderPresetStatus() {
     if (anchor) anchor.after(status);
     else if (editor.host) root.prepend(status);
   }
+  const changed = status.dataset.motionMessage !== operation.message;
+  status.dataset.motionMessage = operation.message;
   status.className = `alert preset-submit-status ${operation.tone}`;
   status.setAttribute("role", operation.tone === "error" ? "alert" : "status");
   status.setAttribute("aria-live", "polite");
   status.textContent = operation.message;
+  if (changed) enterSurface(status, { token: "--motion-feedback" });
   if (operation.task?.id) {
     const link = document.createElement("a");
     link.href = "#tasks";

@@ -1,15 +1,18 @@
+import { cancelMotion } from "./motion.js";
 import { bindEvent } from "./refresh.js";
-import { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "./agent-card-drag.js";
+import { animateNodeCardDrop, clearNodeCardDragState, moveCardByKey, nodeCardDropIndex } from "./agent-card-drag.js";
 import { saveNodeOrder } from "./node-order.js";
 import { openRegionPicker } from "./regions.js";
 
 export function createAgentCardInteractions({ api, state, esc, notify }, { can, cardInteractions, loadRegionDisplay, loadKomariDisplay }) {
+  const copyTimers = new Map();
   let cancelCardDrag = () => {};
 // Drag reordering of the overview cards. A cloned ghost follows the cursor and
 // the target card is highlighted, while the grid itself does not reflow
 // mid-drag; on release the cards FLIP-animate to their new layout and the
 // order is committed to localStorage.
 function enableCardDrag(grid) {
+  cancelCardDrag();
   let drag = null;
   let cancelLanding = null;
   const dropIndex = (pointerX, pointerY) => {
@@ -34,10 +37,12 @@ function enableCardDrag(grid) {
   };
   const clearDragState = (clearAnimationStyles) => {
     if (!drag) return;
-    clearNodeCardDragState(grid, drag, {
+    const previous = drag;
+    drag = null;
+    clearNodeCardDragState(grid, previous, {
       clearAnimationStyles,
     });
-    drag = null;
+    if (previous.grip.hasPointerCapture(previous.pointerId)) previous.grip.releasePointerCapture(previous.pointerId);
   };
   const reset = () => {
     const landing = cancelLanding;
@@ -86,6 +91,21 @@ function enableCardDrag(grid) {
     reset();
   };
   grid.querySelectorAll(".node-card-grip").forEach((grip) => {
+    bindEvent(grip, "keydown", (event) => {
+      if (event.key === "Escape") return reset();
+      if (["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); return; }
+      if (!event.key.startsWith("Arrow")) return;
+      reset();
+      const moved = moveCardByKey(event, grid, ".node-card");
+      if (!moved) return;
+      saveNodeOrder(moved.cards.map(item => item.dataset.agentNode));
+      const release = cardInteractions.begin();
+      let settled = false;
+      const cancel = animateNodeCardDrop(moved.cards, moved.oldRects, {
+        onSettled: () => { settled = true; cancelLanding = null; release(); },
+      });
+      if (!settled) cancelLanding = cancel;
+    });
     bindEvent(grip, "pointerdown", (event) => {
       if (event.button !== 0 || drag) return;
       const releaseInteraction = cardInteractions.begin();
@@ -97,9 +117,10 @@ function enableCardDrag(grid) {
         return;
       }
       event.preventDefault();
+      cancelMotion(card);
       const rect = card.getBoundingClientRect();
       drag = {
-        card,
+        card, grip,
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
@@ -133,6 +154,9 @@ function enableCardDrag(grid) {
         const ghost = drag.card.cloneNode(true);
         ghost.classList.remove("dragging");
         ghost.classList.add("node-card-ghost");
+        ghost.inert = true;
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.querySelectorAll("[id]").forEach(element => element.removeAttribute("id"));
         ghost.removeAttribute("href");
         ghost.removeAttribute("data-agent-node");
         ghost.removeAttribute("data-agent-metrics");
@@ -147,7 +171,7 @@ function enableCardDrag(grid) {
       drag.moved = true;
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
-      drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
+      drag.ghost.style.transform = `translate(${dx}px, ${dy}px)`;
       const index = dropIndex(event.clientX, event.clientY);
       drag.drop = index;
       highlight(index);
@@ -216,19 +240,30 @@ function enableCardDrag(grid) {
         document.execCommand("copy");
         fallback.remove();
       }
-      const originalTitle = button.title;
+      if (!button.isConnected) return;
+      const previous = copyTimers.get(button);
+      clearTimeout(previous?.timer);
+      const originalTitle = previous?.title || button.title;
       button.classList.add("copied");
       button.title = "已复制";
-      window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
+        copyTimers.delete(button);
         button.classList.remove("copied");
         if (button.isConnected) button.title = originalTitle;
       }, 1600);
+      copyTimers.set(button, { timer, title: originalTitle });
     });
   });
 
   }
   return {
     bindCards,
-    cancel() { cancelCardDrag(); cancelCardDrag = () => {}; },
+    cancel() {
+      cancelCardDrag(); cancelCardDrag = () => {};
+      copyTimers.forEach(({ timer, title }, button) => {
+        clearTimeout(timer); button.classList.remove("copied"); button.title = title;
+      });
+      copyTimers.clear();
+    },
   };
 }

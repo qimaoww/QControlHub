@@ -45,5 +45,6 @@ export function installSubStoreSync(ctx) {
     return true;
   }
 
+  subStoreSync.dispose = () => { refresh.invalidate(); masonry.disconnect(); };
   return subStoreSync;
 }

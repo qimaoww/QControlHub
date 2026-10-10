@@ -1,19 +1,24 @@
+import { cancelMotion } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import {
   animateNodeCardDrop,
   nodeCardDropIndex,
+  moveCardByKey,
 } from "./agent-card-drag.js";
 
 import { mergeVisibleTrafficCardOrder } from "./traffic-model.js";
 export function createTrafficCardInteractions({ cardInteractions, saveTrafficCardOrder }) {
   let cancelTrafficCardDrag = () => {};
   function enableTrafficCardDrag(grid, allKeys) {
+    cancelTrafficCardDrag();
     let drag = null;
     let cancelLanding = null;
     const cards = () => [...grid.querySelectorAll("[data-traffic-card-key]")];
     const clear = (clearAnimationStyles = true) => {
       if (!drag) return;
-      drag.card.classList.remove("dragging");
+      const previous = drag;
+      drag = null;
+      previous.card.classList.remove("dragging");
       document.body.classList.remove("traffic-card-dragging");
       cards().forEach((card) => {
         card.classList.remove("drop-target");
@@ -22,8 +27,8 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
           card.style.transition = "";
         }
       });
-      drag.ghost?.remove();
-      drag = null;
+      previous.ghost?.remove();
+      if (previous.grip.hasPointerCapture(previous.pointerId)) previous.grip.releasePointerCapture(previous.pointerId);
     };
     const reset = () => {
       const landing = cancelLanding;
@@ -75,6 +80,21 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
       reset();
     };
     grid.querySelectorAll(".traffic-card-grip").forEach((grip) => {
+      bindEvent(grip, "keydown", (event) => {
+        if (event.key === "Escape") return reset();
+        if (["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); return; }
+        if (!event.key.startsWith("Arrow")) return;
+        reset();
+        const moved = moveCardByKey(event, grid, "[data-traffic-card-key]");
+        if (!moved) return;
+        saveTrafficCardOrder(mergeVisibleTrafficCardOrder(allKeys, moved.cards.map(item => item.dataset.trafficCardKey)));
+        const release = cardInteractions.begin();
+        let settled = false;
+        const cancel = animateNodeCardDrop(moved.cards, moved.oldRects, {
+          onSettled: () => { settled = true; cancelLanding = null; release(); },
+        });
+        if (!settled) cancelLanding = cancel;
+      });
       bindEvent(grip, "pointerdown", (event) => {
         if (event.button !== 0 || drag) return;
         const releaseInteraction = cardInteractions.begin();
@@ -86,9 +106,10 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
           return;
         }
         event.preventDefault();
+        cancelMotion(card);
         const rect = card.getBoundingClientRect();
         drag = {
-          card,
+          card, grip,
           pointerId: event.pointerId,
           startX: event.clientX,
           startY: event.clientY,
@@ -114,6 +135,8 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
           const ghost = drag.card.cloneNode(true);
           ghost.classList.remove("dragging");
           ghost.classList.add("traffic-card-ghost");
+          ghost.inert = true;
+          ghost.setAttribute("aria-hidden", "true");
           ghost.removeAttribute("id");
           ghost.removeAttribute("data-traffic-card-key");
           ghost.querySelectorAll("dialog,[id]").forEach((element) => {
@@ -130,7 +153,7 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
         drag.moved = true;
         const dx = event.clientX - drag.startX;
         const dy = event.clientY - drag.startY;
-        drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
+        drag.ghost.style.transform = `translate(${dx}px, ${dy}px)`;
         const rects = cards().map((card) => card.getBoundingClientRect());
         drag.drop = nodeCardDropIndex(
           rects,

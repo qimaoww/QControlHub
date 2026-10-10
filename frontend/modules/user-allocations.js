@@ -150,6 +150,14 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
     const currentUser = () => data === state.data && state.route === "users" && data.userID === user.id && trigger.isConnected;
     if (!currentUser() || data.userAccessSaves.has(user.id) || data.userDeletions.has(user.id)) return;
     const submitted = data.userDrafts.get(user.id), saving = { controls: new Map() };
+    const unlock = () => {
+      if (saving.unlocked) return;
+      saving.unlocked = true;
+      saving.controls.forEach((disabled, control) => {
+        if (!control.isConnected || data === state.data && state.route === "users" && data.userID === user.id)
+          control.disabled = disabled;
+      });
+    };
     data.userAccessSaves.set(user.id, saving);
     lockAllocationControls(data, user.id, saving);
     try {
@@ -159,6 +167,9 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
       });
       if (data !== state.data) return;
       if (data.userDrafts.get(user.id) === submitted) data.userDrafts.delete(user.id);
+      // Release the old busy snapshot before rendering new availability.
+      // Mounted buttons may now be disabled because all nodes were allocated.
+      unlock();
       data.userAccessSaves.delete(user.id);
       if (state.route === "users" && data.userID === user.id) {
         ++lifecycle.serial;
@@ -169,7 +180,7 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
     } catch (error) { reportAllocationError(error, data, user.id); }
     finally {
       if (data.userAccessSaves.get(user.id) === saving) data.userAccessSaves.delete(user.id);
-      saving.controls.forEach((disabled, control) => { control.disabled = disabled; });
+      unlock();
     }
   }
 

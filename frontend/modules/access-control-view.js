@@ -36,9 +36,9 @@ export function createAccessControlView({ state, esc, engineName, shell }, { edi
       ? entries.find((entry) => entry.agent_id === selected)?.agent_name || "所选节点"
       : "全部节点";
     shell(
-      `<div class="access-control-workspace"><section class="access-control-toolbar"><dl class="access-control-stats"><div><dt>当前范围</dt><dd>${esc(title)}</dd></div><div><dt>入站端口</dt><dd>${visible.length}</dd></div><div><dt>禁止目标</dt><dd>${activeDestination}</dd></div><div><dt>禁止来源</dt><dd>${activeSource}</dd></div></dl><a class="access-control-source" href="https://github.com/misakaio/chnroutes2" target="_blank" rel="noopener noreferrer"><span><small>默认大陆 CIDR 数据源</small><b>chnroutes2 IPv4 + 大陆 IPv6</b></span><strong>查看 ↗</strong></a></section>${cards ? `<section class="access-control-grid">${cards}</section>` : '<div class="empty large"><strong>当前范围没有可限制的入站端口</strong><p>请先保存服务端命名入站。</p></div>'}</div>`,
+      `<div class="access-control-workspace" data-motion-region="access-control-results" data-motion-key="${esc(selected)}"><section class="access-control-toolbar"><dl class="access-control-stats"><div><dt>当前范围</dt><dd>${esc(title)}</dd></div><div><dt>入站端口</dt><dd>${visible.length}</dd></div><div><dt>禁止目标</dt><dd>${activeDestination}</dd></div><div><dt>禁止来源</dt><dd>${activeSource}</dd></div></dl><a class="access-control-source" href="https://github.com/misakaio/chnroutes2" target="_blank" rel="noopener noreferrer"><span><small>默认大陆 CIDR 数据源</small><b>chnroutes2 IPv4 + 大陆 IPv6</b></span><strong>查看 ↗</strong></a></section>${cards ? `<section class="access-control-grid">${cards}</section>` : '<div class="empty large"><strong>当前范围没有可限制的入站端口</strong><p>请先保存服务端命名入站。</p></div>'}</div>`,
       "访问限制",
-      { viewKey: `access-control-${selected || "all"}` },
+      { viewKey: "access-control" },
     );
   }
 

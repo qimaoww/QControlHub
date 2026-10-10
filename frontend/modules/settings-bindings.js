@@ -1,22 +1,29 @@
+import { enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import { selectedDefaultEngines } from "./engine-capabilities.js";
 export function createSettingsBindings({ api, state, esc, notify, applyUIFontScale, invalidatePanelReads = () => {} }) {
+  const drafts = new WeakMap();
   return ({ item, writable, accountData }) => {
     const form = document.querySelector("#settings-form");
     const saveButton = form?.querySelector("[data-save-settings]");
     const stateBadge = document.querySelector("[data-settings-state]");
-    const markDirty = () => {
+    const draft = drafts.get(form) || { revision: 0, dirty: false };
+    drafts.set(form, draft);
+    const showDirty = () => {
       if (!saveButton) return;
       saveButton.disabled = false;
       stateBadge.textContent = "有未保存更改";
       stateBadge.classList.add("dirty");
     };
+    const markDirty = () => { draft.revision++; draft.dirty = true; showDirty(); };
     bindEvent(form, "input", markDirty);
     bindEvent(form, "change", markDirty);
+    if (writable && draft.dirty) showDirty();
 
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
-      if (!writable) return;
+      if (!writable || form.getAttribute("aria-busy") === "true") return;
+      const savingRevision = draft.revision;
       const data = new FormData(form);
       const number = (name) => Number(data.get(name));
       const body = {
@@ -40,6 +47,9 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         notify_agent_online: data.has("notify_agent_online"), notify_traffic_quota: data.has("notify_traffic_quota"),
       };
       saveButton.disabled = true;
+      saveButton.setAttribute("aria-busy", "true");
+      form.setAttribute("aria-busy", "true");
+      stateBadge.textContent = "正在保存…";
       try {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
         if (state.data !== accountData) return;
@@ -48,13 +58,22 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         state.data.settings = saved;
         item.revision = saved.revision;
         applyUIFontScale?.(saved.ui_font_scale);
-        stateBadge.textContent = `已保存 · v${saved.revision}`;
-        stateBadge.classList.remove("dirty");
+        const stillDirty = draft.revision !== savingRevision;
+        draft.dirty = stillDirty;
+        saveButton.disabled = !stillDirty;
+        stateBadge.textContent = stillDirty ? "已保存 · 仍有未保存更改" : `已保存 · v${saved.revision}`;
+        stateBadge.classList.toggle("dirty", stillDirty);
+        enterSurface(stateBadge, { token: "--motion-feedback" });
         notify("设置已保存");
       } catch (error) {
         if (state.data !== accountData || error.name === "AbortError") return;
+        draft.dirty = true;
         saveButton.disabled = false;
+        stateBadge.textContent = "保存失败 · 有未保存更改";
         notify(error.message, "error");
+      } finally {
+        saveButton.removeAttribute("aria-busy");
+        form.removeAttribute("aria-busy");
       }
     });
 

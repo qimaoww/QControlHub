@@ -17,7 +17,7 @@ export function createClientConnectionView({ esc, engineName, date }) {
 
       ${error ? `<div class="connection-error" role="alert">${esc(error)}</div>` : ""}
       ${clientConnectionFilters({ filters, esc, engineName, open: filtersOpen })}
-      <section class="workspace-panel connection-detail-panel">
+      <section class="workspace-panel connection-detail-panel" data-motion-region="connection-results" data-motion-key="${esc(JSON.stringify([filters.agent_id || "", filters.engine || "", filters.period || "day", filters.date || "", filters.client_ip || "", filters.include_non_public || "", filters.since || "", filters.until || "", page]))}" data-motion-ready="${!loading}">
         <header><h3>客户端来源 IP</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : result?.preview ? `已显示 ${records.length} 条，结果待更新` : `本页 ${records.length} 条`}</span></header>
         ${clientConnectionTable({ records, loading, esc, engineName, date })}
         <footer class="connection-pagination"><span>第 ${page} 页</span><button class="button small" data-connection-previous${!hasPrevious ? " disabled" : ""}>上一页</button><button class="button small" data-connection-next${!result?.next_cursor ? " disabled" : ""}>下一页</button></footer>

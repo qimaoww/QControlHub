@@ -1,6 +1,8 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
+import { syncSelectionMotion, updateFeedback } from "./motion.js";
+import { bindDialogBackdrop, closePopup } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
@@ -12,6 +14,8 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
   const fresh = host.root.cloneNode(false);
   const content = document.createElement("div");
   content.dataset.refreshKey = viewKey;
+  content.dataset.motionRegion = "preset-selection";
+  content.dataset.motionKey = viewKey;
   const toolbar = document.createElement("div");
   toolbar.className = "config-command-bar inbound-editor-toolbar";
   if (host.kind === "add") {
@@ -59,6 +63,7 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
   }
   fresh.append(content);
   reconcileView(host.root, fresh);
+  syncSelectionMotion(host.root);
 }
 
 export function bindConfigInbounds(ctx) {
@@ -165,7 +170,7 @@ export function bindConfigInbounds(ctx) {
     return true;
   };
   const open = async (kind, trigger) => {
-    menu.open = false;
+    closePopup(menu);
     if (busy || dialog || !current()) return;
     const mutation = isMutation(kind), commonAction = kind.startsWith("common-");
     if (commonAction && (!commonSelected() || !saved)) return;
@@ -205,10 +210,7 @@ export function bindConfigInbounds(ctx) {
     };
     bindEvent(opened.querySelector("[data-inbound-close]"), "click", close);
     bindEvent(opened, "cancel", event => { event.preventDefault(); void close(); });
-    bindEvent(opened, "click", event => {
-      const rect = opened.getBoundingClientRect();
-      if (event.target === opened && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) void close();
-    });
+    bindDialogBackdrop(opened, () => { void close(); });
     state.routeSignal?.addEventListener("abort", abort, { once:true });
     document.body.append(opened);
     opened.showModal();
@@ -261,7 +263,7 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              body.querySelector("[data-inbound-error]").textContent = `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`;
+              updateFeedback(body.querySelector("[data-inbound-error]"), `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`);
               if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }

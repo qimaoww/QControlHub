@@ -4,7 +4,8 @@ function assertVisibleBounds(element, label) {
   const rect = element.getBoundingClientRect();
   assert.ok(rect.width > 0 && rect.height > 0, `${label}不可见`);
   assert.ok(rect.left >= -1 && rect.right <= innerWidth + 1, `${label}超出视口宽度`);
-  assert.ok(rect.top >= -1 && rect.bottom <= innerHeight + 1, `${label}超出视口高度`);
+  assert.ok(rect.top >= -1 && rect.bottom <= innerHeight + 1,
+    `${label}超出视口高度: top=${rect.top}, bottom=${rect.bottom}, viewport=${innerHeight}`);
 }
 
 export async function assertTCPDialogLayout(dialog) {
