@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,5 +57,37 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entries)
+	// Hash the actual representation after permission filtering and sanitizing.
+	// A newest-ID watermark misses retention/deletion and corrections to existing
+	// rows. Reading xmin would also defeat the store's covering index. Reusing
+	// this encoding keeps the original bounded, index-only query and suppresses
+	// compression, transfer and browser parsing when the window is unchanged.
+	payload, err := json.Marshal(entries)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	payload = append(payload, '\n')
+	digest := sha256.Sum256(payload)
+	etag := `W/"` + hex.EncodeToString(digest[:]) + `"`
+	w.Header().Set("ETag", etag)
+	if coreLogETagMatches(request.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
+func coreLogETagMatches(condition, etag string) bool {
+	// Generated tags contain only a SHA-256 hexadecimal digest, so a comma
+	// cannot be part of a matching tag. GET uses weak comparison (RFC 9110).
+	for _, candidate := range strings.Split(condition, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == strings.TrimPrefix(etag, "W/") {
+			return true
+		}
+	}
+	return false
 }

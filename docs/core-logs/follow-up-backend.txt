@@ -1,0 +1,89 @@
+Core logs follow-up: backend measurements (2026-10-11)
+
+Environment: Linux 6.12.107+deb13-amd64, amd64, Intel i5-12500; Go 1.25.12;
+PostgreSQL 18.6 on Alpine (postgres:18-alpine), local Docker published TCP.
+This is real Store + PostgreSQL + API permission/gzip middleware using an
+in-process httptest HTTP transport; synthetic log data, not production Agents.
+CPU is a shared development host; results are comparative observations, not
+latency guarantees. No test assertions use timing thresholds.
+
+API fixture: 3 nodes x 4 engines x 2000 rows, read one node's 8000-row window.
+Messages: 160 or 4096 bytes, MD5-varied prefix plus repetitive diagnostic text.
+The 4096-byte fixture is compressible; see the separate existing incompressible
+B-tree index size limitation in the follow-up validation report.
+VACUUM ANALYZE and one warm fetch precede timed batches, so these are warm
+backend reads, not a cold-disk or real-network browser benchmark.
+Each result below is one 30-iteration batch; 3 batches per scenario.
+body-bytes/op is gzip response-body bytes, excludes HTTP headers.
+
+The SAME internal/api/core_logs_bench_test.go was copied to a detached worktree
+at df1ad925aa270a146b2ad342143546d8ff74c1ea; baseline product code was unchanged.
+Baseline command (only unconditional is compatible with the old API):
+  QCH_TEST_DATABASE_URL='<isolated postgres URL>' go test ./internal/api -run '^$' -bench 'BenchmarkCoreLogRefresh/.*/unconditional' -benchtime=30x -count=3
+Follow-up command:
+  QCH_TEST_DATABASE_URL='<isolated postgres URL>' go test ./internal/api -run '^$' -bench 'BenchmarkCoreLogRefresh/.*/(modified|unchanged)$' -benchtime=30x -count=3
+
+Query fixture: existing TestCoreLogWindowMeasurements, 4 nodes x 40000 rows,
+950-byte messages over seven receive days, VACUUM ANALYZE, production SQL.
+Rows below are single diagnostic observations; they are not medians. The first
+node reads brought 56/112/112 blocks into PostgreSQL shared buffers, while
+subsequent aggregate reads were shared-buffer hits; OS caches were not reset.
+No production SQL/schema changes were made in this follow-up.
+  QCH_TEST_DATABASE_URL='<isolated postgres URL>' QCH_CORE_LOG_MEASURE=1 go test ./internal/store -run '^TestCoreLogWindowMeasurements$' -count=1 -v
+
+Upload fixture: real StoreCoreLogs 32-row batch, local PostgreSQL connection.
+RemoteDatabase injects 20 ms per protocol write, not a measured production RTT.
+  QCH_TEST_DATABASE_URL='<isolated postgres URL>' go test ./internal/store -run '^$' -bench '^Benchmark(Local|Remote)Database/logs32$' -benchtime=15x -count=1
+
+
+===== baseline df1ad925 =====
+goos: linux
+goarch: amd64
+pkg: github.com/qimaoww/qcontrolhub/internal/api
+cpu: 12th Gen Intel(R) Core(TM) i5-12500
+BenchmarkCoreLogRefresh/message-160/unconditional-12         	      30	  29390872 ns/op	    182421 body-bytes/op	11538755 B/op	   88151 allocs/op
+BenchmarkCoreLogRefresh/message-160/unconditional-12         	      30	  29812207 ns/op	    182421 body-bytes/op	12590764 B/op	   88158 allocs/op
+BenchmarkCoreLogRefresh/message-160/unconditional-12         	      30	  28093270 ns/op	    182421 body-bytes/op	13098988 B/op	   88159 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unconditional-12        	      30	 269799569 ns/op	    450929 body-bytes/op	185769832 B/op	   88238 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unconditional-12        	      30	 251202205 ns/op	    450929 body-bytes/op	182942422 B/op	   88235 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unconditional-12        	      30	 245272301 ns/op	    450929 body-bytes/op	185842751 B/op	   88244 allocs/op
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	30.437s
+
+===== follow-up =====
+goos: linux
+goarch: amd64
+pkg: github.com/qimaoww/qcontrolhub/internal/api
+cpu: 12th Gen Intel(R) Core(TM) i5-12500
+BenchmarkCoreLogRefresh/message-160/modified-12         	      30	  28570155 ns/op	    182421 body-bytes/op	11907621 B/op	   64158 allocs/op
+BenchmarkCoreLogRefresh/message-160/modified-12         	      30	  25800272 ns/op	    182421 body-bytes/op	14669462 B/op	   64173 allocs/op
+BenchmarkCoreLogRefresh/message-160/modified-12         	      30	  24270607 ns/op	    182421 body-bytes/op	12521266 B/op	   64160 allocs/op
+BenchmarkCoreLogRefresh/message-160/unchanged-12        	      30	  19642605 ns/op	         0 body-bytes/op	11162671 B/op	   64129 allocs/op
+BenchmarkCoreLogRefresh/message-160/unchanged-12        	      30	  23261786 ns/op	         0 body-bytes/op	11722077 B/op	   64132 allocs/op
+BenchmarkCoreLogRefresh/message-160/unchanged-12        	      30	  24176013 ns/op	         0 body-bytes/op	12282121 B/op	   64135 allocs/op
+BenchmarkCoreLogRefresh/message-4096/modified-12        	      30	 241907926 ns/op	    450927 body-bytes/op	120105689 B/op	   64172 allocs/op
+BenchmarkCoreLogRefresh/message-4096/modified-12        	      30	 235895331 ns/op	    450927 body-bytes/op	106140106 B/op	   64165 allocs/op
+BenchmarkCoreLogRefresh/message-4096/modified-12        	      30	 237130407 ns/op	    450927 body-bytes/op	128636879 B/op	   64179 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unchanged-12       	      30	 226454658 ns/op	         0 body-bytes/op	132612691 B/op	   64147 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unchanged-12       	      30	 217405096 ns/op	         0 body-bytes/op	132612361 B/op	   64147 allocs/op
+BenchmarkCoreLogRefresh/message-4096/unchanged-12       	      30	 206535695 ns/op	         0 body-bytes/op	121418830 B/op	   64141 allocs/op
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	49.726s
+
+===== query-plan summary =====
+node limit=200 rows=800 sql_ms=1.077 read_ms=4.24 json_ms=3.35 bytes=910601 heap_fetches 0 sort [('Sort', 'quicksort', 118)] root_blocks 66 56 scan_types ['Function Scan', 'Index Only Scan']
+node limit=1000 rows=4000 sql_ms=3.28 read_ms=10.44 json_ms=12.71 bytes=4553001 heap_fetches 0 sort [('Sort', 'quicksort', 565)] root_blocks 122 112 scan_types ['Function Scan', 'Index Only Scan']
+node limit=2000 rows=8000 sql_ms=8.547 read_ms=20.77 json_ms=28.65 bytes=9106001 heap_fetches 0 sort [('Sort', 'quicksort', 1130)] root_blocks 234 112 scan_types ['Function Scan', 'Index Only Scan']
+all limit=200 rows=800 sql_ms=0.912 read_ms=2.36 json_ms=1.67 bytes=911401 heap_fetches 0 sort [('Sort', 'quicksort', 118)] root_blocks 115 0 scan_types ['Function Scan', 'Index Only Scan']
+all limit=1000 rows=4000 sql_ms=2.949 read_ms=8.04 json_ms=13.68 bytes=4557001 heap_fetches 0 sort [('Sort', 'quicksort', 565)] root_blocks 203 0 scan_types ['Function Scan', 'Index Only Scan']
+all limit=2000 rows=8000 sql_ms=8.227 read_ms=17.59 json_ms=20.79 bytes=9114001 heap_fetches 0 sort [('Sort', 'quicksort', 1130)] root_blocks 315 0 scan_types ['Function Scan', 'Index Only Scan']
+
+===== upload transaction benchmark =====
+goos: linux
+goarch: amd64
+pkg: github.com/qimaoww/qcontrolhub/internal/store
+cpu: 12th Gen Intel(R) Core(TM) i5-12500
+BenchmarkRemoteDatabase/logs32-12         	      15	 128707817 ns/op	         6.000 wire-writes/op	   39523 B/op	     434 allocs/op
+BenchmarkLocalDatabase/logs32-12          	      15	   2934820 ns/op	         6.000 wire-writes/op	   36350 B/op	     420 allocs/op
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/store	4.675s

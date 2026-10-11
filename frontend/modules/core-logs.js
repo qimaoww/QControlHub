@@ -1,9 +1,9 @@
 import { updateFeedback } from "./presence-motion.js";
 import { readCoreLogWindow } from "./core-log-read.js";
-import { reuseCoreLogEntries } from "./core-log-projection.js";
 import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
 import { createCoreLogBindings } from "./core-log-bindings.js";
+import { coreLogAgentPresentation } from "./core-log-source-status.js";
 export { filterCoreLogEntries, coreLogFilterCounts } from "./core-log-model.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 import { createCoreLogCache } from "./core-log-cache.js";
@@ -99,20 +99,26 @@ export function installCoreLogs(ctx) {
           if (can("agents.read") && (!scopeChange || !data.coreLogAgentsAt || now() - data.coreLogAgentsAt >= 10_000)) {
             void api("/agents", { signal }).then((freshAgents) => {
               if (!current(signal)) return;
+              const previousPresentation = coreLogAgentPresentation(agents);
               agents = freshAgents.filter((agent) => agent.can_manage !== false);
               data.agents = agents;
               data.coreLogAgentsAt = now();
-              if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
+              if (previousPresentation !== coreLogAgentPresentation(agents))
+                paint(data.coreLogEntries || [], data.coreLogPhase);
             }).catch(() => {
               // A failed metadata read must not discard successfully read logs.
               if (!current(signal)) return;
+              const previousPresentation = coreLogAgentPresentation(agents);
               agents = agents.map((agent) => ({ ...agent, status: "unknown" }));
+              data.agents = agents;
               data.coreLogAgentsAt = 0;
-              if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
+              if (previousPresentation !== coreLogAgentPresentation(agents))
+                paint(data.coreLogEntries || [], data.coreLogPhase);
             });
           }
           return readCoreLogWindow(api, params, {
             signal, engines,
+            previous: changed ? cached : data.coreLogEntries,
             preview: changed && !cached && !related && Number(filters.limit || 1000) > 200,
             onPreview(entries) {
               if (!current(signal)) return;
@@ -124,9 +130,8 @@ export function installCoreLogs(ctx) {
         (entries) => {
           if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs") return;
           failures = 0;
-          entries = reuseCoreLogEntries(changed ? cached : data.coreLogEntries, entries);
           cache.set(key, entries);
-          paint(entries, "ready");
+          if (!background || entries !== data.coreLogEntries || data.coreLogPhase !== "ready") paint(entries, "ready");
         },
       );
       if (applied && state.data === data && state.data.coreLogAutoRefresh !== false) poller.start();

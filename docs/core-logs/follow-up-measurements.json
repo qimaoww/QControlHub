@@ -1,0 +1,2849 @@
+{
+  "measuredDate": "2026-10-11",
+  "baselineCommit": "df1ad925aa270a146b2ad342143546d8ff74c1ea",
+  "candidate": "codex/core-logs-ci-performance working tree before PR commit",
+  "candidateFileSHA256": {
+    "scripts/core-logs-performance-server.mjs": "eba96fc41c00da6f514c7ad417946f57ebbc4128aed1ab91d7a3e2e75c32c2a1",
+    "scripts/core-logs-refresh-performance.js": "535cec7ae5dfabd457bf4382ac5975538d0de2a09dee23c30f456d44d417561e",
+    "frontend/modules/core-log-read.js": "872af0659c34bf63c42038129696a7b1b7c8060ac463e61f3b07a63e9ffa843b",
+    "frontend/modules/core-logs.js": "a583c8a950348f63ce750b74d878354e9a169d73239f1664c374ef8437c02048",
+    "frontend/modules/errors.js": "fd0b1881dc060a8ad78fc1fddc3d591c75da61287edfb5e35b1a31f17edd0e26",
+    "frontend/modules/core-log-cache.js": "88ac7ce647c75b2f7157bb9d76dc7f39451a6d9c58c1440ef7fceacdeed72d80",
+    "frontend/modules/core-log-source-status.js": "d1ee1e327f158df1dfbb6a8019d771fc63dec8c3b74eca6155b99bbcd96ee841"
+  },
+  "environment": {
+    "os": "Linux 6.12.107+deb13-amd64",
+    "node": "22.23.2",
+    "browser": "Google Chrome 153.0.8010.36 headless",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "serverLatencyMs": 120,
+    "streamBytesPerSecond": 4194304,
+    "streamChunkIntervalMs": 31.25,
+    "engines": 4,
+    "entriesPerEngine": 2000,
+    "totalEntries": 8000,
+    "visibleDOMRows": 200,
+    "automaticRefreshTestIntervalMs": 100,
+    "productionRefreshIntervalMs": 10000,
+    "instrumentation": true
+  },
+  "scope": {
+    "realBrowser": true,
+    "realHTTP": true,
+    "realBackend": false,
+    "productionSession": false,
+    "data": "Synthetic loopback fixture, four engines; alpha/bravo/charlie scopes. Long messages repeat 80 times, short messages repeat zero times. Both versions served by the same candidate fixture.",
+    "backendLimitation": "Fixture validators are synthetic and bypass body construction when unchanged. Production computes content SHA256 after permission checks and SQL/JSON work, so these results establish transport/browser savings, not lower database cost or production TTFB.",
+    "byteDefinition": "Encoded/decoded HTTP response body bytes; excludes HTTP request/response headers and TLS framing. 304 still has headers.",
+    "measurementDefinition": "Actions include two requestAnimationFrame turns after the relevant UI state. Changed refresh waits for the first displayed row key to change after server completion. Unchanged sample waits for three browser-consumed 200 bodies or 304 responses and two frames.",
+    "bodyAndJSONMs": "Includes body streaming, decompression and JSON parsing wait; not exclusive CPU parse time.",
+    "cache": "Short snapshots fit the 16 MiB cache and show 200 rows synchronously on return. Long 8000-entry snapshots exceed that budget and correctly show zero synchronous cached rows.",
+    "sampling": "One final observation per case on a shared host, not percentile guarantees; earlier exploratory runs are excluded.",
+    "phaseAggregation": "Phase calls are aggregated as calls/totalMs/maxMs per sampling window; phase durations may be nested and must not be summed as exclusive CPU time. Full per-call raw output remains in output/playwright/*-final.txt."
+  },
+  "cases": {
+    "longPlain": {
+      "baseline": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 3630
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 58
+          },
+          {
+            "name": "reset",
+            "ms": 67
+          },
+          {
+            "name": "page2",
+            "ms": 99
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 3699
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 3676
+          }
+        ],
+        "firstVisibleMs": 866,
+        "initialCompleteMs": 1999,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 4.300000190734863,
+          "synchronousRows": 0,
+          "status": "正在加载日志…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 484
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 6991454,
+              "decodedBytes": 6991454,
+              "sentBytes": 6991454,
+              "completed": true,
+              "durationMs": 1855
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3509
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 505
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3528
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3502
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 484
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3503
+            }
+          ],
+          "longTasks": [
+            {
+              "at": 5535,
+              "ms": 67
+            },
+            {
+              "at": 9436.900000095367,
+              "ms": 87
+            },
+            {
+              "at": 13111.200000286102,
+              "ms": 53
+            },
+            {
+              "at": 16695,
+              "ms": 63
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 322.90000009536743
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 1680.6000003814697
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3366.7999997138977
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 317.40000009536743
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3392.5
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3351.5999999046326
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 316.09999990463257
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3363.300000190735
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 16,
+              "totalMs": 10.6,
+              "maxMs": 7.1
+            },
+            "projection": {
+              "calls": 18,
+              "totalMs": 23.2,
+              "maxMs": 13.3
+            },
+            "rowHTML": {
+              "calls": 18,
+              "totalMs": 12.2,
+              "maxMs": 5.2
+            },
+            "view": {
+              "calls": 18,
+              "totalMs": 152.5,
+              "maxMs": 17.5
+            },
+            "captureViewState": {
+              "calls": 65,
+              "totalMs": 2.4,
+              "maxMs": 0.2
+            },
+            "reconcileView": {
+              "calls": 80,
+              "totalMs": 46.4,
+              "maxMs": 2.3
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 174.69999980926514,
+              "transferMs": 310.5,
+              "durationMs": 485.7999997138977,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 202.90000009536743,
+              "transferMs": 1652.8999996185303,
+              "durationMs": 1856.1999998092651,
+              "encodedBytes": 6991454,
+              "decodedBytes": 6991454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 210.5,
+              "transferMs": 3299.4000000953674,
+              "durationMs": 3510.4000000953674,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 192.7000002861023,
+              "transferMs": 312.40000009536743,
+              "durationMs": 505.7000002861023,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 223.60000038146973,
+              "transferMs": 3304.5999999046326,
+              "durationMs": 3528.7000002861023,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 204.7000002861023,
+              "transferMs": 3298,
+              "durationMs": 3503.300000190735,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 173.7000002861023,
+              "transferMs": 310.59999990463257,
+              "durationMs": 485.2000002861023,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 203.7000002861023,
+              "transferMs": 3299.2999997138977,
+              "durationMs": 3503.8999996185303,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 10968,
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3496
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3493
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3492
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [
+            {
+              "at": 20412.10000038147,
+              "ms": 51
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3353.7000002861023
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3342.7999997138977
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3337.5
+            }
+          ],
+          "httpResponses": [
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            }
+          ],
+          "phases": {
+            "projection": {
+              "calls": 3,
+              "totalMs": 0.1,
+              "maxMs": 0.1
+            },
+            "rowHTML": {
+              "calls": 3,
+              "totalMs": 0.5,
+              "maxMs": 0.2
+            },
+            "captureViewState": {
+              "calls": 2,
+              "totalMs": 0.2,
+              "maxMs": 0.1
+            },
+            "reconcileView": {
+              "calls": 2,
+              "totalMs": 0.2,
+              "maxMs": 0.1
+            },
+            "view": {
+              "calls": 3,
+              "totalMs": 2.0,
+              "maxMs": 1.1
+            }
+          },
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988469,
+              "decodedBytes": 13988469,
+              "sentBytes": 13988469,
+              "completed": true,
+              "durationMs": 3488
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0.46875,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988469,
+              "decodedBytes": 13988469,
+              "sentBytes": 13988469,
+              "completed": true,
+              "durationMs": 3491
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 4.599999904632568,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 2,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 2.6999998092651367,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 41965362,
+          "unchangedDecodedBodyBytes": 41965362,
+          "unchangedLongTaskCount": 1,
+          "unchangedMaxLongTaskMs": 51,
+          "unchangedBodyReadCount": 3,
+          "navigationRequestCount": 8,
+          "navigationEncodedBodyBytes": 67138829
+        }
+      },
+      "candidate": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 3626
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 58
+          },
+          {
+            "name": "reset",
+            "ms": 84
+          },
+          {
+            "name": "page2",
+            "ms": 97
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 3697
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 3740
+          }
+        ],
+        "firstVisibleMs": 856,
+        "initialCompleteMs": 1971,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 4.400000095367432,
+          "synchronousRows": 0,
+          "status": "正在加载日志…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 468
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 6991454,
+              "decodedBytes": 6991454,
+              "sentBytes": 6991454,
+              "completed": true,
+              "durationMs": 1839
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3504
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 510
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3528
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3502
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853,
+              "sentBytes": 1397853,
+              "completed": true,
+              "durationMs": 484
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454,
+              "sentBytes": 13988454,
+              "completed": true,
+              "durationMs": 3503
+            }
+          ],
+          "longTasks": [
+            {
+              "at": 5502.10000038147,
+              "ms": 62
+            },
+            {
+              "at": 9422.10000038147,
+              "ms": 90
+            },
+            {
+              "at": 13098.10000038147,
+              "ms": 54
+            },
+            {
+              "at": 16681.700000286102,
+              "ms": 84
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 318.30000019073486
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 1677.7000002861023
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3364.2000002861023
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 321.30000019073486
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3392.300000190735
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3357.800000190735
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 318.8999996185303
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 3383.5
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 16,
+              "totalMs": 8.0,
+              "maxMs": 4.7
+            },
+            "projection": {
+              "calls": 17,
+              "totalMs": 22.0,
+              "maxMs": 14.4
+            },
+            "rowHTML": {
+              "calls": 17,
+              "totalMs": 10.8,
+              "maxMs": 1.9
+            },
+            "view": {
+              "calls": 17,
+              "totalMs": 162.1,
+              "maxMs": 22.6
+            },
+            "captureViewState": {
+              "calls": 65,
+              "totalMs": 2.7,
+              "maxMs": 0.3
+            },
+            "reconcileView": {
+              "calls": 80,
+              "totalMs": 50.3,
+              "maxMs": 2.5
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 159.10000038146973,
+              "transferMs": 309.59999990463257,
+              "durationMs": 469.2000002861023,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 188.19999980926514,
+              "transferMs": 1651.3000001907349,
+              "durationMs": 1839.9000000953674,
+              "encodedBytes": 6991454,
+              "decodedBytes": 6991454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 204,
+              "transferMs": 3301,
+              "durationMs": 3505.5999999046326,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 195.40000009536743,
+              "transferMs": 315.30000019073486,
+              "durationMs": 511.30000019073486,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 226.40000009536743,
+              "transferMs": 3302.0999999046326,
+              "durationMs": 3529,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 198.80000019073486,
+              "transferMs": 3303.300000190735,
+              "durationMs": 3502.6000003814697,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 174.59999990463257,
+              "transferMs": 310.40000009536743,
+              "durationMs": 485.69999980926514,
+              "encodedBytes": 1397853,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 204.90000009536743,
+              "transferMs": 3298.5,
+              "durationMs": 3504.0999999046326,
+              "encodedBytes": 13988454,
+              "decodedBytes": 13988454
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 748,
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [],
+          "bodyReads": [],
+          "httpResponses": [
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            }
+          ],
+          "phases": {},
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 200,
+              "encodedBytes": 13988469,
+              "decodedBytes": 13988469,
+              "sentBytes": 13988469,
+              "completed": true,
+              "durationMs": 3525
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0.46875,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:80\"",
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 4.900000095367432,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 1.9000000953674316,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 2.8999996185302734,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 0,
+          "unchangedDecodedBodyBytes": 0,
+          "unchangedLongTaskCount": 0,
+          "unchangedMaxLongTaskMs": 0,
+          "unchangedBodyReadCount": 0,
+          "navigationRequestCount": 8,
+          "navigationEncodedBodyBytes": 67138829
+        }
+      }
+    },
+    "longGzip": {
+      "baseline": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 389
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 49
+          },
+          {
+            "name": "reset",
+            "ms": 78
+          },
+          {
+            "name": "page2",
+            "ms": 97
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 448
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 457
+          }
+        ],
+        "firstVisibleMs": 417,
+        "initialCompleteMs": 690,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 4.399999618530273,
+          "synchronousRows": 0,
+          "status": "正在加载日志…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 175
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 44461,
+              "decodedBytes": 6991454,
+              "sentBytes": 44461,
+              "completed": true,
+              "durationMs": 207
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 231
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 241
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 271
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 226
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 217
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 248
+            }
+          ],
+          "longTasks": [
+            {
+              "at": 978.2000002861023,
+              "ms": 62
+            },
+            {
+              "at": 2080.0999999046326,
+              "ms": 61
+            },
+            {
+              "at": 2462.5,
+              "ms": 55
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 13.099999904632568
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 81.5
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 106.09999990463257
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 13
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 82.5
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 107.89999961853027
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 10
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 97.39999961853027
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 16,
+              "totalMs": 4.3,
+              "maxMs": 0.7
+            },
+            "projection": {
+              "calls": 17,
+              "totalMs": 29.6,
+              "maxMs": 25.8
+            },
+            "rowHTML": {
+              "calls": 17,
+              "totalMs": 9.9,
+              "maxMs": 1.5
+            },
+            "view": {
+              "calls": 17,
+              "totalMs": 155.7,
+              "maxMs": 28.3
+            },
+            "captureViewState": {
+              "calls": 65,
+              "totalMs": 2.4,
+              "maxMs": 0.2
+            },
+            "reconcileView": {
+              "calls": 80,
+              "totalMs": 49.7,
+              "maxMs": 2.5
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 175.40000009536743,
+              "transferMs": 1.9000000953674316,
+              "durationMs": 177.69999980926514,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 207,
+              "transferMs": 49.5,
+              "durationMs": 256.80000019073486,
+              "encodedBytes": 44461,
+              "decodedBytes": 6991454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 231.59999990463257,
+              "transferMs": 34.19999980926514,
+              "durationMs": 266.2999997138977,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 241.10000038146973,
+              "transferMs": 1.5999999046325684,
+              "durationMs": 243.30000019073486,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 271.59999990463257,
+              "transferMs": 46.40000009536743,
+              "durationMs": 318.5,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 226.2999997138977,
+              "transferMs": 43.5,
+              "durationMs": 270.2999997138977,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 217.90000009536743,
+              "transferMs": 1.5999999046325684,
+              "durationMs": 219.90000009536743,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 248.80000019073486,
+              "transferMs": 39.5,
+              "durationMs": 288.6000003814697,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 1355,
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 227
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 224
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 250
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [
+            {
+              "at": 3314.7000002861023,
+              "ms": 54
+            },
+            {
+              "at": 3368.9000000953674,
+              "ms": 63
+            },
+            {
+              "at": 3832.0999999046326,
+              "ms": 51
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 91.7999997138977
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 118.30000019073486
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 92.5
+            }
+          ],
+          "httpResponses": [
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            }
+          ],
+          "phases": {
+            "projection": {
+              "calls": 3,
+              "totalMs": 0,
+              "maxMs": 0
+            },
+            "rowHTML": {
+              "calls": 3,
+              "totalMs": 0.5,
+              "maxMs": 0.2
+            },
+            "captureViewState": {
+              "calls": 2,
+              "totalMs": 0.1,
+              "maxMs": 0.1
+            },
+            "reconcileView": {
+              "calls": 2,
+              "totalMs": 0.1,
+              "maxMs": 0.1
+            },
+            "view": {
+              "calls": 3,
+              "totalMs": 1.4,
+              "maxMs": 0.6
+            }
+          },
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88428,
+              "decodedBytes": 13988469,
+              "sentBytes": 88428,
+              "completed": true,
+              "durationMs": 213
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0.46875,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88428,
+              "decodedBytes": 13988469,
+              "sentBytes": 88428,
+              "completed": true,
+              "durationMs": 224
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 4,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 2.4000000953674316,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 3,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 265224,
+          "unchangedDecodedBodyBytes": 41965362,
+          "unchangedLongTaskCount": 3,
+          "unchangedMaxLongTaskMs": 63,
+          "unchangedBodyReadCount": 3,
+          "navigationRequestCount": 8,
+          "navigationEncodedBodyBytes": 425780
+        }
+      },
+      "candidate": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 375
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 53
+          },
+          {
+            "name": "reset",
+            "ms": 80
+          },
+          {
+            "name": "page2",
+            "ms": 83
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 364
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 460
+          }
+        ],
+        "firstVisibleMs": 355,
+        "initialCompleteMs": 612,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 4.300000190734863,
+          "synchronousRows": 0,
+          "status": "正在加载日志…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 173
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 44461,
+              "decodedBytes": 6991454,
+              "sentBytes": 44461,
+              "completed": true,
+              "durationMs": 203
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 239
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 190
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 221
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 224
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853,
+              "sentBytes": 9229,
+              "completed": true,
+              "durationMs": 201
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454,
+              "sentBytes": 88408,
+              "completed": true,
+              "durationMs": 232
+            }
+          ],
+          "longTasks": [
+            {
+              "at": 861,
+              "ms": 51
+            },
+            {
+              "at": 1844,
+              "ms": 93
+            },
+            {
+              "at": 1938.1999998092651,
+              "ms": 89
+            }
+          ],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 9.799999713897705
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 43.5
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 98.59999990463257
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 10.800000190734863
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 75.19999980926514
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 186
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 10.199999809265137
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 97
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 16,
+              "totalMs": 3.8,
+              "maxMs": 1
+            },
+            "projection": {
+              "calls": 17,
+              "totalMs": 24.6,
+              "maxMs": 20.7
+            },
+            "rowHTML": {
+              "calls": 17,
+              "totalMs": 10.0,
+              "maxMs": 2.2
+            },
+            "view": {
+              "calls": 17,
+              "totalMs": 135.5,
+              "maxMs": 23.1
+            },
+            "captureViewState": {
+              "calls": 65,
+              "totalMs": 2.1,
+              "maxMs": 0.2
+            },
+            "reconcileView": {
+              "calls": 80,
+              "totalMs": 43.7,
+              "maxMs": 2.2
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 173,
+              "transferMs": 1.8000001907348633,
+              "durationMs": 175.2000002861023,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 203.7000002861023,
+              "transferMs": 19.09999990463257,
+              "durationMs": 223.09999990463257,
+              "encodedBytes": 44461,
+              "decodedBytes": 6991454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 239.5,
+              "transferMs": 50,
+              "durationMs": 290,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 190.59999990463257,
+              "transferMs": 1.9000000953674316,
+              "durationMs": 193,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 221.5,
+              "transferMs": 32.5,
+              "durationMs": 254.30000019073486,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 223.80000019073486,
+              "transferMs": 90,
+              "durationMs": 314.30000019073486,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 201.39999961853027,
+              "transferMs": 1.700000286102295,
+              "durationMs": 203.59999990463257,
+              "encodedBytes": 9229,
+              "decodedBytes": 1397853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 232.89999961853027,
+              "transferMs": 47.200000286102295,
+              "durationMs": 280.5,
+              "encodedBytes": 88408,
+              "decodedBytes": 13988454
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 765,
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [],
+          "bodyReads": [],
+          "httpResponses": [
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            }
+          ],
+          "phases": {},
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:80\"",
+              "status": 200,
+              "encodedBytes": 88428,
+              "decodedBytes": 13988469,
+              "sentBytes": 88428,
+              "completed": true,
+              "durationMs": 219
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0.46875,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 80,
+          "bytesPerSecond": 4194304,
+          "gzip": true,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:80\"",
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:80\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 5.900000095367432,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 2,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 2,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 0,
+          "unchangedDecodedBodyBytes": 0,
+          "unchangedLongTaskCount": 0,
+          "unchangedMaxLongTaskMs": 0,
+          "unchangedBodyReadCount": 0,
+          "navigationRequestCount": 8,
+          "navigationEncodedBodyBytes": 425780
+        }
+      }
+    },
+    "shortPlain": {
+      "baseline": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 511
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 55
+          },
+          {
+            "name": "reset",
+            "ms": 118
+          },
+          {
+            "name": "page2",
+            "ms": 82
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 531
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 652
+          }
+        ],
+        "firstVisibleMs": 244,
+        "initialCompleteMs": 642,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 13.800000190734863,
+          "synchronousRows": 200,
+          "status": "已显示缓存，正在更新…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853,
+              "sentBytes": 117853,
+              "completed": true,
+              "durationMs": 153
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 591454,
+              "decodedBytes": 591454,
+              "sentBytes": 591454,
+              "completed": true,
+              "durationMs": 280
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 440
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853,
+              "sentBytes": 117853,
+              "completed": true,
+              "durationMs": 152
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 441
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 436
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 437
+            }
+          ],
+          "longTasks": [],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 1.200000286102295
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 117.69999980926514
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 288.30000019073486
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 2.4000000953674316
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 267.8999996185303
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 283.6000003814697
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 284.59999990463257
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 12,
+              "totalMs": 2.9,
+              "maxMs": 0.7
+            },
+            "projection": {
+              "calls": 16,
+              "totalMs": 4.1,
+              "maxMs": 2
+            },
+            "rowHTML": {
+              "calls": 16,
+              "totalMs": 4.7,
+              "maxMs": 1
+            },
+            "view": {
+              "calls": 16,
+              "totalMs": 127.0,
+              "maxMs": 15.2
+            },
+            "captureViewState": {
+              "calls": 53,
+              "totalMs": 5.2,
+              "maxMs": 1.4
+            },
+            "reconcileView": {
+              "calls": 65,
+              "totalMs": 65.7,
+              "maxMs": 10.8
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 153.2999997138977,
+              "transferMs": 0.5999999046325684,
+              "durationMs": 154.19999980926514,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 154.69999980926514,
+              "transferMs": 125.40000009536743,
+              "durationMs": 280.40000009536743,
+              "encodedBytes": 591454,
+              "decodedBytes": 591454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 163.19999980926514,
+              "transferMs": 280.19999980926514,
+              "durationMs": 446.8999996185303,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 153.7000002861023,
+              "transferMs": 0.8999996185302734,
+              "durationMs": 155.09999990463257,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 159,
+              "transferMs": 283.90000009536743,
+              "durationMs": 443.2999997138977,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 156.2999997138977,
+              "transferMs": 279.80000019073486,
+              "durationMs": 436.40000009536743,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 156.19999980926514,
+              "transferMs": 281.5,
+              "durationMs": 438.2999997138977,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 1698,
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 441
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 453
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 434
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [],
+          "bodyReads": [
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 284
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 286.2999997138977
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 282.30000019073486
+            }
+          ],
+          "httpResponses": [
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            },
+            {
+              "status": 200,
+              "limit": "2000"
+            }
+          ],
+          "phases": {
+            "projection": {
+              "calls": 3,
+              "totalMs": 0,
+              "maxMs": 0
+            },
+            "rowHTML": {
+              "calls": 3,
+              "totalMs": 0.7,
+              "maxMs": 0.4
+            },
+            "captureViewState": {
+              "calls": 2,
+              "totalMs": 0.1,
+              "maxMs": 0.1
+            },
+            "reconcileView": {
+              "calls": 2,
+              "totalMs": 0.1,
+              "maxMs": 0.1
+            },
+            "view": {
+              "calls": 3,
+              "totalMs": 1.5,
+              "maxMs": 0.5
+            }
+          },
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188469,
+              "decodedBytes": 1188469,
+              "sentBytes": 1188469,
+              "completed": true,
+              "durationMs": 434
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 0,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": false
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188469,
+              "decodedBytes": 1188469,
+              "sentBytes": 1188469,
+              "completed": true,
+              "durationMs": 435
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 10.899999618530273,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 9.900000095367432,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 4.899999618530273,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 3565362,
+          "unchangedDecodedBodyBytes": 3565362,
+          "unchangedLongTaskCount": 0,
+          "unchangedMaxLongTaskMs": 0,
+          "unchangedBodyReadCount": 3,
+          "navigationRequestCount": 7,
+          "navigationEncodedBodyBytes": 5580976
+        }
+      },
+      "candidate": {
+        "steps": [
+          {
+            "name": "window8000",
+            "ms": 495
+          },
+          {
+            "name": "searchFullWindow",
+            "ms": 44
+          },
+          {
+            "name": "reset",
+            "ms": 67
+          },
+          {
+            "name": "page2",
+            "ms": 81
+          },
+          {
+            "name": "coldNodeComplete",
+            "ms": 550
+          },
+          {
+            "name": "changedRefresh",
+            "ms": 645
+          }
+        ],
+        "firstVisibleMs": 353,
+        "initialCompleteMs": 626,
+        "window": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条自动更新已暂停保存策略不可见"
+        },
+        "warmSelection": {
+          "ms": 17.200000286102295,
+          "synchronousRows": 200,
+          "status": "已显示缓存，正在更新…"
+        },
+        "navigationAndSwitch": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "alpha",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853,
+              "sentBytes": 117853,
+              "completed": true,
+              "durationMs": 151
+            },
+            {
+              "agent": "alpha",
+              "limit": 1000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 591454,
+              "decodedBytes": 591454,
+              "sentBytes": 591454,
+              "completed": true,
+              "durationMs": 281
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 440
+            },
+            {
+              "agent": "bravo",
+              "limit": 200,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853,
+              "sentBytes": 117853,
+              "completed": true,
+              "durationMs": 152
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": null,
+              "status": 200,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454,
+              "sentBytes": 1188454,
+              "completed": true,
+              "durationMs": 439
+            },
+            {
+              "agent": "alpha",
+              "limit": 2000,
+              "conditional": "\"fixture:alpha:2000:0:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            }
+          ],
+          "longTasks": [],
+          "bodyReads": [
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 1.8000001907348633
+            },
+            {
+              "limit": "1000",
+              "status": 200,
+              "bodyAndJSONMs": 113.90000009536743
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 283
+            },
+            {
+              "limit": "200",
+              "status": 200,
+              "bodyAndJSONMs": 0.6999998092651367
+            },
+            {
+              "limit": "2000",
+              "status": 200,
+              "bodyAndJSONMs": 289.69999980926514
+            }
+          ],
+          "phases": {
+            "coreLogFilterCounts": {
+              "calls": 12,
+              "totalMs": 2.4,
+              "maxMs": 0.8
+            },
+            "projection": {
+              "calls": 16,
+              "totalMs": 2.8,
+              "maxMs": 1
+            },
+            "rowHTML": {
+              "calls": 16,
+              "totalMs": 7.0,
+              "maxMs": 1.5
+            },
+            "view": {
+              "calls": 16,
+              "totalMs": 125.6,
+              "maxMs": 17.4
+            },
+            "captureViewState": {
+              "calls": 53,
+              "totalMs": 3.9,
+              "maxMs": 1.5
+            },
+            "reconcileView": {
+              "calls": 65,
+              "totalMs": 69.7,
+              "maxMs": 13.2
+            }
+          },
+          "resources": [
+            {
+              "limit": "200",
+              "ttfbMs": 152.90000009536743,
+              "transferMs": 0.8000001907348633,
+              "durationMs": 154.30000019073486,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853
+            },
+            {
+              "limit": "1000",
+              "ttfbMs": 157.30000019073486,
+              "transferMs": 124.40000009536743,
+              "durationMs": 282.1000003814697,
+              "encodedBytes": 591454,
+              "decodedBytes": 591454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 160.7000002861023,
+              "transferMs": 280,
+              "durationMs": 441.1000003814697,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            },
+            {
+              "limit": "200",
+              "ttfbMs": 152.7000002861023,
+              "transferMs": 0.5,
+              "durationMs": 154,
+              "encodedBytes": 117853,
+              "decodedBytes": 117853
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 158.30000019073486,
+              "transferMs": 281,
+              "durationMs": 439.90000009536743,
+              "encodedBytes": 1188454,
+              "decodedBytes": 1188454
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 120.7999997138977,
+              "transferMs": 0.3000001907348633,
+              "durationMs": 121.5,
+              "encodedBytes": 0,
+              "decodedBytes": 0
+            },
+            {
+              "limit": "2000",
+              "ttfbMs": 121,
+              "transferMs": 0.3000001907348633,
+              "durationMs": 122,
+              "encodedBytes": 0,
+              "decodedBytes": 0
+            }
+          ]
+        },
+        "unchanged": {
+          "elapsedMs": 751,
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            }
+          ],
+          "streamMutations": 0,
+          "longTasks": [],
+          "bodyReads": [],
+          "httpResponses": [
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            },
+            {
+              "status": 304,
+              "limit": "2000"
+            }
+          ],
+          "phases": {},
+          "focusPreserved": true
+        },
+        "changed": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:0:0\"",
+              "status": 200,
+              "encodedBytes": 1188469,
+              "decodedBytes": 1188469,
+              "sentBytes": 1188469,
+              "completed": true,
+              "durationMs": 435
+            }
+          ],
+          "firstKey": "core-log-31801",
+          "anchorRetained": true,
+          "anchorDelta": 0,
+          "pageRetained": true,
+          "previousFirstKey": "core-log-31800"
+        },
+        "failure": {
+          "rows": 200,
+          "loaded": "显示 8000 条结果 · 已加载 8000 条 · 每页 200 条刷新失败，保留上次数据保存策略不可见"
+        },
+        "recovery": {
+          "latency": 120,
+          "longRepeat": 0,
+          "bytesPerSecond": 4194304,
+          "gzip": false,
+          "requests": [
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:0\"",
+              "status": 503,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 120
+            },
+            {
+              "agent": "bravo",
+              "limit": 2000,
+              "conditional": "\"fixture:bravo:2000:1:0\"",
+              "status": 304,
+              "encodedBytes": 0,
+              "decodedBytes": 0,
+              "sentBytes": 0,
+              "completed": true,
+              "durationMs": 121
+            }
+          ]
+        },
+        "rapidSwitch": [
+          {
+            "agent": "charlie",
+            "ms": 5.700000286102295,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "bravo",
+            "ms": 10.400000095367432,
+            "active": true,
+            "consistent": true
+          },
+          {
+            "agent": "charlie",
+            "ms": 4.099999904632568,
+            "active": true,
+            "consistent": true
+          }
+        ],
+        "finalSelection": {
+          "active": true,
+          "consistent": true
+        },
+        "browser": {
+          "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+          "width": 1280,
+          "height": 720
+        },
+        "summary": {
+          "unchangedRequestCount": 3,
+          "unchangedEncodedBodyBytes": 0,
+          "unchangedDecodedBodyBytes": 0,
+          "unchangedLongTaskCount": 0,
+          "unchangedMaxLongTaskMs": 0,
+          "unchangedBodyReadCount": 0,
+          "navigationRequestCount": 7,
+          "navigationEncodedBodyBytes": 3204068
+        }
+      }
+    }
+  },
+  "browserRegression": {
+    "command": "QCH_BROWSER_SMOKE_MODES=logs,logs-mobile,logs-restore node frontend/agents_browser_smoke.mjs",
+    "result": "passed",
+    "baselineResult": "passed",
+    "candidateDesktop": {
+      "loaded": 8000,
+      "domRows": 200,
+      "initialMs": 138,
+      "expandedMs": 45,
+      "pageMs": 10,
+      "filterMs": 14,
+      "switchAckMs": 8,
+      "previewRenderMs": 22,
+      "cachedSwitchMs": 18,
+      "longPageMs": 10
+    },
+    "coverage": [
+      "8000 logs and full-window search",
+      "200 row paging",
+      "cold and warm scope changes",
+      "IME composition",
+      "unchanged HTTP 304",
+      "same-ID corrected content invalidates validator",
+      "focus and caret retention",
+      "metadata-only stream stability",
+      "503 keeps previous data and recovers",
+      "hidden tab pause and foreground refresh",
+      "long-log desktop and 390x844 touch layouts",
+      "page/reading anchor preserved on changed logs",
+      "route cancellation",
+      "restored node/filter/preferences"
+    ],
+    "entranceTiming": "Reading-anchor test awaits finite entrance animation.finished and two frames before measuring; unchanged two-pixel assertion. Faster 304 exposed the former fixed 150ms wait inside a 480ms entrance animation."
+  }
+}

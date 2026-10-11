@@ -28,24 +28,48 @@ const settled = async () => waitFor(() => !document.getAnimations().some(a => a.
 
 async function checkNavigationReversal(main, reduced) {
   const originalFetch = window.fetch;
+  let releaseTraffic;
+  const trafficGate = new Promise(resolve => { releaseTraffic = resolve; });
+  let observation;
   window.fetch = async (...args) => {
-    if (String(args[0]).includes("traffic-policies")) await delay(700);
+    if (String(args[0]).includes("traffic-policies")) await trafficGate;
     return originalFetch(...args);
   };
   try {
     location.hash = "#traffic";
     await waitFor(() => main.classList.contains("is-route-departing"), "pending route departure missing");
-    await delay(60);
+    // Wait for meaningful departure paint instead of assuming a timer means
+    // Chromium has presented a frame. This also makes a forced opaque frame
+    // distinguishable from the current painted position. The .32 departure
+    // endpoint bounds any progress before hashchange to less than .2.
+    if (!reduced) await waitFor(() => Number(getComputedStyle(main).opacity) <= .5, "route departure must become visible");
     const departingOpacity = Number(getComputedStyle(main).opacity);
+    let reversedPaint;
+    // Mutation observers run after the route handler and before the next
+    // rendering opportunity. A delayed polling tick must not confuse normal
+    // resume playback with a discontinuity at the reversal itself.
+    observation = new MutationObserver(() => {
+      if (!main.classList.contains("is-route-departing") && reversedPaint === undefined)
+        reversedPaint = Number(getComputedStyle(main).opacity);
+    });
+    observation.observe(main, { attributes: true, attributeFilter: ["class"] });
     location.hash = "#node-settings";
-    await waitFor(() => !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
-    assert.ok(Math.abs(Number(getComputedStyle(main).opacity) - departingOpacity) < .2,
-      "reverse navigation must not flash to a fully opaque frame");
+    await waitFor(() => reversedPaint !== undefined && !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
+    // A late observer must still compare the same painted transition. The
+    // explicit fetch gate keeps this independent of request/runner timing.
+    await delay(200);
+    assert.ok(Math.abs(reversedPaint - departingOpacity) < .2,
+      `reverse navigation must not flash to a fully opaque frame: ${departingOpacity} -> ${reversedPaint}`);
     await waitFor(() => getComputedStyle(main).opacity === "1", "reversed workspace must restore its painted state");
     if (!reduced) assert.ok(document.querySelector(".is-route-pending"), "paint restoration must not wait for the cancelled slow request");
+    releaseTraffic();
     await waitFor(() => !document.querySelector(".is-route-pending"), "latest reversed route must complete");
     assert.equal(document.querySelector(".workspace-main"), main, "reversal retains the mounted workspace");
-  } finally { window.fetch = originalFetch; }
+  } finally {
+    observation?.disconnect();
+    releaseTraffic();
+    window.fetch = originalFetch;
+  }
 }
 
 async function checkListReversal(reduced) {

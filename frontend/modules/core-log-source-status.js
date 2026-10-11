@@ -1,3 +1,14 @@
+// Ignore heartbeat metrics and other runtime fields that this page never shows.
+// Names, membership, presence and collection availability still update at once.
+export function coreLogAgentPresentation(agents) {
+  return JSON.stringify(agents.map(agent => [agent.id, agent.name, agent.status,
+    (agent.features || []).includes("core-logs-v1"),
+    (agent.features || []).includes("core-log-status-v1"),
+    Object.entries(agent.runtime || {}).map(([engine, runtime]) =>
+      [engine, runtime?.installed, runtime?.core_log_status]),
+  ]));
+}
+
 // Report collection availability independently of log paging and transport.
 export function coreLogSourceStatus(selectedAgent, filters, can) {
     const selectedRuntime = filters.engine

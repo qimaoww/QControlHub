@@ -64,13 +64,14 @@ try {
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
   const calls = [];
   let markup = "";
+  let paints = 0;
   let metadata = deferred();
   let preview = deferred();
   let full = deferred();
   const render = installCoreLogs({
     state, engines: ["xray"], can: () => true, now: () => clock,
     esc: (v) => String(v ?? ""), engineName: (v) => v, date: (v) => v,
-    shell: (value) => { markup = value; }, setTimer: () => 1, clearTimer: () => {},
+    shell: (value) => { markup = value; paints++; }, setTimer: () => 1, clearTimer: () => {},
     api: (path, { signal }) => {
       calls.push({ path, signal });
       if (path === "/agents") return metadata.promise;
@@ -199,6 +200,21 @@ try {
   full.resolve(entries("metadata-failed", 2000));
   await refreshActive;
   assert.equal(state.data.coreLogEntries.length, 2000);
+  const beforePollPaints = paints;
+  metadata = deferred(); full = deferred();
+  const stablePoll = render({ background: true });
+  metadata.resolve(state.data.agents.map(agent => ({ ...agent, cpu_usage: 99, last_seen_at: "changed" })));
+  full.resolve(structuredClone(state.data.coreLogEntries));
+  await stablePoll;
+  await flush();
+  assert.equal(paints, beforePollPaints, "unchanged logs and metrics-only metadata skip log rendering");
+  assert.equal(state.data.agents[0].cpu_usage, 99, "fresh metrics still reach account state");
+  metadata = deferred(); full = deferred();
+  const renamedPoll = render({ background: true });
+  metadata.resolve(state.data.agents.map(agent => ({ ...agent, name: "Renamed node" })));
+  full.resolve(structuredClone(state.data.coreLogEntries));
+  await renamedPoll;
+  assert.match(markup, /Renamed node/, "node names still update when log content is unchanged");
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
