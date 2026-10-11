@@ -60,7 +60,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   document.body.append(sizing);
   const beforeSize = new Map([[sizing, sizing.getBoundingClientRect()]]);
   sizing.style.width = "140px"; sizing.style.height = "180px";
-  animateNodeCardDrop([sizing], beforeSize, { resize: true, token: "--motion-card-place" });
+  animateNodeCardDrop([sizing], beforeSize, { resize: true });
   if (!reduced) {
     const first = sizing.getBoundingClientRect();
     assert.ok(Math.abs(first.width - 100) < 2 && Math.abs(first.height - 100) < 2, "row resize starts at the painted bounds");
@@ -82,10 +82,20 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
       const original = cards(), originalIds = ids(), grip = original[0].querySelector(".node-card-grip");
       assert.ok(grip.getAttribute("aria-describedby"), "grip needs shared instructions");
       assert.equal(grip.getAttribute("aria-pressed"), "false");
-      if (mobile) assert.ok(grip.getBoundingClientRect().width >= 44, "touch grip needs a usable hit target");
       const draft = original[0].querySelector('input[name="name"]');
       if (draft) draft.value = "unsaved card movement draft";
       const { start, end } = geometry(grip, original[1]);
+      if (mobile) {
+        const box = grip.getBoundingClientRect(), hit = getComputedStyle(grip, "::before");
+        const width = box.width - parseFloat(hit.left) - parseFloat(hit.right);
+        const height = box.height - parseFloat(hit.top) - parseFloat(hit.bottom);
+        assert.ok(width >= 44 && height >= 44, "original grip has an expanded invisible touch target");
+        // Start native touch outside the visible grip, after scrolling it into
+        // view. The padded area must initiate dragging without card navigation.
+        const offset = box.width / 2 + 6;
+        start.x -= offset; end.x -= offset;
+        assert.ok(grip.contains(document.elementFromPoint(start.x, start.y)), "expanded touch area belongs to the grip");
+      }
       const saved = accountStorage.getItem(orderKey);
       await gesture(start, [{ x: start.x + 2, y: start.y }, end, start, end], "drop", async (index, point) => {
         if (!index) {
@@ -111,7 +121,8 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         assert.equal(document.querySelector(".card-move-cue,.card-move-guide,.card-move-feedback"), null, "drag feedback uses borders without added labels");
         assert.equal(getComputedStyle(original[0]).opacity, "0.4", "source retains the original traffic-card fade");
         assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "1", "source content remains visible without a blank placeholder");
-        assert.equal(getComputedStyle(ghost).scale, "1", "preview preserves the original traffic-card size");
+        assert.equal(getComputedStyle(ghost).scale, "none", "preview has no added pickup scale");
+        assert.equal(getComputedStyle(ghost).opacity, "0.96", "preview keeps the original traffic-card opacity");
         if (reduced) assert.equal(ghost.getAnimations().length, 0, "reduced motion keeps cue and placement without animation");
         if (index === 3 && theme === "light") {
           const path = type === "nodes" ? "/agents" : "/traffic-policies";
@@ -205,8 +216,8 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   filter.value = ""; filter.dispatchEvent(new Event("change", { bubbles: true }));
   await waitFor(() => document.querySelectorAll('.traffic-policy-grid > [data-traffic-card-key]').length === all.length, "unfiltered traffic missing");
 
-  // Discovered listeners use the same solid drag border and preserve their
-  // scoped traffic layout, even though their resting business border is dashed.
+  // Discovered listeners keep the original dashed traffic border while sharing
+  // the destination inset and preserving their scoped traffic layout.
   grid = document.querySelector(".traffic-policy-grid");
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
@@ -217,7 +228,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
     await gesture(positioned.start, [positioned.end, positioned.start, positioned.end], "drop", async step => {
       const ghost = document.querySelector(".card-move-ghost");
       trafficPaint(port, ghost);
-      assert.equal(getComputedStyle(ghost).borderTopStyle, "solid", "discovered listener preview shares the solid drag border");
+      assert.equal(getComputedStyle(ghost).borderTopStyle, "dashed", "discovered listener keeps its original traffic border");
       const target = step === 1 ? null : cards[targetIndex];
       assert.equal(grid.querySelector(".drop-target"), target, `discovered listener border follows the selected card: ${theme}/${step}; source ${index}, target ${targetIndex}, actual ${cards.indexOf(grid.querySelector(".drop-target"))}`);
       if (target) assert.ok(getComputedStyle(target).boxShadow.includes("inset"), "discovered listener destination shares the traffic inset border");

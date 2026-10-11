@@ -97,7 +97,7 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     clearPreview(previous);
     let done = false;
     const cancelAnimation = animateNodeCardDrop(cards(), from, {
-      token: "--motion-card-place", resize: true,
+      resize: true,
       onSettled: () => { done = true; landing = null; previous.release(); },
     });
     if (!done) landing = cancelAnimation;

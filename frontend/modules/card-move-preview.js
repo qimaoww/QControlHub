@@ -1,4 +1,3 @@
-import { animateMotion } from "./motion.js";
 import { freezePaint } from "./paint-snapshot.js";
 import { nodeCardDropIndex } from "./agent-card-drag.js";
 
@@ -30,9 +29,6 @@ export function createCardMoveGhost(card, rect) {
   layer.setAttribute("aria-hidden", "true");
   layer.append(ghost);
   document.body.append(layer);
-  animateMotion(ghost, [{ boxShadow: "var(--shadow)" }, { boxShadow: "var(--shadow-lift)" }], {
-    id: "qch-card-pickup", token: "--motion-card-pickup", retarget: false,
-  });
   return ghost;
 }
 
