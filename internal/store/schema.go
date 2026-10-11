@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 71
+const currentSchemaVersion = 72
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -83,13 +83,13 @@ CREATE TABLE IF NOT EXISTS core_logs (
     UNIQUE (batch_id,entry_index,received_at)
 ) PARTITION BY RANGE (received_at);
 
--- Core log reads have exactly one shape: a bounded newest-first window per
--- (selected engines × optional agent). The covering index below serves every
--- variant of it with index-only reads, so the older single-column recency
--- indexes only added write amplification: every inserted row had to maintain
--- them while no query used them. See docs/performance.md.
+-- Node windows require (agent_id,engine,id); fleet windows require (engine,id).
+-- The node index cannot supply fleet recency order, especially for a quiet
+-- engine: it otherwise scans/sorts history or reads the primary-key heap.
 CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
     INCLUDE (level,message,logged_at,received_at);
+CREATE INDEX IF NOT EXISTS core_logs_engine_covering_idx ON core_logs(engine,id DESC)
+    INCLUDE (agent_id,level,message,logged_at,received_at);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 

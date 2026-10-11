@@ -22,6 +22,21 @@ export function createCoreLogCache({ now = Date.now, maxScopes = 3, maxBytes = 1
       snapshots.set(key, snapshot);
       return snapshot.entries;
     },
+    preview(key) {
+      prune();
+      const [agent, limit] = JSON.parse(key);
+      const scopes = [...snapshots].reverse();
+      const related = scopes.find(([scope]) => JSON.parse(scope)[0] === agent);
+      if (!related) return null;
+      const [scope, snapshot] = related;
+      const counts = new Map();
+      const entries = snapshot.entries.filter(entry => {
+        const count = counts.get(entry.engine) || 0;
+        counts.set(entry.engine, count + 1);
+        return count < limit;
+      });
+      return { entries, complete: JSON.parse(scope)[1] >= limit };
+    },
     set(key, entries) {
       prune();
       remove(key);

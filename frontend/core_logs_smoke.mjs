@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { installCoreLogs } from "./modules/core-logs.js";
 import { createCoreLogCache } from "./modules/core-log-cache.js";
 import { createCoreLogView } from "./modules/core-log-view.js";
+import { readCoreLogWindow } from "./modules/core-log-read.js";
+import { reuseCoreLogEntries } from "./modules/core-log-projection.js";
 
 const deferred = () => {
   let resolve, reject;
@@ -77,6 +79,8 @@ try {
     },
   });
   const first = render();
+  assert.equal(render(), first, "concurrent same-scope refreshes share their pending read");
+  assert.equal(calls.length, 3, "metadata, preview and full reads start without serial waiting");
   assert.match(markup, /正在加载日志/, "cold selection is acknowledged synchronously");
   assert.equal(calls[1].path, "/core-logs?agent_id=alpha&limit=200");
   preview.resolve(entries("alpha", 200));
@@ -127,15 +131,17 @@ try {
   assert.match(markup, /当前仅显示部分日志/, "a preview is never falsely labeled as the complete window");
   assert.equal(state.data.coreLogCache.get(JSON.stringify(["gamma", 1000])), null, "partial windows are not cached as complete");
 
-  preview = deferred();
+  preview = deferred(); full = deferred();
   state.data.coreLogFilters = { agent_id: "quiet", limit: 2000 };
   const quiet = render({ scopeChange: true });
   const quietCalls = calls.length;
   preview.resolve(entries("quiet", 10));
   await quiet;
-  assert.equal(calls.length, quietCalls, "quiet engines do not issue an unnecessary full-window query");
+  assert.equal(calls.length, quietCalls, "quiet previews do not start any further read");
+  assert.equal(calls.at(-1).signal.aborted, true, "a complete quiet preview cancels the speculative full read");
 
-  full = deferred();
+  full = deferred(); preview = deferred();
+  preview.reject(Object.assign(new Error("forbidden"), { status: 403 }));
   state.data.coreLogFilters = { agent_id: "alpha", limit: 2000 };
   const denied = render({ scopeChange: true });
   full.reject(Object.assign(new Error("forbidden"), { status: 403 }));
@@ -174,7 +180,7 @@ try {
   state.data = { coreLogFilters: { agent_id: "metadata-failed", limit: 2000 }, agents: [
     { id: "metadata-failed", name: "Metadata Failed", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} },
   ] };
-  preview = deferred(); metadata = deferred();
+  preview = deferred(); full = deferred(); metadata = deferred();
   const missingMetadata = render();
   metadata.reject(new Error("node metadata unavailable"));
   preview.resolve(entries("metadata-failed", 10));
@@ -197,4 +203,51 @@ try {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
 }
+
+{
+  const preview = deferred(), full = deferred();
+  const signals = [];
+  let previews = 0;
+  const read = readCoreLogWindow((path, { signal }) => {
+    signals.push(signal);
+    return path.endsWith("limit=200") ? preview.promise : full.promise;
+  }, new URLSearchParams("agent_id=alpha&limit=2000"), {
+    signal: new AbortController().signal, preview: true, engines: ["xray"],
+    onPreview: () => previews++,
+  });
+  const snapshot = entries("alpha", 2000);
+  full.resolve(snapshot);
+  assert.equal(await read, snapshot, "a fast full read never waits for a slow preview");
+  assert.equal(signals[0].aborted, true);
+  preview.resolve(entries("alpha", 200));
+  await flush();
+  assert.equal(previews, 0, "late previews cannot replace a completed full window");
+  assert.equal(reuseCoreLogEntries(snapshot, structuredClone(snapshot)), snapshot, "equal payloads reuse the window");
+  const changed = structuredClone(snapshot);
+  changed[0].message = "updated sanitizer output";
+  const reused = reuseCoreLogEntries(snapshot, changed);
+  assert.equal(reused[0].message, changed[0].message, "matching IDs cannot hide changed content");
+  assert.equal(reused[1], snapshot[1], "other records retain their search/render memoization");
+  const windows = createCoreLogCache();
+  windows.set(JSON.stringify(["alpha", 2000]), snapshot);
+  const smaller = windows.preview(JSON.stringify(["alpha", 1000]));
+  assert.equal(smaller.complete, true);
+  assert.equal(smaller.entries.length, 1000, "related windows respect the new per-engine cap");
+  assert.equal(smaller.entries[0], snapshot[0], "cache slicing keeps newest-first order");
+  assert.equal(windows.preview(JSON.stringify(["beta", 1000])), null, "related caches never cross nodes");
+
+  const delayedPreview = deferred();
+  let partial = 0;
+  const failure = new Error("fast full failure");
+  const failedRead = readCoreLogWindow(path => path.endsWith("limit=200")
+    ? delayedPreview.promise : Promise.reject(failure), new URLSearchParams("limit=2000"), {
+    signal: new AbortController().signal, preview: true, engines: ["xray"],
+    onPreview: entries => { partial = entries.length; },
+  });
+  const rejected = assert.rejects(failedRead, failure);
+  delayedPreview.resolve(entries("alpha", 200));
+  await rejected;
+  assert.equal(partial, 200, "a failed full read still permits a successful preview before reporting incompleteness");
+}
+
 console.log("Core log staged loading/cache smoke passed");

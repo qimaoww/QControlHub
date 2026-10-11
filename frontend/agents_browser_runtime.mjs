@@ -104,7 +104,7 @@ try {
     else if (mode.startsWith("enrollment")) await testEnrollmentLayoutRuntime(scenario);
     else if (mode.startsWith("users-layout")) await testUsersLayoutRuntime(scenario);
     else if (mode.startsWith("shared-node")) await testSharedNodeRuntime(scenario);
-    else if (mode === "logs") await testLargeLogRuntime(scenario);
+    else if ((mode === "logs" || mode === "logs-mobile")) await testLargeLogRuntime(scenario);
     else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime(scenario);
     else await testReadonlyRuntime(scenario);
   }

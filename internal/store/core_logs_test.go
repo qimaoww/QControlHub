@@ -245,6 +245,12 @@ func TestCoreLogLevelAtLeast(t *testing.T) {
 // particular plan: on an empty or tiny fixture the planner legitimately prefers
 // a sequential or primary-key scan.
 func TestCoreLogCoveringIndexCarriesWindowColumns(t *testing.T) {
+	for _, index := range []string{"core_logs_agent_engine_covering_idx", "core_logs_engine_covering_idx"} {
+		t.Run(index, func(t *testing.T) { testCoreLogCoveringColumns(t, index) })
+	}
+}
+
+func testCoreLogCoveringColumns(t *testing.T, index string) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("QCH_TEST_DATABASE_URL is not configured")
@@ -256,6 +262,19 @@ func TestCoreLogCoveringIndexCarriesWindowColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dataStore.Close()
+	var firstKey string
+	if err := dataStore.pool.QueryRow(ctx, `SELECT attribute.attname FROM pg_index index
+		JOIN pg_attribute attribute ON attribute.attrelid=index.indrelid AND attribute.attnum=index.indkey[0]
+		WHERE index.indexrelid=to_regclass($1)`, index).Scan(&firstKey); err != nil {
+		t.Fatal(err)
+	}
+	wantKey := "agent_id"
+	if index == "core_logs_engine_covering_idx" {
+		wantKey = "engine"
+	}
+	if firstKey != wantKey {
+		t.Fatalf("%s leading key = %s, want %s", index, firstKey, wantKey)
+	}
 	if err := dataStore.EnsureCoreLogPartitions(ctx, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
@@ -270,9 +289,9 @@ func TestCoreLogCoveringIndexCarriesWindowColumns(t *testing.T) {
 		JOIN pg_inherits ON pg_inherits.inhrelid = index.indexrelid
 		JOIN pg_class parent_index ON parent_index.oid = pg_inherits.inhparent
 		JOIN pg_class partition ON partition.oid = index.indrelid
-		WHERE parent_index.relname = 'core_logs_agent_engine_covering_idx'
+		WHERE parent_index.relname = $1
 		  AND partition.relname LIKE 'core_logs_p%'
-		LIMIT 100`)
+		LIMIT 100`, index)
 	if err != nil {
 		t.Fatal(err)
 	}
