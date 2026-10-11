@@ -86,6 +86,10 @@ await waitFor(() => document.querySelector(".desktop-app"), "initial shell missi
 async function testStableLogRuntime({ testAPI }) {
   const search = document.querySelector('#core-log-filters input[name="q"]');
   search.focus();
+  // A preceding ordinary input may still be queued when IME composition
+  // starts in the same frame. It must not filter the unfinished composition.
+  search.value = "pressure entry 1999";
+  search.dispatchEvent(new InputEvent("input", { bubbles: true }));
   search.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
   search.value = "中文";
   search.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));

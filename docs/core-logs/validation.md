@@ -156,6 +156,8 @@ and its matching ffmpeg download. Timing/trace details are in
   search, IME composition events, paging, focus/caret retention, unchanged-stream
   mutation count, metrics-only metadata, new-log reading anchors, failure
   backoff/recovery, hidden-page pause/resume and route-leave cancellation.
+  Review also reproduces and fixes an ordinary input queued immediately before
+  IME composition: composition start now cancels that pending filter frame.
 - Unit regressions cover pending-read coalescing, preview/full races and
   cancellation, a fast failed full read with a successful late preview, content
   changes under the same ID, cache limits/TTL/isolation,

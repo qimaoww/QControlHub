@@ -32,7 +32,11 @@ export function createCoreLogBindings({ state }, { renderCoreLogs, rememberSelec
       bindEvent(button, "click", () => renderLocalFilters({ level: button.value }));
     });
     const search = document.querySelector('#core-log-filters input[name="q"]');
-    bindEvent(search, "compositionstart", () => composing.add(search));
+    bindEvent(search, "compositionstart", () => {
+      composing.add(search);
+      if (searchFrame !== null) cancelAnimationFrame(searchFrame);
+      searchFrame = null;
+    });
     const scheduleSearch = () => {
       if (searchFrame !== null) cancelAnimationFrame(searchFrame);
       const data = state.data, epoch = state.navigationEpoch;
