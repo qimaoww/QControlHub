@@ -1,3 +1,4 @@
+import { testClientWorkspace } from "./client-workspace.mjs";
 import { assert, waitFor } from "./assertions.mjs";
 
 // Client exports shaped like a real fleet: several engines per node, long names,
@@ -76,6 +77,18 @@ export function clientLayoutFixture() {
 export async function testClientLayoutRuntime({ testAPI }) {
   await waitFor(() => document.querySelectorAll(".client-access-node-card").length === 8, "client cards did not load");
   if (new URLSearchParams(location.search).has("preview")) return;
+  const mode = new URLSearchParams(location.search).get("mode");
+  if (mode === "client-layout-limited" || mode === "client-layout-readonly") {
+    assert.equal(document.querySelector("[data-client-display-open]"), null, "read-only client must not offer edits");
+    if (mode === "client-layout-limited") {
+      assert.equal(document.querySelector("[data-config-agent]"), null, "client-only user must not see server config controls");
+      assert.equal(testAPI.calls.some(call => call.path === "/agents"), false, "client-only user fetched protected agents");
+    }
+    document.querySelector('[data-access-agent="lax-02"]').click();
+    assert.equal(document.querySelectorAll(".client-profile-row").length, 2, "limited user cannot select a node");
+    assert.ok(document.querySelector(".client-copy:not([disabled])"), "read-only user lost export copy");
+    return;
+  }
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "client page overflows the viewport");
   assert.ok(document.querySelector('#client-search [name="q"]').getBoundingClientRect().width >= 140, "search input must remain usable beside its button");
   const query = (selector) => document.querySelector(selector);
@@ -131,4 +144,5 @@ export async function testClientLayoutRuntime({ testAPI }) {
   delete missing.mihomo_error;
   selectFormat("url");
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "filtered client page overflows the viewport");
+  await testClientWorkspace({ testAPI });
 }

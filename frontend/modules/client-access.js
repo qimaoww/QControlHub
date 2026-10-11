@@ -6,17 +6,29 @@ export { copyClientValue } from "./client-clipboard.js";
 import { createRefreshChannel } from "./refresh.js";
 
 export function installClientAccess(ctx) {
-  const { api, state, can, notify } = ctx;
+  const { api, state, can } = ctx;
   const masonry = createCardMasonry(".client-access-node-grid:not(.empty)", ".client-access-node-card");
   const view = createClientAccessView(ctx, { masonry });
   const bind = createClientAccessBindings(ctx, { clientAccess, renderClientAccess, masonry });
-  function renderClientAccess() { view(); bind(); }
+  function renderClientAccess() {
+    const scroller = document.querySelector("[data-client-access-page]")?.closest(".workspace-main");
+    const top = scroller?.scrollTop;
+    view();
+    bind();
+    // Masonry spans are reapplied after keyed reconciliation. Restore the
+    // reading position after that layout, when the full scroll range exists.
+    if (scroller?.isConnected) scroller.scrollTop = top;
+  }
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "client-access",
     getScope: () => state.navigationEpoch,
   });
 
   async function clientAccess() {
+    if (state.route !== "client-access") return false;
+    state.data.clientAccessLoading = true;
+    state.data.clientAccessError = "";
+    if (!document.querySelector("[data-client-access-page]")) renderClientAccess();
     let payload;
     let applied;
     try {
@@ -33,13 +45,14 @@ export function installClientAccess(ctx) {
         },
       );
     } catch (error) {
-      const current = document.querySelector("[data-client-access-page]");
-      if (!current) throw error;
-      current.dataset.refreshError = "1";
-      notify(error.message, "error");
+      state.data.clientAccessLoading = false;
+      state.data.clientAccessError = error.message;
+      renderClientAccess();
       return false;
     }
     if (!applied) return false;
+    state.data.clientAccessLoading = false;
+    state.data.clientAccessError = "";
     const [entries, agents] = payload;
     state.data.agents = agents;
     state.data.clientAccessEntries = entries;

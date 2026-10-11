@@ -21,7 +21,7 @@ func frontendFeatureSources(t *testing.T, route string) string {
 		"modules/client-access.js": {
 			"modules/client-access.js", "modules/client-access-model.js", "modules/client-access-view.js",
 			"modules/client-access-results.js", "modules/client-access-bindings.js", "modules/client-access-profiles.js",
-			"modules/client-clipboard.js", "modules/card-masonry.js",
+			"modules/client-clipboard.js", "modules/client-access-dialogs.js", "modules/card-masonry.js",
 		},
 		"modules/substore-sync.js": {
 			"modules/substore-sync.js", "modules/substore-model.js", "modules/substore-view.js",

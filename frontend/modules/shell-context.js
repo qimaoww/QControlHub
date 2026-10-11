@@ -38,8 +38,11 @@ function contextMarkup(title) {
     return "";
   }
   if (state.route === "client-access") {
-    const items = orderNodesBySavedOrder(state.data.agents || []);
     const entries = state.data.clientAccessEntries || [];
+    const nodes = new Map((state.data.agents || []).map(agent => [agent.id, agent]));
+    for (const entry of entries) if (!nodes.has(entry.agent_id))
+      nodes.set(entry.agent_id, { id: entry.agent_id, name: entry.agent_name, status: entry.agent_status });
+    const items = orderNodesBySavedOrder([...nodes.values()]);
     return `<a class="context-back" href="#node-settings">返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span>${agentPresenceMarkup(agent.status)}</a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "substore-sync") {

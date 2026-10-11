@@ -28,7 +28,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 	}
 	for _, required := range []string{
 		`if (filters.agent && entry.agent_id !== filters.agent) return [];`,
-		`data-filter-engine=""`,
+		`data-filter-engine="${esc(engine)}"`,
 		`aria-label="按内核筛选"`,
 		`.querySelectorAll("[data-access-agent]")`,
 		`client-access-toolbar`,
@@ -65,7 +65,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 	for _, required := range []string{
 		`.client-access-toolbar`,
 		`.client-profile-row`,
-		`.client-access-node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,390px),1fr))`,
+		`grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))`,
 		`grid-auto-rows:1px`,
 		`.client-access-node-card{width:100%;min-width:0`,
 		`.client-parameter-dialog{width:min(560px`,

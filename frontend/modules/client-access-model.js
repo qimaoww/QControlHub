@@ -21,11 +21,11 @@ export function clientAccessExport(item, format) {
   return {
     value: native ? "" : value,
     format: profile.format || "URL",
-    error: native ? "此协议不支持 URL，请使用其他显示格式或查看参数详情。" : value ? "" : "暂无可用 URL",
+    error: native ? "此协议不支持 URL。" : value ? "" : "暂无可用 URL",
   };
 }
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
-  const agentIDs = new Set((agents || []).map((agent) => agent.id));
+  const agentIDs = new Set([...(agents || []).map((agent) => agent.id), ...(entries || []).map(entry => entry.agent_id)]);
   let agent = String(filters.agent || "");
   if (agent && !agentIDs.has(agent)) agent = "";
 
@@ -56,7 +56,6 @@ export function filterClientAccessEntries(entries, filters = {}) {
       entry.engine,
       entry.address,
       entry.source,
-      ...(entry.address_options || []).flatMap((option) => [option.address, option.source]),
     ]
       .join(" ")
       .toLowerCase()
@@ -67,6 +66,8 @@ export function filterClientAccessEntries(entries, filters = {}) {
         profile.tag,
         profile.client_name,
         profile.protocol,
+        profile.port,
+        profile.address,
         profile.profile?.format,
       ]
         .join(" ")
@@ -109,11 +110,10 @@ export function clientAccessAddressChoices(entry) {
       byFamily.set(option.family, option);
     }
   }
-  if (!byFamily.has("ipv4") || !byFamily.has("ipv6")) return [];
   return [
     { value: "auto", label: "自动选择" },
-    { value: "ipv4", label: `IPv4 · ${byFamily.get("ipv4").address}` },
-    { value: "ipv6", label: `IPv6 · ${byFamily.get("ipv6").address}` },
+    { value: "ipv4", label: byFamily.has("ipv4") ? "优先 IPv4" : "优先 IPv4（无可用地址时自动回退）" },
+    { value: "ipv6", label: byFamily.has("ipv6") ? "优先 IPv6" : "优先 IPv6（无可用地址时自动回退）" },
   ];
 }
 

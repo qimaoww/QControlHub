@@ -126,9 +126,14 @@ export function createUserQuota(ctx, { lifecycle, myQuota }) {
     bindEvent(document.querySelector("[data-quota-refresh]"), "click", async (event) => {
       if (data !== state.data || data.agentShareResponse) return;
       const button = event.currentTarget;
+      const focused = document.activeElement === button;
       button.disabled = true;
       try { await myQuota(); } catch (error) { if (error.name !== "AbortError") notify(error.message, "error"); }
-      finally { button.disabled = false; }
+      finally {
+        button.disabled = false;
+        // Disabling the launcher moves focus to body before reconciliation.
+        if (focused && button.isConnected && document.activeElement === document.body) button.focus({ preventScroll: true });
+      }
     });
   }
 
