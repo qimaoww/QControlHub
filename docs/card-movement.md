@@ -89,7 +89,8 @@ in both themes, including cleanup of the viewport layer.
 
 ## Actual validation
 
-Validated against main `2bbd07b` with Chromium on Linux:
+Validated after syncing latest main `df1ad92` with Chromium on Linux. The original
+traffic styles referenced from `2bbd07b` are unchanged by that main update.
 
 - `make generate-styles` and `make styles-check`: passed.
 - The four card movement browser modes above: passed, with both card types and
@@ -103,17 +104,17 @@ Validated against main `2bbd07b` with Chromium on Linux:
   modes. The card matrix and non-browser checks were rerun after the style update.
 - `node frontend/module_smoke.mjs` and the module/smoke policy tests: passed.
 - `make non-browser-checks`: passed.
-- On the initial commit `0ed0159`, `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`:
-  passed. The browser runner was exercised separately; the skipped wrapper runs
-  the same suite.
-- After the style update, `go test -p 1 ./frontend -skip '^TestAgentBrowserRuntimeSmoke$'`:
-  passed.
-- `make check`: ran and failed on the existing `motion-selection` assertion
-  `quota refresh retains focus` (focus becomes the document body). The same
-  assertion fails on an unmodified checkout of main `2bbd07b`.
-- Supplemental existing `motion` runs also failed at the navigation reversal
-  timing assertions, before any card gesture. An unmodified main checkout
-  reproduces `reverse navigation must not flash to a fully opaque frame`.
+- `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed after syncing
+  latest main. The browser wrapper was excluded; the native card modes ran
+  through `make check` as described below.
+- `make check`: all four card movement modes passed, then it failed (exit 2) on
+  the existing `motion-selection` assertion `quota refresh retains focus`
+  (focus becomes the document body). The same assertion fails on an unmodified
+  checkout of latest main `df1ad92`.
+- Earlier supplemental existing `motion` runs on main `2bbd07b` also failed at
+  navigation reversal timing assertions, before any card gesture. An unmodified
+  checkout of that main reproduces `reverse navigation must not flash to a fully
+  opaque frame`.
 
 The unrelated quota and navigation failures are recorded here rather than
 reported as successful checks. Their production behavior is outside this change.
