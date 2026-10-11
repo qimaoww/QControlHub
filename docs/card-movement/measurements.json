@@ -1,6 +1,6 @@
 {
   "date": "2026-10-11",
-  "browser": "Chromium on Linux; native CDP mouse/touch input",
+  "browser": "Chromium 154 on Linux; native CDP mouse/touch input (desktop recording: Chromium 147)",
   "baseMain": "df1ad925aa270a146b2ad342143546d8ff74c1ea",
   "metric": "hypot(ghost.left + grab.x - pointer.x, ghost.top + grab.y - pointer.y), viewport CSS pixels",
   "summary": [
@@ -12,7 +12,7 @@
         390,
         844
       ],
-      "gestures": 24,
+      "gestures": 26,
       "maxGrabErrorPx": 0
     },
     {
@@ -23,8 +23,8 @@
         390,
         844
       ],
-      "gestures": 24,
-      "maxGrabErrorPx": 7.62939453125e-06
+      "gestures": 26,
+      "maxGrabErrorPx": 0
     },
     {
       "mode": "motion-cards-coordinates-reduced",
@@ -32,10 +32,10 @@
       "dpr": 1,
       "viewport": [
         1280,
-        761
+        757
       ],
       "gestures": 34,
-      "maxGrabErrorPx": 0.094818115234375
+      "maxGrabErrorPx": 0.190673828125
     },
     {
       "mode": "motion-cards-coordinates",
@@ -43,10 +43,10 @@
       "dpr": 1,
       "viewport": [
         1280,
-        761
+        757
       ],
       "gestures": 34,
-      "maxGrabErrorPx": 0.094818115234375
+      "maxGrabErrorPx": 0.190673828125
     },
     {
       "mode": "motion-cards-coordinates",
@@ -54,15 +54,16 @@
       "dpr": 1.875,
       "viewport": [
         1024,
-        609
+        606
       ],
       "gestures": 34,
-      "maxGrabErrorPx": 0.18839768503502705
+      "maxGrabErrorPx": 0.2198858785559515
     }
   ],
   "runs": [
     {
       "mode": "motion-cards-coordinates-mobile-reduced",
+      "browserZoom": 1,
       "mobile": true,
       "dpr": 1,
       "viewport": [
@@ -73,7 +74,20 @@
         {
           "name": "nodes/grip/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 357,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 357,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -99,7 +113,20 @@
         {
           "name": "nodes/grip-top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 347,
+            "y": 89.5
+          },
+          "nativePress": {
+            "x": 347,
+            "y": 89.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -125,7 +152,20 @@
         {
           "name": "nodes/grip-bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 367,
+            "y": 113.5
+          },
+          "nativePress": {
+            "x": 367,
+            "y": 113.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -151,7 +191,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "bravo",
@@ -177,7 +230,20 @@
         {
           "name": "nodes/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 358.09375,
+            "y": 365.5
+          },
+          "nativePress": {
+            "x": 358.09375,
+            "y": 365.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -203,7 +269,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "bravo",
@@ -229,7 +308,20 @@
         {
           "name": "nodes/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "alpha",
@@ -243,6 +335,45 @@
           "finalOrder": [
             "bravo",
             "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/visual-viewport-pan",
+          "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 61,
+            "top": 52,
+            "scale": 1.25
+          },
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -255,10 +386,23 @@
         {
           "name": "nodes/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha",
             "bravo",
+            "alpha",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -267,8 +411,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "alpha",
             "bravo",
+            "alpha",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -281,10 +425,23 @@
         {
           "name": "nodes/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 358.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 358.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "alpha",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -293,8 +450,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "alpha",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -307,11 +464,24 @@
         {
           "name": "nodes/interrupt-landing/2",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 223.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 223.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
-            "bravo",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -320,8 +490,8 @@
           ],
           "finalOrder": [
             "alpha",
-            "bravo",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -333,11 +503,24 @@
         {
           "name": "nodes/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
-            "alpha",
             "charlie",
+            "alpha",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -345,9 +528,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
-            "alpha",
             "charlie",
+            "alpha",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -359,25 +542,38 @@
         {
           "name": "nodes/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 172.09375,
+            "y": 104.5
+          },
+          "nativePress": {
+            "x": 172.09375,
+            "y": 104.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
-            "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
             "card-extra-3",
-            "bravo",
+            "charlie",
             "card-extra-4"
           ],
           "finalOrder": [
             "alpha",
-            "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "delta",
             "card-extra-3",
-            "bravo",
+            "charlie",
             "card-extra-4"
           ],
           "release": "drop"
@@ -385,360 +581,559 @@
         {
           "name": "traffic/grip/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 355,
+            "y": 103.28125
+          },
+          "nativePress": {
+            "x": 355,
+            "y": 103.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip-top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 345,
+            "y": 91.28125
+          },
+          "nativePress": {
+            "x": 345,
+            "y": 91.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip-bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 365,
+            "y": 115.28125
+          },
+          "nativePress": {
+            "x": 365,
+            "y": 115.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 300,
+            "y": 475.96875
+          },
+          "nativePress": {
+            "x": 300,
+            "y": 475.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8543",
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/visual-viewport-pan",
+          "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 61,
+            "top": 52,
+            "scale": 1.25
+          },
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:8443",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
-            "alpha:8443",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:8443",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 300,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 300,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
-            "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/2",
           "samples": 3,
+          "intendedGrab": {
+            "x": 121,
+            "y": 333.96875
+          },
+          "nativePress": {
+            "x": 121,
+            "y": 333.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8443",
+            "bravo:8444",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8443",
+            "bravo:8444",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:19443",
+            "bravo:8444",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "finalOrder": [
-            "alpha:19443",
+            "bravo:8444",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "charlie:8545"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 124,
+            "y": 368.96875
+          },
+          "nativePress": {
+            "x": 124,
+            "y": 368.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
+            "charlie:8445",
             "bravo:8444",
-            "alpha:19443",
-            "bravo:8544"
+            "charlie:8545"
           ],
           "finalOrder": [
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
+            "alpha:19443",
+            "bravo:8544",
             "delta:8446",
             "alpha:8543",
             "delta:8546",
             "delta:19444",
+            "charlie:8445",
             "bravo:8444",
-            "alpha:19443",
-            "bravo:8544"
+            "charlie:8545"
           ],
           "release": "drop"
         }
@@ -746,6 +1141,7 @@
     },
     {
       "mode": "motion-cards-coordinates-mobile",
+      "browserZoom": 1,
       "mobile": true,
       "dpr": 1,
       "viewport": [
@@ -756,7 +1152,20 @@
         {
           "name": "nodes/grip/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 357,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 357,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -782,7 +1191,20 @@
         {
           "name": "nodes/grip-top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 347,
+            "y": 89.5
+          },
+          "nativePress": {
+            "x": 347,
+            "y": 89.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -808,7 +1230,20 @@
         {
           "name": "nodes/grip-bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 367,
+            "y": 113.5
+          },
+          "nativePress": {
+            "x": 367,
+            "y": 113.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -834,7 +1269,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "bravo",
@@ -860,7 +1308,20 @@
         {
           "name": "nodes/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 358.09375,
+            "y": 365.5
+          },
+          "nativePress": {
+            "x": 358.09375,
+            "y": 365.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -886,7 +1347,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "bravo",
@@ -912,7 +1386,20 @@
         {
           "name": "nodes/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "alpha",
@@ -926,6 +1413,45 @@
           "finalOrder": [
             "bravo",
             "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/visual-viewport-pan",
+          "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 61,
+            "top": 52,
+            "scale": 1.25
+          },
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -938,10 +1464,23 @@
         {
           "name": "nodes/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha",
             "bravo",
+            "alpha",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -950,8 +1489,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "alpha",
             "bravo",
+            "alpha",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -964,11 +1503,24 @@
         {
           "name": "nodes/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 223.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 223.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie",
             "bravo",
             "alpha",
-            "charlie",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -976,9 +1528,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
+            "charlie",
             "bravo",
             "alpha",
-            "charlie",
             "card-extra-1",
             "card-extra-2",
             "delta",
@@ -990,22 +1542,35 @@
         {
           "name": "nodes/interrupt-landing/2",
           "samples": 3,
+          "intendedGrab": {
+            "x": 358.09375,
+            "y": 228.46511840820312
+          },
+          "nativePress": {
+            "x": 358.09375,
+            "y": 228.46511840820312
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha",
-            "bravo",
             "charlie",
             "card-extra-1",
+            "bravo",
+            "alpha",
             "card-extra-2",
             "delta",
             "card-extra-3",
             "card-extra-4"
           ],
           "finalOrder": [
-            "alpha",
-            "bravo",
             "charlie",
             "card-extra-1",
+            "bravo",
+            "alpha",
             "card-extra-2",
             "delta",
             "card-extra-3",
@@ -1016,22 +1581,35 @@
         {
           "name": "nodes/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 169.09375,
+            "y": 101.5
+          },
+          "nativePress": {
+            "x": 169.09375,
+            "y": 101.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "card-extra-1",
+            "charlie",
             "bravo",
             "alpha",
-            "charlie",
-            "card-extra-1",
             "card-extra-2",
             "delta",
             "card-extra-3",
             "card-extra-4"
           ],
           "finalOrder": [
+            "card-extra-1",
+            "charlie",
             "bravo",
             "alpha",
-            "charlie",
-            "card-extra-1",
             "card-extra-2",
             "delta",
             "card-extra-3",
@@ -1042,25 +1620,38 @@
         {
           "name": "nodes/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 172.09375,
+            "y": 104.5
+          },
+          "nativePress": {
+            "x": 172.09375,
+            "y": 104.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha",
             "charlie",
-            "card-extra-1",
+            "bravo",
+            "alpha",
             "card-extra-2",
             "delta",
             "card-extra-3",
-            "bravo",
+            "card-extra-1",
             "card-extra-4"
           ],
           "finalOrder": [
-            "alpha",
             "charlie",
-            "card-extra-1",
+            "bravo",
+            "alpha",
             "card-extra-2",
             "delta",
             "card-extra-3",
-            "bravo",
+            "card-extra-1",
             "card-extra-4"
           ],
           "release": "drop"
@@ -1068,360 +1659,559 @@
         {
           "name": "traffic/grip/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 355,
+            "y": 103.28125
+          },
+          "nativePress": {
+            "x": 355,
+            "y": 103.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip-top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 345,
+            "y": 91.28125
+          },
+          "nativePress": {
+            "x": 345,
+            "y": 91.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie:8445",
+            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "finalOrder": [
+            "charlie:8445",
+            "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip-bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 365,
+            "y": 115.28125
+          },
+          "nativePress": {
+            "x": 365,
+            "y": 115.28125
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8443",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8443",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 300,
+            "y": 475.96875
+          },
+          "nativePress": {
+            "x": 300,
+            "y": 475.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8543",
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8443",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8443",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:19443",
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:19443",
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/visual-viewport-pan",
+          "samples": 7,
+          "intendedGrab": {
+            "x": 121,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 121,
+            "y": 211.96875
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 61,
+            "top": 52,
+            "scale": 1.25
+          },
+          "previewOrder": [
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
+          ],
+          "finalOrder": [
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 111,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 111,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 14,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 121,
+            "y": 347.96875
+          },
+          "nativePress": {
+            "x": 121,
+            "y": 347.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:19443",
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:19443",
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/2",
           "samples": 3,
-          "maxGrabErrorPx": 7.62939453125e-06,
+          "intendedGrab": {
+            "x": 300,
+            "y": 352.93316650390625
+          },
+          "nativePress": {
+            "x": 300,
+            "y": 352.93316650390625
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "bravo:8544",
             "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
+            "bravo:8544",
             "alpha:8443",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 121,
+            "y": 211.96875
+          },
+          "nativePress": {
+            "x": 121,
+            "y": 211.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:19443",
             "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 114,
+            "y": 368.96875
+          },
+          "nativePress": {
+            "x": 114,
+            "y": 368.96875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "alpha:19443",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "alpha:8443",
+            "delta:19444"
           ],
           "finalOrder": [
-            "alpha:8443",
-            "charlie:8445",
-            "charlie:8545",
-            "delta:8446",
-            "alpha:8543",
-            "delta:8546",
-            "alpha:19443",
-            "delta:19444",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8445",
+            "alpha:8543",
+            "charlie:8545",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "alpha:8443",
+            "delta:19444"
           ],
           "release": "drop"
         }
@@ -1429,17 +2219,31 @@
     },
     {
       "mode": "motion-cards-coordinates-reduced",
+      "browserZoom": 1,
       "mobile": false,
       "dpr": 1,
       "viewport": [
         1280,
-        761
+        757
       ],
       "measurements": [
         {
           "name": "nodes/center/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 288.6640625,
+            "y": 262.171875
+          },
+          "nativePress": {
+            "x": 288.6640625,
+            "y": 262.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -1465,7 +2269,20 @@
         {
           "name": "nodes/top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 108,
+            "y": 90
+          },
+          "nativePress": {
+            "x": 108,
+            "y": 90
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -1491,7 +2308,20 @@
         {
           "name": "nodes/top-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 469.328125,
+            "y": 90
+          },
+          "nativePress": {
+            "x": 469.328125,
+            "y": 90
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -1517,7 +2347,20 @@
         {
           "name": "nodes/bottom-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 108,
+            "y": 434.34375
+          },
+          "nativePress": {
+            "x": 108,
+            "y": 434.34375
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -1543,7 +2386,20 @@
         {
           "name": "nodes/bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 469.328125,
+            "y": 434.34375
+          },
+          "nativePress": {
+            "x": 469.328125,
+            "y": 434.34375
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -1569,7 +2425,20 @@
         {
           "name": "nodes/grip/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -1595,7 +2464,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -1621,7 +2503,20 @@
         {
           "name": "nodes/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 1235,
+            "y": 259.5
+          },
+          "nativePress": {
+            "x": 1235,
+            "y": 259.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -1647,7 +2542,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -1673,7 +2581,20 @@
         {
           "name": "nodes/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "delta",
@@ -1699,7 +2620,20 @@
         {
           "name": "nodes/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "charlie",
@@ -1725,7 +2659,20 @@
         {
           "name": "nodes/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 845.65625,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 845.65625,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "charlie",
             "delta",
@@ -1751,11 +2698,24 @@
         {
           "name": "nodes/interrupt-landing/2",
           "samples": 3,
+          "intendedGrab": {
+            "x": 1235,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 1235,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie",
             "delta",
             "bravo",
-            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1763,9 +2723,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
+            "charlie",
             "delta",
             "bravo",
-            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1777,11 +2737,24 @@
         {
           "name": "nodes/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1789,9 +2762,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1803,11 +2776,24 @@
         {
           "name": "nodes/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.04007720947265625,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "maxGrabErrorPx": 0.0805816650390625,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1815,9 +2801,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1829,11 +2815,24 @@
         {
           "name": "nodes/sidebar-reflow",
           "samples": 2,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1841,9 +2840,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -1855,25 +2854,38 @@
         {
           "name": "nodes/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 457.328125,
+            "y": 120.5
+          },
+          "nativePress": {
+            "x": 457.328125,
+            "y": 120.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "bravo",
+            "delta",
             "card-extra-4"
           ],
           "finalOrder": [
-            "delta",
             "charlie",
+            "bravo",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "bravo",
+            "delta",
             "card-extra-4"
           ],
           "release": "drop"
@@ -1881,510 +2893,731 @@
         {
           "name": "traffic/center/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 554,
+            "y": 386.421875
+          },
+          "nativePress": {
+            "x": 554,
+            "y": 386.421875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 332,
+            "y": 256.671875
+          },
+          "nativePress": {
+            "x": 332,
+            "y": 256.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 776,
+            "y": 256.671875
+          },
+          "nativePress": {
+            "x": 776,
+            "y": 256.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 332,
+            "y": 516.171875
+          },
+          "nativePress": {
+            "x": 332,
+            "y": 516.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 776,
+            "y": 516.171875
+          },
+          "nativePress": {
+            "x": 776,
+            "y": 516.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
+            "charlie:8445",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 761,
+            "y": 271.671875
+          },
+          "nativePress": {
+            "x": 761,
+            "y": 271.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 1232.984375,
+            "y": 355.671875
+          },
+          "nativePress": {
+            "x": 1232.984375,
+            "y": 355.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
             "charlie:8545",
+            "bravo:8444",
+            "bravo:8544",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "delta:8546",
-            "charlie:8445",
-            "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8545",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:19444",
-            "delta:8546",
-            "charlie:8445",
-            "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "charlie:8545",
+            "bravo:8544",
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "charlie:8445",
-            "delta:19444",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "charlie:8445",
-            "delta:19444",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
+            "bravo:8544",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 918.328125,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 918.328125,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "charlie:8445",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "charlie:8445",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/2",
           "samples": 3,
+          "intendedGrab": {
+            "x": 1232.984375,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 1232.984375,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.094818115234375,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 271.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 271.671875
+          },
+          "maxGrabErrorPx": 0.190673828125,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/sidebar-reflow",
           "samples": 2,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
-            "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 604.65625,
+            "y": 107.671875
+          },
+          "nativePress": {
+            "x": 604.65625,
+            "y": 107.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544",
-            "delta:8546"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8544"
           ],
           "finalOrder": [
-            "delta:19444",
-            "charlie:8445",
             "charlie:8545",
-            "alpha:8443",
-            "delta:8446",
-            "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544",
-            "delta:8546"
+            "alpha:8443",
+            "alpha:8543",
+            "charlie:8445",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8544"
           ],
           "release": "drop"
         }
@@ -2392,17 +3625,31 @@
     },
     {
       "mode": "motion-cards-coordinates",
+      "browserZoom": 1,
       "mobile": false,
       "dpr": 1,
       "viewport": [
         1280,
-        761
+        757
       ],
       "measurements": [
         {
           "name": "nodes/center/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 288.6640625,
+            "y": 262.171875
+          },
+          "nativePress": {
+            "x": 288.6640625,
+            "y": 262.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -2428,7 +3675,20 @@
         {
           "name": "nodes/top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 108,
+            "y": 90
+          },
+          "nativePress": {
+            "x": 108,
+            "y": 90
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -2454,7 +3714,20 @@
         {
           "name": "nodes/top-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 469.328125,
+            "y": 90
+          },
+          "nativePress": {
+            "x": 469.328125,
+            "y": 90
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -2480,7 +3753,20 @@
         {
           "name": "nodes/bottom-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 108,
+            "y": 434.34375
+          },
+          "nativePress": {
+            "x": 108,
+            "y": 434.34375
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -2506,7 +3792,20 @@
         {
           "name": "nodes/bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 469.328125,
+            "y": 434.34375
+          },
+          "nativePress": {
+            "x": 469.328125,
+            "y": 434.34375
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -2532,7 +3831,20 @@
         {
           "name": "nodes/grip/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -2558,7 +3870,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -2584,7 +3909,20 @@
         {
           "name": "nodes/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 1235,
+            "y": 259.5
+          },
+          "nativePress": {
+            "x": 1235,
+            "y": 259.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -2610,7 +3948,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -2636,7 +3987,20 @@
         {
           "name": "nodes/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "delta",
@@ -2662,7 +4026,20 @@
         {
           "name": "nodes/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "charlie",
@@ -2688,7 +4065,20 @@
         {
           "name": "nodes/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 1226.009033203125,
+            "y": 121.53845977783203
+          },
+          "nativePress": {
+            "x": 1226.009033203125,
+            "y": 121.53845977783203
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "delta",
@@ -2714,11 +4104,24 @@
         {
           "name": "nodes/interrupt-landing/2",
           "samples": 3,
-          "maxGrabErrorPx": 3.0517578125e-05,
+          "intendedGrab": {
+            "x": 903.2377319335938,
+            "y": 112.03845977783203
+          },
+          "nativePress": {
+            "x": 903.2377319335938,
+            "y": 112.03845977783203
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
-            "charlie",
             "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2727,8 +4130,8 @@
           ],
           "finalOrder": [
             "bravo",
-            "charlie",
             "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2740,11 +4143,24 @@
         {
           "name": "nodes/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2752,9 +4168,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2766,11 +4182,24 @@
         {
           "name": "nodes/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.04007720947265625,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "maxGrabErrorPx": 0.0805816650390625,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2778,9 +4207,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2792,11 +4221,24 @@
         {
           "name": "nodes/sidebar-reflow",
           "samples": 2,
+          "intendedGrab": {
+            "x": 456.328125,
+            "y": 117.5
+          },
+          "nativePress": {
+            "x": 456.328125,
+            "y": 117.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2804,9 +4246,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "charlie",
-            "bravo",
             "delta",
+            "bravo",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -2818,25 +4260,38 @@
         {
           "name": "nodes/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 457.328125,
+            "y": 120.5
+          },
+          "nativePress": {
+            "x": 457.328125,
+            "y": 120.5
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
-            "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "charlie",
+            "delta",
             "card-extra-4"
           ],
           "finalOrder": [
             "bravo",
-            "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "charlie",
+            "delta",
             "card-extra-4"
           ],
           "release": "drop"
@@ -2844,510 +4299,731 @@
         {
           "name": "traffic/center/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 554,
+            "y": 386.421875
+          },
+          "nativePress": {
+            "x": 554,
+            "y": 386.421875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 332,
+            "y": 256.671875
+          },
+          "nativePress": {
+            "x": 332,
+            "y": 256.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 776,
+            "y": 256.671875
+          },
+          "nativePress": {
+            "x": 776,
+            "y": 256.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-left/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 332,
+            "y": 516.171875
+          },
+          "nativePress": {
+            "x": 332,
+            "y": 516.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-right/slow",
           "samples": 17,
+          "intendedGrab": {
+            "x": 776,
+            "y": 516.171875
+          },
+          "nativePress": {
+            "x": 776,
+            "y": 516.171875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
             "bravo:8444",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip/fast",
           "samples": 3,
+          "intendedGrab": {
+            "x": 761,
+            "y": 271.671875
+          },
+          "nativePress": {
+            "x": 761,
+            "y": 271.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/first",
           "samples": 7,
+          "intendedGrab": {
+            "x": 1232.984375,
+            "y": 355.671875
+          },
+          "nativePress": {
+            "x": 1232.984375,
+            "y": 355.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8444",
             "bravo:8544",
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/stationary-reflow",
           "samples": 3,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "bravo:8544",
-            "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545"
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "bravo:8544",
-            "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545"
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/0",
           "samples": 3,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo:8544",
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
+            "charlie:8545",
             "charlie:8445",
-            "charlie:8545"
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "bravo:8544",
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
+            "charlie:8545",
             "charlie:8445",
-            "charlie:8545"
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/1",
           "samples": 3,
+          "intendedGrab": {
+            "x": 1225.9920654296875,
+            "y": 232.13341522216797
+          },
+          "nativePress": {
+            "x": 1225.9920654296875,
+            "y": 232.1334228515625
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "bravo:8544",
-            "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545"
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "bravo:8544",
-            "delta:8546",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
             "charlie:8445",
-            "charlie:8545"
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/2",
           "samples": 3,
-          "maxGrabErrorPx": 6.103515625e-05,
+          "intendedGrab": {
+            "x": 1012.4326782226562,
+            "y": 210.77381896972656
+          },
+          "nativePress": {
+            "x": 1012.4326782226562,
+            "y": 210.77381896972656
+          },
+          "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/empty-gap",
           "samples": 7,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.094818115234375,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 271.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 271.671875
+          },
+          "maxGrabErrorPx": 0.190673828125,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/sidebar-reflow",
           "samples": 2,
+          "intendedGrab": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
+          "nativePress": {
+            "x": 603.65625,
+            "y": 213.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "finalOrder": [
+            "charlie:8445",
+            "bravo:8544",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
             "delta:8446",
             "delta:8546",
-            "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
-            "charlie:8545"
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/nested-scroll",
           "samples": 3,
+          "intendedGrab": {
+            "x": 604.65625,
+            "y": 107.671875
+          },
+          "nativePress": {
+            "x": 604.65625,
+            "y": 107.671875
+          },
           "maxGrabErrorPx": 0,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
             "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
-            "delta:8446"
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445"
           ],
           "finalOrder": [
-            "delta:8546",
             "bravo:8544",
-            "delta:19444",
-            "alpha:8443",
-            "bravo:8444",
-            "alpha:8543",
-            "alpha:19443",
-            "charlie:8445",
             "charlie:8545",
-            "delta:8446"
+            "alpha:8443",
+            "alpha:8543",
+            "bravo:8444",
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445"
           ],
           "release": "drop"
         }
@@ -3356,18 +5032,30 @@
     {
       "mode": "motion-cards-coordinates",
       "browserZoom": 1.25,
-      "displayScale": 1.5,
       "mobile": false,
       "dpr": 1.875,
       "viewport": [
         1024,
-        609
+        606
       ],
       "measurements": [
         {
           "name": "nodes/center/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.007377628456595944,
+          "intendedGrab": {
+            "x": 322.0000228881836,
+            "y": 259.40001678466797
+          },
+          "nativePress": {
+            "x": 322.00006103515625,
+            "y": 259.4000549316406
+          },
+          "maxGrabErrorPx": 0.014831544931042705,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -3393,7 +5081,20 @@
         {
           "name": "nodes/top-left/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.011169694157463864,
+          "intendedGrab": {
+            "x": 108.00000762939453,
+            "y": 90.00000762939453
+          },
+          "nativePress": {
+            "x": 108.0000228881836,
+            "y": 90.00001525878906
+          },
+          "maxGrabErrorPx": 0.022453437724437655,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -3419,7 +5120,20 @@
         {
           "name": "nodes/top-right/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.011169436199417225,
+          "intendedGrab": {
+            "x": 536.0000381469727,
+            "y": 90.00000762939453
+          },
+          "nativePress": {
+            "x": 536.0001220703125,
+            "y": 90.00001525878906
+          },
+          "maxGrabErrorPx": 0.022453309401662142,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -3445,7 +5159,20 @@
         {
           "name": "nodes/bottom-left/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.025924794879959898,
+          "intendedGrab": {
+            "x": 108.00000762939453,
+            "y": 428.8000259399414
+          },
+          "nativePress": {
+            "x": 108.0000228881836,
+            "y": 428.8000793457031
+          },
+          "maxGrabErrorPx": 0.052108820500490524,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -3471,7 +5198,20 @@
         {
           "name": "nodes/bottom-right/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.02592468373981763,
+          "intendedGrab": {
+            "x": 536.0000381469727,
+            "y": 428.8000259399414
+          },
+          "nativePress": {
+            "x": 536.0001220703125,
+            "y": 428.8000793457031
+          },
+          "maxGrabErrorPx": 0.05210876520695832,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "alpha",
@@ -3497,7 +5237,20 @@
         {
           "name": "nodes/grip/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.008209260422882128,
+          "intendedGrab": {
+            "x": 523.4667062759399,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 523.4667358398438,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.01650239624361288,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -3523,7 +5276,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
-          "maxGrabErrorPx": 0.023429931471611123,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.047081023942427344,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -3549,7 +5315,20 @@
         {
           "name": "nodes/cross-row/first",
           "samples": 7,
-          "maxGrabErrorPx": 0.024520949984933094,
+          "intendedGrab": {
+            "x": 979.4667367935181,
+            "y": 259.0333414077759
+          },
+          "nativePress": {
+            "x": 979.4667358398438,
+            "y": 259.0333557128906
+          },
+          "maxGrabErrorPx": 0.04930118524189254,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "alpha",
             "delta",
@@ -3575,7 +5354,20 @@
         {
           "name": "nodes/cross-row/forward",
           "samples": 7,
-          "maxGrabErrorPx": 0.023429931471611123,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.047081023942427344,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "bravo",
@@ -3601,7 +5393,20 @@
         {
           "name": "nodes/stationary-reflow",
           "samples": 3,
-          "maxGrabErrorPx": 0.011169457044733162,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.022445690380640582,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "bravo",
             "delta",
@@ -3627,7 +5432,20 @@
         {
           "name": "nodes/interrupt-landing/0",
           "samples": 3,
-          "maxGrabErrorPx": 0.010070942386440821,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.020233224779469434,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "delta",
             "charlie",
@@ -3653,11 +5471,24 @@
         {
           "name": "nodes/interrupt-landing/1",
           "samples": 3,
-          "maxGrabErrorPx": 0.009696972454552833,
+          "intendedGrab": {
+            "x": 970.0002450942993,
+            "y": 121.6349983215332
+          },
+          "nativePress": {
+            "x": 970.0003051757812,
+            "y": 121.63500213623047
+          },
+          "maxGrabErrorPx": 0.02142333984375,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "charlie",
-            "delta",
             "bravo",
+            "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -3665,9 +5496,9 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "charlie",
-            "delta",
             "bravo",
+            "delta",
+            "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
@@ -3679,10 +5510,23 @@
         {
           "name": "nodes/interrupt-landing/2",
           "samples": 3,
-          "maxGrabErrorPx": 0.009849550001940597,
+          "intendedGrab": {
+            "x": 730.5000619888306,
+            "y": 111.64359474182129
+          },
+          "nativePress": {
+            "x": 730.5001220703125,
+            "y": 111.64359283447266
+          },
+          "maxGrabErrorPx": 0.021423361579905726,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta",
             "bravo",
+            "delta",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3691,8 +5535,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "delta",
             "bravo",
+            "delta",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3705,10 +5549,23 @@
         {
           "name": "nodes/empty-gap",
           "samples": 7,
-          "maxGrabErrorPx": 0.008422855017841019,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.016937257577707015,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3717,8 +5574,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3731,10 +5588,23 @@
         {
           "name": "nodes/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.07204994229414852,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.08441266716386843,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3743,8 +5613,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3757,10 +5627,23 @@
         {
           "name": "nodes/sidebar-reflow",
           "samples": 2,
-          "maxGrabErrorPx": 0.011169436199417225,
+          "intendedGrab": {
+            "x": 371.4666757583618,
+            "y": 117.03334140777588
+          },
+          "nativePress": {
+            "x": 371.4666748046875,
+            "y": 117.03334045410156
+          },
+          "maxGrabErrorPx": 0.022453309401662142,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3769,8 +5652,8 @@
             "card-extra-4"
           ],
           "finalOrder": [
-            "bravo",
             "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
@@ -3783,25 +5666,38 @@
         {
           "name": "nodes/nested-scroll",
           "samples": 3,
-          "maxGrabErrorPx": 0.04323577948173602,
+          "intendedGrab": {
+            "x": 372.35000705718994,
+            "y": 119.70000553131104
+          },
+          "nativePress": {
+            "x": 372.3500061035156,
+            "y": 119.70000457763672
+          },
+          "maxGrabErrorPx": 0.0869216922293594,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "bravo",
+            "delta",
             "card-extra-4"
           ],
           "finalOrder": [
-            "delta",
+            "bravo",
             "charlie",
             "card-extra-1",
             "card-extra-2",
             "alpha",
             "card-extra-3",
-            "bravo",
+            "delta",
             "card-extra-4"
           ],
           "release": "drop"
@@ -3809,510 +5705,731 @@
         {
           "name": "traffic/center/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.0410156363532641,
+          "intendedGrab": {
+            "x": 662.0000610351562,
+            "y": 332.99168395996094
+          },
+          "nativePress": {
+            "x": 662.0001220703125,
+            "y": 332.99169921875
+          },
+          "maxGrabErrorPx": 0.0820922908286621,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-left/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.05505371939580814,
+          "intendedGrab": {
+            "x": 332.0000305175781,
+            "y": 204.85000610351562
+          },
+          "nativePress": {
+            "x": 332.00006103515625,
+            "y": 204.85000610351562
+          },
+          "maxGrabErrorPx": 0.11029053156588303,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/top-right/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.055053710939565015,
+          "intendedGrab": {
+            "x": 992.0000915527344,
+            "y": 204.85000610351562
+          },
+          "nativePress": {
+            "x": 992.0001831054688,
+            "y": 204.85000610351562
+          },
+          "maxGrabErrorPx": 0.11029052734478079,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-left/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.02697755632356808,
+          "intendedGrab": {
+            "x": 332.0000305175781,
+            "y": 461.13336181640625
+          },
+          "nativePress": {
+            "x": 332.00006103515625,
+            "y": 461.13336181640625
+          },
+          "maxGrabErrorPx": 0.0538787928224447,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/bottom-right/slow",
           "samples": 17,
-          "maxGrabErrorPx": 0.02697753906671413,
+          "intendedGrab": {
+            "x": 992.0000915527344,
+            "y": 461.13336181640625
+          },
+          "nativePress": {
+            "x": 992.0001831054688,
+            "y": 461.13336181640625
+          },
+          "maxGrabErrorPx": 0.05387878418179755,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:8446",
-            "delta:19444",
+            "bravo:8544",
+            "bravo:8444",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/grip/fast",
           "samples": 3,
-          "maxGrabErrorPx": 0.053436279296875,
+          "intendedGrab": {
+            "x": 977.4667367935181,
+            "y": 219.3833475112915
+          },
+          "nativePress": {
+            "x": 977.4667358398438,
+            "y": 219.38336181640625
+          },
+          "maxGrabErrorPx": 0.107086181640625,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
-          "maxGrabErrorPx": 0.03335572685108783,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.06701660851094639,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/first",
           "samples": 7,
-          "maxGrabErrorPx": 0.0330810546875,
+          "intendedGrab": {
+            "x": 977.4667367935181,
+            "y": 324.5833444595337
+          },
+          "nativePress": {
+            "x": 977.4667358398438,
+            "y": 324.5833435058594
+          },
+          "maxGrabErrorPx": 0.06646728515625,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8446",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
             "alpha:8543",
             "alpha:19443",
-            "bravo:8444",
-            "bravo:8544"
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/cross-row/forward",
           "samples": 7,
-          "maxGrabErrorPx": 0.03335572685108783,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.06701660851094639,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/stationary-reflow",
           "samples": 3,
-          "maxGrabErrorPx": 0.021072409793474793,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.042358409430862456,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "delta:8546",
             "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:19444",
-            "delta:8546",
             "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/0",
           "samples": 3,
-          "maxGrabErrorPx": 0.01998922333352592,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.04016123716578506,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "charlie:8445",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
+            "charlie:8445",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "charlie:8445",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
+            "charlie:8445",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/1",
           "samples": 3,
-          "maxGrabErrorPx": 0.019821172865469562,
+          "intendedGrab": {
+            "x": 970.5670785903931,
+            "y": 200.2078151702881
+          },
+          "nativePress": {
+            "x": 970.5670776367188,
+            "y": 200.20782470703125
+          },
+          "maxGrabErrorPx": 0.0408782958984375,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
             "charlie:8445",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
             "charlie:8445",
-            "delta:8546",
-            "delta:19444",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/interrupt-landing/2",
           "samples": 3,
-          "maxGrabErrorPx": 0.01959233863324149,
+          "intendedGrab": {
+            "x": 782.2958993911743,
+            "y": 179.11668300628662
+          },
+          "nativePress": {
+            "x": 782.2959594726562,
+            "y": 179.11669921875
+          },
+          "maxGrabErrorPx": 0.04092411778025759,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:8546",
-            "delta:19444",
             "charlie:8445",
+            "bravo:8544",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/empty-gap",
           "samples": 7,
-          "maxGrabErrorPx": 0.018341089842107534,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.03686524700644574,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "drop"
         },
         {
           "name": "traffic/live-css-zoom",
           "samples": 2,
-          "maxGrabErrorPx": 0.18839768503502705,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 300.45001316070557
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 300.4500427246094
+          },
+          "maxGrabErrorPx": 0.2198858785559515,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/sidebar-reflow",
           "samples": 2,
-          "maxGrabErrorPx": 0.019699120318386037,
+          "intendedGrab": {
+            "x": 518.8000192642212,
+            "y": 182.5833444595337
+          },
+          "nativePress": {
+            "x": 518.800048828125,
+            "y": 182.58335876464844
+          },
+          "maxGrabErrorPx": 0.03962708694639975,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "finalOrder": [
-            "delta:19444",
-            "delta:8546",
+            "bravo:8544",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444"
           ],
           "release": "escape"
         },
         {
           "name": "traffic/nested-scroll",
           "samples": 3,
-          "maxGrabErrorPx": 0.059646614252315856,
+          "intendedGrab": {
+            "x": 519.6833505630493,
+            "y": 107.38333988189697
+          },
+          "nativePress": {
+            "x": 519.683349609375,
+            "y": 107.38333892822266
+          },
+          "maxGrabErrorPx": 0.08966827911893657,
+          "viewport": {
+            "left": 0,
+            "top": 0,
+            "scale": 1
+          },
           "previewOrder": [
-            "delta:8546",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544",
-            "delta:19444"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8544"
           ],
           "finalOrder": [
-            "delta:8546",
             "charlie:8445",
             "charlie:8545",
             "alpha:8443",
-            "delta:8446",
             "alpha:8543",
-            "alpha:19443",
             "bravo:8444",
-            "bravo:8544",
-            "delta:19444"
+            "alpha:19443",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8544"
           ],
           "release": "drop"
         }

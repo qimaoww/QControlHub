@@ -36,8 +36,11 @@ export function moveCardGhost(drag) {
   // Convert once into the layer's local space (CSS/browser zoom can scale it).
   const layer = drag.ghost.parentElement, box = layer.getBoundingClientRect();
   const sx = box.width / layer.offsetWidth || 1, sy = box.height / layer.offsetHeight || 1;
+  // clientLeft/Top round fractional borders under CSS zoom. The absolute
+  // child's origin is the painted padding edge, so retain the used precision.
+  const border = getComputedStyle(layer);
   Object.assign(drag.ghost.style, {
     left: "0px", top: "0px", width: `${drag.rect.width / sx}px`, height: `${drag.rect.height / sy}px`,
-    transform: `translate(${(drag.point.x - drag.grab.x - box.left) / sx}px, ${(drag.point.y - drag.grab.y - box.top) / sy}px)`,
+    transform: `translate(${(drag.point.x - drag.grab.x - box.left) / sx - parseFloat(border.borderLeftWidth)}px, ${(drag.point.y - drag.grab.y - box.top) / sy - parseFloat(border.borderTopWidth)}px)`,
   });
 }

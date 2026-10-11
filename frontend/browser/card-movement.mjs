@@ -23,6 +23,11 @@ const trafficPaint = (original, preview) => {
 
 // The runner dispatches real mouse/touch events and waits for each inspection
 // acknowledgement before sending the next input. Timing cannot skip assertions.
+export async function viewportScale(scale) {
+  window.__cardMoveViewport = { action: "viewport", scale };
+  await waitFor(() => window.__cardMoveViewport === null, "native viewport setup did not finish");
+}
+
 export async function gesture(start, points, release, inspect = async () => {}, waitForLanding = true) {
   const input = new AbortController();
   window.__cardMoveStep = -1;

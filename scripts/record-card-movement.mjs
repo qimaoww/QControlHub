@@ -43,8 +43,12 @@ const sequence = `async page => {
     }, true);
   });
   const results = [];
+  const touch = async (type, point) => {
+    const input = point && await page.evaluate(p => ({ x: p.x - visualViewport.offsetLeft, y: p.y - visualViewport.offsetTop }), point);
+    await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: input ? [input] : [] });
+  };
   const move = async point => {
-    if (mobile) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[point]});
+    if (mobile) await touch('touchMove', point);
     else await page.mouse.move(point.x,point.y);
     await page.waitForTimeout(25);
   };
@@ -70,7 +74,7 @@ const sequence = `async page => {
         return {start,end:{x:t.left+t.width/2,y:t.top+36},original:list.map(c=>c.dataset.agentNode||c.dataset.trafficCardKey)};
       },{selector,position,mobile});
       const {start,end,original} = geometry;
-      if(mobile) await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[start]});
+      if(mobile) await touch('touchStart', start);
       else {await page.mouse.move(start.x,start.y);await page.mouse.down();}
       const samples = [];
       const destinations = index===0 ? [end,start,end] : [end];
@@ -90,7 +94,7 @@ const sequence = `async page => {
       const expected=await page.evaluate(selector=>[...document.querySelector(selector).children].filter(c=>c.matches('.node-card,.traffic-policy-card')).sort((a,b)=>Number(a.style.order)-Number(b.style.order)).map(c=>c.dataset.agentNode||c.dataset.trafficCardKey),selector);
       const cancelled=index===positions.length-1;
       if(cancelled)await page.keyboard.press('Escape');
-      if(mobile)await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});else await page.mouse.up();
+      if(mobile)await touch('touchEnd');else await page.mouse.up();
       await page.waitForTimeout(650);
       const actual=await page.evaluate(selector=>[...document.querySelector(selector).children].filter(c=>c.matches('.node-card,.traffic-policy-card')).map(c=>c.dataset.agentNode||c.dataset.trafficCardKey),selector);
       if(!samples.length||Math.max(...samples)>=1||JSON.stringify(actual)!==JSON.stringify(cancelled?original:expected))throw new Error('recording verification failed '+type+'/'+position);

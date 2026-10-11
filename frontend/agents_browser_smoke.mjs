@@ -163,6 +163,14 @@ async function waitForPageTarget(debugOrigin, expectedURL) {
 
 // Real input drives drag regressions. The page fixture publishes geometry;
 // desktop mouse and mobile touch use the browser's native pointer capture.
+async function inputPoint(send, point) {
+  // DOM client coordinates include the visual viewport's origin. CDP input
+  // starts at that origin; Chromium applies browser/pinch scale itself.
+  const result = await send("Runtime.evaluate", { expression: "({x:visualViewport.offsetLeft,y:visualViewport.offsetTop})", returnByValue: true });
+  const origin = result.result.value;
+  return { x: point.x - origin.x, y: point.y - origin.y };
+}
+
 async function driveMotionGestures(send, mobile) {
   for (const expected of ["drop", "cancel", "leave"]) {
     const result = await send("Runtime.evaluate", {
@@ -175,13 +183,14 @@ async function driveMotionGestures(send, mobile) {
     const gesture = result.result?.value;
     if (!gesture) return;
     assert.equal(gesture.action, expected);
+    const start = await inputPoint(send, gesture.start);
     if (mobile) {
-      await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
-      await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [gesture.end] });
+      await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+      await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [await inputPoint(send, gesture.end)] });
     } else {
-      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
-      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...gesture.start, button: "left", buttons: 1, clickCount: 1 });
-      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.end, button: "left", buttons: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...start, button: "left", buttons: 1, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...await inputPoint(send, gesture.end), button: "left", buttons: 1 });
     }
     if (expected === "cancel")
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
@@ -190,7 +199,7 @@ async function driveMotionGestures(send, mobile) {
       await delay(80);
     }
     if (mobile) await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    else await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...gesture.end, button: "left", buttons: 0, clickCount: 1 });
+    else await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...await inputPoint(send, gesture.end), button: "left", buttons: 0, clickCount: 1 });
     await send("Runtime.evaluate", { expression: "window.__motionGesture = null" });
   }
 }
@@ -201,20 +210,38 @@ async function driveCardMoveGestures(send, mobile) {
     if (${expression} || document.documentElement.dataset.browserSmoke) { clearInterval(timer); resolve(document.documentElement.dataset.browserSmoke ? null : (${expression})); }
   }, 10); })`);
   while (true) {
-    const gesture = await wait("window.__cardMoveGesture");
+    const gesture = await wait("window.__cardMoveViewport || window.__cardMoveGesture");
     if (!gesture) return;
-    if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
+    if (gesture.action === "viewport") {
+      await send("Emulation.setPageScaleFactor", { pageScaleFactor: gesture.scale });
+      if (gesture.scale > 1) {
+        // Pan the zoomed visual viewport with native touch, then cancel to
+        // prevent a fling or a content click before the measured grip pickup.
+        await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 180, y: 400 }] });
+        for (let step = 1; step <= 5; step++) {
+          await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 180 - step * 14, y: 400 - step * 12 }] });
+          await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+        }
+        await send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      }
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      await evaluate("window.__cardMoveViewport = null");
+      continue;
+    }
+    const start = await inputPoint(send, gesture.start);
+    if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
     else {
-      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
-      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...gesture.start, button: "left", buttons: 1, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...start, button: "left", buttons: 1, clickCount: 1 });
     }
     // A CDP acknowledgement can precede native pointer delivery. In particular,
     // a new touch must not race the preceding touch's release during landing.
     if (await wait("window.__cardMoveInput.pressed") === null) return;
     for (let index = 0; index < gesture.points.length; index++) {
       const point = gesture.points[index];
-      if (mobile) await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point] });
-      else await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point, button: "left", buttons: 1 });
+      const input = await inputPoint(send, point);
+      if (mobile) await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [input] });
+      else await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...input, button: "left", buttons: 1 });
       // Chromium may coalesce native touch moves until its next input frame.
       // Inspect delivered input, rather than racing CDP acknowledgement.
       if (await wait(`window.__cardMoveInput.cancelled || (window.__cardMoveInput.point && Math.hypot(window.__cardMoveInput.point.x - ${point.x}, window.__cardMoveInput.point.y - ${point.y}) < 1)`) === null) return;
@@ -227,7 +254,7 @@ async function driveCardMoveGestures(send, mobile) {
     if (mobile) await send("Input.dispatchTouchEvent", { type: gesture.release === "cancel" ? "touchCancel" : "touchEnd", touchPoints: [] });
     else {
       if (gesture.release === "cancel") await evaluate('document.activeElement.releasePointerCapture(1)');
-      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...gesture.points.at(-1), button: "left", buttons: 0, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...await inputPoint(send, gesture.points.at(-1)), button: "left", buttons: 0, clickCount: 1 });
     }
     if (await wait("window.__cardMoveInput.ended") === null) return;
     await evaluate("window.__cardMoveGesture = null");

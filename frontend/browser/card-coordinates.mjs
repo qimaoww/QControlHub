@@ -1,5 +1,5 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
-import { gesture, route, settled } from "./card-movement.mjs";
+import { gesture, route, settled, viewportScale } from "./card-movement.mjs";
 
 const cards = grid => [...grid.querySelectorAll(":scope > .node-card,:scope > .traffic-policy-card")];
 const id = card => card.dataset.agentNode || card.dataset.trafficCardKey;
@@ -12,13 +12,14 @@ const frames = () => new Promise(resolve => requestAnimationFrame(() => requestA
 export async function testCardCoordinateRuntime({ mode }, preview) {
   if (preview) await new Promise(() => {});
   const mobile = mode.includes("mobile"), measurements = [];
-  let pointer = null, pressed = null, pressedRect = null, inputTrace = [];
+  let pointer = null, pressed = null, pressedCard = null, pressedRect = null, inputTrace = [];
   const observe = event => {
     if (event.type !== "pointercancel") pointer = { x: event.clientX, y: event.clientY };
     if (event.type === "pointerdown") {
       inputTrace = [];
       pressed = pointer;
-      pressedRect = event.target.closest(".node-card,.traffic-policy-card")?.getBoundingClientRect();
+      pressedCard = event.target.closest(".node-card,.traffic-policy-card");
+      pressedRect = pressedCard?.getBoundingClientRect();
     }
     inputTrace.push({ type: event.type, x: event.clientX, y: event.clientY, pointer: event.pointerType, primary: event.isPrimary, buttons: event.buttons, target: event.target.tagName + "." + event.target.getAttribute("class"), scrollY });
     inputTrace = inputTrace.slice(-12);
@@ -26,9 +27,12 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
   const inputTypes = ["pointerdown", "pointermove", "pointerup", "pointercancel"];
   inputTypes.forEach(type => document.addEventListener(type, observe, true));
   const run = async (grid, card, start, points, name, inspect = async () => {}, release = "drop", waitForLanding = true) => {
+    assert.ok(grid.isConnected, `${name}: the fixture must retain the live grid`);
     const initial = order(grid);
     let expected = initial, samples = 0, maxError = 0, anchor;
     const sample = () => {
+      assert.equal(pressedCard, card, `${name}: native press chooses the intended card`);
+      assert.ok(Math.hypot(pressed.x - start.x, pressed.y - start.y) < 1, `${name}: native press reaches the intended grab point`);
       const ghost = document.querySelector(".card-move-ghost");
       assert.ok(ghost, `${name}: real pointer must pick up`);
       anchor ||= { x: pressed.x - pressedRect.left, y: pressed.y - pressedRect.top };
@@ -47,21 +51,25 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
         await frames(); sample();
       }, waitForLanding);
     } catch (error) {
-      throw new Error(`${error.message}; ${name}: start ${JSON.stringify(start)}, points ${JSON.stringify(points)}, pressed ${JSON.stringify(pressed)}, delivered ${JSON.stringify(window.__cardMoveInput)}, trace ${JSON.stringify(inputTrace)}`);
+      const view = { left: visualViewport.offsetLeft, top: visualViewport.offsetTop, scale: visualViewport.scale };
+      throw new Error(`${error.message}; ${name}: route ${location.hash}, connected ${grid.isConnected}, viewport ${JSON.stringify(view)}, start ${JSON.stringify(start)}, points ${JSON.stringify(points)}, pressed ${JSON.stringify(pressed)}, delivered ${JSON.stringify(window.__cardMoveInput)}, trace ${JSON.stringify(inputTrace)}`);
     } finally {
       document.removeEventListener("pointerup", releasing, true);
     }
     equal(order(grid), release === "drop" ? expected : initial, `${name}: final order equals the last preview`);
     assert.equal(document.querySelector(".card-move-ghost,.card-move-layer,.card-move-active"), null, `${name}: cleans up`);
     assert.ok(cards(grid).every(c => !c.style.order && !c.style.transform), `${name}: clears temporary geometry`);
-    measurements.push({ name, samples, maxGrabErrorPx: maxError, previewOrder: expected, finalOrder: order(grid), release });
+    measurements.push({ name, samples, intendedGrab: start, nativePress: pressed, maxGrabErrorPx: maxError,
+      viewport: { left: visualViewport.offsetLeft, top: visualViewport.offsetTop, scale: visualViewport.scale },
+      previewOrder: expected, finalOrder: order(grid), release });
   };
 
   const fixtureStyle = document.createElement("style");
   fixtureStyle.textContent = `body[data-card-coordinate-layout] :is(.node-card-grid,.traffic-policy-grid){grid-template-columns:var(--card-coordinate-columns)!important;align-items:start!important;scroll-margin-top:160px}
     body[data-card-coordinate-layout] :is(.node-card-grid>.node-card,.traffic-policy-grid>.traffic-policy-card){height:110px!important;min-height:0!important}
     body[data-card-coordinate-layout] :is(.node-card-head,.traffic-card-header){flex-shrink:0}
-    body[data-card-coordinate-layout] :is(.node-card-grid>.node-card,.traffic-policy-grid>.traffic-policy-card):nth-child(3n){height:130px!important}`;
+    body[data-card-coordinate-layout] :is(.node-card-grid>.node-card,.traffic-policy-grid>.traffic-policy-card):nth-child(3n){height:130px!important}
+    body[data-card-coordinate-scroll] :is(.node-settings-page:has(>.node-card-grid),.traffic-workspace:has(>.traffic-policy-grid)){overflow:auto!important;max-height:360px!important;border:3px solid transparent!important;scroll-margin-top:160px}`;
   document.head.append(fixtureStyle);
   for (const type of ["nodes", "traffic"]) {
     const grid = await route(type === "nodes" ? "#node-settings" : "#traffic-all", type === "nodes" ? ".node-card-grid" : ".traffic-policy-grid");
@@ -118,6 +126,18 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
       await delay(500);
     });
 
+    if (mobile) {
+      await prepare();
+      await viewportScale(1.25);
+      assert.ok(visualViewport.scale > 1.1 && visualViewport.offsetTop > 1 && visualViewport.offsetLeft > 1,
+        "native pan must expose a shifted visual viewport");
+      const shifted = cards(grid)[0], destination = cards(grid)[1].getBoundingClientRect();
+      start = center(shifted.querySelector(".node-card-grip").getBoundingClientRect());
+      end = center(destination);
+      await run(grid, shifted, start, [end, start, end], `${type}/visual-viewport-pan`);
+      await viewportScale(1);
+    }
+
     await prepare();
     // Keep the production landing alive while a loaded CI browser processes
     // native input. Its normal safety deadline must not expire during aiming.
@@ -160,6 +180,7 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
       start = center(zoomCard.querySelector(".node-card-grip").getBoundingClientRect());
       end = { x: start.x + 40, y: start.y + 40 };
       await run(grid, zoomCard, start, [end], `${type}/live-css-zoom`, async () => {
+        document.querySelector(".card-move-layer").style.border = "3px solid transparent";
         document.body.style.zoom = "1.25"; await delay(120);
       }, "escape");
       document.body.style.zoom = "";
@@ -177,9 +198,12 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
     // A nested scroll container moves independently of its grid. Hold the
     // pointer stationary, scroll it manually, then let edge scrolling continue.
     await prepare();
-    const panel = document.createElement("div");
-    panel.style.cssText = "overflow:auto;max-height:360px;border:3px solid transparent";
-    grid.before(panel); panel.append(grid); panel.scrollIntoView({ block: "start", behavior: "instant" });
+    // Preserve production DOM structure: polling must not replace a grid that
+    // the fixture manually reparented. Only make its existing workspace scroll.
+    const panel = grid.parentElement, originalScroll = panel.scrollTop;
+    document.body.dataset.cardCoordinateScroll = "nested";
+    panel.scrollIntoView({ block: "start", behavior: "instant" });
+    panel.scrollTop += grid.getBoundingClientRect().top - panel.getBoundingClientRect().top - panel.clientTop;
     await frames();
     const scrolled = cards(grid)[0];
     start = center(scrolled.querySelector(".node-card-grip").getBoundingClientRect());
@@ -191,7 +215,8 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
       await waitFor(() => panel.scrollTop > before + 15 || panel.scrollTop >= panel.scrollHeight - panel.clientHeight - 1, "nested auto-scroll did not advance");
       await frames();
     });
-    panel.before(grid); panel.remove();
+    delete document.body.dataset.cardCoordinateScroll;
+    panel.scrollTop = originalScroll;
     delete document.body.dataset.cardCoordinateLayout;
   }
   if (!mobile) {
