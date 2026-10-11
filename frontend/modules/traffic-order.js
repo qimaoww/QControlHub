@@ -11,8 +11,10 @@ export function createTrafficOrder(storage) {
   };
   const saveTrafficCardOrder = (keys) => {
     try {
-      storage?.setItem(trafficCardOrderKey, JSON.stringify(keys));
-    } catch {}
+      const value = JSON.stringify(keys);
+      storage?.setItem(trafficCardOrderKey, value);
+      return storage?.getItem(trafficCardOrderKey) === value;
+    } catch { return false; }
   };
 
   return { savedTrafficCardOrder, saveTrafficCardOrder };

@@ -36,7 +36,7 @@ export function installTraffic(ctx) {
 
   const fields = createTrafficFormView(ctx);
   const order = createTrafficOrder(storage);
-  const cards = createTrafficCardInteractions({ cardInteractions, ...order });
+  const cards = createTrafficCardInteractions({ cardInteractions, ...order, notify: ctx.notify });
   const view = createTrafficView(ctx, { filters, storage, ...order, ...fields });
   const sync = createTrafficSyncDialog(ctx, { traffic });
   const bindTrafficForms = createTrafficForms(ctx, { filters, renderTraffic, traffic, sync, ...fields });

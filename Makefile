@@ -22,14 +22,15 @@ build:
 
 # Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
+# The native browser matrix also runs through Go; match CI's package deadline.
 test:
-	go test -p 1 ./...
+	go test -timeout 20m -p 1 ./...
 
 alpine-agent-test:
 	$(ALPINE_AGENT_TESTS)
 
 alpine-test: alpine-agent-test
-	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -p 1 $$packages
+	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -timeout 20m -p 1 $$packages
 
 upgrade-sandbox-test:
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .

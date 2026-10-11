@@ -270,6 +270,8 @@ function reconcileNode(current, fresh, metrics) {
     metrics.replaced += 1;
     return replacement;
   }
+  // Sorting feedback survives the deferred telemetry paint after a landing.
+  if (current.nodeType === 1 && current.getAttribute("data-card-order-status") != null) return current;
   // Native equality checks can discard an unchanged branch in one browser
   // call. This keeps frequent metric/log refreshes out of thousands of
   // attribute and text comparisons while preserving the existing live DOM.

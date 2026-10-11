@@ -51,7 +51,7 @@ export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
 }
 
 export function animateNodeCardDrop(
-  items, oldRects, { animate = animateMotion, onSettled = () => {} } = {},
+  items, oldRects, { animate = animateMotion, onSettled = () => {}, token = "--motion-reorder", resize = false } = {},
 ) {
   // Read all geometry before starting compositor animations. No forced layout
   // per card, temporary transform styles, or transition listeners are needed.
@@ -60,8 +60,13 @@ export function animateNodeCardDrop(
     const previous = oldRects.get(item);
     if (!previous) return null;
     const rect = item.getBoundingClientRect();
-    const dx = previous.left - rect.left, dy = previous.top - rect.top;
-    return Math.abs(dx) < 1 && Math.abs(dy) < 1 ? null : { item, dx, dy };
+    const scaleX = rect.width ? rect.width / item.offsetWidth : 1;
+    const scaleY = rect.height ? rect.height / item.offsetHeight : 1;
+    const dx = (previous.left - rect.left) / (scaleX || 1), dy = (previous.top - rect.top) / (scaleY || 1);
+    const sx = resize && previous.width && rect.width ? previous.width / rect.width : 1;
+    const sy = resize && previous.height && rect.height ? previous.height / rect.height : 1;
+    const resized = resize && (Math.abs((previous.width || rect.width) - rect.width) > 1 || Math.abs((previous.height || rect.height) - rect.height) > 1);
+    return Math.abs(dx) < 1 && Math.abs(dy) < 1 && !resized ? null : { item, dx, dy, sx, sy };
   }).filter(Boolean);
   let remaining = moves.length;
   let settled = false;
@@ -71,36 +76,11 @@ export function animateNodeCardDrop(
     onSettled();
   };
   if (!remaining) { settle(); return () => {}; }
-  const cancels = moves.map(({ item, dx, dy }) => animate(item, [
-    { transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" },
-  ], { id: "qch-drop", token: "--motion-reorder", retarget: false, onSettled: () => { if (!--remaining) settle(); } }));
+  const cancels = moves.map(({ item, dx, dy, sx, sy }) => animate(item, [
+    { transform: `translate(${dx}px, ${dy}px)${resize ? ` scale(${sx}, ${sy})` : ""}`, ...(resize ? { transformOrigin: "top left" } : {}) },
+    { transform: "none", ...(resize ? { transformOrigin: "top left" } : {}) },
+  ], { id: "qch-drop", token, retarget: false, onSettled: () => { if (!--remaining) settle(); } }));
   return () => { cancels.forEach(cancel => cancel()); settle(); };
-}
-
-// Arrow keys provide the same order commit as dragging, without a gesture.
-export function moveCardByKey(event, grid, selector, paintedRects) {
-  const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
-  if (!direction) return null;
-  event.preventDefault();
-  event.stopPropagation();
-  const cards = [...grid.querySelectorAll(selector)];
-  const card = event.currentTarget.closest(selector), index = cards.indexOf(card);
-  const target = cards[index + direction];
-  if (!target) return null;
-  const oldRects = paintedRects || new Map(cards.map(item => [item, item.getBoundingClientRect()]));
-  cards.forEach(cancelMotion);
-  if (direction < 0) target.before(card); else target.after(card);
-  event.currentTarget.focus({ preventScroll: true });
-  let status = grid.parentElement.querySelector("[data-card-order-status]");
-  if (!status) {
-    status = document.createElement("span");
-    status.className = "visually-hidden";
-    status.dataset.cardOrderStatus = "";
-    status.setAttribute("role", "status");
-    grid.after(status);
-  }
-  status.textContent = `已移至第 ${index + direction + 1} 项，共 ${cards.length} 项`;
-  return { cards: [...grid.querySelectorAll(selector)], oldRects };
 }
 
 export function clearNodeCardDragState(

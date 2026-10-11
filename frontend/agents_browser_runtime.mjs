@@ -15,6 +15,8 @@ import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
 import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
 import { testSelectionRuntime } from "./browser/selections.mjs";
+import { testCardCoordinateRuntime } from "./browser/card-coordinates.mjs";
+import { testCardMoveRuntime } from "./browser/card-movement.mjs";
 import { testMotionRuntime } from "./browser/motion.mjs";
 import { testPopupRuntime } from "./browser/popups.mjs";
 import { assert, waitFor } from "./browser/assertions.mjs";
@@ -56,7 +58,9 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
     await import("./app.js");
-    if (mode.startsWith("motion-selection")) await testSelectionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    else if (mode.startsWith("motion-cards")) await testCardMoveRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    else if (mode.startsWith("motion-selection")) await testSelectionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-popup")) await testPopupRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion")) await testMotionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode === "traffic-layout-dense" || mode === "traffic-layout-dense-mobile") {
@@ -108,7 +112,7 @@ try {
   }
   document.documentElement.dataset.browserSmoke = "passed";
   if (!new URLSearchParams(location.search).has("preview"))
-    document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
+    document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.cardMovementResult ? " " + window.cardMovementResult : window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
 } catch (error) {
   document.documentElement.dataset.browserSmoke = "failed";
   document.body.innerHTML = `<pre id="browser-smoke-result"></pre>`;

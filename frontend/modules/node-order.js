@@ -21,8 +21,10 @@ export function savedNodeOrder(storage) {
 export function saveNodeOrder(ids, storage) {
   try {
     const target = storage ?? accountStorage;
-    target?.setItem(nodeCardOrderKey, JSON.stringify(ids));
-  } catch {}
+    const value = JSON.stringify(ids);
+    target?.setItem(nodeCardOrderKey, value);
+    return target?.getItem(nodeCardOrderKey) === value;
+  } catch { return false; }
 }
 
 // Older builds kept one browser-wide order under the bare key. Migrate it into

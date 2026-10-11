@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmod, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -212,6 +212,14 @@ async function waitForPageTarget(debugOrigin, expectedURL) {
 
 // Real input drives drag regressions. The page fixture publishes geometry;
 // desktop mouse and mobile touch use the browser's native pointer capture.
+async function inputPoint(send, point) {
+  // DOM client coordinates include the visual viewport's origin. CDP input
+  // starts at that origin; Chromium applies browser/pinch scale itself.
+  const result = await send("Runtime.evaluate", { expression: "({x:visualViewport.offsetLeft,y:visualViewport.offsetTop})", returnByValue: true });
+  const origin = result.result.value;
+  return { x: point.x - origin.x, y: point.y - origin.y };
+}
+
 async function driveMotionGestures(send, mobile) {
   for (const expected of ["drop", "cancel", "leave"]) {
     const result = await send("Runtime.evaluate", {
@@ -224,13 +232,14 @@ async function driveMotionGestures(send, mobile) {
     const gesture = result.result?.value;
     if (!gesture) return;
     assert.equal(gesture.action, expected);
+    const start = await inputPoint(send, gesture.start);
     if (mobile) {
-      await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
-      await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [gesture.end] });
+      await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+      await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [await inputPoint(send, gesture.end)] });
     } else {
-      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
-      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...gesture.start, button: "left", buttons: 1, clickCount: 1 });
-      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.end, button: "left", buttons: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...start, button: "left", buttons: 1, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...await inputPoint(send, gesture.end), button: "left", buttons: 1 });
     }
     if (expected === "cancel")
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
@@ -239,10 +248,68 @@ async function driveMotionGestures(send, mobile) {
       await delay(80);
     }
     if (mobile) await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    else await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...gesture.end, button: "left", buttons: 0, clickCount: 1 });
+    else await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...await inputPoint(send, gesture.end), button: "left", buttons: 0, clickCount: 1 });
     await send("Runtime.evaluate", { expression: "window.__motionGesture = null" });
   }
 }
+
+async function driveCardMoveGestures(send, mobile) {
+  const evaluate = async expression => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
+  const wait = expression => evaluate(`new Promise(resolve => { const timer = setInterval(() => {
+    if (${expression} || document.documentElement.dataset.browserSmoke) { clearInterval(timer); resolve(document.documentElement.dataset.browserSmoke ? null : (${expression})); }
+  }, 10); })`);
+  while (true) {
+    const gesture = await wait("window.__cardMoveViewport || window.__cardMoveGesture");
+    if (!gesture) return;
+    if (gesture.action === "viewport") {
+      await send("Emulation.setPageScaleFactor", { pageScaleFactor: gesture.scale });
+      if (gesture.scale > 1) {
+        // Pan the zoomed visual viewport with native touch, then cancel to
+        // prevent a fling or a content click before the measured grip pickup.
+        await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 180, y: 400 }] });
+        for (let step = 1; step <= 5; step++) {
+          await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 180 - step * 14, y: 400 - step * 12 }] });
+          await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+        }
+        await send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      }
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      await evaluate("window.__cardMoveViewport = null");
+      continue;
+    }
+    const start = await inputPoint(send, gesture.start);
+    if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+    else {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...start, button: "left", buttons: 1, clickCount: 1 });
+    }
+    // A CDP acknowledgement can precede native pointer delivery. In particular,
+    // a new touch must not race the preceding touch's release during landing.
+    if (await wait("window.__cardMoveInput.pressed") === null) return;
+    for (let index = 0; index < gesture.points.length; index++) {
+      const point = gesture.points[index];
+      const input = await inputPoint(send, point);
+      if (mobile) await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [input] });
+      else await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...input, button: "left", buttons: 1 });
+      // Chromium may coalesce native touch moves until its next input frame.
+      // Inspect delivered input, rather than racing CDP acknowledgement.
+      if (await wait(`window.__cardMoveInput.cancelled || (window.__cardMoveInput.point && Math.hypot(window.__cardMoveInput.point.x - ${point.x}, window.__cardMoveInput.point.y - ${point.y}) < 1)`) === null) return;
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      await evaluate(`window.__cardMoveStep = ${index}`);
+      if (await wait(`window.__cardMoveAck === ${index}`) === null) return;
+    }
+    if (gesture.release === "escape") await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    if (gesture.release === "leave") { await evaluate('location.hash = "#core-logs"'); await delay(80); }
+    if (mobile) await send("Input.dispatchTouchEvent", { type: gesture.release === "cancel" ? "touchCancel" : "touchEnd", touchPoints: [] });
+    else {
+      if (gesture.release === "cancel") await evaluate('document.activeElement.releasePointerCapture(1)');
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...await inputPoint(send, gesture.points.at(-1)), button: "left", buttons: 0, clickCount: 1 });
+    }
+    if (await wait("window.__cardMoveInput.ended") === null) return;
+    await evaluate("window.__cardMoveGesture = null");
+  }
+}
+
 
 export async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode, diagnostics = {}) {
   diagnostics.cdp = { state: "connecting" };
@@ -366,13 +433,26 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
       await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     }
+    if (process.env.QCH_BROWSER_SMOKE_ZOOM) {
+      const zoom = Number(process.env.QCH_BROWSER_SMOKE_ZOOM);
+      assert.ok(zoom >= .5 && zoom <= 2, "browser zoom must be between 50% and 200%");
+      await send("Page.navigate", { url: "chrome://settings/appearance" });
+      let ready = false;
+      for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+        const result = await send("Runtime.evaluate", { expression: "!!globalThis.chrome?.settingsPrivate?.setDefaultZoom", returnByValue: true });
+        ready = result.result?.value; if (!ready) await delay(25);
+      }
+      assert.ok(ready, "Chromium settings zoom API was unavailable");
+      const result = await send("Runtime.evaluate", { expression: `new Promise(resolve => chrome.settingsPrivate.setDefaultZoom(${zoom}, () => chrome.settingsPrivate.getDefaultZoom(resolve)))`, awaitPromise: true, returnByValue: true });
+      assert.equal(result.result?.value, zoom, "browser must apply the requested zoom");
+    }
     if (navigateURL) await send("Page.navigate", { url: navigateURL });
     // Popup/selection suites need focus emulation, but publish no drag input.
     // Full popup playback now samples all 36 theme/route combinations.
     // Its deadline covers this extra choreography; interaction budgets are unchanged.
     if (gestureMode) await Promise.race([
-      driveMotionGestures(send, mobile),
-      delay(30000).then(() => { throw new Error("motion input timed out"); }),
+      navigateURL?.includes("mode=motion-cards") ? driveCardMoveGestures(send, mobile) : driveMotionGestures(send, mobile),
+      delay(navigateURL?.includes("mode=motion-cards") ? 90000 : 30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
     const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") ? 60000 : 45000);
     let evaluation;
@@ -388,6 +468,7 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
+              measurements: window.cardCoordinateMeasurements,
             });
           }, 10);
         })`,
@@ -447,12 +528,13 @@ async function runMode(mode) {
     assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
     profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
     await chmod(profile, 0o700);
-    const mobile = mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    const mobile = (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") ? "about:blank" : url;
     child = spawn(
       chrome,
       [
         "--headless=new",
+        ...(process.env.QCH_BROWSER_SMOKE_DPR ? [`--force-device-scale-factor=${Number(process.env.QCH_BROWSER_SMOKE_DPR)}`] : []),
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
@@ -499,14 +581,18 @@ async function runMode(mode) {
       }),
     ]);
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
-    const gestureMode = ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
+    const gestureMode = mode.startsWith("motion-cards") || ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
     const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode, diagnostics);
     assert.equal(
       result?.status,
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}`,
     );
-    if (mode === "logs") process.stdout.write(`${result.detail}\n`);
+    if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
+    if (result.measurements && process.env.QCH_BROWSER_SMOKE_REPORT) {
+      await mkdir(process.env.QCH_BROWSER_SMOKE_REPORT, { recursive: true });
+      await writeFile(join(process.env.QCH_BROWSER_SMOKE_REPORT, `${mode}.json`), JSON.stringify(result.measurements, null, 2) + "\n");
+    }
   } catch (error) {
     throw smokeFailure(mode, url, error, diagnostics, stderr);
   } finally {
@@ -521,7 +607,7 @@ async function runMode(mode) {
 }
 
 if (isMain) try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

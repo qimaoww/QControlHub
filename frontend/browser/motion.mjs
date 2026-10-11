@@ -28,10 +28,23 @@ const settled = async () => waitFor(() => !document.getAnimations().some(a => a.
 
 async function checkNavigationReversal(main, reduced) {
   const originalFetch = window.fetch;
-  let releaseTraffic;
+  const originalAnimate = main.animate;
+  const classes = main.classList, originalRemove = classes.remove;
+  let releaseTraffic, reversingOpacity, resumeOpacity;
   const trafficGate = new Promise(resolve => { releaseTraffic = resolve; });
   let trafficStarted = false;
-  let observation;
+  classes.remove = function (...tokens) {
+    if (tokens.includes("is-route-departing") && this.contains("is-route-departing"))
+      reversingOpacity = Number(getComputedStyle(main).opacity);
+    return originalRemove.apply(this, tokens);
+  };
+  main.animate = function (frames, options) {
+    const animation = originalAnimate.call(this, frames, options);
+    queueMicrotask(() => {
+      if (animation.id === "qch-route-resume") resumeOpacity = Number(frames[0].opacity);
+    });
+    return animation;
+  };
   window.fetch = async (...args) => {
     if (String(args[0]).includes("traffic-policies")) {
       trafficStarted = true;
@@ -42,40 +55,24 @@ async function checkNavigationReversal(main, reduced) {
   try {
     location.hash = "#traffic";
     await waitFor(() => main.classList.contains("is-route-departing"), "pending route departure missing");
-    // Wait for meaningful departure paint instead of assuming a timer means
-    // Chromium has presented a frame. This also makes a forced opaque frame
-    // distinguishable from the current painted position. The .32 departure
-    // endpoint bounds any progress before hashchange to less than .2.
     if (!reduced) await waitFor(() => Number(getComputedStyle(main).opacity) <= .5, "route departure must become visible");
-    // A slow runner can still be preparing the route when departure ends.
-    // Establish the blocked request before asserting restoration precedes it.
     await waitFor(() => trafficStarted, "the slow route request must start before reversal");
-    const departingOpacity = Number(getComputedStyle(main).opacity);
-    let reversedPaint;
-    // Mutation observers run after the route handler and before the next
-    // rendering opportunity. A delayed polling tick must not confuse normal
-    // resume playback with a discontinuity at the reversal itself.
-    observation = new MutationObserver(() => {
-      if (!main.classList.contains("is-route-departing") && reversedPaint === undefined)
-        reversedPaint = Number(getComputedStyle(main).opacity);
-    });
-    observation.observe(main, { attributes: true, attributeFilter: ["class"] });
     location.hash = "#node-settings";
-    await waitFor(() => reversedPaint !== undefined && !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
-    // A late observer must still compare the same painted transition. The
-    // explicit fetch gate keeps this independent of request/runner timing.
-    await delay(200);
-    assert.ok(Math.abs(reversedPaint - departingOpacity) < .2,
-      `reverse navigation must not flash to a fully opaque frame: ${departingOpacity} -> ${reversedPaint}`);
+    await waitFor(() => !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
+    // Compare the actual reversal frame with the native resume's first frame.
+    // A CI renderer may advance well beyond an earlier wall-clock sample.
+    if (!reduced) assert.ok(Math.abs(resumeOpacity - reversingOpacity) < .02,
+      `reverse navigation must start at its painted opacity without a flash: resume=${resumeOpacity}, before=${reversingOpacity}`);
     await waitFor(() => getComputedStyle(main).opacity === "1", "reversed workspace must restore its painted state");
     if (!reduced) assert.ok(document.querySelector(".is-route-pending"), "paint restoration must not wait for the cancelled slow request");
     releaseTraffic();
     await waitFor(() => !document.querySelector(".is-route-pending"), "latest reversed route must complete");
     assert.equal(document.querySelector(".workspace-main"), main, "reversal retains the mounted workspace");
   } finally {
-    observation?.disconnect();
-    releaseTraffic();
+    releaseTraffic?.();
     window.fetch = originalFetch;
+    main.animate = originalAnimate;
+    classes.remove = originalRemove;
   }
 }
 
@@ -127,6 +124,7 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   assert.equal(document.querySelector(".node-card-ghost"), null, "pointer drop removes the ghost");
   const orderAfterDrop = [...grid.querySelectorAll(".node-card")];
   await gesture(orderAfterDrop[0].querySelector(".node-card-grip"), orderAfterDrop[1], "cancel");
+  await settled();
   assert.equal(grid.querySelector(".node-card"), orderAfterDrop[0], "Escape cancels pointer drag without committing");
   assert.equal(document.querySelector(".node-card-ghost"), null);
   const grip = grid.querySelector(".node-card-grip");

@@ -3,6 +3,7 @@ import { assert } from "./assertions.mjs";
 import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
+const initialAnchor = location.hash;
 const tcpRules = [
   { key: "net.ipv4.tcp_congestion_control", label: "拥塞控制算法", choices: ["bbr", "bbr2", "bbr3", "cubic", "reno"] },
   { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "fq_pie", "pfifo_fast", "sfq", "cake"] },
@@ -186,7 +187,8 @@ if (mode === "logs-restore") {
 if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
   location.hash = "#traffic";
   setStorageAccount({ role: "admin" });
-  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
+  if (!accountStorage.getItem("qcontrolhub:node-card-order"))
+    accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.trafficCandidates = [
     { agent_id: "alpha", name: "误删的 VLESS 入口", engine: "xray", port: 443, protocol: "both", kind: "deleted" },
     { agent_id: "bravo", name: "新增的香港入口", engine: "sing-box", port: 9443, protocol: "tcp", kind: "new" },
@@ -244,7 +246,18 @@ if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     });
   }
 }
-if (mode.startsWith("motion")) location.hash = "#node-settings";
+if (mode.startsWith("motion-cards")) {
+  testAPI.agents.push(...[1, 2, 3, 4].map(index => onlineAgent(`card-extra-${index}`)));
+  testAPI.trafficPolicies.push(...testAPI.trafficPolicies.slice(0, 4).map((policy, index) => ({
+    ...policy, id: `trf_card_extra_${index}`, port: policy.port + 100,
+  })));
+  testAPI.trafficEndpoints = [
+    { agent_id: "alpha", name: "Discovered Mihomo listener", engine: "mihomo", port: 19443, protocol: "both" },
+    { agent_id: "delta", name: "Discovered SS listener", engine: "ss-rust", port: 19444, protocol: "both" },
+  ];
+}
+if (mode.startsWith("motion-cards")) location.hash = initialAnchor || "#node-settings";
+else if (mode.startsWith("motion")) location.hash = "#node-settings";
 const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
 if (mode.startsWith("motion")) testAPI.settings = { panel_name: "Motion preview", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 if (mode.startsWith("capabilities-settings")) {
@@ -302,7 +315,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
-    if (path === "/traffic-endpoints") return json([]);
+    if (path === "/traffic-endpoints") return json(testAPI.trafficEndpoints || []);
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;

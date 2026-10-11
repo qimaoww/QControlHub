@@ -33,7 +33,7 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 	}
 	for _, required := range []string{
 		`orderedNodeList(agents)`,
-		`saveNodeOrder(ids);`,
+		`saveNodeOrder(cards.map(card => card.dataset.agentNode))`,
 	} {
 		if !strings.Contains(agents, required) {
 			t.Errorf("node settings drag ordering is not using shared persistence: missing %q", required)
