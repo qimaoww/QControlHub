@@ -103,10 +103,13 @@ order. They cover centre/corner/handle grabs, slow and fast motion, reversals,
 interrupting landing, variable heights, multiple rows/columns, first/last slots,
 gaps, stationary reflow, sidebar offset, CSS zoom and nested manual/edge scrolling.
 Touch starts on the grip; normal card content remains available for scrolling.
-For deterministic interruption coverage, the native driver pauses the in-flight
-landing at its current painted frame while aiming at its small grip; production
-pointer-down must cancel it and preserve the grab point. Other gestures and the
-recordings run with animation progressing normally.
+For deterministic interruption coverage, the fixture waits for an in-flight
+landing to pause before selecting a grip that is actually visible and hit-testable.
+Its short-card fixture keeps the header from shrinking underneath the body, and
+uses a longer reorder token so the normal animation safety deadline cannot fire
+while a loaded CI driver aims. Production pointer-down must cancel the existing
+landing and preserve its grab point. Other gestures and the recordings run with
+normal animation playback.
 Browser zoom uses Chromium's actual default zoom setting, separately from display
 scale. At 125% zoom and 150% display scale the observed DPR is 1.875.
 
@@ -147,12 +150,19 @@ styles from `2bbd07b` are unchanged by that main update.
 - Browser 125% zoom with 150% display scale: 34 gestures passed; maximum error
   was 0.189 CSS pixels. Every successful drop matched its last preview.
 - Both recordings verify their own pointer error and preview/final order.
-- `make check`: ran to exit 2. All eight card modes passed, then the existing
-  `motion-selection` assertion `quota refresh retains focus` failed (focus becomes
-  the document body). That assertion also fails on an unmodified checkout of
-  main `df1ad92`.
+The initial `make check` ran to exit 2 after all eight card modes passed, at
+`motion-selection` / `quota refresh retains focus`. This also failed on unmodified
+main `df1ad92`. During merge review, the quota launcher now restores focus after
+its temporary disabled state, provided focus has not moved to another control.
+All four selection modes pass with that repair.
 
-The baseline quota-focus failure is not reported as a successful full-suite check.
+Merge review also found that the new interruption fixture could aim at a grip
+occluded by another landing card or by its artificially compressed body. The
+fixture changes described above fix that input race. All four coordinate modes
+and all four existing motion modes pass. Navigation reversal uses a controlled
+request gate and compares the captured reversal opacity with the native resume
+keyframe, avoiding stale wall-clock samples. Full-check and CI results are
+recorded in the PR.
 
 ## Persistence and rollback
 

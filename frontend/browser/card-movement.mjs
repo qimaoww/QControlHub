@@ -23,10 +23,10 @@ const trafficPaint = (original, preview) => {
 
 // The runner dispatches real mouse/touch events and waits for each inspection
 // acknowledgement before sending the next input. Timing cannot skip assertions.
-export async function gesture(start, points, release, inspect = async () => {}, waitForLanding = true, liveStart = null) {
+export async function gesture(start, points, release, inspect = async () => {}, waitForLanding = true) {
   window.__cardMoveStep = -1;
   window.__cardMoveAck = -1;
-  window.__cardMoveGesture = { start, points, release, liveStart };
+  window.__cardMoveGesture = { start, points, release };
   for (let index = 0; index < points.length; index++) {
     await waitFor(() => window.__cardMoveStep === index, "native input step missing");
     await inspect(index, points[index]);

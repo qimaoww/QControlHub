@@ -41,7 +41,7 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
       sample();
       await inspect(index, point);
       await frames(); sample();
-    }, waitForLanding, waitForLanding ? null : `[${card.dataset.agentNode ? "data-agent-node" : "data-traffic-card-key"}="${CSS.escape(id(card))}"] .node-card-grip`);
+    }, waitForLanding);
     document.removeEventListener("pointerup", releasing, true);
     equal(order(grid), release === "drop" ? expected : initial, `${name}: final order equals the last preview`);
     assert.equal(document.querySelector(".card-move-ghost,.card-move-layer,.card-move-active"), null, `${name}: cleans up`);
@@ -52,6 +52,7 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
   const fixtureStyle = document.createElement("style");
   fixtureStyle.textContent = `body[data-card-coordinate-layout] :is(.node-card-grid,.traffic-policy-grid){grid-template-columns:var(--card-coordinate-columns)!important;align-items:start!important;scroll-margin-top:160px}
     body[data-card-coordinate-layout] :is(.node-card-grid>.node-card,.traffic-policy-grid>.traffic-policy-card){height:110px!important;min-height:0!important}
+    body[data-card-coordinate-layout] :is(.node-card-head,.traffic-card-header){flex-shrink:0}
     body[data-card-coordinate-layout] :is(.node-card-grid>.node-card,.traffic-policy-grid>.traffic-policy-card):nth-child(3n){height:130px!important}`;
   document.head.append(fixtureStyle);
   for (const type of ["nodes", "traffic"]) {
@@ -110,8 +111,23 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
     });
 
     await prepare();
+    // Keep the production landing alive while a loaded CI browser processes
+    // native input. Its normal safety deadline must not expire during aiming.
+    document.documentElement.style.setProperty("--motion-reorder", "2000ms");
     for (let index = 0; index < 3; index++) {
-      const quick = cards(grid)[index % 2];
+      const landings = document.getAnimations().filter(animation => animation.id === "qch-drop");
+      if (index && !mode.endsWith("reduced")) assert.ok(landings.length, "next pickup must interrupt a landing");
+      landings.forEach(animation => animation.pause());
+      await Promise.all(landings.map(animation => animation.ready));
+      await frames();
+      // Yielding cards can overlap during landing. A user can only pick a
+      // visible grip; aiming at an occluded grip would hit a different card.
+      const visible = cards(grid).filter(item => {
+        const grip = item.querySelector(".node-card-grip"), point = center(grip.getBoundingClientRect());
+        return point.y > 100 && point.y < innerHeight - (mobile ? 100 : 8) && grip.contains(document.elementFromPoint(point.x, point.y));
+      });
+      assert.ok(visible.length, `${type}/interrupt-landing/${index}: a visible grip must remain available`);
+      const quick = visible[index % visible.length];
       start = center(quick.querySelector(".node-card-grip").getBoundingClientRect());
       const box = grid.getBoundingClientRect();
       end = { x: index % 2 ? box.left + 30 : box.right - 30, y: box.top + 45 };
@@ -119,6 +135,7 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
       await run(grid, quick, start, [end], `${type}/interrupt-landing/${index}`, async () => {}, "drop", false);
     }
     await settled();
+    document.documentElement.style.removeProperty("--motion-reorder");
 
     await prepare();
     const gapCard = cards(grid)[0];

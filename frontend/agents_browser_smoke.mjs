@@ -203,14 +203,6 @@ async function driveCardMoveGestures(send, mobile) {
   while (true) {
     const gesture = await wait("window.__cardMoveGesture");
     if (!gesture) return;
-    // Hold the in-flight landing at its current painted frame while CDP aims
-    // at a small moving grip. Production pointerdown must still cancel that
-    // animation and preserve its painted grab point; no DOM order is changed.
-    if (gesture.liveStart) gesture.start = await evaluate(`(() => {
-      document.getAnimations().filter(animation => animation.id === "qch-drop").forEach(animation => animation.pause());
-      const box = document.querySelector(${JSON.stringify(gesture.liveStart)}).getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-    })()`);
     if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
     else {
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });

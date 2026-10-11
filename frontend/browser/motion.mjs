@@ -28,24 +28,46 @@ const settled = async () => waitFor(() => !document.getAnimations().some(a => a.
 
 async function checkNavigationReversal(main, reduced) {
   const originalFetch = window.fetch;
+  const originalAnimate = main.animate;
+  const classes = main.classList, originalRemove = classes.remove;
+  let releaseTraffic, reversingOpacity, resumeOpacity;
+  classes.remove = function (...tokens) {
+    if (tokens.includes("is-route-departing") && this.contains("is-route-departing"))
+      reversingOpacity = Number(getComputedStyle(main).opacity);
+    return originalRemove.apply(this, tokens);
+  };
+  main.animate = function (frames, options) {
+    const animation = originalAnimate.call(this, frames, options);
+    queueMicrotask(() => {
+      if (animation.id === "qch-route-resume") resumeOpacity = Number(frames[0].opacity);
+    });
+    return animation;
+  };
   window.fetch = async (...args) => {
-    if (String(args[0]).includes("traffic-policies")) await delay(700);
+    if (String(args[0]).includes("traffic-policies")) await new Promise(resolve => { releaseTraffic = resolve; });
     return originalFetch(...args);
   };
   try {
     location.hash = "#traffic";
-    await waitFor(() => main.classList.contains("is-route-departing"), "pending route departure missing");
+    await waitFor(() => releaseTraffic && main.classList.contains("is-route-departing"), "pending route departure missing");
     await delay(60);
-    const departingOpacity = Number(getComputedStyle(main).opacity);
     location.hash = "#node-settings";
     await waitFor(() => !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
-    assert.ok(Math.abs(Number(getComputedStyle(main).opacity) - departingOpacity) < .2,
-      "reverse navigation must not flash to a fully opaque frame");
+    // Compare the actual reversal frame with the native resume's first frame.
+    // A CI renderer may advance well beyond an earlier wall-clock sample.
+    if (!reduced) assert.ok(Math.abs(resumeOpacity - reversingOpacity) < .02,
+      `reverse navigation must start at its painted opacity without a flash: resume=${resumeOpacity}, before=${reversingOpacity}`);
     await waitFor(() => getComputedStyle(main).opacity === "1", "reversed workspace must restore its painted state");
     if (!reduced) assert.ok(document.querySelector(".is-route-pending"), "paint restoration must not wait for the cancelled slow request");
+    releaseTraffic();
     await waitFor(() => !document.querySelector(".is-route-pending"), "latest reversed route must complete");
     assert.equal(document.querySelector(".workspace-main"), main, "reversal retains the mounted workspace");
-  } finally { window.fetch = originalFetch; }
+  } finally {
+    releaseTraffic?.();
+    window.fetch = originalFetch;
+    main.animate = originalAnimate;
+    classes.remove = originalRemove;
+  }
 }
 
 async function checkListReversal(reduced) {
