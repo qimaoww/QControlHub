@@ -366,9 +366,9 @@ export function reconcileView(current, fresh, runtime = {}) {
     replaced: 0,
     updated: 0,
   };
-  const state = captureViewState(current, documentObject, windowObject);
+  const state = runtime.preserveViewState === false ? null : captureViewState(current, documentObject, windowObject);
   const result = reconcileNode(current, fresh, metrics);
-  restoreViewState(state, windowObject);
+  if (state) restoreViewState(state, windowObject);
   return result;
 }
 

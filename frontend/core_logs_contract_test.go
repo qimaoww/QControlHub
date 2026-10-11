@@ -32,7 +32,9 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	for _, required := range []string{
 		`data-core-log-engine`,
 		`data-core-log-level`,
-		`renderLocalFilters({ q: event.currentTarget.value })`,
+		`renderLocalFilters({ q: search.value })`,
+		`compositionend`,
+		`!event.isComposing`,
 		`data-toggle-core-log-refresh`,
 		`core-log-columns`,
 		`每内核上限<select name="limit">`,

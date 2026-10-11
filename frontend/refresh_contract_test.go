@@ -89,7 +89,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		},
 		"modules/core-logs.js": {
 			"createPoller({",
-			"filterCoreLogEntries(sourceEntries, filters)",
+			"createCoreLogProjection(engines)",
 			"data-core-log-engine",
 			"data-core-log-level",
 			"data-refresh-key=\"core-log-${esc(entry.id)}\"",

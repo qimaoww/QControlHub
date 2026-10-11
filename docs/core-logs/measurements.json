@@ -1,0 +1,1003 @@
+{
+  "wan_before": {
+    "firstVisibleMs": 2393,
+    "steps": [
+      {
+        "name": "limit2000",
+        "ms": 4204
+      },
+      {
+        "name": "search",
+        "ms": 526
+      },
+      {
+        "name": "reset",
+        "ms": 184
+      },
+      {
+        "name": "page2",
+        "ms": 589
+      },
+      {
+        "name": "coldSwitch",
+        "ms": 5096
+      },
+      {
+        "name": "cachedSwitch",
+        "ms": 406
+      }
+    ],
+    "initial": {
+      "rows": 200,
+      "requests": [
+        {
+          "limit": "1000",
+          "ttfbMs": 197,
+          "transferMs": 1654,
+          "durationMs": 1851,
+          "encodedBytes": 6991454,
+          "decodedBytes": 6991454
+        }
+      ],
+      "loadedRows": 4000
+    },
+    "initialCompleteMs": 2697,
+    "network": [
+      {
+        "limit": "1000",
+        "ttfbMs": 197,
+        "transferMs": 1654,
+        "durationMs": 1851,
+        "encodedBytes": 6991454,
+        "decodedBytes": 6991454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 254,
+        "transferMs": 3314,
+        "durationMs": 3569,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "200",
+        "ttfbMs": 164,
+        "transferMs": 313,
+        "durationMs": 478,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 278,
+        "transferMs": 3333,
+        "durationMs": 3612,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 235,
+        "transferMs": 3318,
+        "durationMs": 3555,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 2030.6999998092651,
+        "ms": 91
+      },
+      {
+        "at": 2709.3999996185303,
+        "ms": 318
+      },
+      {
+        "at": 6805,
+        "ms": 54
+      },
+      {
+        "at": 6970.800000190735,
+        "ms": 438
+      },
+      {
+        "at": 7713.800000190735,
+        "ms": 465
+      },
+      {
+        "at": 8307.39999961853,
+        "ms": 342
+      },
+      {
+        "at": 12866.699999809265,
+        "ms": 411
+      },
+      {
+        "at": 13398.699999809265,
+        "ms": 300
+      },
+      {
+        "at": 17402.39999961853,
+        "ms": 323
+      }
+    ],
+    "browser": {
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.0.0 Safari/537.36",
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "wan_after": {
+    "firstVisibleMs": 1015,
+    "steps": [
+      {
+        "name": "limit2000",
+        "ms": 3724
+      },
+      {
+        "name": "search",
+        "ms": 60
+      },
+      {
+        "name": "reset",
+        "ms": 138
+      },
+      {
+        "name": "page2",
+        "ms": 127
+      },
+      {
+        "name": "coldSwitch",
+        "ms": 3753
+      },
+      {
+        "name": "cachedSwitch",
+        "ms": 90
+      }
+    ],
+    "initial": {
+      "rows": 200,
+      "requests": [
+        {
+          "limit": "200",
+          "ttfbMs": 173,
+          "transferMs": 317,
+          "durationMs": 491,
+          "encodedBytes": 1397853,
+          "decodedBytes": 1397853
+        }
+      ],
+      "loadedRows": 800
+    },
+    "initialCompleteMs": 2294,
+    "network": [
+      {
+        "limit": "200",
+        "ttfbMs": 173,
+        "transferMs": 317,
+        "durationMs": 491,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "1000",
+        "ttfbMs": 224,
+        "transferMs": 1666,
+        "durationMs": 1893,
+        "encodedBytes": 6991454,
+        "decodedBytes": 6991454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 240,
+        "transferMs": 3310,
+        "durationMs": 3551,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "200",
+        "ttfbMs": 161,
+        "transferMs": 311,
+        "durationMs": 478,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 234,
+        "transferMs": 3308,
+        "durationMs": 3547,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 268,
+        "transferMs": 3311,
+        "durationMs": 3580,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      }
+    ],
+    "longTasks": [],
+    "browser": {
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.0.0 Safari/537.36",
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "production_before": {
+    "steps": [
+      {
+        "name": "limit2000",
+        "ms": 18436
+      },
+      {
+        "name": "search",
+        "ms": 137
+      },
+      {
+        "name": "reset",
+        "ms": 193
+      },
+      {
+        "name": "page2",
+        "ms": 196
+      },
+      {
+        "name": "coldSwitch",
+        "ms": 1222
+      },
+      {
+        "name": "cachedSwitch",
+        "ms": 168
+      }
+    ],
+    "initial": {
+      "rows": 200,
+      "requests": [
+        {
+          "limit": "1000",
+          "ttfbMs": 12274,
+          "transferMs": 17,
+          "durationMs": 12296,
+          "encodedBytes": 108070,
+          "decodedBytes": 1262437
+        }
+      ],
+      "loadedRows": 3153
+    },
+    "network": [
+      {
+        "limit": "1000",
+        "ttfbMs": 12274,
+        "transferMs": 17,
+        "durationMs": 12296,
+        "encodedBytes": 108070,
+        "decodedBytes": 1262437
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 18264,
+        "transferMs": 25,
+        "durationMs": 18290,
+        "encodedBytes": 211693,
+        "decodedBytes": 2466329
+      },
+      {
+        "limit": "200",
+        "ttfbMs": 219,
+        "transferMs": 1,
+        "durationMs": 222,
+        "encodedBytes": 8101,
+        "decodedBytes": 120246
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 700,
+        "transferMs": 51,
+        "durationMs": 752,
+        "encodedBytes": 77745,
+        "decodedBytes": 1202448
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 18081,
+        "transferMs": 57,
+        "durationMs": 18140,
+        "encodedBytes": 211560,
+        "decodedBytes": 2466269
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 62.5,
+        "ms": 101
+      },
+      {
+        "at": 13282.300000190735,
+        "ms": 80
+      },
+      {
+        "at": 31739.5,
+        "ms": 92
+      },
+      {
+        "at": 31923.10000038147,
+        "ms": 96
+      },
+      {
+        "at": 32122.800000190735,
+        "ms": 95
+      },
+      {
+        "at": 32322.199999809265,
+        "ms": 88
+      },
+      {
+        "at": 33404,
+        "ms": 86
+      },
+      {
+        "at": 51739.10000038147,
+        "ms": 96
+      },
+      {
+        "at": 52016.300000190735,
+        "ms": 94
+      }
+    ]
+  },
+  "short_before": {
+    "loaded": 8000,
+    "domRows": 200,
+    "initialMs": 288,
+    "expandedMs": 186,
+    "pageMs": 154,
+    "filterMs": 125,
+    "switchAckMs": 121,
+    "previewRenderMs": 38,
+    "cachedSwitchMs": 141
+  },
+  "short_after": {
+    "loaded": 8000,
+    "domRows": 200,
+    "initialMs": 336,
+    "expandedMs": 62,
+    "pageMs": 24,
+    "filterMs": 19,
+    "switchAckMs": 9,
+    "previewRenderMs": 41,
+    "cachedSwitchMs": 19,
+    "longPageMs": 15
+  },
+  "database_skew_before": [
+    "node limit=200 rows=400 sql_ms=11.622 read_ms=4.26 json_ms=1.97 bytes=454801",
+    "node limit=1000 rows=2000 sql_ms=53.018 read_ms=13.50 json_ms=7.88 bytes=2273726",
+    "node limit=2000 rows=3000 sql_ms=74.471 read_ms=23.14 json_ms=13.54 bytes=3411726",
+    "all limit=200 rows=400 sql_ms=183.879 read_ms=164.57 json_ms=0.66 bytes=455201",
+    "all limit=1000 rows=2000 sql_ms=214.382 read_ms=136.97 json_ms=4.01 bytes=2276001",
+    "all limit=2000 rows=4000 sql_ms=230.786 read_ms=142.60 json_ms=13.32 bytes=4551502"
+  ],
+  "database_skew_after": [
+    "node limit=200 rows=400 sql_ms=13.775 read_ms=12.72 json_ms=19.25 bytes=454801",
+    "node limit=1000 rows=2000 sql_ms=60.159 read_ms=63.22 json_ms=19.37 bytes=2273726",
+    "node limit=2000 rows=3000 sql_ms=139.988 read_ms=36.55 json_ms=20.03 bytes=3411726",
+    "all limit=200 rows=400 sql_ms=15.007 read_ms=7.43 json_ms=1.22 bytes=455201",
+    "all limit=1000 rows=2000 sql_ms=72.222 read_ms=17.60 json_ms=12.86 bytes=2276001",
+    "all limit=2000 rows=4000 sql_ms=115.098 read_ms=24.52 json_ms=19.67 bytes=4551502"
+  ],
+  "database_balanced_before": [
+    "node limit=200 rows=800 sql_ms=25.034 read_ms=8.33 json_ms=3.75 bytes=910601",
+    "node limit=1000 rows=4000 sql_ms=102.423 read_ms=17.01 json_ms=15.88 bytes=4553001",
+    "node limit=2000 rows=8000 sql_ms=205.33 read_ms=33.78 json_ms=29.20 bytes=9106001",
+    "all limit=200 rows=800 sql_ms=23.016 read_ms=4.74 json_ms=1.33 bytes=911401",
+    "all limit=1000 rows=4000 sql_ms=115.578 read_ms=24.25 json_ms=11.29 bytes=4557001",
+    "all limit=2000 rows=8000 sql_ms=228.167 read_ms=56.40 json_ms=32.09 bytes=9114001"
+  ],
+  "database_balanced_after": [
+    "node limit=200 rows=800 sql_ms=22.439 read_ms=8.57 json_ms=3.41 bytes=910601",
+    "node limit=1000 rows=4000 sql_ms=144.439 read_ms=26.64 json_ms=26.07 bytes=4553001",
+    "node limit=2000 rows=8000 sql_ms=209.026 read_ms=40.82 json_ms=30.00 bytes=9106001",
+    "all limit=200 rows=800 sql_ms=21.286 read_ms=5.78 json_ms=1.44 bytes=911401",
+    "all limit=1000 rows=4000 sql_ms=103.036 read_ms=23.25 json_ms=7.02 bytes=4557001",
+    "all limit=2000 rows=8000 sql_ms=202.83 read_ms=40.34 json_ms=27.20 bytes=9114001"
+  ],
+  "render_before": {
+    "steps": [
+      {
+        "name": "search",
+        "ms": 774
+      },
+      {
+        "name": "reset",
+        "ms": 100
+      },
+      {
+        "name": "page2",
+        "ms": 502
+      }
+    ],
+    "rendering": {
+      "UpdateLayoutTree": {
+        "calls": 427,
+        "totalMs": 97.4129999999998,
+        "maxMs": 5.069
+      },
+      "Layout": {
+        "calls": 402,
+        "totalMs": 876.1980000000005,
+        "maxMs": 16.795
+      },
+      "Paint": {
+        "calls": 51,
+        "totalMs": 11.525999999999998,
+        "maxMs": 1.273
+      }
+    },
+    "phases": [
+      {
+        "phase": "filterCoreLogEntries",
+        "ms": 47.09999942779541
+      },
+      {
+        "phase": "coreLogFilterCounts",
+        "ms": 0.8000001907348633
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 0.10000038146972656
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 600.6000003814697
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 605.8000001907349
+      },
+      {
+        "phase": "view",
+        "ms": 663.6999998092651
+      },
+      {
+        "phase": "filterCoreLogEntries",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "coreLogFilterCounts",
+        "ms": 0.9000005722045898
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 12.899999618530273
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 7.300000190734863
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 13.600000381469727
+      },
+      {
+        "phase": "view",
+        "ms": 33.30000019073486
+      },
+      {
+        "phase": "filterCoreLogEntries",
+        "ms": 1
+      },
+      {
+        "phase": "coreLogFilterCounts",
+        "ms": 0.8999996185302734
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 8.90000057220459
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 428.4000005722046
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 438.1000003814697
+      },
+      {
+        "phase": "view",
+        "ms": 454.19999980926514
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 46313.300000190735,
+        "ms": 673
+      },
+      {
+        "at": 47211.599999427795,
+        "ms": 456
+      }
+    ]
+  },
+  "render_after": {
+    "steps": [
+      {
+        "name": "search",
+        "ms": 52
+      },
+      {
+        "name": "reset",
+        "ms": 72
+      },
+      {
+        "name": "page2",
+        "ms": 62
+      }
+    ],
+    "rendering": {
+      "Paint": {
+        "calls": 50,
+        "totalMs": 11.197,
+        "maxMs": 1.184
+      },
+      "UpdateLayoutTree": {
+        "calls": 40,
+        "totalMs": 7.646000000000003,
+        "maxMs": 0.966
+      },
+      "Layout": {
+        "calls": 26,
+        "totalMs": 42.671,
+        "maxMs": 13.718
+      }
+    },
+    "phases": [
+      {
+        "phase": "projection",
+        "ms": 15.09999942779541
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 0
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.6000003814697266
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.8000001907348633
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.39999961853027344
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.39999961853027344
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 1.4000005722045898
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.2999992370605469
+      },
+      {
+        "phase": "view",
+        "ms": 19.899999618530273
+      },
+      {
+        "phase": "projection",
+        "ms": 0
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 0.3000001907348633
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.8999996185302734
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 1.3000001907348633
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.20000076293945312
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.6000003814697266
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.5
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.7000007629394531
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.10000038146972656
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.5
+      },
+      {
+        "phase": "view",
+        "ms": 10.600000381469727
+      },
+      {
+        "phase": "projection",
+        "ms": 0
+      },
+      {
+        "phase": "rowHTML",
+        "ms": 0.8999996185302734
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.10000038146972656
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 0.8000001907348633
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 3.3000001907348633
+      },
+      {
+        "phase": "captureViewState",
+        "ms": 0.09999942779541016
+      },
+      {
+        "phase": "reconcileView",
+        "ms": 1
+      },
+      {
+        "phase": "view",
+        "ms": 15.40000057220459
+      }
+    ],
+    "longTasks": []
+  },
+  "instrumented_wan_before": {
+    "firstVisibleMs": 2784,
+    "steps": [
+      {
+        "name": "limit2000",
+        "ms": 4425
+      },
+      {
+        "name": "search",
+        "ms": 723
+      },
+      {
+        "name": "reset",
+        "ms": 266
+      },
+      {
+        "name": "page2",
+        "ms": 1201
+      },
+      {
+        "name": "coldSwitch",
+        "ms": 5234
+      },
+      {
+        "name": "cachedSwitch",
+        "ms": 1194
+      }
+    ],
+    "initial": {
+      "rows": 200,
+      "requests": [
+        {
+          "limit": "1000",
+          "ttfbMs": 310,
+          "transferMs": 1684,
+          "durationMs": 1996,
+          "encodedBytes": 6991454,
+          "decodedBytes": 6991454
+        }
+      ],
+      "loadedRows": 4000
+    },
+    "initialCompleteMs": 3344,
+    "network": [
+      {
+        "limit": "1000",
+        "ttfbMs": 310,
+        "transferMs": 1684,
+        "durationMs": 1996,
+        "encodedBytes": 6991454,
+        "decodedBytes": 6991454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 272,
+        "transferMs": 3440,
+        "durationMs": 3715,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "200",
+        "ttfbMs": 166,
+        "transferMs": 326,
+        "durationMs": 503,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 393,
+        "transferMs": 3379,
+        "durationMs": 3775,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 266,
+        "transferMs": 3322,
+        "durationMs": 3590,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 34.89999961853027,
+        "ms": 57
+      },
+      {
+        "at": 2577.5,
+        "ms": 143
+      },
+      {
+        "at": 2802.300000190735,
+        "ms": 98
+      },
+      {
+        "at": 3359.300000190735,
+        "ms": 441
+      },
+      {
+        "at": 7801.199999809265,
+        "ms": 664
+      },
+      {
+        "at": 8624.099999427795,
+        "ms": 71
+      },
+      {
+        "at": 8890.800000190735,
+        "ms": 991
+      },
+      {
+        "at": 10092.300000190735,
+        "ms": 405
+      },
+      {
+        "at": 11025.39999961853,
+        "ms": 57
+      },
+      {
+        "at": 11088.300000190735,
+        "ms": 86
+      },
+      {
+        "at": 14915.699999809265,
+        "ms": 297
+      },
+      {
+        "at": 15300.800000190735,
+        "ms": 271
+      },
+      {
+        "at": 19368,
+        "ms": 1073
+      }
+    ],
+    "phases": {
+      "filterCoreLogEntries": {
+        "calls": 13,
+        "totalMs": 32.90000057220459,
+        "maxMs": 24.5
+      },
+      "coreLogFilterCounts": {
+        "calls": 14,
+        "totalMs": 10.59999942779541,
+        "maxMs": 4.40000057220459
+      },
+      "rowHTML": {
+        "calls": 13,
+        "totalMs": 24.200000762939453,
+        "maxMs": 15.800000190734863
+      },
+      "view": {
+        "calls": 13,
+        "totalMs": 4324.099999427795,
+        "maxMs": 1063.8000001907349
+      },
+      "captureViewState": {
+        "calls": 12,
+        "totalMs": 3923.4999990463257,
+        "maxMs": 1056.6000003814697
+      },
+      "reconcileView": {
+        "calls": 12,
+        "totalMs": 4059.599997520447,
+        "maxMs": 1062.5
+      }
+    },
+    "browser": {
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.0.0 Safari/537.36",
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "instrumented_wan_after": {
+    "firstVisibleMs": 1022,
+    "steps": [
+      {
+        "name": "limit2000",
+        "ms": 3827
+      },
+      {
+        "name": "search",
+        "ms": 183
+      },
+      {
+        "name": "reset",
+        "ms": 196
+      },
+      {
+        "name": "page2",
+        "ms": 244
+      },
+      {
+        "name": "coldSwitch",
+        "ms": 4005
+      },
+      {
+        "name": "cachedSwitch",
+        "ms": 161
+      }
+    ],
+    "initial": {
+      "rows": 200,
+      "requests": [
+        {
+          "limit": "200",
+          "ttfbMs": 173,
+          "transferMs": 310,
+          "durationMs": 484,
+          "encodedBytes": 1397853,
+          "decodedBytes": 1397853
+        }
+      ],
+      "loadedRows": 800
+    },
+    "initialCompleteMs": 2443,
+    "network": [
+      {
+        "limit": "200",
+        "ttfbMs": 173,
+        "transferMs": 310,
+        "durationMs": 484,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "1000",
+        "ttfbMs": 260,
+        "transferMs": 1678,
+        "durationMs": 1942,
+        "encodedBytes": 6991454,
+        "decodedBytes": 6991454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 279,
+        "transferMs": 3309,
+        "durationMs": 3598,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "200",
+        "ttfbMs": 165,
+        "transferMs": 317,
+        "durationMs": 498,
+        "encodedBytes": 1397853,
+        "decodedBytes": 1397853
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 253,
+        "transferMs": 3353,
+        "durationMs": 3621,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      },
+      {
+        "limit": "2000",
+        "ttfbMs": 328,
+        "transferMs": 3311,
+        "durationMs": 3640,
+        "encodedBytes": 13988454,
+        "decodedBytes": 13988454
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 6439,
+        "ms": 59
+      }
+    ],
+    "phases": {
+      "coreLogFilterCounts": {
+        "calls": 13,
+        "totalMs": 9.79999828338623,
+        "maxMs": 2.8000001907348633
+      },
+      "projection": {
+        "calls": 16,
+        "totalMs": 46.699997901916504,
+        "maxMs": 37
+      },
+      "rowHTML": {
+        "calls": 16,
+        "totalMs": 11.900001525878906,
+        "maxMs": 2.8000001907348633
+      },
+      "view": {
+        "calls": 16,
+        "totalMs": 309.0999994277954,
+        "maxMs": 50.10000038146973
+      },
+      "captureViewState": {
+        "calls": 57,
+        "totalMs": 25.200003623962402,
+        "maxMs": 5.300000190734863
+      },
+      "reconcileView": {
+        "calls": 70,
+        "totalMs": 111.50000190734863,
+        "maxMs": 12.800000190734863
+      }
+    },
+    "browser": {
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.0.0 Safari/537.36",
+      "width": 1280,
+      "height": 720
+    }
+  }
+}

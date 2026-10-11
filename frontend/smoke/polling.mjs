@@ -60,8 +60,8 @@ try {
     clearTimer: (id) => coreTimers.delete(id),
   });
   await renderCoreLogs();
-  assert.equal(coreRequests, 2, "log refresh uses two parallel data requests");
-  assert.equal(coreRenders, 1);
+  assert.equal(coreRequests, 3, "initial log delivery starts metadata, preview and full reads together");
+  assert.equal(coreRenders, 3, "initial loading, metadata, and ready states render once each");
   assert.equal(coreTimers.size, 1, "log polling owns one timer");
   assert.equal(coreMarkup.includes('data-refresh-key="core-log-1"'), true);
   assert.equal(coreMarkup.includes('name="agent_id"'), false, "the sidebar is the only node filter");
@@ -70,23 +70,25 @@ try {
   assert.equal(coreMarkup.includes('type="submit"'), false, "core log filters do not require an apply action");
   assert.equal(coreMarkup.includes("core-log-columns"), true, "the light log table has explicit column headings");
   assert.equal(coreMarkup.includes('每内核上限<select name="limit">'), true, "the log count setting explicitly applies to each engine");
+  const previousEntries = coreState.data.coreLogEntries;
   const corePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await corePoll();
-  assert.equal(coreRequests, 4, "one log poll issues one request per data source");
-  assert.equal(coreRenders, 2);
+  assert.equal(coreRequests, 5, "one log poll issues one request per data source");
+  assert.equal(coreRenders, 4, "an unchanged poll renders only its final state in the DOM-free fixture");
   assert.equal(coreTimers.size, 1, "log polling reschedules exactly one timer");
+  assert.equal(coreState.data.coreLogEntries, previousEntries, "unchanged polls preserve the searchable snapshot identity");
   coreFailure = true;
   const failedCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await failedCorePoll();
-  assert.equal(coreRenders, 3, "a log error preserves data and renders the failure status");
+  assert.equal(coreRenders, 5, "a failure renders feedback without clearing data");
   assert.equal(coreTimers.size, 1, "a log error keeps recovery polling alive");
   coreFailure = false;
   const recoveredCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await recoveredCorePoll();
-  assert.equal(coreRenders, 4, "log polling recovers without clearing state");
+  assert.equal(coreRenders, 6, "recovery renders the ready state");
   assert.equal(coreTimers.size, 1);
   coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
     Array.from({ length: 100 }, (_, index) => ({
