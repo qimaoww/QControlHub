@@ -8,6 +8,8 @@ Measured on 2026-10-11 against **main `df1ad925`**, the merge of [#258](https://
 
 The existing assertion sampled opacity on opposite sides of asynchronous navigation and a later polling tick. Delaying the second observation by 200 ms reproduced the same failure with unchanged main animation code: normal resume playback was mistaken for a discontinuity. The fixed test waits for a visible departure, captures the reversal with a MutationObserver before the next rendering opportunity, and uses an explicit slow-request gate. The original 0.2 tolerance, DOM identity, restored opacity and restoration-before-request-completion assertions remain. A deliberate 200 ms delayed observer still passes; a separate mutation forcing the resume opacity to 1 correctly fails (`0.431451 -> 1`). Four desktop/mobile, normal/reduced motion modes pass on host Chromium and Alpine 3.24.1 / Chromium 152 / Node 24. No CI check, workflow or threshold was removed.
 
+The follow-up PR runs also exposed two existing fixture preconditions. [Run 38121771629](https://github.com/qimaoww/QControlHub/actions/runs/38121771629), at `1b6ecd4f`, reversed before the simulated slow request had started on Debian; the test now waits for the request to enter its gate. [Run 38122775847](https://github.com/qimaoww/QControlHub/actions/runs/38122775847), at `21041ca4`, passed Debian but failed the Alpine popup test. Its injected menu lived inside the traffic page's server-owned workspace, which a two-second background poll legitimately reconciles. Triggering the actual poll at menu opening reproduced the original failure: the host disconnected, the menu closed and focus was lost. The fixture now lives outside that workspace, like the existing disclosure fixtures. A new regression observes a real poll removing a workspace marker, then asserts that the isolated menu remains connected, open and focused. Original reveal, rebind, Escape, outside-click and focus-exit assertions remain. Four popup modes pass on host and Alpine Chromium. Disabling the disclosure transition in a temporary negative control still fails the original reveal assertion.
+
 ## Current read path and changes
 
 - Agent file tailing checks an idle source about once per second. Uploads use a 500 ms tick, at most 32 entries per acknowledged batch, and a bounded queue of 2048 entries. With negligible RTT the tick permits about 64 entries/s; sustained excess can drop the oldest queued entries. These are existing collection/update-latency limits, distinct from API TTFB or browser stalls; this PR does not change the agent protocol.
@@ -15,7 +17,7 @@ The existing assertion sampled opacity on opposite sides of asynchronous navigat
 - A cold scope already starts preview (200/engine), complete window, and node metadata concurrently. Full-first cancels preview; a quiet complete preview cancels the speculative full request. Exact/related snapshots reuse session memory (three scopes, 16 MiB estimate, 30 s TTL). Search covers the full 8000-entry window while only 200 rows are mounted. No new cursor or incremental merge is introduced.
 - The new API emits a weak SHA-256 ETag of the **actual sanitized JSON representation**, after normal authorization and the current bounded query. Matching `If-None-Match` returns a bodyless 304. Insertions, deletions, expiry, scope/permission changes and corrections under the same ID are evaluated from current data. `Cache-Control: no-store` remains; no server/shared response cache is added. CORS explicitly permits the validator and exposes ETag.
 - Frontend validators are weakly associated with an owned array and its exact request URL. Evicted, partial, related-limit or other-node arrays cannot validate another representation. A 304 preserves the active array without JSON parsing, entry comparison, projection, counting, row markup or DOM reconciliation. Older servers without ETag continue to return ordinary arrays. Account changes and stale request sequences remain guarded.
-- Metadata still refreshes state, but only membership, names, presence and collection availability repaint the logs. Metrics-only changes skip that work. Failed refreshes retain valid rows and show feedback; recovery clears it. The ten-second poll, exponential failure backoff to sixty seconds, hidden-tab pause and cancellation on navigation remain.
+- Metadata still refreshes state, but only membership, names, presence and collection availability repaint the logs. Metrics-only changes skip that work. The displayed storage policy and read permissions also participate in invalidation: asynchronously loaded minimum level/retention changes repaint once, while equivalent, unrelated or hidden settings do not. Failed refreshes retain valid rows and show feedback; recovery clears it. The ten-second poll, exponential failure backoff to sixty seconds, hidden-tab pause and cancellation on navigation remain.
 - Stored messages are already sanitized, but the ANSI regexp replacement copied even clean strings on every read. An ESC-byte check now bypasses just that redundant replacement. Invalid UTF-8, NUL, whitespace and legacy/colorized cleanup retain their existing behavior.
 
 ## Real browser comparison
@@ -24,24 +26,24 @@ Chrome 153 on Linux, 1280 x 720, identical synthetic multi-node data and loopbac
 
 | Operation, long logs, gzip disabled | Main | This PR |
 | --- | ---: | ---: |
-| First visible logs, cold page | 866 ms | 856 ms |
-| Initial 4000-entry window complete | 1999 ms | 1971 ms |
-| Expand to 8000 entries | 3630 ms | 3626 ms |
-| Cold node complete | 3699 ms | 3697 ms |
-| Search full window | 58 ms | 58 ms |
-| Page 2 | 99 ms | 97 ms |
-| Changed-window refresh through paint | 3676 ms | 3740 ms |
-| Three unchanged polls through browser consumption | 10968 ms | 748 ms |
+| First visible logs, cold page | 853 ms | 859 ms |
+| Initial 4000-entry window complete | 1955 ms | 2003 ms |
+| Expand to 8000 entries | 3625 ms | 3622 ms |
+| Cold node complete | 3680 ms | 3666 ms |
+| Search full window | 47 ms | 48 ms |
+| Page 2 | 100 ms | 99 ms |
+| Changed-window refresh through paint | 3694 ms | 3721 ms |
+| Three unchanged polls through browser consumption | 11071 ms | 747 ms |
 | Unchanged polls: requests / status | 3 / 200 | 3 / 304 |
 | Unchanged polls: response body bytes | 41965362 | 0 |
 | Unchanged polls: JSON reads | 3 | 0 |
-| Unchanged polls: long tasks >50 ms | 1 (51 ms) | 0 |
+| Unchanged polls: long tasks >50 ms | 3 (max 72 ms) | 0 |
 
-The unchanged-poll timing includes three **100 ms test poll intervals**; production remains 10 seconds. Body bytes exclude HTTP headers. The measured gain is 93.2% for the three slow-transfer polls. Fresh and changed data still need the full bounded window; these control cases show no meaningful cold-load improvement. Across the navigation/switch sequence both sides made eight log requests and sent 67,138,829 bytes; baseline had four long tasks (max 87 ms), candidate four (max 90 ms). This PR does not eliminate full-payload parsing long tasks when data changes.
+The unchanged-poll timing includes three **100 ms test poll intervals**; production remains 10 seconds. Body bytes exclude HTTP headers. The measured gain is 93.3% for the three slow-transfer polls. Fresh and changed data still need the full bounded window; these control cases show no meaningful cold-load improvement. Across the long-log navigation/switch sequence both sides made eight completed log requests and sent 67,138,829 bytes; baseline had four long tasks (max 77 ms), candidate four (max 74 ms). This PR does not eliminate full-payload parsing long tasks when data changes.
 
-With gzip enabled, the three unchanged polls transferred 265,224 bytes compressed / 41,965,362 bytes decoded on main, versus zero body bytes and zero JSON reads with 304. Duration was 1355 -> 765 ms; long tasks were three (max 63 ms) -> zero. Both versions already made zero unchanged-stream DOM mutations; this PR additionally removes the projection/view calls (instrumented view time 1.4 ms -> 0 over the three gzip polls).
+With gzip enabled, the three completed unchanged polls transferred 265,224 bytes compressed / 41,965,362 bytes decoded on main, versus zero body bytes and zero JSON reads with 304. Duration was 1312 -> 793 ms; long tasks were three (max 59 ms) -> zero. The accelerated candidate sample recorded four attempted requests: three completed 304 responses and one additional in-flight attempt with no response/body at sampling. Pausing the timer does not abort an active GET; this is not labeled a cancellation or omitted from request totals. Both versions already made zero unchanged-stream DOM mutations; this PR additionally removes the projection/view calls (instrumented view time 1.2 ms -> 0 over the three gzip polls).
 
-Short logs separately verify a **real warm cache hit**: both versions display 200 rows synchronously on node return. The large long-log snapshot exceeds the existing 16 MiB cache budget and displays zero synchronous rows on repeat selection; that repeat is explicitly not described as a cache hit. Full short-log, gzip, phase, request, long-task and race measurements are in [follow-up-measurements.json](follow-up-measurements.json).
+Short logs separately verify a **real warm cache hit**: both versions display 200 rows synchronously on node return (14.9 -> 23.3 ms in this single observation). Three completed unchanged polls took 1724 -> 763 ms and sent 3,565,362 -> 0 body bytes. The large long-log snapshot exceeds the existing 16 MiB cache budget and displays zero synchronous rows on repeat selection; that repeat is explicitly not described as a cache hit. Full short-log, gzip, phase, attempted/completed request, long-task and race measurements are in [follow-up-measurements.json](follow-up-measurements.json). Only the final six-sample recheck after the policy fix is included in these comparisons; exact final source hashes accompany the raw observations.
 
 The pressure script also checks three rapid alternating node selections, no cross-node rows, retained page 2/read anchor after new IDs arrive, and 503 failure/recovery without discarding rows. The changed long-log anchor moved only 0.469 px on both versions. Browser regressions additionally cover same-ID content corrections, search focus/caret and IME, 8000 entries, bounded DOM, complete-window search, cold/hot snapshots, backoff and hidden/route lifecycle. The anchor test now waits for actual finite route entrances to finish: faster 304 polls exposed its old fixed 150 ms sleep measuring a still-moving 480 ms parent animation. Its 2 px correctness threshold remains.
 
@@ -83,7 +85,7 @@ QCH_PERF_TIMING=1 QCH_PERF_PORT=44385 node scripts/core-logs-performance-server.
 # Repeat with QCH_PERF_GZIP=1 or QCH_PERF_LONG_REPEAT=0 on both servers.
 ```
 
-Full `make check` passed with isolated PostgreSQL and real Chromium, including both complete browser invocations and all Go packages. The first PR CI exposed a further slow-runner precondition race: reversal could occur while the route module was still loading, before the gated request started. The test now explicitly waits for that request to enter the gate before reversing; it retains the pending-request assertion. Latest remote CI results are recorded in the PR. Generated stylesheet integrity is checked; no CSS source changed, so regeneration is unnecessary. Necessary new regressions cover conditional transport, actual API authorization and invalidation, and real browser state retention. Existing module boundaries, schema policy, sanitation and per-engine limits remain checked.
+Full `make check` passed for `1b6ecd4f` with isolated PostgreSQL and real Chromium, including both complete browser invocations and all Go packages. Subsequent CI fixes preserve the original pending-request and popup behavior assertions and add the preconditions described above. Final review also caught a late-settings invalidation case; its regressions verify one policy repaint during an unchanged poll, retained snapshot/filter/page state, an unchanged next poll and permission notices. Final local and remote CI results after these fixes are recorded in the PR. Generated stylesheet integrity is checked; no CSS source changed, so regeneration is unnecessary. Necessary new regressions cover conditional transport, actual API authorization and invalidation, and real browser state retention. Existing module boundaries, schema policy, sanitation and per-engine limits remain checked.
 
 ## Remaining limits and rollback
 

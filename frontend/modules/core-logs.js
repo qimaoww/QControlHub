@@ -4,6 +4,7 @@ import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
 import { createCoreLogBindings } from "./core-log-bindings.js";
 import { coreLogAgentPresentation } from "./core-log-source-status.js";
+import { storagePolicyName } from "./core-log-model.js";
 export { filterCoreLogEntries, coreLogFilterCounts } from "./core-log-model.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 import { createCoreLogCache } from "./core-log-cache.js";
@@ -43,7 +44,22 @@ export function installCoreLogs(ctx) {
   const { restoreSelection, rememberSelection, query } = createCoreLogSelection({ state, engines, storage });
   const view = createCoreLogView(ctx);
   const bind = createCoreLogBindings(ctx, { renderCoreLogs, rememberSelection, coreLogs, poller });
-  function renderCoreLogs(entries, agents, filters) { view(entries, agents, filters); bind(filters); }
+  // Shared settings can arrive after the log window. Compare the policy that
+  // the view displays, ignoring unrelated settings and hidden policy values.
+  const viewPresentation = () => {
+    const settingsVisible = Boolean(can("settings.read"));
+    const retentionDays = Number(state.data.settings?.core_log_retention_days);
+    return JSON.stringify([
+      Boolean(can("agents.read")), settingsVisible,
+      settingsVisible ? storagePolicyName(state.data.settings?.core_log_minimum_level) : "",
+      settingsVisible && Number.isInteger(retentionDays) && retentionDays > 0 ? retentionDays : null,
+    ]);
+  };
+  function renderCoreLogs(entries, agents, filters) {
+    view(entries, can("agents.read") ? agents : [], filters);
+    state.data.coreLogViewPresentation = viewPresentation();
+    bind(filters);
+  }
 
   function coreLogs(options = {}) {
     if (document.addEventListener) bindEvent(document, "visibilitychange", () => {
@@ -131,7 +147,8 @@ export function installCoreLogs(ctx) {
           if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs") return;
           failures = 0;
           cache.set(key, entries);
-          if (!background || entries !== data.coreLogEntries || data.coreLogPhase !== "ready") paint(entries, "ready");
+          if (!background || entries !== data.coreLogEntries || data.coreLogPhase !== "ready" ||
+              data.coreLogViewPresentation !== viewPresentation()) paint(entries, "ready");
         },
       );
       if (applied && state.data === data && state.data.coreLogAutoRefresh !== false) poller.start();
