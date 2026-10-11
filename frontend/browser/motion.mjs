@@ -30,9 +30,13 @@ async function checkNavigationReversal(main, reduced) {
   const originalFetch = window.fetch;
   let releaseTraffic;
   const trafficGate = new Promise(resolve => { releaseTraffic = resolve; });
+  let trafficStarted = false;
   let observation;
   window.fetch = async (...args) => {
-    if (String(args[0]).includes("traffic-policies")) await trafficGate;
+    if (String(args[0]).includes("traffic-policies")) {
+      trafficStarted = true;
+      await trafficGate;
+    }
     return originalFetch(...args);
   };
   try {
@@ -43,6 +47,9 @@ async function checkNavigationReversal(main, reduced) {
     // distinguishable from the current painted position. The .32 departure
     // endpoint bounds any progress before hashchange to less than .2.
     if (!reduced) await waitFor(() => Number(getComputedStyle(main).opacity) <= .5, "route departure must become visible");
+    // A slow runner can still be preparing the route when departure ends.
+    // Establish the blocked request before asserting restoration precedes it.
+    await waitFor(() => trafficStarted, "the slow route request must start before reversal");
     const departingOpacity = Number(getComputedStyle(main).opacity);
     let reversedPaint;
     // Mutation observers run after the route handler and before the next

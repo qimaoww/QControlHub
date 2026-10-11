@@ -83,7 +83,7 @@ QCH_PERF_TIMING=1 QCH_PERF_PORT=44385 node scripts/core-logs-performance-server.
 # Repeat with QCH_PERF_GZIP=1 or QCH_PERF_LONG_REPEAT=0 on both servers.
 ```
 
-Full `make check` and remote CI results are recorded in the PR. Generated stylesheet integrity is checked; no CSS source changed, so regeneration is unnecessary. Necessary new regressions cover conditional transport, actual API authorization and invalidation, and real browser state retention. Existing module boundaries, schema policy, sanitation and per-engine limits remain checked.
+Full `make check` passed with isolated PostgreSQL and real Chromium, including both complete browser invocations and all Go packages. The first PR CI exposed a further slow-runner precondition race: reversal could occur while the route module was still loading, before the gated request started. The test now explicitly waits for that request to enter the gate before reversing; it retains the pending-request assertion. Latest remote CI results are recorded in the PR. Generated stylesheet integrity is checked; no CSS source changed, so regeneration is unnecessary. Necessary new regressions cover conditional transport, actual API authorization and invalidation, and real browser state retention. Existing module boundaries, schema policy, sanitation and per-engine limits remain checked.
 
 ## Remaining limits and rollback
 
