@@ -109,7 +109,9 @@ Its short-card fixture keeps the header from shrinking underneath the body, and
 uses a longer reorder token so the normal animation safety deadline cannot fire
 while a loaded CI driver aims. Production pointer-down must cancel the existing
 landing and preserve its grab point. Other gestures and the recordings run with
-normal animation playback.
+normal animation playback. The driver also waits for delivered pointer-down,
+move coordinates and pointer-up/cancel events rather than treating a CDP command
+acknowledgement as proof that the native touch lifecycle has completed.
 Browser zoom uses Chromium's actual default zoom setting, separately from display
 scale. At 125% zoom and 150% display scale the observed DPR is 1.875.
 
@@ -163,6 +165,16 @@ and all four existing motion modes pass. Navigation reversal uses a controlled
 request gate and compares the captured reversal opacity with the native resume
 keyframe, avoiding stale wall-clock samples. Full-check and CI results are
 recorded in the PR.
+
+The full browser sweep caught a 2px mobile overflow from the grip's invisible
+touch area and its negative right margin. Its 44x44 hit area now expands slightly
+further left so it fits the header without changing the visible traffic grip.
+The existing shared-node mobile and both mobile lifecycle regressions pass.
+Chromium 154 is also tested using an isolated package extraction, matching the
+Debian CI version without replacing the workspace's Chromium 147 installation.
+Its desktop coordinate maximum is 0.191 CSS pixels; touch error rounds to 0.0000.
+At 125% browser zoom and 150% display scale (DPR 1.875), its 34 coordinate
+gestures also pass with a maximum error of 0.220 CSS pixels.
 
 ## Persistence and rollback
 

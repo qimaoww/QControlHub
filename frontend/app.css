@@ -2220,7 +2220,8 @@ body.card-moving :is(.node-card,.traffic-policy-card,.node-card-grip){cursor:gra
 .card-move-ghost,.card-move-ghost *{animation:none!important;transition:none!important}
 @media(pointer:coarse){
   :is(.node-card,.traffic-policy-card){scroll-margin-top:80px;scroll-margin-bottom:96px}
-  /* Expand only the invisible touch hit area; the original grip stays 24x28. */
+  /* Keep the 44x44 touch area inside the header's right padding despite the
+     grip's negative margin; its original visible size stays 24x28. */
   .node-card-grip{position:relative}
-  .node-card-grip::before{content:"";position:absolute;inset:-8px -10px}
+  .node-card-grip::before{content:"";position:absolute;inset:-8px -8px -8px -12px}
 }

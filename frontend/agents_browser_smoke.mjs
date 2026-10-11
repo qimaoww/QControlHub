@@ -208,12 +208,16 @@ async function driveCardMoveGestures(send, mobile) {
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
       await send("Input.dispatchMouseEvent", { type: "mousePressed", ...gesture.start, button: "left", buttons: 1, clickCount: 1 });
     }
+    // A CDP acknowledgement can precede native pointer delivery. In particular,
+    // a new touch must not race the preceding touch's release during landing.
+    if (await wait("window.__cardMoveInput.pressed") === null) return;
     for (let index = 0; index < gesture.points.length; index++) {
       const point = gesture.points[index];
       if (mobile) await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point] });
       else await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point, button: "left", buttons: 1 });
       // Chromium may coalesce native touch moves until its next input frame.
       // Inspect delivered input, rather than racing CDP acknowledgement.
+      if (await wait(`window.__cardMoveInput.cancelled || (window.__cardMoveInput.point && Math.hypot(window.__cardMoveInput.point.x - ${point.x}, window.__cardMoveInput.point.y - ${point.y}) < 1)`) === null) return;
       await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
       await evaluate(`window.__cardMoveStep = ${index}`);
       if (await wait(`window.__cardMoveAck === ${index}`) === null) return;
@@ -225,6 +229,7 @@ async function driveCardMoveGestures(send, mobile) {
       if (gesture.release === "cancel") await evaluate('document.activeElement.releasePointerCapture(1)');
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...gesture.points.at(-1), button: "left", buttons: 0, clickCount: 1 });
     }
+    if (await wait("window.__cardMoveInput.ended") === null) return;
     await evaluate("window.__cardMoveGesture = null");
   }
 }

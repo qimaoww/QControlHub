@@ -22,7 +22,7 @@ const assertSharedStatusOrder = (root) => {
       assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
       const rect = root.getBoundingClientRect();
       assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && root.scrollWidth <= root.clientWidth + 1,
-        "手机共享节点列表或详情被裁切");
+        `手机共享节点列表或详情被裁切：${root.className}; left=${rect.left}, right=${rect.right}, viewport=${innerWidth}, scroll=${root.scrollWidth}, client=${root.clientWidth}`);
     }
   };
   await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");

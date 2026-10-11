@@ -12,22 +12,25 @@ const frames = () => new Promise(resolve => requestAnimationFrame(() => requestA
 export async function testCardCoordinateRuntime({ mode }, preview) {
   if (preview) await new Promise(() => {});
   const mobile = mode.includes("mobile"), measurements = [];
-  let pointer = null, pressed = null, pressedRect = null;
+  let pointer = null, pressed = null, pressedRect = null, inputTrace = [];
   const observe = event => {
-    pointer = { x: event.clientX, y: event.clientY };
+    if (event.type !== "pointercancel") pointer = { x: event.clientX, y: event.clientY };
     if (event.type === "pointerdown") {
+      inputTrace = [];
       pressed = pointer;
       pressedRect = event.target.closest(".node-card,.traffic-policy-card")?.getBoundingClientRect();
     }
+    inputTrace.push({ type: event.type, x: event.clientX, y: event.clientY, pointer: event.pointerType, primary: event.isPrimary, buttons: event.buttons, target: event.target.tagName + "." + event.target.getAttribute("class"), scrollY });
+    inputTrace = inputTrace.slice(-12);
   };
-  document.addEventListener("pointerdown", observe, true);
-  document.addEventListener("pointermove", observe, true);
+  const inputTypes = ["pointerdown", "pointermove", "pointerup", "pointercancel"];
+  inputTypes.forEach(type => document.addEventListener(type, observe, true));
   const run = async (grid, card, start, points, name, inspect = async () => {}, release = "drop", waitForLanding = true) => {
     const initial = order(grid);
     let expected = initial, samples = 0, maxError = 0, anchor;
     const sample = () => {
       const ghost = document.querySelector(".card-move-ghost");
-      assert.ok(ghost, `${name}: real pointer must pick up; start ${JSON.stringify(start)}, pressed ${JSON.stringify(pressed)}, hit ${document.elementFromPoint(start.x,start.y)?.outerHTML.slice(0,300)}`);
+      assert.ok(ghost, `${name}: real pointer must pick up`);
       anchor ||= { x: pressed.x - pressedRect.left, y: pressed.y - pressedRect.top };
       const painted = ghost.getBoundingClientRect();
       const error = Math.hypot(painted.left + anchor.x - pointer.x, painted.top + anchor.y - pointer.y);
@@ -37,12 +40,17 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
     };
     const releasing = () => { if (document.querySelector(".card-move-ghost")) sample(); };
     document.addEventListener("pointerup", releasing, true);
-    await gesture(start, points, release, async (index, point) => {
-      sample();
-      await inspect(index, point);
-      await frames(); sample();
-    }, waitForLanding);
-    document.removeEventListener("pointerup", releasing, true);
+    try {
+      await gesture(start, points, release, async (index, point) => {
+        sample();
+        await inspect(index, point);
+        await frames(); sample();
+      }, waitForLanding);
+    } catch (error) {
+      throw new Error(`${error.message}; ${name}: start ${JSON.stringify(start)}, points ${JSON.stringify(points)}, pressed ${JSON.stringify(pressed)}, delivered ${JSON.stringify(window.__cardMoveInput)}, trace ${JSON.stringify(inputTrace)}`);
+    } finally {
+      document.removeEventListener("pointerup", releasing, true);
+    }
     equal(order(grid), release === "drop" ? expected : initial, `${name}: final order equals the last preview`);
     assert.equal(document.querySelector(".card-move-ghost,.card-move-layer,.card-move-active"), null, `${name}: cleans up`);
     assert.ok(cards(grid).every(c => !c.style.order && !c.style.transform), `${name}: clears temporary geometry`);
@@ -197,8 +205,7 @@ export async function testCardCoordinateRuntime({ mode }, preview) {
   }
   fixtureStyle.remove();
   document.documentElement.style.removeProperty("--card-coordinate-columns");
-  document.removeEventListener("pointerdown", observe, true);
-  document.removeEventListener("pointermove", observe, true);
+  inputTypes.forEach(type => document.removeEventListener(type, observe, true));
   window.cardCoordinateMeasurements = { mobile, dpr: devicePixelRatio, viewport: [innerWidth, innerHeight], measurements };
   const max = Math.max(...measurements.map(m => m.maxGrabErrorPx));
   window.cardMovementResult = `coordinates ${measurements.length} gestures; max grab error ${max.toFixed(4)} CSS px; preview/final match; DPR ${devicePixelRatio}`;

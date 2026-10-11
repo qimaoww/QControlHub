@@ -24,16 +24,30 @@ const trafficPaint = (original, preview) => {
 // The runner dispatches real mouse/touch events and waits for each inspection
 // acknowledgement before sending the next input. Timing cannot skip assertions.
 export async function gesture(start, points, release, inspect = async () => {}, waitForLanding = true) {
+  const input = new AbortController();
   window.__cardMoveStep = -1;
   window.__cardMoveAck = -1;
+  window.__cardMoveInput = { pressed: false, ended: false, cancelled: false, point: null };
+  for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"])
+    document.addEventListener(type, event => {
+      const delivered = window.__cardMoveInput;
+      if (type === "pointerdown") delivered.pressed = true;
+      if (type === "pointerup" || type === "pointercancel") delivered.ended = true;
+      if (type === "pointercancel") delivered.cancelled = true;
+      else delivered.point = { x: event.clientX, y: event.clientY };
+    }, { capture: true, signal: input.signal });
   window.__cardMoveGesture = { start, points, release };
-  for (let index = 0; index < points.length; index++) {
-    await waitFor(() => window.__cardMoveStep === index, "native input step missing");
-    await inspect(index, points[index]);
-    window.__cardMoveAck = index;
+  try {
+    for (let index = 0; index < points.length; index++) {
+      await waitFor(() => window.__cardMoveStep === index, "native input step missing");
+      await inspect(index, points[index]);
+      window.__cardMoveAck = index;
+    }
+    await waitFor(() => window.__cardMoveGesture === null, "native input did not finish");
+    if (waitForLanding) await settled();
+  } finally {
+    input.abort();
   }
-  await waitFor(() => window.__cardMoveGesture === null, "native input did not finish");
-  if (waitForLanding) await settled();
 }
 export const geometry = (grip, target) => {
   const source = grip.closest(".node-card,.traffic-policy-card");
