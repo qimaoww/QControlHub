@@ -5,8 +5,9 @@
 # horizon, so packages that connect to PostgreSQL must stay sequential with
 # each other ("go test -p 1"). Those packages share one shard and one database,
 # the remaining packages run in parallel shards with databases of their own,
-# and the non-Go checks run as separate tasks instead of extending the critical
-# path.
+# and the non-Go checks run as separate tasks. Optional after-checks wait for
+# every parallel task before running serially, so duplicate browser suites do
+# not compete with each other or the remaining parallel work.
 #
 # Environment:
 #   QCH_TEST_DATABASE_URL  base PostgreSQL URL; shard databases add a suffix
@@ -14,6 +15,7 @@
 #
 # Options:
 #   --checks COMMAND       non-Go checks; repeatable, each runs as one task
+#   --after-checks COMMAND serial checks after all tasks finish; repeatable
 #   --exclude REGEX        extended regex of packages to keep out of the shards
 #   --extra COMMAND        extra task that receives its own database
 #   --dry-run              print the shard assignment and exit
@@ -29,9 +31,10 @@ export GOFLAGS
 
 usage() {
     printf '%s\n' \
-        'usage: run-ci-tests.sh [--checks COMMAND]... [--exclude REGEX] [--extra COMMAND] [--dry-run]' \
+        'usage: run-ci-tests.sh [--checks COMMAND]... [--after-checks COMMAND]... [--exclude REGEX] [--extra COMMAND] [--dry-run]' \
         '' \
-        'Runs the non-Go checks and the Go test suite in parallel shards.' \
+        'Runs the Go suite and checks in parallel, then runs every after-check serially.' \
+        'After-checks run even if an earlier task failed; failures determine the final exit.' \
         'QCH_TEST_DATABASE_URL is required; QCH_TEST_SHARDS defaults to 4.'
 }
 
@@ -41,12 +44,18 @@ exclude=""
 extra=""
 dry_run=false
 declare -a check_commands=()
+declare -a after_check_commands=()
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --checks)
             [ "$#" -ge 2 ] || { printf '%s\n' '--checks requires a command' >&2; exit 2; }
             check_commands+=("$2")
+            shift 2
+            ;;
+        --after-checks)
+            [ "$#" -ge 2 ] || { printf '%s\n' '--after-checks requires a command' >&2; exit 2; }
+            after_check_commands+=("$2")
             shift 2
             ;;
         --exclude)
@@ -195,6 +204,9 @@ if [ "$dry_run" = true ]; then
         printf 'shard %s/%s: %s\n' "$index" "$shard_count" "${shard_packages[index - 1]}"
     done
     [ -z "$extra" ] || printf 'extra: %s\n' "$extra"
+    for command in "${after_check_commands[@]}"; do
+        printf 'after-checks: %s\n' "$command"
+    done
     exit 0
 fi
 
@@ -214,8 +226,8 @@ for ((index = 1; index <= shard_count; index++)); do
     ensure_database "${base_name}_shard${index}"
     printf '%s\n' "-> $name: $list"
     (
-        # The frontend package repeats all 70 real-browser modes, including
-        # full motion playback, beside the standalone browser check. Allow
+        # The frontend package runs the complete real-browser suite, including
+        # full motion playback, before the standalone after-check. Allow
         # this aggregate suite to finish on shared runners; each browser mode
         # and interaction still enforces its own unchanged deadline/budget.
         QCH_TEST_DATABASE_URL="$(database_url "shard${index}")" go test -timeout 20m -p 1 $list 2>&1 |
@@ -243,6 +255,15 @@ done
 status=0
 for pid in "${task_pids[@]}"; do
     if ! wait "$pid"; then
+        status=1
+    fi
+done
+after_check_index=0
+for command in "${after_check_commands[@]}"; do
+    after_check_index=$((after_check_index + 1))
+    name="after-checks-$after_check_index"
+    printf '%s\n' "-> $name: $command"
+    if ! bash -c "$command" 2>&1 | sed "s|^|[$name] |"; then
         status=1
     fi
 done

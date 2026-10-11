@@ -39,6 +39,13 @@ export function createCoreLogCache({ now = Date.now, maxScopes = 3, maxBytes = 1
     },
     set(key, entries) {
       prune();
+      const existing = snapshots.get(key);
+      if (existing?.entries === entries) {
+        existing.at = now();
+        snapshots.delete(key);
+        snapshots.set(key, existing);
+        return;
+      }
       remove(key);
       // Conservative UTF-16 text estimate plus per-entry object overhead.
       const size = entries.reduce((total, entry) => total + 512 + 2 * String(entry.message || "").length, 0);

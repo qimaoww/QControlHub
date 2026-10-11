@@ -3,14 +3,14 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check module-policy-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
-# Non-Go checks. CI runs each group as its own task next to the Go test shards,
-# so keep the Go suite out of these targets.
+# Non-Go checks. CI runs these next to the Go shards, then the standalone
+# browser group afterward; keep the Go suite out of these targets.
 BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
+CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
+ALPINE_CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
@@ -59,6 +59,13 @@ module-policy-test:
 ss-rust-runtime-test:
 	sh deploy/tests/ss-rust-runtime.sh
 
+ci-runner-test:
+	node --test .github/scripts/run-ci-tests.test.mjs
+
+# Import the observer with stub CDP events; this target starts no browser.
+browser-diagnostics-test:
+	node --test frontend/agents_browser_smoke_diagnostics_test.mjs
+
 pr-policy-test:
 	node --test .github/scripts/check-pr.test.mjs
 
@@ -102,8 +109,8 @@ web-image-test:
 
 check: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS) test
 
-# CI runs the same checks in parallel groups; these targets keep one source of
-# truth for the targets that "make check" covers.
+# CI runs the same checks in parallel tasks, then the standalone browser group;
+# these targets keep one source of truth for the targets that "make check" covers.
 checks: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS)
 browser-checks: $(BROWSER_CHECK_TARGETS)
 non-browser-checks: $(CHECK_TARGETS)

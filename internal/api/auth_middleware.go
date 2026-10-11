@@ -179,7 +179,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-QControlHub-CSRF, X-QControlHub-Agent-ID, X-QControlHub-Timestamp, X-QControlHub-Nonce, X-QControlHub-Signature")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, If-None-Match, X-QControlHub-CSRF, X-QControlHub-Agent-ID, X-QControlHub-Timestamp, X-QControlHub-Nonce, X-QControlHub-Signature")
+				w.Header().Set("Access-Control-Expose-Headers", "ETag")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			} else if request.Method == http.MethodOptions {
 				writeError(w, http.StatusForbidden, "origin is not allowed")

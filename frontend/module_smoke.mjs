@@ -5,6 +5,7 @@ import "./route_loader_smoke.mjs";
 import "./requests_smoke.mjs";
 import "./errors_smoke.mjs";
 import "./core_logs_smoke.mjs";
+import "./core_log_conditional_smoke.mjs";
 import "./core_log_preferences_smoke.mjs";
 import "./config_fields_smoke.mjs";
 import "./access_control_smoke.mjs";

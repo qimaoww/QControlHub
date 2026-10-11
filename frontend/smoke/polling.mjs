@@ -75,20 +75,20 @@ try {
   coreTimers.clear();
   await corePoll();
   assert.equal(coreRequests, 5, "one log poll issues one request per data source");
-  assert.equal(coreRenders, 4, "an unchanged poll renders only its final state in the DOM-free fixture");
+  assert.equal(coreRenders, 3, "an unchanged poll skips rendering the log view");
   assert.equal(coreTimers.size, 1, "log polling reschedules exactly one timer");
   assert.equal(coreState.data.coreLogEntries, previousEntries, "unchanged polls preserve the searchable snapshot identity");
   coreFailure = true;
   const failedCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await failedCorePoll();
-  assert.equal(coreRenders, 5, "a failure renders feedback without clearing data");
+  assert.equal(coreRenders, 4, "a failure renders feedback without clearing data");
   assert.equal(coreTimers.size, 1, "a log error keeps recovery polling alive");
   coreFailure = false;
   const recoveredCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await recoveredCorePoll();
-  assert.equal(coreRenders, 6, "recovery renders the ready state");
+  assert.equal(coreRenders, 5, "recovery renders the ready state");
   assert.equal(coreTimers.size, 1);
   coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
     Array.from({ length: 100 }, (_, index) => ({

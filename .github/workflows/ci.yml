@@ -71,8 +71,8 @@ jobs:
           QCH_TEST_SHARDS: "4"
         run: |
           bash .github/scripts/run-ci-tests.sh \
-            --checks "make browser-checks" \
-            --checks "make non-browser-checks"
+            --checks "make non-browser-checks" \
+            --after-checks "make browser-checks"
 
       - name: Build release binaries
         run: make build VERSION="${{ github.sha }}"
@@ -129,10 +129,10 @@ jobs:
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
               apk add --no-cache bash chromium coreutils findutils git libcap make nftables nodejs openrc openssl postgresql-client
               bash .github/scripts/run-ci-tests.sh \
-                --checks "make browser-checks" \
                 --checks "make alpine-non-browser-checks" \
                 --exclude "/internal/agent$" \
-                --extra "make alpine-agent-test"
+                --extra "make alpine-agent-test" \
+                --after-checks "make browser-checks"
               make build VERSION="$VERSION"
               sh deploy/tests/existing-core-openrc.sh
               sh -n deploy/remote/install-agent.sh

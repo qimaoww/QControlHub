@@ -286,10 +286,10 @@ if (mode.startsWith("bbr")) {
   location.hash = "#system-bbr";
 }
 
-const json = (value, status = 200) =>
+const json = (value, status = 200, headers = {}) =>
   new Response(value === null ? null : JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 
 const fixtureFetch = window.fetch.bind(window);
@@ -435,11 +435,19 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
     if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (testAPI.logFailure) return json({ error: "temporary log failure" }, testAPI.logFailure);
+    const etag = `"fixture:${agent}:${limit}:${testAPI.logNewCount || 0}:${Boolean(testAPI.longLogs)}:${testAPI.logRevision || 0}"`;
+    const conditional = new Headers(options.headers).get("If-None-Match");
+    testAPI.logResponses ||= [];
+    if (conditional === etag) {
+      testAPI.logResponses.push({ agent, limit, status: 304, conditional });
+      return json(null, 304, { ETag: etag });
+    }
+    testAPI.logResponses.push({ agent, limit, status: 200, conditional });
     return json(["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
       Array.from({ length: limit }, (_, index) => ({
         id: engineIndex * 10000 + (index < (testAPI.logNewCount || 0) ? 9000 + testAPI.logNewCount - index : index + 1 - (testAPI.logNewCount || 0)), agent_id: agent, engine, level: "warning",
-        message: `${agent} ${engine} pressure entry ${index - (testAPI.logNewCount || 0)}${testAPI.longLogs ? " 长日志连接内容".repeat(180) : ""}`, logged_at: "2026-09-06T00:00:00Z",
-      }))));
+        message: `${agent} ${engine} pressure entry ${index - (testAPI.logNewCount || 0)}${testAPI.logRevision ? " corrected" : ""}${testAPI.longLogs ? " 长日志连接内容".repeat(180) : ""}`, logged_at: "2026-09-06T00:00:00Z",
+      }))), 200, { ETag: etag });
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
   if (method === "GET" && path === "/client-access" && (mode.startsWith("client-order") || mode.startsWith("client-layout")))

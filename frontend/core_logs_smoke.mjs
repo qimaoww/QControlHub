@@ -64,13 +64,15 @@ try {
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
   const calls = [];
   let markup = "";
+  let paints = 0;
+  const deniedPermissions = new Set();
   let metadata = deferred();
   let preview = deferred();
   let full = deferred();
   const render = installCoreLogs({
-    state, engines: ["xray"], can: () => true, now: () => clock,
+    state, engines: ["xray"], can: permission => !deniedPermissions.has(permission), now: () => clock,
     esc: (v) => String(v ?? ""), engineName: (v) => v, date: (v) => v,
-    shell: (value) => { markup = value; }, setTimer: () => 1, clearTimer: () => {},
+    shell: (value) => { markup = value; paints++; }, setTimer: () => 1, clearTimer: () => {},
     api: (path, { signal }) => {
       calls.push({ path, signal });
       if (path === "/agents") return metadata.promise;
@@ -179,7 +181,7 @@ try {
 
   state.data = { coreLogFilters: { agent_id: "metadata-failed", limit: 2000 }, agents: [
     { id: "metadata-failed", name: "Metadata Failed", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} },
-  ] };
+  ], settings: { core_log_minimum_level: "warning", core_log_retention_days: 7 } };
   preview = deferred(); full = deferred(); metadata = deferred();
   const missingMetadata = render();
   metadata.reject(new Error("node metadata unavailable"));
@@ -199,6 +201,64 @@ try {
   full.resolve(entries("metadata-failed", 2000));
   await refreshActive;
   assert.equal(state.data.coreLogEntries.length, 2000);
+  assert.match(markup, /保存警告及以上 · 保留 7 天/);
+  const beforePollPaints = paints;
+  metadata = deferred(); full = deferred();
+  const stablePoll = render({ background: true });
+  metadata.resolve(state.data.agents.map(agent => ({ ...agent, cpu_usage: 99, last_seen_at: "changed" })));
+  full.resolve(structuredClone(state.data.coreLogEntries));
+  await stablePoll;
+  await flush();
+  assert.equal(paints, beforePollPaints, "unchanged logs and metrics-only metadata skip log rendering");
+  assert.equal(state.data.agents[0].cpu_usage, 99, "fresh metrics still reach account state");
+  const policyEntries = state.data.coreLogEntries;
+  const policyFilters = state.data.coreLogFilters;
+  const policyPage = state.data.coreLogPage;
+  metadata = deferred(); full = deferred();
+  const policyPoll = render({ background: true });
+  // Shell settings can finish after the log view, including during a poll.
+  state.data.settings = { core_log_minimum_level: "error", core_log_retention_days: 30 };
+  metadata.resolve(structuredClone(state.data.agents));
+  full.resolve(structuredClone(policyEntries));
+  await policyPoll;
+  await flush();
+  assert.equal(paints, beforePollPaints + 1, "late storage policy changes repaint an unchanged log window once");
+  assert.match(markup, /保存错误及以上 · 保留 30 天/);
+  assert.doesNotMatch(markup, /保存警告及以上|保留 7 天/);
+  assert.equal(state.data.coreLogEntries, policyEntries, "policy refresh retains the searchable snapshot");
+  assert.equal(state.data.coreLogFilters, policyFilters, "policy refresh preserves local filters");
+  assert.equal(state.data.coreLogPage, policyPage, "policy refresh preserves the selected page");
+  metadata = deferred(); full = deferred();
+  const unchangedPolicyPoll = render({ background: true });
+  state.data.settings = { ...state.data.settings, core_log_retention_days: "30", panel_name: "New panel name" };
+  metadata.resolve(state.data.agents.map(agent => ({ ...agent, cpu_usage: 12 })));
+  full.resolve(structuredClone(policyEntries));
+  await unchangedPolicyPoll;
+  await flush();
+  assert.equal(paints, beforePollPaints + 1, "equivalent policy, unrelated settings and metrics skip the next repaint");
+  metadata = deferred(); full = deferred();
+  const renamedPoll = render({ background: true });
+  metadata.resolve(state.data.agents.map(agent => ({ ...agent, name: "Renamed node" })));
+  full.resolve(structuredClone(state.data.coreLogEntries));
+  await renamedPoll;
+  assert.match(markup, /Renamed node/, "node names still update when log content is unchanged");
+  const beforePermissionPaints = paints;
+  deniedPermissions.add("settings.read");
+  deniedPermissions.add("agents.read");
+  full = deferred();
+  const permissionPoll = render({ background: true });
+  full.resolve(structuredClone(policyEntries));
+  await permissionPoll;
+  assert.equal(paints, beforePermissionPaints + 1, "visible permission changes invalidate an unchanged view");
+  assert.match(markup, /保存策略不可见/);
+  assert.match(markup, /无法核验采集状态/);
+  assert.doesNotMatch(markup, /保存错误及以上|保留 30 天|Renamed node/);
+  full = deferred();
+  const hiddenPolicyPoll = render({ background: true });
+  state.data.settings = { core_log_minimum_level: "debug", core_log_retention_days: 1 };
+  full.resolve(structuredClone(policyEntries));
+  await hiddenPolicyPoll;
+  assert.equal(paints, beforePermissionPaints + 1, "hidden policy changes do not repaint");
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;

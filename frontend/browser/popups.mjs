@@ -93,7 +93,9 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   // Real configuration menu handlers, including a same-DOM refresh/rebind.
   const host = document.createElement("div");
   host.innerHTML = '<details class="config-inbound-menu"><summary>Menu</summary><div role="menu"><button role="menuitem">Action</button></div></details><button data-outside-popup>Outside</button>';
-  document.querySelector(".workspace-main").append(host);
+  // Traffic polling reconciles server-owned workspace markup. Keep this
+  // injected fixture outside that markup, as with the disclosure fixtures.
+  document.body.append(host);
   const menu = host.querySelector("details"), summary = menu.querySelector("summary"), content = menu.querySelector("[role=menu]");
   bindConfigMenu(menu); summary.focus(); summary.click(); await delay(25);
   assert.ok(menu.open);
@@ -102,6 +104,15 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   if (!reduced) assert.ok(Number(getComputedStyle(menu, "::details-content").opacity) < 1, "dynamic menu reveal missing");
   bindConfigMenu(menu);
   assert.ok(menu.open, "rebind retains an open configuration menu");
+  const pollMarker = document.createElement("span");
+  pollMarker.hidden = true;
+  document.querySelector(".workspace-main").append(pollMarker);
+  const pollReads = () => testAPI.calls.filter(call => call.path === "/traffic-policies" && call.method === "GET").length;
+  const beforePoll = pollReads();
+  await waitFor(() => pollReads() > beforePoll && !pollMarker.isConnected, "traffic background poll did not reconcile the workspace");
+  assert.ok(host.isConnected, "traffic polling must retain the isolated menu fixture");
+  assert.ok(menu.open, "traffic polling must not dismiss the isolated menu");
+  assert.equal(document.activeElement, summary, "traffic polling must not steal menu focus");
   menu.querySelector("button").focus(); escape(document.activeElement);
   assert.equal(menu.open, false); assert.equal(document.activeElement, summary);
   summary.click(); await delay(25);
