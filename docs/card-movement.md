@@ -4,12 +4,17 @@ Node overview cards and traffic cards use the same movement controller. Other
 card lists follow the saved node order or a fixed business order and do not gain
 new sorting controls. Node batch selection keeps its existing selection behavior.
 
-Only the drop border provides visible movement guidance: a solid accent edge,
-soft halo and inset line surround the insertion slot. The preview follows the
-pointer directly, and surrounding cards move into their new positions. No new
-instruction rows, floating labels or success/cancellation notifications are added.
-Existing error notices report failed saves; a hidden live region announces
-positions, saved order and cancellation to screen readers.
+Both lists use the original traffic-card drag style: the source card fades to
+40% opacity, a full-size lifted preview follows the pointer directly, and the
+destination card receives an accent border with a 2px inset highlight. Other
+cards stay in place during dragging. Releasing commits the selected position
+and animates the real card from the preview's bounds while its neighbours settle.
+Cancellation or failure animates the real card back to its saved position.
+
+Movement guidance is limited to the target-card border. No instruction rows,
+floating labels, empty placeholder tiles or success/cancellation notifications
+are added. Existing error notices report failed saves; a hidden live region
+announces positions, saved order and cancellation to screen readers.
 
 Traffic previews retain the workspace's header layout, type sizes, spacing and
 footer layout in a non-interactive viewport layer. Discovered listeners keep
@@ -24,9 +29,10 @@ route exit.
 3. Use the printed localhost origin with
    `/agents-browser-smoke.html?mode=motion-cards&preview=1#node-settings`.
    This uses local fixtures and needs no server credentials.
-4. Drag a card's six-dot grip to another slot. Reverse direction before releasing,
-   and repeat immediately after dropping. Inspect the moving border, pickup,
-   neighbour movement and landing. Press Escape to return to the saved position.
+4. Drag a card's six-dot grip to another card. Reverse direction before releasing,
+   and repeat immediately after dropping. Inspect the faded source, full-size
+   preview and target-card border; the grid stays still until release. Include
+   the last card as a destination. Press Escape to return to the saved position.
 5. Open **Traffic** from the navigation and repeat. Filter by a core, reorder the
    visible cards, then clear the filter to check that hidden positions are kept.
    Both monitored ports and the two discovered listener cards in this fixture
@@ -69,7 +75,9 @@ background polling, stable card identity/focus/form drafts, keyboard pickup/drop
 Escape, lost capture/touch cancellation, outside drops, failed storage writes,
 a fresh document reading saved order, filtered traffic slots, edge scrolling,
 normal touch scrolling and route exit. Reduced motion runs the same operations.
-The matrix compares live and preview traffic header/footer styles and exercises
+The matrix checks stationary card slots, visible source contents, full-size
+previews and target borders through reversals and last-slot keyboard moves.
+It also compares live and preview traffic header/footer styles and exercises
 discovered listener pickup, reversals, drop, cancellation and keyboard movement
 in both themes, including cleanup of the viewport layer.
 
@@ -80,14 +88,16 @@ Validated against main `2bbd07b` with Chromium on Linux:
 - `make generate-styles` and `make styles-check`: passed.
 - The four card movement browser modes above: passed, with both card types and
   both themes in each mode.
-- All 58 existing browser modes outside the motion suites: passed across
-  separate batches. The four existing popup motion modes also passed.
+- On the initial commit `0ed0159`, all 58 existing browser modes outside the
+  motion suites passed across separate batches, as did the four popup motion
+  modes. The card matrix and non-browser checks were rerun after the style update.
 - `node frontend/module_smoke.mjs` and the module/smoke policy tests: passed.
 - `make non-browser-checks`: passed.
-- `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed. The browser
-  runner was exercised separately; the skipped wrapper runs the same suite.
-- After the traffic preview adjustment, `go test -p 1 ./frontend -skip
-  '^TestAgentBrowserRuntimeSmoke$'`: passed.
+- On the initial commit `0ed0159`, `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`:
+  passed. The browser runner was exercised separately; the skipped wrapper runs
+  the same suite.
+- After the style update, `go test -p 1 ./frontend -skip '^TestAgentBrowserRuntimeSmoke$'`:
+  passed.
 - `make check`: ran and failed on the existing `motion-selection` assertion
   `quota refresh retains focus` (focus becomes the document body). The same
   assertion fails on an unmodified checkout of main `2bbd07b`.

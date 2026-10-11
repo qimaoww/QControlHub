@@ -1,6 +1,6 @@
 import { animateNodeCardDrop } from "./agent-card-drag.js";
 import { cancelOwnMotion } from "./motion.js";
-import { createCardMoveGhost, moveCardGhost, cardMoveDropIndex, placeCardGhost, createCardMoveScroll } from "./card-move-preview.js";
+import { createCardMoveGhost, moveCardGhost, cardMoveDropIndex, createCardMoveScroll } from "./card-move-preview.js";
 
 const directions = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 const threshold = 6;
@@ -30,7 +30,7 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     previous?.card.classList.remove("dragging");
     previous?.card.classList.remove("card-move-outside");
     previous?.grip.setAttribute("aria-pressed", "false");
-    cards().forEach(card => { card.style.order = ""; });
+    cards().forEach(card => { card.style.order = ""; card.classList.remove("drop-target"); });
     grid.classList.remove("card-move-active");
     delete grid.dataset.cardMoveInput;
     document.body.classList.remove("card-moving", "node-card-dragging", "traffic-card-dragging");
@@ -51,31 +51,31 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
   const detachPointer = previous => {
     drag = null;
     scroll.stop();
+    cards().forEach(card => card.classList.remove("drop-target"));
     if (previous.pointerId != null && pointerClick?.id === previous.pointerId) pointerClick.until = performance.now() + 800;
     if (previous.pointerId != null && previous.grip.hasPointerCapture(previous.pointerId)) previous.grip.releasePointerCapture(previous.pointerId);
   };
   const preview = (index, announce = true) => {
     const previous = drag;
+    if (previous.drop === index && previous.started) return;
+    cards().forEach(card => card.classList.remove("drop-target"));
     if (index == null) {
       previous.drop = null;
       previous.card.classList.add("card-move-outside");
       if (announce) say("已离开可移动区域 · 松开取消");
       return;
     }
-    if (previous.drop === index && previous.started) return;
-    const from = paint();
-    stopMotion();
-    const next = previous.original.filter(card => card !== previous.card);
-    next.splice(index, 0, previous.card);
-    next.forEach((card, position) => { card.style.order = String(position); });
+    // Keep the roster still, like the original traffic cards. Highlight the
+    // actual destination slot, including the last card, without a blank tile.
+    const target = previous.original[index];
+    if (target !== previous.card) target?.classList.add("drop-target");
     previous.drop = index;
     previous.card.classList.remove("card-move-outside");
-    animateNodeCardDrop(next, from, { token: "--motion-card-shift", resize: true });
-    if (announce) say(`移动中 · 第 ${index + 1} 位 / ${next.length}`);
+    if (announce) say(`移动中 · 第 ${index + 1} 位 / ${previous.original.length}`);
   };
   const activate = previous => {
     previous.started = true;
-    if (previous.pointerId != null) previous.ghost = createCardMoveGhost(previous.card, previous.rect, previous.start);
+    if (previous.pointerId != null) previous.ghost = createCardMoveGhost(previous.card, previous.rect);
     previous.card.classList.add("dragging");
     previous.grip.setAttribute("aria-pressed", "true");
     grid.classList.add("card-move-active");
@@ -91,20 +91,16 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     preview(cardMoveDropIndex(drag, grid));
   }
   const settle = (previous, from) => {
-    const destination = previous.card.getBoundingClientRect();
-    let remaining = previous.ghost ? 2 : 1, done = false;
-    const finish = () => {
-      if (done || --remaining) return;
-      done = true;
-      landing = null;
-      clearPreview(previous);
-      previous.release();
-    };
-    const cancels = [animateNodeCardDrop(cards(), from, {
-      token: "--motion-card-place", resize: true, onSettled: finish,
-    })];
-    if (previous.ghost) cancels.push(placeCardGhost(previous, destination, finish));
-    if (!done) landing = () => { cancels.forEach(cancelAnimation => cancelAnimation()); if (!done) { remaining = 1; finish(); } };
+    // Hand the preview's painted bounds to the real card, as the original
+    // traffic drop did. Only one card is painted during landing or return.
+    if (previous.ghost) from.set(previous.card, previous.ghost.getBoundingClientRect());
+    clearPreview(previous);
+    let done = false;
+    const cancelAnimation = animateNodeCardDrop(cards(), from, {
+      token: "--motion-card-place", resize: true,
+      onSettled: () => { done = true; landing = null; previous.release(); },
+    });
+    if (!done) landing = cancelAnimation;
   };
   const commit = previous => {
     const next = previous.original.filter(card => card !== previous.card);
@@ -164,7 +160,9 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
       stopMotion(); restoreFocus(grip);
       const start = { x: event.clientX, y: event.clientY };
       drag = { card, grip, rect, release, start, point: start, pointerId: event.pointerId,
-        original: cards(), slots: cards().map(item => from.get(item)), gridRect: grid.getBoundingClientRect(),
+        // Read hit slots after releasing entrance/landing transforms. Painted
+        // rectangles from overlapping animated rows are not stable drop slots.
+        original: cards(), slots: cards().map(item => item.getBoundingClientRect()), gridRect: grid.getBoundingClientRect(),
         offset: { x: start.x - rect.left - rect.width / 2, y: start.y - rect.top - rect.height / 2 },
         started: false, drop: null, ghost: null };
       pointerClick = { id: event.pointerId, until: Infinity };

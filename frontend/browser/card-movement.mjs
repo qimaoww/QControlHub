@@ -60,7 +60,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   document.body.append(sizing);
   const beforeSize = new Map([[sizing, sizing.getBoundingClientRect()]]);
   sizing.style.width = "140px"; sizing.style.height = "180px";
-  animateNodeCardDrop([sizing], beforeSize, { resize: true, token: "--motion-card-shift" });
+  animateNodeCardDrop([sizing], beforeSize, { resize: true, token: "--motion-card-place" });
   if (!reduced) {
     const first = sizing.getBoundingClientRect();
     assert.ok(Math.abs(first.width - 100) < 2 && Math.abs(first.height - 100) < 2, "row resize starts at the painted bounds");
@@ -104,10 +104,14 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         assert.ok(Math.abs(transform.m41 - (point.x - start.x)) < .1 && Math.abs(transform.m42 - (point.y - start.y)) < .1,
           `translation follows the pointer without interpolation lag: ${type}/${theme}/${index}; actual ${transform.m41},${transform.m42}; expected ${point.x-start.x},${point.y-start.y}`);
         assert.equal(accountStorage.getItem(orderKey), saved, "preview cannot write order preferences");
-        assert.equal(original[0].style.order, index === 2 ? "0" : "1", "border follows reversals");
-        assert.equal(getComputedStyle(original[0], "::before").borderTopWidth, "2px", "drop border must be explicit in both themes");
+        const target = index === 2 ? null : original[1];
+        assert.equal(grid.querySelector(".drop-target"), target, "target-card border follows reversals");
+        assert.ok(cards().every(card => !card.style.order), "cards keep their original slots until drop");
+        if (target) assert.ok(getComputedStyle(target).boxShadow.includes("inset") && getComputedStyle(target).boxShadow.includes("2px"), "destination uses the original traffic inset border in both themes");
         assert.equal(document.querySelector(".card-move-cue,.card-move-guide,.card-move-feedback"), null, "drag feedback uses borders without added labels");
-        assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "0", "original contents must not double-paint through the placeholder");
+        assert.equal(getComputedStyle(original[0]).opacity, "0.4", "source retains the original traffic-card fade");
+        assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "1", "source content remains visible without a blank placeholder");
+        assert.equal(getComputedStyle(ghost).scale, "1", "preview preserves the original traffic-card size");
         if (reduced) assert.equal(ghost.getAnimations().length, 0, "reduced motion keeps cue and placement without animation");
         if (index === 3 && theme === "light") {
           const path = type === "nodes" ? "/agents" : "/traffic-policies";
@@ -121,14 +125,16 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
       assert.equal(cards()[1], original[0], `drop commits the preview position: ${type}/${theme}; ${ids().join(",")}; ${grid.parentElement.querySelector("[data-card-order-status]")?.textContent}`);
       assert.equal(document.activeElement, grip, "pointer drop keeps focus on the same grip");
       assert.ok(grid.parentElement.querySelector('[data-phase="saved"]'), "success is announced without a toast");
-      assert.ok(cards().every(card => !card.style.order && !card.style.transform && !card.style.transition), "temporary geometry must be cleaned");
+      assert.ok(cards().every(card => !card.style.order && !card.style.transform && !card.style.transition && !card.classList.contains("drop-target")), "temporary geometry and target border must be cleaned");
 
       // Direct arrows commit serially; Space opens a reversible keyboard preview.
       key(grip, "ArrowLeft"); key(grip, "ArrowRight"); key(grip, "ArrowLeft");
       await settled();
       equalOrder(ids(), originalIds, "rapid keyboard reversals must persist the latest order");
-      key(grip, " "); key(grip, "ArrowRight");
+      key(grip, " ");
+      for (let index = 1; index < cards().length; index++) key(grip, "ArrowRight");
       assert.equal(grip.getAttribute("aria-pressed"), "true");
+      assert.equal(grid.querySelector(".drop-target"), cards().at(-1), "last-slot movement retains a destination border");
       key(grip, "Escape"); await settled();
       equalOrder(ids(), originalIds, "keyboard cancellation must restore the committed order");
       assert.equal(document.activeElement, grip);
@@ -156,7 +162,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         assert.ok(grid.isConnected && grip.isConnected, `failure fixture must retain its grid: ${type}/${theme}/${location.hash}`);
         await gesture(positioned.start, [positioned.end], "drop", async () => {
           assert.ok(document.querySelector(".card-move-ghost"), `failure gesture must pick up: ${type}/${theme}/${location.hash}`);
-          assert.equal(original[0].style.order, "0", `failure gesture must select first slot: ${type}/${theme}`);
+          assert.equal(grid.querySelector(".drop-target"), cards()[0], `failure gesture must select first slot: ${type}/${theme}`);
         });
         equalOrder(ids(), beforeFailure, "failed persistence must restore the last saved DOM order");
         assert.equal(accountStorage.getItem(orderKey), persisted);
@@ -208,11 +214,13 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
     const port = grid.querySelector(".traffic-configured-port"), grip = port.querySelector(".traffic-card-grip");
     const index = cards.indexOf(port), targetIndex = index + 1 < cards.length ? index + 1 : index - 1;
     const positioned = geometry(grip, cards[targetIndex]);
-    await gesture(positioned.start, [positioned.end, positioned.start, positioned.end], "drop", async () => {
+    await gesture(positioned.start, [positioned.end, positioned.start, positioned.end], "drop", async step => {
       const ghost = document.querySelector(".card-move-ghost");
       trafficPaint(port, ghost);
       assert.equal(getComputedStyle(ghost).borderTopStyle, "solid", "discovered listener preview shares the solid drag border");
-      assert.equal(getComputedStyle(port, "::before").borderTopStyle, "solid", "discovered listener slot shares the solid drop border");
+      const target = step === 1 ? null : cards[targetIndex];
+      assert.equal(grid.querySelector(".drop-target"), target, `discovered listener border follows the selected card: ${theme}/${step}; source ${index}, target ${targetIndex}, actual ${cards.indexOf(grid.querySelector(".drop-target"))}`);
+      if (target) assert.ok(getComputedStyle(target).boxShadow.includes("inset"), "discovered listener destination shares the traffic inset border");
     });
     const expected = [...before]; expected.splice(index, 1); expected.splice(targetIndex, 0, before[index]);
     equalOrder(keys(), expected, "discovered listener drop saves the selected slot");
