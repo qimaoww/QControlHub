@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const isMain = Boolean(process.argv[1]) &&
+  (await realpath(process.argv[1]).catch(() => null)) === fileURLToPath(import.meta.url);
 const productionCSP = (await readFile(join(root, "nginx.conf"), "utf8"))
   .match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
 assert.ok(productionCSP, "browser smoke must read the production content security policy");
@@ -109,19 +111,19 @@ const server = createServer(async (request, response) => {
   }
 });
 
-await new Promise((resolve, reject) => {
+if (isMain) await new Promise((resolve, reject) => {
   server.once("error", reject);
   server.listen(0, "127.0.0.1", resolve);
 });
 
 // Reuse the same fixture for manual layout inspection, without launching the
 // automated browser runner. No production API or credentials are involved.
-if (process.env.QCH_BROWSER_SMOKE_SERVE_ONLY) {
+if (isMain && process.env.QCH_BROWSER_SMOKE_SERVE_ONLY) {
   process.stdout.write(`http://127.0.0.1:${server.address().port}/agents-browser-smoke.html?mode=logs&preview=1#node-settings\n`);
   await new Promise(() => {});
 }
 
-const chrome = [
+const chrome = !isMain ? null : [
   process.env.QCH_CHROME_BIN,
   "chromium",
   "chromium-browser",
@@ -135,11 +137,58 @@ const chrome = [
       : spawnSync("which", [candidate], { stdio: "ignore" }).status === 0,
   );
 
-assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
 const address = server.address();
 
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const stderrLimit = 8192;
+const diagnosticText = (value, limit = 2048) => String(value ?? "").slice(0, limit);
+const remember = (events, event) => {
+  events.push(event);
+  if (events.length > 8) events.shift();
+};
+const describeException = details => ({
+  text: diagnosticText(details.text),
+  description: diagnosticText(details.exception?.description),
+  url: diagnosticText(details.url, 1024),
+  line: details.lineNumber,
+  column: details.columnNumber,
+  frames: (details.stackTrace?.callFrames || []).slice(0, 6).map(frame => ({
+    function: diagnosticText(frame.functionName, 128), url: diagnosticText(frame.url, 1024),
+    line: frame.lineNumber, column: frame.columnNumber,
+  })),
+});
+
+// This snapshot runs only after a failure. Its separate bound cannot extend
+// a mode's passing deadline, including when the renderer stops responding.
+const pageSnapshot = `({
+  url: location.href.slice(0, 2048),
+  readyState: document.readyState,
+  visibility: document.visibilityState,
+  focused: document.hasFocus(),
+  marker: document.documentElement?.dataset.browserSmoke?.slice(0, 128) || null,
+  routeCoverage: document.documentElement?.dataset.motionCoveragePages?.slice(0, 1024) || null,
+  result: document.querySelector("#browser-smoke-result")?.textContent?.slice(0, 2048) || null,
+  body: document.body?.textContent?.slice(0, 2048) || null,
+  activeElement: document.activeElement?.outerHTML?.slice(0, 512) || null,
+  workspace: document.querySelector(".workspace-main")?.className?.slice(0, 256) || null,
+  busy: document.querySelector(".workspace-main")?.getAttribute("aria-busy")?.slice(0, 128) || null,
+  gesture: window.__motionGesture?.action?.slice(0, 128) || null,
+  animations: document.getAnimations().slice(0, 12).map(animation => ({
+    id: animation.id.slice(0, 128), name: (animation.animationName || animation.transitionProperty)?.slice(0, 128) || null,
+    state: animation.playState, time: animation.currentTime,
+  })),
+})`;
+
+export function smokeFailure(mode, url, error, diagnostics, stderr = "") {
+  return new Error(
+    `Chrome ${mode} smoke failed (${url}): ${diagnosticText(error?.message || error)}\n` +
+    `Browser diagnostics: ${JSON.stringify(diagnostics)}\n` +
+    `Chrome stderr tail (last ${stderrLimit} chars):\n${stderr.slice(-stderrLimit)}`,
+    { cause: error },
+  );
+}
 
 async function waitForPageTarget(debugOrigin, expectedURL) {
   const deadline = Date.now() + 10000;
@@ -261,22 +310,58 @@ async function driveCardMoveGestures(send, mobile) {
   }
 }
 
-async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode) {
-  const socket = new WebSocket(webSocketURL);
-  await Promise.race([
-    new Promise((resolve, reject) => {
-      socket.addEventListener("open", resolve, { once: true });
-      socket.addEventListener("error", reject, { once: true });
-    }),
-    delay(10000).then(() => {
-      throw new Error("连接浏览器调试目标超时");
-    }),
-  ]);
 
+export async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode, diagnostics = {}) {
+  diagnostics.cdp = { state: "connecting" };
+  diagnostics.runtimeExceptions = [];
+  diagnostics.consoleErrors = [];
+  let socket;
+  try { socket = new WebSocket(webSocketURL); }
+  catch (error) {
+    diagnostics.cdp.error = diagnosticText(error.message || error);
+    diagnostics.page = { unavailable: "CDP connection was not established" };
+    throw error;
+  }
   let requestID = 0;
+  let cleaningUp = false;
+  let connectionFailure;
   const pending = new Map();
+  const rejectPending = error => {
+    connectionFailure = error;
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+  };
+  socket.addEventListener("open", () => { diagnostics.cdp.state = "open"; });
+  socket.addEventListener("close", event => {
+    const error = new Error(`CDP socket closed (${event.code}): ${diagnosticText(event.reason)}`);
+    if (!cleaningUp) {
+      diagnostics.cdp.state = "closed";
+      diagnostics.cdp.close = { code: event.code, reason: diagnosticText(event.reason) };
+    }
+    rejectPending(error);
+  });
+  socket.addEventListener("error", event => {
+    const error = new Error(diagnosticText(event.message || event.error?.message || "CDP socket error"));
+    if (!cleaningUp) diagnostics.cdp.error = error.message;
+    rejectPending(error);
+  });
   socket.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data));
+    let message;
+    try { message = JSON.parse(String(event.data)); }
+    catch (error) {
+      diagnostics.cdp.error = diagnosticText(`invalid CDP message: ${error.message}`);
+      rejectPending(error);
+      return;
+    }
+    if (message.method === "Runtime.exceptionThrown")
+      remember(diagnostics.runtimeExceptions, describeException(message.params.exceptionDetails));
+    if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error")
+      remember(diagnostics.consoleErrors, diagnosticText(message.params.args
+        .map(argument => diagnosticText(argument.value ?? argument.description, 512)).join(" ")));
+    if (message.method === "Inspector.targetCrashed" || message.method === "Inspector.detached") {
+      diagnostics.cdp.failure = { event: message.method, reason: diagnosticText(message.params?.reason) };
+      rejectPending(new Error(message.method));
+    }
     if (!message.id || !pending.has(message.id)) return;
     const { resolve, reject } = pending.get(message.id);
     pending.delete(message.id);
@@ -284,14 +369,60 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     else resolve(message.result);
   });
 
-  const send = (method, params = {}) =>
+  const send = (method, params = {}, timeout) =>
     new Promise((resolve, reject) => {
+      if (connectionFailure) { reject(connectionFailure); return; }
+      if (socket.readyState !== WebSocket.OPEN) {
+        reject(new Error(`CDP ${method} unavailable: socket state ${socket.readyState}`));
+        return;
+      }
       const id = ++requestID;
-      pending.set(id, { resolve, reject });
-      socket.send(JSON.stringify({ id, method, params }));
+      let timer;
+      const settle = callback => value => { clearTimeout(timer); callback(value); };
+      pending.set(id, { resolve: settle(resolve), reject: settle(reject), method });
+      if (timeout) timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method} exceeded ${timeout}ms`));
+      }, timeout);
+      try { socket.send(JSON.stringify({ id, method, params })); }
+      catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
 
+  const capture = async () => {
+    diagnostics.cdp.pendingRequests = [...pending.values()].slice(-8).map(request => request.method);
+    if (socket.readyState !== WebSocket.OPEN) {
+      diagnostics.page = { unavailable: `CDP socket state ${socket.readyState}` };
+      return;
+    }
+    try {
+      const snapshot = await send("Runtime.evaluate", { expression: pageSnapshot, returnByValue: true }, 1500);
+      diagnostics.page = snapshot.exceptionDetails
+        ? { unavailable: describeException(snapshot.exceptionDetails) }
+        : snapshot.result?.value || { unavailable: "page snapshot returned no value" };
+    } catch (error) {
+      diagnostics.page = { unavailable: diagnosticText(error.message || error) };
+    }
+  };
+
   try {
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", () => reject(new Error(diagnostics.cdp.error)), { once: true });
+        socket.addEventListener("close", () => reject(new Error("CDP socket closed before opening")), { once: true });
+      }),
+      delay(10000).then(() => { throw new Error("连接浏览器调试目标超时"); }),
+    ]);
+    // Diagnostic subscriptions must not delay setup or move the smoke deadline.
+    // A stalled subscription is recorded without failing a working fixture.
+    diagnostics.cdp.subscriptions = {};
+    for (const method of ["Runtime.enable", "Inspector.enable"]) {
+      diagnostics.cdp.subscriptions[method] = "pending";
+      send(method, {}, 1500).then(
+        () => { diagnostics.cdp.subscriptions[method] = "enabled"; },
+        error => { diagnostics.cdp.subscriptions[method] = diagnosticText(error.message || error); },
+      );
+    }
     if (motionMode) await send("Emulation.setFocusEmulationEnabled", { enabled: true });
     if (navigateURL) {
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
@@ -356,14 +487,22 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     if (!evaluation) throw new Error("等待浏览器 smoke 完成标记超时");
     if (evaluation.exceptionDetails)
       throw new Error(JSON.stringify(evaluation.exceptionDetails));
-    return evaluation.result?.value;
+    const result = evaluation.result?.value;
+    if (result?.status !== "passed") await capture();
+    return result;
+  } catch (error) {
+    await capture();
+    throw error;
   } finally {
-    socket.close();
+    cleaningUp = true;
+    rejectPending(new Error("CDP socket closed during cleanup"));
+    try { socket.close(); }
+    catch (error) { diagnostics.cdp.cleanupError = diagnosticText(error.message); }
   }
 }
 
 async function stopBrowser(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise((resolve) => child.once("exit", resolve));
   child.kill("SIGTERM");
   await Promise.race([
@@ -376,11 +515,19 @@ async function stopBrowser(child) {
 }
 
 async function runMode(mode) {
-  const profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
+  const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
+  const diagnostics = {
+    browser: { exitCode: null, signalCode: null },
+    cdp: { state: "not-connected" },
+    page: { unavailable: "CDP connection was not established" },
+  };
+  let profile;
   let child;
+  let stderr = "";
   try {
+    assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
+    profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
     await chmod(profile, 0o700);
-    const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
     const mobile = (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") ? "about:blank" : url;
     child = spawn(
@@ -412,14 +559,16 @@ async function runMode(mode) {
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
-    let stderr = "";
+    child.once("error", error => { diagnostics.browser.error = diagnosticText(error.message); });
+    child.once("exit", (exitCode, signalCode) => { diagnostics.browser = { exitCode, signalCode }; });
     const debugOrigin = await Promise.race([
       new Promise((resolve, reject) => {
         child.stderr.on("data", (chunk) => {
-          stderr += chunk;
-          const match = stderr.match(
+          const output = stderr + chunk;
+          const match = output.match(
             /DevTools listening on ws:\/\/(127\.0\.0\.1|localhost):(\d+)\//,
           );
+          stderr = output.slice(-stderrLimit);
           if (match) resolve(`http://127.0.0.1:${match[2]}`);
         });
         child.once("error", reject);
@@ -433,20 +582,22 @@ async function runMode(mode) {
     ]);
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
     const gestureMode = mode.startsWith("motion-cards") || ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
-    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode);
+    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode, diagnostics);
     assert.equal(
       result?.status,
       "passed",
-      `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
+      `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}`,
     );
     if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
     if (result.measurements && process.env.QCH_BROWSER_SMOKE_REPORT) {
       await mkdir(process.env.QCH_BROWSER_SMOKE_REPORT, { recursive: true });
       await writeFile(join(process.env.QCH_BROWSER_SMOKE_REPORT, `${mode}.json`), JSON.stringify(result.measurements, null, 2) + "\n");
     }
+  } catch (error) {
+    throw smokeFailure(mode, url, error, diagnostics, stderr);
   } finally {
     if (child) await stopBrowser(child);
-    await rm(profile, {
+    if (profile) await rm(profile, {
       recursive: true,
       force: true,
       maxRetries: 5,
@@ -455,7 +606,7 @@ async function runMode(mode) {
   }
 }
 
-try {
+if (isMain) try {
   const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");

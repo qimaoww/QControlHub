@@ -1,9 +1,10 @@
 import { updateFeedback } from "./presence-motion.js";
 import { readCoreLogWindow } from "./core-log-read.js";
-import { reuseCoreLogEntries } from "./core-log-projection.js";
 import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
 import { createCoreLogBindings } from "./core-log-bindings.js";
+import { coreLogAgentPresentation } from "./core-log-source-status.js";
+import { storagePolicyName } from "./core-log-model.js";
 export { filterCoreLogEntries, coreLogFilterCounts } from "./core-log-model.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 import { createCoreLogCache } from "./core-log-cache.js";
@@ -43,7 +44,22 @@ export function installCoreLogs(ctx) {
   const { restoreSelection, rememberSelection, query } = createCoreLogSelection({ state, engines, storage });
   const view = createCoreLogView(ctx);
   const bind = createCoreLogBindings(ctx, { renderCoreLogs, rememberSelection, coreLogs, poller });
-  function renderCoreLogs(entries, agents, filters) { view(entries, agents, filters); bind(filters); }
+  // Shared settings can arrive after the log window. Compare the policy that
+  // the view displays, ignoring unrelated settings and hidden policy values.
+  const viewPresentation = () => {
+    const settingsVisible = Boolean(can("settings.read"));
+    const retentionDays = Number(state.data.settings?.core_log_retention_days);
+    return JSON.stringify([
+      Boolean(can("agents.read")), settingsVisible,
+      settingsVisible ? storagePolicyName(state.data.settings?.core_log_minimum_level) : "",
+      settingsVisible && Number.isInteger(retentionDays) && retentionDays > 0 ? retentionDays : null,
+    ]);
+  };
+  function renderCoreLogs(entries, agents, filters) {
+    view(entries, can("agents.read") ? agents : [], filters);
+    state.data.coreLogViewPresentation = viewPresentation();
+    bind(filters);
+  }
 
   function coreLogs(options = {}) {
     if (document.addEventListener) bindEvent(document, "visibilitychange", () => {
@@ -99,20 +115,26 @@ export function installCoreLogs(ctx) {
           if (can("agents.read") && (!scopeChange || !data.coreLogAgentsAt || now() - data.coreLogAgentsAt >= 10_000)) {
             void api("/agents", { signal }).then((freshAgents) => {
               if (!current(signal)) return;
+              const previousPresentation = coreLogAgentPresentation(agents);
               agents = freshAgents.filter((agent) => agent.can_manage !== false);
               data.agents = agents;
               data.coreLogAgentsAt = now();
-              if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
+              if (previousPresentation !== coreLogAgentPresentation(agents))
+                paint(data.coreLogEntries || [], data.coreLogPhase);
             }).catch(() => {
               // A failed metadata read must not discard successfully read logs.
               if (!current(signal)) return;
+              const previousPresentation = coreLogAgentPresentation(agents);
               agents = agents.map((agent) => ({ ...agent, status: "unknown" }));
+              data.agents = agents;
               data.coreLogAgentsAt = 0;
-              if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
+              if (previousPresentation !== coreLogAgentPresentation(agents))
+                paint(data.coreLogEntries || [], data.coreLogPhase);
             });
           }
           return readCoreLogWindow(api, params, {
             signal, engines,
+            previous: changed ? cached : data.coreLogEntries,
             preview: changed && !cached && !related && Number(filters.limit || 1000) > 200,
             onPreview(entries) {
               if (!current(signal)) return;
@@ -124,9 +146,9 @@ export function installCoreLogs(ctx) {
         (entries) => {
           if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs") return;
           failures = 0;
-          entries = reuseCoreLogEntries(changed ? cached : data.coreLogEntries, entries);
           cache.set(key, entries);
-          paint(entries, "ready");
+          if (!background || entries !== data.coreLogEntries || data.coreLogPhase !== "ready" ||
+              data.coreLogViewPresentation !== viewPresentation()) paint(entries, "ready");
         },
       );
       if (applied && state.data === data && state.data.coreLogAutoRefresh !== false) poller.start();

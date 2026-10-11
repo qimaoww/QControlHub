@@ -3,6 +3,7 @@ import { coreLogFilterCounts, filterCoreLogEntries } from "./core-log-model.js";
 // Read snapshots are immutable. Reuse unchanged records, including their
 // search text and rendered rows, across polls without retaining another window.
 export function reuseCoreLogEntries(previous, fresh) {
+  if (previous === fresh) return previous;
   if (!previous?.length) return fresh;
   const byID = new Map(previous.map(entry => [entry.id, entry]));
   const fields = ["agent_id", "engine", "level", "message", "logged_at", "received_at"];

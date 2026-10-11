@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
@@ -159,4 +160,62 @@ func TestCoreLogsLimitAppliesPerEngine(t *testing.T) {
 	for _, limit := range []string{"0", "-1", "2001", "invalid"} {
 		request("limit="+limit, http.StatusBadRequest)
 	}
+	t.Run("conditional windows preserve content and query semantics", func(t *testing.T) {
+		fetch := func(query, condition, token string, status int) *httptest.ResponseRecorder {
+			t.Helper()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/core-logs?"+query, nil)
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("If-None-Match", condition)
+			r.Header.Set("Accept-Encoding", "gzip")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != status {
+				t.Fatalf("conditional %s: status=%d, want %d", query, w.Code, status)
+			}
+			if status == http.StatusNotModified && (w.Body.Len() != 0 || w.Header().Get("Content-Encoding") != "" || w.Header().Get("ETag") == "") {
+				t.Fatal("304 must retain the validator without a body or gzip stream")
+			}
+			return w
+		}
+		query := scope + "limit=2"
+		tag := fetch(query, "", adminToken, http.StatusOK).Header().Get("ETag")
+		if !strings.HasPrefix(tag, `W/"`) {
+			t.Fatalf("missing weak representation validator: %q", tag)
+		}
+		fetch(query, tag, adminToken, http.StatusNotModified)
+		fetch(query, `"unrelated", `+strings.TrimPrefix(tag, "W/"), adminToken, http.StatusNotModified)
+		fetch(query, "*", adminToken, http.StatusNotModified)
+		fetch(query, tag, "invalid-token", http.StatusUnauthorized)
+		fetch(scope+"limit=1", tag, adminToken, http.StatusOK)
+		fetch("agent_id="+secondary.ID+"&limit=2", tag, adminToken, http.StatusOK)
+		fetch(scope+"level=warning&limit=2", tag, adminToken, http.StatusOK)
+		fetch(scope+"q=needle&limit=2", tag, adminToken, http.StatusOK)
+		fetch(scope+fmt.Sprintf("before=%d&limit=2", before), tag, adminToken, http.StatusOK)
+		// Another node's new log must not invalidate this node's window.
+		writeBatch(secondary.ID, []core.CoreLogEntry{{Engine: core.EngineXray, Level: "info", Message: "another node changed"}})
+		fetch(query, tag, adminToken, http.StatusNotModified)
+		writeBatch(primary.ID, []core.CoreLogEntry{{Engine: core.EngineXray, Level: "info", Message: "new upload"}})
+		tag = fetch(query, tag, adminToken, http.StatusOK).Header().Get("ETag")
+		// Same-ID content corrections and a removed oldest selected row both
+		// invalidate, even when the newest ID and the per-engine count survive.
+		connection, err := pgx.Connect(ctx, schema.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close(ctx)
+		if _, err := connection.Exec(ctx, `UPDATE core_logs SET message='corrected existing line' WHERE agent_id=$1 AND message='xray busy 2'`, primary.ID); err != nil {
+			t.Fatal(err)
+		}
+		tag = fetch(query, tag, adminToken, http.StatusOK).Header().Get("ETag")
+		if _, err := connection.Exec(ctx, `DELETE FROM core_logs WHERE agent_id=$1 AND message='ss-rust other middle'`, primary.ID); err != nil {
+			t.Fatal(err)
+		}
+		tag = fetch(query, tag, adminToken, http.StatusOK).Header().Get("ETag")
+		fetch(query, tag, adminToken, http.StatusNotModified)
+		if _, err := connection.Exec(ctx, `DELETE FROM core_logs WHERE agent_id=$1`, primary.ID); err != nil {
+			t.Fatal(err)
+		}
+		tag = fetch(query, tag, adminToken, http.StatusOK).Header().Get("ETag")
+		fetch(query, tag, adminToken, http.StatusNotModified)
+	})
 }

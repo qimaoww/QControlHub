@@ -256,8 +256,14 @@ var ansiControlPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 func sanitizeCoreLogMessage(raw string) string {
 	message := strings.TrimSpace(strings.ToValidUTF8(raw, "�"))
 	message = strings.ReplaceAll(message, "\x00", "�")
-	message = ansiControlPattern.ReplaceAllString(message, "")
-	message = strings.ReplaceAll(message, "\x1b", "")
+	// Stored rows have already been sanitized on upload. The regexp replacement
+	// copies even a clean message, so a full window of long logs used to allocate
+	// another two message-sized buffers per row on every poll. Legacy/colorized
+	// rows still take the same cleanup path when an escape byte is present.
+	if strings.ContainsRune(message, '\x1b') {
+		message = ansiControlPattern.ReplaceAllString(message, "")
+		message = strings.ReplaceAll(message, "\x1b", "")
+	}
 	return message
 }
 

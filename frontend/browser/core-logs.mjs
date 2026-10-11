@@ -119,17 +119,25 @@ async function testStableLogRuntime({ testAPI }) {
   try {
     const reads = () => testAPI.calls.filter(call => call.path === "/core-logs").length;
     const before = reads();
+    const responsesBefore = testAPI.logResponses.length;
     document.querySelector("[data-toggle-core-log-refresh]").click();
     await waitFor(() => reads() >= before + 3, "continuous log polling did not run");
     assert.equal(document.activeElement, search, "live refresh preserves search focus");
     assert.equal(search.selectionStart, 4, "live refresh preserves the caret");
     assert.equal(search.selectionEnd, 8);
     assert.equal(mutations, 0, "identical logs must not mutate the stream");
+    assert.ok(testAPI.logResponses.slice(responsesBefore).filter(response => response.status === 304).length >= 2,
+      "unchanged polls must use HTTP validators instead of downloading the log window");
     testAPI.agents = testAPI.agents.map(agent => ({ ...agent, metrics: { ...agent.metrics, cpu_percent: 73 } }));
     resolveMetadata();
     testAPI.agentsGate = null;
     await waitFor(() => reads() >= before + 5, "metadata/live refresh did not settle");
     assert.equal(mutations, 0, "metrics-only metadata must not redraw logs");
+    testAPI.logRevision = 1;
+    await waitFor(() => document.querySelector(".core-log-row pre")?.textContent.includes("corrected"), "same-ID content correction must invalidate the validator");
+    assert.equal(document.activeElement, search, "changed refresh preserves search focus");
+    assert.equal(search.selectionStart, 4);
+    assert.equal(search.selectionEnd, 8);
 
     testAPI.logFailure = 503;
     await waitFor(() => document.querySelector('[data-core-log-refresh-label]')?.textContent.includes("刷新失败"), "failed refresh must retain the stream and show feedback");
@@ -164,9 +172,14 @@ async function testStableLogRuntime({ testAPI }) {
     const main = document.querySelector(".workspace-main");
     const workspace = main.scrollHeight > main.clientHeight ? main : document.scrollingElement;
     workspace.scrollTo({ top: 1200, behavior: "instant" });
-    // content-visibility lays out the newly visible long rows on the next
-    // frame. Measure the settled reading position rather than its estimate.
-    await new Promise(resolve => originalTimer(resolve, 150));
+    // Conditional polls can complete before the route's 480 ms entrance
+    // animation. A moving parent is not a stable reading anchor; await the
+    // actual finite animations instead of depending on JSON parsing delay.
+    const entrance = [main, document.querySelector("[data-core-log-page]")]
+      .flatMap(element => element.getAnimations()).filter(animation => Number.isFinite(animation.effect.getComputedTiming().endTime));
+    await Promise.all(entrance.map(animation => animation.finished.catch(() => {})));
+    // content-visibility resolves newly visible long rows on the next frame.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const position = workspace.scrollTop;
     document.querySelector("[data-toggle-core-log-refresh]").click();
     const pageReads = reads();
@@ -180,7 +193,7 @@ async function testStableLogRuntime({ testAPI }) {
     const appendReads = reads();
     await waitFor(() => reads() >= appendReads + 2, "new log refresh missing");
     assert.equal(anchor.isConnected, true, "retained rows keep their DOM identity after new logs arrive");
-    assert.ok(Math.abs(anchor.getBoundingClientRect().top - anchorTop) < 2, "new logs must preserve the visible reading anchor");
+    assert.ok(Math.abs(anchor.getBoundingClientRect().top - anchorTop) < 2, `new logs must preserve the visible reading anchor: before=${anchorTop} after=${anchor.getBoundingClientRect().top}`);
     assert.match(document.querySelector(".core-log-pagination").textContent, /第 2 \/ 40 页/);
     document.querySelector("[data-toggle-core-log-refresh]").click();
     location.hash = "#node-settings";
@@ -195,6 +208,7 @@ async function testStableLogRuntime({ testAPI }) {
     testAPI.agentsGate = null;
     testAPI.logFailure = 0;
     testAPI.logNewCount = 0;
+    testAPI.logRevision = 0;
   }
 }
 

@@ -31,6 +31,8 @@ async function checkNavigationReversal(main, reduced) {
   const originalAnimate = main.animate;
   const classes = main.classList, originalRemove = classes.remove;
   let releaseTraffic, reversingOpacity, resumeOpacity;
+  const trafficGate = new Promise(resolve => { releaseTraffic = resolve; });
+  let trafficStarted = false;
   classes.remove = function (...tokens) {
     if (tokens.includes("is-route-departing") && this.contains("is-route-departing"))
       reversingOpacity = Number(getComputedStyle(main).opacity);
@@ -44,13 +46,17 @@ async function checkNavigationReversal(main, reduced) {
     return animation;
   };
   window.fetch = async (...args) => {
-    if (String(args[0]).includes("traffic-policies")) await new Promise(resolve => { releaseTraffic = resolve; });
+    if (String(args[0]).includes("traffic-policies")) {
+      trafficStarted = true;
+      await trafficGate;
+    }
     return originalFetch(...args);
   };
   try {
     location.hash = "#traffic";
-    await waitFor(() => releaseTraffic && main.classList.contains("is-route-departing"), "pending route departure missing");
-    await delay(60);
+    await waitFor(() => main.classList.contains("is-route-departing"), "pending route departure missing");
+    if (!reduced) await waitFor(() => Number(getComputedStyle(main).opacity) <= .5, "route departure must become visible");
+    await waitFor(() => trafficStarted, "the slow route request must start before reversal");
     location.hash = "#node-settings";
     await waitFor(() => !main.classList.contains("is-route-departing"), "reverse navigation must restore the mounted page");
     // Compare the actual reversal frame with the native resume's first frame.

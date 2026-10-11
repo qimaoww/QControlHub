@@ -73,8 +73,13 @@ export async function requestJSON(url, options, {
   const canceled = (cause) => cause?.name !== "TimeoutError"
     && (cause?.name === "AbortError" || options?.signal?.aborted);
   let response;
+  // Validators are opt-in and belong to an exact in-memory representation.
+  // Never let a bodyless 304 stand in for a value the caller no longer owns.
+  const { conditional, onResponse, ...requestOptions } = options || {};
+  const validator = conditional?.etag && Object.hasOwn(conditional, "value") ? conditional : null;
+  if (validator) requestOptions.headers = { ...requestOptions.headers, "If-None-Match": validator.etag };
   try {
-    response = await fetchImpl(url, options);
+    response = await fetchImpl(url, requestOptions);
   } catch (cause) {
     assertCurrent();
     // Navigation cancellation must remain silent and retain its identity.
@@ -85,6 +90,10 @@ export async function requestJSON(url, options, {
     throw new Error(message, { cause });
   }
   assertCurrent();
+  if (response.status === 304 && validator) {
+    onResponse?.(response);
+    return validator.value;
+  }
   if (!response.ok) {
     // Rendering login aborts the route signal. Do not read the response body
     // afterward: that would replace the authentication failure with AbortError.
@@ -112,6 +121,7 @@ export async function requestJSON(url, options, {
   try {
     const body = await response.json();
     assertCurrent();
+    onResponse?.(response);
     return body;
   } catch (cause) {
     assertCurrent();
