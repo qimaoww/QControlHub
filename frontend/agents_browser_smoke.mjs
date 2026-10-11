@@ -195,6 +195,40 @@ async function driveMotionGestures(send, mobile) {
   }
 }
 
+async function driveCardMoveGestures(send, mobile) {
+  const evaluate = async expression => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
+  const wait = expression => evaluate(`new Promise(resolve => { const timer = setInterval(() => {
+    if (${expression} || document.documentElement.dataset.browserSmoke) { clearInterval(timer); resolve(document.documentElement.dataset.browserSmoke ? null : (${expression})); }
+  }, 10); })`);
+  while (true) {
+    const gesture = await wait("window.__cardMoveGesture");
+    if (!gesture) return;
+    if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
+    else {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...gesture.start, button: "left", buttons: 1, clickCount: 1 });
+    }
+    for (let index = 0; index < gesture.points.length; index++) {
+      const point = gesture.points[index];
+      if (mobile) await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point] });
+      else await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point, button: "left", buttons: 1 });
+      // Chromium may coalesce native touch moves until its next input frame.
+      // Inspect delivered input, rather than racing CDP acknowledgement.
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      await evaluate(`window.__cardMoveStep = ${index}`);
+      if (await wait(`window.__cardMoveAck === ${index}`) === null) return;
+    }
+    if (gesture.release === "escape") await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    if (gesture.release === "leave") { await evaluate('location.hash = "#core-logs"'); await delay(80); }
+    if (mobile) await send("Input.dispatchTouchEvent", { type: gesture.release === "cancel" ? "touchCancel" : "touchEnd", touchPoints: [] });
+    else {
+      if (gesture.release === "cancel") await evaluate('document.activeElement.releasePointerCapture(1)');
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...gesture.points.at(-1), button: "left", buttons: 0, clickCount: 1 });
+    }
+    await evaluate("window.__cardMoveGesture = null");
+  }
+}
+
 async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode) {
   const socket = new WebSocket(webSocketURL);
   await Promise.race([
@@ -241,8 +275,8 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     // Full popup playback now samples all 36 theme/route combinations.
     // Its deadline covers this extra choreography; interaction budgets are unchanged.
     if (gestureMode) await Promise.race([
-      driveMotionGestures(send, mobile),
-      delay(30000).then(() => { throw new Error("motion input timed out"); }),
+      navigateURL?.includes("mode=motion-cards") ? driveCardMoveGestures(send, mobile) : driveMotionGestures(send, mobile),
+      delay(navigateURL?.includes("mode=motion-cards") ? 90000 : 30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
     const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") ? 60000 : 45000);
     let evaluation;
@@ -301,7 +335,7 @@ async function runMode(mode) {
   try {
     await chmod(profile, 0o700);
     const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
-    const mobile = mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    const mobile = (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") ? "about:blank" : url;
     child = spawn(
       chrome,
@@ -351,14 +385,14 @@ async function runMode(mode) {
       }),
     ]);
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
-    const gestureMode = ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
+    const gestureMode = mode.startsWith("motion-cards") || ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
     const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode);
     assert.equal(
       result?.status,
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
-    if (mode === "logs") process.stdout.write(`${result.detail}\n`);
+    if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
   } finally {
     if (child) await stopBrowser(child);
     await rm(profile, {
@@ -371,7 +405,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

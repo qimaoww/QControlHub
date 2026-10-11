@@ -96,6 +96,7 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   assert.equal(document.querySelector(".node-card-ghost"), null, "pointer drop removes the ghost");
   const orderAfterDrop = [...grid.querySelectorAll(".node-card")];
   await gesture(orderAfterDrop[0].querySelector(".node-card-grip"), orderAfterDrop[1], "cancel");
+  await settled();
   assert.equal(grid.querySelector(".node-card"), orderAfterDrop[0], "Escape cancels pointer drag without committing");
   assert.equal(document.querySelector(".node-card-ghost"), null);
   const grip = grid.querySelector(".node-card-grip");

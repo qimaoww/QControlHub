@@ -4,7 +4,7 @@
 .workspace-main.is-route-departing{opacity:.32;translate:0 -10px;pointer-events:none}
 :is(.node-card,.traffic-policy-card,.workspace-panel,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card,.user-account-card){transform-origin:50% 10%;transition:box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-feedback) var(--motion-ease-out),background-color var(--motion-feedback) var(--motion-ease-out)}
 @media(hover:hover) and (pointer:fine){
-  :is(.node-card,.traffic-policy-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.template-card,.user-account-card):not(.dragging):not(.node-card-ghost):not(.traffic-card-ghost):hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--line));box-shadow:0 16px 36px -22px color-mix(in srgb,var(--accent) 42%,transparent),var(--shadow-lift)}
+  :is(.node-card,.traffic-policy-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.template-card,.user-account-card):not(.dragging):not(.node-card-ghost):not(.traffic-card-ghost):not(.card-move-active *):hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--line));box-shadow:0 16px 36px -22px color-mix(in srgb,var(--accent) 42%,transparent),var(--shadow-lift)}
   :is(button:not(.node-card-grip,.traffic-card-grip,[role=switch]),.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled):hover{translate:0 -2px;box-shadow:0 7px 18px -10px color-mix(in srgb,var(--accent) 70%,transparent)}
 }
 :is(button:not(.node-card-grip,.traffic-card-grip,[role=switch]),.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled){transition:translate var(--motion-fast) var(--motion-ease-out),scale var(--motion-fast) var(--motion-ease-out),background-color var(--motion-feedback) var(--motion-ease-out),border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-feedback) var(--motion-ease-out),opacity var(--motion-fast) ease}
@@ -52,7 +52,6 @@ dialog[open] footer{transition-delay:110ms}
 .button[aria-busy=true]{opacity:.8;background-image:linear-gradient(110deg,transparent 25%,color-mix(in srgb,var(--accent) 20%,transparent) 45%,transparent 65%);background-size:240% 100%;animation:qch-busy-sheen 1300ms linear infinite}
 .task-feedback.running>[data-task-feedback-dot]{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 12%,transparent)}
 :is(.status-label,.task-status,.task-stage,.task-feedback,.settings-saved-state,.traffic-policy-status,.node-presence){transition:background-color var(--motion-feedback) var(--motion-ease-out),color var(--motion-feedback) var(--motion-ease-out),border-color var(--motion-feedback) var(--motion-ease-out),box-shadow var(--motion-feedback) var(--motion-ease-out)}
-:is(.node-card,.traffic-policy-card).drop-target{box-shadow:inset 0 0 0 2px var(--accent),0 10px 32px -14px color-mix(in srgb,var(--accent) 50%,transparent)}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
   dialog::backdrop,details::details-content{animation:none!important;transition:none!important}

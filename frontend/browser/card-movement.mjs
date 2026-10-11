@@ -1,0 +1,217 @@
+import { assert, delay, waitFor } from "./assertions.mjs";
+import { animateNodeCardDrop } from "../modules/agent-card-drag.js";
+import { accountStorage } from "../modules/account-storage.js";
+
+const key = (grip, value) => grip.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true }));
+const settled = () => waitFor(() => !document.querySelector(".card-move-ghost") &&
+  !document.getAnimations().some(animation => animation.id.startsWith("qch-card") || animation.id === "qch-drop"), "card movement did not settle");
+const route = async (hash, selector) => {
+  location.hash = hash;
+  const grid = await waitFor(() => document.querySelector(selector) && !document.querySelector(".is-route-pending"), `missing ${hash}`);
+  await waitFor(() => !document.getAnimations().some(animation => animation.id.startsWith("qch-route")), "route did not settle");
+  return document.querySelector(selector);
+};
+const equalOrder = (actual, expected, message) => assert.equal(JSON.stringify(actual), JSON.stringify(expected), message);
+
+// The runner dispatches real mouse/touch events and waits for each inspection
+// acknowledgement before sending the next input. Timing cannot skip assertions.
+async function gesture(start, points, release, inspect = async () => {}) {
+  window.__cardMoveStep = -1;
+  window.__cardMoveAck = -1;
+  window.__cardMoveGesture = { start, points, release };
+  for (let index = 0; index < points.length; index++) {
+    await waitFor(() => window.__cardMoveStep === index, "native input step missing");
+    await inspect(index, points[index]);
+    window.__cardMoveAck = index;
+  }
+  await waitFor(() => window.__cardMoveGesture === null, "native input did not finish");
+  await settled();
+}
+const geometry = (grip, target) => {
+  const source = grip.closest(".node-card,.traffic-policy-card");
+  // Keep both adjacent grips inside the viewport; holding a target at the edge
+  // deliberately auto-scrolls and is covered by the separate edge gesture.
+  const anchor = source.getBoundingClientRect().top < target.getBoundingClientRect().top ? source : target;
+  if (matchMedia("(pointer:coarse)").matches) anchor.scrollIntoView({ block: "start", behavior: "instant" });
+  else grip.scrollIntoView({ block: "center", behavior: "instant" });
+  const box = grip.getBoundingClientRect(), card = source.getBoundingClientRect();
+  const destination = target.getBoundingClientRect();
+  const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  return { start, end: { x: start.x + destination.left - card.left, y: start.y + destination.top - card.top } };
+};
+
+export async function testCardMoveRuntime({ mode, testAPI }, preview) {
+  await waitFor(() => document.querySelector(".node-card-grid"), "nodes missing");
+  if (preview) await new Promise(() => {});
+  const reduced = mode.endsWith("reduced"), mobile = mode.includes("mobile");
+  assert.equal(matchMedia("(prefers-reduced-motion: reduce)").matches, reduced);
+  // Row-height changes must begin at the last painted size rather than pop
+  // when a shorter card moves out of a row stretched by a taller neighbour.
+  const sizing = document.createElement("article");
+  sizing.className = "node-card";
+  sizing.style.cssText = "position:fixed;left:10px;top:100px;width:100px;height:100px";
+  document.body.append(sizing);
+  const beforeSize = new Map([[sizing, sizing.getBoundingClientRect()]]);
+  sizing.style.width = "140px"; sizing.style.height = "180px";
+  animateNodeCardDrop([sizing], beforeSize, { resize: true, token: "--motion-card-shift" });
+  if (!reduced) {
+    const first = sizing.getBoundingClientRect();
+    assert.ok(Math.abs(first.width - 100) < 2 && Math.abs(first.height - 100) < 2, "row resize starts at the painted bounds");
+  }
+  await settled();
+  assert.equal(sizing.getBoundingClientRect().height, 180, "row resize settles at the actual layout size");
+  sizing.remove();
+  for (const theme of ["light", "dark"]) {
+    localStorage.setItem("qcontrolhub-color-theme", theme);
+    document.documentElement.dataset.theme = theme;
+    for (const type of ["nodes", "traffic"]) {
+      const selector = type === "nodes" ? ".node-card-grid" : ".traffic-policy-grid";
+      const cardSelector = type === "nodes" ? ".node-card" : "[data-traffic-card-key]";
+      const orderKey = `qcontrolhub:${type === "nodes" ? "node" : "traffic"}-card-order`;
+      const hash = type === "nodes" ? "#node-settings" : "#traffic-all";
+      const grid = await route(hash, selector);
+      const cards = () => [...grid.querySelectorAll(cardSelector)];
+      const ids = () => cards().map(card => type === "nodes" ? card.dataset.agentNode : card.dataset.trafficCardKey);
+      const original = cards(), originalIds = ids(), grip = original[0].querySelector(".node-card-grip");
+      assert.ok(grip.getAttribute("aria-describedby"), "grip needs shared instructions");
+      assert.equal(grip.getAttribute("aria-pressed"), "false");
+      if (mobile) assert.ok(grip.getBoundingClientRect().width >= 44, "touch grip needs a usable hit target");
+      const draft = original[0].querySelector('input[name="name"]');
+      if (draft) draft.value = "unsaved card movement draft";
+      const { start, end } = geometry(grip, original[1]);
+      const saved = accountStorage.getItem(orderKey);
+      await gesture(start, [{ x: start.x + 2, y: start.y }, end, start, end], "drop", async (index, point) => {
+        if (!index) {
+          assert.equal(document.querySelector(".card-move-ghost"), null, "below-threshold input cannot pick up a card");
+          return;
+        }
+        const ghost = document.querySelector(".card-move-ghost");
+        assert.ok(ghost, `native input must create a preview: ${type}/${theme}/${index}; start ${start.x},${start.y}; target ${point.x},${point.y}`);
+        assert.ok(ghost.inert && ghost.getAttribute("aria-hidden") === "true", "preview is excluded from focus and announcements");
+        assert.equal(ghost.querySelector("[id],dialog"), null, "preview cannot duplicate IDs or dialogs");
+        assert.equal(ghost.getAttribute(type === "nodes" ? "data-agent-node" : "data-traffic-card-key"), null);
+        if (type === "nodes") assert.equal(ghost.querySelector(".agent-presence").dataset.agentPresence,
+          original[0].querySelector(".agent-presence").dataset.agentPresence, "preview preserves presence artwork");
+        const transform = new DOMMatrix(getComputedStyle(ghost).transform);
+        assert.ok(Math.abs(transform.m41 - (point.x - start.x)) < .1 && Math.abs(transform.m42 - (point.y - start.y)) < .1,
+          `translation follows the pointer without interpolation lag: ${type}/${theme}/${index}; actual ${transform.m41},${transform.m42}; expected ${point.x-start.x},${point.y-start.y}`);
+        assert.equal(accountStorage.getItem(orderKey), saved, "preview cannot write order preferences");
+        assert.equal(original[0].style.order, index === 2 ? "0" : "1", "border follows reversals");
+        assert.equal(getComputedStyle(original[0], "::before").borderTopWidth, "2px", "drop border must be explicit in both themes");
+        assert.equal(document.querySelector(".card-move-cue,.card-move-guide,.card-move-feedback"), null, "drag feedback uses borders without added labels");
+        assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "0", "original contents must not double-paint through the placeholder");
+        if (reduced) assert.equal(ghost.getAnimations().length, 0, "reduced motion keeps cue and placement without animation");
+        if (index === 3 && theme === "light") {
+          const path = type === "nodes" ? "/agents" : "/traffic-policies";
+          const before = testAPI.calls.filter(call => call.path === path).length;
+          await waitFor(() => testAPI.calls.filter(call => call.path === path).length > before, "background poll did not run during drag");
+          await delay(60);
+          assert.equal(cards()[0], original[0], "refresh cannot replace or commit a card during drag");
+          assert.equal(document.querySelector(".card-move-ghost"), ghost);
+        }
+      });
+      assert.equal(cards()[1], original[0], `drop commits the preview position: ${type}/${theme}; ${ids().join(",")}; ${grid.parentElement.querySelector("[data-card-order-status]")?.textContent}`);
+      assert.equal(document.activeElement, grip, "pointer drop keeps focus on the same grip");
+      assert.ok(grid.parentElement.querySelector('[data-phase="saved"]'), "success is announced without a toast");
+      assert.ok(cards().every(card => !card.style.order && !card.style.transform && !card.style.transition), "temporary geometry must be cleaned");
+
+      // Direct arrows commit serially; Space opens a reversible keyboard preview.
+      key(grip, "ArrowLeft"); key(grip, "ArrowRight"); key(grip, "ArrowLeft");
+      await settled();
+      equalOrder(ids(), originalIds, "rapid keyboard reversals must persist the latest order");
+      key(grip, " "); key(grip, "ArrowRight");
+      assert.equal(grip.getAttribute("aria-pressed"), "true");
+      key(grip, "Escape"); await settled();
+      equalOrder(ids(), originalIds, "keyboard cancellation must restore the committed order");
+      assert.equal(document.activeElement, grip);
+      key(grip, " "); key(grip, "ArrowRight"); key(grip, " "); await settled();
+      assert.equal(cards()[1], original[0], "keyboard pickup and drop commit the same slot");
+
+      for (const release of ["escape", "cancel", "outside"]) {
+        const before = ids(), positioned = geometry(grip, cards()[0]);
+        const point = release === "outside" ? { x: 2, y: 2 } : positioned.end;
+        await gesture(positioned.start, [point], release);
+        assert.equal(location.hash, hash, `${release} cannot synthesize card navigation`);
+        equalOrder(ids(), before, `${release} must preserve the last saved order`);
+        assert.ok(grid.parentElement.querySelector('[data-phase="idle"]'), "cancellation is announced without a toast");
+      }
+
+      const beforeFailure = ids(), persisted = accountStorage.getItem(orderKey);
+      const nativeSet = Storage.prototype.setItem;
+      let writeAttempts = 0;
+      Storage.prototype.setItem = function(key, value) {
+        if (key.startsWith(orderKey)) { writeAttempts++; throw new DOMException("fixture quota exceeded", "QuotaExceededError"); }
+        return nativeSet.call(this, key, value);
+      };
+      try {
+        const positioned = geometry(grip, cards()[0]);
+        assert.ok(grid.isConnected && grip.isConnected, `failure fixture must retain its grid: ${type}/${theme}/${location.hash}`);
+        await gesture(positioned.start, [positioned.end], "drop", async () => {
+          assert.ok(document.querySelector(".card-move-ghost"), `failure gesture must pick up: ${type}/${theme}/${location.hash}`);
+          assert.equal(original[0].style.order, "0", `failure gesture must select first slot: ${type}/${theme}`);
+        });
+        equalOrder(ids(), beforeFailure, "failed persistence must restore the last saved DOM order");
+        assert.equal(accountStorage.getItem(orderKey), persisted);
+        assert.equal(writeAttempts, 1, "failed drop must attempt exactly one write");
+        assert.ok(grid.parentElement.querySelector('[data-phase="error"]')?.textContent.includes("已恢复原位"), "storage failure needs explicit recovery feedback");
+        assert.ok(document.querySelector('[data-spa-notice][role="alert"]'), "failed saves use the existing error surface");
+        document.querySelector('[data-spa-notice] .notice-close').click();
+      } finally { Storage.prototype.setItem = nativeSet; }
+      key(grip, "ArrowLeft"); await settled();
+      equalOrder(ids(), originalIds, "moving after a failure must remain reliable");
+
+      if (draft) assert.equal(draft.value, "unsaved card movement draft", "moving a card retains its internal form draft");
+
+      // A fresh document reads the same account preference rather than DOM state.
+      if (theme === "dark") {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "position:fixed;left:-2000px;width:1280px;height:900px";
+        frame.src = `/agents-browser-smoke.html?mode=${mode}&preview=1${hash}`;
+        document.body.append(frame);
+        await waitFor(() => frame.contentDocument?.querySelector(selector), "fresh document did not load");
+        const reloaded = [...frame.contentDocument.querySelectorAll(`${selector} > ${cardSelector}`)]
+          .map(card => type === "nodes" ? card.dataset.agentNode : card.dataset.trafficCardKey);
+        equalOrder(reloaded, ids(), "fresh document must restore saved order");
+        frame.remove();
+      }
+    }
+  }
+
+  // Filtered traffic moves only the visible slots in the complete order.
+  let grid = await route("#traffic-all", ".traffic-policy-grid");
+  const keys = () => [...grid.querySelectorAll("[data-traffic-card-key]")].map(card => card.dataset.trafficCardKey);
+  const all = keys(), filter = document.querySelector('[data-traffic-filter="engine"]');
+  filter.value = "xray"; filter.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => document.querySelectorAll('.traffic-policy-grid > [data-traffic-card-key]').length === 2, "filtered traffic missing");
+  grid = document.querySelector(".traffic-policy-grid");
+  const visible = keys(); key(grid.querySelector(".traffic-card-grip"), "ArrowRight"); await settled();
+  const visibleSet = new Set(visible), reversed = [...visible].reverse();
+  let cursor = 0;
+  equalOrder(JSON.parse(accountStorage.getItem("qcontrolhub:traffic-card-order")), all.map(id => visibleSet.has(id) ? reversed[cursor++] : id), "filtered movement must preserve hidden positions");
+  filter.value = ""; filter.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => document.querySelectorAll('.traffic-policy-grid > [data-traffic-card-key]').length === all.length, "unfiltered traffic missing");
+
+  grid = await route("#node-settings", ".node-card-grid");
+  const grip = grid.querySelector(".node-card-grip"), card = grip.closest(".node-card");
+  const scroller = mobile ? document.scrollingElement : document.querySelector(".workspace-main");
+  const positioned = geometry(grip, card), scrollBefore = scroller.scrollTop;
+  await gesture(positioned.start, [{ x: positioned.start.x, y: innerHeight - (mobile ? 108 : 8) }], "escape", async () => {
+    await waitFor(() => scroller.scrollTop > scrollBefore + 20, "dragging near the viewport edge must scroll");
+  });
+  if (mobile) {
+    card.scrollIntoView({ block: "center", behavior: "instant" });
+    const rect = card.getBoundingClientRect(), before = scrollY;
+    const start = { x: rect.left + 80, y: Math.min(innerHeight - 150, rect.top + 240) };
+    await gesture(start, [{ x: start.x, y: start.y - 150 }], "drop", async () => {
+      assert.equal(document.querySelector(".card-move-ghost"), null, "card content remains available for page scrolling");
+    });
+    assert.ok(scrollY > before + 20, "normal touch outside the grip must scroll the page");
+  }
+  const beforeLeave = JSON.stringify(JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order")));
+  const leave = geometry(grip, grid.querySelectorAll(".node-card")[1]);
+  await gesture(leave.start, [leave.end], "leave");
+  assert.equal(document.querySelector(".card-move-ghost"), null, "route exit must remove all preview layers");
+  assert.equal(document.body.classList.contains("card-moving"), false);
+  assert.equal(JSON.stringify(JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order"))), beforeLeave, "route exit cannot commit an unfinished drag");
+  window.cardMovementResult = `${mobile ? "touch" : "mouse"}; light+dark; ${reduced ? "reduced" : "full"} motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave`;
+}

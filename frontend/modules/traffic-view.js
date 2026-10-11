@@ -1,3 +1,4 @@
+import { cardMoveGrip, cardMoveHelp } from "./card-move-view.js";
 import { orderedNodeList } from "./node-order.js";
 import { gibibyte, dateInputValue, cycleName, protocolName, policyStatusKey, policyStatus, eligibleAgents, mergeTrafficPorts, orderTrafficItems, trafficCardIdentity, trafficRateForDisplay } from "./traffic-model.js";
 import { renderTrafficAccounting } from "./traffic-accounting-view.js";
@@ -55,7 +56,7 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
     const cardHeader = (value, agent, status, tone) => {
       const nodeName = agent?.name || value.agent_id;
       return `<header class="traffic-card-header">
-        <div class="traffic-card-heading"><div class="traffic-card-node"><strong title="${esc(nodeName)}">${esc(nodeName)}</strong><div class="traffic-card-port"><code aria-label="监听端口 ${esc(value.port)}">${esc(value.port)}</code></div></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动或用方向键调整顺序" role="button" tabindex="0" aria-label="调整顺序，使用方向键移动"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></div>
+        <div class="traffic-card-heading"><div class="traffic-card-node"><strong title="${esc(nodeName)}">${esc(nodeName)}</strong><div class="traffic-card-port"><code aria-label="监听端口 ${esc(value.port)}">${esc(value.port)}</code></div></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span>${cardMoveGrip("traffic", "traffic-card-grip", `${esc(nodeName)} :${esc(value.port)}`)}</span></div>
         <div class="traffic-card-facts"><div class="traffic-card-core"><span class="engine-badge ${esc(value.engine)}" title="${esc(engineName(value.engine))} 内核">${esc(engineName(value.engine))}</span></div><div class="traffic-card-config"><strong title="${esc(value.name || `端口 ${value.port}`)}">${esc(value.name || `端口 ${value.port}`)}</strong><small>${esc(protocolName(value.protocol))}</small></div></div>
       </header>`;
     };
@@ -95,7 +96,7 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
       : '<div class="empty large"><strong>尚未读取到配置端口</strong><p>节点保存或部署内核配置后，已有监听端口会直接显示在这里。</p></div>';
     const listHeader = `<header class="traffic-policy-list-head"><div><h2>监控端口</h2><span>${filteredItems.length}</span></div><div class="traffic-policy-list-actions"><small>${esc(selectedScope)} · 自动发现配置 · Agent 实时上报</small>${can("traffic.manage") ? `<button class="button small" type="button" data-traffic-sync>同步端口</button>` : ""}</div></header>`;
     const trafficResultKey = JSON.stringify([currentFilters.agent_id || "", currentFilters.engine || "", currentFilters.endpoint_key || "", currentFilters.status || ""]);
-    shell(`<div class="traffic-workspace">${toolbar}${listHeader}<section class="${cards ? "traffic-policy-grid " : ""}qch-swap-panel" data-refresh-key="traffic-results" data-motion-region="traffic-results" data-motion-key="${esc(trafficResultKey)}">${cards || empty}</section>${createDialog}</div>`, "流量配额", { viewKey: "traffic" });
+    shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? cardMoveHelp("traffic") : ""}<section class="${cards ? "traffic-policy-grid " : ""}qch-swap-panel" data-refresh-key="traffic-results" data-motion-region="traffic-results" data-motion-key="${esc(trafficResultKey)}">${cards || empty}</section>${createDialog}</div>`, "流量配额", { viewKey: "traffic" });
 
     return { selectableAgents, filteredItems, orderedItems };
   };

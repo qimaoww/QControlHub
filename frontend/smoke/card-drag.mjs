@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 
+import { saveNodeOrder } from "../modules/node-order.js";
+import { createTrafficOrder } from "../modules/traffic-order.js";
+import { cardMoveDropIndex } from "../modules/card-move-preview.js";
 import { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "../modules/agents.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
@@ -20,6 +23,28 @@ assert.equal(dropAt(210, 20), 1, "natural upper-half drop selects middle slot");
 assert.equal(dropAt(330, 20), 2, "natural upper-half drop selects last slot");
 assert.equal(dropAt(90, 200), 3, "drop selection follows the actual grid row");
 assert.equal(dropAt(210, 200), 4, "drop selection follows row direction");
+
+// A preview uses stable slots even while the grid scrolls and neighbours animate.
+const gridRect = { left: 0, right: 340, top: 0, bottom: 340 };
+const drag = { slots: cardSlots, gridRect, point: { x: 210, y: 20 }, offset: upperRightGripOffset };
+assert.equal(cardMoveDropIndex(drag, { getBoundingClientRect: () => gridRect }), 1);
+assert.equal(cardMoveDropIndex({ ...drag, point: { x: 210, y: -80 } }, {
+  getBoundingClientRect: () => ({ ...gridRect, top: -100, bottom: 240 }),
+}), 1, "scrolled slots keep their intended identity");
+assert.equal(cardMoveDropIndex({ ...drag, point: { x: -100, y: 20 } }, {
+  getBoundingClientRect: () => gridRect,
+}), null, "leaving the grid cancels instead of moving to an arbitrary end slot");
+
+for (const saveOrder of [saveNodeOrder, (ids, storage) => createTrafficOrder(storage).saveTrafficCardOrder(ids)]) {
+  let value = null;
+  const storage = { getItem: () => value, setItem: (_key, next) => { value = next; } };
+  for (const ids of [["a", "b"], ["b", "a"], ["a", "b"]]) assert.equal(saveOrder(ids, storage), true);
+  assert.equal(value, '["a","b"]', "consecutive saves keep the latest committed order");
+  const before = value;
+  assert.equal(saveOrder(["b", "a"], { ...storage, setItem: () => { throw new Error("quota exceeded"); } }), false);
+  assert.equal(value, before, "failed writes retain the last reliable preference");
+  assert.equal(saveOrder(["b", "a"], { ...storage, setItem: () => {} }), false, "unconfirmed writes cannot announce success");
+}
 
 const fakeCard = (left) => {
   const listeners = new Map();

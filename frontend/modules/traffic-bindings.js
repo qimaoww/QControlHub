@@ -11,7 +11,7 @@ export function createTrafficBindings({ state }, { bindTrafficForms, enableTraff
       bindDialogBackdrop(dialog);
     });
     const cardGrid = document.querySelector(".traffic-policy-grid");
-    if (cardGrid && filteredItems.length > 1) {
+    if (cardGrid && filteredItems.length) {
       enableTrafficCardDrag(cardGrid, orderedItems.map(trafficCardIdentity));
     }
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();

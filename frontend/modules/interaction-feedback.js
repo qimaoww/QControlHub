@@ -26,6 +26,7 @@ function hideTip(immediate = false) {
   else closeTimer = setTimeout(remove, 240);
 }
 function showTip(element) {
+  if (element?.closest(".card-move-active")) return hideTip(true);
   if (!element?.isConnected || element.closest("[hidden],[inert]")) return;
   const modal = document.querySelector("dialog:modal");
   if (modal && !modal.contains(element)) return;
@@ -49,7 +50,7 @@ function showTip(element) {
     document.body.append(tooltip);
     tooltip.showPopover?.();
     watch = new MutationObserver(records => {
-      if (!owner?.isConnected) return hideTip(true);
+      if (!owner?.isConnected || owner.closest(".card-move-active")) return hideTip(true);
       if (!records.some(record => record.target === owner && record.type === "attributes")) return;
       if (owner.hasAttribute("title")) {
         owner.dataset.motionTitle = owner.title;
@@ -60,7 +61,7 @@ function showTip(element) {
       if (owner.hasAttribute("data-motion-description")) owner.setAttribute("aria-description", message);
       updateFeedback(tooltip, message);
     });
-    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-motion-title"] });
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-motion-title", "aria-pressed"] });
   }
   const bounds = element.getBoundingClientRect(), tip = tooltip.getBoundingClientRect();
   anchor = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
