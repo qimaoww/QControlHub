@@ -37,13 +37,13 @@ func TestCoreLogWindowStaysIndexOnly(t *testing.T) {
 	// Enough rows that the planner has a real choice between the covering index
 	// and a sequential scan.
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	for batchIndex := range 40 {
+	for batchIndex := range 120 {
 		entries := make([]core.CoreLogEntry, 0, core.MaxCoreLogBatchEntries)
 		for entryIndex := range core.MaxCoreLogBatchEntries {
 			entries = append(entries, core.CoreLogEntry{
 				Engine:   core.EngineMihomo,
 				Level:    "info",
-				Message:  fmt.Sprintf("window fixture %d/%d", batchIndex, entryIndex),
+				Message:  fmt.Sprintf("window fixture %d/%d %s", batchIndex, entryIndex, strings.Repeat("long log ", 100)),
 				LoggedAt: now.Add(-time.Duration(batchIndex) * time.Second),
 			})
 		}
@@ -84,6 +84,20 @@ func TestCoreLogWindowStaysIndexOnly(t *testing.T) {
 		t.Fatalf("log window plan reported no heap fetch count: %s", planSummary(plan))
 	} else if fetches != 0 {
 		t.Fatalf("log window performed %.0f heap fetches; the covering index no longer serves the window: %s", fetches, planSummary(plan))
+	}
+	// An aggregate read has no agent_id predicate. Even a quiet/absent engine
+	// must seek its own covering index instead of visiting unrelated heap rows.
+	statement, args = coreLogWindowStatement(CoreLogQuery{Limit: 2000},
+		[]string{string(core.EngineMihomo), string(core.EngineXray), string(core.EngineSingBox), string(core.EngineShadowsocksRust)})
+	plan = explainJSONOnDedicatedConnection(t, s, statement, args...)
+	if walkPlan(plan.Plan, func(node planNode) bool {
+		return strings.HasPrefix(node.RelationName, coreLogPartitionPrefix) &&
+			!strings.EqualFold(node.NodeType, "Index Only Scan")
+	}) {
+		t.Fatalf("fleet window reads the log heap: %s", planSummary(plan))
+	}
+	if fetches, ok := planHeapFetches(plan); !ok || fetches != 0 {
+		t.Fatalf("fleet window heap fetches = %v (reported=%v): %s", fetches, ok, planSummary(plan))
 	}
 }
 

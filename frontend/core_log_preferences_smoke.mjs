@@ -1,3 +1,5 @@
+globalThis.requestAnimationFrame ||= callback => setTimeout(callback, 0);
+globalThis.cancelAnimationFrame ||= clearTimeout;
 import assert from "node:assert/strict";
 import {
   coreLogFilterLimits,
@@ -146,6 +148,7 @@ const fakeElement = ({ value = "", dataset = {} } = {}) => {
   const listeners = new Map();
   const element = {
     dataset,
+    isConnected: true,
     value,
     attributes: {},
     addEventListener(type, handler) {
@@ -308,6 +311,7 @@ try {
     "an engine change is remembered",
   );
   dom.searchInput.input("disk");
+  await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(
     storage.read(coreLogPreferenceKey).q,
     "disk",
@@ -421,6 +425,7 @@ try {
     "a browser that denies reads falls back to the default window",
   );
   deniedDom.searchInput.input("disk");
+  await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(
     deniedState.data.coreLogFilters.q,
     "disk",

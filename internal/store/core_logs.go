@@ -182,8 +182,8 @@ func scopedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, engin
 // recent window. The %s placeholder receives the predicate built by
 // ListCoreLogs.
 //
-// Every selected column is carried by core_logs_agent_engine_covering_idx, so
-// this stays an index-only scan. Falling back to heap fetches turns a bounded
+// The node and fleet covering indexes carry every selected column, so either
+// scope can use an index-only scan. Falling back to heap fetches turns a bounded
 // window into hundreds of random page reads per request.
 const coreLogWindowSQL = `
 		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at

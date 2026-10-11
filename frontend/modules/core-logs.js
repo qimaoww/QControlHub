@@ -1,10 +1,11 @@
 import { updateFeedback } from "./presence-motion.js";
-import { coreLogFilterCounts } from "./core-log-model.js";
+import { readCoreLogWindow } from "./core-log-read.js";
+import { reuseCoreLogEntries } from "./core-log-projection.js";
 import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
 import { createCoreLogBindings } from "./core-log-bindings.js";
 export { filterCoreLogEntries, coreLogFilterCounts } from "./core-log-model.js";
-import { createPoller, createRefreshChannel } from "./refresh.js";
+import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 import { createCoreLogCache } from "./core-log-cache.js";
 import { accountStorage } from "./account-storage.js";
 
@@ -27,11 +28,14 @@ export function installCoreLogs(ctx) {
     isCurrent: () => state.route === "core-logs",
     getScope: () => state.navigationEpoch,
   });
+  let failures = 0;
+  let pending = null;
+  let routeSignal = null;
   const poller = createPoller({
     run: () => coreLogs({ background: true }),
     isActive: () =>
-      state.route === "core-logs" && state.data.coreLogAutoRefresh !== false,
-    delay: () => 10_000,
+      state.route === "core-logs" && state.data.coreLogAutoRefresh !== false && !document.hidden,
+    delay: () => Math.min(60_000, 10_000 * 2 ** failures),
     setTimer,
     clearTimer,
   });
@@ -41,7 +45,27 @@ export function installCoreLogs(ctx) {
   const bind = createCoreLogBindings(ctx, { renderCoreLogs, rememberSelection, coreLogs, poller });
   function renderCoreLogs(entries, agents, filters) { view(entries, agents, filters); bind(filters); }
 
-  async function coreLogs({ background = false, scopeChange = false } = {}) {
+  function coreLogs(options = {}) {
+    if (document.addEventListener) bindEvent(document, "visibilitychange", () => {
+      if (state.route !== "core-logs") return;
+      if (document.hidden) poller.stop();
+      else if (state.data.coreLogAutoRefresh !== false) void coreLogs({ background: true });
+    });
+    restoreSelection();
+    if (routeSignal !== state.routeSignal) {
+      routeSignal = state.routeSignal;
+      routeSignal?.addEventListener("abort", () => { refresh.invalidate(); poller.stop(); pending = null; }, { once: true });
+    }
+    const key = JSON.stringify([state.data.coreLogFilters.agent_id || "", Number(state.data.coreLogFilters.limit || 1000)]);
+    if (pending?.key === key && pending.data === state.data && pending.epoch === state.navigationEpoch)
+      return pending.promise;
+    const request = { key, data: state.data, epoch: state.navigationEpoch };
+    pending = request;
+    request.promise = loadCoreLogs(options).finally(() => { if (pending === request) pending = null; });
+    return request.promise;
+  }
+
+  async function loadCoreLogs({ background = false, scopeChange = false } = {}) {
     restoreSelection();
     poller.stop();
     const { filters, params } = query();
@@ -51,6 +75,8 @@ export function installCoreLogs(ctx) {
     const cache = data.coreLogCache ||= createCoreLogCache({ now });
     const cached = cache.get(key);
     const changed = data.coreLogDataScope !== key;
+    if (changed) failures = 0;
+    const related = changed && !cached ? cache.preview(key) : null;
     let rendered = false;
     let previewed = false;
     let agents = can("agents.read") ? (data.agents || []).filter((agent) => agent.can_manage !== false) : [];
@@ -63,8 +89,8 @@ export function installCoreLogs(ctx) {
     };
     // The selected sidebar item/header must change before waiting on the WAN.
     // Never show the previous node's rows under the new node's name.
-    if (!background && changed && (scopeChange || filters.agent_id || cached))
-      paint(cached || [], cached ? "cached" : "loading");
+    if (!background && changed)
+      paint(cached || related?.entries || [], cached || related?.complete ? "cached" : related ? "preview" : "loading");
     try {
       const applied = await refresh.run(
         async (signal) => {
@@ -85,21 +111,20 @@ export function installCoreLogs(ctx) {
               if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
             });
           }
-          if (changed && filters.agent_id && !cached && Number(filters.limit || 1000) > 200) {
-            const previewParams = new URLSearchParams(params);
-            previewParams.set("limit", "200");
-            const entries = await api(`/core-logs?${previewParams}`, { signal });
-            if (!current(signal)) return entries;
-            // If no engine hit its cap, this is already the complete window.
-            const counts = coreLogFilterCounts(entries, engines);
-            if (Object.values(counts.engine).every((count) => count < 200)) return entries;
-            previewed = true;
-            paint(entries, "preview");
-          }
-          return api(`/core-logs?${params}`, { signal });
+          return readCoreLogWindow(api, params, {
+            signal, engines,
+            preview: changed && !cached && !related && Number(filters.limit || 1000) > 200,
+            onPreview(entries) {
+              if (!current(signal)) return;
+              previewed = true;
+              paint(entries, "preview");
+            },
+          });
         },
         (entries) => {
           if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs") return;
+          failures = 0;
+          entries = reuseCoreLogEntries(changed ? cached : data.coreLogEntries, entries);
           cache.set(key, entries);
           paint(entries, "ready");
         },
@@ -142,6 +167,7 @@ export function installCoreLogs(ctx) {
         const label = status.querySelector("[data-core-log-refresh-label]");
         if (label) updateFeedback(label, incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据");
       }
+      failures += 1;
       if (state.data.coreLogAutoRefresh !== false) poller.start();
       return false;
     }
