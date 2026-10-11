@@ -198,7 +198,7 @@ try {
   assert.equal(accessMarkup.includes("client-access-node-card"), true);
   assert.equal(accessMarkup.includes("修改显示参数"), true);
   assert.equal(accessMarkup.includes("client-display-dialog"), true);
-  assert.equal(accessMarkup.includes("客户端地址协议栈"), false);
+  assert.equal(accessMarkup.includes("客户端地址协议栈"), true);
   assert.equal(accessMarkup.includes("client-address-editor"), false);
   assert.equal(accessMarkup.includes("data-client-parameter-open"), true);
   assert.equal(accessMarkup.includes("client-parameter-dialog"), true);
@@ -254,6 +254,22 @@ try {
     4,
     "node changes normalize incompatible engine filters locally",
   );
+  accessState.data = { accessAgent: "beta" };
+  let rejectLoad;
+  const gate = new Promise((resolve, reject) => { rejectLoad = reject; });
+  accessCtx.api = async path => path === "/client-access" ? gate : accessAgents;
+  const firstLoad = installClientAccess(accessCtx)();
+  assert.ok(accessMarkup.includes("正在加载客户端配置"), "first load must expose progress");
+  assert.equal(accessState.data.accessAgent, "beta", "loading reset a selected node");
+  rejectLoad(new Error("fixture unavailable"));
+  await firstLoad;
+  assert.ok(accessMarkup.includes("加载失败"), "first failure needs an inline recovery state");
+  assert.ok(accessMarkup.includes("重试"), "first failure needs a retry action");
+  accessCtx.api = async path => path === "/client-access" ? accessEntries : accessAgents;
+  // The controller captured api at installation; install a new controller to retry.
+  await installClientAccess(accessCtx)();
+  assert.ok(!accessMarkup.includes("fixture unavailable"), "retry did not clear the error");
+
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;

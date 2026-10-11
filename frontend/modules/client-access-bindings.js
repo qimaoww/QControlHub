@@ -63,11 +63,13 @@ export function createClientAccessBindings(ctx, { clientAccess, renderClientAcce
         renderClientAccess();
       },
     );
-    bindEvent(
-      document.querySelector("[data-refresh-client-access]"),
+    document.querySelectorAll("[data-refresh-client-access]").forEach((refreshButton) => bindEvent(
+      refreshButton,
       "click",
       async (event) => {
+        if (state.data.clientAccessLoading) return;
         const button = event.currentTarget;
+        const focused = document.activeElement === button;
         button.disabled = true;
         button.setAttribute("aria-busy", "true");
         try {
@@ -81,9 +83,11 @@ export function createClientAccessBindings(ctx, { clientAccess, renderClientAcce
           notify(error.message, "error");
           button.disabled = false;
           button.removeAttribute("aria-busy");
+        } finally {
+          if (focused && document.activeElement === document.body && button.isConnected) button.focus({ preventScroll: true });
         }
       },
-    );
+    ));
 
     bindClientProfiles();
   }

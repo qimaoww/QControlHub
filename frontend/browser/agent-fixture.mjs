@@ -348,7 +348,9 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json(mode === "uninstall-writeonly"
+    return json(mode === "client-layout-limited"
+      ? { role: "user", user_id: "client-only", permissions: ["client-access.read"], csrf_token: "browser-test-csrf" }
+      : mode === "uninstall-writeonly"
       ? { role: "user", permissions: ["agents.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
       : mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
@@ -420,6 +422,7 @@ window.fetch = async (input, options = {}) => {
     testAPI.settings = { ...JSON.parse(options.body), revision: testAPI.settings.revision + 1 };
     return json(testAPI.settings);
   }
+  if (method === "GET" && path === "/agents" && mode === "client-layout-limited") return json({error:"forbidden"},403);
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
   if (method === "GET" && path === "/agents") {
     if (testAPI.agentsGate) await testAPI.agentsGate;
@@ -442,6 +445,7 @@ window.fetch = async (input, options = {}) => {
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
+  if (method === "GET" && path === "/client-access" && testAPI.clientAccessFailure) return json({error:"temporary client export failure"},503);
   if (method === "GET" && path === "/client-access" && (mode.startsWith("client-order") || mode.startsWith("client-layout")))
     return json(testAPI.clientAccessEntries);
   if (method === "GET" && path === "/client-access" && ["ports","ports-mobile","shell-layout","shell-layout-mobile","readonly","regions","regions-preview"].includes(mode)) {
