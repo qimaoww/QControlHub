@@ -251,6 +251,10 @@ if (mode.startsWith("motion-cards")) {
   testAPI.trafficPolicies.push(...testAPI.trafficPolicies.slice(0, 4).map((policy, index) => ({
     ...policy, id: `trf_card_extra_${index}`, port: policy.port + 100,
   })));
+  testAPI.trafficEndpoints = [
+    { agent_id: "alpha", name: "Discovered Mihomo listener", engine: "mihomo", port: 19443, protocol: "both" },
+    { agent_id: "delta", name: "Discovered SS listener", engine: "ss-rust", port: 19444, protocol: "both" },
+  ];
 }
 if (mode.startsWith("motion-cards")) location.hash = initialAnchor || "#node-settings";
 else if (mode.startsWith("motion")) location.hash = "#node-settings";
@@ -311,7 +315,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
-    if (path === "/traffic-endpoints") return json([]);
+    if (path === "/traffic-endpoints") return json(testAPI.trafficEndpoints || []);
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;

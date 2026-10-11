@@ -2217,7 +2217,8 @@ body.card-moving{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .card-move-active>.dragging.card-move-outside{background:var(--surface-2);box-shadow:none}
 .card-move-active>.dragging.card-move-outside::before{border-color:var(--line-2)}
 .card-move-active>.dragging.card-move-outside::after{border-color:var(--line)}
-:is(.node-card,.traffic-policy-card).card-move-ghost{position:fixed;z-index:100;margin:0;pointer-events:none;opacity:1;border-color:color-mix(in srgb,var(--accent) 48%,var(--line));box-shadow:var(--shadow-lift);scale:1.018;translate:none;cursor:grabbing;will-change:transform;overflow:hidden}
+.card-move-layer{position:fixed;inset:0;z-index:100;pointer-events:none}
+:is(.node-card,.traffic-policy-card).card-move-ghost{position:fixed;z-index:100;margin:0;pointer-events:none;opacity:1;border-style:solid;border-color:color-mix(in srgb,var(--accent) 48%,var(--line));box-shadow:var(--shadow-lift);scale:1.018;translate:none;cursor:grabbing;will-change:transform;overflow:hidden}
 .card-move-ghost,.card-move-ghost *{animation:none!important;transition:none!important}
 @media(pointer:coarse){
   :is(.node-card,.traffic-policy-card){scroll-margin-top:80px;scroll-margin-bottom:96px}

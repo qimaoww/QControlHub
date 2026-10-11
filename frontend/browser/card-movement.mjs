@@ -12,6 +12,13 @@ const route = async (hash, selector) => {
   return document.querySelector(selector);
 };
 const equalOrder = (actual, expected, message) => assert.equal(JSON.stringify(actual), JSON.stringify(expected), message);
+const trafficPaint = (original, preview) => {
+  for (const selector of [".traffic-card-header", ".traffic-card-heading", ".traffic-card-facts", ".traffic-card-port code", "footer"]) {
+    const live = getComputedStyle(original.querySelector(selector)), copy = getComputedStyle(preview.querySelector(selector));
+    for (const property of ["display", "padding", "fontSize", "lineHeight", "gap", "color", "backgroundColor"])
+      assert.equal(copy[property], live[property], `traffic preview retains ${selector} ${property}`);
+  }
+};
 
 // The runner dispatches real mouse/touch events and waits for each inspection
 // acknowledgement before sending the next input. Timing cannot skip assertions.
@@ -41,8 +48,8 @@ const geometry = (grip, target) => {
 };
 
 export async function testCardMoveRuntime({ mode, testAPI }, preview) {
-  await waitFor(() => document.querySelector(".node-card-grid"), "nodes missing");
   if (preview) await new Promise(() => {});
+  await waitFor(() => document.querySelector(".node-card-grid"), "nodes missing");
   const reduced = mode.endsWith("reduced"), mobile = mode.includes("mobile");
   assert.equal(matchMedia("(prefers-reduced-motion: reduce)").matches, reduced);
   // Row-height changes must begin at the last painted size rather than pop
@@ -92,6 +99,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         assert.equal(ghost.getAttribute(type === "nodes" ? "data-agent-node" : "data-traffic-card-key"), null);
         if (type === "nodes") assert.equal(ghost.querySelector(".agent-presence").dataset.agentPresence,
           original[0].querySelector(".agent-presence").dataset.agentPresence, "preview preserves presence artwork");
+        else trafficPaint(original[0], ghost);
         const transform = new DOMMatrix(getComputedStyle(ghost).transform);
         assert.ok(Math.abs(transform.m41 - (point.x - start.x)) < .1 && Math.abs(transform.m42 - (point.y - start.y)) < .1,
           `translation follows the pointer without interpolation lag: ${type}/${theme}/${index}; actual ${transform.m41},${transform.m42}; expected ${point.x-start.x},${point.y-start.y}`);
@@ -191,6 +199,31 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   filter.value = ""; filter.dispatchEvent(new Event("change", { bubbles: true }));
   await waitFor(() => document.querySelectorAll('.traffic-policy-grid > [data-traffic-card-key]').length === all.length, "unfiltered traffic missing");
 
+  // Discovered listeners use the same solid drag border and preserve their
+  // scoped traffic layout, even though their resting business border is dashed.
+  grid = document.querySelector(".traffic-policy-grid");
+  for (const theme of ["light", "dark"]) {
+    document.documentElement.dataset.theme = theme;
+    const before = keys(), cards = [...grid.querySelectorAll("[data-traffic-card-key]")];
+    const port = grid.querySelector(".traffic-configured-port"), grip = port.querySelector(".traffic-card-grip");
+    const index = cards.indexOf(port), targetIndex = index + 1 < cards.length ? index + 1 : index - 1;
+    const positioned = geometry(grip, cards[targetIndex]);
+    await gesture(positioned.start, [positioned.end, positioned.start, positioned.end], "drop", async () => {
+      const ghost = document.querySelector(".card-move-ghost");
+      trafficPaint(port, ghost);
+      assert.equal(getComputedStyle(ghost).borderTopStyle, "solid", "discovered listener preview shares the solid drag border");
+      assert.equal(getComputedStyle(port, "::before").borderTopStyle, "solid", "discovered listener slot shares the solid drop border");
+    });
+    const expected = [...before]; expected.splice(index, 1); expected.splice(targetIndex, 0, before[index]);
+    equalOrder(keys(), expected, "discovered listener drop saves the selected slot");
+    const reversed = geometry(grip, grid.querySelectorAll("[data-traffic-card-key]")[index]);
+    await gesture(reversed.start, [reversed.end], "escape");
+    equalOrder(keys(), expected, "discovered listener cancellation retains the saved order");
+    key(grip, targetIndex > index ? "ArrowLeft" : "ArrowRight"); await settled();
+    equalOrder(keys(), before, "discovered listener keyboard move restores its original slot");
+    assert.equal(document.querySelector(".card-move-layer"), null, "settled movement removes its viewport layer");
+  }
+
   grid = await route("#node-settings", ".node-card-grid");
   const grip = grid.querySelector(".node-card-grip"), card = grip.closest(".node-card");
   const scroller = mobile ? document.scrollingElement : document.querySelector(".workspace-main");
@@ -211,6 +244,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   const leave = geometry(grip, grid.querySelectorAll(".node-card")[1]);
   await gesture(leave.start, [leave.end], "leave");
   assert.equal(document.querySelector(".card-move-ghost"), null, "route exit must remove all preview layers");
+  assert.equal(document.querySelector(".card-move-layer"), null, "route exit must remove the viewport layer");
   assert.equal(document.body.classList.contains("card-moving"), false);
   assert.equal(JSON.stringify(JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order"))), beforeLeave, "route exit cannot commit an unfinished drag");
   window.cardMovementResult = `${mobile ? "touch" : "mouse"}; light+dark; ${reduced ? "reduced" : "full"} motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave`;

@@ -22,7 +22,14 @@ export function createCardMoveGhost(card, rect, point) {
     order: "", gridRowEnd: "", transform: "none", transition: "none",
     transformOrigin: `${point.x - rect.left}px ${point.y - rect.top}px`,
   });
-  document.body.append(ghost);
+  // Traffic card layout is scoped to its workspace. Preserve that context in
+  // the viewport layer so pickup cannot change the header, type or spacing.
+  const layer = document.createElement("div");
+  layer.className = `card-move-layer${card.matches(".traffic-policy-card") ? " traffic-workspace" : ""}`;
+  layer.inert = true;
+  layer.setAttribute("aria-hidden", "true");
+  layer.append(ghost);
+  document.body.append(layer);
   animateMotion(ghost, [{ scale: "1", boxShadow: "var(--shadow)" }, { scale: "1.018", boxShadow: "var(--shadow-lift)" }], {
     id: "qch-card-pickup", token: "--motion-card-pickup", retarget: false,
   });

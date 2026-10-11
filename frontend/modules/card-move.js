@@ -34,7 +34,11 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     grid.classList.remove("card-move-active");
     delete grid.dataset.cardMoveInput;
     document.body.classList.remove("card-moving", "node-card-dragging", "traffic-card-dragging");
-    if (previous?.ghost) { cancelOwnMotion(previous.ghost); previous.ghost.remove(); }
+    if (previous?.ghost) {
+      cancelOwnMotion(previous.ghost);
+      previous.ghost.closest(".card-move-layer")?.remove();
+      previous.ghost.remove();
+    }
   };
   const stopLanding = () => { const previous = landing; landing = null; previous?.(); };
   const begin = () => {

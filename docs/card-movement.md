@@ -11,6 +11,12 @@ instruction rows, floating labels or success/cancellation notifications are adde
 Existing error notices report failed saves; a hidden live region announces
 positions, saved order and cancellation to screen readers.
 
+Traffic previews retain the workspace's header layout, type sizes, spacing and
+footer layout in a non-interactive viewport layer. Discovered listeners keep
+their dashed business border at rest and use the same solid border as monitored
+ports while dragging. The viewport layer is removed on landing, cancellation or
+route exit.
+
 ## Reproducible browser preview
 
 1. Run `make generate-styles`.
@@ -23,6 +29,8 @@ positions, saved order and cancellation to screen readers.
    neighbour movement and landing. Press Escape to return to the saved position.
 5. Open **Traffic** from the navigation and repeat. Filter by a core, reorder the
    visible cards, then clear the filter to check that hidden positions are kept.
+   Both monitored ports and the two discovered listener cards in this fixture
+   support the same movement. Check that pickup preserves their header layout.
 6. Use the theme control to inspect light and dark themes. With a touch device or
    browser device emulation, drag from the 44px grip; swipe elsewhere on the card
    to scroll normally. Hold the grip near the viewport edge to scroll during a drag.
@@ -61,6 +69,9 @@ background polling, stable card identity/focus/form drafts, keyboard pickup/drop
 Escape, lost capture/touch cancellation, outside drops, failed storage writes,
 a fresh document reading saved order, filtered traffic slots, edge scrolling,
 normal touch scrolling and route exit. Reduced motion runs the same operations.
+The matrix compares live and preview traffic header/footer styles and exercises
+discovered listener pickup, reversals, drop, cancellation and keyboard movement
+in both themes, including cleanup of the viewport layer.
 
 ## Actual validation
 
@@ -75,6 +86,8 @@ Validated against main `2bbd07b` with Chromium on Linux:
 - `make non-browser-checks`: passed.
 - `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed. The browser
   runner was exercised separately; the skipped wrapper runs the same suite.
+- After the traffic preview adjustment, `go test -p 1 ./frontend -skip
+  '^TestAgentBrowserRuntimeSmoke$'`: passed.
 - `make check`: ran and failed on the existing `motion-selection` assertion
   `quota refresh retains focus` (focus becomes the document body). The same
   assertion fails on an unmodified checkout of main `2bbd07b`.
