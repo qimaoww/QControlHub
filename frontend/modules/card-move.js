@@ -1,6 +1,8 @@
 import { animateNodeCardDrop } from "./agent-card-drag.js";
 import { cancelOwnMotion } from "./motion.js";
-import { createCardMoveGhost, moveCardGhost, cardMoveDropIndex, createCardMoveScroll } from "./card-move-preview.js";
+import { createCardMoveGhost, moveCardGhost } from "./card-move-preview.js";
+import { cardMoveLayout, cardMoveTarget, cardMoveOrder } from "./card-move-layout.js";
+import { createCardMoveScroll } from "./card-move-scroll.js";
 
 const directions = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 const threshold = 6;
@@ -53,7 +55,7 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     scroll.stop();
     cards().forEach(card => card.classList.remove("drop-target"));
     if (previous.pointerId != null && pointerClick?.id === previous.pointerId) pointerClick.until = performance.now() + 800;
-    if (previous.pointerId != null && previous.grip.hasPointerCapture(previous.pointerId)) previous.grip.releasePointerCapture(previous.pointerId);
+    if (previous.pointerId != null && previous.capture.hasPointerCapture(previous.pointerId)) previous.capture.releasePointerCapture(previous.pointerId);
   };
   const preview = (index, announce = true) => {
     const previous = drag;
@@ -65,22 +67,27 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
       if (announce) say("已离开可移动区域 · 松开取消");
       return;
     }
-    // Keep the roster still, like the original traffic cards. Highlight the
-    // actual destination slot, including the last card, without a blank tile.
-    const target = previous.original[index];
-    if (target !== previous.card) target?.classList.add("drop-target");
+    const from = paint();
+    stopMotion();
+    const next = cardMoveOrder(previous.original, previous.card, index);
+    next.forEach((card, position) => { card.style.order = String(position); });
+    previous.card.classList.add("drop-target");
     previous.drop = index;
     previous.card.classList.remove("card-move-outside");
+    animateNodeCardDrop(next.filter(card => card !== previous.card), from, { resize: true });
+    previous.layout = cardMoveLayout(grid, cards()).signature;
     if (announce) say(`移动中 · 第 ${index + 1} 位 / ${previous.original.length}`);
   };
   const activate = previous => {
     previous.started = true;
+    restoreFocus(previous.grip);
     if (previous.pointerId != null) previous.ghost = createCardMoveGhost(previous.card, previous.rect);
     previous.card.classList.add("dragging");
     previous.grip.setAttribute("aria-pressed", "true");
     grid.classList.add("card-move-active");
     grid.dataset.cardMoveInput = previous.pointerId == null ? "keyboard" : "pointer";
     document.body.classList.add("card-moving", previous.card.matches(".node-card") ? "node-card-dragging" : "traffic-card-dragging");
+    previous.drop = null;
     preview(previous.original.indexOf(previous.card));
     say(`已拾起第 ${previous.drop + 1} 项，共 ${previous.original.length} 项`);
   };
@@ -88,7 +95,15 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     if (!drag?.ghost) return;
     if (!grid.isConnected || !grid.contains(drag.card)) return cancel(false);
     moveCardGhost(drag);
-    preview(cardMoveDropIndex(drag, grid));
+    const layout = cardMoveLayout(grid, cards());
+    const moved = !drag.lastPoint || drag.lastPoint.x !== drag.point.x || drag.lastPoint.y !== drag.point.y;
+    if (!moved && layout.signature === drag.layout) return;
+    drag.lastPoint = { ...drag.point };
+    drag.layout = layout.signature;
+    const changedLayout = drag.hitLayout && layout.signature !== drag.hitLayout;
+    drag.hitLayout = layout.signature;
+    preview(cardMoveTarget(layout, drag.point, changedLayout ? null : drag.drop));
+    if (drag) drag.hitLayout = drag.layout;
   }
   const settle = (previous, from) => {
     // Hand the preview's painted bounds to the real card, as the original
@@ -103,8 +118,7 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     if (!done) landing = cancelAnimation;
   };
   const commit = previous => {
-    const next = previous.original.filter(card => card !== previous.card);
-    next.splice(previous.drop, 0, previous.card);
+    const next = cardMoveOrder(previous.original, previous.card, previous.drop);
     if (next.every((card, index) => card === previous.original[index])) {
       say("位置未改变");
       return;
@@ -151,34 +165,6 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     grip.tabIndex = disabled ? -1 : 0;
     on(grip, "click", event => { event.preventDefault(); event.stopPropagation(); });
     on(grip, "dragstart", event => event.preventDefault());
-    on(grip, "pointerdown", event => {
-      if (event.button !== 0 || !event.isPrimary || drag || cards().length < 2) return;
-      const card = grip.closest(selector), from = paint(), rect = from.get(card);
-      if (!card) return;
-      event.preventDefault(); event.stopPropagation();
-      const release = begin();
-      stopMotion(); restoreFocus(grip);
-      const start = { x: event.clientX, y: event.clientY };
-      drag = { card, grip, rect, release, start, point: start, pointerId: event.pointerId,
-        // Read hit slots after releasing entrance/landing transforms. Painted
-        // rectangles from overlapping animated rows are not stable drop slots.
-        original: cards(), slots: cards().map(item => item.getBoundingClientRect()), gridRect: grid.getBoundingClientRect(),
-        offset: { x: start.x - rect.left - rect.width / 2, y: start.y - rect.top - rect.height / 2 },
-        started: false, drop: null, ghost: null };
-      pointerClick = { id: event.pointerId, until: Infinity };
-      grip.setPointerCapture(event.pointerId);
-    });
-    on(grip, "pointermove", event => {
-      if (!drag || drag.pointerId !== event.pointerId) return;
-      drag.point = { x: event.clientX, y: event.clientY };
-      if (!drag.started && Math.hypot(drag.point.x - drag.start.x, drag.point.y - drag.start.y) < threshold) return;
-      event.preventDefault();
-      if (!drag.started) activate(drag);
-      updatePointer();
-      if (drag) scroll.move(drag.point);
-    });
-    on(grip, "pointerup", event => { if (drag?.pointerId === event.pointerId) { if (drag.started) updatePointer(); finish(); } });
-    for (const type of ["pointercancel", "lostpointercapture"]) on(grip, type, event => { if (drag?.pointerId === event.pointerId) cancel(); });
     on(grip, "keydown", event => {
       const direction = directions[event.key], pickup = ["Enter", " "].includes(event.key);
       if (!direction && !pickup) return;
@@ -198,6 +184,47 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
       preview(index);
       if (!pickedUp) { drag.started = true; finish(); }
     });
+  });
+  on(grid, "pointerdown", event => {
+    if (event.button !== 0 || !event.isPrimary || drag || cards().length < 2) return;
+    const card = event.target.closest(selector), handle = event.target.closest(gripSelector);
+    if (!card || !grid.contains(card)) return;
+    // Touch content remains scrollable. Mouse/pen can also grab non-control
+    // surfaces; a click below threshold still follows the card's own link.
+    const control = event.target.closest("button,input,select,textarea,summary,a,[role=button],[contenteditable=true],label");
+    if (!handle && (event.pointerType === "touch" || control && control !== card)) return;
+    const grip = card.querySelector(gripSelector), rect = card.getBoundingClientRect();
+    if (!grip) return;
+    event.preventDefault(); event.stopPropagation();
+    const release = begin();
+    stopMotion();
+    const start = { x: event.clientX, y: event.clientY }, capture = handle || card;
+    drag = { card, grip, capture, rect, release, start, point: start, pointerId: event.pointerId,
+      original: cards(), grab: { x: start.x - rect.left, y: start.y - rect.top },
+      started: false, drop: null, ghost: null };
+    capture.setPointerCapture(event.pointerId);
+  });
+  on(grid, "pointermove", event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    drag.point = { x: event.clientX, y: event.clientY };
+    if (!drag.started && Math.hypot(drag.point.x - drag.start.x, drag.point.y - drag.start.y) < threshold) return;
+    event.preventDefault();
+    if (!drag.started) {
+      pointerClick = { id: event.pointerId, until: Infinity };
+      activate(drag);
+    }
+    updatePointer();
+    if (drag) scroll.move(drag.point);
+  });
+  on(grid, "pointerup", event => {
+    if (drag?.pointerId !== event.pointerId) return;
+    drag.point = { x: event.clientX, y: event.clientY };
+    if (drag.started) updatePointer();
+    finish();
+  });
+  on(grid, "dragstart", event => { if (drag) event.preventDefault(); });
+  for (const type of ["pointercancel", "lostpointercapture"]) on(grid, type, event => {
+    if (drag?.pointerId === event.pointerId) cancel();
   });
   // Releasing/lost capture can retarget the synthesized click to the card link
   // after it moves. Consume that click, and reset on the next genuine press.

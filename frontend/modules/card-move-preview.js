@@ -1,5 +1,4 @@
 import { freezePaint } from "./paint-snapshot.js";
-import { nodeCardDropIndex } from "./agent-card-drag.js";
 
 export function createCardMoveGhost(card, rect) {
   const ghost = card.cloneNode(true);
@@ -33,46 +32,12 @@ export function createCardMoveGhost(card, rect) {
 }
 
 export function moveCardGhost(drag) {
-  drag.ghost.style.transform = `translate(${drag.point.x - drag.start.x}px, ${drag.point.y - drag.start.y}px)`;
+  // clientX/Y, painted bounds and the grab point are all viewport CSS pixels.
+  // Convert once into the layer's local space (CSS/browser zoom can scale it).
+  const layer = drag.ghost.parentElement, box = layer.getBoundingClientRect();
+  const sx = box.width / layer.offsetWidth || 1, sy = box.height / layer.offsetHeight || 1;
+  Object.assign(drag.ghost.style, {
+    left: "0px", top: "0px", width: `${drag.rect.width / sx}px`, height: `${drag.rect.height / sy}px`,
+    transform: `translate(${(drag.point.x - drag.grab.x - box.left) / sx}px, ${(drag.point.y - drag.grab.y - box.top) / sy}px)`,
+  });
 }
-
-// Slots stay fixed during a gesture, as do the original traffic cards.
-// Scrolling offsets these same slots without changing their identities.
-export function cardMoveDropIndex(drag, grid) {
-  const current = grid.getBoundingClientRect();
-  const dx = current.left - drag.gridRect.left, dy = current.top - drag.gridRect.top;
-  const center = { x: drag.point.x - drag.offset.x, y: drag.point.y - drag.offset.y };
-  if (center.x < current.left - 32 || center.x > current.right + 32 ||
-      center.y < current.top - 48 || center.y > current.bottom + 48) return null;
-  return nodeCardDropIndex(drag.slots.map(rect => ({
-    left: rect.left + dx, right: rect.right + dx, top: rect.top + dy, bottom: rect.bottom + dy,
-  })), drag.point, drag.offset);
-}
-
-export function createCardMoveScroll(grid, update) {
-  let scroller = grid.parentElement;
-  while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
-  scroller ||= document.scrollingElement;
-  let frame = null, point = null, previous = null;
-  const tick = time => {
-    frame = null;
-    const viewport = scroller === document.scrollingElement ? { top: 0, bottom: innerHeight } : scroller.getBoundingClientRect();
-    const dock = document.querySelector(".app-dock");
-    const bottom = Math.min(innerHeight, viewport.bottom, dock && getComputedStyle(dock).position === "fixed" ? dock.getBoundingClientRect().top : innerHeight);
-    const bar = document.querySelector(".workspace-topbar");
-    const barBottom = bar && /sticky|fixed/.test(getComputedStyle(bar).position) ? bar.getBoundingClientRect().bottom : 0;
-    const top = Math.max(0, viewport.top, barBottom);
-    const velocity = point.y < top + 56 ? -Math.min(1, (top + 56 - point.y) / 56)
-      : point.y > bottom - 56 ? Math.min(1, (point.y - bottom + 56) / 56) : 0;
-    const before = scroller.scrollTop;
-    scroller.scrollTop += velocity * Math.min(32, previous == null ? 16 : time - previous) * .75;
-    previous = time;
-    if (scroller.scrollTop !== before) update();
-    frame = requestAnimationFrame(tick);
-  };
-  return {
-    move(value) { point = value; if (frame == null) frame = requestAnimationFrame(tick); },
-    stop() { if (frame != null) cancelAnimationFrame(frame); frame = null; point = previous = null; },
-  };
-}
-

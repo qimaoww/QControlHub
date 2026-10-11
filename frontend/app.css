@@ -2201,15 +2201,22 @@ dialog[open] footer{transition-delay:110ms}
 .node-card-grip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .card-move-active[data-card-move-input=pointer] .node-card-grip{outline:none}
 .node-card-grip svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round}
+.card-move-active{position:relative;overflow-anchor:none}
 body.card-moving{cursor:grabbing;user-select:none;-webkit-user-select:none}
+body.card-moving :is(.node-card,.traffic-policy-card,.node-card-grip){cursor:grabbing}
 .card-move-active>:is(.node-card,.traffic-policy-card){transform:none;translate:none;scale:1;transition-property:border-color,box-shadow,background-color}
 .card-move-active>:is(.node-card,.traffic-policy-card):hover{border-color:var(--line);box-shadow:var(--shadow)}
 .card-move-active>:is(.node-card,.traffic-policy-card).dragging{position:relative;z-index:5;opacity:.4}
 .card-move-active>.dragging>*{pointer-events:none}
 .card-move-active>.dragging .node-card-grip{pointer-events:auto}
-.card-move-active>:is(.node-card,.traffic-policy-card).drop-target{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent),var(--shadow)}
+.card-move-active>:is(.node-card,.traffic-policy-card).drop-target{border-radius:12px;border-color:color-mix(in srgb,var(--accent) 40%,var(--line));box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent),var(--shadow)}
+.card-move-active>:is(.node-card,.traffic-policy-card).dragging.drop-target{opacity:1}
+/* Traffic headers/footers already paint an opaque surface above the inset.
+   Match that paint order on nodes: a thin outside edge, not a second full ring.
+   Keep the destination content opaque, just like the original traffic target. */
+.card-move-active>.node-card.drop-target>:is(.node-card-head,.node-card-foot){background:var(--surface)}
 .card-move-layer{position:fixed;inset:0;z-index:60;pointer-events:none}
-:is(.node-card,.traffic-policy-card).card-move-ghost{position:fixed;z-index:60;margin:0;pointer-events:none;opacity:.96;border-color:color-mix(in srgb,var(--accent) 32%,var(--line));box-shadow:var(--shadow-lift);cursor:grabbing;will-change:transform;transform-origin:top left}
+:is(.node-card,.traffic-policy-card).card-move-ghost{position:absolute;z-index:60;margin:0;pointer-events:none;opacity:.96;border-radius:12px;border-color:color-mix(in srgb,var(--accent) 32%,var(--line));box-shadow:var(--shadow-lift);cursor:grabbing;will-change:transform;transform-origin:top left}
 .card-move-ghost,.card-move-ghost *{animation:none!important;transition:none!important}
 @media(pointer:coarse){
   :is(.node-card,.traffic-policy-card){scroll-margin-top:80px;scroll-margin-bottom:96px}

@@ -60,7 +60,9 @@ export function animateNodeCardDrop(
     const previous = oldRects.get(item);
     if (!previous) return null;
     const rect = item.getBoundingClientRect();
-    const dx = previous.left - rect.left, dy = previous.top - rect.top;
+    const scaleX = rect.width ? rect.width / item.offsetWidth : 1;
+    const scaleY = rect.height ? rect.height / item.offsetHeight : 1;
+    const dx = (previous.left - rect.left) / (scaleX || 1), dy = (previous.top - rect.top) / (scaleY || 1);
     const sx = resize && previous.width && rect.width ? previous.width / rect.width : 1;
     const sy = resize && previous.height && rect.height ? previous.height / rect.height : 1;
     const resized = resize && (Math.abs((previous.width || rect.width) - rect.width) > 1 || Math.abs((previous.height || rect.height) - rect.height) > 1);

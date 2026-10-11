@@ -4,26 +4,47 @@ Node overview cards and traffic cards use the same movement controller. Other
 card lists follow the saved node order or a fixed business order and do not gain
 new sorting controls. Node batch selection keeps its existing selection behavior.
 
-Both lists share the original traffic drag declarations from main `2bbd07b`,
-with their original values: the 24x28 grip uses a 14px icon, muted hover colours
-and a 6px radius; the source fades to 40%; the pointer preview uses 96% opacity,
-the existing lifted shadow and stacking level 60. The destination uses the same
-40% accent border colour and 60% accent 2px inset. Other cards stay in place
-during dragging. There is no added pickup scale or shadow animation. Releasing
-commits the selected position and uses the existing `--motion-reorder` timing
-(420ms) to animate the real card from the preview while its neighbours settle.
-Cancellation or failure animates the real card back to its saved position.
+Both lists use the original traffic appearance from main `2bbd07b`: the
+24x28 grip and 14px icon, 96% pointer preview opacity, lifted shadow, 12px
+corners, 40% accent outer border and 60% accent 2px inset. The destination keeps
+its normal content and opacity. Node headers and footers now paint an opaque
+surface above the inset, matching the original traffic card's actual paint
+order. Merely copying the shadow declaration previously left a visibly heavier
+ring on nodes because their headers and footers were transparent.
 
-Movement guidance is limited to the target-card border. No instruction rows,
-floating labels, empty placeholder tiles or success/cancellation notifications
-are added. Existing error notices report failed saves; a hidden live region
-announces positions, saved order and cancellation to screen readers.
+Movement guidance is the destination border. There are no new visual instruction
+rows, floating labels or success/cancellation notices. A hidden live region
+announces positions, saves and cancellation; existing error notices report failed
+saves. Discovered listeners retain their dashed business border.
 
-Traffic previews retain the workspace's header layout, type sizes, spacing and
-footer layout in a non-interactive viewport layer. Discovered listeners retain
-their original dashed business border during movement and receive the same
-destination inset. The viewport layer is removed on landing, cancellation or
-route exit.
+## Coordinates, preview and lifecycle
+
+The old hit selection used a preview centre and cached rectangles. Different
+grab points, scrolling and reflow could therefore select a different slot than
+the pointer indicated. The controller now records the actual pointer-down offset
+from the painted card bounds, moves the preview immediately in viewport CSS
+pixels and converts those coordinates into its layer's local scale. Pointer
+following has no transition or added pickup scale. Traffic previews retain their
+workspace layout, spacing and typography in an inert viewport layer.
+
+Hit selection uses the pointer and current untransformed layout rectangles.
+A small boundary dead band avoids repeated switching in gaps. Every animation
+frame rechecks nested/document scrolling and layout, even with a stationary
+pointer. Browser/CSS zoom, sidebar changes and responsive columns cannot leave
+cached hit rectangles behind. Auto-scroll advances the innermost available
+scroll container and accounts for the fixed navigation and top bar. Its per-frame
+scroll writes explicitly use instant behavior so the page's default smooth
+scrolling cannot delay or repeatedly restart them.
+
+The dragged original card occupies the selected slot using temporary CSS order;
+neighbours yield using the existing 420ms reorder animation. The DOM order stays
+committed until a save succeeds. Release uses the final pointer position and the
+same preview order. Landing/return animation starts at the ghost's last painted
+bounds, with scale-correct translation. Starting another drag interrupts landing
+without releasing the refresh gate between gestures. Hover/entrance transforms
+are suspended during dragging; route exit and cancellation clean up captures,
+frames, preview layers and temporary styles. Reduced motion keeps all positional
+feedback with immediate placement.
 
 ## Reproducible browser preview
 
@@ -32,10 +53,11 @@ route exit.
 3. Use the printed localhost origin with
    `/agents-browser-smoke.html?mode=motion-cards&preview=1#node-settings`.
    This uses local fixtures and needs no server credentials.
-4. Drag a card's six-dot grip to another card. Reverse direction before releasing,
-   and repeat immediately after dropping. Inspect the faded source, full-size
-   preview and target-card border; the grid stays still until release. Include
-   the last card as a destination. Press Escape to return to the saved position.
+4. Drag from the six-dot grip, or a non-control card surface with a mouse.
+   Try the centre and four corners, reverse direction, then drag again before
+   landing completes. The original grab offset stays fixed; the bordered card
+   shows the final insertion slot while neighbours yield. Include the first and
+   last slots and row gaps. Press Escape to return to the saved position.
 5. Open **Traffic** from the navigation and repeat. Filter by a core, reorder the
    visible cards, then clear the filter to check that hidden positions are kept.
    Both monitored ports and the two discovered listener cards in this fixture
@@ -66,58 +88,71 @@ The card returns to the last saved position and the existing error notice report
 that recovery. Restore with `Storage.prototype.setItem = originalSetItem`, or
 reload the preview. A subsequent move must save normally.
 
-## Automated regression
+## Native input regression and recordings
 
 ```sh
-QCH_BROWSER_SMOKE_MODES=motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced node frontend/agents_browser_smoke.mjs
+QCH_BROWSER_SMOKE_MODES=motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced node frontend/agents_browser_smoke.mjs
+QCH_BROWSER_SMOKE_MODES=motion-cards-coordinates QCH_BROWSER_SMOKE_ZOOM=1.25 QCH_BROWSER_SMOKE_DPR=1.5 node frontend/agents_browser_smoke.mjs
 make check
 ```
 
-The existing Chromium runner dispatches native mouse/touch input and inspects
-both themes. Coverage includes the movement threshold, fast direction reversals,
-background polling, stable card identity/focus/form drafts, keyboard pickup/drop,
-Escape, lost capture/touch cancellation, outside drops, failed storage writes,
-a fresh document reading saved order, filtered traffic slots, edge scrolling,
-normal touch scrolling and route exit. Reduced motion runs the same operations.
-The matrix checks stationary card slots, visible source contents, previews
-without added scaling, the original 96% opacity and target borders through
-reversals and last-slot keyboard moves. Touch checks include the invisible
-expanded hit area without enlarging the visible grip.
-It also compares live and preview traffic header/footer styles and exercises
-discovered listener pickup, reversals, drop, cancellation and keyboard movement
-in both themes, including cleanup of the viewport layer.
+The Chromium runner dispatches native mouse/touch input. Coordinate cases measure
+`hypot(ghost.left + grab.x - pointer.x, ghost.top + grab.y - pointer.y)` against
+the delivered pointer events and compare the last preview with the committed
+order. They cover centre/corner/handle grabs, slow and fast motion, reversals,
+interrupting landing, variable heights, multiple rows/columns, first/last slots,
+gaps, stationary reflow, sidebar offset, CSS zoom and nested manual/edge scrolling.
+Touch starts on the grip; normal card content remains available for scrolling.
+For deterministic interruption coverage, the native driver pauses the in-flight
+landing at its current painted frame while aiming at its small grip; production
+pointer-down must cancel it and preserve the grab point. Other gestures and the
+recordings run with animation progressing normally.
+Browser zoom uses Chromium's actual default zoom setting, separately from display
+scale. At 125% zoom and 150% display scale the observed DPR is 1.875.
+
+The lifecycle matrix covers both themes, nodes, monitored traffic and discovered
+listeners; threshold, keyboard moves, identity/focus/drafts, polling, Escape,
+touch cancellation/lost capture, outside drops, failed writes/recovery, a fresh
+document loading the saved order, filtered slots, normal touch scrolling, edge
+scrolling and route exit. It also checks the destination's original traffic
+border, radius, opaque content and header paint rather than just CSS shadow values.
+
+- [Desktop native mouse recording](card-movement/desktop.mp4)
+- [Mobile native touch recording](card-movement/mobile.mp4)
+- [Measured gestures and final orders](card-movement/measurements.json)
+- Destination appearance: [node](card-movement/node-target.png),
+  [traffic](card-movement/traffic-target.png) (same light theme and drag state).
+
+The recording-only cursor follows delivered pointer events and highlights a
+press. The clips show node cards in light theme, traffic in dark theme, reversals,
+actual drops and Escape return. Recreate them against the local fixture origin:
+
+```sh
+node scripts/record-card-movement.mjs http://127.0.0.1:PORT desktop
+node scripts/record-card-movement.mjs http://127.0.0.1:PORT mobile
+```
 
 ## Actual validation
 
-Validated after syncing latest main `df1ad92` with Chromium on Linux. The original
-traffic styles referenced from `2bbd07b` are unchanged by that main update.
+Validated on Linux Chromium after fetching main `df1ad92`. The original traffic
+styles from `2bbd07b` are unchanged by that main update.
 
-- `make generate-styles` and `make styles-check`: passed.
-- The four card movement browser modes above: passed, with both card types and
-  both themes in each mode.
-- Manual Playwright comparison against unmodified main traffic cards: all 22
-  inspected source, grip, icon, preview and destination paint properties match
-  for both node and traffic cards in both themes. Keyboard focus remains visible;
-  pointer dragging does not introduce an extra grip outline.
-- On the initial commit `0ed0159`, all 58 existing browser modes outside the
-  motion suites passed across separate batches, as did the four popup motion
-  modes. The card matrix and non-browser checks were rerun after the style update.
-- `node frontend/module_smoke.mjs` and the module/smoke policy tests: passed.
-- `make non-browser-checks`: passed.
-- `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed after syncing
-  latest main. The browser wrapper was excluded; the native card modes ran
-  through `make check` as described below.
-- `make check`: all four card movement modes passed, then it failed (exit 2) on
-  the existing `motion-selection` assertion `quota refresh retains focus`
-  (focus becomes the document body). The same assertion fails on an unmodified
-  checkout of latest main `df1ad92`.
-- Earlier supplemental existing `motion` runs on main `2bbd07b` also failed at
-  navigation reversal timing assertions, before any card gesture. An unmodified
-  checkout of that main reproduces `reverse navigation must not flash to a fully
-  opaque frame`.
+- `make generate-styles`, `make non-browser-checks`: passed.
+- `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed. The browser
+  wrapper is excluded here; native card modes run separately and in `make check`.
+- Desktop coordinate modes: 34 measured gestures each, normal and reduced motion.
+  Maximum grab-point error was 0.095 CSS pixels, including live CSS zoom.
+- Touch coordinate modes: 24 measured gestures each, normal and reduced motion.
+  Maximum grab-point error rounded to 0.0000 CSS pixels.
+- Browser 125% zoom with 150% display scale: 34 gestures passed; maximum error
+  was 0.189 CSS pixels. Every successful drop matched its last preview.
+- Both recordings verify their own pointer error and preview/final order.
+- `make check`: ran to exit 2. All eight card modes passed, then the existing
+  `motion-selection` assertion `quota refresh retains focus` failed (focus becomes
+  the document body). That assertion also fails on an unmodified checkout of
+  main `df1ad92`.
 
-The unrelated quota and navigation failures are recorded here rather than
-reported as successful checks. Their production behavior is outside this change.
+The baseline quota-focus failure is not reported as a successful full-suite check.
 
 ## Persistence and rollback
 

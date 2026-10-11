@@ -3,12 +3,13 @@ import { animateNodeCardDrop } from "../modules/agent-card-drag.js";
 import { accountStorage } from "../modules/account-storage.js";
 
 const key = (grip, value) => grip.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true }));
-const settled = () => waitFor(() => !document.querySelector(".card-move-ghost") &&
+export const settled = () => waitFor(() => !document.querySelector(".card-move-ghost") &&
   !document.getAnimations().some(animation => animation.id.startsWith("qch-card") || animation.id === "qch-drop"), "card movement did not settle");
-const route = async (hash, selector) => {
+export const route = async (hash, selector) => {
   location.hash = hash;
   const grid = await waitFor(() => document.querySelector(selector) && !document.querySelector(".is-route-pending"), `missing ${hash}`);
   await waitFor(() => !document.getAnimations().some(animation => animation.id.startsWith("qch-route")), "route did not settle");
+  await waitFor(() => !document.getAnimations().some(animation => animation.id.startsWith("qch")), "route content did not settle");
   return document.querySelector(selector);
 };
 const equalOrder = (actual, expected, message) => assert.equal(JSON.stringify(actual), JSON.stringify(expected), message);
@@ -22,24 +23,29 @@ const trafficPaint = (original, preview) => {
 
 // The runner dispatches real mouse/touch events and waits for each inspection
 // acknowledgement before sending the next input. Timing cannot skip assertions.
-async function gesture(start, points, release, inspect = async () => {}) {
+export async function gesture(start, points, release, inspect = async () => {}, waitForLanding = true, liveStart = null) {
   window.__cardMoveStep = -1;
   window.__cardMoveAck = -1;
-  window.__cardMoveGesture = { start, points, release };
+  window.__cardMoveGesture = { start, points, release, liveStart };
   for (let index = 0; index < points.length; index++) {
     await waitFor(() => window.__cardMoveStep === index, "native input step missing");
     await inspect(index, points[index]);
     window.__cardMoveAck = index;
   }
   await waitFor(() => window.__cardMoveGesture === null, "native input did not finish");
-  await settled();
+  if (waitForLanding) await settled();
 }
-const geometry = (grip, target) => {
+export const geometry = (grip, target) => {
   const source = grip.closest(".node-card,.traffic-policy-card");
   // Keep both adjacent grips inside the viewport; holding a target at the edge
   // deliberately auto-scrolls and is covered by the separate edge gesture.
   const anchor = source.getBoundingClientRect().top < target.getBoundingClientRect().top ? source : target;
-  if (matchMedia("(pointer:coarse)").matches) anchor.scrollIntoView({ block: "start", behavior: "instant" });
+  if (matchMedia("(pointer:coarse)").matches) {
+    anchor.scrollIntoView({ block: "start", behavior: "instant" });
+    // Keep reversals clear of the top bar's auto-scroll band as well as the
+    // bottom dock. Edge scrolling has its own stationary-pointer regression.
+    document.scrollingElement.scrollTo({ top: scrollY + anchor.getBoundingClientRect().top - 160, behavior: "instant" });
+  }
   else grip.scrollIntoView({ block: "center", behavior: "instant" });
   const box = grip.getBoundingClientRect(), card = source.getBoundingClientRect();
   const destination = target.getBoundingClientRect();
@@ -96,6 +102,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         start.x -= offset; end.x -= offset;
         assert.ok(grip.contains(document.elementFromPoint(start.x, start.y)), "expanded touch area belongs to the grip");
       }
+      const sourceRect = original[0].getBoundingClientRect();
       const saved = accountStorage.getItem(orderKey);
       await gesture(start, [{ x: start.x + 2, y: start.y }, end, start, end], "drop", async (index, point) => {
         if (!index) {
@@ -110,17 +117,22 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         if (type === "nodes") assert.equal(ghost.querySelector(".agent-presence").dataset.agentPresence,
           original[0].querySelector(".agent-presence").dataset.agentPresence, "preview preserves presence artwork");
         else trafficPaint(original[0], ghost);
-        const transform = new DOMMatrix(getComputedStyle(ghost).transform);
-        assert.ok(Math.abs(transform.m41 - (point.x - start.x)) < .1 && Math.abs(transform.m42 - (point.y - start.y)) < .1,
-          `translation follows the pointer without interpolation lag: ${type}/${theme}/${index}; actual ${transform.m41},${transform.m42}; expected ${point.x-start.x},${point.y-start.y}`);
+        const painted = ghost.getBoundingClientRect();
+        const anchor = { x: start.x - sourceRect.left, y: start.y - sourceRect.top };
+        const error = Math.hypot(painted.left + anchor.x - point.x, painted.top + anchor.y - point.y);
+        assert.ok(error < 1, `grab point follows the pointer: ${type}/${theme}/${index}; error ${error}px`);
         assert.equal(accountStorage.getItem(orderKey), saved, "preview cannot write order preferences");
-        const target = index === 2 ? null : original[1];
+        const target = original[0];
         assert.equal(grid.querySelector(".drop-target"), target, "target-card border follows reversals");
-        assert.ok(cards().every(card => !card.style.order), "cards keep their original slots until drop");
+        assert.equal(Number(target.style.order), index === 2 ? 0 : 1, `border placeholder occupies the preview insertion slot: ${type}/${theme}/${index}; point ${JSON.stringify(point)}; start ${JSON.stringify(start)}; source ${JSON.stringify(sourceRect)}; scroll ${scrollY}; slots ${JSON.stringify(cards().map(c => [c.style.order,c.getBoundingClientRect().top,c.offsetHeight]))}`);
         if (target) assert.ok(getComputedStyle(target).boxShadow.includes("inset") && getComputedStyle(target).boxShadow.includes("2px"), "destination uses the original traffic inset border in both themes");
         assert.equal(document.querySelector(".card-move-cue,.card-move-guide,.card-move-feedback"), null, "drag feedback uses borders without added labels");
-        assert.equal(getComputedStyle(original[0]).opacity, "0.4", "source retains the original traffic-card fade");
-        assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "1", "source content remains visible without a blank placeholder");
+        assert.equal(getComputedStyle(original[0]).opacity, "1", "destination border retains the original traffic-card strength");
+        assert.equal(getComputedStyle(original[0]).borderRadius, "12px", "destination uses the original traffic-card radius");
+        assert.equal(getComputedStyle(original[0].firstElementChild).opacity, "1", "destination keeps the original traffic target's opaque content");
+        const cap = type === "nodes" ? ".node-card-head" : ".traffic-card-header";
+        const fill = getComputedStyle(target.querySelector(cap)).backgroundColor;
+        assert.equal(fill, getComputedStyle(target).backgroundColor, "header masks the inset like the original traffic target");
         assert.equal(getComputedStyle(ghost).scale, "none", "preview has no added pickup scale");
         assert.equal(getComputedStyle(ghost).opacity, "0.96", "preview keeps the original traffic-card opacity");
         if (reduced) assert.equal(ghost.getAnimations().length, 0, "reduced motion keeps cue and placement without animation");
@@ -145,7 +157,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
       key(grip, " ");
       for (let index = 1; index < cards().length; index++) key(grip, "ArrowRight");
       assert.equal(grip.getAttribute("aria-pressed"), "true");
-      assert.equal(grid.querySelector(".drop-target"), cards().at(-1), "last-slot movement retains a destination border");
+      assert.equal(grid.querySelector(".drop-target"), original[0], "last-slot movement retains a destination border");
       key(grip, "Escape"); await settled();
       equalOrder(ids(), originalIds, "keyboard cancellation must restore the committed order");
       assert.equal(document.activeElement, grip);
@@ -173,7 +185,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         assert.ok(grid.isConnected && grip.isConnected, `failure fixture must retain its grid: ${type}/${theme}/${location.hash}`);
         await gesture(positioned.start, [positioned.end], "drop", async () => {
           assert.ok(document.querySelector(".card-move-ghost"), `failure gesture must pick up: ${type}/${theme}/${location.hash}`);
-          assert.equal(grid.querySelector(".drop-target"), cards()[0], `failure gesture must select first slot: ${type}/${theme}`);
+          assert.equal(grid.querySelector(".drop-target"), grip.closest(cardSelector), `failure gesture keeps its placeholder: ${type}/${theme}`);
         });
         equalOrder(ids(), beforeFailure, "failed persistence must restore the last saved DOM order");
         assert.equal(accountStorage.getItem(orderKey), persisted);
@@ -215,6 +227,7 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   equalOrder(JSON.parse(accountStorage.getItem("qcontrolhub:traffic-card-order")), all.map(id => visibleSet.has(id) ? reversed[cursor++] : id), "filtered movement must preserve hidden positions");
   filter.value = ""; filter.dispatchEvent(new Event("change", { bubbles: true }));
   await waitFor(() => document.querySelectorAll('.traffic-policy-grid > [data-traffic-card-key]').length === all.length, "unfiltered traffic missing");
+  await waitFor(() => !document.getAnimations().some(animation => animation.id.startsWith("qch")), "filter reveal did not settle");
 
   // Discovered listeners keep the original dashed traffic border while sharing
   // the destination inset and preserving their scoped traffic layout.
@@ -229,8 +242,9 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
       const ghost = document.querySelector(".card-move-ghost");
       trafficPaint(port, ghost);
       assert.equal(getComputedStyle(ghost).borderTopStyle, "dashed", "discovered listener keeps its original traffic border");
-      const target = step === 1 ? null : cards[targetIndex];
+      const target = port;
       assert.equal(grid.querySelector(".drop-target"), target, `discovered listener border follows the selected card: ${theme}/${step}; source ${index}, target ${targetIndex}, actual ${cards.indexOf(grid.querySelector(".drop-target"))}`);
+      assert.equal(Number(port.style.order), step === 1 ? index : targetIndex, `listener selected slot ${theme}/${step}; pointer ${JSON.stringify(step === 1 ? positioned.start : positioned.end)}; slots ${JSON.stringify(cards.map(c => [c.style.order,c.offsetTop,c.offsetHeight]))}`);
       if (target) assert.ok(getComputedStyle(target).boxShadow.includes("inset"), "discovered listener destination shares the traffic inset border");
     });
     const expected = [...before]; expected.splice(index, 1); expected.splice(targetIndex, 0, before[index]);

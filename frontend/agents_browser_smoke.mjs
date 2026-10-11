@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -203,6 +203,14 @@ async function driveCardMoveGestures(send, mobile) {
   while (true) {
     const gesture = await wait("window.__cardMoveGesture");
     if (!gesture) return;
+    // Hold the in-flight landing at its current painted frame while CDP aims
+    // at a small moving grip. Production pointerdown must still cancel that
+    // animation and preserve its painted grab point; no DOM order is changed.
+    if (gesture.liveStart) gesture.start = await evaluate(`(() => {
+      document.getAnimations().filter(animation => animation.id === "qch-drop").forEach(animation => animation.pause());
+      const box = document.querySelector(${JSON.stringify(gesture.liveStart)}).getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    })()`);
     if (mobile) await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [gesture.start] });
     else {
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...gesture.start });
@@ -270,6 +278,19 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
       await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     }
+    if (process.env.QCH_BROWSER_SMOKE_ZOOM) {
+      const zoom = Number(process.env.QCH_BROWSER_SMOKE_ZOOM);
+      assert.ok(zoom >= .5 && zoom <= 2, "browser zoom must be between 50% and 200%");
+      await send("Page.navigate", { url: "chrome://settings/appearance" });
+      let ready = false;
+      for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+        const result = await send("Runtime.evaluate", { expression: "!!globalThis.chrome?.settingsPrivate?.setDefaultZoom", returnByValue: true });
+        ready = result.result?.value; if (!ready) await delay(25);
+      }
+      assert.ok(ready, "Chromium settings zoom API was unavailable");
+      const result = await send("Runtime.evaluate", { expression: `new Promise(resolve => chrome.settingsPrivate.setDefaultZoom(${zoom}, () => chrome.settingsPrivate.getDefaultZoom(resolve)))`, awaitPromise: true, returnByValue: true });
+      assert.equal(result.result?.value, zoom, "browser must apply the requested zoom");
+    }
     if (navigateURL) await send("Page.navigate", { url: navigateURL });
     // Popup/selection suites need focus emulation, but publish no drag input.
     // Full popup playback now samples all 36 theme/route combinations.
@@ -292,6 +313,7 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
+              measurements: window.cardCoordinateMeasurements,
             });
           }, 10);
         })`,
@@ -341,6 +363,7 @@ async function runMode(mode) {
       chrome,
       [
         "--headless=new",
+        ...(process.env.QCH_BROWSER_SMOKE_DPR ? [`--force-device-scale-factor=${Number(process.env.QCH_BROWSER_SMOKE_DPR)}`] : []),
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
@@ -393,6 +416,10 @@ async function runMode(mode) {
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
     if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
+    if (result.measurements && process.env.QCH_BROWSER_SMOKE_REPORT) {
+      await mkdir(process.env.QCH_BROWSER_SMOKE_REPORT, { recursive: true });
+      await writeFile(join(process.env.QCH_BROWSER_SMOKE_REPORT, `${mode}.json`), JSON.stringify(result.measurements, null, 2) + "\n");
+    }
   } finally {
     if (child) await stopBrowser(child);
     await rm(profile, {
@@ -405,7 +432,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

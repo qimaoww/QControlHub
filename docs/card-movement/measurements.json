@@ -1,0 +1,4668 @@
+{
+  "date": "2026-10-11",
+  "browser": "Chromium on Linux; native CDP mouse/touch input",
+  "baseMain": "df1ad925aa270a146b2ad342143546d8ff74c1ea",
+  "metric": "hypot(ghost.left + grab.x - pointer.x, ghost.top + grab.y - pointer.y), viewport CSS pixels",
+  "summary": [
+    {
+      "mode": "motion-cards-coordinates-mobile-reduced",
+      "browserZoom": 1,
+      "dpr": 1,
+      "viewport": [
+        390,
+        844
+      ],
+      "gestures": 24,
+      "maxGrabErrorPx": 0
+    },
+    {
+      "mode": "motion-cards-coordinates-mobile",
+      "browserZoom": 1,
+      "dpr": 1,
+      "viewport": [
+        390,
+        844
+      ],
+      "gestures": 24,
+      "maxGrabErrorPx": 7.62939453125e-06
+    },
+    {
+      "mode": "motion-cards-coordinates-reduced",
+      "browserZoom": 1,
+      "dpr": 1,
+      "viewport": [
+        1280,
+        761
+      ],
+      "gestures": 34,
+      "maxGrabErrorPx": 0.094818115234375
+    },
+    {
+      "mode": "motion-cards-coordinates",
+      "browserZoom": 1,
+      "dpr": 1,
+      "viewport": [
+        1280,
+        761
+      ],
+      "gestures": 34,
+      "maxGrabErrorPx": 0.094818115234375
+    },
+    {
+      "mode": "motion-cards-coordinates",
+      "browserZoom": 1.25,
+      "dpr": 1.875,
+      "viewport": [
+        1024,
+        609
+      ],
+      "gestures": 34,
+      "maxGrabErrorPx": 0.18839768503502705
+    }
+  ],
+  "runs": [
+    {
+      "mode": "motion-cards-coordinates-mobile-reduced",
+      "mobile": true,
+      "dpr": 1,
+      "viewport": [
+        390,
+        844
+      ],
+      "measurements": [
+        {
+          "name": "nodes/grip/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip-top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip-bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip-top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip-bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "alpha:19443",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "alpha:19443",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        }
+      ]
+    },
+    {
+      "mode": "motion-cards-coordinates-mobile",
+      "mobile": true,
+      "dpr": 1,
+      "viewport": [
+        390,
+        844
+      ],
+      "measurements": [
+        {
+          "name": "nodes/grip/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip-top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip-bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "delta",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip-top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip-bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8543",
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 7.62939453125e-06,
+          "previewOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:19443",
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "alpha:19443",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "alpha:8443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446",
+            "alpha:8543",
+            "delta:8546",
+            "alpha:19443",
+            "delta:19444",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        }
+      ]
+    },
+    {
+      "mode": "motion-cards-coordinates-reduced",
+      "mobile": false,
+      "dpr": 1,
+      "viewport": [
+        1280,
+        761
+      ],
+      "measurements": [
+        {
+          "name": "nodes/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "charlie",
+            "delta",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "charlie",
+            "delta",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.04007720947265625,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "charlie:8445",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "charlie:8445",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.094818115234375,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8546"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8546"
+          ],
+          "release": "drop"
+        }
+      ]
+    },
+    {
+      "mode": "motion-cards-coordinates",
+      "mobile": false,
+      "dpr": 1,
+      "viewport": [
+        1280,
+        761
+      ],
+      "measurements": [
+        {
+          "name": "nodes/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 3.0517578125e-05,
+          "previewOrder": [
+            "bravo",
+            "charlie",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "charlie",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.04007720947265625,
+          "previewOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "charlie",
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "charlie",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "charlie",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "bravo:8444",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8444",
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "bravo:8544",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "bravo:8544",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "bravo:8544",
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "bravo:8544",
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "bravo:8544",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "bravo:8544",
+            "delta:8546",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 6.103515625e-05,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.094818115234375,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0,
+          "previewOrder": [
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "bravo:8544",
+            "delta:19444",
+            "alpha:8443",
+            "bravo:8444",
+            "alpha:8543",
+            "alpha:19443",
+            "charlie:8445",
+            "charlie:8545",
+            "delta:8446"
+          ],
+          "release": "drop"
+        }
+      ]
+    },
+    {
+      "mode": "motion-cards-coordinates",
+      "browserZoom": 1.25,
+      "displayScale": 1.5,
+      "mobile": false,
+      "dpr": 1.875,
+      "viewport": [
+        1024,
+        609
+      ],
+      "measurements": [
+        {
+          "name": "nodes/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.007377628456595944,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.011169694157463864,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.011169436199417225,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.025924794879959898,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.02592468373981763,
+          "previewOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "alpha",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.008209260422882128,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0.023429931471611123,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0.024520949984933094,
+          "previewOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "alpha",
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0.023429931471611123,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0.011169457044733162,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0.010070942386440821,
+          "previewOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "charlie",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0.009696972454552833,
+          "previewOrder": [
+            "charlie",
+            "delta",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "charlie",
+            "delta",
+            "bravo",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0.009849550001940597,
+          "previewOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "bravo",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0.008422855017841019,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "nodes/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.07204994229414852,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0.011169436199417225,
+          "previewOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "bravo",
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "card-extra-4"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "nodes/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0.04323577948173602,
+          "previewOrder": [
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "finalOrder": [
+            "delta",
+            "charlie",
+            "card-extra-1",
+            "card-extra-2",
+            "alpha",
+            "card-extra-3",
+            "bravo",
+            "card-extra-4"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/center/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.0410156363532641,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.05505371939580814,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/top-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.055053710939565015,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-left/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.02697755632356808,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/bottom-right/slow",
+          "samples": 17,
+          "maxGrabErrorPx": 0.02697753906671413,
+          "previewOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:8446",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/grip/fast",
+          "samples": 3,
+          "maxGrabErrorPx": 0.053436279296875,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0.03335572685108783,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/first",
+          "samples": 7,
+          "maxGrabErrorPx": 0.0330810546875,
+          "previewOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8446",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/cross-row/forward",
+          "samples": 7,
+          "maxGrabErrorPx": 0.03335572685108783,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/stationary-reflow",
+          "samples": 3,
+          "maxGrabErrorPx": 0.021072409793474793,
+          "previewOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/0",
+          "samples": 3,
+          "maxGrabErrorPx": 0.01998922333352592,
+          "previewOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/1",
+          "samples": 3,
+          "maxGrabErrorPx": 0.019821172865469562,
+          "previewOrder": [
+            "charlie:8445",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "charlie:8445",
+            "delta:8546",
+            "delta:19444",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/interrupt-landing/2",
+          "samples": 3,
+          "maxGrabErrorPx": 0.01959233863324149,
+          "previewOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "delta:19444",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/empty-gap",
+          "samples": 7,
+          "maxGrabErrorPx": 0.018341089842107534,
+          "previewOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "drop"
+        },
+        {
+          "name": "traffic/live-css-zoom",
+          "samples": 2,
+          "maxGrabErrorPx": 0.18839768503502705,
+          "previewOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/sidebar-reflow",
+          "samples": 2,
+          "maxGrabErrorPx": 0.019699120318386037,
+          "previewOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "finalOrder": [
+            "delta:19444",
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544"
+          ],
+          "release": "escape"
+        },
+        {
+          "name": "traffic/nested-scroll",
+          "samples": 3,
+          "maxGrabErrorPx": 0.059646614252315856,
+          "previewOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
+            "delta:19444"
+          ],
+          "finalOrder": [
+            "delta:8546",
+            "charlie:8445",
+            "charlie:8545",
+            "alpha:8443",
+            "delta:8446",
+            "alpha:8543",
+            "alpha:19443",
+            "bravo:8444",
+            "bravo:8544",
+            "delta:19444"
+          ],
+          "release": "drop"
+        }
+      ]
+    }
+  ],
+  "recordings": {
+    "desktop": [
+      {
+        "type": "nodes",
+        "position": "center",
+        "cancelled": false,
+        "maxGrabErrorPx": 1.1920928955078125e-07,
+        "samples": 54,
+        "previewOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "top-left",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "top-right",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "bottom-left",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "bottom-right",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "grip",
+        "cancelled": true,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "traffic",
+        "position": "grip",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 54,
+        "previewOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ],
+        "finalOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ]
+      },
+      {
+        "type": "traffic",
+        "position": "center",
+        "cancelled": true,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "delta:8446",
+          "delta:8546",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ],
+        "finalOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ]
+      }
+    ],
+    "mobile": [
+      {
+        "type": "nodes",
+        "position": "grip",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 54,
+        "previewOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "nodes",
+        "position": "grip",
+        "cancelled": true,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "alpha",
+          "delta",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ],
+        "finalOrder": [
+          "delta",
+          "alpha",
+          "bravo",
+          "charlie",
+          "card-extra-1",
+          "card-extra-2",
+          "card-extra-3",
+          "card-extra-4"
+        ]
+      },
+      {
+        "type": "traffic",
+        "position": "grip",
+        "cancelled": false,
+        "maxGrabErrorPx": 0,
+        "samples": 54,
+        "previewOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ],
+        "finalOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ]
+      },
+      {
+        "type": "traffic",
+        "position": "grip",
+        "cancelled": true,
+        "maxGrabErrorPx": 0,
+        "samples": 18,
+        "previewOrder": [
+          "delta:8446",
+          "delta:8546",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ],
+        "finalOrder": [
+          "delta:8546",
+          "delta:8446",
+          "delta:19444",
+          "alpha:8443",
+          "alpha:8543",
+          "alpha:19443",
+          "bravo:8444",
+          "bravo:8544",
+          "charlie:8445",
+          "charlie:8545"
+        ]
+      }
+    ]
+  }
+}

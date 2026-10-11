@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { saveNodeOrder } from "../modules/node-order.js";
 import { createTrafficOrder } from "../modules/traffic-order.js";
-import { cardMoveDropIndex } from "../modules/card-move-preview.js";
+import { cardMoveTarget } from "../modules/card-move-layout.js";
 import { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "../modules/agents.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
@@ -24,16 +24,16 @@ assert.equal(dropAt(330, 20), 2, "natural upper-half drop selects last slot");
 assert.equal(dropAt(90, 200), 3, "drop selection follows the actual grid row");
 assert.equal(dropAt(210, 200), 4, "drop selection follows row direction");
 
-// A preview uses stable slots even while the grid scrolls and neighbours animate.
-const gridRect = { left: 0, right: 340, top: 0, bottom: 340 };
-const drag = { slots: cardSlots, gridRect, point: { x: 210, y: 20 }, offset: upperRightGripOffset };
-assert.equal(cardMoveDropIndex(drag, { getBoundingClientRect: () => gridRect }), 1);
-assert.equal(cardMoveDropIndex({ ...drag, point: { x: 210, y: -80 } }, {
-  getBoundingClientRect: () => ({ ...gridRect, top: -100, bottom: 240 }),
-}), 1, "scrolled slots keep their intended identity");
-assert.equal(cardMoveDropIndex({ ...drag, point: { x: -100, y: 20 } }, {
-  getBoundingClientRect: () => gridRect,
-}), null, "leaving the grid cancels instead of moving to an arbitrary end slot");
+// The pointer selects the actual layout slot, independent of the grab offset.
+const box = { left: 0, right: 340, top: 0, bottom: 340 };
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: 130, y: 20 }), 1);
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: 130, y: 200 }), 4);
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: 345, y: 330 }), 4, "empty last-row space selects the last slot");
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: -100, y: 20 }), null);
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: 104, y: 20 }, 0), 0, "gap jitter retains the current slot");
+assert.equal(cardMoveTarget({ box, slots: cardSlots }, { x: 130, y: 20 }, 0), 1, "crossing the gap advances once");
+const resized = { box: { ...box, right: 100, bottom: 880 }, slots: cardSlots.map((r, i) => ({ left: 0, right: 100, top: i * 180, bottom: i * 180 + 160 })) };
+assert.equal(cardMoveTarget(resized, { x: 90, y: 560 }), 3, "responsive single-column layout replaces old column boundaries");
 
 for (const saveOrder of [saveNodeOrder, (ids, storage) => createTrafficOrder(storage).saveTrafficCardOrder(ids)]) {
   let value = null;
