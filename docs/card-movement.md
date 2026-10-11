@@ -24,7 +24,8 @@ grab points, scrolling and reflow could therefore select a different slot than
 the pointer indicated. The controller now records the actual pointer-down offset
 from the painted card bounds, moves the preview immediately in viewport CSS
 pixels and converts those coordinates into its layer's local scale. Pointer
-following has no transition or added pickup scale. Traffic previews retain their
+following has no transition or added pickup scale. The preview layer's padding-edge origin uses fractional computed border widths, avoiding integer
+`clientLeft`/`clientTop` rounding under CSS zoom. Traffic previews retain their
 workspace layout, spacing and typography in an inert viewport layer.
 
 Hit selection uses the pointer and current untransformed layout rectangles.
@@ -139,8 +140,9 @@ node scripts/record-card-movement.mjs http://127.0.0.1:PORT mobile
 
 ## Actual validation
 
-Validated on Linux Chromium after fetching main `df1ad92`. The original traffic
-styles from `2bbd07b` are unchanged by that main update.
+Validated on Linux Chromium 147 and 154. Main `ff20732` is included after resolving
+the browser-runner and navigation-test overlap; its original traffic appearance
+from `2bbd07b` remains unchanged.
 
 - `make generate-styles`, `make non-browser-checks`: passed.
 - `go test -p 1 ./... -skip '^TestAgentBrowserRuntimeSmoke$'`: passed. The browser
@@ -172,9 +174,31 @@ further left so it fits the header without changing the visible traffic grip.
 The existing shared-node mobile and both mobile lifecycle regressions pass.
 Chromium 154 is also tested using an isolated package extraction, matching the
 Debian CI version without replacing the workspace's Chromium 147 installation.
-Its desktop coordinate maximum is 0.191 CSS pixels; touch error rounds to 0.0000.
+Its desktop modes each cover 34 gestures with a maximum error of 0.191 CSS
+pixels. Touch modes now cover 26 gestures each with error rounding to 0.0000,
+including a 125% page scale with native viewport pan of 61px horizontally and
+52px vertically. Intended grip coordinates and delivered native presses match.
 At 125% browser zoom and 150% display scale (DPR 1.875), its 34 coordinate
 gestures also pass with a maximum error of 0.220 CSS pixels.
+
+CI diagnostics exposed a separate input-driver mismatch: CDP input starts at the
+visual viewport, while the fixture publishes DOM client coordinates. A 49px
+viewport pan therefore sent a planned grip touch into the card body. The runner
+and recording script now subtract the current viewport origin before dispatch;
+Chromium applies browser and page scale itself. The coordinate regression checks
+both the intended card and the intended grab point, alongside ghost error and
+preview/final order. The committed measurements contain these native presses.
+
+The nested-scroll fixture now scrolls the existing workspace through scoped CSS
+rather than wrapping its grid in new DOM that a roster refresh can replace.
+Polling remains enabled. Its rule excludes the inert preview workspace. The CSS
+zoom regression also changes the preview layer's border while holding the pointer
+stationary, covering its fractional padding-edge projection.
+
+The local Go package deadline is 20 minutes, matching CI: the complete browser
+matrix also runs through the Go wrapper and exceeds Go's default 10 minutes.
+An earlier complete browser/non-Go pass reached that Go timeout; the final
+`make check` result on the merged main is recorded in the PR.
 
 ## Persistence and rollback
 

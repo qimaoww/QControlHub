@@ -1,7 +1,7 @@
 {
   "date": "2026-10-11",
   "browser": "Chromium 154 on Linux; native CDP mouse/touch input (desktop recording: Chromium 147)",
-  "baseMain": "df1ad925aa270a146b2ad342143546d8ff74c1ea",
+  "baseMain": "ff20732bf70a0f207f753813d95f377e81b3f379",
   "metric": "hypot(ghost.left + grab.x - pointer.x, ghost.top + grab.y - pointer.y), viewport CSS pixels",
   "summary": [
     {
