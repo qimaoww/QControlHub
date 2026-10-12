@@ -150,8 +150,8 @@ export function createIPQualityController(ctx, view) {
       }
       // Keep a few account-scoped views ready for instant return navigation.
       // Do not duplicate unusually large report responses in memory.
+      daySnapshots.delete(date);
       if (JSON.stringify(history).length < 2 * 1024 * 1024) {
-        daySnapshots.delete(date);
         daySnapshots.set(date, snapshot);
         while (daySnapshots.size > 3) daySnapshots.delete(daySnapshots.keys().next().value);
       }

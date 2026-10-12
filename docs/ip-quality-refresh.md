@@ -77,6 +77,8 @@ observation, including disappearance and recovery.
   selected date, including when other nodes still have records, rather than
   keeping removed reports or labeling them as first-time results. The
   selected date/timezone and fallback node ownership are checked explicitly.
+  Responses above the snapshot size cap still invalidate the older snapshot;
+  returning with a slow read cannot resurrect its deleted reports.
 - Date-scoped SQL now retains the previous success **within that same local
   submission date** while another attempt is pending, running or failed.
   Latest views retain their existing cross-date fallback. Task IDs and image

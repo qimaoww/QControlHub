@@ -211,10 +211,22 @@ export async function testIPQualityRefresh({ fixture, refresh, card, reportDay, 
   const otherNode = { ...record, agent_id: "quality-c", task_id: "quality-other-node" };
   fixture.records = [record, otherNode];
   await refresh();
-  fixture.records = [otherNode];
+  // A response above the cache cap must invalidate the old smaller snapshot,
+  // otherwise a return navigation can resurrect its deleted node report.
+  fixture.records = [{ ...otherNode, cache_size_probe: "x".repeat(2 * 1024 * 1024) }];
   await refresh();
   assert.ok(card().textContent.includes("已删除或不再可用"), "one deleted node record looked like a first-time result while another node retained records");
   assert.equal(card().querySelector("img"), null, "one deleted node retained its obsolete report");
+  goDate(reportDay);
+  await waitFor(() => selectedDate() === reportDay && !document.querySelector("[data-ip-quality-refresh]").disabled,
+    "history read before large-snapshot return did not complete");
+  release = null;
+  fixture.readGate = response => new Promise(resolve => { release = () => resolve(response); });
+  document.querySelector("[data-ip-quality-latest]").click();
+  await waitFor(() => release && card(), "large-snapshot return read did not start");
+  assert.equal(card().querySelector("img"), null, "oversized response left a stale cached report that returned during a slow read");
+  release();
+  await waitFor(() => !document.querySelector("[data-ip-quality-refresh]").disabled, "large-snapshot return read did not complete");
   fixture.records = [record];
   await refresh();
   await openDetails(); assertContent("final recovery");
