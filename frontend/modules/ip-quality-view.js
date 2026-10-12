@@ -56,7 +56,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
           ${addresses}
           ${attempt}
           ${record?.error ? `<p class="alert error ip-quality-error" role="alert">${esc(record.error)}</p>` : ""}
-          ${reports.length ? "" : `<p class="ip-quality-no-report">${record ? "等待有效检测结果；失败或缺失数据不会记为低风险。" : !history ? readFailed ? "检测记录读取失败，可点击刷新重试。" : "正在读取这台节点的检测记录…" : recordsRemoved ? "检测记录已删除或不再可用，可刷新确认或重新检测。" : isLatest ? "还没有检测记录，可点击立即检测生成首次报告。" : isToday ? "当天没有检测记录，可选择其他节点或发起检测。" : "当天没有检测记录。"}</p>`}
+          ${reports.length ? "" : `<p class="ip-quality-no-report">${record ? "等待有效检测结果；失败或缺失数据不会记为低风险。" : !history ? readFailed ? "检测记录读取失败，可点击刷新重试。" : "正在读取这台节点的检测记录…" : recordsRemoved?.has(agent.id) ? "检测记录已删除或不再可用，可刷新确认或重新检测。" : isLatest ? "还没有检测记录，可点击立即检测生成首次报告。" : isToday ? "当天没有检测记录，可选择其他节点或发起检测。" : "当天没有检测记录。"}</p>`}
           ${reportRecord ? archiveView(reportRecord) : ""}
           ${reports.length ? `<details class="ip-quality-details" data-refresh-key="report-${esc(reportRecord.task_id)}"><summary>详细数据 <span>⌄</span></summary>${reports.map(reportView).join("")}</details>` : ""}
         </div>
@@ -64,7 +64,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
     };
     const issue = `<div class="alert error ip-quality-alert" data-refresh-key="ip-quality-read-error" role="alert"${error ? "" : " hidden"}>${error ? `${esc(error)}${history ? " · 显示缓存，操作已暂停" : ""} · 可点击刷新重试` : ""}</div>`;
     const picker = calendarView({ date, timezone, dates: availableDates || history?.dates || [], month, loading, readFailed });
-    const emptyTitle = loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : recordsRemoved ? "检测记录已删除或不再可用" : canOperate ? "没有可查看的自有节点" : "当天没有检测记录";
+    const emptyTitle = loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : recordsRemoved?.size ? "检测记录已删除或不再可用" : canOperate ? "没有可查看的自有节点" : "当天没有检测记录";
     const emptyNote = error ? "可点击刷新重试。" : loading ? "节点列表和检测记录将逐步显示。" : canOperate ? "IP 检测仅面向节点所有者和有权限的管理员；共享不授予主机检测权限。" : "可选择其他日期，或回到最新结果发起检测。";
     const count = (value) => history ? value : "—";
     shell(`<div class="ip-quality-workspace" data-refresh-key="ip-quality-workspace">

@@ -8,7 +8,7 @@ export function createIPQualityController(ctx, view) {
     clearTimer = clearTimeout } = ctx;
   let accountData = state.data, serial = 0, snapshot = null, pendingAgents = null;
   let foregroundLoading = false, readFailed = false, readError = "";
-  let recordsRemoved = false;
+  let recordsRemoved = new Set();
   let availableDates = null;
   let scopeEpoch = -1, requestController = null, releaseLifecycle = () => {};
   const daySnapshots = new Map();
@@ -79,7 +79,7 @@ export function createIPQualityController(ctx, view) {
       readFailed = false;
       readError = "";
       availableDates = null;
-      recordsRemoved = false;
+      recordsRemoved = new Set();
     }
     // The shell supplies route options as the first argument on page entry.
     const date = typeof requestedDate === "string" ? requestedDate : data.ipQualityDate || ipQualityLatest;
@@ -100,7 +100,7 @@ export function createIPQualityController(ctx, view) {
       snapshot = daySnapshots.get(date) || null;
       readFailed = false;
       readError = "";
-      recordsRemoved = false;
+      recordsRemoved = new Set(snapshot?.recordsRemoved || []);
     }
     if (!background && current(data, epoch)) render(date);
     try {
@@ -136,9 +136,12 @@ export function createIPQualityController(ctx, view) {
       readError = "";
       pendingAgents = null;
       foregroundLoading = false;
-      if (history.records.length) recordsRemoved = false;
-      else if (snapshot?.history.records.length) recordsRemoved = true;
-      snapshot = { date, history, agents: agents.filter((agent) => agent.can_manage !== false) };
+      const recordedAgents = new Set(history.records.map(record => record.agent_id));
+      for (const record of snapshot?.history.records || []) {
+        if (!recordedAgents.has(record.agent_id)) recordsRemoved.add(record.agent_id);
+      }
+      for (const agentID of recordedAgents) recordsRemoved.delete(agentID);
+      snapshot = { date, history, agents: agents.filter((agent) => agent.can_manage !== false), recordsRemoved };
       // Cached dates must not resurrect reports after a successful read removes
       // their records or their node's ownership/permissions.
       restrictNodes(agents);
@@ -163,6 +166,7 @@ export function createIPQualityController(ctx, view) {
         pendingAgents = [];
         daySnapshots.clear();
         availableDates = [];
+        recordsRemoved.clear();
         data.ipQualityNodes = [];
         readError = "查看权限已变化，无法读取检测记录。请确认账号权限后重试。";
       }

@@ -208,6 +208,13 @@ export async function testIPQualityRefresh({ fixture, refresh, card, reportDay, 
   fixture.records = [];
   await refresh();
   assert.ok(card().textContent.includes("已删除或不再可用"), "deleted records looked like an unread or first-time result");
+  const otherNode = { ...record, agent_id: "quality-c", task_id: "quality-other-node" };
+  fixture.records = [record, otherNode];
+  await refresh();
+  fixture.records = [otherNode];
+  await refresh();
+  assert.ok(card().textContent.includes("已删除或不再可用"), "one deleted node record looked like a first-time result while another node retained records");
+  assert.equal(card().querySelector("img"), null, "one deleted node retained its obsolete report");
   fixture.records = [record];
   await refresh();
   await openDetails(); assertContent("final recovery");

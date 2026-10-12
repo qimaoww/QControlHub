@@ -73,8 +73,9 @@ observation, including disappearance and recovery.
   nodes even if the parallel report read fails. 403 clears protected report
   snapshots; 401 uses the existing session reset/login flow.
 - Valid cached reports survive temporary failures and malformed responses with
-  error/retry feedback. Successful empty reads clear deleted results and show
-  that records became unavailable, rather than keeping them forever. The
+  error/retry feedback. Successful reads track deleted results per node and
+  selected date, including when other nodes still have records, rather than
+  keeping removed reports or labeling them as first-time results. The
   selected date/timezone and fallback node ownership are checked explicitly.
 - Date-scoped SQL now retains the previous success **within that same local
   submission date** while another attempt is pending, running or failed.
