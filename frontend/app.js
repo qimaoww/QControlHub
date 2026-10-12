@@ -68,6 +68,7 @@ function renderLogin(message = "") {
   resetFeedback();
   routeModules.peek("traffic")?.cancelInteractions();
   routeModules.peek("client-access")?.dispose();
+  routeModules.peek("ip-quality")?.dispose();
   routeModules.peek("substore-sync")?.dispose();
   routeModules.peek("users")?.closeInvitation();
   scopedAPI.end();
@@ -200,6 +201,7 @@ function renderRouteModule(route, module, options) {
 }
 
 async function renderOnce() {
+  routeModules.peek("ip-quality")?.dispose();
   routeModules.peek("users")?.closeInvitation();
   const previousRoute = state.route;
   routeController?.abort();

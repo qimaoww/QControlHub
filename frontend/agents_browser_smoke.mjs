@@ -22,6 +22,7 @@ const mime = (path) =>
       : "text/html; charset=utf-8";
 
 const previewFlags = new Map();
+const archiveFailures = new Set();
 let presetCatalog;
 const server = createServer(async (request, response) => {
   try {
@@ -65,6 +66,11 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (/^\/api\/v1\/ip-quality\/[a-z-]+\/archives\/[46]$/.test(path)) {
+      if (path.includes("/quality-image-failure-") && path.endsWith("/4") && !archiveFailures.has(path)) {
+        archiveFailures.add(path);
+        response.writeHead(503).end("Temporary report image failure");
+        return;
+      }
       response.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
       const variants = { "quality-clean": "clean", "quality-medium": "medium", "quality-high": "high",
         "quality-missing": "missing", "quality-vsix-short": "v6-short", "quality-vsix-missing": "v6-missing" };
@@ -454,7 +460,7 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
       navigateURL?.includes("mode=motion-cards") ? driveCardMoveGestures(send, mobile) : driveMotionGestures(send, mobile),
       delay(navigateURL?.includes("mode=motion-cards") ? 90000 : 30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
-    const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") ? 60000 : 45000);
+    const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") || navigateURL?.includes("mode=ip-quality") ? 60000 : 45000);
     let evaluation;
     while (!evaluation && Date.now() < deadline) {
       try {
@@ -468,7 +474,7 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
-              measurements: window.cardCoordinateMeasurements,
+              measurements: window.cardCoordinateMeasurements || window.ipQualityMeasurements,
             });
           }, 10);
         })`,
@@ -528,8 +534,8 @@ async function runMode(mode) {
     assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
     profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
     await chmod(profile, 0o700);
-    const mobile = (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
-    const initialURL = mobile || mode.startsWith("motion") ? "about:blank" : url;
+    const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    const initialURL = mobile || mode.startsWith("motion") || mode.endsWith("reduced") ? "about:blank" : url;
     child = spawn(
       chrome,
       [
@@ -607,7 +613,7 @@ async function runMode(mode) {
 }
 
 if (isMain) try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly,ip-quality-reduced,ip-quality-mobile-reduced";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

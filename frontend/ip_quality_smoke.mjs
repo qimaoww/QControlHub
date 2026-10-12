@@ -3,7 +3,7 @@ import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
 import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
 import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary, ipQualityReportRecord } from "./modules/ip-quality-model.js";
 import { createIPQualityCalendarView } from "./modules/ip-quality-calendar-view.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
@@ -28,7 +28,7 @@ const report = {
 const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v2"] };
 const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
 const fixtureDates = [ipQualityToday(), nextIPQualityDay(ipQualityToday(), -1), "2025-09-11", "2025-09-12", "2025-09-13", "2025-09-14", "2025-09-15", "2025-09-16"];
-const history = (day, records = []) => ({ date: day, timezone: "UTC", dates: fixtureDates, records, schedules: [] });
+const history = (day, records = []) => ({ date: day, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", dates: fixtureDates, records, schedules: [] });
 let markup = "";
 const viewState = { data: {} };
 const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
@@ -111,6 +111,11 @@ for (const status of ["pending", "running", "failed", "canceled"]) {
 }
 renderDay("2025-09-16", [{ task_id: "new-task", agent_id: "alpha", status: "failed", last_successful: oldReport }]);
 assert.ok(!markup.includes("203.0.113.1"), "history showed a successful report from a different day");
+const sameDayReport = { ...oldReport, created_at: "2025-09-15T23:30:00Z" };
+const repeatedCheck = { task_id: "repeated", agent_id: "alpha", status: "running", last_successful: sameDayReport };
+assert.equal(ipQualityReportRecord(repeatedCheck, "2025-09-16", "Asia/Shanghai"), sameDayReport);
+assert.equal(ipQualityReportRecord(repeatedCheck, "2025-09-16", "UTC"), null, "fallback crossed the requested local day");
+assert.equal(ipQualityReportRecord({ ...repeatedCheck, agent_id: "beta" }, ipQualityLatest, "UTC"), null, "fallback crossed nodes");
 renderDay(ipQualityLatest, []);
 assert.ok(markup.includes("首次报告"));
 assert.equal(viewState.data.ipQualityNodes[0].note, "尚未检测");
@@ -211,7 +216,7 @@ try {
   assert.equal(timers.size, 1, "invalid date stopped automatic refresh");
   assert.ok(timers.has(scheduledTimer), "invalid date replaced the pending poll");
   await timers.get(scheduledTimer)();
-  assert.equal(calls.length, count + 1, "polling should refresh history without rereading agents");
+  assert.equal(calls.length, count + 2, "polling should refresh history and current node permissions");
   assert.equal(timers.size, 1, "polling duplicated its timer");
 
   await controller.load("2025-09-12");

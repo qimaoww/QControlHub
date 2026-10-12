@@ -144,3 +144,5 @@
 @media(max-width:700px){
   .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 }
+.ip-quality-archive-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;color:var(--red);font-size:calc(12px * var(--ui-font-scale))}
+.ip-quality-archive-error[hidden]{display:none}

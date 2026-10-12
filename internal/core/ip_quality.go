@@ -41,8 +41,9 @@ type IPQualityRecord struct {
 	FinishedAt *time.Time             `json:"finished_at,omitempty"`
 	Result     *IPQualityResult       `json:"result,omitempty"`
 	Archives   []IPQualityArchiveInfo `json:"archives,omitempty"`
-	// Latest views retain the previous report while a newer check is unfinished
-	// or failed. Its timestamps and task ID belong to that successful check.
+	// Retain the previous report while a newer check is unfinished or failed.
+	// Date views restrict this fallback to the same local submission date.
+	// Its timestamps and task ID belong to that successful check.
 	LastSuccessful *IPQualityRecord `json:"last_successful,omitempty"`
 }
 

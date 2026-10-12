@@ -133,6 +133,32 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || len(dates) != 4 {
 		t.Fatalf("multiple attempts duplicated a calendar date: %+v %v", dates, err)
 	}
+	// A date view may keep a successful report from that local day while a
+	// repeated check runs/fails, but never borrow the prior day's report.
+	repeated, err := db.CreateTask(owner, core.TaskRequest{AgentID: first.ID, Action: core.ActionIPQuality})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameDay := func(status core.TaskStatus) {
+		t.Helper()
+		records, err := db.ListIPQualityRecords(owner, repeated.CreatedAt.UTC().Format(time.DateOnly), "UTC")
+		if err != nil || len(records) != 1 || records[0].Status != status || records[0].LastSuccessful == nil ||
+			records[0].LastSuccessful.TaskID != newResult.ID || len(records[0].LastSuccessful.Archives) != 1 {
+			t.Fatalf("%s lost its same-day successful report: %+v %v", status, records, err)
+		}
+	}
+	assertSameDay(core.TaskPending)
+	claimed, err = db.ClaimTask(ctx, first.ID)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim repeated check: %+v %v", claimed, err)
+	}
+	assertSameDay(core.TaskRunning)
+	if err := db.CompleteTask(ctx, first.ID, repeated.ID, core.TaskResultRequest{
+		LeaseID: claimed.LeaseID, Success: false, Error: "temporary failure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertSameDay(core.TaskFailed)
 	for _, input := range []struct{ date, timezone string }{
 		{"2026-02-30", "UTC"}, {"", "Invalid/Zone"}, {"", "Local"},
 	} {

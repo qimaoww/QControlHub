@@ -245,20 +245,29 @@ function reconcileChildren(current, fresh, metrics) {
       const index = desired.indexOf(label.previousSibling);
       desired.splice(index >= 0 ? index + 1 : desired.length, 0, label);
     });
-  desired.forEach((child, index) => {
-    const currentAtIndex = current.childNodes[index] || null;
-    if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
-    // Only the inserted branch fades. Logs and task polling stay immediate;
-    // descendants never receive a second entrance.
-    if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
-      enterSurface(child, { token: "--motion-base", id: "qch-insert" });
-  });
+  // Remove departed siblings before placing survivors. Moving a still-live
+  // subtree ahead of a sibling that will be removed anyway unnecessarily
+  // reconnects native details and replays their @starting-style entrances.
   const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
     if (!desiredNodes.has(child)) {
       child.remove();
       metrics.removed += 1;
     }
+  });
+  desired.forEach((child, index) => {
+    const currentAtIndex = current.childNodes[index] || null;
+    if (currentAtIndex !== child) {
+      // Whitespace matching or real reordering can still move a survivor.
+      // Native moves preserve its focus, animations and disclosure paint.
+      if (current.moveBefore && current.isConnected && child.parentNode === current)
+        current.moveBefore(child, currentAtIndex);
+      else current.insertBefore(child, currentAtIndex);
+    }
+    // Only the inserted branch fades. Logs and task polling stay immediate;
+    // descendants never receive a second entrance.
+    if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
+      enterSurface(child, { token: "--motion-base", id: "qch-insert" });
   });
   finishListMotion(current, listMotion);
 }

@@ -3,7 +3,23 @@ import { closePopup } from "./popup.js";
 import { ipQualityLatest } from "./ip-quality-model.js";
 
 export function createIPQualityBindings({ state, load, runCheck, setSchedule, select, showMonth }) {
+  const imageErrors = new WeakSet();
   return () => {
+    document.querySelectorAll(".ip-quality-archive").forEach(figure => {
+      const image = figure.querySelector("img"), error = figure.querySelector(".ip-quality-archive-error");
+      const failed = () => { imageErrors.add(image); error.hidden = false; };
+      bindEvent(image, "error", failed);
+      bindEvent(image, "load", () => { imageErrors.delete(image); error.hidden = true; });
+      // Reconciliation may restore the template's hidden attribute, while the
+      // unchanged image has already failed and will emit no second event.
+      if (imageErrors.has(image) || image.complete && !image.naturalWidth) error.hidden = false;
+      bindEvent(figure.querySelector("[data-ip-quality-image-retry]"), "click", () => {
+        imageErrors.delete(image);
+        error.hidden = true;
+        image.removeAttribute("src");
+        image.src = figure.querySelector("a[download]").getAttribute("href").split("?")[0];
+      });
+    });
     document.querySelectorAll("[data-ip-quality-agent]").forEach((link) => {
       bindEvent(link, "click", (event) => {
         event.preventDefault();
@@ -11,9 +27,6 @@ export function createIPQualityBindings({ state, load, runCheck, setSchedule, se
       });
     });
     const calendar = document.querySelector("[data-ip-quality-calendar]");
-    if (calendar) bindEvent(document, "pointerdown", (event) => {
-      if (state.route === "ip-quality" && calendar.open && !calendar.contains(event.target)) closePopup(calendar);
-    });
     bindEvent(calendar, "keydown", (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
