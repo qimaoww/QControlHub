@@ -1,4 +1,5 @@
-import { cancelMotion, enterSurface, retireSurface } from "./motion.js";
+import { cancelMotion, enterSurface } from "./motion.js";
+import { removePresented } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { renderNotice } from "./shell-feedback-view.js";
 import { errorMessage } from "./errors.js";
@@ -26,10 +27,10 @@ function notify(message, tone = "success") {
   const dismiss = () => {
     clearTimeout(noticeTimer);
     noticeTimer = null;
-    notice.removeAttribute("data-spa-notice");
-    notice.removeAttribute("data-refresh-key");
-    notice.removeAttribute("role");
-    retireSurface(notice);
+    // Remove the live notice immediately; only isolated paint owns the exit.
+    // Polling cannot recycle its div, or move the workspace around its tail
+    // and replay native disclosure entrances inside the surviving page.
+    removePresented(notice);
   };
   notice.querySelector(".notice-close").onclick = dismiss;
   if (changed) enterSurface(notice, { token: "--motion-feedback" });

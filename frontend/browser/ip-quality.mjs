@@ -1,11 +1,12 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
 import { testIPQualityScenarios } from "./ip-quality-scenarios.mjs";
 import { testIPQualitySVG } from "./ip-quality-svg.mjs";
+import { testIPQualityRefresh } from "./ip-quality-refresh.mjs";
 import { ipQualityToday, nextIPQualityDay } from "../modules/ip-quality-model.js";
 
 export async function testIPQualityRuntime(mode, preview = false) {
   const readonly = mode === "ip-quality-readonly";
-  if (mode === "ip-quality-mobile") {
+  if (mode.includes("mobile")) {
     assert.ok(innerWidth <= 480 && matchMedia("(pointer:coarse)").matches,
       "IP quality mobile scenario requires a real narrow touch viewport");
   }
@@ -14,7 +15,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const violations = [];
   document.addEventListener("securitypolicyviolation", (event) => violations.push(event.effectiveDirective));
   const session = { role: readonly ? "user" : "admin", user_id: readonly ? "quality-reader" : undefined,
-    permissions: ["agents.read"], csrf_token: "quality-test-csrf" };
+    permissions: ["agents.read", "overview.read"], csrf_token: "quality-test-csrf" };
   const agents = [
     { id: "quality-a", name: "东京 · IPv4 / IPv6", status: "online", features: ["ip-quality-v2"] },
     { id: "quality-b", name: "新加坡 · 等待升级", status: "online", features: [] },
@@ -56,14 +57,20 @@ export async function testIPQualityRuntime(mode, preview = false) {
     const url = new URL(input instanceof Request ? input.url : input, location.href);
     const path = url.pathname.replace(/^\/api\/v1/, "");
     const method = options.method || "GET";
-    fixture.calls.push({ path, method, search: url.search });
-    if (path === "/auth/session") return json(session);
+    const call = { path, method, search: url.search, at: performance.now() };
+    fixture.calls.push(call);
+    if (path === "/auth/session" || path === "/auth/login") return json(fixture.session || session);
     if (path === "/agent-access") return json({ isolated: false, shares: [] });
     if (path === "/overview") { await shellReady; return json({ agents: 3, agents_online: 2 }); }
     if (path === "/settings") { await shellReady; return json({ panel_name: "QControlHub", ui_font_scale: 100, time_display: "absolute" }); }
-    if (path === "/agents") return json(agents);
+    if (path === "/agents") return json(fixture.agents || agents);
+    if (path === "/tasks") return json([]);
+    if (path === "/traffic-usage") return json({ month: url.searchParams.get("month"), timezone: "UTC", days: [] });
+    if (path === "/panel-metrics") return json({});
     if (path === "/ip-quality" && method === "GET") {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
+      if (fixture.readStatus) return json({ error: "检测记录请求失败" }, fixture.readStatus);
+      if (fixture.invalid) return json({ records: [] });
       const date = url.searchParams.get("date");
       if (!date) await historyReady;
       const retainedHistory = historicalRecords.filter((record) => record.created_at.slice(0, 10) >= fixture.prunedBefore);
@@ -71,7 +78,14 @@ export async function testIPQualityRuntime(mode, preview = false) {
       const records = !date ? retainedLatest : retainedHistory.filter((record) => record.created_at.slice(0, 10) === date);
       const dates = [...new Set([...retainedHistory, ...retainedLatest].filter((record) => record.created_at)
         .map((record) => record.created_at.slice(0, 10)))].sort().reverse();
-      return json({ date: date || "", timezone: url.searchParams.get("timezone"), dates, records, schedules: fixture.schedules });
+      const response = json({ date: date || "", timezone: url.searchParams.get("timezone"), dates, records, schedules: fixture.schedules });
+      if (fixture.readGate) {
+        const gate = fixture.readGate;
+        fixture.readGate = null;
+        return gate(response, options.signal);
+      }
+      call.completed = performance.now();
+      return response;
     }
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
@@ -275,6 +289,32 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await delay(60);
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "expanded report overflows on mobile");
   assert.equal(violations.length, 0, `production CSP violations: ${violations.join(", ")}`);
+  await testIPQualityRefresh({ fixture, refresh, card, reportDay, olderDay, historicalRecords, mode });
   await testIPQualityScenarios({ fixture, refresh, card });
+  // Log in under a different session while an obsolete response still exists.
+  // The real session API clears account data and the controller's date cache.
+  let releaseOld;
+  fixture.readGate = response => new Promise(resolve => { releaseOld = () => resolve(response); });
+  document.querySelector("[data-ip-quality-refresh]").click();
+  await waitFor(() => releaseOld, "account-switch read did not start");
+  fixture.readStatus = 401;
+  document.querySelector("[data-ip-quality-latest]").click();
+  await waitFor(() => document.querySelector("#login-form"), "expired session did not clear the page");
+  assert.equal(document.querySelector(".ip-quality-archive img"), null, "expired account kept reports visible");
+  fixture.readStatus = 0;
+  fixture.session = { ...session, user_id: "quality-second-account", csrf_token: "quality-second-csrf" };
+  const firstAccountRecords = fixture.records;
+  fixture.records = [];
+  const login = document.querySelector("#login-form");
+  login.querySelector('[name="username"]').value = "fixture-user";
+  login.querySelector('[name="token"]').value = "fixture-password";
+  login.querySelector("button").click();
+  await waitFor(() => document.body.classList.contains("page-dashboard"), "second account did not log in");
+  location.hash = "#ip-quality";
+  await waitFor(() => card() && !document.querySelector("[data-ip-quality-refresh]").disabled, "second account IP page did not load");
+  releaseOld(); await delay(30);
+  assert.equal(card().querySelector("img"), null, "obsolete response restored the first account report");
+  fixture.records = firstAccountRecords;
+  await refresh();
   if (preview) await new Promise(() => {});
 }

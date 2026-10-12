@@ -88,9 +88,7 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	}
 	where := ownerClause(ctx, "t.owner_id", &args)
 	where += agentAdministrationClause(ctx, "t.agent_id", &args)
-	lastSuccessful := "NULL::jsonb"
-	if date == "" {
-		lastSuccessful = `CASE WHEN latest.status<>'succeeded' THEN (
+	lastSuccessful := `CASE WHEN latest.status<>'succeeded' THEN (
 			SELECT jsonb_build_object('task_id',t.id,'agent_id',t.agent_id,'status',t.status,
 				'created_at',t.created_at,'started_at',t.started_at,'finished_at',t.finished_at,
 				'result',previous.result - 'reports_text','archives',
@@ -99,10 +97,9 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 					FROM ip_quality_archives a WHERE a.task_id=t.id),'[]'::jsonb))
 			FROM tasks t JOIN ip_quality_reports previous ON previous.task_id=t.id
 			WHERE t.action='ip-quality' AND t.agent_id=latest.agent_id AND t.status='succeeded'
-				AND (t.created_at,t.id)<(latest.created_at,latest.id)` + where + `
+				AND (t.created_at,t.id)<(latest.created_at,latest.id)` + dateFilter + where + `
 			ORDER BY t.created_at DESC,t.id DESC LIMIT 1
 		) END`
-	}
 	rows, err := s.pool.Query(ctx, `SELECT latest.id,latest.agent_id,latest.status,COALESCE(latest.error,''),
 		latest.created_at,latest.started_at,latest.finished_at,r.result - 'reports_text',
         COALESCE((SELECT jsonb_agg(jsonb_build_object('family',a.family,

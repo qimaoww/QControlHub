@@ -209,6 +209,15 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   reconcileView(currentMain, freshMain);
   assert.equal(document.querySelector("[data-spa-notice]"), notice, "polling retains operation feedback");
   notice.querySelector(".notice-close").click();
+  // Reconcile while dismissal still owns its animation/callback. Unkeyed
+  // incoming content must not be recycled into the retiring notice's div.
+  const pollingMain = currentMain.cloneNode(false);
+  pollingMain.innerHTML = '<div class="notice-refresh-regression"><strong>Live page after dismissal</strong></div>';
+  reconcileView(currentMain, pollingMain);
+  await settled();
+  const liveContent = currentMain.querySelector(".notice-refresh-regression");
+  assert.ok(liveContent?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+    liveContent.getBoundingClientRect().height > 0, "notice exit removed the refreshed page");
   feedback.resetFeedback();
   assert.equal(document.querySelector("dialog[open]"), null, "rapid close leaves no modal behind");
 

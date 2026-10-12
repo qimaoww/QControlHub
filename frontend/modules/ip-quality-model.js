@@ -1,6 +1,18 @@
 export const ipQualityFeature = "ip-quality-v2";
 export const ipQualityLatest = "latest";
 
+export function ipQualityReportRecord(record, date, timezone) {
+  if (record?.status === "succeeded" && record.result?.reports?.length) return record;
+  const previous = record?.last_successful;
+  if (!previous || previous.agent_id !== record.agent_id || previous.status !== "succeeded") return null;
+  if (date === ipQualityLatest) return previous;
+  const created = new Date(previous.created_at);
+  if (!Number.isFinite(created.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(created);
+  const value = type => parts.find(part => part.type === type).value;
+  return `${value("year")}-${value("month")}-${value("day")}` === date ? previous : null;
+}
+
 export function ipQualityToday(now = new Date()) {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
 }

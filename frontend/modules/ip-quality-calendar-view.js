@@ -15,7 +15,7 @@ export function createIPQualityCalendarView({ esc }) {
     end.setMonth(end.getMonth() + 1);
     end.setDate(0);
     const available = new Set(dates);
-    const blocked = loading || readFailed;
+    const blocked = readFailed || loading && !dates.length;
     const days = Array.from({ length: end.getDate() }, (_, index) => {
       const value = `${visibleMonth}-${String(index + 1).padStart(2, "0")}`;
       const enabled = !blocked && available.has(value), selected = value === date;

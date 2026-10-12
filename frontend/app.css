@@ -1753,6 +1753,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 @media(max-width:700px){
   .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 }
+.ip-quality-archive-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;color:var(--red);font-size:calc(12px * var(--ui-font-scale))}
+.ip-quality-archive-error[hidden]{display:none}
 /* Dismissible notices and compact node-page confirmations. */
 .workspace-main>[data-spa-notice]{display:grid;grid-template-columns:28px minmax(0,1fr) 32px;align-items:start;gap:10px;max-height:min(320px,calc(100dvh - 100px));overflow:auto;padding:14px;border-radius:12px;pointer-events:auto;box-shadow:0 12px 36px -18px rgba(15,18,38,.4)}
 .notice-icon{width:26px;height:26px;display:grid;place-items:center;border:1px solid currentColor;border-radius:50%;font-size:calc(14px * var(--ui-font-scale));font-weight:800}

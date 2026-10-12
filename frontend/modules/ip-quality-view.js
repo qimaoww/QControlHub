@@ -1,7 +1,7 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
 import {
   ipQualityToday, ipQualityLatest, ipQualitySummary, ipQualityBlockReason, ipQualityFeature,
-  ipQualityNodeList, ipQualityStatusName, ipQualityStatusTone,
+  ipQualityNodeList, ipQualityStatusName, ipQualityStatusTone, ipQualityReportRecord,
 } from "./ip-quality-model.js";
 import { createIPQualityReportView } from "./ip-quality-report-view.js";
 import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
@@ -15,7 +15,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
   const archiveView = createIPQualityArchiveView({ esc, date: formatDate });
   const calendarView = createIPQualityCalendarView({ esc });
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons[name]}</svg>`;
-  return ({ date, timezone, history, availableDates, month, agents = [], loading = false, error = "", submitting, editable, readFailed }) => {
+  return ({ date, timezone, history, availableDates, month, agents = [], loading = false, error = "", submitting, editable, readFailed, recordsRemoved }) => {
     const today = ipQualityToday(), isToday = date === today, isLatest = date === ipQualityLatest;
     const canOperate = isLatest || isToday;
     const records = history?.records || [], schedules = history?.schedules || [];
@@ -37,7 +37,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
       const record = recordMap.get(agent.id), schedule = scheduleMap.get(agent.id);
       const tone = record ? ipQualityStatusTone(record.status) : !history ? readFailed ? "poor" : "pending" : "unknown";
       const busy = submitting.has(agent.id), reason = ipQualityBlockReason(agent, record);
-      const reportRecord = record?.result ? record : isLatest ? record?.last_successful : null;
+      const reportRecord = ipQualityReportRecord(record, date, timezone);
       const reports = reportRecord?.result?.reports || [];
       const runButton = canOperate && editable(agent) ? `<button type="button" class="button small primary" data-ip-quality-run="${esc(agent.id)}"${busy || loading || readFailed || !history || reason ? " disabled" : ""}>${esc(busy ? "正在提交…" : reason || "立即检测")}</button>` : "";
       const controls = canOperate && editable(agent) ? `<div class="ip-quality-actions" role="group" aria-label="节点检测操作">
@@ -56,19 +56,19 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
           ${addresses}
           ${attempt}
           ${record?.error ? `<p class="alert error ip-quality-error" role="alert">${esc(record.error)}</p>` : ""}
-          ${reports.length ? "" : `<p class="ip-quality-no-report">${record ? "等待有效检测结果；失败或缺失数据不会记为低风险。" : !history ? readFailed ? "检测记录读取失败，可点击刷新重试。" : "正在读取这台节点的检测记录…" : isLatest ? "还没有检测记录，可点击立即检测生成首次报告。" : isToday ? "当天没有检测记录，可选择其他节点或发起检测。" : "当天没有检测记录。"}</p>`}
+          ${reports.length ? "" : `<p class="ip-quality-no-report">${record ? "等待有效检测结果；失败或缺失数据不会记为低风险。" : !history ? readFailed ? "检测记录读取失败，可点击刷新重试。" : "正在读取这台节点的检测记录…" : recordsRemoved?.has(agent.id) ? "检测记录已删除或不再可用，可刷新确认或重新检测。" : isLatest ? "还没有检测记录，可点击立即检测生成首次报告。" : isToday ? "当天没有检测记录，可选择其他节点或发起检测。" : "当天没有检测记录。"}</p>`}
           ${reportRecord ? archiveView(reportRecord) : ""}
           ${reports.length ? `<details class="ip-quality-details" data-refresh-key="report-${esc(reportRecord.task_id)}"><summary>详细数据 <span>⌄</span></summary>${reports.map(reportView).join("")}</details>` : ""}
         </div>
       </section>`;
     };
-    const issue = error ? `<div class="alert error ip-quality-alert" role="alert">${esc(error)}${history ? " · 显示缓存，操作已暂停" : ""}</div>` : "";
+    const issue = `<div class="alert error ip-quality-alert" data-refresh-key="ip-quality-read-error" role="alert"${error ? "" : " hidden"}>${error ? `${esc(error)}${history ? " · 显示缓存，操作已暂停" : ""} · 可点击刷新重试` : ""}</div>`;
     const picker = calendarView({ date, timezone, dates: availableDates || history?.dates || [], month, loading, readFailed });
-    const emptyTitle = loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : canOperate ? "没有可查看的自有节点" : "当天没有检测记录";
+    const emptyTitle = loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : recordsRemoved?.size ? "检测记录已删除或不再可用" : canOperate ? "没有可查看的自有节点" : "当天没有检测记录";
     const emptyNote = error ? "可点击刷新重试。" : loading ? "节点列表和检测记录将逐步显示。" : canOperate ? "IP 检测仅面向节点所有者和有权限的管理员；共享不授予主机检测权限。" : "可选择其他日期，或回到最新结果发起检测。";
     const count = (value) => history ? value : "—";
-    shell(`<div class="ip-quality-workspace">
-      <section class="ip-quality-controls">
+    shell(`<div class="ip-quality-workspace" data-refresh-key="ip-quality-workspace">
+      <section class="ip-quality-controls" data-refresh-key="ip-quality-controls">
         <header class="ip-quality-head"><div><h2>IP 质量</h2><p class="ip-quality-view-note">${isLatest ? "各节点最近一次检测，保留已有质量报告。" : `${esc(date)} 的检测记录`}</p></div>${picker}</header>
         <section class="ip-quality-summary" aria-label="${isLatest ? "最新检测概览" : "当日检测概览"}">
           <div><span title="${isLatest ? "每个节点最近一次检测，不限日期" : "每个节点当天的最新记录"}">检测节点</span><strong>${count(summary.total)}</strong></div>
@@ -78,7 +78,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
         </section>
       </section>
       ${issue}
-      <div data-motion-region="ip-quality-results" data-motion-key="${esc(JSON.stringify([date, nodes.selected?.id || ""]))}" data-motion-ready="${!loading}">${nodes.selected ? nodePanel(nodes.selected) : `<div class="empty large"><strong>${emptyTitle}</strong><p>${emptyNote}</p></div>`}</div>
+      <div data-refresh-key="ip-quality-results" data-motion-region="ip-quality-results" data-motion-key="${esc(JSON.stringify([date, nodes.selected?.id || ""]))}" data-motion-ready="${!loading}">${nodes.selected ? nodePanel(nodes.selected) : `<div class="empty large"><strong>${emptyTitle}</strong><p>${emptyNote}</p></div>`}</div>
       <p class="ip-quality-source"><a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer">xykt/IPQuality</a> · AGPL-3.0 · 仅显示自有节点的检测结果</p>
     </div>`, "IP 质量", { viewKey: "ip-quality" });
   };
