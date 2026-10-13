@@ -21,7 +21,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	if !scopeForConfig(ctx).Admin {
 		return PurgedUser{}, ErrForbidden
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.beginUserManagementTx(ctx)
 	if err != nil {
 		return PurgedUser{}, err
 	}
@@ -57,8 +57,12 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	if result.ID == "" {
 		return PurgedUser{}, ErrNotFound
 	}
-	if result.Role == core.RoleAdmin {
-		return PurgedUser{}, fmt.Errorf("%w: administrator accounts cannot be deleted", ErrConflict)
+	auth, _ := ctx.Value(userManagementAuthKey{}).(userManagementAuth)
+	if auth.UserID != "" && auth.UserID == id {
+		return PurgedUser{}, fmt.Errorf("%w: cannot delete the current user session", ErrConflict)
+	}
+	if err := protectAdministratorRemovalTx(ctx, tx, result.User); err != nil {
+		return PurgedUser{}, err
 	}
 
 	// Enrollment consumes its credential before locking an Agent. Wait for

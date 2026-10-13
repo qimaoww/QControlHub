@@ -96,8 +96,8 @@ func TestUserManagementLoginRolesAndDisableWithPostgreSQL(t *testing.T) {
 
 // TestPurgeUserEndpointWithPostgreSQL covers the account-deletion route: an
 // ordinary account cannot delete itself, an administrator can, a purged
-// account can no longer log in, and an administrator account can only be
-// disabled.
+// account can no longer log in, and another administrator account can be
+// purged while the environment administrator remains available.
 func TestPurgeUserEndpointWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -174,7 +174,7 @@ func TestPurgeUserEndpointWithPostgreSQL(t *testing.T) {
 	}
 
 	administrator := createAccount(core.UserRequest{Username: fmt.Sprintf("purge_admin_%d", suffix), Role: core.RoleAdmin, Password: password})
-	if response := purge(administrator.ID, "Bearer "+adminToken, nil); response.Code != http.StatusConflict {
+	if response := purge(administrator.ID, "Bearer "+adminToken, nil); response.Code != http.StatusNoContent {
 		t.Fatalf("administrator purge status=%d body=%s", response.Code, response.Body.String())
 	}
 }

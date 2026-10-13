@@ -45,16 +45,25 @@ func (role Role) Valid() bool {
 // User is a durable panel login identity. Password hashes are intentionally
 // never included in this public model.
 type User struct {
-	ID           string       `json:"id"`
-	Username     string       `json:"username"`
-	DisplayName  string       `json:"display_name,omitempty"`
-	Role         Role         `json:"role"`
-	Permissions  []Permission `json:"permissions,omitempty"`
-	Disabled     bool         `json:"disabled"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	LastLoginAt  *time.Time   `json:"last_login_at,omitempty"`
-	AuthRevision int64        `json:"-"`
+	ID             string              `json:"id"`
+	Username       string              `json:"username"`
+	DisplayName    string              `json:"display_name,omitempty"`
+	Role           Role                `json:"role"`
+	Permissions    []Permission        `json:"permissions,omitempty"`
+	Disabled       bool                `json:"disabled"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	LastLoginAt    *time.Time          `json:"last_login_at,omitempty"`
+	AuthRevision   int64               `json:"-"`
+	AccountActions *UserAccountActions `json:"account_actions,omitempty"`
+}
+
+// Empty restrictions permit an action. These are a snapshot for the UI;
+// mutations recheck the same policy under the account-management lock.
+type UserAccountActions struct {
+	DeleteRestriction  string `json:"delete_restriction"`
+	DisableRestriction string `json:"disable_restriction"`
+	DemoteRestriction  string `json:"demote_restriction"`
 }
 
 type UserRequest struct {

@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { userActionRestriction } from "./user-model.js";
 
 export function createUserBindings({ api, state, notify, confirmAction }, { lifecycle, users, captureDraft, current, report, editUser, openAllocation, saveAllocation, lockAllocationControls }) {
   return (items, agents, user, access, { editable, data, draft, shares }) => {
@@ -63,7 +64,8 @@ export function createUserBindings({ api, state, notify, confirmAction }, { life
         button.disabled = false;
         if (data === state.data && state.route === "users" && data.userID === user.id) {
           const activeButton = document.querySelector("[data-user-delete]");
-          if (activeButton) activeButton.disabled = false;
+          const activeUser = data.users?.find(item => item.id === user.id) || user;
+          if (activeButton) activeButton.disabled = Boolean(userActionRestriction(activeUser, state.session, "delete"));
         }
       }
     });

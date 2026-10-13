@@ -1,6 +1,6 @@
 import { closeRetiringDialog } from "./popup.js";
 import { sharedEngineNames } from "./engine-capabilities.js";
-import { agentShareStatus, sharedPortsLabel, usage } from "./user-model.js";
+import { agentShareStatus, sharedPortsLabel, usage, userActionRestriction } from "./user-model.js";
 export function createUserView({ state, esc, shell }, lifecycle) {
   function shareRow(share, agents) {
     const agent = agents.find((item) => item.id === share.agent_id);
@@ -16,6 +16,8 @@ export function createUserView({ state, esc, shell }, lifecycle) {
 
   function renderUsers(items, agents, user, access) {
     const editable = user?.role !== "admin";
+    const deleteRestriction = userActionRestriction(user, state.session, "delete");
+    const tokenLogin = state.session?.auth_type === "environment_token" && state.session?.role === "admin";
     const data = state.data;
     data.userDrafts ||= new Map();
     data.userAccessSaves ||= new Map();
@@ -30,7 +32,9 @@ export function createUserView({ state, esc, shell }, lifecycle) {
     lifecycle.activeAllocation = null;
     lifecycle.captureActive = () => {};
     shell(`<div class="settings-workspace users-workspace user-admin-workspace">
-      <header class="users-toolbar"><div class="users-title"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2>${user ? `<span class="user-account-state">${user.disabled ? "已停用" : user.role === "admin" ? "管理员" : "普通用户"}</span>` : ""}</div><div class="users-toolbar-actions">${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? `<button class="button small danger-button" type="button" data-user-delete ${data.userDeletions.has(user.id) ? "disabled" : ""}>删除账号</button>` : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
+      <header class="users-toolbar"><div class="users-title"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2>${user ? `<span class="user-account-state">${user.disabled ? "已停用" : user.role === "admin" ? "管理员" : "普通用户"}</span>` : ""}</div><div class="users-toolbar-actions">${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user ? `<button class="button small danger-button" type="button" data-user-delete ${deleteRestriction || data.userDeletions.has(user.id) ? "disabled" : ""} ${deleteRestriction ? `title="${esc(deleteRestriction)}"` : ""}>永久删除</button>` : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
+      <p class="settings-hint" data-user-login-info>${tokenLogin ? "当前通过环境管理员令牌登录（系统管理员入口），没有数据库账号 ID，不在下方账号列表中。令牌请通过部署配置或安装器轮换。" : `当前登录的是数据库账号“${esc(state.session?.username || state.session?.user_id || "")}”，可在账号列表中管理。`}${state.session?.token_admin_available === true ? " 环境管理员令牌入口当前有效，符合条件的其他管理员账号可停用、降级或永久删除。" : state.session?.token_admin_available === false ? " 当前没有有效的环境管理员令牌入口，必须保留至少一个启用的数据库管理员账号。" : ""} 停用保留账号和数据；永久删除不可恢复。</p>
+      ${deleteRestriction ? `<p class="settings-hint" data-user-delete-restriction>${esc(deleteRestriction)}</p>` : ""}
       ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name && item.display_name !== item.username ? `${item.display_name} · ${item.username}` : item.username)}</option>`).join("")}</select>` : ""}
       ${user ? `<section class="settings-section user-allocation-panel" data-user-allocations data-motion-region="user-allocations" data-motion-key="${esc(user.id)}" aria-labelledby="user-allocation-title">
         <header class="user-allocation-head"><div class="user-allocation-title"><h3 id="user-allocation-title">共享节点</h3><span class="user-allocation-count" data-share-count>${shares.length}</span></div><div class="user-allocation-tools"><button class="button small" type="button" data-user-reload>刷新</button>${editable ? `<button class="button primary small" type="button" data-allocation-add ${available.length ? "" : 'disabled title="没有可分配的节点"'}>分配节点</button>` : ""}</div></header>

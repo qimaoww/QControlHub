@@ -29,7 +29,7 @@ var errorMessages = map[string]string{
 	"task permission is no longer granted":                                                                    "任务权限已被收回，请刷新页面。",
 	"only administrators may manage Agent sharing":                                                            "仅管理员可管理 Agent 分配。",
 	"cannot delete the current user session":                                                                  "不能删除当前登录的账号。",
-	"administrator accounts cannot be deleted":                                                                "管理员账号不能删除。",
+	"cannot remove the last available administrator login":                                                    "不能删除、停用或降级最后一个可用的管理员登录入口。请先启用其他管理员账号或配置有效的环境管理员令牌。",
 	"the account still owns records that must be moved first":                                                 "该账号仍有未转移的数据，请先处理其节点或共享。",
 	"sharing changed while deleting the account; reload and retry":                                            "删除期间节点共享已变更，请刷新后重试。",
 	"stop and settle shared core instances before deleting the account":                                       "请先停止共享节点上的独立内核并完成流量结算，再删除账号。",

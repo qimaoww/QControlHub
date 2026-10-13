@@ -1,4 +1,13 @@
 export const GiB = 1024 ** 3;
+
+export function userActionRestriction(user, session, action) {
+  if (user?.id && user.id === session?.user_id && (action === "delete" || action === "disable"))
+    return action === "delete" ? "不能永久删除当前登录账号，请使用其他管理员登录入口操作。" : "不能停用当前登录账号，请使用其他管理员登录入口操作。";
+  const reason = user?.account_actions?.[`${action}_restriction`];
+  if (reason === "last_administrator")
+    return "这是最后一个可用的管理员登录入口。请先启用其他管理员账号或配置有效的环境管理员令牌。";
+  return reason ? "账号操作条件已变更，请刷新后重试。" : "";
+}
 export const userPermissions = [
   ["overview.read", "总览"], ["agents.read", "节点查看"], ["metrics.read", "性能指标"],
   ["panel-metrics.read", "面板主机指标"],

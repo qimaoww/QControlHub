@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -12,10 +14,36 @@ import (
 // enrollment credentials, task history and engine ownership join the
 // administrator scope, while grants and personal data leave with the account.
 func TestPurgeUserMovesFleetToAdminScopeAndRevokesAccess(t *testing.T) {
+	for _, role := range []core.Role{core.RoleUser, core.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) { testPurgeUserMovesFleet(t, role) })
+	}
+}
+
+func testPurgeUserMovesFleet(t *testing.T, role core.Role) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
-	admin := WithConfigScope(ctx, "", true)
+	admin := WithUserManagementAuth(WithConfigScope(ctx, "", true), "", 0, true)
 	owner, ownerCtx := sharedTestUser(t, db, ctx, "purge-owner")
 	recipient, recipientCtx := sharedTestUser(t, db, ctx, "purge-recipient")
+	if role == core.RoleAdmin {
+		if _, err := db.UpdateUser(admin, owner.ID, core.UserUpdate{Role: &role}, ""); err != nil {
+			t.Fatal(err)
+		}
+		ownerCtx = WithConfigScope(ctx, owner.ID, true)
+	}
+	publicConfig, err := db.CreateConfig(admin, core.Config{Name: "retained-public-config", Engine: core.EngineMihomo, Content: "mixed-port: 22001\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []context.Context{admin, recipientCtx} {
+		settings, err := db.PanelSettings(scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settings.PanelName = "retained-panel-settings"
+		if _, err := db.SavePanelSettings(scope, settings); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	node := sharedTestAgent(t, db, ctx)
 	if _, err := db.pool.Exec(ctx, "UPDATE agents SET owner_id=$2 WHERE id=$1", node.ID, owner.ID); err != nil {
@@ -85,6 +113,21 @@ func TestPurgeUserMovesFleetToAdminScopeAndRevokesAccess(t *testing.T) {
 	}
 	if _, err := db.UserForSession(ctx, owner.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("purged account still resolves a session: %v", err)
+	}
+	if _, _, err := db.UserForLogin(ctx, owner.Username); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("purged account retains password credentials: %v", err)
+	}
+	for _, scope := range []context.Context{admin, recipientCtx} {
+		settings, err := db.PanelSettings(scope)
+		if err != nil || settings.PanelName != "retained-panel-settings" {
+			t.Fatalf("purge altered another account's settings: %+v %v", settings, err)
+		}
+	}
+	configs, err := db.ListConfigs(admin)
+	if err != nil || !slices.ContainsFunc(configs, func(config core.Config) bool {
+		return config.ID == publicConfig.ID && config.Content == publicConfig.Content && config.OwnerID == ""
+	}) {
+		t.Fatalf("purge changed administrator public configuration: %+v %v", configs, err)
 	}
 
 	agent, err := db.GetAgent(admin, node.ID)
@@ -178,8 +221,8 @@ func TestPurgeUserMovesFleetToAdminScopeAndRevokesAccess(t *testing.T) {
 }
 
 // TestPurgeUserRefusesNonAdministratorsAndAdministratorAccounts keeps the two
-// safety valves: only an administrator may purge, and an administrator account
-// can only be disabled, never deleted.
+// safety valves: only an administrator may purge, and the last available
+// administrator cannot be removed without another management login.
 func TestPurgeUserRefusesNonAdministratorsAndAdministratorAccounts(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	admin := WithConfigScope(ctx, "", true)

@@ -36,7 +36,20 @@ func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
 		}
 		users = append(users, user)
 	}
-	return users, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	activeAdmins := 0
+	for _, user := range users {
+		if user.Role == core.RoleAdmin && !user.Disabled {
+			activeAdmins++
+		}
+	}
+	auth, _ := ctx.Value(userManagementAuthKey{}).(userManagementAuth)
+	for i := range users {
+		users[i].AccountActions = accountActions(users[i], auth, activeAdmins)
+	}
+	return users, nil
 }
 
 func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwordHash string) (core.User, error) {
@@ -62,8 +75,13 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 		return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
 	}
 	permissions, _ := json.Marshal(normalized)
+	tx, err := s.beginUserManagementTx(ctx)
+	if err != nil {
+		return core.User{}, err
+	}
+	defer tx.Rollback(ctx)
 	now := time.Now().UTC()
-	row := s.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at,agent_isolation)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8)
 		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision`,
@@ -75,25 +93,23 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 		}
 		return core.User{}, err
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.User{}, err
+	}
 	return user, nil
 }
 
 // UpdateUser applies a complete partial update in one transaction. It refuses
-// to remove the last active administrator, keeping the panel recoverable.
+// to remove the last available administrator login, keeping the panel recoverable.
 func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdate, passwordHash string) (core.User, error) {
 	if !scopeForConfig(ctx).Admin {
 		return core.User{}, ErrForbidden
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.beginUserManagementTx(ctx)
 	if err != nil {
 		return core.User{}, err
 	}
 	defer tx.Rollback(ctx)
-	// Two administrators being demoted concurrently must not both observe
-	// the other as the remaining administrator.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:users'))`); err != nil {
-		return core.User{}, err
-	}
 	row := tx.QueryRow(ctx, `
 		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision,password_hash
 		FROM panel_users WHERE id=$1 FOR UPDATE`, id)
@@ -119,6 +135,10 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	if update.Disabled != nil {
 		disabled = *update.Disabled
 	}
+	auth, _ := ctx.Value(userManagementAuthKey{}).(userManagementAuth)
+	if disabled && auth.UserID != "" && auth.UserID == id {
+		return core.User{}, fmt.Errorf("%w: cannot disable the current user session", ErrConflict)
+	}
 	if update.DisplayName != nil {
 		displayName = strings.TrimSpace(*update.DisplayName)
 	}
@@ -135,13 +155,9 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	if role != core.RoleAdmin && core.HasPermission(permissions, core.PermissionUsersManage) {
 		return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
 	}
-	if current.User.Role == core.RoleAdmin && (!current.User.Disabled && (role != core.RoleAdmin || disabled)) {
-		var otherAdmins int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM panel_users WHERE role='admin' AND disabled=false AND id<>$1`, id).Scan(&otherAdmins); err != nil {
+	if role != core.RoleAdmin || disabled {
+		if err := protectAdministratorRemovalTx(ctx, tx, current.User); err != nil {
 			return core.User{}, err
-		}
-		if otherAdmins == 0 {
-			return core.User{}, fmt.Errorf("%w: cannot disable or demote the last active administrator", ErrConflict)
 		}
 	}
 	if strings.TrimSpace(passwordHash) == "" {
