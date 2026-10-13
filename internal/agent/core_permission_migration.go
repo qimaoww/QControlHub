@@ -31,7 +31,11 @@ func (e *Executor) syncManagedCorePermissions(ctx context.Context) error {
 	var failures []error
 	for _, engine := range core.AllEngines() {
 		base, configured := specs[engine]
-		if !configured || base != DefaultSpecsForServiceManager(manager.Kind())[engine] {
+		if !configured {
+			continue
+		}
+		if base != DefaultSpecsForServiceManager(manager.Kind())[engine] {
+			failures = append(failures, fmt.Errorf("kernel %s service %s uses an administrator mapping; automatic permission sync requires the exact bundled service/binary/config paths; review its execution identity and permissions manually", engine, base.Service))
 			continue
 		}
 		if _, err := os.Lstat(base.Binary); errors.Is(err, os.ErrNotExist) {

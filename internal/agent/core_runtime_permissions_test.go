@@ -130,6 +130,26 @@ func TestManagedRuntimeServiceIdentificationRequiresProtectedFragment(t *testing
 	}
 }
 
+func TestManagedRuntimeServiceIdentificationRejectsCustomizedOwnedPath(t *testing.T) {
+	root := t.TempDir()
+	previous := existingDiscoveryManagedUnitRoot
+	existingDiscoveryManagedUnitRoot = root
+	t.Cleanup(func() { existingDiscoveryManagedUnitRoot = previous })
+	path := filepath.Join(root, "qagent-xray.service")
+	if err := os.WriteFile(path, []byte("[Service]\nUser=root\nExecStart=/administrator/program\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(root, "systemctl")
+	writeExecutable(t, helper, "#!/bin/sh\nprintf '%s\\n' '"+path+"'\n")
+	manager := &ServiceManager{kind: ServiceManagerSystemd, executable: helper}
+	if _, _, managed := runtimePermissionManagedService(context.Background(), manager, "qagent-xray.service"); managed {
+		t.Fatal("custom unit in the default location was treated as project-owned")
+	}
+	if err := verifyManagedServiceProcessPermissions(context.Background(), manager, "qagent-xray.service"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagedServiceIdentityCoversValidSharedIDsOnly(t *testing.T) {
 	for _, kind := range []string{ServiceManagerSystemd, ServiceManagerOpenRC} {
 		for engine, base := range DefaultSpecsForServiceManager(kind) {

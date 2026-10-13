@@ -232,5 +232,18 @@ func runtimePermissionManagedService(ctx context.Context, manager *ServiceManage
 		fragment = "qagent-" + managedCoreAssetName(engine) + "@.service"
 	}
 	value, err := run(ctx, manager.executable, "show", service, "--property=FragmentPath", "--value")
-	return engine, spec, err == nil && strings.TrimSpace(value) == filepath.Join(existingDiscoveryManagedUnitRoot, fragment)
+	path := filepath.Join(existingDiscoveryManagedUnitRoot, fragment)
+	if err != nil || strings.TrimSpace(value) != path || validateManagedUnitFile(path) != nil {
+		return engine, spec, false
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return engine, spec, false
+	}
+	if isSharedInstanceSpec(engine, spec, manager.Kind()) {
+		_, err = sharedInstanceTemplateNeedsUpgrade(engine, path)
+	} else {
+		err = validateManagedUnitFragment(contents, engine, spec)
+	}
+	return engine, spec, err == nil && validateManagedUnitDropIns(ctx, service) == nil
 }
