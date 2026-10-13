@@ -36,7 +36,10 @@ func (e *Executor) ensureSharedInstanceService(ctx context.Context, engine core.
 	}
 	path := filepath.Join("/etc/systemd/system", "qagent-"+managedCoreAssetName(engine)+"@.service")
 	if err := validateManagedUnitFile(path); err == nil {
-		return verifySharedInstanceTemplate(engine, path)
+		upgrade, err := sharedInstanceTemplateNeedsUpgrade(engine, path)
+		if err != nil || !upgrade {
+			return err
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -54,18 +57,32 @@ func (e *Executor) ensureSharedInstanceService(ctx context.Context, engine core.
 }
 
 func verifySharedInstanceTemplate(engine core.Engine, path string) error {
+	upgrade, err := sharedInstanceTemplateNeedsUpgrade(engine, path)
+	if err == nil && upgrade {
+		return errors.New("shared core service template requires the Mihomo netlink update")
+	}
+	return err
+}
+
+func sharedInstanceTemplateNeedsUpgrade(engine core.Engine, path string) (bool, error) {
 	want, err := fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/systemd/qagent-"+managedCoreAssetName(engine)+"@.service")
 	if err != nil {
-		return err
+		return false, err
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !bytes.Equal(got, want) {
-		return errors.New("shared core service template differs from the bundled QAgent asset")
+	if bytes.Equal(got, want) {
+		return false, nil
 	}
-	return nil
+	if engine == core.EngineMihomo {
+		legacy := bytes.Replace(want, []byte("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\n"), []byte("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n"), 1)
+		if bytes.Equal(got, legacy) {
+			return true, nil
+		}
+	}
+	return false, errors.New("shared core service template differs from the bundled QAgent asset")
 }
 
 func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) error {

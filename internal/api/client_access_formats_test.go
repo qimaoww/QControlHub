@@ -76,3 +76,59 @@ func TestClientAccessMihomoFormatErrorsDoNotFallBackToURL(t *testing.T) {
 		}
 	}
 }
+
+func TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats(t *testing.T) {
+	for _, transport := range []string{"TCP", "UDP"} {
+		t.Run(transport, func(t *testing.T) {
+			protocol, _ := serverconfig.FindProtocol(core.EngineMihomo, serverconfig.ProtocolMieru)
+			input, err := serverconfig.NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.MieruTransport, input.MieruTrafficPattern = transport, "balanced"
+			generated, err := serverconfig.Generate(core.EngineMihomo, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			merged, err := serverconfig.MutateGenerated(core.EngineMihomo, "listeners: []\nrules: ['MATCH,DIRECT']\n", generated, "", "add")
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := serverconfig.PrepareIndependentEgress(core.EngineMihomo, merged)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := serverconfig.Parse(core.EngineMihomo, plan.Content)
+			if !ok {
+				t.Fatal("deployed shape did not parse")
+			}
+			profile, err := serverconfig.BuildClientProfileNamed(parsed, "192.0.2.1", "", "Mieru TCP/UDP")
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := []clientAccessEntry{{Profiles: []clientAccessProfile{{Profile: profile}}}}
+			prepareClientAccessFormats(entries)
+			display := entries[0].Profiles[0]
+			if display.MihomoError != "" {
+				t.Fatal(display.MihomoError)
+			}
+			for _, format := range []string{core.SubStoreSyncFormatURL, core.SubStoreSyncFormatMihomo} {
+				nodes, err := subStoreNodesForSelection(subStoreSyncProfile{URI: display.Profile.URI, Mihomo: display.MihomoYAML}, core.SubStoreSyncSelection{CustomName: "Renamed Mieru"}, format)
+				if err != nil || len(nodes) != 1 {
+					t.Fatalf("Sub-Store %s: %v %v", format, nodes, err)
+				}
+				var node, original map[string]any
+				if err := yaml.Unmarshal([]byte(nodes[0]), &node); err != nil {
+					t.Fatal(err)
+				}
+				if err := yaml.Unmarshal([]byte(profile.Mihomo), &original); err != nil {
+					t.Fatal(err)
+				}
+				original["name"] = "Renamed Mieru"
+				if node["udp"] != true || node["transport"] != transport || !reflect.DeepEqual(node, original) {
+					t.Fatal("UDP capability, transport, credentials or traffic pattern changed in export/sync")
+				}
+			}
+		})
+	}
+}

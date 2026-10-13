@@ -117,6 +117,56 @@ func TestXrayOutboundMarkCapabilityRecognition(t *testing.T) {
 	}
 }
 
+func TestMihomoNetworkFamilyRecognition(t *testing.T) {
+	for _, tc := range []struct {
+		families string
+		allowed  bool
+	}{
+		{"AF_UNIX AF_INET AF_INET6", false},
+		{"AF_UNIX AF_INET AF_INET6 AF_NETLINK", true},
+		{"", true},
+		{"~AF_PACKET", true},
+		{"~AF_NETLINK AF_PACKET", false},
+	} {
+		t.Run(tc.families, func(t *testing.T) {
+			systemctl := filepath.Join(t.TempDir(), "systemctl")
+			writeExecutable(t, systemctl, "#!/bin/sh\nprintf '%s\\n' 'AmbientCapabilities=cap_net_bind_service cap_net_admin' 'CapabilityBoundingSet=cap_net_bind_service cap_net_admin' 'RestrictAddressFamilies="+tc.families+"'\n")
+			syncer := coreUnitCapabilitySyncer{systemctlPath: systemctl, outboundMarks: true}
+			configured, err := syncer.configured(context.Background(), "qagent-mihomo.service")
+			if err != nil || configured != tc.allowed {
+				t.Fatalf("Mihomo netlink permission: configured=%v err=%v", configured, err)
+			}
+		})
+	}
+}
+
+func TestMihomoRepairsNetworkFamilyWithExistingCapabilities(t *testing.T) {
+	root := t.TempDir()
+	dropInPath := filepath.Join(root, "qagent-mihomo.service.d", "10-qcontrolhub-bind-low-ports.conf")
+	systemctl, runner := filepath.Join(root, "systemctl"), filepath.Join(root, "systemd-run")
+	writeExecutable(t, systemctl, "#!/bin/sh\ncase \"$1\" in\nshow)\n  printf '%s\\n' 'AmbientCapabilities=cap_net_bind_service cap_net_admin' 'CapabilityBoundingSet=cap_net_bind_service cap_net_admin'\n  families='AF_UNIX AF_INET AF_INET6'\n  if [ -f '"+dropInPath+"' ] && /usr/bin/grep -q '^RestrictAddressFamilies=AF_NETLINK$' '"+dropInPath+"'; then families=\"$families AF_NETLINK\"; fi\n  printf 'RestrictAddressFamilies=%s\\n' \"$families\"\n  ;;\ndaemon-reload) ;;\n*) exit 64 ;;\nesac\n")
+	writeExecutable(t, runner, "#!/bin/sh\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\n")
+	for _, name := range []string{"install", "tee", "mv", "rm"} {
+		writeExecutable(t, filepath.Join(root, name), "#!/bin/sh\nexec /usr/bin/"+name+" \"$@\"\n")
+	}
+	syncer := coreUnitCapabilitySyncer{
+		outboundMarks: true, systemctlPath: systemctl, systemdRunPath: runner,
+		installPath: filepath.Join(root, "install"), teePath: filepath.Join(root, "tee"), movePath: filepath.Join(root, "mv"), removePath: filepath.Join(root, "rm"), dropInRoot: root,
+	}
+	if err := syncer.ensure(context.Background(), "qagent-mihomo.service"); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(dropInPath)
+	if err != nil || string(contents) != string(managedCapabilityDropInVariants("qagent-mihomo.service")[2]) {
+		t.Fatalf("network repair drop-in: %q %v", contents, err)
+	}
+	// The next restart must recognize the repair rather than rewrite it.
+	syncer.installPath = filepath.Join(root, "missing-helper")
+	if err := syncer.ensure(context.Background(), "qagent-mihomo.service"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := writeFixtureExecutable(path, []byte(contents)); err != nil {
