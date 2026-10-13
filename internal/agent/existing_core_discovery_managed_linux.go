@@ -19,6 +19,10 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 	execStart := managed.Binary + " -d /var/lib/qcontrolhub-mihomo -f " + managed.ConfigPath
 	extraServiceLines := []string{}
 	switch engine {
+	case core.EngineMihomo:
+		// Mihomo's direct UDP adapter queries local interfaces through netlink
+		// even when the listener carries those datagrams over TCP.
+		addressFamilies += " AF_NETLINK"
 	case core.EngineXray:
 		documentation = "https://github.com/XTLS/Xray-core"
 		execStart = managed.Binary + " run -config " + managed.ConfigPath
@@ -79,6 +83,11 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 		}
 		if engine != core.EngineXray && (line == "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" || line == "AmbientCapabilities=CAP_NET_BIND_SERVICE") {
 			line += " CAP_NET_ADMIN"
+		}
+		// Recognize the exact old managed Mihomo template so an existing
+		// installation can receive the network-family repair on restart.
+		if engine == core.EngineMihomo && line == "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" {
+			line += " AF_NETLINK"
 		}
 		actual = append(actual, line)
 	}

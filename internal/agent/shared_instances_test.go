@@ -100,3 +100,32 @@ func TestSharedFailureDoesNotStopUnrelatedBaseCore(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedMihomoTemplateNetlinkUpgradeRecognition(t *testing.T) {
+	current, err := fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/systemd/qagent-mihomo@.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.Replace(string(current), "AF_INET6 AF_NETLINK", "AF_INET6", 1)
+	if legacy == string(current) {
+		t.Fatal("shared Mihomo unit must permit netlink")
+	}
+	path := filepath.Join(t.TempDir(), "qagent-mihomo@.service")
+	for _, tc := range []struct {
+		content string
+		upgrade bool
+		invalid bool
+	}{
+		{string(current), false, false},
+		{legacy, true, false},
+		{legacy + "EnvironmentFile=/etc/custom\n", false, true},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		upgrade, err := sharedInstanceTemplateNeedsUpgrade(core.EngineMihomo, path)
+		if (err != nil) != tc.invalid || upgrade != tc.upgrade {
+			t.Fatalf("shared template recognition: upgrade=%v err=%v", upgrade, err)
+		}
+	}
+}

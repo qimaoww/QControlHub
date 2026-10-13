@@ -24,6 +24,9 @@ func managedCapabilityDropInVariants(service string) [][]byte {
 	if managedCoreServiceName(service) {
 		variants = append(variants, []byte(strings.ReplaceAll(managedCoreCapabilityDropIn, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")))
 	}
+	if service == "qagent-mihomo.service" {
+		variants = append(variants, []byte(string(variants[1])+"RestrictAddressFamilies=AF_NETLINK\n"))
+	}
 	return variants
 }
 
@@ -70,7 +73,7 @@ func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engin
 	syncer := defaultCoreUnitCapabilitySyncer()
 	syncer.outboundMarks = engine == core.EngineMihomo || engine == core.EngineShadowsocksRust || engine == core.EngineSingBox || engine == core.EngineXray
 	if err := syncer.ensure(ctx, spec.Service); err != nil {
-		return fmt.Errorf("prepare managed systemd service %s for privileged ports: %w", spec.Service, err)
+		return fmt.Errorf("prepare managed systemd service %s capabilities and network access: %w", spec.Service, err)
 	}
 	return nil
 }
@@ -122,6 +125,11 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 	if syncer.outboundMarks {
 		content = strings.ReplaceAll(content, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")
 	}
+	if service == "qagent-mihomo.service" {
+		// Repeated positive directives extend systemd's existing allowlist.
+		// Keep the rest of the managed sandbox and grant only netlink sockets.
+		content += "RestrictAddressFamilies=AF_NETLINK\n"
+	}
 	if err := syncer.runHelper(ensureContext, []byte(content), syncer.teePath, temporaryPath); err != nil {
 		return fmt.Errorf("write managed systemd drop-in: %w", err)
 	}
@@ -148,27 +156,43 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 		return err
 	}
 	if !configured {
-		return errors.New("systemd did not load CAP_NET_BIND_SERVICE for the managed core")
+		return errors.New("systemd did not load the required managed core capabilities and address families")
 	}
 	return nil
 }
 
 func (syncer coreUnitCapabilitySyncer) configured(ctx context.Context, service string) (bool, error) {
 	output, err := run(ctx, syncer.systemctlPath, "show", service,
-		"--property=AmbientCapabilities", "--property=CapabilityBoundingSet", "--no-pager")
+		"--property=AmbientCapabilities", "--property=CapabilityBoundingSet", "--property=RestrictAddressFamilies", "--no-pager")
 	if err != nil {
-		return false, fmt.Errorf("inspect managed systemd service capabilities: %w: %s", err, output)
+		return false, fmt.Errorf("inspect managed systemd service capabilities and address families: %w: %s", err, output)
 	}
-	properties := make(map[string]string, 2)
+	properties := make(map[string]string, 3)
 	for _, line := range strings.Split(output, "\n") {
 		name, value, found := strings.Cut(strings.TrimSpace(line), "=")
 		if found {
 			properties[name] = strings.ToLower(value)
 		}
 	}
-	return capabilityListContains(properties["AmbientCapabilities"], "cap_net_bind_service") &&
+	networkReady := true
+	if service == "qagent-mihomo.service" {
+		families, present := properties["RestrictAddressFamilies"]
+		networkReady = present && systemdAddressFamilyAllowed(families, "af_netlink")
+	}
+	return networkReady && capabilityListContains(properties["AmbientCapabilities"], "cap_net_bind_service") &&
 		capabilityListContains(properties["CapabilityBoundingSet"], "cap_net_bind_service") &&
 		(!syncer.outboundMarks || capabilityListContains(properties["AmbientCapabilities"], "cap_net_admin") && capabilityListContains(properties["CapabilityBoundingSet"], "cap_net_admin")), nil
+}
+
+func systemdAddressFamilyAllowed(value, family string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true // An empty RestrictAddressFamilies property is unrestricted.
+	}
+	if denied, negative := strings.CutPrefix(value, "~"); negative {
+		return !capabilityListContains(denied, family)
+	}
+	return capabilityListContains(value, family)
 }
 
 func capabilityListContains(value, capability string) bool {

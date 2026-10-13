@@ -68,3 +68,18 @@ func TestManagedCoreUnitPolicyAcceptsOnlyExactHistoricalTemplate(t *testing.T) {
 		t.Fatal("historical unit with an unknown directive was accepted")
 	}
 }
+
+func TestManagedMihomoUnitRecognizesPreNetlinkTemplate(t *testing.T) {
+	spec := DefaultSpecs()[core.EngineMihomo]
+	current := strings.Join(managedCoreUnitLines(core.EngineMihomo, spec), "\n") + "\n"
+	legacy := strings.Replace(current, "AF_INET6 AF_NETLINK", "AF_INET6", 1)
+	if current == legacy {
+		t.Fatal("managed Mihomo unit must permit netlink")
+	}
+	if err := validateManagedUnitFragment([]byte(legacy), core.EngineMihomo, spec); err != nil {
+		t.Fatalf("old managed unit cannot receive the network-family repair: %v", err)
+	}
+	if err := validateManagedUnitFragment([]byte(legacy+"RestrictAddressFamilies=AF_PACKET\n"), core.EngineMihomo, spec); err == nil {
+		t.Fatal("custom socket policy was accepted as the historical template")
+	}
+}
