@@ -62,6 +62,10 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		if role == core.RoleAdmin {
+			value, _ := s.sessionForRequest(request)
+			request = request.WithContext(store.WithUserManagementAuth(request.Context(), s.sessionUserID(request), value.AuthRevision, s.tokenAdministratorAvailable()))
+		}
 		if !s.authorizeAgentResource(w, request) {
 			return
 		}
@@ -89,8 +93,22 @@ func (s *Server) roleForToken(token string) (core.Role, bool) {
 }
 
 func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
+	if token == "" {
+		return tokenPrincipal{}, false
+	}
 	principal, ok := s.roleTokens[sha256.Sum256([]byte(token))]
 	return principal, ok
+}
+
+// Consult the final authentication registry: a legacy token collision can
+// replace the configured administrator credential with a non-admin role.
+func (s *Server) tokenAdministratorAvailable() bool {
+	for _, principal := range s.roleTokens {
+		if principal.Role == core.RoleAdmin {
+			return true
+		}
+	}
+	return false
 }
 
 func tokenConfigOwnerID(token string) string {

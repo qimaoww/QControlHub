@@ -28,6 +28,7 @@ export async function testUsersRuntime(preview = false) {
   const writes = [], notifications = [];
   let conflict = false, confirm = true, confirmCount = 0, holdSave, releaseSave, failedUser = "";
   let confirmGate, releaseConfirm, purgeGate, releasePurge, rejectConfirmation = 0;
+  let purgeError = "";
   const api = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
     if (options.method) writes.push({ path, body, method: options.method });
@@ -41,8 +42,14 @@ export async function testUsersRuntime(preview = false) {
       return structuredClone(user);
     }
     const userID = path.split("/")[2];
+    if (options.method === "PUT" && !path.endsWith("/agent-access")) {
+      const user = items.find(item => item.id === userID);
+      Object.assign(user, body);
+      return structuredClone(user);
+    }
     if (path.endsWith("/purge") && options.method === "POST") {
       if (purgeGate) await new Promise(resolve => { releasePurge = resolve; });
+      if (purgeError) throw new Error(purgeError);
       const index = items.findIndex(user => user.id === userID);
       if (index < 0) throw new Error("账号不存在");
       items.splice(index, 1);
@@ -279,7 +286,52 @@ export async function testUsersRuntime(preview = false) {
   await select("alice");
   assert(document.querySelector("[data-user-delete]"), "administrator cannot delete a regular account");
   await select("admin");
-  assert(!document.querySelector("[data-user-delete]"), "administrator account offered deletion");
+  assert(document.querySelector("[data-user-delete]").disabled, "current account offered deletion");
+  assert(document.querySelector("[data-user-delete-restriction]").textContent.includes("当前登录账号"), "current-account protection is not explained");
+  // A token administrator has no database user ID, even when both logins
+  // are displayed as admin. Deletion and node allocation are independent.
+  state.session = { role: "admin", user_id: "", username: "admin", auth_type: "environment_token", token_admin_available: true };
+  await pages.users();
+  assert(!document.querySelector("[data-user-delete]").disabled, "token administrator cannot delete another administrator");
+  assert(!document.querySelector("[data-allocation-add]"), "administrator account was offered shared allocation");
+  assert(document.querySelector("[data-user-login-info]").textContent.includes("没有数据库账号 ID"), "token identity is not explained");
+  document.querySelector("[data-user-edit]").click();
+  assert(!document.querySelector('[name="enabled"]').disabled && !document.querySelector('[name="role"]').disabled, "token entry did not allow administrator disable/demotion");
+  document.querySelector("[data-user-dialog]").close();
+  const administrator = items.find(item => item.id === "admin");
+  administrator.account_actions = { delete_restriction: "last_administrator", disable_restriction: "last_administrator", demote_restriction: "last_administrator" };
+  state.session.token_admin_available = false;
+  await pages.users();
+  assert(document.querySelector("[data-user-delete]").disabled && document.querySelector("[data-user-delete-restriction]").textContent.includes("最后一个可用"), "last entry protection is not explained");
+  document.querySelector("[data-user-edit]").click();
+  const protectedForm = document.querySelector("[data-user-form]");
+  assert(protectedForm.elements.enabled.disabled && protectedForm.elements.role.disabled, "last administrator can be disabled/demoted in the editor");
+  protectedForm.elements.display_name.value = "Protected admin";
+  protectedForm.requestSubmit();
+  await waitFor(() => !document.querySelector("[data-user-dialog]").open, "protected administrator display name could not be saved");
+  const protectedWrite = writes.findLast(write => write.path === "/users/admin");
+  assert(protectedWrite.body.role === "admin" && !protectedWrite.body.disabled, "disabled controls changed a protected administrator's role/status");
+  delete administrator.account_actions;
+  state.session.token_admin_available = true;
+  await pages.users();
+  purgeError = "请先停止共享节点上的独立内核并完成流量结算，再删除账号。";
+  purgeGate = true;
+  document.querySelector("[data-user-delete]").click();
+  await waitFor(() => releasePurge, "administrator purge did not start");
+  administrator.account_actions = { delete_restriction: "last_administrator" };
+  await pages.users();
+  purgeGate = false;
+  releasePurge();
+  await waitFor(() => notifications.includes(purgeError) && !state.data.userDeletions.size, "purge failure did not show its actual restriction");
+  assert(document.querySelector("[data-user-delete]").disabled, "stale purge completion re-enabled a newly protected account");
+  assert(items.some(item => item.id === "admin") && state.data.userID === "admin", "failed purge removed the administrator selection");
+  delete administrator.account_actions;
+  await pages.users();
+  assert(!document.querySelector("[data-user-delete]").disabled, "eligible administrator remained locked after refresh");
+  purgeError = "";
+  document.querySelector("[data-user-delete]").click();
+  await waitFor(() => !items.some(item => item.id === "admin") && state.data.userID !== "admin", "purged administrator stayed selected");
+  assert(!document.querySelector("[data-user-mobile-select]")?.querySelector('option[value="admin"]'), "purged administrator remained in the list");
   await select("alice");
   confirm = false;
   document.querySelector("[data-user-delete]").click();

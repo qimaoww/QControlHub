@@ -2,18 +2,20 @@ import { closeRetiringDialog } from "./popup.js";
 import { setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 
-import { userPermissions, defaultPermissions } from "./user-model.js";
+import { userPermissions, defaultPermissions, userActionRestriction } from "./user-model.js";
 export function createUserAccountEditor({ api, state, esc, notify }, { users, report }) {
   function editUser(user) {
     const dialog = document.querySelector("[data-user-dialog]");
     const selected = new Set(user ? user.permissions || [] : defaultPermissions);
+    const disableRestriction = userActionRestriction(user, state.session, "disable");
+    const demoteRestriction = user?.role === "admin" ? userActionRestriction(user, state.session, "demote") : "";
     dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">＋</span><div><h2 id="user-dialog-title">${user ? "编辑账号" : "新增用户"}</h2></div><button class="deploy-command-close" type="button" data-user-close aria-label="关闭">×</button></header>
       <form data-user-form><div class="traffic-edit-body">
         <label>用户名<input name="username" required maxlength="64" autocomplete="off" value="${esc(user?.username || "")}" ${user ? "disabled" : ""}></label>
         <label>显示名称<input name="display_name" maxlength="100" value="${esc(user?.display_name || "")}"></label>
         <label>${user ? "新密码（留空不改）" : "密码"}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${user ? "" : "required"}></label>
-        <label>角色<select name="role"><option value="user" ${user?.role !== "admin" ? "selected" : ""}>普通用户</option><option value="admin" ${user?.role === "admin" ? "selected" : ""}>管理员</option></select></label>
-        ${user ? `<label class="settings-toggle"><span><b>启用账号</b></span><input name="enabled" type="checkbox" ${user.disabled ? "" : "checked"} ${user.id === state.session.user_id ? "disabled" : ""}></label>` : '<p class="settings-hint" data-user-default-isolation>普通用户资源始终独立，可自行添加 Agent，或使用获共享的 Agent。</p>'}
+        <label>角色<select name="role" ${demoteRestriction ? "disabled" : ""}><option value="user" ${user?.role !== "admin" ? "selected" : ""}>普通用户</option><option value="admin" ${user?.role === "admin" ? "selected" : ""}>管理员</option></select>${demoteRestriction ? `<small>${esc(demoteRestriction)}</small>` : ""}</label>
+        ${user ? `<label class="settings-toggle"><span><b>启用账号</b><small>${esc(disableRestriction || "停用后无法登录，账号与数据仍保留。")}</small></span><input name="enabled" type="checkbox" ${user.disabled ? "" : "checked"} ${disableRestriction ? "disabled" : ""}></label>` : '<p class="settings-hint" data-user-default-isolation>普通用户资源始终独立，可自行添加 Agent，或使用获共享的 Agent。</p>'}
         <details class="user-permissions" ${user?.role === "admin" ? "hidden" : ""}><summary>操作权限</summary><div>${userPermissions.map(([key, label]) => `<label><input type="checkbox" name="permission" value="${key}" ${selected.has(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="settings-hint">共享节点仅限已分配内核、端口与额度。</p></details>
         <div class="alert error" data-user-error role="alert" hidden></div>
       </div><footer><button class="button" type="button" data-user-close>取消</button><button class="button primary" type="submit">保存账号</button></footer></form>`;
@@ -29,9 +31,9 @@ export function createUserAccountEditor({ api, state, esc, notify }, { users, re
       const button = form.querySelector('button[type="submit"]');
       if (button.disabled) return;
       const data = new FormData(form);
-      const body = { display_name: data.get("display_name"), role: data.get("role"), permissions: data.getAll("permission") };
+      const body = { display_name: data.get("display_name"), role: demoteRestriction ? user.role : data.get("role"), permissions: data.getAll("permission") };
       if (data.get("password")) body.password = data.get("password");
-      if (user) body.disabled = user.id === state.session.user_id ? user.disabled : !data.has("enabled");
+      if (user) body.disabled = disableRestriction ? user.disabled : !data.has("enabled");
       else Object.assign(body, { username: data.get("username"), agent_isolation: body.role !== "admin" });
       button.disabled = true;
       try {

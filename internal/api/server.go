@@ -37,10 +37,13 @@ func New(dataStore *store.Store, config Config) *Server {
 		}
 	}
 	adminTokenDigest := config.AdminTokenDigest
-	if adminTokenDigest == ([32]byte{}) {
-		adminTokenDigest = sha256.Sum256([]byte(config.AdminToken))
+	if adminTokenDigest == ([32]byte{}) && strings.TrimSpace(config.AdminToken) != "" {
+		adminTokenDigest = sha256.Sum256([]byte(strings.TrimSpace(config.AdminToken)))
 	}
-	roleTokens := map[[32]byte]tokenPrincipal{adminTokenDigest: {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
+	roleTokens := make(map[[32]byte]tokenPrincipal)
+	if adminTokenDigest != ([32]byte{}) && adminTokenDigest != sha256.Sum256(nil) {
+		roleTokens[adminTokenDigest] = tokenPrincipal{Role: core.RoleAdmin, Permissions: core.AllPermissions()}
+	}
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
 			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyOperatorPermissions()}

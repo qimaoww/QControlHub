@@ -132,7 +132,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	if userID != "" && s.store != nil {
 		_ = s.store.RecordUserLogin(request.Context(), userID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "workspace_id": configOwnerID, "username": username, "permissions": permissions, "csrf_token": csrf, "expires_at": expires})
+	writeJSON(w, http.StatusOK, s.sessionResponse(apiSession{Role: role, UserID: userID, ConfigOwnerID: configOwnerID, Username: username, Permissions: permissions, CSRF: csrf, ExpiresAt: expires}))
 }
 
 func (s *Server) session(w http.ResponseWriter, request *http.Request) {
@@ -147,7 +147,17 @@ func (s *Server) session(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "workspace_id": value.ConfigOwnerID, "username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
+	writeJSON(w, http.StatusOK, s.sessionResponse(value))
+}
+
+func (s *Server) sessionResponse(value apiSession) map[string]any {
+	authType := "environment_token"
+	if value.UserID != "" {
+		authType = "database_account"
+	}
+	return map[string]any{"role": value.Role, "user_id": value.UserID, "workspace_id": value.ConfigOwnerID,
+		"username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt,
+		"auth_type": authType, "token_admin_available": s.tokenAdministratorAvailable()}
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
