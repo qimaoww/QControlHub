@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -70,11 +73,98 @@ func lookupCommandIdentity(userName, groupName string) (commandIdentity, error) 
 
 func ensureDefaultManagedConfigurationAccess(engine core.Engine, spec EngineSpec, manager *ServiceManager) error {
 	defaultSpec, ok := DefaultSpecsForServiceManager(selectedServiceManager(manager).Kind())[engine]
-	if !ok || spec != defaultSpec {
+	if !ok || spec != defaultSpec && !isSharedInstanceSpec(engine, spec, selectedServiceManager(manager).Kind()) {
 		return nil
 	}
-	_, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath)
-	return err
+	if err := ensureManagedCoreBinaryAccess(engine, spec, manager); err != nil {
+		return err
+	}
+	if _, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath); err != nil {
+		return err
+	}
+	if engine == core.EngineShadowsocksRust {
+		path := shadowsocksRustACLPath
+		if spec.ACLPath != "" {
+			path = spec.ACLPath
+		}
+		_, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, path)
+		return err
+	}
+	return nil
+}
+
+func ensureManagedConfigurationRootAccess(gid int) error {
+	info, err := os.Lstat(managedCoreConfigurationRoot)
+	if err != nil {
+		return err
+	}
+	meta := metadataFromFileInfo(info)
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !meta.ownershipKnown || meta.uid != 0 || meta.mode&0o022 != 0 {
+		return fmt.Errorf("configuration root %s is not a protected root-owned directory", managedCoreConfigurationRoot)
+	}
+	if meta.gid == gid && meta.mode == 0o750 {
+		return nil
+	}
+	if err := applyManagedConfigurationMetadata(managedCoreConfigurationRoot, true, gid); err == nil {
+		return nil
+	}
+	// ProtectSystem on older Agents can make just this parent read-only.
+	// The helper grants CHOWN only and writes to this fixed protected root.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	syncer := defaultCoreUnitCapabilitySyncer()
+	syncer.dropInRoot = managedCoreConfigurationRoot
+	syncer.metadataWrites = true
+	for _, executable := range []string{syncer.systemdRunPath, syncer.installPath} {
+		if err := validatePrivilegedExecutable(executable); err != nil {
+			return err
+		}
+	}
+	if err := syncer.runHelper(ctx, nil, syncer.installPath, "-d", "-o", "root", "-g", strconv.Itoa(gid), "-m", "0750", managedCoreConfigurationRoot); err != nil {
+		return fmt.Errorf("repair configuration parent traversal for non-root cores: %w; redeploy the current Agent to restore root:qcontrolhub-core 0750 on /etc/qagent", err)
+	}
+	return nil
+}
+
+func ensureManagedCoreBinaryAccess(engine core.Engine, spec EngineSpec, manager *ServiceManager) error {
+	base := DefaultSpecsForServiceManager(selectedServiceManager(manager).Kind())[engine]
+	if spec != base && !isSharedInstanceSpec(engine, spec, selectedServiceManager(manager).Kind()) {
+		return nil
+	}
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		return err
+	}
+	for _, path := range []string{filepath.Dir(filepath.Dir(spec.Binary)), filepath.Dir(spec.Binary)} {
+		if err := applyManagedConfigurationMetadata(path, true, int(identity.gid)); err != nil {
+			return fmt.Errorf("kernel %s: traverse binary directory %s: %w", engine, path, err)
+		}
+	}
+	if err := validatePrivilegedExecutable(spec.Binary); errors.Is(err, os.ErrNotExist) {
+		return nil // First install has not staged the executable yet.
+	} else if err != nil {
+		return fmt.Errorf("kernel %s: execute %s: %w", engine, spec.Binary, err)
+	}
+	file, err := os.Open(spec.Binary)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	current, err := os.Lstat(spec.Binary)
+	if err != nil || !os.SameFile(opened, current) || !opened.Mode().IsRegular() || metadataFromFileInfo(opened) != metadataFromFileInfo(current) {
+		return fmt.Errorf("kernel %s: binary changed while repairing execute access", engine)
+	}
+	if opened.Mode().Perm() == 0o755 && opened.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0 {
+		return nil
+	}
+	if err := file.Chmod(0o755); err != nil {
+		return fmt.Errorf("kernel %s: repair binary execute access: %w", engine, err)
+	}
+	return file.Sync()
 }
 
 func atomicDeployManagedConfiguration(engine core.Engine, spec EngineSpec, manager *ServiceManager, content string) (string, error) {
@@ -118,11 +208,14 @@ func prepareManagedConfigurationAccessWithGID(rootPath, configPath string, gid i
 	if err := validateProtectedDirectoryChain(directory); err != nil {
 		return fileMetadata{}, fmt.Errorf("managed configuration directory is unsafe: %w", err)
 	}
+	if rootPath == managedCoreConfigurationRoot {
+		if err := ensureManagedConfigurationRootAccess(gid); err != nil {
+			return fileMetadata{}, err
+		}
+	}
 
-	// The Agent may run under an older systemd unit that exposes only the
-	// engine-specific directory as writable. The installer/bootstrap owns the
-	// protected root metadata, so runtime tasks must validate but never chmod or
-	// chown that parent directory.
+	// The root is synchronized separately through a bounded helper when an
+	// older Agent mount exposes only individual engine directories as writable.
 	directories := make([]string, 0)
 	if relative != "." {
 		current := rootPath
@@ -160,6 +253,9 @@ func applyManagedConfigurationMetadata(path string, directory bool, gid int) err
 	if info.Mode().Perm()&0o022 != 0 {
 		return fmt.Errorf("managed configuration path %s is writable by group or others", path)
 	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); !directory && ok && stat.Nlink != 1 {
+		return fmt.Errorf("managed configuration path %s has multiple hard links; review ownership manually", path)
+	}
 	if err := validateOwner(info, "managed configuration path"); err != nil {
 		return err
 	}
@@ -177,6 +273,9 @@ func applyManagedConfigurationMetadata(path string, directory bool, gid int) err
 	mode := os.FileMode(0o640)
 	if directory {
 		mode = 0o750
+	}
+	if metadata := metadataFromFileInfo(opened); metadata.mode == mode && metadata.uid == 0 && metadata.gid == gid && opened.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0 {
+		return nil
 	}
 	if err := file.Chmod(mode); err != nil {
 		return fmt.Errorf("set managed configuration mode: %w", err)

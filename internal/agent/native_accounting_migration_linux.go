@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"io/fs"
 	"log/slog"
@@ -36,8 +35,7 @@ func (e *Executor) migrateNativeAccounting(ctx context.Context) {
 				if err != nil {
 					return
 				}
-				legacy := bytes.ReplaceAll(wanted, []byte("^cap_net_bind_service,^cap_net_admin"), []byte("^cap_net_bind_service"))
-				if !bytes.Equal(current, wanted) && !bytes.Equal(current, legacy) {
+				if !matchesAnyManagedDropIn(current, managedOpenRCScriptVariants(wanted)) {
 					slog.Warn("managed traffic migration refused customized OpenRC script", "engine", engine)
 					return
 				}

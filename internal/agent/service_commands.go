@@ -19,6 +19,21 @@ func serviceCommandAndVerify(ctx context.Context, service string, action core.Ac
 }
 
 func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceManager, service string, action core.Action) (string, error) {
+	if action == core.ActionStart && manager.processVerifier != nil {
+		if _, _, managed := managedSpecForService(service, manager.Kind()); managed {
+			if status, err := manager.status(ctx, service); err != nil {
+				return "", err
+			} else if status == "active" {
+				stale, err := managedServicePolicyNeedsRestart(ctx, manager, service)
+				if err != nil {
+					return "", err
+				}
+				if stale || manager.processVerifier(ctx, manager, service) != nil {
+					action = core.ActionRestart
+				}
+			}
+		}
+	}
 	output, err := manager.command(ctx, service, action)
 	if err != nil {
 		return output, err
@@ -54,6 +69,11 @@ func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceMan
 	if status != expected {
 		cause := fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
 		return output + "\nservice status: " + status, withServiceFailureDiagnostics(ctx, manager, service, cause)
+	}
+	if action != core.ActionStop && manager.processVerifier != nil {
+		if err := manager.processVerifier(ctx, manager, service); err != nil {
+			return output, withServiceFailureDiagnostics(ctx, manager, service, err)
+		}
 	}
 	return output + "\nservice status: " + status, nil
 }

@@ -614,10 +614,25 @@ qagent_core_service_is_safe_owned() {
   for drop_in in $drop_in_paths; do
     case "$drop_in" in
       */10-qcontrolhub-bind-low-ports.conf)
-        [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE')" ] || return 1
+        [ "$drop_in" = "$fragment_path.d/10-qcontrolhub-bind-low-ports.conf" ] || return 1
+        protected_directory_chain "$fragment_path.d" || return 1
+        protected_regular_file "$drop_in" false || return 1
+        permission_dropin=$(cat "$drop_in" 2>/dev/null) || return 1
+        low_ports=$(printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE')
+        marked_ports=$(printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN' 'AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN')
+        netlink_ports=$(printf '%s\n' "$marked_ports" 'RestrictAddressFamilies=AF_NETLINK')
+        if [ "$permission_dropin" != "$low_ports" ] && [ "$permission_dropin" != "$marked_ports" ]; then
+          [ "$engine" = sing-box ] && [ "$permission_dropin" = "$netlink_ports" ] || return 1
+        fi
         ;;
       */20-qcontrolhub-volatile-logs.conf)
-        [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal')" ] || return 1
+        [ "$drop_in" = "$fragment_path.d/20-qcontrolhub-volatile-logs.conf" ] || return 1
+        protected_directory_chain "$fragment_path.d" || return 1
+        protected_regular_file "$drop_in" false || return 1
+        log_dropin=$(cat "$drop_in" 2>/dev/null) || return 1
+        journal_dropin=$(printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal')
+        fallback_dropin=$(printf '%s\n' '[Service]' 'LogNamespace=' "StandardOutput=append:/run/qagent-core-logs/qagent-core-log-$service.log" 'StandardError=inherit')
+        [ "$log_dropin" = "$journal_dropin" ] || [ "$log_dropin" = "$fallback_dropin" ] || return 1
         ;;
       */30-qcontrolhub-ss-rust-logs.conf)
         [ "$engine" = shadowsocks-rust ] || return 1

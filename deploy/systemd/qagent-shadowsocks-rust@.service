@@ -14,8 +14,6 @@ Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-shadowsocks-rust-%i
 StateDirectory=qcontrolhub-shadowsocks-rust-%i
 StateDirectoryMode=0750
-StateDirectory=qcontrolhub-shadowsocks-rust-%i
-StateDirectoryMode=0750
 UMask=0027
 ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/shares/%i/config.json --acl /etc/qagent/shadowsocks-rust/shares/%i/qch-mainland-block.acl
 Environment=RUST_LOG=info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug

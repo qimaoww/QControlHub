@@ -80,7 +80,7 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			}
 		}
 		for _, forbidden := range []string{"CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_ADMIN", "CAP_DAC_OVERRIDE"} {
-			if forbidden == "CAP_NET_ADMIN" && engine != core.EngineXray {
+			if forbidden == "CAP_NET_ADMIN" {
 				continue
 			}
 			if strings.Contains(unit, forbidden) {

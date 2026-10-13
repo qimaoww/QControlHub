@@ -140,9 +140,11 @@ sudo env QCH_LIVE_MIERU_SYSTEMD_TEST=1 \
   -run '^TestMieruUDPWithSystemdSocketPolicy$' -count=1 -v
 ```
 
-This launches real systemd services with the project's socket-family policies,
-and real Mihomo clients consuming project-generated exports. It does not emulate
-the complete filesystem sandbox. Each positive case checks 24 binary UDP
+Prepare the formal service account first with
+`sudo sh deploy/bootstrap-core-services.sh --prepare-agent`.
+This launches real non-root systemd services with the project's complete service
+sandbox and real Mihomo clients consuming project-generated exports. Fixture
+paths, state names and output capture are substituted. Each positive case checks 24 binary UDP
 echoes round-robin across two IPv4 targets and one IPv6 loopback target, raw UDP
 DNS with a unique name and TTL zero, recovery after client/server UDP mappings
 expire, a fresh SOCKS association, and TCP HTTP before and after. UDP route logs
@@ -158,6 +160,10 @@ there is no DNS cache or TCP fallback in the fixture.
 | Historical filter plus repair directive / TCP | Bidirectional UDP and TCP pass | Bidirectional UDP and TCP pass |
 | Updated shared template / TCP | Bidirectional UDP and TCP pass | Bidirectional UDP and TCP pass |
 | Updated normal template / UDP control | Bidirectional UDP and TCP pass | Bidirectional UDP and TCP pass |
+
+See [the complete managed-core permission audit](core-runtime-permissions.md)
+for all four kernels, OpenRC, actual process checks, certificate/file access,
+packet-mark verification and idempotent installed-node migration.
 
 The CI matrix downloads these exact official release assets, verifies their
 SHA-256 digests, records core/build dependency versions, and runs the systemd

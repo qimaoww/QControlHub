@@ -61,6 +61,21 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 				return errors.New("configuration bundle content mismatch")
 			}
 		}
+		// Content remains immutable; recognized old 0600/0700 bundles need
+		// their intended group access restored after an Agent-umask upgrade.
+		if metadata.ownershipKnown {
+			paths := map[string]bool{name: true}
+			for _, file := range files {
+				path := filepath.Join(name, file.Path)
+				paths[path] = false
+				paths[filepath.Dir(path)] = true
+			}
+			for path, directory := range paths {
+				if err := repairBundleMetadata(root, path, directory, metadata); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -94,9 +109,10 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 		if err != nil {
 			return err
 		}
-		if metadata.ownershipKnown {
-			err = f.Chown(metadata.uid, metadata.gid)
-		}
+		// OpenFile's mode is filtered by the Agent's 0077 umask. Apply the
+		// intended mode explicitly so immutable source fragments remain readable
+		// by the same non-root identity as the atomic merged configuration.
+		err = applyFileMetadata(f, metadata)
 		if err == nil {
 			_, err = f.WriteString(file.Content)
 		}
@@ -129,4 +145,36 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 		return fmt.Errorf("publish configuration bundle: %w", err)
 	}
 	return syncRootDirectory(root)
+}
+
+func repairBundleMetadata(root *os.Root, path string, directory bool, metadata fileMetadata) error {
+	info, err := root.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || directory && !info.IsDir() || !directory && !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("unsafe bundle path %s", path)
+	}
+	if err := validateOwner(info, "configuration bundle path"); err != nil {
+		return err
+	}
+	file, err := root.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return errors.New("bundle path changed during permission sync")
+	}
+	if directory {
+		metadata.mode = 0o750
+	}
+	if metadataFromFileInfo(opened) == metadata {
+		return nil
+	}
+	if err := applyFileMetadata(file, metadata); err != nil {
+		return err
+	}
+	return file.Sync()
 }

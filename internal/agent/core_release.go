@@ -45,7 +45,7 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 					continue
 				}
 				inspected = append(inspected, candidate.TagName)
-				if _, err := selectCoreReleaseAsset(engine, updater.goarch, candidate); err != nil {
+				if _, err := selectCoreReleaseAsset(engine, updater.goarch, candidate, updater.libc); err != nil {
 					var missing missingCoreReleaseAssetError
 					if errors.As(err, &missing) {
 						// A prerelease without a compatible binary (for example
@@ -258,6 +258,19 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 	case core.EngineSingBox:
 		version := strings.TrimPrefix(release.TagName, "v")
 		wanted = "sing-box-" + version + "-linux-" + arch + ".tar.gz"
+		if libc == "musl" {
+			musl := strings.TrimSuffix(wanted, ".tar.gz") + "-musl.tar.gz"
+			for _, asset := range release.Assets {
+				if asset.Name == musl {
+					if err := validateReleaseAssetMetadata(asset); err != nil {
+						return githubReleaseAsset{}, err
+					}
+					return asset, nil
+				}
+			}
+			// Earlier releases shipped a static Go generic build, without a
+			// separate musl asset. Preserve that historical selection.
+		}
 	case core.EngineShadowsocksRust:
 		targets := map[string]map[string]string{
 			"gnu":  {"amd64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"},

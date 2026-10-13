@@ -10,6 +10,18 @@ supervisor="supervise-daemon"
 respawn_delay=3
 respawn_max=5
 capabilities="^cap_net_bind_service,^cap_net_admin"
+
+# QCH core bounding policy begin
+# libcap IAB caret entries grant ambient/inheritable caps; they do not bound
+# the process. Exclude every other Linux capability, including future ones.
+qch_last_cap=$(cat /proc/sys/kernel/cap_last_cap) || exit 1
+case "$qch_last_cap" in ''|*[!0-9]*) eerror "invalid kernel capability limit"; exit 1 ;; esac
+qch_cap=0
+while [ "$qch_cap" -le "$qch_last_cap" ]; do
+    case "$qch_cap" in 10|12) ;; *) capabilities="${capabilities},!${qch_cap}" ;; esac
+    qch_cap=$((qch_cap + 1))
+done
+# QCH core bounding policy end
 no_new_privs=true
 umask=0027
 depend() { need net; }
