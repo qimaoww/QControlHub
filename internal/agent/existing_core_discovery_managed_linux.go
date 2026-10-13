@@ -23,6 +23,7 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		// Mihomo's direct UDP adapter queries local interfaces through netlink
 		// even when the listener carries those datagrams over TCP.
 		addressFamilies += " AF_NETLINK"
+		extraServiceLines = append(extraServiceLines, "Environment=SAFE_PATHS=/etc/qagent/mihomo:/etc/qcontrolhub/tls")
 	case core.EngineXray:
 		documentation = "https://github.com/XTLS/Xray-core"
 		execStart = managed.Binary + " run -config " + managed.ConfigPath
@@ -49,10 +50,7 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		lines = append(lines[:conditionIndex+1], append([]string{"ConditionPathExists=" + shadowsocksRustACLPath}, lines[conditionIndex+1:]...)...)
 	}
 	lines = append(lines, extraServiceLines...)
-	capabilities := "CAP_NET_BIND_SERVICE"
-	if engine != core.EngineXray {
-		capabilities += " CAP_NET_ADMIN"
-	}
+	capabilities := "CAP_NET_BIND_SERVICE CAP_NET_ADMIN"
 	lines = append(lines,
 		"LogNamespace=qagent-cores", "StandardOutput=journal", "StandardError=journal",
 		"Restart=on-failure", "RestartSec=3s", "TimeoutStopSec=20s", "NoNewPrivileges=true",
@@ -81,15 +79,25 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 		if engine == core.EngineShadowsocksRust && line == "Environment=RUST_LOG=info" {
 			line = "Environment=RUST_LOG=" + managedSSRustLogFilter
 		}
-		if engine != core.EngineXray && (line == "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" || line == "AmbientCapabilities=CAP_NET_BIND_SERVICE") {
+		if line == "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" || line == "AmbientCapabilities=CAP_NET_BIND_SERVICE" {
 			line += " CAP_NET_ADMIN"
 		}
 		// Recognize the exact old managed Mihomo template so an existing
 		// installation can receive the network-family repair on restart.
-		if engine == core.EngineMihomo && line == "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" {
+		if (engine == core.EngineMihomo || engine == core.EngineSingBox) && line == "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" {
 			line += " AF_NETLINK"
 		}
 		actual = append(actual, line)
+	}
+	// This allowlist was absent before certificate paths were tested with the
+	// actual state-directory working directory. Accept only its exact omission.
+	if engine == core.EngineMihomo && !strings.Contains(string(contents), "Environment=") {
+		for i, line := range actual {
+			if strings.HasPrefix(line, "ExecStart=") {
+				actual = append(actual[:i+1:i+1], append([]string{"Environment=SAFE_PATHS=/etc/qagent/mihomo:/etc/qcontrolhub/tls"}, actual[i+1:]...)...)
+				break
+			}
+		}
 	}
 	if managedUnitLinesEqual(actual, expected) {
 		return nil
@@ -161,6 +169,9 @@ func managedUnitLinesEqual(actual, expected []string) bool {
 func validateManagedServiceExecutionContext(ctx context.Context, engine core.Engine, managed EngineSpec) error {
 	workingDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
 	expectedEnvironment := ""
+	if engine == core.EngineMihomo {
+		expectedEnvironment = "SAFE_PATHS=/etc/qagent/mihomo:/etc/qcontrolhub/tls"
+	}
 	if engine == core.EngineShadowsocksRust {
 		expectedEnvironment = "RUST_LOG=" + managedSSRustLogFilter
 	}
@@ -169,6 +180,9 @@ func validateManagedServiceExecutionContext(ctx context.Context, engine core.Eng
 		"RootImage": "", "BindPaths": "", "BindReadOnlyPaths": "", "Environment": expectedEnvironment, "EnvironmentFiles": "",
 	} {
 		value, err := systemdUnitProperty(ctx, managed.Service, property)
+		if err == nil && engine == core.EngineMihomo && property == "Environment" && value == "" {
+			continue // Recognized legacy unit; synchronization installs the allowlist.
+		}
 		if err == nil && engine == core.EngineShadowsocksRust && property == "Environment" && value == "RUST_LOG=info" {
 			continue
 		}
@@ -189,6 +203,10 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"): {
 			[]byte(managedCoreLogDropIn),
 		},
+	}
+	if engine, ok := managedCoreServiceEngine(service); ok && strings.Contains(service, "@") {
+		template := "qagent-" + managedCoreAssetName(engine) + "@.service"
+		allowed[filepath.Join(existingDiscoveryManagedUnitRoot, template+".d", "10-qcontrolhub-bind-low-ports.conf")] = managedCapabilityDropInVariants(service)
 	}
 	if fallback, fallbackErr := managedCoreLogFallbackDropIn(service); fallbackErr == nil {
 		path := filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf")

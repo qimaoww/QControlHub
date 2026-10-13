@@ -224,26 +224,103 @@ func mieruUnitSocketFamilies(t *testing.T, service string) string {
 func startMieruSocketPolicyServer(t *testing.T, binary, directory, content string, ready int, families []string) (*trafficMihomoProcess, string) {
 	t.Helper()
 	unit := fmt.Sprintf("qch-mieru-test-%d-%d", os.Getpid(), ready)
-	// Keep fixture access independent of PrivateTmp/ProtectHome; this test
-	// exercises the real systemd socket filter, not the filesystem sandbox.
-	wrapper := filepath.Join(t.TempDir(), "mihomo-systemd")
-	script := "#!/bin/sh\nexec systemd-run --pipe --wait --collect --quiet --unit=" + unit + " --property=RuntimeMaxSec=90s --property=NoNewPrivileges=yes"
-	for _, value := range families {
-		script += " --property='RestrictAddressFamilies=" + value + "'"
-	}
-	script += " -- '" + binary + "' \"$@\"\n"
-	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Register even before readiness so failed startup cannot leave a service.
-	var process *trafficMihomoProcess
+	// /tmp is private in the production sandbox and /run can be noexec.
+	directory, err = os.MkdirTemp("/var/lib", unit+"-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err := os.Chmod(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(directory, int(identity.uid), int(identity.gid)); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := os.ReadFile("../../deploy/systemd/qagent-mihomo.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reuse every production sandbox directive. Replace only fixture paths,
+	// socket-family variants and journal output (captured through --pipe).
+	arguments := []string{"--pipe", "--wait", "--collect", "--quiet", "--unit=" + unit, "--property=RuntimeMaxSec=90s"}
+	inService := false
+	for _, line := range strings.Split(string(asset), "\n") {
+		if strings.HasPrefix(line, "[") {
+			inService = line == "[Service]"
+			continue
+		}
+		key, _, found := strings.Cut(line, "=")
+		if !inService || !found || strings.HasPrefix(line, "#") {
+			continue
+		}
+		switch key {
+		case "ExecStart", "WorkingDirectory", "StateDirectory", "StateDirectoryMode", "ReadOnlyPaths", "ReadWritePaths", "RestrictAddressFamilies", "LogNamespace", "StandardOutput", "StandardError":
+			continue
+		}
+		arguments = append(arguments, "--property="+line)
+	}
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureBinary := filepath.Join(directory, "mihomo")
+	config := filepath.Join(directory, "config.yaml")
+	if err := os.WriteFile(fixtureBinary, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte(content), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(config, 0, int(identity.gid)); err != nil {
+		t.Fatal(err)
+	}
+	arguments = append(arguments, "--property=WorkingDirectory="+directory, "--property=ReadOnlyPaths="+fixtureBinary+" "+config, "--property=ReadWritePaths="+directory)
+	for _, value := range families {
+		arguments = append(arguments, "--property=RestrictAddressFamilies="+value)
+	}
+	arguments = append(arguments, "--", fixtureBinary, "-d", directory, "-f", config)
+	logPath := filepath.Join(directory, "service.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("systemd-run", arguments...)
+	command.Stdout, command.Stderr = logFile, logFile
+	if err := command.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	process := &trafficMihomoProcess{command: command, done: make(chan error, 1), logPath: logPath}
+	go func() { process.done <- command.Wait(); _ = logFile.Close() }()
 	t.Cleanup(func() {
 		_ = exec.Command("systemctl", "stop", unit).Run()
-		if process != nil {
-			process.stop(t)
-		}
+		process.stop(t)
 	})
-	process = startMihomoForTrafficTest(t, wrapper, directory, "config.yaml", content, ready)
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		connection, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", ready), 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			output, err := exec.Command("systemctl", "show", unit, "--property=MainPID", "--value").Output()
+			pid := strings.TrimSpace(string(output))
+			status, readErr := os.ReadFile(filepath.Join("/proc", pid, "status"))
+			if err != nil || readErr != nil || validateManagedProcessStatus(string(status), identity) != nil {
+				t.Fatalf("production identity/capabilities were not applied: %v %v\n%s", err, readErr, status)
+			}
+			return process, unit
+		}
+		select {
+		case err := <-process.done:
+			t.Fatalf("sandboxed Mihomo exited: %v\n%s", err, process.log(t))
+		default:
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("sandboxed Mihomo did not listen\n%s", process.log(t))
 	return process, unit
 }
 

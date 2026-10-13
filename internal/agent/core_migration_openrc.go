@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -442,6 +444,13 @@ func validateOpenRCServiceScript(service, ownershipMarker string) error {
 	}
 	if !strings.Contains(string(contents), ownershipMarker+"\n") {
 		return errors.New("OpenRC service script lacks the QAgent ownership marker")
+	}
+	if _, managed := managedCoreServiceEngine(service + ".service"); managed {
+		want, err := fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/openrc/"+service)
+		if err != nil || !matchesAnyManagedDropIn(contents, managedOpenRCScriptVariants(want)) {
+			return fmt.Errorf("OpenRC service %s is not an exact recognized QAgent script; restore the bundled script or maintain permissions manually", service)
+		}
+		return validateOpenRCCoreOverrides(service)
 	}
 	return nil
 }

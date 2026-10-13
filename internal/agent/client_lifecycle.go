@@ -94,6 +94,9 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
+	if err := c.executor.syncManagedCorePermissions(ctx); err != nil {
+		slog.Warn("synchronize installed core runtime permissions; customized services require administrator review", "error", err)
+	}
 	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs, c.executor.serviceManager()); err != nil {
 		slog.Warn("prepare volatile managed core logs", "error", err)
 	}

@@ -24,7 +24,7 @@ func managedCapabilityDropInVariants(service string) [][]byte {
 	if managedCoreServiceName(service) {
 		variants = append(variants, []byte(strings.ReplaceAll(managedCoreCapabilityDropIn, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")))
 	}
-	if service == "qagent-mihomo.service" {
+	if managedCoreNeedsNetlink(service) {
 		variants = append(variants, []byte(string(variants[1])+"RestrictAddressFamilies=AF_NETLINK\n"))
 	}
 	return variants
@@ -32,6 +32,7 @@ func managedCapabilityDropInVariants(service string) [][]byte {
 
 type coreUnitCapabilitySyncer struct {
 	outboundMarks  bool
+	metadataWrites bool
 	systemctlPath  string
 	systemdRunPath string
 	installPath    string
@@ -59,16 +60,30 @@ func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engin
 		manager = managers[0]
 	}
 	defaultSpec, exists := DefaultSpecsForServiceManager(manager.Kind())[engine]
-	if !exists || spec != defaultSpec {
+	if !exists || spec != defaultSpec && !isSharedInstanceSpec(engine, spec, manager.Kind()) {
 		return nil
+	}
+	if spec == defaultSpec {
+		if _, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager); err != nil {
+			return fmt.Errorf("kernel %s service %s: permission sync refused custom service/override: %w; restore the bundled service or maintain its permissions manually", engine, spec.Service, err)
+		}
+		if manager.Kind() == ServiceManagerSystemd && engine == core.EngineMihomo {
+			if err := syncManagedMihomoTemplate(ctx, spec); err != nil {
+				return err
+			}
+		}
+	} else if manager.Kind() == ServiceManagerSystemd {
+		if err := validateManagedSharedService(ctx, engine, spec); err != nil {
+			return fmt.Errorf("kernel %s service %s: permission sync refused shared service/override: %w", engine, spec.Service, err)
+		}
 	}
 	// Alpine's managed OpenRC scripts grant CAP_NET_BIND_SERVICE when they
 	// launch the non-root core. No unit drop-in is needed or available there.
 	if manager.Kind() == ServiceManagerOpenRC {
-		if engine == core.EngineMihomo || engine == core.EngineShadowsocksRust || engine == core.EngineSingBox || engine == core.EngineXray {
-			return ensureOpenRCOutboundMarkCapability(spec.Service)
+		if isSharedInstanceSpec(engine, spec, manager.Kind()) {
+			return ensureOpenRCSharedInstanceService(engine, spec)
 		}
-		return nil
+		return ensureOpenRCOutboundMarkCapability(spec.Service)
 	}
 	syncer := defaultCoreUnitCapabilitySyncer()
 	syncer.outboundMarks = engine == core.EngineMihomo || engine == core.EngineShadowsocksRust || engine == core.EngineSingBox || engine == core.EngineXray
@@ -115,6 +130,11 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 	if err := validateManagedUnitFile(dropInPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if current, err := os.ReadFile(dropInPath); err == nil && !matchesAnyManagedDropIn(current, managedCapabilityDropInVariants(service)) {
+		return fmt.Errorf("refusing administrator-modified permission drop-in %s; review it and restore the QControlHub content before retrying", dropInPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	suffix, err := randomSuffix(10)
 	if err != nil {
@@ -125,7 +145,7 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 	if syncer.outboundMarks {
 		content = strings.ReplaceAll(content, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")
 	}
-	if service == "qagent-mihomo.service" {
+	if managedCoreNeedsNetlink(service) {
 		// Repeated positive directives extend systemd's existing allowlist.
 		// Keep the rest of the managed sandbox and grant only netlink sockets.
 		content += "RestrictAddressFamilies=AF_NETLINK\n"
@@ -175,7 +195,7 @@ func (syncer coreUnitCapabilitySyncer) configured(ctx context.Context, service s
 		}
 	}
 	networkReady := true
-	if service == "qagent-mihomo.service" {
+	if managedCoreNeedsNetlink(service) {
 		families, present := properties["RestrictAddressFamilies"]
 		networkReady = present && systemdAddressFamilyAllowed(families, "af_netlink")
 	}
@@ -205,10 +225,14 @@ func capabilityListContains(value, capability string) bool {
 }
 
 func (syncer coreUnitCapabilitySyncer) runHelper(ctx context.Context, input []byte, executable string, arguments ...string) error {
+	capabilities := ""
+	if syncer.metadataWrites {
+		capabilities = "CAP_CHOWN"
+	}
 	runnerArguments := []string{
 		"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
 		"--property=User=root", "--property=UMask=0022", "--property=NoNewPrivileges=yes",
-		"--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=",
+		"--property=CapabilityBoundingSet=" + capabilities, "--property=AmbientCapabilities=" + capabilities,
 		"--property=ProtectSystem=strict", "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
 		"--property=PrivateDevices=yes", "--property=RestrictAddressFamilies=AF_UNIX",
 		"--property=ReadWritePaths=" + syncer.dropInRoot, "--", executable,
@@ -231,12 +255,26 @@ func (syncer coreUnitCapabilitySyncer) runHelper(ctx context.Context, input []by
 }
 
 func managedCoreServiceName(service string) bool {
-	switch service {
-	case "qagent-mihomo.service", "qagent-xray.service", "qagent-sing-box.service", "qagent-shadowsocks-rust.service":
-		return true
-	default:
-		return false
+	_, ok := managedCoreServiceEngine(service)
+	return ok
+}
+
+func managedCoreServiceEngine(service string) (core.Engine, bool) {
+	for _, engine := range core.AllEngines() {
+		base := "qagent-" + managedCoreAssetName(engine)
+		if service == base+".service" {
+			return engine, true
+		}
+		if id, found := strings.CutPrefix(strings.TrimSuffix(service, ".service"), base+"@"); found && strings.HasSuffix(service, ".service") && core.ValidAgentShareID(id) {
+			return engine, true
+		}
 	}
+	return "", false
+}
+
+func managedCoreNeedsNetlink(service string) bool {
+	engine, ok := managedCoreServiceEngine(service)
+	return ok && (engine == core.EngineMihomo || engine == core.EngineSingBox)
 }
 
 func validateManagedUnitDirectory(path string) error {

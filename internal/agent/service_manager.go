@@ -25,17 +25,19 @@ type ServiceManager struct {
 	kind             string
 	executable       string
 	enableExecutable string
+	processVerifier  func(context.Context, *ServiceManager, string) error
 }
 
 func NewServiceManager(kind string) (*ServiceManager, error) {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", ServiceManagerSystemd:
-		return &ServiceManager{kind: ServiceManagerSystemd, executable: systemctlPath, enableExecutable: systemctlPath}, nil
+		return defaultSystemdServiceManager(), nil
 	case ServiceManagerOpenRC:
 		return &ServiceManager{
 			kind:             ServiceManagerOpenRC,
 			executable:       openRCHelperExecutable("rc-service", rcServicePath),
 			enableExecutable: openRCHelperExecutable("rc-update", rcUpdatePath),
+			processVerifier:  verifyManagedServiceProcessPermissions,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported QCH_SERVICE_MANAGER %q", kind)
@@ -67,7 +69,7 @@ func (manager *ServiceManager) Kind() string {
 }
 
 func defaultSystemdServiceManager() *ServiceManager {
-	return &ServiceManager{kind: ServiceManagerSystemd, executable: systemctlPath, enableExecutable: systemctlPath}
+	return &ServiceManager{kind: ServiceManagerSystemd, executable: systemctlPath, enableExecutable: systemctlPath, processVerifier: verifyManagedServiceProcessPermissions}
 }
 
 func selectedServiceManager(managers ...*ServiceManager) *ServiceManager {

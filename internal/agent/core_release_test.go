@@ -67,6 +67,19 @@ func TestSelectCoreReleaseAssetUsesGenericOfficialBuilds(t *testing.T) {
 			want: "shadowsocks-v1.24.0.x86_64-unknown-linux-gnu.tar.xz",
 		},
 		{
+			name: "sing-box Alpine selects explicit musl before generic dynamic glibc", engine: core.EngineSingBox, arch: "amd64", libc: "musl",
+			release: githubRelease{TagName: "v1.14.3", Assets: []githubReleaseAsset{
+				asset("SagerNet/sing-box", "sing-box-1.14.3-linux-amd64.tar.gz"),
+				asset("SagerNet/sing-box", "sing-box-1.14.3-linux-amd64-musl.tar.gz"),
+			}},
+			want: "sing-box-1.14.3-linux-amd64-musl.tar.gz",
+		},
+		{
+			name: "sing-box Alpine retains historical static generic release", engine: core.EngineSingBox, arch: "amd64", libc: "musl",
+			release: githubRelease{TagName: "v1.12.0", Assets: []githubReleaseAsset{asset("SagerNet/sing-box", "sing-box-1.12.0-linux-amd64.tar.gz")}},
+			want:    "sing-box-1.12.0-linux-amd64.tar.gz",
+		},
+		{
 			name: "Shadowsocks Rust Alpine musl", engine: core.EngineShadowsocksRust, arch: "arm64", libc: "musl",
 			release: githubRelease{TagName: "v1.24.0", Assets: []githubReleaseAsset{
 				asset("shadowsocks/shadowsocks-rust", "shadowsocks-v1.24.0.aarch64-unknown-linux-musl.tar.xz"),

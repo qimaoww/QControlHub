@@ -179,12 +179,18 @@ func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spe
 }
 
 func (e *Executor) validateManagedServiceSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	if err := ensureManagedCoreBinaryAccess(engine, spec, e.serviceManager()); err != nil {
+		return "", err
+	}
 	metadata, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath)
 	if err != nil {
 		return "", fmt.Errorf("prepare managed %s validation access: %w", engine, err)
 	}
 	identity, err := managedCoreServiceIdentity()
 	if err != nil {
+		return "", err
+	}
+	if err := e.verifyCoreCertificateAccess(ctx, engine, spec, content, identity); err != nil {
 		return "", err
 	}
 	return e.validateSnapshotWithIdentity(ctx, engine, spec, content, &identity, metadata)
@@ -287,7 +293,11 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	case core.EngineShadowsocksRust:
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
-	output, err := e.runManagedIdentityCommand(ctx, directory, spec.commandEnv, spec.Binary, identity, args...)
+	environment := spec.commandEnv
+	if engine == core.EngineMihomo && identity != nil {
+		environment = "SAFE_PATHS=" + directory + ":/etc/qcontrolhub/tls"
+	}
+	output, err := e.runManagedIdentityCommand(ctx, directory, environment, spec.Binary, identity, args...)
 	if validationHomeName != "" {
 		cleanupErr := e.cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
 		validationHomeName = ""

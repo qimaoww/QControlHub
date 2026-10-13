@@ -13,10 +13,9 @@ Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-mihomo-%i
 StateDirectory=qcontrolhub-mihomo-%i
 StateDirectoryMode=0750
-StateDirectory=qcontrolhub-mihomo-%i
-StateDirectoryMode=0750
 UMask=0027
 ExecStart=/usr/local/lib/qagent/cores/mihomo -d /var/lib/qcontrolhub-mihomo-%i -f /etc/qagent/mihomo/shares/%i/config.yaml
+Environment=SAFE_PATHS=/etc/qagent/mihomo/shares/%i:/etc/qcontrolhub/tls
 LogNamespace=qagent-cores
 StandardOutput=journal
 StandardError=journal

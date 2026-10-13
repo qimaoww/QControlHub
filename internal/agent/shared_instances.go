@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"github.com/qimaoww/qcontrolhub"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -37,29 +36,41 @@ func (e *Executor) ensureSharedInstanceService(ctx context.Context, engine core.
 	path := filepath.Join("/etc/systemd/system", "qagent-"+managedCoreAssetName(engine)+"@.service")
 	if err := validateManagedUnitFile(path); err == nil {
 		upgrade, err := sharedInstanceTemplateNeedsUpgrade(engine, path)
-		if err != nil || !upgrade {
+		if err != nil {
 			return err
+		}
+		if !upgrade {
+			return validateManagedSharedService(ctx, engine, spec)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	bootstrapper := defaultCoreServiceBootstrapper()
-	if e.coreBootstrapper != nil {
-		bootstrapper = *e.coreBootstrapper
-	}
-	if err := bootstrapper.install(ctx, engine, false, e.serviceManager()); err != nil {
+	want, err := fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/systemd/qagent-"+managedCoreAssetName(engine)+"@.service")
+	if err != nil {
 		return err
+	}
+	// Refresh only the recognized shared template. Bootstrapping the whole
+	// engine here also rewrote the owner's main unit and enablement.
+	syncer := defaultCoreUnitCapabilitySyncer()
+	if _, err := installManagedLogFile(ctx, syncer, path, want); err != nil {
+		return err
+	}
+	if output, err := run(ctx, syncer.systemctlPath, "daemon-reload"); err != nil {
+		return fmt.Errorf("reload shared service template: %w: %s", err, output)
 	}
 	if err := validateManagedUnitFile(path); err != nil {
 		return err
 	}
-	return verifySharedInstanceTemplate(engine, path)
+	if err := verifySharedInstanceTemplate(engine, path); err != nil {
+		return err
+	}
+	return validateManagedSharedService(ctx, engine, spec)
 }
 
 func verifySharedInstanceTemplate(engine core.Engine, path string) error {
 	upgrade, err := sharedInstanceTemplateNeedsUpgrade(engine, path)
 	if err == nil && upgrade {
-		return errors.New("shared core service template requires the Mihomo netlink update")
+		return errors.New("shared core service template requires the managed permission update")
 	}
 	return err
 }
@@ -76,9 +87,20 @@ func sharedInstanceTemplateNeedsUpgrade(engine core.Engine, path string) (bool, 
 	if bytes.Equal(got, want) {
 		return false, nil
 	}
+	// Earlier generated templates duplicated StateDirectory directives. Accept
+	// only the exact bundled historical variants, including Mihomo's old family
+	// filter; extra administrator directives still require manual review.
+	variants := [][]byte{want}
 	if engine == core.EngineMihomo {
-		legacy := bytes.Replace(want, []byte("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\n"), []byte("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n"), 1)
-		if bytes.Equal(got, legacy) {
+		variants = append(variants, bytes.Replace(want, []byte("Environment=SAFE_PATHS=/etc/qagent/mihomo/shares/%i:/etc/qcontrolhub/tls\n"), nil, 1))
+	}
+	if engine == core.EngineMihomo || engine == core.EngineSingBox {
+		for _, value := range append([][]byte(nil), variants...) {
+			variants = append(variants, bytes.Replace(value, []byte("AF_INET6 AF_NETLINK\n"), []byte("AF_INET6\n"), 1))
+		}
+	}
+	for _, value := range variants {
+		if bytes.Equal(got, value) || bytes.Equal(got, bytes.Replace(value, []byte("StateDirectoryMode=0750\n"), []byte("StateDirectoryMode=0750\nStateDirectory=qcontrolhub-"+managedCoreAssetName(engine)+"-%i\nStateDirectoryMode=0750\n"), 1)) {
 			return true, nil
 		}
 	}
@@ -97,6 +119,9 @@ func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) erro
 		return err
 	}
 	path := filepath.Join("/etc/init.d", spec.Service)
+	if err := validateOpenRCCoreOverrides(spec.Service); err != nil {
+		return err
+	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
 	if err == nil {
 		_, writeErr := file.WriteString(contents)
@@ -122,9 +147,32 @@ func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) erro
 		return err
 	}
 	if !bytes.Equal(stored, []byte(contents)) {
-		return errors.New("OpenRC shared core service differs from the bundled QAgent asset")
+		if !matchesAnyManagedDropIn(stored, managedOpenRCScriptVariants([]byte(contents))) {
+			return fmt.Errorf("OpenRC shared service %s differs from recognized QAgent scripts; review administrator changes before permission sync", spec.Service)
+		}
+		_, err = atomicDeployWithDefaultMetadata(path, contents, fileMetadata{mode: 0o755})
+		return err
 	}
 	return nil
+}
+
+func validateManagedSharedService(ctx context.Context, engine core.Engine, spec EngineSpec) error {
+	if !isSharedInstanceSpec(engine, spec, ServiceManagerSystemd) {
+		return errors.New("invalid shared systemd service")
+	}
+	base := "qagent-" + managedCoreAssetName(engine) + "@.service"
+	if err := verifySharedInstanceTemplate(engine, filepath.Join(existingDiscoveryManagedUnitRoot, base)); err != nil {
+		return err
+	}
+	for property, want := range map[string]string{
+		"FragmentPath": filepath.Join(existingDiscoveryManagedUnitRoot, base), "User": managedCoreServiceGroup, "Group": managedCoreServiceGroup,
+	} {
+		got, err := systemdUnitProperty(ctx, spec.Service, property)
+		if err != nil || got != want {
+			return fmt.Errorf("shared service %s effective %s is not %q", spec.Service, property, want)
+		}
+	}
+	return validateManagedUnitDropIns(ctx, spec.Service)
 }
 
 func openRCSharedInstanceContent(engine core.Engine, spec EngineSpec) (string, error) {
@@ -136,6 +184,9 @@ func openRCSharedInstanceContent(engine core.Engine, spec EngineSpec) (string, e
 	base := DefaultSpecsForServiceManager(ServiceManagerOpenRC)[engine]
 	contents := strings.ReplaceAll(string(asset), baseName, spec.Service)
 	contents = strings.ReplaceAll(contents, base.ConfigPath, spec.ConfigPath)
+	if engine == core.EngineMihomo {
+		contents = strings.ReplaceAll(contents, "SAFE_PATHS=\""+filepath.Dir(base.ConfigPath)+":", "SAFE_PATHS=\""+filepath.Dir(spec.ConfigPath)+":")
+	}
 	contents = strings.ReplaceAll(contents, "/var/lib/qcontrolhub-"+managedCoreAssetName(engine),
 		filepath.Join("/var/lib", "qcontrolhub-"+managedCoreAssetName(engine)+"-"+filepath.Base(filepath.Dir(spec.ConfigPath))))
 	if engine == core.EngineShadowsocksRust {
@@ -145,29 +196,7 @@ func openRCSharedInstanceContent(engine core.Engine, spec EngineSpec) (string, e
 }
 
 func prepareSharedStateDirectory(path string) error {
-	if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
-		return err
-	}
-	identity, err := managedCoreServiceIdentity()
-	if err != nil {
-		return err
-	}
-	if err := os.Mkdir(path, 0o750); err == nil {
-		if err := os.Chown(path, int(identity.uid), int(identity.gid)); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.IsDir() || info.Mode().Perm()&0o027 != 0 || stat.Uid != identity.uid || stat.Gid != identity.gid {
-		return errors.New("unsafe shared core state directory")
-	}
-	return nil
+	return repairManagedCoreStateDirectory(path)
 }
 
 func sharedInstanceSpec(engine core.Engine, base EngineSpec, shareID, managerKind string) (EngineSpec, error) {
