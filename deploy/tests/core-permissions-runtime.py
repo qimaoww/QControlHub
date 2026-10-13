@@ -23,6 +23,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 MANAGER = os.environ.get("QCH_SERVICE_MANAGER", "systemd")
 BIN = pathlib.Path(os.environ["QCH_PERMISSION_BIN"])
 ACCOUNT = pwd.getpwnam("qcontrolhub-core")
+TCP_RESPONSE = b"HTTP/1.0 200 OK\r\nContent-Length: 9\r\n\r\nqch-tcpok"
 ROOT = pathlib.Path(tempfile.mkdtemp(prefix="qch-permissions-", dir="/var/lib"))
 ROOT.chmod(0o755)
 ALIASES = []
@@ -89,7 +90,7 @@ def backend(host, udp):
                     with conn:
                         conn.recv(4096)
                         hits[0] += 1
-                        conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 9\r\n\r\nqch-tcpok")
+                        conn.sendall(TCP_RESPONSE)
             except OSError:
                 return
 
@@ -113,7 +114,7 @@ def traffic(p, targets=None):
         sock, _, _ = socks(p, 1, host, tcp[1])
         with sock:
             sock.sendall(b"GET / HTTP/1.0\r\n\r\n")
-            assert b"qch-tcpok" in sock.recv(4096)
+            assert receive(sock, len(TCP_RESPONSE)) == TCP_RESPONSE
         assert tcp[2][0] == before + 1
         control, relay, rp = socks(p, 3, "127.0.0.1", 0)
         with control, socket.socket(socket.AF_INET6 if ":" in relay else socket.AF_INET, socket.SOCK_DGRAM) as datagram:
