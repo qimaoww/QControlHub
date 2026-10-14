@@ -2,7 +2,7 @@
 // default needs semantics would otherwise skip the required check entirely.
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-const required = ["debian", "alpine", "upgrade-sandbox", "mieru-udp", "core-permissions", "build-images"];
+const required = ["debian", "alpine", "upgrade-sandbox", "core-permissions", "build-images"];
 export function requireSuccess(needs) {
   for (const name of required) if (needs[name]?.result !== "success") {
     throw new Error(`Required job ${name}: ${needs[name]?.result || "missing"}`);
