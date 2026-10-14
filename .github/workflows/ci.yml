@@ -48,6 +48,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
+        id: debian-go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -56,7 +57,7 @@ jobs:
       - name: Restore Debian Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v4-linux-${{ runner.arch }}-go1.25.0-debian12-glibc
+          identity: qch-v4-linux-${{ runner.arch }}-go${{ steps.debian-go.outputs.go-version }}-debian12-glibc
           paths: |
             ${{ env.GOCACHE }}
             ${{ env.GOMODCACHE }}

@@ -50,11 +50,13 @@ not be presented as independently measured historical numbers. Baseline Debian
 restored a 249MiB Go cache; Alpine and sandbox compilation were cold on every
 run. This is a mixed-cache baseline, not a fully warm workflow.
 
-A separate dispatch-only measurement branch (`codex/ci-baseline-measure`) keeps
-the original workflow and application/test code, adds `workflow_dispatch`, and
-disables setup-go restoration / selects fresh image cache scopes for a full
-cold baseline. It never publishes because the event is not a main push. Its
-run and the optimized cold/warm attempts are recorded in the PR comparison.
+Separate dispatch-only measurement branches (`codex/ci-baseline-measure` and
+`codex/ci-optimized-measure`) keep
+the respective workflows and identical application/test code, add `workflow_dispatch`, and
+disable setup-go restoration / select fresh image cache scopes for controlled
+cold comparisons. The optimized experiment also selects fresh platform-cache
+identities, retaining cache-save costs. They never publish because the event is
+not a main push. Their runs and PR cold/warm attempts are recorded in the comparison.
 No extra benchmark workflow runs on routine PRs.
 
 The optimized platform artifacts contain:
@@ -66,7 +68,7 @@ The optimized platform artifacts contain:
   Shard elapsed minus serial package execution includes compilation, loading
   and tooling overhead; it is not labelled pure compilation.
 - `browser-*.json`: each scene's Chromium startup, interaction/assertion,
-  cleanup, elapsed time and verdict. The same assertions and deadlines remain.
+  cleanup, elapsed time and verdict. The same assertions and per-scene deadlines remain.
 
 ## Task structure and coverage
 

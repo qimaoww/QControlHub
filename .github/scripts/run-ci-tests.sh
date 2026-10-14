@@ -44,7 +44,9 @@ shard_count="${QCH_TEST_SHARDS:-4}"
 exclude=""
 extra=""
 extra_independent=false
-summary_script="$(cd "$(dirname "$0")" && pwd)/go-test-summary.mjs"
+script_directory="$(cd "$(dirname "$0")" && pwd)"
+summary_script="$script_directory/go-test-summary.mjs"
+prefix_script="$script_directory/prefix-ci-output.mjs"
 dry_run=false
 declare -a check_commands=()
 declare -a after_check_commands=()
@@ -172,7 +174,7 @@ start_task() {
     local name="$1"
     local command="$2"
     printf '%s\n' "-> $name: $command"
-    setsid bash -o pipefail -c 'bash -c "$1" 2>&1 | sed -u "s|^|[$2] |"' _ "$command" "$name" &
+    setsid bash -o pipefail -c 'bash -c "$1" 2>&1 | node "$3" "$2"' _ "$command" "$name" "$prefix_script" &
     task_pids+=("$!")
 }
 
@@ -206,8 +208,8 @@ if [ -n "$extra" ]; then
     ensure_database "${base_name}_extra"
     name="go-tests-extra"
     setsid bash -o pipefail -c '
-        QCH_TEST_DATABASE_URL="$1" bash -c "$3" 2>&1 | sed -u "s|^|[$2] |"
-    ' _ "$(database_url extra)" "$name" "$extra" &
+        QCH_TEST_DATABASE_URL="$1" bash -c "$3" 2>&1 | node "$4" "$2"
+    ' _ "$(database_url extra)" "$name" "$extra" "$prefix_script" &
     task_pids+=("$!")
 fi
 

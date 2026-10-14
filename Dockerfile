@@ -10,7 +10,7 @@ RUN go mod download
 # documentation and CI metadata are excluded by .dockerignore.
 COPY cmd ./cmd
 COPY internal ./internal
-COPY install_assets.go ./
+COPY *.go ./
 COPY deploy ./deploy
 COPY examples/configs ./examples/configs
 
