@@ -2,9 +2,12 @@
 
 ## Measurement
 
-The implementation is based on `main` at `ffdc09adbffb6b47bfcebd275b10b6125817a4c0`.
-Application code, test assertions, platform integrations and pinned core releases
-are unchanged. PR #267 tracks the measured cold/warm comparison:
+The controlled comparison uses `main` at `ffdc09adbffb6b47bfcebd275b10b6125817a4c0`.
+Before delivery the branch was rebased onto latest main
+`8ced1108d784b08c015a404d6021e11630285fb3` (#270), retaining its new IPQuality
+implementation/tests. That newer final-head CI is reported separately in the PR;
+its duration is not treated as a same-code comparison. This PR changes no
+application code, existing assertions, platform integrations or pinned core releases. PR #267 tracks the measured cold/warm comparison:
 https://github.com/qimaoww/QControlHub/pull/267
 
 Use attempt-specific job data and rerun **all** jobs for repetitions. The report
@@ -31,7 +34,7 @@ All runs below passed every necessary CI job. The controlled branches use the
 same application code/test assertions as main, on Ubuntu 24.04 runners (4 CPUs,
 about 16GiB), Debian Go 1.25.0/glibc, Alpine Go 1.25.14/musl and PostgreSQL 17.
 All candidate data includes real database/runtime execution, cache upload and
-strict required gates. The scope difference is the user-requested optional
+strict required gates. These measurements precede the #270 main update. The scope difference is the user-requested optional
 browser matrix, described below; this is not a claim of identical mandatory coverage.
 
 | Configuration / cache state | Run / attempt | Necessary checks | Actual job minutes |
