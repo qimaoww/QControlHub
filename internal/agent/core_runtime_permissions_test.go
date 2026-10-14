@@ -44,8 +44,8 @@ func TestCertificatePermissionPathsPreserveInlineMaterial(t *testing.T) {
 		content string
 		want    string
 	}{
-		{core.EngineMihomo, "listeners:\n- certificate: /etc/qagent/mihomo/cert.pem\n  private-key: |\n    -----BEGIN PRIVATE KEY-----\n    inline\n", "/etc/qagent/mihomo/cert.pem"},
-		{core.EngineXray, `{"inbounds":[{"tlsSettings":{"certificates":[{"certificateFile":"/etc/tls/cert.pem","key":["inline"]}]}}]}`, "/etc/tls/cert.pem"},
+		{core.EngineMihomo, "listeners:\n- type: trojan\n  certificate: /etc/qagent/mihomo/cert.pem\n  private-key: |\n    -----BEGIN PRIVATE KEY-----\n    inline\n", "/etc/qagent/mihomo/cert.pem"},
+		{core.EngineXray, `{"inbounds":[{"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/tls/cert.pem","key":["inline"]}]}}}]}`, "/etc/tls/cert.pem"},
 		{core.EngineSingBox, `{"inbounds":[{"tls":{"certificate_path":"/etc/tls/cert.pem","client_certificate_path":["/etc/tls/ca.pem"]}}]}`, "/etc/tls/cert.pem"},
 	} {
 		paths, err := coreCertificatePaths(test.engine, test.content)

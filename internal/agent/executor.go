@@ -136,7 +136,16 @@ func (e *Executor) Validate() error {
 	return nil
 }
 
-func (e *Executor) Execute(parent context.Context, task core.Task) (string, error) {
+func (e *Executor) Execute(parent context.Context, task core.Task) (output string, resultErr error) {
+	if task.Action == core.ActionValidate || task.Action == core.ActionDeploy || task.Action == core.ActionImportExisting {
+		redact := coreDiagnosticRedactor(task.Engine, task.ConfigContent)
+		defer func() {
+			output = redact(output)
+			if resultErr != nil {
+				resultErr = redactedCoreError{err: resultErr, message: redact(resultErr.Error())}
+			}
+		}()
+	}
 	if !task.Action.Valid() || !task.Engine.Valid() {
 		return "", errors.New("task contains an unsupported action or engine")
 	}

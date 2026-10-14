@@ -197,6 +197,10 @@ func (e *Executor) validateManagedServiceSnapshot(ctx context.Context, engine co
 }
 
 func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core.Engine, spec EngineSpec, content string, identity *commandIdentity, metadata fileMetadata) (string, error) {
+	// Core diagnostics may echo an invalid inline key. Redact before any
+	// caller can persist validation output or include it in a task error.
+	redact := coreDiagnosticRedactor(engine, content)
+	fields := coreDiagnosticFieldLocations(engine, content)
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
@@ -211,6 +215,13 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	extension := ".json"
 	if engine == core.EngineMihomo {
 		extension = ".yaml"
+		if identity != nil {
+			var err error
+			content, err = mihomoValidationCertificatePaths(content, coreCertificateWorkingDirectory(engine, spec, e.serviceManager().Kind()))
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 	directory := filepath.Dir(spec.ConfigPath)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
@@ -295,9 +306,10 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	}
 	environment := spec.commandEnv
 	if engine == core.EngineMihomo && identity != nil {
-		environment = "SAFE_PATHS=" + directory + ":/etc/qcontrolhub/tls"
+		environment = "SAFE_PATHS=" + directory + ":/etc/qcontrolhub/tls:" + coreCertificateWorkingDirectory(engine, spec, e.serviceManager().Kind())
 	}
 	output, err := e.runManagedIdentityCommand(ctx, directory, environment, spec.Binary, identity, args...)
+	output = redact(output)
 	if validationHomeName != "" {
 		cleanupErr := e.cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
 		validationHomeName = ""
@@ -309,7 +321,14 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		}
 	}
 	if err != nil {
-		return output, fmt.Errorf("%s rejected the configuration: %w", engine, err)
+		detail := output
+		if len(detail) > 2048 {
+			detail = strings.ToValidUTF8(detail[len(detail)-2048:], "�")
+		}
+		if fields != "" {
+			detail = "configuration fields: " + fields + "; " + detail
+		}
+		return output, fmt.Errorf("kernel %s service %s: %s rejected the configuration: %w; %s", engine, spec.Service, engine, err, detail)
 	}
 	if output == "" {
 		output = fmt.Sprintf("%s validation passed", engine)

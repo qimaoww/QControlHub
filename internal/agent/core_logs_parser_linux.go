@@ -23,6 +23,7 @@ func sanitizeCoreLogMessage(raw string) string {
 	message = ansiControlPattern.ReplaceAllString(message, "")
 	// Remove any surviving ESC introducer so a lone control byte cannot render.
 	message = strings.ReplaceAll(message, "\x1b", "")
+	message = core.RedactDiagnostic(message)
 	if message == "" {
 		return ""
 	}
