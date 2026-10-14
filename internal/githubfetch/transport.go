@@ -246,6 +246,10 @@ func (t *Transport) request(base http.RoundTripper, req *http.Request) (*http.Re
 	timer := time.AfterFunc(budget, cancel)
 	response, err := base.RoundTrip(req.Clone(ctx))
 	stopped := timer.Stop()
+	if err == nil && ctx.Err() != nil {
+		response.Body.Close()
+		err = ctx.Err()
+	}
 	if err != nil {
 		cancel()
 		if !stopped && req.Context().Err() == nil {

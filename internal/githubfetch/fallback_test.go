@@ -206,3 +206,20 @@ func TestHeaderBudgetReportsOutstandingDNSAndPreservesTrace(t *testing.T) {
 		t.Fatalf("diagnosis=%v trace=%d", err, traceCalls)
 	}
 }
+
+func TestLateHeadersDoNotEscapeRouteDeadline(t *testing.T) {
+	calls := 0
+	tr := &Transport{HeaderBudget: time.Millisecond, Detect: func(context.Context) Mode { return Unknown }, Base: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			<-r.Context().Done()
+		}
+		return fixtureResponse(r, 200), nil
+	})}
+	req, _ := http.NewRequest("GET", "https://api.github.com/repos/o/r/releases/latest", nil)
+	response, err := tr.RoundTrip(req)
+	if err != nil || calls != 2 {
+		t.Fatalf("late headers bypassed fallback: calls=%d err=%v", calls, err)
+	}
+	response.Body.Close()
+}

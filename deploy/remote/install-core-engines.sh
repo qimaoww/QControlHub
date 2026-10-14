@@ -65,6 +65,7 @@ qch_github_egress_proxy() (
 )
 
 qch_github_probe_network() (
+    qch_overall_deadline=${1:-}
     qch_github_mode=unknown
     qch_probe_dir=$(mktemp -d) || exit 1
     trap 'rm -rf "$qch_probe_dir"' EXIT
@@ -110,7 +111,7 @@ qch_github_probe_network() (
 qch_github_detect() {
     qch_now=$(date +%s)
     if [ "$qch_now" -lt "${qch_github_expires:-0}" ]; then return; fi
-    qch_github_mode=$(qch_github_probe_network) || return 1
+    qch_github_mode=$(qch_github_probe_network "${1:-}") || return 1
     qch_ttl=300
     [ "$qch_github_mode" != unknown ] || qch_ttl=15
     qch_github_expires=$((qch_now + qch_ttl))
@@ -120,7 +121,7 @@ qch_github_detect() {
 qch_github_download() {
     qch_overall_deadline=$(( $(date +%s) + ${4:-90} ))
     qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; return 1; }
-    if ! qch_github_egress_proxy "$qch_checked_source"; then qch_github_detect || return 1; fi
+    if ! qch_github_egress_proxy "$qch_checked_source"; then qch_github_detect "$qch_overall_deadline" || return 1; fi
     if (
         # A subshell isolates all state, traps and curl options from enrollment.
         qch_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; exit 1; }
