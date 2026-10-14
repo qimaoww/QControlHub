@@ -19,6 +19,8 @@ import tempfile
 import threading
 import time
 
+from core_permission_network import add_loopback_alias, bind_backend_socket, wait_tcp_listener
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 MANAGER = os.environ.get("QCH_SERVICE_MANAGER", "systemd")
 BIN = pathlib.Path(os.environ["QCH_PERMISSION_BIN"])
@@ -71,9 +73,7 @@ def socks(p, command, host, target):
 
 
 def backend(host, udp):
-    family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    sock = socket.socket(family, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
-    sock.bind((host, 0))
+    sock = bind_backend_socket(host, udp)
     if not udp:
         sock.listen()
     hits = [0]
@@ -248,12 +248,10 @@ def test(engine, shared):
             client = subprocess.Popen([str(binary), "-d", str(directory / "client-state"), "-f", str(client_config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             local = p
-        for _ in range(50):
-            try:
-                with socket.create_connection(("127.0.0.1", local), timeout=0.2):
-                    break
-            except OSError:
-                time.sleep(0.1)
+        # Mihomo's client can listen before its managed server. Wait for every
+        # endpoint used below, including the separate TLS listener.
+        for listener in dict.fromkeys([local, p] + ([tls_port] if engine != "shadowsocks-rust" else [])):
+            wait_tcp_listener("127.0.0.1", listener)
         pid = inspect_process(name, unit)
         if engine != "shadowsocks-rust":
             context = ssl._create_unverified_context()
@@ -283,7 +281,7 @@ def test(engine, shared):
         write(candidate_config, cp.read_text())
         candidate_config.replace(cp)
         action("restart")
-        time.sleep(0.3)
+        wait_tcp_listener("127.0.0.1", p)
         assert inspect_process(name, unit) != pid, "binary update did not replace the process"
         before_marks = marked_packets()
         traffic(p if engine == "mihomo" else local)
@@ -336,7 +334,7 @@ try:
     # Mihomo deliberately skips marks on non-global socket addresses. Test
     # marks against owned benchmark/ULA aliases as well as ordinary loopback.
     for prefix in (f"198.18.{(os.getpid() // 250) % 250}.{os.getpid() % 250 + 1}/32", f"fd42:{os.getpid() & 0xffff:x}:1::1/128"):
-        run("ip", "address", "add", prefix, "dev", "lo")
+        add_loopback_alias(prefix, run)
         ALIASES.append(prefix)
         host = prefix.split("/")[0]
         TARGETS.append((host, backend(host, False), backend(host, True)))

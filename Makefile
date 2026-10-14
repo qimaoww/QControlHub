@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs these next to the Go shards, then the standalone
 # browser group afterward; keep the Go suite out of these targets.
@@ -59,6 +59,9 @@ module-policy-test:
 
 ss-rust-runtime-test:
 	sh deploy/tests/ss-rust-runtime.sh
+
+core-permission-network-test:
+	python3 -B deploy/tests/core_permission_network_test.py
 
 ci-runner-test:
 	node --test .github/scripts/run-ci-tests.test.mjs
