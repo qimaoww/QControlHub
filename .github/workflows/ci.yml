@@ -227,49 +227,6 @@ jobs:
       - run: make upgrade-sandbox-test
       - run: make ss-rust-runtime-test
 
-  mieru-udp:
-    name: Mieru UDP over TCP / ${{ matrix.version }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - version: v1.19.31
-            sha256: d5e74bbddbdfff49a1aef7775bf5911da59f0d7196ed509a0ac914b3653dd5f1
-          - version: v1.19.32
-            sha256: 8451100836c9eda194331c2babfad490b2faf30cebc1a04b0e76fd8ac2d35d10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - name: Fetch the official pinned Mihomo release
-        env:
-          MIHOMO_VERSION: ${{ matrix.version }}
-          MIHOMO_SHA256: ${{ matrix.sha256 }}
-        run: |
-          core_root="$RUNNER_TEMP/mieru-core"
-          mkdir -p "$core_root/bin"
-          curl --fail --location --retry 3 \
-            "https://github.com/MetaCubeX/mihomo/releases/download/$MIHOMO_VERSION/mihomo-linux-amd64-$MIHOMO_VERSION.gz" \
-            --output "$core_root/mihomo.gz"
-          printf '%s  %s\n' "$MIHOMO_SHA256" "$core_root/mihomo.gz" | sha256sum --check
-          gzip -dc "$core_root/mihomo.gz" > "$core_root/bin/mihomo"
-          chmod 0755 "$core_root/bin/mihomo"
-          "$core_root/bin/mihomo" -v
-          go version -m "$core_root/bin/mihomo"
-      - name: Verify real forwarding under systemd socket policies
-        run: |
-          sudo sh deploy/bootstrap-core-services.sh --prepare-agent
-          go test -c -o "$RUNNER_TEMP/mieru-agent.test" ./internal/agent
-          cd internal/agent
-          sudo env QCH_LIVE_MIERU_SYSTEMD_TEST=1 \
-            QCH_LIVE_CORE_ROOT="$RUNNER_TEMP/mieru-core" \
-            "$RUNNER_TEMP/mieru-agent.test" \
-            -test.run '^TestMieruUDPWithSystemdSocketPolicy$' -test.count=1 -test.v
-
   core-permissions:
     name: All cores / actual service permissions
     runs-on: ubuntu-latest
@@ -323,7 +280,7 @@ jobs:
 
   # Build immediately. Bake shares compilation vertices across all targets.
   build-images:
-    name: Prepare all images
+    name: Build Docker images
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -354,7 +311,7 @@ jobs:
   images:
     name: Build ${{ matrix.target }} image
     if: ${{ always() }}
-    needs: [debian, alpine, upgrade-sandbox, mieru-udp, core-permissions, build-images]
+    needs: [debian, alpine, upgrade-sandbox, core-permissions, build-images]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     strategy:
@@ -371,7 +328,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.target }} image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'qimaoww/qcontrolhub'
-    needs: [images, debian, alpine, upgrade-sandbox, mieru-udp, core-permissions, build-images]
+    needs: [images, debian, alpine, upgrade-sandbox, core-permissions, build-images]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -129,6 +129,15 @@ do not run or depend on that workflow. Frontend module smoke, contracts, policy,
 style and diagnostic regressions remain mandatory. This is an explicit scope
 change; its time saving is distinguished from scheduling/cache improvements.
 
+After PR #267 was merged, the user also removed the two-version Mieru UDP
+systemd workflow from automatic CI and publication dependencies. The timing
+table above records the earlier scope, including those two jobs; it has not
+been rewritten to claim additional measured savings. The opt-in
+`TestMieruUDPWithSystemdSocketPolicy` test is retained for local Linux/systemd
+execution with a verified official Mihomo binary, root privileges,
+`QCH_LIVE_MIERU_SYSTEMD_TEST=1` and `QCH_LIVE_CORE_ROOT` pointing at its `bin`
+directory's parent. Ordinary Mieru unit tests still run in the Go suite.
+
 Separate dispatch-only measurement branches (`codex/ci-baseline-measure` and
 `codex/ci-optimized-measure`) keep
 the respective workflows and identical application/test code, add `workflow_dispatch`, and
@@ -160,13 +169,11 @@ flowchart LR
   commit[Commit] --> deb[Debian: checks + four Go shards]
   commit --> alp[Alpine: checks + four Go shards + OpenRC agent selection]
   commit --> sand[Read-only upgrade + native Shadowsocks Rust]
-  commit --> mieru[Mieru real systemd UDP: both versions]
   commit --> perms[All core service permission and forwarding checks]
-  commit --> bake[Bake all three images with shared objects]
+  commit --> bake[Build Docker images: three targets with shared objects]
   deb --> gates[Existing Build image required checks]
   alp --> gates
   sand --> gates
-  mieru --> gates
   perms --> gates
   bake --> gates
   gates --> publish[Main push: publish with SBOM and provenance]
@@ -255,9 +262,9 @@ Publication itself is gated and has not been exercised by the PR event.
 
 Ruleset 20995958 requires Title and description, Debian / systemd, Alpine /
 OpenRC, and the three existing Build image check names. These names are retained.
-The image checks now explicitly require all six producer jobs, using `always()`
+The image checks now explicitly require all five producer jobs, using `always()`
 and exact `success` comparisons. A failed, cancelled, skipped or missing producer
-fails the gate. This also makes the previously non-required sandbox, Mieru and
+fails the gate. This also makes the previously non-required sandbox and
 permission checks necessary for merge. Main publication has explicit dependencies
 on all producers and gates for the same workflow commit.
 
