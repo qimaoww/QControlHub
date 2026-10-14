@@ -5,6 +5,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +18,13 @@ import (
 // network requests or installing packages on the test host.
 func executeIPQualityFixture(t *testing.T, script string) (core.IPQualityResult, error) {
 	t.Helper()
-	program := "curl() { cat <<'QCH_IPQUALITY_FIXTURE'\n" + script + "\nQCH_IPQUALITY_FIXTURE\n}\n" + ipQualityProgram
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "detector.sh"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return executeIPQualityProgram(ctx, "/bin/bash", program)
+	return executeIPQualityInDirectory(ctx, "/bin/bash", ipQualityProgram, directory, func(string) {})
 }
 
 func TestIPQualityDependencyFilesAreNotLimitedToReportSize(t *testing.T) {
@@ -28,7 +33,7 @@ func TestIPQualityDependencyFilesAreNotLimitedToReportSize(t *testing.T) {
 	script := `set -e
 dd if=/dev/zero of=dependency-package bs=1024 count=512 2>/dev/null
 test "$(wc -c < dependency-package)" -eq 524288
-printf '%s\n' '` + agentQualityReport("203.0.113.1", "fixture") + `' > "$5"
+printf '%s\n' '` + agentQualityReport("203.0.113.1", "fixture") + `' > "$6"
 printf 'IP质量体检报告：203.0.113.1\n依赖安装完成\n'`
 	result, err := executeIPQualityFixture(t, script)
 	if err != nil {
@@ -41,7 +46,7 @@ printf 'IP质量体检报告：203.0.113.1\n依赖安装完成\n'`
 	// Removing the process-wide file limit must not allow oversized JSON into
 	// result memory or onto the WSS result path.
 	_, err = executeIPQualityFixture(t, `set -e
-dd if=/dev/zero of="$5" bs=1024 count=129 2>/dev/null
+dd if=/dev/zero of="$6" bs=1024 count=129 2>/dev/null
 printf 'IP质量体检报告：203.0.113.1\n'`)
 	if err == nil || !strings.Contains(err.Error(), "大小受限的普通文件") {
 		t.Fatalf("oversized JSON report was not rejected by the file check: %v", err)
@@ -58,7 +63,7 @@ func TestIPQualityPrintedCapturePreservesBothFamilies(t *testing.T) {
 				tail := "\n报告结束：" + ip
 				printed := header + strings.Repeat("x", size-len(header)-len(tail)) + tail
 				expected = append(expected, printed)
-				fmt.Fprintf(&script, "printf '%%s\\n' '%s' >> \"$5\"\nprintf '%%s\\n' '%s'\n",
+				fmt.Fprintf(&script, "printf '%%s\\n' '%s' >> \"$6\"\nprintf '%%s\\n' '%s'\n",
 					agentQualityReport(ip, "fixture"), printed)
 			}
 			result, err := executeIPQualityFixture(t, script.String())
@@ -92,7 +97,7 @@ func TestIPQualityPrintedCaptureRejectsIncompleteReports(t *testing.T) {
 		{"encoded-overflow", header + strings.Repeat("\x1b", 24<<10), "size limit"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			script := fmt.Sprintf("printf '%%s\\n' '%s' > \"$5\"\nprintf '%%s' '%s'\n",
+			script := fmt.Sprintf("printf '%%s\\n' '%s' > \"$6\"\nprintf '%%s' '%s'\n",
 				agentQualityReport("203.0.113.1", "fixture"), test.printed)
 			result, err := executeIPQualityFixture(t, script)
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {

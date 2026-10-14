@@ -49,6 +49,7 @@ if [ "$action" = uninstall ]; then
   exit 0
 fi
 
+install_download_prerequisites || { printf '%s\n' 'download prerequisite installation failed; check repository access and root permissions, then retry' >&2; exit 1; }
 install_nftables
 install_iproute2
 

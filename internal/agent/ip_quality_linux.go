@@ -7,18 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// Upstream publishes the detector as a one-liner that pipes its script straight
-// into bash. Follow that source instead of pinning a revision and a checksum,
-// so the detector keeps working when upstream moves `main`.
+// Keep the official moving source, but download and validate it before running.
 const ipQualityScriptURL = "https://IP.Check.Place"
 
 // ipQualityPrintedReportLimit bounds each address family's printed report.
@@ -27,8 +27,8 @@ const ipQualityScriptURL = "https://IP.Check.Place"
 const ipQualityPrintedReportLimit = 32 << 10
 const ipQualityPrintedOutputLimit = 2*ipQualityPrintedReportLimit + 4<<10
 
-// ipQualityProgram runs the official one-liner with the fixed detection
-// arguments: accept upstream's dependency installation, stay in privacy mode so
+// ipQualityProgram runs the verified script with the fixed detection
+// arguments: skip upstream's unchecked installation after Agent preparation, stay in privacy mode so
 // nothing is uploaded to the upstream report host, and write the machine-readable
 // JSON to the private report path. The default locale is kept so the JSON carries
 // the same localized labels the detector prints, and the printed report is left
@@ -36,46 +36,69 @@ const ipQualityPrintedOutputLimit = 2*ipQualityPrintedReportLimit + 4<<10
 // Do not impose RLIMIT_FSIZE on this process tree: dependency installers write
 // package indexes and binaries larger than the report budget. The report reader
 // enforces the JSON file's type and size before accepting it.
-const ipQualityProgram = `exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -o "$1"`
+const ipQualityProgram = `exec bash --noprofile --norc "$2" -n -y -p -f -o "$1"`
 
 func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
+	result, _, err := runIPQualityDetailed(ctx)
+	return result, err
+}
+
+func runIPQualityDetailed(ctx context.Context) (core.IPQualityResult, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.IPQualityTimeout)
 	defer cancel()
-	bash, err := ipQualityPrerequisites()
+	var stages []string
+	progress := func(message string) {
+		message = sanitizeIPQualityDiagnostic(message)
+		stages = append(stages, message)
+		slog.Info("IPQuality", "stage", message)
+	}
+	result, err := runPreparedIPQuality(ctx, progress)
+	if err != nil {
+		progress("失败：" + err.Error())
+	} else {
+		progress("完成：有效报告已通过校验")
+	}
+	return result, strings.Join(stages, "\n"), err
+}
+
+func runPreparedIPQuality(ctx context.Context, progress func(string)) (core.IPQualityResult, error) {
+	progress("检查依赖")
+	preparation, cancel := context.WithTimeout(ctx, ipQualityPreparationTimeout+10*time.Second)
+	err := prepareIPQualityDependencies(preparation, progress)
+	cancel()
+	if err != nil {
+		return core.IPQualityResult{}, fmt.Errorf("IPQuality 依赖准备失败：%w", err)
+	}
+	bash, err := findIPQualityExecutable("bash")
 	if err != nil {
 		return core.IPQualityResult{}, err
 	}
-	return executeIPQualityProgram(ctx, bash, ipQualityProgram)
+	directory, err := os.MkdirTemp("", "qagent-ip-quality-")
+	if err != nil {
+		return core.IPQualityResult{}, err
+	}
+	defer os.RemoveAll(directory)
+	progress("下载脚本")
+	if err := downloadIPQualityScript(ctx, directory, progress); err != nil {
+		return core.IPQualityResult{}, err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return core.IPQualityResult{}, err
+	}
+	executable, err = ipQualityExecutable(executable)
+	if err != nil {
+		return core.IPQualityResult{}, err
+	}
+	progress("执行检测：检测服务连通性由上游按 IPv4/IPv6 分别检查")
+	return executeIPQualityInDirectory(ctx, bash, ipQualityResourceWrapper(executable)+ipQualityProgram, directory, progress)
 }
 
-// ipQualityPrerequisites resolves the shell that runs the one-liner. Only bash
-// and curl are required up front, because curl fetches the script itself. Every
-// other probe dependency is installed by upstream when it is missing; the Agent
-// passes -y so that installation stays non-interactive.
-func ipQualityPrerequisites() (string, error) {
-	bash := ""
-	for _, name := range []string{"bash", "curl"} {
-		binary := ""
-		// Match the child's fixed PATH, including the first executable it
-		// would find. Do not skip an unsafe earlier executable for a safe one.
-		for _, directory := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
-			path := filepath.Join(directory, name)
-			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
-				binary, err = ipQualityExecutable(path)
-				if err != nil {
-					return "", fmt.Errorf("IPQuality 依赖 %s 不安全：%w", name, err)
-				}
-				break
-			}
-		}
-		if binary == "" {
-			return "", fmt.Errorf("IPQuality 缺少依赖：%s；bash 与 curl 是获取上游脚本的前提，请先在节点安装", name)
-		}
-		if name == "bash" {
-			bash = binary
-		}
-	}
-	return bash, nil
+// RunIPQualityCheck runs the same complete pipeline for local diagnostics.
+func RunIPQualityCheck(parent context.Context, progress func(string)) (core.IPQualityResult, error) {
+	ctx, cancel := context.WithTimeout(parent, core.IPQualityTimeout)
+	defer cancel()
+	return runPreparedIPQuality(ctx, progress)
 }
 
 func ipQualityExecutable(path string) (string, error) {
@@ -101,8 +124,12 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 		return core.IPQualityResult{}, err
 	}
 	defer os.RemoveAll(directory)
+	return executeIPQualityInDirectory(ctx, bash, program, directory, func(string) {})
+}
+
+func executeIPQualityInDirectory(ctx context.Context, bash, program, directory string, progress func(string)) (core.IPQualityResult, error) {
 	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", program,
-		"ip-quality", filepath.Join(directory, "report.json"))
+		"ip-quality", filepath.Join(directory, "report.json"), filepath.Join(directory, "detector.sh"))
 	command.Dir = directory
 	command.Env = append(commandEnvironment(""), "TERM=dumb", "CURL_HOME="+directory,
 		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory)
@@ -111,23 +138,24 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 	// interrupting a healthy run; only the bounded JSON report is accepted as
 	// result data, and the bounded stdout only supplies the printed report.
 	output := &boundedOutput{limit: ipQualityPrintedOutputLimit}
-	log := &boundedOutput{limit: 16 << 10}
+	log := &ipQualityDiagnosticTail{}
 	command.Stdout, command.Stderr = output, log
 	runErr := command.Run()
 	if command.Process != nil {
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 	}
 	if ctx.Err() != nil {
-		return core.IPQualityResult{}, fmt.Errorf("IPQuality 检测超时或已停止：%w", ctx.Err())
+		return core.IPQualityResult{}, fmt.Errorf("执行检测：超时或已停止：%w；诊断：%s", ctx.Err(), sanitizeIPQualityDiagnostic(log.String()))
 	}
 	if output.Truncated() {
 		return core.IPQualityResult{}, errors.New("IPQuality 报告输出超过采集大小限制，已拒绝截断的报告")
 	}
+	progress(fmt.Sprintf("解析报告：执行状态 %v", runErr))
 	result, err := readIPQualityReport(directory)
 	if err != nil {
 		// Do not publish ANSI progress, ads, external HTML or partial reports as
 		// a successful result. The exit status still helps diagnose missing tools.
-		return core.IPQualityResult{}, fmt.Errorf("IPQuality 未生成有效报告（执行状态：%v）：%w", runErr, err)
+		return core.IPQualityResult{}, fmt.Errorf("执行检测/解析报告：IPQuality 未生成有效报告（执行状态：%v）：%w；检查检测服务的 DNS/HTTP/IPv4/IPv6 连通性；stderr：%s；stdout：%s", runErr, err, sanitizeIPQualityDiagnostic(log.String()), sanitizeIPQualityDiagnostic(output.String()))
 	}
 	texts := parseIPQualityReportTexts(output.String())
 	if len(texts) != len(result.Reports) {

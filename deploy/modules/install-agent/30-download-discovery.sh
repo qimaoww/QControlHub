@@ -38,6 +38,14 @@ download /api/v1/agent-binary "$work_dir/qagent"
 [ -s "$work_dir/qagent" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
 chmod 0755 "$work_dir/qagent"
 
+# Use the same fixed package plan as runtime repair. The candidate runs before
+# the sandboxed service starts, so fresh installs do not inherit read-only /usr.
+echo '== IPQuality 检查并自动补齐检测依赖 =='
+"$work_dir/qagent" prepare-ip-quality || {
+  printf '%s\n' 'IPQuality dependency preparation failed; fix the package-manager diagnostics above and rerun the installer' >&2
+  exit 1
+}
+
 echo '== 3/6 检测现有核心并暂存按需安装资源 =='
 run_discovery() {
   label=$1
