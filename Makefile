@@ -1,6 +1,8 @@
 SHELL := /bin/sh
 
 VERSION ?= dev
+QCH_SANDBOX_GOCACHE ?= $(CURDIR)/.ci-cache/sandbox-build
+export QCH_SANDBOX_GOCACHE
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
@@ -13,7 +15,7 @@ CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics
 ALPINE_CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
-ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
+ALPINE_AGENT_TESTS := go test -count=1 ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
 
 build:
 	mkdir -p bin
@@ -24,7 +26,7 @@ build:
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
 # The native browser matrix also runs through Go; match CI's package deadline.
 test:
-	go test -timeout 20m -p 1 ./...
+	go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$$' ./...
 
 alpine-agent-test:
 	$(ALPINE_AGENT_TESTS)
@@ -35,17 +37,19 @@ ip-quality-clean-test:
 	sh deploy/tests/ip-quality-clean.sh
 
 alpine-test: alpine-agent-test
-	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -timeout 20m -p 1 $$packages
+	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$$' $$packages
 
 upgrade-sandbox-test:
+	mkdir -p "$(QCH_SANDBOX_GOCACHE)"
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
 	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
 		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
 		--tmpfs /usr/local/lib/qagent:rw,exec,mode=0755 --tmpfs /etc/qagent:rw,mode=0755 \
 		--tmpfs /etc/systemd:rw,mode=0755 --tmpfs /var/lib/qcontrolhub-shadowsocks-rust:rw,mode=0750 \
-		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/tmp/qch-go-cache -e GOTOOLCHAIN=local \
+		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/cache -e GOTOOLCHAIN=local \
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
-		qch-upgrade-lifecycle-test go test ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
+		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
+		qch-upgrade-lifecycle-test go test -count=1 ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
 
 vet:
 	go vet ./...
@@ -55,12 +59,11 @@ fmt-check:
 
 frontend-check:
 	node frontend/module_smoke.mjs
-	node frontend/agents_browser_smoke.mjs
+	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v
 
 module-policy-test:
 	node --test frontend/module_policy_test.mjs
 	node --test frontend/smoke_policy_test.mjs
-	go test -buildvcs=false ./internal/architecture
 
 ss-rust-runtime-test:
 	sh deploy/tests/ss-rust-runtime.sh
@@ -69,11 +72,11 @@ core-permission-network-test:
 	python3 -B deploy/tests/core_permission_network_test.py
 
 ci-runner-test:
-	node --test .github/scripts/run-ci-tests.test.mjs
+	node --test .github/scripts/run-ci-tests.test.mjs .github/scripts/require-ci-success.test.mjs
 
 # Import the observer with stub CDP events; this target starts no browser.
 browser-diagnostics-test:
-	node --test frontend/agents_browser_smoke_diagnostics_test.mjs
+	node --test frontend/agents_browser_smoke_diagnostics_test.mjs frontend/browser_scheduler_test.mjs
 
 pr-policy-test:
 	node --test .github/scripts/check-pr.test.mjs

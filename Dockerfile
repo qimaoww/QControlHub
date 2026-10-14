@@ -1,33 +1,31 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.25-alpine AS build-base
+FROM golang:1.25.0-alpine3.22 AS build-base
 
 WORKDIR /src
-
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+# Only production inputs invalidate compilation. Browser fixtures, Go tests,
+# documentation and CI metadata are excluded by .dockerignore.
+COPY cmd ./cmd
+COPY internal ./internal
+COPY install_assets.go ./
+COPY deploy ./deploy
+COPY examples/configs ./examples/configs
 
-FROM build-base AS build-qcontrol-plane
+# Both binaries share one solve/cache across the three bake targets. Normal
+# layers hold modules and compiled objects so GHA can export them: BuildKit
+# cache mounts alone are not included in the external layer cache.
+FROM build-base AS build-objects
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath ./cmd/control-plane ./cmd/agent
 
+FROM build-objects AS build-binaries
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -buildvcs=false \
-    -trimpath \
-    -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /out/qcontrol-plane \
-    ./cmd/control-plane
-
-FROM build-base AS build-qagent
-
-ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -buildvcs=false \
-    -trimpath \
-    -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /out/qagent \
-    ./cmd/agent
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION}" -o /out/ ./cmd/control-plane ./cmd/agent \
+    && mv /out/control-plane /out/qcontrol-plane \
+    && mv /out/agent /out/qagent
 
 FROM alpine:3.22 AS runtime-base
 
@@ -47,8 +45,8 @@ STOPSIGNAL SIGTERM
 
 FROM runtime-base AS qcontrol-plane
 
-COPY --from=build-qcontrol-plane /out/qcontrol-plane /usr/local/bin/qcontrol-plane
-COPY --from=build-qagent /out/qagent /usr/local/lib/qcontrolhub/qagent
+COPY --from=build-binaries /out/qcontrol-plane /usr/local/bin/qcontrol-plane
+COPY --from=build-binaries /out/qagent /usr/local/lib/qcontrolhub/qagent
 COPY deploy/remote/install-agent.sh /usr/local/lib/qcontrolhub/install-agent.sh
 
 ENV QCH_AGENT_BINARY_PATH=/usr/local/lib/qcontrolhub/qagent
@@ -59,7 +57,7 @@ ENTRYPOINT ["/usr/local/bin/qcontrol-plane"]
 
 FROM runtime-base AS qagent
 
-COPY --from=build-qagent /out/qagent /usr/local/bin/qagent
+COPY --from=build-binaries /out/qagent /usr/local/bin/qagent
 
 VOLUME ["/var/lib/qcontrolhub"]
 ENTRYPOINT ["/usr/local/bin/qagent"]

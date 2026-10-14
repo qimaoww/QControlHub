@@ -17,7 +17,8 @@
 #   --checks COMMAND       non-Go checks; repeatable, each runs as one task
 #   --after-checks COMMAND serial checks after all tasks finish; repeatable
 #   --exclude REGEX        extended regex of packages to keep out of the shards
-#   --extra COMMAND        extra task that receives its own database
+#   --extra COMMAND        extra task; waits for the database shard by default
+#   --extra-independent    assert that the extra task never uses PostgreSQL
 #   --dry-run              print the shard assignment and exit
 #   -h, --help             show this help
 set -euo pipefail
@@ -42,6 +43,8 @@ base_url="${QCH_TEST_DATABASE_URL:-}"
 shard_count="${QCH_TEST_SHARDS:-4}"
 exclude=""
 extra=""
+extra_independent=false
+summary_script="$(cd "$(dirname "$0")" && pwd)/go-test-summary.mjs"
 dry_run=false
 declare -a check_commands=()
 declare -a after_check_commands=()
@@ -67,6 +70,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || { printf '%s\n' '--extra requires a command' >&2; exit 2; }
             extra="$2"
             shift 2
+            ;;
+        --extra-independent)
+            extra_independent=true
+            shift
             ;;
         --dry-run)
             dry_run=true
@@ -116,8 +123,8 @@ database_url() {
     printf '%s' "${base_prefix}${base_name}_$1${base_query}"
 }
 
-# One database per shard keeps the sequential package requirement without
-# letting the shards share PostgreSQL's cluster-wide xmin horizon.
+# Separate databases isolate data only. The planner puts all PostgreSQL
+# users in one sequential shard because xmin is cluster-wide.
 ensure_database() {
     local name="$1"
     if [ "$(psql "$base_url" -tAc "SELECT 1 FROM pg_database WHERE datname = '$name'")" = "1" ]; then
@@ -127,81 +134,20 @@ ensure_database() {
     printf 'created test database %s\n' "$name"
 }
 
-packages="$(go list ./...)"
-if [ -n "$exclude" ]; then
-    packages="$(printf '%s\n' "$packages" | grep -Ev "$exclude" || true)"
-fi
-[ -n "$packages" ] || { printf '%s\n' 'no Go packages selected for the test shards' >&2; exit 1; }
-
-# Greedy longest-processing-time packing on the number of test functions:
-# counting tests tracks runtime closely enough to balance the shards without
-# keeping a hardcoded package list in sync with the repository.
-weighted=""
-database_packages=""
-database_tests=0
-while IFS= read -r package; do
-    [ -n "$package" ] || continue
-    directory="$(go list -f '{{.Dir}}' "$package")"
-    test_files=("$directory"/*_test.go)
-    tests=0
-    if [ -e "${test_files[0]}" ]; then
-        tests="$({ grep -hcE '^func (Test|Fuzz|Benchmark)' "${test_files[@]}" || true; } | awk '{ total += $1 } END { print total + 0 }')"
-    fi
-    # The xmin horizon that gates HOT-page pruning is cluster-wide: a
-    # transaction in another database still pins the pages measured by the
-    # store performance invariants. Every package that connects to PostgreSQL
-    # therefore shares one shard and stays sequential with the other database
-    # users, while packages that never connect stay fully parallel.
-    if grep -qs 'QCH_TEST_DATABASE_URL' "$directory"/*.go; then
-        database_packages="${database_packages}${database_packages:+ }${package}"
-        database_tests=$((database_tests + tests))
-    else
-        weighted="${weighted}${tests}"$'\t'"${package}"$'\n'
-    fi
-done <<<"$packages"
-
+# Runtime weights come from real CI package timings; unknown packages use a
+# conservative test-count estimate. The planner loads all metadata once.
+assignment="$(node "$(dirname "$0")/plan-ci-tests.mjs" "$shard_count" "$exclude")"
 declare -a shard_loads=() shard_packages=()
-for ((index = 0; index < shard_count; index++)); do
-    shard_loads[index]=0
-    shard_packages[index]=""
-done
-# Seed the shared database shard before packing the independent packages.
-if [ -n "$database_packages" ]; then
-    shard_loads[0]=$database_tests
-    shard_packages[0]="$database_packages"
-fi
-
-testless=0
-while IFS=$'\t' read -r tests package; do
-    [ -n "$package" ] || continue
-    if [ "$tests" -eq 0 ]; then
-        slot=$((testless % shard_count))
-        testless=$((testless + 1))
-    else
-        slot=0
-        for ((index = 1; index < shard_count; index++)); do
-            if [ "${shard_loads[index]}" -lt "${shard_loads[slot]}" ]; then
-                slot=$index
-            fi
-        done
-        shard_loads[slot]=$((shard_loads[slot] + tests))
-    fi
-    shard_packages[slot]="${shard_packages[slot]}${shard_packages[slot]:+ }${package}"
-done < <(printf '%s' "$weighted" | sort -rn)
-
-# Every selected package must land in exactly one shard.
-selected="$(printf '%s\n' "$packages" | sort)"
-assigned="$(printf '%s\n' "${shard_packages[@]}" | tr ' ' '\n' | grep -v '^$' | sort)"
-if [ "$assigned" != "$selected" ]; then
-    printf '%s\n' 'shard assignment did not cover every selected package' >&2
-    diff <(printf '%s\n' "$selected") <(printf '%s\n' "$assigned") >&2 || true
-    exit 1
-fi
+while IFS=$'\t' read -r weight list; do
+    shard_loads+=("$weight")
+    shard_packages+=("$list")
+done <<<"$assignment"
 
 if [ "$dry_run" = true ]; then
     for ((index = 1; index <= shard_count; index++)); do
         [ -n "${shard_packages[index - 1]}" ] || continue
         printf 'shard %s/%s: %s\n' "$index" "$shard_count" "${shard_packages[index - 1]}"
+        printf 'estimated seconds: %s\n' "${shard_loads[index - 1]}"
     done
     [ -z "$extra" ] || printf 'extra: %s\n' "$extra"
     for command in "${after_check_commands[@]}"; do
@@ -211,11 +157,22 @@ if [ "$dry_run" = true ]; then
 fi
 
 declare -a task_pids=()
+cleanup() {
+    trap - EXIT INT TERM
+    for pid in "${task_pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+    if [ "${#task_pids[@]}" -gt 0 ]; then
+        sleep 1
+        for pid in "${task_pids[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 start_task() {
     local name="$1"
     local command="$2"
     printf '%s\n' "-> $name: $command"
-    ( bash -c "$command" 2>&1 | sed "s|^|[$name] |" ) &
+    setsid bash -o pipefail -c 'bash -c "$1" 2>&1 | sed -u "s|^|[$2] |"' _ "$command" "$name" &
     task_pids+=("$!")
 }
 
@@ -225,26 +182,13 @@ for ((index = 1; index <= shard_count; index++)); do
     name="go-tests-$index-of-$shard_count"
     ensure_database "${base_name}_shard${index}"
     printf '%s\n' "-> $name: $list"
-    (
-        # The frontend package runs the complete real-browser suite, including
-        # full motion playback, before the standalone after-check. Allow
-        # this aggregate suite to finish on shared runners; each browser mode
-        # and interaction still enforces its own unchanged deadline/budget.
-        QCH_TEST_DATABASE_URL="$(database_url "shard${index}")" go test -timeout 20m -p 1 $list 2>&1 |
-            sed "s|^|[$name] |"
-    ) &
+    setsid bash -o pipefail -c '
+        QCH_TEST_DATABASE_URL="$1" go test -json -count=1 -timeout 20m -p 1 -skip "^TestAgentBrowserRuntimeSmoke$" ${@:4} 2>&1 |
+            node "$3" "$2"
+    ' _ "$(database_url "shard${index}")" "$name" "$summary_script" $list &
     task_pids+=("$!")
 done
 
-if [ -n "$extra" ]; then
-    ensure_database "${base_name}_extra"
-    name="go-tests-extra"
-    (
-        QCH_TEST_DATABASE_URL="$(database_url extra)" bash -c "$extra" 2>&1 |
-            sed "s|^|[$name] |"
-    ) &
-    task_pids+=("$!")
-fi
 
 check_index=0
 for command in "${check_commands[@]}"; do
@@ -253,6 +197,20 @@ for command in "${check_commands[@]}"; do
 done
 
 status=0
+if [ -n "$extra" ] && [ "$extra_independent" = false ]; then
+    # A different database still shares xmin: unknown extra tasks wait for
+    # the database shard. Only explicitly database-free extras may overlap.
+    if ! wait "${task_pids[0]}"; then status=1; fi
+fi
+if [ -n "$extra" ]; then
+    ensure_database "${base_name}_extra"
+    name="go-tests-extra"
+    setsid bash -o pipefail -c '
+        QCH_TEST_DATABASE_URL="$1" bash -c "$3" 2>&1 | sed -u "s|^|[$2] |"
+    ' _ "$(database_url extra)" "$name" "$extra" &
+    task_pids+=("$!")
+fi
+
 for pid in "${task_pids[@]}"; do
     if ! wait "$pid"; then
         status=1
@@ -262,8 +220,8 @@ after_check_index=0
 for command in "${after_check_commands[@]}"; do
     after_check_index=$((after_check_index + 1))
     name="after-checks-$after_check_index"
-    printf '%s\n' "-> $name: $command"
-    if ! bash -c "$command" 2>&1 | sed "s|^|[$name] |"; then
+    start_task "$name" "$command"
+    if ! wait "${task_pids[${#task_pids[@]} - 1]}"; then
         status=1
     fi
 done

@@ -60,12 +60,8 @@ async function runTask(name) {
 
 if (tool === "go") {
   record({ type: "tool", tool, args });
-  if (args[0] === "list" && args[1] === "./...") {
-    console.log(config.packages.map((entry) => entry.name).join("\\n"));
-  } else if (args[0] === "list" && args[1] === "-f" && args[2] === "{{.Dir}}") {
-    const entry = config.packages.find((entry) => entry.name === args[3]);
-    if (!entry) throw new Error("unexpected package: " + args[3]);
-    console.log(entry.directory);
+  if (args[0] === "list" && args.at(-1) === "./...") {
+    console.log(config.packages.map((entry) => [entry.name, entry.directory, ...(entry.imports || ["", "", ""])].join("|")).join("\\n"));
   } else if (args[0] === "test") {
     const shard = process.env.QCH_TEST_DATABASE_URL.match(/_shard([0-9]+)(?:\\?|$)/);
     if (!shard) throw new Error("missing shard database URL");
@@ -138,7 +134,7 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
   const events = () => readFileSync(eventPath, "utf8").split("\n")
     .filter(Boolean).map((line) => JSON.parse(line));
 
-  function start({ dryRun = false } = {}) {
+  function start({ dryRun = false, extraIndependent = true } = {}) {
     assert.equal(execution, undefined, "one runner per fixture");
     // Interleave options to ensure after-checks are deferred regardless of
     // where their options appear, while their own CLI order stays intact.
@@ -150,6 +146,7 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
       "--after-checks", taskCommand(afterTasks[1]),
     ];
     if (dryRun) args.push("--dry-run");
+    if (extraIndependent) args.push("--extra-independent");
     const child = spawn("bash", args, {
       cwd: root,
       detached: true,
@@ -205,6 +202,15 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
 
   return {
     start, events, taskCommand, waitForEvents,
+    addPackage(name, imports = ["", "", ""]) {
+      const directory = join(root, "new-package");
+      mkdirSync(directory);
+      writeFileSync(join(directory, "new_test.go"), 'package fixture\nimport "testing"\nfunc TestNew(t *testing.T) {}\n');
+      const path = join(root, "config.json");
+      const config = JSON.parse(readFileSync(path, "utf8"));
+      config.packages.push({ name, directory, imports });
+      writeFileSync(path, JSON.stringify(config));
+    },
     release(name) { writeFileSync(join(root, "gates", name), "released\n"); },
   };
 }
@@ -286,4 +292,39 @@ test("dry-run prints after-check commands in CLI order without executing any tas
   assert.ok(fixture.events().every((event) =>
     event.type === "tool" && event.tool === "go" && event.args[0] === "list"),
   "dry-run must not execute Go tests, psql, checks, extra tasks, or after-checks");
+});
+
+
+test("uses one metadata load, auto-includes a new helper-based database package exactly once", async t => {
+  const fixture = createFixture(t);
+  fixture.addPackage("example.invalid/new", ["", "example.invalid/database", ""]);
+  const completed = await fixture.start({ dryRun: true }).result;
+  assert.equal(completed.code, 0, completed.stdout + completed.stderr);
+  assert.equal(fixture.events().filter(event => event.tool === "go" && event.args[0] === "list").length, 1);
+  const shards = completed.stdout.split("\n").filter(line => line.startsWith("shard "));
+  assert.match(shards[0], /example.invalid\/database.*example.invalid\/new/);
+  assert.equal(shards.join(" ").match(/example.invalid\/new/g).length, 1);
+});
+
+test("unknown extra tasks wait for the cluster-wide database transaction horizon", async t => {
+  const fixture = createFixture(t, { gated: ["go-1"] });
+  const { result } = fixture.start({ extraIndependent: false });
+  await fixture.waitForEvents(events => events.some(event => event.type === "start" && event.task === "go-1"));
+  assert.equal(fixture.events().some(event => event.type === "start" && event.task === "extra"), false);
+  fixture.release("go-1");
+  const completed = await result;
+  assert.equal(completed.code, 0, completed.stdout + completed.stderr);
+  const events = fixture.events();
+  assert.ok(events.findIndex(event => event.type === "finish" && event.task === "go-1") <
+    events.findIndex(event => event.type === "start" && event.task === "extra"));
+});
+
+test("cancellation stops gated subprocesses and never starts after-checks", async t => {
+  const fixture = createFixture(t, { gated: parallelTasks });
+  const { child, result } = fixture.start();
+  await fixture.waitForEvents(events => parallelTasks.every(task => events.some(event => event.type === "start" && event.task === task)));
+  child.kill("SIGTERM");
+  const completed = await result;
+  assert.equal(completed.code, 143);
+  assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
 });
