@@ -49,3 +49,24 @@ func TestDiagnosticRedactionPreservesRealTLSPaths(t *testing.T) {
 		t.Fatalf("redaction lost the real file path or leaked inline data: %s", got)
 	}
 }
+
+func TestDiagnosticRedactionDistinguishesProviderFilesAndInlineKeys(t *testing.T) {
+	content := `proxy-providers:
+  "provider.with[brackets]":
+    type: inline
+    payload:
+    - type: trojan
+      private-key: /etc/qcontrolhub/tls/provider.key
+    - type: wireguard
+      private-key: inline-provider-secret
+`
+	redact := coreDiagnosticRedactor(core.EngineMihomo, content)
+	got := redact("read /etc/qcontrolhub/tls/provider.key failed; inline-provider-secret")
+	if !strings.Contains(got, "/etc/qcontrolhub/tls/provider.key") || strings.Contains(got, "inline-provider-secret") {
+		t.Fatalf("provider file path was redacted or inline key survived: %s", got)
+	}
+	fields := coreDiagnosticFieldLocations(core.EngineMihomo, content)
+	if strings.Count(fields, `proxy-providers["provider.with[brackets]"].payload[0].private-key`) != 1 {
+		t.Fatalf("provider file field was also classified as an inline key: %s", fields)
+	}
+}

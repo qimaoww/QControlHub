@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
 	"net"
 	"net/netip"
@@ -176,6 +177,32 @@ func TestRealityProbeDoesNotWaitForUnreachableAddress(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(time.Second):
 		t.Fatal("successful probe did not cancel the losing connection")
+	}
+}
+
+func TestRealityProbeRetainsEveryAddressFailureAndStage(t *testing.T) {
+	t.Parallel()
+	ipv4, ipv6 := "93.184.216.34:443", "[2001:4860:4860::8888]:443"
+	unreachable, refused := errors.New("network is unreachable"), errors.New("connection refused")
+	_, err := probeRealityTarget(context.Background(), "reality.example", realityProbeOptions{
+		resolver: staticRealityResolver{cname: "reality.example.", addresses: []netip.Addr{
+			netip.MustParseAddr("93.184.216.34"), netip.MustParseAddr("2001:4860:4860::8888"),
+		}},
+		dialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+			if address == ipv6 {
+				return nil, unreachable
+			}
+			return nil, refused
+		},
+		totalTimeout: time.Second, connectionTimeout: time.Second,
+	})
+	if err == nil || !errors.Is(err, unreachable) || !errors.Is(err, refused) {
+		t.Fatalf("lost an address failure: %v", err)
+	}
+	for _, detail := range []string{ipv4, ipv6, "reality.example", "TCP connect failed"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("lost target, address or failure stage %q: %v", detail, err)
+		}
 	}
 }
 

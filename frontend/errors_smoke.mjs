@@ -20,11 +20,19 @@ for (const [raw, explanation] of [
   ["x509: certificate has expired or is not yet valid", /信任或域名验证失败/],
   ["Reality target www.getty.edu: TLS 1.3 handshake failed: x509: certificate signed by unknown authority", /Reality 目标握手失败/],
   ["invalid Reality privateKey: invalid-key-value", /Reality 配置解析失败/],
+  ["WireGuard: invalid private-key", /私钥配置解析失败/],
+  ["tls: invalid private key", /TLS 私钥格式错误/],
+  ["kernel mihomo: configuration fields: listeners[0].reality-config.private-key, listeners[1].private-key; failed to parse certificate: malformed PEM", /TLS 私钥格式错误/],
+  ["parse certificate failed, maybe format error:tls: failed to find any PEM data in certificate input, or path error: open /var/lib/qcontrolhub-mihomo/-----BEGIN CERTIFICATE-----\\ninvalid-cert\\n-----END CERTIFICATE-----: no such file or directory", /TLS 私钥格式错误/],
+  ["parse certificate failed, maybe format error:tls: private key does not match public key, or path error: open /var/lib/qcontrolhub-mihomo/[redacted]: no such file or directory", /TLS 私钥格式错误/],
+  ["parse certificate failed, maybe format error:tls: failed to find any PEM data in certificate input, or path error: open /etc/qcontrolhub/tls/missing.pem: no such file or directory", /文件不存在/],
 ]) {
   const diagnostic = diagnosticError(raw);
   assert.match(diagnostic, explanation);
   if (raw.includes("listeners[1]")) assert.ok(diagnostic.includes("listeners[1]"), "field location must survive diagnostic translation");
 }
+assert.doesNotMatch(diagnosticError("WireGuard: invalid private-key"), /Reality 配置解析失败/);
+assert.doesNotMatch(diagnosticError("kernel mihomo: configuration fields: listeners[0].reality-config.private-key; invalid private key"), /Reality 配置解析失败/);
 const oldFailure = `kernel mihomo service qagent-mihomo.service: read certificate/key /var/lib/qcontrolhub-mihomo/${"A".repeat(43)} as qcontrolhub-core: exit status 1`;
 assert.match(diagnosticError(oldFailure), /文件无法读取/);
 assert.ok(!diagnosticError(oldFailure).includes("A".repeat(43)), "historical task errors must mask the inline Reality key");

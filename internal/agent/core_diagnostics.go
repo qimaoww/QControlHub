@@ -46,6 +46,11 @@ func coreInlineDiagnosticKeys(engine core.Engine, content string) map[string]str
 				if field != "" {
 					position = field + "." + key
 				}
+				if field == "proxy-providers" {
+					// Match the quoted provider-name locations used by the file
+					// collector, including names containing dots or brackets.
+					position = fmt.Sprintf("%s[%q]", field, key)
+				}
 				switch key {
 				case "private-key", "private_key", "privateKey", "mldsa65Seed", "mldsa65_seed", "ech-key":
 					remember(child, position)

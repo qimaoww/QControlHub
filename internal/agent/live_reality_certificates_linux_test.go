@@ -254,9 +254,11 @@ func TestMihomoRealityAndTLSManagedLifecycle(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				process := startMihomoForTrafficTest(t, base.Binary, t.TempDir(), "config.yaml", string(clientData), clientPort)
-				assertProxyTraffic(t, clientPort, backend.URL, "reality-and-tls-ok", func() string { return "managed server " + spec.Service }, func() string { return redact(process.log(t)) })
-				process.stop(t)
+				func() {
+					process := startMihomoForTrafficTest(t, base.Binary, t.TempDir(), "config.yaml", string(clientData), clientPort)
+					defer process.stop(t)
+					assertProxyTraffic(t, clientPort, backend.URL, "reality-and-tls-ok", func() string { return "managed server " + spec.Service }, func() string { return redact(process.log(t)) })
+				}()
 			}
 			t.Log("save validation -> deploy -> service identity/sandbox -> exported Reality, file TLS and inline TLS traffic passed")
 		})
