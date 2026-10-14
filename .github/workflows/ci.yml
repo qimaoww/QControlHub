@@ -56,7 +56,7 @@ jobs:
       - name: Restore Debian Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v3-linux-${{ runner.arch }}-go1.25.0-debian12-glibc
+          identity: qch-v4-linux-${{ runner.arch }}-go1.25.0-debian12-glibc
           paths: |
             ${{ env.GOCACHE }}
             ${{ env.GOMODCACHE }}
@@ -154,7 +154,7 @@ jobs:
       - name: Restore Alpine Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.alpine-toolchain.outputs.identity }}
+          identity: qch-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.alpine-toolchain.outputs.identity }}
           paths: |
             .ci-cache/alpine-build
             .ci-cache/alpine-mod
@@ -220,7 +220,7 @@ jobs:
       - name: Restore sandbox Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sandbox-toolchain.outputs.identity }}-sandbox
+          identity: qch-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.sandbox-toolchain.outputs.identity }}-sandbox
           paths: |
             ${{ env.GOMODCACHE }}
             ${{ env.QCH_SANDBOX_GOCACHE }}
@@ -401,7 +401,7 @@ jobs:
           target: ${{ matrix.target }}
           push: true
           build-args: VERSION=${{ github.sha }}
-          cache-from: type=gha,scope=qch-v3-${{ matrix.target }}
+          cache-from: type=gha,scope=qch-v4-${{ matrix.target }}
           provenance: mode=max
           sbom: true
           tags: |

@@ -1,5 +1,5 @@
 variable "VERSION" { default = "dev" }
-variable "CACHE_SCOPE" { default = "qch-v3" }
+variable "CACHE_SCOPE" { default = "qch-v4" }
 
 group "default" {
   targets = ["qcontrol-plane", "qagent", "qcontrol-web"]

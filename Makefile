@@ -53,7 +53,7 @@ upgrade-sandbox-test:
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
 		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
 		qch-upgrade-lifecycle-test sh -ec 'trap '\''chown -R "$$QCH_CACHE_UID:$$QCH_CACHE_GID" /cache'\'' EXIT; \
-		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v' 
+		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v'
 
 vet:
 	go vet ./...
