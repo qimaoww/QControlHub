@@ -64,10 +64,10 @@ func TestIPQualityPrintedReportBudgetFitsTheResultLimit(t *testing.T) {
 	}
 }
 
-func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
+func TestIPQualityProgramUsesPreparedScriptAndPrivacy(t *testing.T) {
 	for _, want := range []string{
-		"curl -Ls https://IP.Check.Place",
-		`-y -p -f -o "$1"`,
+		`bash --noprofile --norc "$2"`,
+		`-n -y -p -f -o "$1"`,
 	} {
 		if !strings.Contains(ipQualityProgram, want) {
 			t.Fatalf("IPQuality program is missing %q", want)

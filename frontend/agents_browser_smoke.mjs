@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { runBrowserWorkers } from "./browser_scheduler.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -146,7 +147,7 @@ const chrome = !isMain ? null : [
 const address = server.address();
 
 const delay = (milliseconds) =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
+  new Promise((resolve) => setTimeout(resolve, milliseconds).unref());
 
 const stderrLimit = 8192;
 const diagnosticText = (value, limit = 2048) => String(value ?? "").slice(0, limit);
@@ -507,20 +508,37 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
   }
 }
 
+const activeBrowsers = new Set();
+const activeProfiles = new Set();
 async function stopBrowser(child) {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  child.kill("SIGTERM");
-  await Promise.race([
-    exited,
-    delay(3000).then(() => {
-      child.kill("SIGKILL");
-      return exited;
-    }),
-  ]);
+  if (!child.pid) return;
+  const kill = signal => {
+    try { process.kill(-child.pid, signal); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
+  };
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise(resolve => child.once("exit", resolve));
+    kill("SIGTERM");
+    await Promise.race([exited, delay(3000)]);
+  }
+  kill("SIGKILL");
+  activeBrowsers.delete(child);
+}
+if (isMain) for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+  process.once(signal, async () => {
+    process.stderr.write(`browser worker cancelled by ${signal}\n`);
+    await Promise.all([...activeBrowsers].map(stopBrowser));
+    await Promise.all([...activeProfiles].map(profile => rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
+    server.closeAllConnections();
+    server.close();
+    process.exit(code);
+  });
 }
 
 async function runMode(mode) {
+  const timing = { mode, startupMs: null, testMs: null, cleanupMs: null, passed: false };
+  const started = performance.now();
+  let testStarted;
   const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
   const diagnostics = {
     browser: { exitCode: null, signalCode: null },
@@ -533,6 +551,7 @@ async function runMode(mode) {
   try {
     assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
     profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
+    activeProfiles.add(profile);
     await chmod(profile, 0o700);
     const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") || mode.endsWith("reduced") ? "about:blank" : url;
@@ -563,8 +582,9 @@ async function runMode(mode) {
         "--remote-debugging-port=0",
         initialURL,
       ],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      { detached: true, stdio: ["ignore", "ignore", "pipe"] },
     );
+    activeBrowsers.add(child);
     child.once("error", error => { diagnostics.browser.error = diagnosticText(error.message); });
     child.once("exit", (exitCode, signalCode) => { diagnostics.browser = { exitCode, signalCode }; });
     const debugOrigin = await Promise.race([
@@ -586,6 +606,8 @@ async function runMode(mode) {
         throw new Error(`Chrome ${mode} 调试端口启动超时：${stderr}`);
       }),
     ]);
+    timing.startupMs = performance.now() - started;
+    testStarted = performance.now();
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
     const gestureMode = mode.startsWith("motion-cards") || ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
     const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode, diagnostics);
@@ -594,6 +616,7 @@ async function runMode(mode) {
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}`,
     );
+    timing.passed = true;
     if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
     if (result.measurements && process.env.QCH_BROWSER_SMOKE_REPORT) {
       await mkdir(process.env.QCH_BROWSER_SMOKE_REPORT, { recursive: true });
@@ -602,6 +625,8 @@ async function runMode(mode) {
   } catch (error) {
     throw smokeFailure(mode, url, error, diagnostics, stderr);
   } finally {
+    const cleanupStarted = performance.now();
+    timing.testMs = testStarted ? cleanupStarted - testStarted : null;
     if (child) await stopBrowser(child);
     if (profile) await rm(profile, {
       recursive: true,
@@ -609,12 +634,27 @@ async function runMode(mode) {
       maxRetries: 5,
       retryDelay: 100,
     });
+    activeProfiles.delete(profile);
+    timing.cleanupMs = performance.now() - cleanupStarted;
+    timing.elapsedMs = performance.now() - started;
+    process.stdout.write(`browser timing ${JSON.stringify(timing)}\n`);
+    if (process.env.QCH_CI_REPORT_DIR) {
+      await mkdir(process.env.QCH_CI_REPORT_DIR, { recursive: true });
+      await writeFile(join(process.env.QCH_CI_REPORT_DIR, `browser-${mode}.json`), JSON.stringify(timing) + "\n");
+    }
   }
 }
 
 if (isMain) try {
   const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly,ip-quality-reduced,ip-quality-mobile-reduced";
-  for (const mode of modes.split(",")) await runMode(mode);
+  const selected = modes.split(",");
+  assert.ok(selected.every(mode => /^[a-z0-9-]+$/.test(mode)), "invalid browser mode");
+  assert.equal(new Set(selected).size, selected.length, "duplicate browser mode");
+  if (process.env.QCH_BROWSER_SMOKE_WORKER) {
+    for (const mode of selected) await runMode(mode);
+  } else {
+    await runBrowserWorkers(fileURLToPath(import.meta.url), selected);
+  }
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
   await new Promise((resolve) => server.close(resolve));

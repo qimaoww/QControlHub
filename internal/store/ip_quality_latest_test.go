@@ -108,12 +108,18 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 		t.Fatalf("claim = %+v %v", claimed, err)
 	}
 	assertRetained(core.TaskRunning)
+	previousFinishedAt := *read(owner)[first.ID].LastSuccessful.FinishedAt
+	const preparationFailure = "安装依赖：依赖下载/软件源失败；命令 apt-get update；退出状态 exit status 100；可重试=true"
 	if err := db.CompleteTask(ctx, first.ID, pending.ID, core.TaskResultRequest{
-		LeaseID: claimed.LeaseID, Success: false, Error: "network failure",
+		LeaseID: claimed.LeaseID, Success: false, Error: preparationFailure,
+		Output: "检查依赖：需要补齐 jq\n安装依赖：apt-get update\n失败：软件源不可用",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	assertRetained(core.TaskFailed)
+	if record := read(owner)[first.ID]; record.Error != preparationFailure || !record.LastSuccessful.FinishedAt.Equal(previousFinishedAt) {
+		t.Fatalf("dependency failure lost diagnosis or changed the actual successful detection time: %+v", record)
+	}
 	if records, err := db.ListIPQualityRecords(owner, pending.CreatedAt.UTC().Format(time.DateOnly), "UTC"); err != nil ||
 		len(records) != 1 || records[0].LastSuccessful != nil || records[0].Result != nil {
 		t.Fatalf("historical day inherited a report from another day: %+v %v", records, err)

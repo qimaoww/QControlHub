@@ -12,6 +12,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  GOFLAGS: -buildvcs=false
+  QCH_CI_REPORT_DIR: ${{ github.workspace }}/.ci-report
+
 jobs:
   debian:
     name: Debian / systemd
@@ -31,7 +35,9 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      QCH_CHROME_BIN: /usr/bin/chromium
+      GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
+      GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
+      QCH_CI_PLATFORM: debian
       QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qcontrolhub?sslmode=disable
     steps:
       - name: Check out repository
@@ -40,10 +46,19 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
+        id: debian-go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
+
+      - name: Restore Debian Go objects and modules
+        uses: ./.github/actions/go-cache
+        with:
+          identity: qch-v4-linux-${{ runner.arch }}-go${{ steps.debian-go.outputs.go-version }}-debian12-glibc
+          paths: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -64,18 +79,21 @@ jobs:
           # iproute2 provides the ip binary that sing-box dual accounting uses
           # to prove existing policy routing cannot hijack outbound marks.
           # postgresql-client creates one isolated database per test shard.
-          apt-get install --no-install-recommends --yes chromium openssl iproute2 postgresql-client
+          # Agent tests validate the real, root-owned systemctl helper. It was
+          # previously pulled through Chromium's udev dependencies.
+          apt-get install --no-install-recommends --yes systemd openssl iproute2 postgresql-client
+
+      - name: Download Go modules
+        run: sh .github/scripts/ci-time.sh modules go mod download
 
       - name: Run project checks with PostgreSQL
         env:
           QCH_TEST_SHARDS: "4"
         run: |
-          bash .github/scripts/run-ci-tests.sh \
-            --checks "make non-browser-checks" \
-            --after-checks "make browser-checks"
+          bash .github/scripts/run-ci-tests.sh --checks "make non-browser-checks"
 
       - name: Build release binaries
-        run: make build VERSION="${{ github.sha }}"
+        run: sh .github/scripts/ci-time.sh release-build make build VERSION="${{ github.sha }}"
 
       - name: Validate systemd bootstrap
         shell: bash
@@ -96,6 +114,15 @@ jobs:
             grep -q '^Description=.* managed by QAgent$' "/etc/systemd/system/qagent-$service.service"
           done
           test -f /etc/systemd/journald@qagent-cores.conf.d/10-qcontrolhub-volatile.conf
+
+      - name: Upload Debian timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-timings-debian
+          path: .ci-report
+          if-no-files-found: warn
+          include-hidden-files: true
 
   alpine:
     name: Alpine / OpenRC
@@ -119,21 +146,39 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Pull and identify the Alpine toolchain
+        id: alpine-toolchain
+        run: sh .github/scripts/container-toolchain.sh golang:1.25-alpine
+
+      - name: Restore Alpine Go objects and modules
+        uses: ./.github/actions/go-cache
+        with:
+          identity: qch-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.alpine-toolchain.outputs.identity }}
+          paths: |
+            .ci-cache/alpine-build
+            .ci-cache/alpine-mod
+
       - name: Run project checks on musl/OpenRC
         run: |
-          docker run --rm --init --network host \
-            -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
+          sh .github/scripts/run-ci-container.sh --rm --init --network host \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
             -e QCH_TEST_SHARDS=4 \
+            -e GOFLAGS=-buildvcs=false -e QCH_CI_PLATFORM=alpine \
+            -e QCH_CI_REPORT_DIR=/src/.ci-report \
+            -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod \
+            -v "$PWD/.ci-cache/alpine-build:/cache/build" \
+            -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -e VERSION="${{ github.sha }}" \
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
-              apk add --no-cache bash chromium coreutils findutils git libcap make nftables nodejs openrc openssl postgresql-client
+              # Module smoke uses zh Intl.DisplayNames. Chromium previously
+              # supplied full ICU data transitively; keep that data explicitly.
+              sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client
+              sh .github/scripts/ci-time.sh modules go mod download
               bash .github/scripts/run-ci-tests.sh \
                 --checks "make alpine-non-browser-checks" \
                 --exclude "/internal/agent$" \
-                --extra "make alpine-agent-test" \
-                --after-checks "make browser-checks"
-              make build VERSION="$VERSION"
+                --extra "make alpine-agent-test" --extra-independent
+              sh .github/scripts/ci-time.sh release-build make build VERSION="$VERSION"
               sh deploy/tests/existing-core-openrc.sh
               sh -n deploy/remote/install-agent.sh
               sh -n deploy/bootstrap-core-services.sh
@@ -146,16 +191,38 @@ jobs:
               done
             '
 
+      - name: Upload Alpine timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-timings-alpine
+          path: .ci-report
+          if-no-files-found: warn
+          include-hidden-files: true
+
   upgrade-sandbox:
     name: Agent upgrade read-only sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GOMODCACHE: ${{ github.workspace }}/.ci-cache/sandbox-mod
+      QCH_SANDBOX_GOCACHE: ${{ github.workspace }}/.ci-cache/sandbox-build
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
+      - name: Pull and identify the sandbox toolchain
+        id: sandbox-toolchain
+        run: sh .github/scripts/container-toolchain.sh golang:1.25-bookworm
+      - name: Restore sandbox Go objects and modules
+        uses: ./.github/actions/go-cache
+        with:
+          identity: qch-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.sandbox-toolchain.outputs.identity }}-sandbox
+          paths: |
+            ${{ env.GOMODCACHE }}
+            ${{ env.QCH_SANDBOX_GOCACHE }}
       - run: go mod download
       - run: make upgrade-sandbox-test
       - run: make ss-rust-runtime-test
@@ -237,7 +304,7 @@ jobs:
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent
           # SYS_PTRACE belongs to the fixture Agent, which verifies cross-UID
           # /proc/exe identity. Each core is still bounded to BIND_SERVICE+ADMIN.
-          docker run --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
+          sh .github/scripts/run-ci-container.sh --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
             -w /src golang:1.25-alpine sh -ec '
@@ -254,45 +321,57 @@ jobs:
                 python3 deploy/tests/core-permissions-runtime.py
             '
 
-  images:
-    name: Build ${{ matrix.target }} image
-    needs: [debian, alpine, upgrade-sandbox, mieru-udp, core-permissions]
+  # Build immediately. Bake shares compilation vertices across all targets.
+  build-images:
+    name: Prepare all images
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [qcontrol-plane, qagent, qcontrol-web]
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Validate Compose configuration
-        if: matrix.target == 'qcontrol-plane'
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           QCH_ADMIN_TOKEN: ci-admin-token
         run: |
           docker compose config --quiet
           bash deploy/tests/quick-start-compose.sh
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Build image
-        uses: docker/build-push-action@v7
+      - name: Build all images with shared objects
+        uses: docker/bake-action@v6
+        env:
+          VERSION: ${{ github.sha }}
         with:
-          context: .
-          target: ${{ matrix.target }}
-          build-args: VERSION=${{ github.sha }}
-          outputs: type=cacheonly
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          files: docker-bake.hcl
+          targets: |
+            qcontrol-plane
+            qagent
+            qcontrol-web
+
+  # These exact names are required by main-protection (ruleset 20995958).
+  # always() + explicit success validation fails closed for skips/cancellation.
+  images:
+    name: Build ${{ matrix.target }} image
+    if: ${{ always() }}
+    needs: [debian, alpine, upgrade-sandbox, mieru-udp, core-permissions, build-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [qcontrol-plane, qagent, qcontrol-web]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every necessary job to succeed
+        env:
+          QCH_CI_NEEDS: ${{ toJSON(needs) }}
+        run: node .github/scripts/require-ci-success.mjs
 
   publish:
     name: Publish ${{ matrix.target }} image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'qimaoww/qcontrolhub'
-    needs: images
+    needs: [images, debian, alpine, upgrade-sandbox, mieru-udp, core-permissions, build-images]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -329,7 +408,7 @@ jobs:
           target: ${{ matrix.target }}
           push: true
           build-args: VERSION=${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-from: type=gha,scope=qch-v4-${{ matrix.target }}
           provenance: mode=max
           sbom: true
           tags: |

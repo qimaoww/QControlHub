@@ -1,0 +1,603 @@
+{
+  "run": 38563741568,
+  "attempt": 1,
+  "url": "https://github.com/qimaoww/QControlHub/actions/runs/38563741568",
+  "headSHA": "3fd0afcdeb3217eac56b356e00f36b82175226d3",
+  "conclusion": "success",
+  "startedAt": "2026-10-14T12:25:56Z",
+  "checksSeconds": 481.0,
+  "jobMinutes": 22.1,
+  "billingNote": "Actual aggregate job duration, excluding publication; not GitHub billed minute rounding.",
+  "jobs": [
+    {
+      "name": "Alpine / OpenRC",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:33:46Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 467.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success",
+          "seconds": 11.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Pull and identify the Alpine toolchain",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Restore Alpine Go objects and modules",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run project checks on musl/OpenRC",
+          "conclusion": "success",
+          "seconds": 438.0
+        },
+        {
+          "name": "Upload Alpine timing evidence",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Restore Alpine Go objects and modules",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "All cores / actual service permissions",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:26:00Z",
+      "completedAt": "2026-10-14T12:27:44Z",
+      "startOffsetSeconds": 4.0,
+      "queueSeconds": 3.0,
+      "runSeconds": 104.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 10.0
+        },
+        {
+          "name": "Verify fixture address readiness regressions",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Fetch verified official kernels",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Verify full systemd service policies and forwarding",
+          "conclusion": "success",
+          "seconds": 22.0
+        },
+        {
+          "name": "Verify Alpine OpenRC policies, migration and forwarding",
+          "conclusion": "success",
+          "seconds": 59.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Mieru UDP over TCP / v1.19.32",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:27:05Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 66.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 9.0
+        },
+        {
+          "name": "Fetch the official pinned Mihomo release",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Verify real forwarding under systemd socket policies",
+          "conclusion": "success",
+          "seconds": 51.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Agent upgrade read-only sandbox",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:27:41Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 102.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 11.0
+        },
+        {
+          "name": "Pull and identify the sandbox toolchain",
+          "conclusion": "success",
+          "seconds": 23.0
+        },
+        {
+          "name": "Restore sandbox Go objects and modules",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run go mod download",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run make upgrade-sandbox-test",
+          "conclusion": "success",
+          "seconds": 42.0
+        },
+        {
+          "name": "Run make ss-rust-runtime-test",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Post Restore sandbox Go objects and modules",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Mieru UDP over TCP / v1.19.31",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:26:52Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 53.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Fetch the official pinned Mihomo release",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Verify real forwarding under systemd socket policies",
+          "conclusion": "success",
+          "seconds": 38.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Debian / systemd",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:33:21Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 442.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success",
+          "seconds": 26.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Set up Go",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Restore Debian Go objects and modules",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Set up Node.js",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Require a schema version bump for schema changes",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Install Debian test dependencies",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Download Go modules",
+          "conclusion": "success",
+          "seconds": 64.0
+        },
+        {
+          "name": "Run project checks with PostgreSQL",
+          "conclusion": "success",
+          "seconds": 289.0
+        },
+        {
+          "name": "Build release binaries",
+          "conclusion": "success",
+          "seconds": 16.0
+        },
+        {
+          "name": "Validate systemd bootstrap",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Upload Debian timing evidence",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Set up Node.js",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Restore Debian Go objects and modules",
+          "conclusion": "success",
+          "seconds": 20.0
+        },
+        {
+          "name": "Post Set up Go",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Prepare all images",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:25:57Z",
+      "startedAt": "2026-10-14T12:25:59Z",
+      "completedAt": "2026-10-14T12:27:07Z",
+      "startOffsetSeconds": 3.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 68.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Validate Compose configuration",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Build all images with shared objects",
+          "conclusion": "success",
+          "seconds": 50.0
+        },
+        {
+          "name": "Post Build all images with shared objects",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Build qcontrol-web image",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:33:46Z",
+      "startedAt": "2026-10-14T12:33:49Z",
+      "completedAt": "2026-10-14T12:33:56Z",
+      "startOffsetSeconds": 473.0,
+      "queueSeconds": 3.0,
+      "runSeconds": 7.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Require every necessary job to succeed",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Build qagent image",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:33:46Z",
+      "startedAt": "2026-10-14T12:33:49Z",
+      "completedAt": "2026-10-14T12:33:57Z",
+      "startOffsetSeconds": 473.0,
+      "queueSeconds": 3.0,
+      "runSeconds": 8.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Require every necessary job to succeed",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Build qcontrol-plane image",
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-14T12:33:46Z",
+      "startedAt": "2026-10-14T12:33:48Z",
+      "completedAt": "2026-10-14T12:33:57Z",
+      "startOffsetSeconds": 472.0,
+      "queueSeconds": 2.0,
+      "runSeconds": 9.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Require every necessary job to succeed",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    }
+  ]
+}

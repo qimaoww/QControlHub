@@ -42,7 +42,16 @@ done
 [ -n "$url" ] || { printf '%s\n' 'fake curl: missing url' >&2; exit 1; }
 path=$(printf '%s' "$url" | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##')
 if [ "$path" = '/api/v1/agent-binary' ]; then
-  cp /bin/true "$dest"
+  cat > "$dest" <<'AGENT'
+#!/bin/sh
+if [ "${1:-}" = prepare-ip-quality ]; then
+  printf '%s\n' 'prepare-ip-quality' >> "$QCH_DEPENDENCY_LOG"
+  if [ "${QCH_SIMULATE_DEPENDENCY_FAILURE:-false}" = true ]; then
+    printf '%s\n' 'dependency repository unavailable (fixture)' >&2
+    exit 1
+  fi
+fi
+AGENT
   exit 0
 fi
 asset_path=${path#/install-assets}
@@ -108,6 +117,7 @@ chmod 0755 "$fake_bin/curl" "$fake_bin/systemctl" "$fake_bin/apt-get" "$fake_bin
 export QCH_ASSET_ROOT="$repo_root"
 export QCH_SYSTEMCTL_LOG="$test_root/systemctl.log"
 export QCH_PACKAGE_LOG="$test_root/package.log"
+export QCH_DEPENDENCY_LOG="$test_root/dependency.log"
 export QCH_CURL="$fake_bin/curl"
 export QCH_SYSTEMCTL="$fake_bin/systemctl"
 export QCH_NFT="$fake_bin/nft"
@@ -128,8 +138,21 @@ export PATH="$fake_bin:$PATH"
 control="http://sandbox.local"
 token="test-enrollment-token"
 
+echo '== dependency failure stops before Agent replacement/service startup =='
+if QCH_SIMULATE_DEPENDENCY_FAILURE=true sh "$installer" "$control" "$token" > "$test_root/dependency-failure.log" 2>&1; then
+  printf '%s\n' 'dependency failure: installer incorrectly succeeded' >&2
+  exit 1
+fi
+grep -q 'dependency repository unavailable' "$test_root/dependency-failure.log"
+[ ! -e "$QCH_AGENT_BIN_DIR/qagent" ] || { printf '%s\n' 'dependency failure: Agent candidate replaced the installed binary' >&2; exit 1; }
+if [ -f "$QCH_SYSTEMCTL_LOG" ] && grep -q '^restart qagent.service$' "$QCH_SYSTEMCTL_LOG"; then
+  printf '%s\n' 'dependency failure: Agent service was started' >&2
+  exit 1
+fi
+
 echo '== first install (fresh node) =='
 sh "$installer" "$control" "$token" > "$test_root/first.log"
+grep -q '^prepare-ip-quality$' "$QCH_DEPENDENCY_LOG" || { printf '%s\n' 'first install: fixed dependency utility was not invoked' >&2; exit 1; }
 [ -x "$QCH_NFT" ] || { printf '%s\n' 'first install: nftables executable was not installed' >&2; exit 1; }
 grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
 grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
