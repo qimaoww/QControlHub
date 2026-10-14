@@ -24,4 +24,8 @@ func TestDiagnosticRedactionMasksKeyAssignmentsPEMAndHistoricalPaths(t *testing.
 	if got := RedactDiagnostic(path); got != path {
 		t.Fatalf("lost actionable field or file location: %s", got)
 	}
+	path = "certificate file access at listeners[1].private-key (/var/lib/qcontrolhub-mihomo/" + strings.Repeat("A", 43) + "): permission denied"
+	if got := RedactDiagnostic(path); got != path {
+		t.Fatalf("a real file was mistaken for a historical inline key: %s", got)
+	}
 }

@@ -42,7 +42,7 @@ export function redactDiagnostic(value) {
   return String(value ?? "")
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[redacted private PEM]")
     .replace(/((?:["']?(?:private[-_]?key|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\]]+)/gi, "$1[redacted]")
-    .replace(/(\/var\/lib\/qcontrolhub-mihomo(?:-shr_[a-f0-9]+)?\/)[A-Za-z0-9_-]{43}(?=["'\s]|$)/g, "$1[redacted]");
+    .replace(/(read certificate\/key \/var\/lib\/qcontrolhub-mihomo(?:-shr_[a-f0-9]+)?\/)[A-Za-z0-9_-]{43}(?=["'\s]|$)/g, "$1[redacted]");
 }
 
 export function diagnosticError(value) {

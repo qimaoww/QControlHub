@@ -29,6 +29,8 @@ const oldFailure = `kernel mihomo service qagent-mihomo.service: read certificat
 assert.match(diagnosticError(oldFailure), /文件无法读取/);
 assert.ok(!diagnosticError(oldFailure).includes("A".repeat(43)), "historical task errors must mask the inline Reality key");
 assert.ok(!redactDiagnostic(oldFailure).includes("A".repeat(43)), "task output and journal display must mask historical paths");
+const realTLSPath = `certificate file access at listeners[1].private-key (/var/lib/qcontrolhub-mihomo/${"A".repeat(43)}): permission denied`;
+assert.ok(diagnosticError(realTLSPath).includes("A".repeat(43)), "a real TLS filename that resembles a key must remain locatable");
 assert.equal(redactDiagnostic('invalid "privateKey": inline-secret'), 'invalid "privateKey": [redacted]');
 assert.ok(!diagnosticError("中文诊断 private-key: inline-secret").includes("inline-secret"));
 assert.equal(redactDiagnostic("-----BEGIN PRIVATE KEY-----\ninline-secret\n-----END PRIVATE KEY-----"), "[redacted private PEM]");
