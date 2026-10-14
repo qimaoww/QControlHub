@@ -29,6 +29,11 @@ test:
 alpine-agent-test:
 	$(ALPINE_AGENT_TESTS)
 
+# Public detector/repository availability is required; normal CI uses fixtures.
+.PHONY: ip-quality-clean-test
+ip-quality-clean-test:
+	sh deploy/tests/ip-quality-clean.sh
+
 alpine-test: alpine-agent-test
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -timeout 20m -p 1 $$packages
 

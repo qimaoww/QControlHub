@@ -49,6 +49,7 @@ Shell follows curl, including leading-dot exclusions matching the apex host.
 | CN IP feeds | `internal/cnip` downloader's actual host, retaining source and public-address validation |
 | Mainland route/domain feeds | Actual Agent or control-plane process, retaining parsing and last-known-good caches |
 | Flag SVG files | Control-plane process, retaining response limits and SVG validation |
+| IPQuality script and official public reference files | Actual Agent/helper process, official source checks, bounded HTTP/content validation and the same IPv6 policy; see [dependency preparation](ip-quality-dependencies.md) |
 | Control-plane Agent binary and installation assets | Existing control-plane origin and enrollment authentication; never sent to GitHub acceleration |
 
 GHCR image pulls/checks remain OCI registry operations. URLs embedded in engine

@@ -96,17 +96,22 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")
 	} else if task.Action == core.ActionIPQuality {
 		check := c.ipQualityFunc
+		var report core.IPQualityResult
+		var err error
 		if check == nil {
-			check = runIPQuality
+			report, output, err = runIPQualityDetailed(ctx)
+		} else {
+			report, err = check(ctx)
 		}
-		report, err := check(ctx)
 		if err == nil {
 			report, err = core.NormalizeIPQualityResult(&report)
 		}
 		executionErr = err
 		if err == nil {
 			ipQuality = &report
-			output = "IPQuality check completed"
+			if output == "" {
+				output = "IPQuality check completed"
+			}
 		}
 	} else if task.Action.SystemBBR() {
 		output, executionErr = c.bbr.Execute(ctx, task.Action, task.TCPSettings)

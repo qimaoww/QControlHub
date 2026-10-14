@@ -101,3 +101,29 @@ install_iproute2() {
     exit 1
   }
 }
+install_download_prerequisites() {
+  if command -v "$download_cmd" >/dev/null 2>&1; then
+    # Custom download commands/CA paths belong to the existing installer API.
+    [ -n "${QCH_CURL:-}${QCH_TLS_CA_FILE:-}" ] && return 0
+    for certificate_bundle in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem /etc/ssl/cert.pem; do
+      [ ! -s "$certificate_bundle" ] || return 0
+    done
+  fi
+  printf '%s\n' 'preparing curl and CA certificates for HTTPS downloads'
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update &&
+      DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=30 -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends curl ca-certificates || return 1
+  elif command -v apk >/dev/null 2>&1; then
+    apk --wait 30 add --no-cache curl ca-certificates || return 1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl ca-certificates || return 1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y curl ca-certificates || return 1
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install curl ca-certificates || return 1
+  else
+    printf '%s\n' 'curl is missing and no supported package manager exists (apt-get/apk/dnf/yum/zypper)' >&2
+    return 1
+  fi
+  command -v "$download_cmd" >/dev/null 2>&1
+}

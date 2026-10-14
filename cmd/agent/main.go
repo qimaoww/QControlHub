@@ -20,6 +20,41 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "ip-quality" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		report, err := agent.RunIPQualityCheck(ctx, func(stage string) { fmt.Fprintln(os.Stderr, stage) })
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "prepare-ip-quality" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		if err := agent.RunIPQualityDependencyPreparation(ctx, func(stage string) { fmt.Println(stage) }); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "fetch-ip-quality-resource" {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		content, err := agent.FetchIPQualityResource(ctx, os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if _, err := os.Stdout.Write(content); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "system-bbr" {
 		if (len(os.Args) != 3 && len(os.Args) != 4) || !core.Action(os.Args[2]).SystemBBR() {
 			fmt.Fprintln(os.Stderr, "usage: qagent system-bbr enable-bbr|disable-bbr|configure-tcp [settings-json]")
