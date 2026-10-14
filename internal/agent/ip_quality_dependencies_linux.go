@@ -213,6 +213,8 @@ func (p ipQualityDependencyPreparer) prepare(ctx context.Context, progress func(
 func classifyIPQualityInstallFailure(output string) (string, string, bool) {
 	value := strings.ToLower(output)
 	switch {
+	case (strings.Contains(value, "seteuid") || strings.Contains(value, "setresuid") || strings.Contains(value, "setegid") || strings.Contains(value, "setresgid")) && (strings.Contains(value, "operation not permitted") || strings.Contains(value, "permission denied")):
+		return "安装服务身份切换权限不足", "更新 Agent 并检查安装服务的 CAP_SETUID/CAP_SETGID；若仍失败，检查宿主机或容器的 capability 限制", false
 	case strings.Contains(value, "permission denied"), strings.Contains(value, "read-only"), strings.Contains(value, "operation not permitted"), strings.Contains(value, "superuser"):
 		return "系统权限或只读文件系统", "检查 root 权限、磁盘挂载和 Agent 安装服务配置", false
 	case strings.Contains(value, "lock"), strings.Contains(value, "another app"):
@@ -345,6 +347,12 @@ func prepareIPQualityDependencies(ctx context.Context, progress func(string)) er
 func ipQualityDependencyHelperArguments(executable, unit string) []string {
 	return []string{"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec", "--unit=" + unit,
 		"--property=User=root", "--property=UMask=0022", "--property=NoNewPrivileges=yes",
+		// systemd 257 drops CAP_SETUID while setting up seccomp unless explicitly
+		// requested as ambient. NoNewPrivileges then prevents root exec from
+		// restoring it, so APT cannot switch to _apt (including mirror+file).
+		// UID/GID changes are needed only by this fixed package helper; APT's
+		// own privilege drop clears ambient capabilities in its _apt children.
+		"--property=AmbientCapabilities=CAP_SETUID CAP_SETGID",
 		// strict protects the root mount and permits explicit package-store
 		// exceptions. full creates conflicting read-only /usr and /etc mounts
 		// on systemd 252, even when those exact paths are in ReadWritePaths.

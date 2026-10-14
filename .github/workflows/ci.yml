@@ -226,6 +226,8 @@ jobs:
       - run: go mod download
       - run: make upgrade-sandbox-test
       - run: make ss-rust-runtime-test
+      - name: Verify IPQuality installation with actual systemd and mirror+file
+        run: make ip-quality-systemd-test
 
   core-permissions:
     name: All cores / actual service permissions

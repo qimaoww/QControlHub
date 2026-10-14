@@ -48,7 +48,7 @@ func TestIPQualityConcurrentPreparationLockCancellationAndRecovery(t *testing.T)
 }
 
 func TestIPQualityDependencyPreparation(t *testing.T) {
-	for _, scenario := range []string{"complete", "missing-bash-curl", "partial", "busybox-grep", "old-bash", "no-ca", "repository", "lock", "permission", "unsupported", "unverified-install", "non-root", "unsafe", "canceled"} {
+	for _, scenario := range []string{"complete", "missing-bash-curl", "partial", "busybox-grep", "old-bash", "no-ca", "repository", "lock", "permission", "apt-uid-permission", "unsupported", "unverified-install", "non-root", "unsafe", "canceled"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -92,6 +92,8 @@ func TestIPQualityDependencyPreparation(t *testing.T) {
 							return "Could not get lock /var/lib/dpkg/lock", errors.New("exit status 100")
 						case "permission":
 							return "Read-only file system", errors.New("exit status 100")
+						case "apt-uid-permission":
+							return "E: seteuid 42 failed - seteuid (1: Operation not permitted)\nE: Method mirror+file has died unexpectedly!", errors.New("exit status 100")
 						case "canceled":
 							cancel()
 							return "", context.Canceled
@@ -118,7 +120,7 @@ func TestIPQualityDependencyPreparation(t *testing.T) {
 			}
 			var stages []string
 			err := p.prepare(ctx, func(stage string) { stages = append(stages, stage) })
-			wantFailure := map[string]string{"repository": "依赖下载/软件源失败", "lock": "包管理器锁冲突", "permission": "系统权限", "unsupported": "未找到支持", "unverified-install": "仍不可执行", "non-root": "权限不足", "unsafe": "不安全", "canceled": "已取消"}[scenario]
+			wantFailure := map[string]string{"repository": "依赖下载/软件源失败", "lock": "包管理器锁冲突", "permission": "系统权限", "apt-uid-permission": "安装服务身份切换权限不足", "unsupported": "未找到支持", "unverified-install": "仍不可执行", "non-root": "权限不足", "unsafe": "不安全", "canceled": "已取消"}[scenario]
 			if wantFailure != "" {
 				if err == nil || !strings.Contains(err.Error(), wantFailure) {
 					t.Fatalf("want %q, got %v", wantFailure, err)
@@ -128,6 +130,9 @@ func TestIPQualityDependencyPreparation(t *testing.T) {
 				}
 				if scenario == "lock" && len(commands) != 3 {
 					t.Fatalf("lock retry count: %v", commands)
+				}
+				if scenario == "apt-uid-permission" && (!strings.Contains(err.Error(), "CAP_SETUID/CAP_SETGID") || !strings.Contains(err.Error(), "可重试=false") || len(commands) != 1) {
+					t.Fatalf("identity failure did not stop with actionable advice: %v %v", commands, err)
 				}
 				return
 			}
@@ -168,7 +173,7 @@ func TestIPQualityPackageMapping(t *testing.T) {
 
 func TestIPQualityTransientInstallIsolation(t *testing.T) {
 	args := strings.Join(ipQualityDependencyHelperArguments("/usr/local/lib/qagent/qagent", "qagent-ip-quality-dependencies-fixture.service"), "\n")
-	for _, want := range []string{"--property=User=root", "--property=ProtectSystem=strict", "--property=ReadWritePaths=/usr /etc /var /run /bin /sbin /lib -/lib64 -/lib32 -/libx32", "--property=RuntimeMaxSec=245s", "--property=KillMode=control-group", "prepare-ip-quality"} {
+	for _, want := range []string{"--property=User=root", "--property=NoNewPrivileges=yes", "--property=AmbientCapabilities=CAP_SETUID CAP_SETGID", "--property=ProtectSystem=strict", "--property=ReadWritePaths=/usr /etc /var /run /bin /sbin /lib -/lib64 -/lib32 -/libx32", "--property=RuntimeMaxSec=245s", "--property=KillMode=control-group", "prepare-ip-quality"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("missing %s: %s", want, args)
 		}
