@@ -224,6 +224,14 @@ jobs:
           sudo sh deploy/bootstrap-core-services.sh --prepare-agent
           sudo env QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
             QCH_SERVICE_MANAGER=systemd python3 deploy/tests/core-permissions-runtime.py
+      - name: Verify Mihomo Reality and TLS validation, deploy and exported clients
+        run: |
+          go test -c -o "$RUNNER_TEMP/reality-agent.test" ./internal/agent
+          cd internal/agent
+          sudo env QCH_LIVE_REALITY_SYSTEMD_TEST=1 \
+            QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
+            "$RUNNER_TEMP/reality-agent.test" \
+            -test.run '^TestMihomoRealityAndTLSManagedLifecycle$' -test.count=1 -test.v
       - name: Verify Alpine OpenRC policies, migration and forwarding
         run: |
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent

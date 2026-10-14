@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { diagnosticError, errorMessage, requestJSON } from "./modules/errors.js";
+import { diagnosticError, errorMessage, redactDiagnostic, requestJSON } from "./modules/errors.js";
 
 for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 422, 429, 500, 502, 503, 504, 599]) {
   assert.match(errorMessage("unknown English error", status), /\p{Script=Han}/u);
@@ -12,6 +12,26 @@ assert.match(errorMessage("cross-site login request rejected"), /HTTPS.*QCH_CORS
 assert.match(diagnosticError("exit status 1"), /原始错误（供排查）：exit status 1/);
 assert.equal(diagnosticError("中文诊断"), "中文诊断");
 assert.equal(diagnosticError(null), "");
+for (const [raw, explanation] of [
+  ["kernel mihomo: certificate file access at listeners[1].certificate (/etc/qcontrolhub/tls/cert.pem): certificate/key file not found", /文件不存在/],
+  ["kernel mihomo: certificate file access at listeners[1].private-key (/etc/qcontrolhub/tls/key.pem): certificate/key file unreadable as qcontrolhub-core: exit status 1", /文件无法读取/],
+  ["mihomo rejected the configuration: parse certificate failed: failed to find any PEM data in key input", /格式错误/],
+  ["x509: certificate signed by unknown authority", /信任或域名验证失败/],
+  ["x509: certificate has expired or is not yet valid", /信任或域名验证失败/],
+  ["Reality target www.getty.edu: TLS 1.3 handshake failed: x509: certificate signed by unknown authority", /Reality 目标握手失败/],
+  ["invalid Reality privateKey: invalid-key-value", /Reality 配置解析失败/],
+]) {
+  const diagnostic = diagnosticError(raw);
+  assert.match(diagnostic, explanation);
+  if (raw.includes("listeners[1]")) assert.ok(diagnostic.includes("listeners[1]"), "field location must survive diagnostic translation");
+}
+const oldFailure = `kernel mihomo service qagent-mihomo.service: read certificate/key /var/lib/qcontrolhub-mihomo/${"A".repeat(43)} as qcontrolhub-core: exit status 1`;
+assert.match(diagnosticError(oldFailure), /文件无法读取/);
+assert.ok(!diagnosticError(oldFailure).includes("A".repeat(43)), "historical task errors must mask the inline Reality key");
+assert.ok(!redactDiagnostic(oldFailure).includes("A".repeat(43)), "task output and journal display must mask historical paths");
+assert.equal(redactDiagnostic('invalid "privateKey": inline-secret'), 'invalid "privateKey": [redacted]');
+assert.ok(!diagnosticError("中文诊断 private-key: inline-secret").includes("inline-secret"));
+assert.equal(redactDiagnostic("-----BEGIN PRIVATE KEY-----\ninline-secret\n-----END PRIVATE KEY-----"), "[redacted private PEM]");
 assert.match(diagnosticError("dial tcp: connection refused"), /目标服务拒绝连接/);
 assert.match(diagnosticError("permission denied"), /节点执行权限不足/);
 assert.match(diagnosticError("context deadline exceeded"), /节点操作超时/);

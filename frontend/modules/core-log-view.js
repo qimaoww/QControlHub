@@ -1,4 +1,5 @@
 import { coreLogFilterLimits } from "./core-log-preferences.js";
+import { redactDiagnostic } from "./errors.js";
 import { levelName, storagePolicyName } from "./core-log-model.js";
 import { coreLogSourceStatus } from "./core-log-source-status.js";
 import { createCoreLogProjection } from "./core-log-projection.js";
@@ -35,7 +36,7 @@ export function createCoreLogView(ctx) {
         const name = agent?.name || entry.agent_id;
         const cached = rowMarkup.get(entry);
         if (cached?.name === name) return cached.html;
-        const html = `<article class="core-log-row level-${esc(entry.level)}" data-refresh-key="core-log-${esc(entry.id)}"><time datetime="${esc(entry.logged_at)}">${esc(date(entry.logged_at))}</time><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="core-log-level">${esc(levelName(entry.level))}</span><span class="core-log-agent" title="${esc(agent?.name || entry.agent_id)}">${esc(agent?.name || entry.agent_id)}</span><pre>${esc(entry.message)}</pre></article>`;
+        const html = `<article class="core-log-row level-${esc(entry.level)}" data-refresh-key="core-log-${esc(entry.id)}"><time datetime="${esc(entry.logged_at)}">${esc(date(entry.logged_at))}</time><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="core-log-level">${esc(levelName(entry.level))}</span><span class="core-log-agent" title="${esc(agent?.name || entry.agent_id)}">${esc(agent?.name || entry.agent_id)}</span><pre>${esc(redactDiagnostic(entry.message))}</pre></article>`;
         rowMarkup.set(entry, { name, html });
         return html;
       })

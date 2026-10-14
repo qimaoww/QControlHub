@@ -4,6 +4,7 @@ package agent
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,12 @@ const existingDiscoveryCoreHelperName = "existing-discovery-core"
 var existingDiscoveryCoreHelper []byte
 
 func TestMain(tests *testing.M) {
+	flag.Parse()
+	// The precompiled live fixture also runs on nodes without a Go compiler;
+	// it never invokes the synthetic discovery executable.
+	if os.Getenv("QCH_LIVE_REALITY_SYSTEMD_TEST") == "1" && flag.Lookup("test.run").Value.String() == "^TestMihomoRealityAndTLSManagedLifecycle$" {
+		os.Exit(tests.Run())
+	}
 	helper, err := buildExistingDiscoveryCoreHelper()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

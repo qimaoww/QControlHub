@@ -30,23 +30,36 @@ const legacyMessages = {
 };
 
 export function errorMessage(value, status = 0) {
-  const message = typeof value === "string" ? value.trim() : "";
+  const message = typeof value === "string" ? redactDiagnostic(value.trim()) : "";
   if (Object.hasOwn(legacyMessages, message)) return legacyMessages[message];
   if (/\p{Script=Han}/u.test(message)) return message;
   return statusMessages[status] || "操作失败，请稍后重试；若持续失败，请查看任务详情或联系管理员。";
 }
 
-// Diagnostic output stays available verbatim, with a Chinese explanation above
-// it. Do not rewrite task.error itself: retry diagnostics inspect the raw value.
+// Preserve failure stages and field locations while masking secret material,
+// including historical output returned by Agents predating the fix.
+export function redactDiagnostic(value) {
+  return String(value ?? "")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[redacted private PEM]")
+    .replace(/((?:["']?(?:private[-_]?key|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\]]+)/gi, "$1[redacted]")
+    .replace(/(\/var\/lib\/qcontrolhub-mihomo(?:-shr_[a-f0-9]+)?\/)[A-Za-z0-9_-]{43}(?=["'\s]|$)/g, "$1[redacted]");
+}
+
 export function diagnosticError(value) {
   if (!value) return "";
-  const raw = String(value);
+  const raw = redactDiagnostic(value);
   if (/\p{Script=Han}/u.test(raw)) return raw;
   const explanations = [
     [/stable core installation failed/i, "稳定版内核安装失败，未继续校验或部署配置。请检查安装错误后重试；已有内核不会自动切换版本。"],
     [/preset-auto-install-v1/i, "Agent 版本不支持自动安装，请到节点设置升级 Agent 后重新提交。断线前的执行结果可能需要核对。"],
     [/rollback (?:also )?failed|service recovery failed|binary rollback also failed/i, "变更失败，且回滚或服务恢复失败，请立即检查节点服务状态；确认恢复前不要重复部署。"],
     [/rolled back/i, "变更失败，已自动回滚，请确认服务状态并检查配置后重试。"],
+    [/(?:certificate\/key file not found|(?:certificate|key).*no such file or directory)/i, "证书或私钥文件不存在。请按下方配置字段和路径安装文件，或修正引用路径。"],
+    [/(?:SAFE_PATHS|not a safe path|ProtectHome|PrivateTmp|certificate\/key file unreadable|(?:read|prepare).*certificate\/key|(?:certificate|private[- ]key).*(?:permission denied|operation not permitted))/i, "证书或私钥文件无法读取。请检查下方字段、路径、父目录穿越权限、qcontrolhub-core 读取权限及服务沙箱允许的路径。"],
+    [/reality.*(?:target|SNI|handshake|TLS 1\.3).*(?:failed|failure|error|timeout|refused|x509)|(?:target|handshake).*reality.*(?:failed|error)/i, "Reality 目标握手失败。请从执行内核的节点检查目标 DNS、地址族连通性、TLS 1.3、证书域名和 ALPN，并根据下方具体原因修复。"],
+    [/(?:invalid|parse|decode).*reality|reality.*(?:invalid|parse|decode)|invalid ["']?private[-_]?key/i, "Reality 配置解析失败。请检查下方字段的内联私钥格式，并核对客户端 ServerName、公钥和 Short ID。"],
+    [/(?:failed to find|failed to parse|malformed|invalid).*PEM|(?:certificate|private key).*(?:format error|malformed|invalid format)|private key does not match|parse.*(?:certificate|private key)|x509: malformed/i, "证书或 TLS 私钥格式错误。请检查 PEM 编码、证书与私钥是否匹配，并按下方字段修正配置。"],
+    [/x509:.*(?:unknown authority|expired|not yet valid|valid for|cannot validate)|certificate verify failed|certificate verification failed|unknown certificate authority/i, "证书信任或域名验证失败。请根据下方原因检查信任链、证书域名、有效期及系统时间。"],
     [/rejected the configuration|invalid configuration|configuration validation failed/i, "配置未通过内核校验，请根据下方诊断修正配置后重试。"],
     [/deadline exceeded|timed? ?out|timeout/i, "节点操作超时，请检查节点连接和服务状态，确认执行结果后再重试。"],
     [/connection refused/i, "目标服务拒绝连接，请检查服务是否启动及监听地址、端口是否正确。"],
@@ -54,7 +67,7 @@ export function diagnosticError(value) {
     [/permission denied|operation not permitted/i, "节点执行权限不足，请检查运行账号、文件权限和系统限制。"],
     [/no space left on device/i, "节点磁盘空间不足，请清理空间后重试。"],
     [/no such file or directory|executable file not found/i, "节点缺少所需文件或程序，请检查内核安装状态及配置路径。"],
-    [/certificate|x509/i, "证书校验失败，请检查证书有效期、域名、系统时间和信任链。"],
+    [/certificate|x509/i, "TLS 或证书相关操作失败。请按下方失败阶段、字段位置和具体原因排查。"],
   ];
   const message = explanations.find(([pattern]) => pattern.test(raw))?.[1]
     || "节点操作失败，请根据下方原始错误检查节点、配置和服务状态。";

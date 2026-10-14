@@ -170,7 +170,7 @@ func probeRealityTarget(ctx context.Context, serverName string, options realityP
 			}
 		}()
 	}
-	var lastErr error
+	var failures []error
 	for range unique {
 		select {
 		case result := <-results:
@@ -178,19 +178,19 @@ func probeRealityTarget(ctx context.Context, serverName string, options realityP
 				result.target.CNAME = cname
 				return result.target, nil
 			}
-			lastErr = result.err
+			failures = append(failures, result.err)
 		case <-ctx.Done():
 			return RealityTarget{}, fmt.Errorf("Reality SNI TLS 1.3 实时校验失败：%w", ctx.Err())
 		}
 	}
-	return RealityTarget{}, fmt.Errorf("Reality SNI TLS 1.3 实时校验失败：%w", lastErr)
+	return RealityTarget{}, fmt.Errorf("Reality SNI %s TLS 1.3 实时校验失败：%w", normalized, errors.Join(failures...))
 }
 
 func probeRealityAddress(ctx context.Context, serverName string, address netip.Addr, options realityProbeOptions) (RealityTarget, error) {
 	endpoint := net.JoinHostPort(address.String(), "443")
 	connection, err := options.dialContext(ctx, "tcp", endpoint)
 	if err != nil {
-		return RealityTarget{}, fmt.Errorf("连接 %s：%w", endpoint, err)
+		return RealityTarget{}, fmt.Errorf("Reality target %s at %s: TCP connect failed: %w", serverName, endpoint, err)
 	}
 	defer connection.Close()
 
@@ -201,7 +201,7 @@ func probeRealityAddress(ctx context.Context, serverName string, address netip.A
 		NextProtos: []string{"h2", "http/1.1"},
 	})
 	if err := tlsConnection.HandshakeContext(ctx); err != nil {
-		return RealityTarget{}, err
+		return RealityTarget{}, fmt.Errorf("Reality target %s at %s: TLS 1.3 handshake/certificate verification failed: %w", serverName, endpoint, err)
 	}
 	state := tlsConnection.ConnectionState()
 	if state.Version != tls.VersionTLS13 || len(state.VerifiedChains) == 0 {
