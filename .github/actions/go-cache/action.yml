@@ -1,5 +1,5 @@
 name: Go compilation cache
-description: Cache modules and objects for one pinned OS, architecture, Go and libc combination
+description: Cache modules and objects for one OS, architecture, Go and libc combination
 inputs:
   identity:
     required: true

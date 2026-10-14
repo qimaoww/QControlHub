@@ -21,7 +21,7 @@ jobs:
   debian:
     name: Debian / systemd
     runs-on: ubuntu-latest
-    container: golang:1.25.0-bookworm
+    container: golang:1.25-bookworm
     timeout-minutes: 35
     services:
       postgres:
@@ -56,7 +56,7 @@ jobs:
       - name: Restore Debian Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v2-linux-${{ runner.arch }}-go1.25.0-debian12-glibc
+          identity: qch-v3-linux-${{ runner.arch }}-go1.25.0-debian12-glibc
           paths: |
             ${{ env.GOCACHE }}
             ${{ env.GOMODCACHE }}
@@ -147,16 +147,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Pull and identify the Alpine toolchain
+        id: alpine-toolchain
+        run: sh .github/scripts/container-toolchain.sh golang:1.25-alpine
+
       - name: Restore Alpine Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v2-linux-${{ runner.arch }}-go1.25.0-alpine3.22-musl
+          identity: qch-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.alpine-toolchain.outputs.identity }}
           paths: |
             .ci-cache/alpine-build
             .ci-cache/alpine-mod
-
-      - name: Pull the pinned Alpine toolchain
-        run: docker pull golang:1.25.0-alpine3.22
 
       - name: Run project checks on musl/OpenRC
         run: |
@@ -170,7 +171,7 @@ jobs:
             -v "$PWD/.ci-cache/alpine-build:/cache/build" \
             -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -e VERSION="${{ github.sha }}" \
-            -v "$PWD:/src" -w /src golang:1.25.0-alpine3.22 sh -euxc '
+            -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
               sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash chromium coreutils findutils git libcap make nftables nodejs openrc openssl postgresql-client
               sh .github/scripts/ci-time.sh modules go mod download
               bash .github/scripts/run-ci-tests.sh \
@@ -213,10 +214,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Pull and identify the sandbox toolchain
+        id: sandbox-toolchain
+        run: sh .github/scripts/container-toolchain.sh golang:1.25-bookworm
       - name: Restore sandbox Go objects and modules
         uses: ./.github/actions/go-cache
         with:
-          identity: qch-v2-linux-${{ runner.arch }}-go1.25.0-debian12-glibc-sandbox
+          identity: qch-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sandbox-toolchain.outputs.identity }}-sandbox
           paths: |
             ${{ env.GOMODCACHE }}
             ${{ env.QCH_SANDBOX_GOCACHE }}
@@ -296,7 +300,7 @@ jobs:
           docker run --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
-            -w /src golang:1.25.0-alpine3.22 sh -ec '
+            -w /src golang:1.25-alpine sh -ec '
               apk add --no-cache python3 openrc libcap openssl coreutils nftables iproute2 >/dev/null
               python3 -B deploy/tests/core_permission_network_test.py
               QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh --prepare-agent
@@ -397,7 +401,7 @@ jobs:
           target: ${{ matrix.target }}
           push: true
           build-args: VERSION=${{ github.sha }}
-          cache-from: type=gha,scope=qch-v2-${{ matrix.target }}
+          cache-from: type=gha,scope=qch-v3-${{ matrix.target }}
           provenance: mode=max
           sbom: true
           tags: |

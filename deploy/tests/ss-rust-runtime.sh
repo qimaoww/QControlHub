@@ -15,7 +15,7 @@ chmod 0755 "$fixture" "$fixture/ssserver" "$fixture/sslocal"
 docker run --rm --read-only --network none --user "$(id -u):$(id -g)" --cap-drop ALL \
   --tmpfs /tmp:exec,mode=1777 -e GOCACHE=/cache \
   -v "$cache:/cache" -v "$fixture:/native" -v "$(pwd):/src:ro" -v "$(go env GOMODCACHE):/go/pkg/mod:ro" \
-  -w /src golang:1.25.0-bookworm go test -c -buildvcs=false -o /native/runtime.test ./internal/serverconfig
+  -w /src golang:1.25-bookworm go test -c -buildvcs=false -o /native/runtime.test ./internal/serverconfig
 docker run --rm --read-only --network none --user 65534:65534 --cap-drop ALL \
   --tmpfs /tmp:exec,mode=1777 -e QCH_SS_RUST_NATIVE_BIN=/native \
-  -v "$fixture:/native:ro" golang:1.25.0-bookworm /native/runtime.test -test.run '^TestSSRustNative(FieldScopes|ConnectionLogs)$' -test.count=1 -test.v
+  -v "$fixture:/native:ro" golang:1.25-bookworm /native/runtime.test -test.run '^TestSSRustNative(FieldScopes|ConnectionLogs)$' -test.count=1 -test.v

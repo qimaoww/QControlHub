@@ -25,13 +25,17 @@ export async function runBrowserWorkers(script, modes) {
   const workers = Math.min(requested, availableParallelism(), totalmem() >= 3 * 1024 ** 3 ? 2 : 1);
   const children = new Set();
   let cancelled = false;
+  let escalation;
   const signal = name => {
     cancelled = true;
     for (const child of children) {
       try { process.kill(-child.pid, name); } catch (error) { if (error.code !== "ESRCH") throw error; }
     }
   };
-  const cancel = () => signal("SIGTERM");
+  const cancel = () => {
+    signal("SIGTERM");
+    escalation = setTimeout(() => signal("SIGKILL"), 6000).unref();
+  };
   process.once("SIGINT", cancel);
   process.once("SIGTERM", cancel);
   const started = performance.now();
@@ -55,6 +59,7 @@ export async function runBrowserWorkers(script, modes) {
     assert.ok(!cancelled && results.every(result => result.code === 0), `browser workers failed: ${JSON.stringify(results)}`);
   } finally {
     signal("SIGTERM");
+    clearTimeout(escalation);
     process.removeListener("SIGINT", cancel);
     process.removeListener("SIGTERM", cancel);
     process.stdout.write(`browser suite elapsed=${((performance.now() - started) / 1000).toFixed(3)}s\n`);
