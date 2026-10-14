@@ -59,7 +59,8 @@ vet:
 	go vet ./...
 
 fmt-check:
-	@test -z "$$(gofmt -l .)" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:'; gofmt -l .; exit 1; }
+	@unformatted="$$(find . -type d \( -name .git -o -name .ci-cache \) -prune -o -type f -name '*.go' -print0 | xargs -0 gofmt -l)" || exit $$?; \
+	test -z "$$unformatted" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:' "$$unformatted"; exit 1; }
 
 frontend-check: frontend-module-check frontend-browser-check
 

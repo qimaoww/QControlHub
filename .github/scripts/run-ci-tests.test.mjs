@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -327,4 +327,22 @@ test("cancellation stops gated subprocesses and never starts after-checks", asyn
   const completed = await result;
   assert.equal(completed.code, 143);
   assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
+});
+
+test("format gate excludes downloaded templates and checks new source directories", t => {
+  const root = mkdtempSync(join(tmpdir(), "qch-format-gate-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".ci-cache", "modules"), { recursive: true });
+  writeFileSync(join(root, ".ci-cache", "modules", "template.go"), "package {{template}}\n");
+  mkdirSync(join(root, "new package"));
+  const source = join(root, "new package", "new.go");
+  writeFileSync(source, "package fixture\n\nfunc New() {}\n");
+  const check = () => spawnSync("make", ["-f", fileURLToPath(new URL("../../Makefile", import.meta.url)), "fmt-check"], { cwd: root, encoding: "utf8" });
+  const clean = check();
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+  writeFileSync(source, "package fixture\nfunc New( ) { }\n");
+  const unformatted = check();
+  assert.notEqual(unformatted.status, 0);
+  assert.match(unformatted.stdout, /new package\/new.go/);
+  assert.doesNotMatch(unformatted.stdout + unformatted.stderr, /template.go/);
 });
