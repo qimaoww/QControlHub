@@ -29,3 +29,13 @@ coverage.out
 docker-compose*.yml
 Makefile
 README.md
+
+.ci-cache
+.ci-report
+**/*_test.go
+frontend/*_smoke.mjs
+frontend/*_test.mjs
+frontend/*_runtime.mjs
+frontend/browser
+frontend/smoke
+frontend/testdata

@@ -1,0 +1,23 @@
+{
+  "debian": {
+    "internal/api": 168,
+    "internal/store": 207,
+    "internal/agent": 217,
+    "frontend": 1,
+    "internal/serverconfig": 1,
+    "internal/geoip": 5.3,
+    "internal/authn": 2.2,
+    "cmd/agent": 0.5,
+    "cmd/control-plane": 0.4
+  },
+  "alpine": {
+    "internal/api": 174,
+    "internal/store": 224,
+    "frontend": 1,
+    "internal/serverconfig": 1.5,
+    "internal/geoip": 5.4,
+    "internal/authn": 2.2,
+    "cmd/agent": 12,
+    "cmd/control-plane": 0.4
+  }
+}

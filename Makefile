@@ -1,30 +1,32 @@
 SHELL := /bin/sh
 
 VERSION ?= dev
+QCH_SANDBOX_GOCACHE ?= $(CURDIR)/.ci-cache/sandbox-build
+export QCH_SANDBOX_GOCACHE
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
-# Non-Go checks. CI runs these next to the Go shards, then the standalone
-# browser group afterward; keep the Go suite out of these targets.
-BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
+# Routine CI runs non-browser checks beside the Go shards. Real-browser checks
+# remain in local make check and the manual Browser validation workflow.
+BROWSER_CHECK_TARGETS := frontend-browser-check
+CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
+ALPINE_CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
-ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
+ALPINE_AGENT_TESTS := go test -count=1 ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
 
 build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qcontrol-plane ./cmd/control-plane
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qagent ./cmd/agent
 
-# Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
+# Separate databases isolate data, not PostgreSQL's cluster-wide vacuum horizon.
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
 # The native browser matrix also runs through Go; match CI's package deadline.
 test:
-	go test -timeout 20m -p 1 ./...
+	go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$$' ./...
 
 alpine-agent-test:
 	$(ALPINE_AGENT_TESTS)
@@ -35,32 +37,42 @@ ip-quality-clean-test:
 	sh deploy/tests/ip-quality-clean.sh
 
 alpine-test: alpine-agent-test
-	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -timeout 20m -p 1 $$packages
+	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$$' $$packages
 
 upgrade-sandbox-test:
+	mkdir -p "$(QCH_SANDBOX_GOCACHE)"
+	# The sandbox drops DAC_OVERRIDE; its root UID must access runner-owned cache directories.
+	chmod -R a+rwX "$(QCH_SANDBOX_GOCACHE)"
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
-	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
+	sh .github/scripts/run-ci-container.sh --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
 		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
 		--tmpfs /usr/local/lib/qagent:rw,exec,mode=0755 --tmpfs /etc/qagent:rw,mode=0755 \
 		--tmpfs /etc/systemd:rw,mode=0755 --tmpfs /var/lib/qcontrolhub-shadowsocks-rust:rw,mode=0750 \
-		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/tmp/qch-go-cache -e GOTOOLCHAIN=local \
+		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/cache -e GOTOOLCHAIN=local \
+		-e QCH_CACHE_UID="$$(id -u)" -e QCH_CACHE_GID="$$(id -g)" \
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
-		qch-upgrade-lifecycle-test go test ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
+		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
+		qch-upgrade-lifecycle-test sh -ec 'trap '\''chown -R "$$QCH_CACHE_UID:$$QCH_CACHE_GID" /cache'\'' EXIT; \
+		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v'
 
 vet:
 	go vet ./...
 
 fmt-check:
-	@test -z "$$(gofmt -l .)" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:'; gofmt -l .; exit 1; }
+	@unformatted="$$(find . -type d \( -name .git -o -name .ci-cache \) -prune -o -type f -name '*.go' -print0 | xargs -0 gofmt -l)" || exit $$?; \
+	test -z "$$unformatted" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:' "$$unformatted"; exit 1; }
 
-frontend-check:
+frontend-check: frontend-module-check frontend-browser-check
+
+frontend-module-check:
 	node frontend/module_smoke.mjs
-	node frontend/agents_browser_smoke.mjs
+
+frontend-browser-check:
+	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v
 
 module-policy-test:
 	node --test frontend/module_policy_test.mjs
 	node --test frontend/smoke_policy_test.mjs
-	go test -buildvcs=false ./internal/architecture
 
 ss-rust-runtime-test:
 	sh deploy/tests/ss-rust-runtime.sh
@@ -69,11 +81,11 @@ core-permission-network-test:
 	python3 -B deploy/tests/core_permission_network_test.py
 
 ci-runner-test:
-	node --test .github/scripts/run-ci-tests.test.mjs
+	node --test .github/scripts/run-ci-tests.test.mjs .github/scripts/require-ci-success.test.mjs
 
 # Import the observer with stub CDP events; this target starts no browser.
 browser-diagnostics-test:
-	node --test frontend/agents_browser_smoke_diagnostics_test.mjs
+	node --test frontend/agents_browser_smoke_diagnostics_test.mjs frontend/browser_scheduler_test.mjs
 
 pr-policy-test:
 	node --test .github/scripts/check-pr.test.mjs
@@ -121,8 +133,8 @@ web-image-test:
 
 check: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS) test
 
-# CI runs the same checks in parallel tasks, then the standalone browser group;
-# these targets keep one source of truth for the targets that "make check" covers.
+# Local checks include the optional real-browser suite. Routine CI shares every
+# other target; module smoke remains mandatory and preserves its serial order.
 checks: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS)
 browser-checks: $(BROWSER_CHECK_TARGETS)
 non-browser-checks: $(CHECK_TARGETS)
