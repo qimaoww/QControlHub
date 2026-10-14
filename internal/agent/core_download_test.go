@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -100,5 +101,21 @@ func TestDownloadAssetDoesNotRetryPermanentHTTPFailure(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("download attempts = %d, want 1", attempts)
+	}
+}
+
+func TestDownloadTotalBudgetIncludesRetryBackoff(t *testing.T) {
+	attempts := 0
+	updater := NewCoreUpdater()
+	updater.downloadAttemptTimeout = 100 * time.Millisecond
+	updater.downloadRetryDelay = 75 * time.Millisecond
+	updater.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: 503, Header: make(http.Header), Body: http.NoBody}, nil
+	})}
+	asset := githubReleaseAsset{Name: "fixture.gz", Size: 1 << 20, Digest: "sha256:" + strings.Repeat("0", 64), BrowserDownloadURL: "https://github.com/o/r/releases/download/v1/fixture.gz"}
+	_, err := updater.downloadAsset(context.Background(), asset)
+	if !errors.Is(err, context.DeadlineExceeded) || attempts > 2 {
+		t.Fatalf("retry reset total budget: attempts=%d err=%v", attempts, err)
 	}
 }

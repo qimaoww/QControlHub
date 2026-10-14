@@ -54,6 +54,12 @@ export function diagnosticError(value) {
   const cause = raw.replace(/configuration fields: [^;\r\n]*;\s*/gi, "");
   const certificateFormatMessage = "证书或 TLS 私钥格式错误。请检查 PEM 编码、证书与私钥是否匹配，并按下方字段修正配置。";
   const explanations = [
+    [/lookup api\.github\.com[^\r\n]*(?:timeout|timed out)|GitHub API domain resolution timed out/i, "GitHub API 域名解析超时。请检查节点 DNS；仅 IPv6 节点需使用可达的 IPv6 DNS。下方原始错误会说明是否尝试加速及其结果。"],
+    [/GitHub API.*rate limit.*(?:exhausted|exceeded)/i, "GitHub API 请求额度已耗尽，请按下方提示的重置时间重试；加速服务可能共享上游额度。"],
+    [/(?:GitHub API metadata|release download) returned HTTP 404/i, "GitHub Release 或下载资源不存在，请检查所选核心、版本及发布来源。"],
+    [/downloaded release asset (?:SHA-256|size) does not match/i, "下载资源校验失败，安装已中止。请检查发布资源完整性与下载通道后重试。"],
+    [/context canceled/i, "操作已取消。"],
+    [/GitHub download network failure/i, "GitHub 下载网络故障。请根据下方直连与加速结果检查 DNS 和 HTTPS 出站；若两边解析均失败，先修复节点 DNS。"],
     [/stable core installation failed/i, "稳定版内核安装失败，未继续校验或部署配置。请检查安装错误后重试；已有内核不会自动切换版本。"],
     [/preset-auto-install-v1/i, "Agent 版本不支持自动安装，请到节点设置升级 Agent 后重新提交。断线前的执行结果可能需要核对。"],
     [/rollback (?:also )?failed|service recovery failed|binary rollback also failed/i, "变更失败，且回滚或服务恢复失败，请立即检查节点服务状态；确认恢复前不要重复部署。"],
@@ -69,6 +75,7 @@ export function diagnosticError(value) {
     [/(?:invalid|parse|decode).*private[-_ ]?key/i, "私钥配置解析失败。请按下方字段所属协议检查私钥格式；内联密钥应填写在协议对应字段，文件引用应使用实际可读路径。"],
     [/x509:.*(?:unknown authority|expired|not yet valid|valid for|cannot validate)|certificate verify failed|certificate verification failed|unknown certificate authority/i, "证书信任或域名验证失败。请根据下方原因检查信任链、证书域名、有效期及系统时间。"],
     [/rejected the configuration|invalid configuration|configuration validation failed/i, "配置未通过内核校验，请根据下方诊断修正配置后重试。"],
+    [/lookup [^\r\n]*?(?:timeout|timed out)|(?:DNS|domain resolution|name resolution)[^\r\n]*?(?:timeout|timed out)/i, "域名解析超时，请检查节点 DNS 服务器是否可达；仅 IPv6 节点需使用可达的 IPv6 DNS。"],
     [/deadline exceeded|timed? ?out|timeout/i, "节点操作超时，请检查节点连接和服务状态，确认执行结果后再重试。"],
     [/connection refused/i, "目标服务拒绝连接，请检查服务是否启动及监听地址、端口是否正确。"],
     [/no such host|name resolution/i, "域名解析失败，请检查节点的 DNS 设置和网络连接。"],

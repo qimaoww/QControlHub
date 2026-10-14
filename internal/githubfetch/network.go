@@ -3,6 +3,7 @@ package githubfetch
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net"
 	"sync"
@@ -22,6 +23,8 @@ const (
 
 type evidence struct {
 	v4, v6, route6, dns6, dns64, translatedGitHub bool
+	v4Done, v6Done                                int
+	githubDone                                    bool
 }
 
 func classify(e evidence) Mode {
@@ -31,32 +34,44 @@ func classify(e evidence) Mode {
 	if e.v4 {
 		return IPv4
 	}
-	if e.v6 && e.route6 && e.dns6 {
-		if e.dns64 && e.translatedGitHub {
-			return NAT64
-		}
+	if e.v6 && e.route6 {
 		if e.translatedGitHub {
+			if e.dns64 {
+				return NAT64
+			}
 			return IPv6Direct
 		}
-		return IPv6Only
+		if e.dns6 && e.v4Done == 2 && e.githubDone {
+			return IPv6Only
+		}
 	}
 	return Unknown
 }
 
-// Detector caches only in this process/network namespace. Concurrent callers
-// share one bounded probe; canceled callers never wait for another probe.
+// Detector is scoped to this process/network namespace. Invalidation also
+// prevents an in-flight probe from repopulating a stale cache.
 type Detector struct {
-	mu      sync.Mutex
-	mode    Mode
-	expires time.Time
-	running chan struct{}
-	probe   func(context.Context) Mode
+	mu         sync.Mutex
+	mode       Mode
+	expires    time.Time
+	running    chan struct{}
+	generation uint64
+	probe      func(context.Context) Mode
 }
 
 var localDetector = &Detector{probe: probeNetwork}
 
+func (d *Detector) Invalidate() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.expires = time.Time{}
+	d.generation++
+}
 func (d *Detector) Detect(ctx context.Context) Mode {
 	for {
+		if ctx.Err() != nil {
+			return Unknown
+		}
 		d.mu.Lock()
 		if time.Now().Before(d.expires) {
 			mode := d.mode
@@ -73,12 +88,13 @@ func (d *Detector) Detect(ctx context.Context) Mode {
 			}
 		}
 		d.running = make(chan struct{})
+		generation := d.generation
 		d.mu.Unlock()
-		probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		mode := d.probe(probeCtx)
 		cancel()
 		d.mu.Lock()
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && generation == d.generation {
 			d.mode = mode
 			ttl := 5 * time.Minute
 			if mode == Unknown {
@@ -94,72 +110,126 @@ func (d *Detector) Detect(ctx context.Context) Mode {
 	}
 }
 
-// TLS probes use two independent providers per family and no environment HTTP
-// proxy. A local address or a failed GitHub request alone is never evidence.
-func probeNetwork(ctx context.Context) Mode {
-	type result struct {
-		kind string
-		ok   bool
-	}
-	results := make(chan result, 7)
+type networkProbe struct {
+	name, kind string
+	budget     time.Duration
+	run        func(context.Context) error
+}
+type probeResult struct{ name, kind, state string }
+
+func probeNetwork(ctx context.Context) Mode { return probeNetworkWith(ctx, systemProbes()) }
+func systemProbes() []networkProbe {
+	var probes []networkProbe
 	for _, p := range []struct{ kind, host, address string }{
-		{"v4", "one.one.one.one", "1.1.1.1:443"},
-		{"v4", "dns.google", "8.8.8.8:443"},
-		{"v6", "one.one.one.one", "[2606:4700:4700::1111]:443"},
-		{"v6", "dns.google", "[2001:4860:4860::8888]:443"},
+		{"v4", "one.one.one.one", "1.1.1.1:443"}, {"v4", "dns.google", "8.8.8.8:443"},
+		{"v6", "one.one.one.one", "[2606:4700:4700::1111]:443"}, {"v6", "dns.google", "[2001:4860:4860::8888]:443"},
 	} {
-		go func() { results <- result{p.kind, tlsReachable(ctx, "tcp", p.host, p.address)} }()
+		probes = append(probes, networkProbe{p.kind + "/" + p.host, p.kind, 2500 * time.Millisecond, func(ctx context.Context) error { return tlsProbe(ctx, "tcp", p.host, p.address) }})
 	}
-	go func() {
-		ips, _ := net.DefaultResolver.LookupIP(ctx, "ip6", "v6.gh-proxy.org")
-		results <- result{"dns6", len(ips) > 0}
-	}()
-	go func() {
-		ips, _ := net.DefaultResolver.LookupIP(ctx, "ip6", "ipv4only.arpa")
-		results <- result{"dns64", len(ips) > 0}
-	}()
-	go func() {
-		results <- result{"translated", tlsReachable(ctx, "tcp6", "api.github.com", "api.github.com:443")}
-	}()
-	e := evidence{}
-	// UDP connect selects a route without sending a packet. Connectivity is
-	// established separately by the TLS probes above.
-	conn, err := (&net.Dialer{}).DialContext(ctx, "udp6", "[2606:4700:4700::1111]:443")
-	if err == nil {
-		e.route6 = true
-		conn.Close()
-	}
-	for range 7 {
-		select {
-		case r := <-results:
-			switch r.kind {
-			case "v4":
-				e.v4 = e.v4 || r.ok
-			case "v6":
-				e.v6 = e.v6 || r.ok
-			case "dns6":
-				e.dns6 = r.ok
-			case "dns64":
-				e.dns64 = r.ok
-			case "translated":
-				e.translatedGitHub = r.ok
+	for _, p := range []struct {
+		kind, host string
+		budget     time.Duration
+	}{
+		{"dns6", "v6.gh-proxy.org", 1500 * time.Millisecond}, {"dns64", "ipv4only.arpa", 750 * time.Millisecond},
+	} {
+		probes = append(probes, networkProbe{p.kind, p.kind, p.budget, func(ctx context.Context) error {
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", p.host)
+			if err != nil {
+				return err
 			}
-		case <-ctx.Done():
-			return Unknown
-		}
+			if len(ips) == 0 {
+				return errors.New("no AAAA records")
+			}
+			return nil
+		}})
 	}
-	slog.Debug("GitHub network evidence", "ipv4_tls", e.v4, "ipv6_tls", e.v6, "ipv6_route", e.route6, "proxy_aaaa", e.dns6, "dns64", e.dns64, "github_ipv6_tls", e.translatedGitHub)
-	return classify(e)
+	probes = append(probes, networkProbe{"github6", "translated", 2500 * time.Millisecond, func(ctx context.Context) error { return tlsProbe(ctx, "tcp6", "api.github.com", "api.github.com:443") }},
+		networkProbe{"route6", "route6", 500 * time.Millisecond, func(ctx context.Context) error {
+			conn, err := (&net.Dialer{}).DialContext(ctx, "udp6", "[2606:4700:4700::1111]:443")
+			if err == nil {
+				conn.Close()
+			}
+			return err
+		}})
+	return probes
 }
 
-func tlsReachable(ctx context.Context, network, host, address string) bool {
-	probeCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+// Every probe owns a budget. Pending auxiliary evidence never erases completed
+// observations, and DNS64 only labels a proven direct IPv6 GitHub path.
+func probeNetworkWith(ctx context.Context, probes []networkProbe) Mode {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}}
-	conn, err := dialer.DialContext(probeCtx, network, address)
-	if err != nil {
-		return false
+	results := make(chan probeResult, len(probes))
+	states := make(map[string]string, len(probes))
+	for _, p := range probes {
+		states[p.name] = "pending"
+		go func() {
+			probeCtx, stop := context.WithTimeout(ctx, p.budget)
+			defer stop()
+			err := p.run(probeCtx)
+			state := "success"
+			if err != nil {
+				state = "failed"
+				if probeCtx.Err() != nil {
+					state = "unfinished"
+				}
+			}
+			results <- probeResult{p.name, p.kind, state}
+		}()
 	}
-	conn.Close()
-	return true
+	e := evidence{}
+	apply := func(r probeResult) {
+		states[r.name] = r.state
+		ok := r.state == "success"
+		switch r.kind {
+		case "v4":
+			e.v4 = e.v4 || ok
+			e.v4Done++
+		case "v6":
+			e.v6 = e.v6 || ok
+			e.v6Done++
+		case "route6":
+			e.route6 = ok
+		case "dns6":
+			e.dns6 = ok
+		case "dns64":
+			e.dns64 = ok
+		case "translated":
+			e.translatedGitHub = ok
+			e.githubDone = true
+		}
+	}
+	finish := func() Mode {
+		mode := classify(e)
+		slog.Info("GitHub network evidence", "network", mode, "probes", states, "ipv4_tls", e.v4, "ipv6_tls", e.v6, "ipv6_route", e.route6, "proxy_aaaa", e.dns6, "dns64", e.dns64, "github_ipv6_tls", e.translatedGitHub)
+		return mode
+	}
+	for completed := 0; completed < len(probes); completed++ {
+		select {
+		case r := <-results:
+			apply(r)
+			if (e.v4 && (e.v6 || e.v6Done == 2)) || (e.v6 && e.route6 && e.v4Done == 2 && e.githubDone && (e.dns6 || e.translatedGitHub)) {
+				return finish()
+			}
+		case <-ctx.Done():
+			// A ready result and the deadline can race. Drain evidence before deciding.
+			for {
+				select {
+				case r := <-results:
+					apply(r)
+				default:
+					return finish()
+				}
+			}
+		}
+	}
+	return finish()
+}
+func tlsProbe(ctx context.Context, network, host, address string) error {
+	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}}
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err == nil {
+		conn.Close()
+	}
+	return err
 }

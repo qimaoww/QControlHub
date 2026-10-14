@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,9 +17,12 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 )
 
 func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engine, selector, source string) (resolvedCoreRelease, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	repository, err := officialCoreRepository(engine, selector, source)
 	if err != nil {
 		return resolvedCoreRelease{}, err
@@ -322,6 +326,8 @@ func validateReleaseAssetMetadata(asset githubReleaseAsset) error {
 }
 
 func (updater *CoreUpdater) getJSON(ctx context.Context, endpoint string, output any) error {
+	ctx, stop := context.WithTimeout(ctx, 20*time.Second)
+	defer stop()
 	for attempt := 1; ; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := updater.getJSONOnce(attemptCtx, endpoint, output)
@@ -333,6 +339,7 @@ func (updater *CoreUpdater) getJSON(ctx context.Context, endpoint string, output
 			return ctx.Err()
 		}
 		var retryable retryableCoreDownloadError
+		slog.Warn("GitHub metadata request failed", "stage", "release-metadata", "attempt", attempt, "error", err)
 		if attempt >= defaultDownloadAttempts || !errors.As(err, &retryable) {
 			return err
 		}
@@ -359,6 +366,9 @@ func (updater *CoreUpdater) getJSONOnce(ctx context.Context, endpoint string, ou
 	request.Header.Set("User-Agent", "QControlHub-Agent")
 	response, err := updater.client.Do(request)
 	if err != nil {
+		if githubfetch.Terminal(err) {
+			return err
+		}
 		return retryableCoreDownloadError{err: err}
 	}
 	defer response.Body.Close()

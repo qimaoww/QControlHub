@@ -128,3 +128,15 @@ await assert.rejects(send(null, {
   fetchImpl: async () => { throw new Error("old private network diagnostic"); },
 }), error => error.name === "AbortError");
 console.log("Chinese error messages smoke tests passed");
+
+const githubDNSTimeout = 'resolve latest stable mihomo release: Get "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest": dial tcp: lookup api.github.com: i/o timeout';
+assert.match(diagnosticError(githubDNSTimeout), /GitHub API 域名解析超时/);
+assert.doesNotMatch(diagnosticError(githubDNSTimeout), /节点操作超时/);
+assert.match(diagnosticError("lookup example.com: i/o timeout"), /域名解析超时/);
+assert.match(diagnosticError("GitHub download network failure: direct: GitHub API domain resolution timed out; acceleration: v6.gh-proxy.org domain resolution timed out"), /GitHub API 域名解析超时/);
+assert.match(diagnosticError("GitHub download network failure: acceleration: connection refused"), /GitHub 下载网络故障/);
+
+assert.match(diagnosticError("GitHub API metadata rate limit exhausted (HTTP 403); retry after reset"), /请求额度已耗尽/);
+assert.match(diagnosticError("GitHub API metadata returned HTTP 404"), /资源不存在/);
+assert.match(diagnosticError("downloaded release asset SHA-256 does not match GitHub metadata"), /校验失败/);
+assert.match(diagnosticError("context canceled"), /操作已取消/);

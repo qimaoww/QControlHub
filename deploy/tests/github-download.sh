@@ -31,6 +31,14 @@ if [ -n "$probe" ]; then
     exit 1
 fi
 case "$url" in
+    */fallback|*/fallback-redirect)
+        case "$url" in https://v6.gh-proxy.org/*) ;; *) printf 'Could not resolve host api.github.com' >&2; exit 6 ;; esac ;;
+    */fallback-both) printf 'Could not resolve host' >&2; exit 6 ;;
+    */tls-failure) exit 60 ;;
+    */cancel) kill -TERM "$PPID"; exit 143 ;;
+esac
+case "$url" in
+    */fallback-redirect) printf '302\nhttps://release-assets.githubusercontent.com/redirected-file'; exit 0 ;;
     */redirect) printf '302\nhttps://raw.githubusercontent.com/o/r/ref/file'; exit 0 ;;
     */proxy-redirect) printf '302\nhttps://v6.gh-proxy.org/https://raw.githubusercontent.com/o/r/ref/file'; exit 0 ;;
     */bad-redirect) printf '302\nhttps://other.example/file'; exit 0 ;;
@@ -113,3 +121,43 @@ for exclusion in .github.com '*.github.com' github.com:443; do
     esac
 done
 printf '%s\n' 'GitHub download network, cache, metadata, redirect and failure regressions passed'
+
+# Reproduce the missing path with real Shell detection evidence: IPv6 TLS works,
+# auxiliary channel HEAD/DNS evidence fails, leaving Unknown; the real resource
+# succeeds only through the specified prefix.
+unset HTTPS_PROXY https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
+export QCH_DOWNLOAD_TEST_NETWORK=dns-failure
+qch_github_expires=0
+qch_github_channel_expires=0
+: > "$test_root/requests"
+qch_github_download https://api.github.com/repos/o/r/fallback "$test_root/resource"
+[ "$qch_github_mode" = unknown ]
+grep -Fq 'https://v6.gh-proxy.org/https://api.github.com/repos/o/r/fallback' "$test_root/requests"
+[ "$(awk '!/--head/ {n++} END {print n+0}' "$test_root/requests")" -eq 2 ]
+: > "$test_root/requests"
+qch_github_download https://github.com/o/r/fallback-redirect "$test_root/resource"
+[ "$(awk '!/--head/ {n++} END {print n+0}' "$test_root/requests")" -eq 2 ]
+grep -Fq 'https://v6.gh-proxy.org/https://release-assets.githubusercontent.com/redirected-file' "$test_root/requests"
+
+qch_github_channel_expires=0
+for failure in fallback-both tls-failure missing; do
+    printf preserved > "$test_root/resource"
+    : > "$test_root/requests"
+    if qch_github_download "https://api.github.com/repos/o/r/$failure" "$test_root/resource"; then exit 1; fi
+    [ "$(cat "$test_root/resource")" = preserved ]
+    expected=1
+    [ "$failure" != fallback-both ] || expected=2
+    [ "$(awk '!/--head/ {n++} END {print n+0}' "$test_root/requests")" -eq "$expected" ]
+    [ -z "$(find "$test_root" -name '*.download.*' -o -name '*.headers.*' -o -name '*.error.*')" ]
+done
+
+export HTTPS_PROXY=http://proxy.example:8080 NO_PROXY=
+: > "$test_root/requests"
+if qch_github_download https://api.github.com/repos/o/r/fallback "$test_root/resource"; then exit 1; fi
+[ "$(wc -l < "$test_root/requests")" -eq 1 ]
+if grep -Fq 'https://v6.gh-proxy.org/' "$test_root/requests"; then exit 1; fi
+unset HTTPS_PROXY
+: > "$test_root/requests"
+if qch_github_download https://api.github.com/repos/o/r/cancel "$test_root/resource"; then exit 1; fi
+[ "$(awk '!/--head/ {n++} END {print n+0}' "$test_root/requests")" -eq 1 ]
+printf '%s\n' 'Unknown fallback, redirects, memoization, proxy failure, TLS refusal and cancellation regressions passed'

@@ -87,6 +87,7 @@ qch_github_probe_network() (
             fi
         fi
     fi
+    printf 'GitHub network evidence ipv4_tls=%s ipv6_tls=%s network=%s\n' "$qch_v4" "$qch_v6" "$qch_github_mode" >&2
     printf '%s\n' "$qch_github_mode"
 )
 
@@ -101,32 +102,45 @@ qch_github_detect() {
 }
 
 qch_github_download() {
-    qch_github_detect || return 1
-    (
+    qch_overall_deadline=$(( $(date +%s) + ${4:-90} ))
+    qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; return 1; }
+    if ! qch_github_egress_proxy "$qch_checked_source"; then qch_github_detect || return 1; fi
+    if (
         # A subshell isolates all state, traps and curl options from enrollment.
         qch_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; exit 1; }
         qch_destination=$2
         qch_limit=${3:-134217728}
-        qch_timeout=${4:-90}
+        qch_deadline=$qch_overall_deadline
+        qch_use_channel=false
+        qch_request_count=0
+        if [ "$(date +%s)" -lt "${qch_github_channel_expires:-0}" ]; then qch_use_channel=true; fi
         qch_partial=$(mktemp "${qch_destination}.download.XXXXXX") || exit 1
         trap 'rm -f "$qch_partial"' EXIT
         qch_headers=$(mktemp "${qch_destination}.headers.XXXXXX") || exit 1
-        trap 'rm -f "$qch_partial" "$qch_headers"' EXIT
+        qch_curl_error=$(mktemp "${qch_destination}.error.XXXXXX") || exit 1
+        trap 'rm -f "$qch_partial" "$qch_headers" "$qch_curl_error"' EXIT
         trap 'exit 130' HUP INT TERM
         qch_attempt=1
         while [ "$qch_attempt" -le 3 ]; do
-            qch_deadline=$(( $(date +%s) + qch_timeout ))
             qch_next=$qch_source
             qch_hops=0
             while [ "$qch_hops" -le 5 ]; do
                 qch_remaining=$((qch_deadline - $(date +%s)))
                 [ "$qch_remaining" -gt 0 ] || { printf '%s\n' 'GitHub download attempt timed out' >&2; break; }
                 qch_wire=$qch_next
-                if [ "$qch_github_mode" = ipv6-only ] && ! qch_github_egress_proxy "$qch_next"; then qch_wire="https://v6.gh-proxy.org/$qch_next"; fi
+                set --
+                qch_explicit_proxy=false
+                if qch_github_egress_proxy "$qch_next"; then
+                    qch_explicit_proxy=true
+                elif [ "${qch_github_mode:-unknown}" = ipv6-only ] || "$qch_use_channel"; then
+                    qch_wire="https://v6.gh-proxy.org/$qch_next"
+                    set -- --noproxy '*'
+                fi
+                qch_request_count=$((qch_request_count + 1))
                 # No automatic redirects: inspect every original GitHub target
                 # before another request. -q disables user curlrc credentials.
-                if qch_result=$(curl -q --silent --show-error --proto '=https' --connect-timeout 10 --max-time "$qch_remaining" \
-                    --max-filesize "$qch_limit" --dump-header "$qch_headers" --output "$qch_partial" --write-out '%{http_code}\n%{redirect_url}' "$qch_wire"); then
+                if qch_result=$(curl -q --silent --show-error --proto '=https' --connect-timeout 5 --max-time "$qch_remaining" "$@" \
+                    --max-filesize "$qch_limit" --dump-header "$qch_headers" --output "$qch_partial" --write-out '%{http_code}\n%{redirect_url}' "$qch_wire" 2>"$qch_curl_error"); then
                     qch_status=$(printf '%s\n' "$qch_result" | head -n 1)
                     case "$qch_status" in
                         403|429)
@@ -142,6 +156,7 @@ qch_github_download() {
                             qch_size=$(wc -c < "$qch_partial")
                             [ "$qch_size" -gt 0 ] && [ "$qch_size" -le "$qch_limit" ] || exit 1
                             mv -f "$qch_partial" "$qch_destination" || exit 1
+                            if "$qch_use_channel"; then exit 10; fi
                             exit 0 ;;
                         301|302|303|307|308)
                             qch_next=$(qch_github_original "$(printf '%s\n' "$qch_result" | tail -n 1)") || {
@@ -153,15 +168,46 @@ qch_github_download() {
                         *) printf 'GitHub download response failed: HTTP %s; check repository, resource, GitHub API rate limits and channel availability\n' "$qch_status" >&2; exit 1 ;;
                     esac
                 else
-                    printf 'GitHub download request failed: attempt=%s network=%s; check DNS and HTTPS connectivity\n' "$qch_attempt" "$qch_github_mode" >&2
-                    break
+                    qch_curl_status=$?
+                    cat "$qch_curl_error" >&2
+                    qch_request_host=${qch_wire#https://}
+                    qch_request_host=${qch_request_host%%/*}
+                    qch_request_host=${qch_request_host%%\?*}
+                    printf 'GitHub download request failed: stage=dns-connect-transfer request=%s retry=%s network=%s curl_exit=%s host=%s\n' "$qch_request_count" "$qch_attempt" "${qch_github_mode:-unknown}" "$qch_curl_status" "$qch_request_host" >&2
+                    case "$qch_curl_status" in
+                        6|7|28|52|56)
+                            if "$qch_explicit_proxy"; then
+                                printf '%s\n' 'acceleration not attempted: explicit egress proxy preserved' >&2
+                                exit 69
+                            fi
+                            if [ "$qch_wire" = "$qch_next" ] && ! "$qch_use_channel"; then
+                                printf '%s\n' 'GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource' >&2
+                                qch_use_channel=true
+                                continue
+                            fi
+                            printf '%s\n' 'acceleration failed: check DNS/HTTPS access to v6.gh-proxy.org; if both domains fail to resolve, configure a reachable IPv6 DNS resolver; existing files preserved' >&2
+                            exit 69 ;;
+                        *) printf '%s\n' 'permanent curl failure; acceleration not retried (check TLS verification, local output and size limit)' >&2; exit 1 ;;
+                    esac
                 fi
             done
             [ "$qch_hops" -le 5 ] || { printf '%s\n' 'too many GitHub download redirects' >&2; exit 1; }
+            qch_remaining=$((qch_deadline - $(date +%s)))
+            [ "$qch_remaining" -gt "$qch_attempt" ] || break
             [ "$qch_attempt" -ge 3 ] || sleep "$qch_attempt"
             qch_attempt=$((qch_attempt + 1))
         done
-        printf '%s\n' 'GitHub download failed after 3 attempts; existing files preserved' >&2
+        printf 'GitHub download failed: attempts=%s; total budget or retry limit exhausted; existing files preserved\n' "$qch_attempt" >&2
         exit 1
-    )
+    ); then
+        return 0
+    else
+        qch_download_status=$?
+        case "$qch_download_status" in
+            10) qch_github_channel_expires=$(( $(date +%s) + 30 )); return 0 ;;
+            69) qch_github_expires=0; qch_github_channel_expires=0 ;;
+            130) return 130 ;;
+        esac
+        return 1
+    fi
 }

@@ -27,6 +27,12 @@ func TestMain(tests *testing.M) {
 	if os.Getenv("QCH_TEST_IPQUALITY_SYSTEMD_SANDBOX") == "1" && flag.Lookup("test.run").Value.String() == "^TestIPQualityDependencyHelperSystemdSandbox$" {
 		os.Exit(tests.Run())
 	}
+	// Download verification runs on real nodes without a Go toolchain; it
+	// never uses discovery fixtures. Match only the explicitly selected suite.
+	if os.Getenv("QCH_TEST_LIVE_GITHUB") == "1" && strings.Split(flag.Lookup("test.run").Value.String(), "/")[0] == "^TestLiveGitHubCoreDownloads$" {
+		os.Exit(tests.Run())
+	}
+
 	helper, err := buildExistingDiscoveryCoreHelper()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
