@@ -161,7 +161,7 @@ jobs:
 
       - name: Run project checks on musl/OpenRC
         run: |
-          docker run --rm --init --network host \
+          sh .github/scripts/run-ci-container.sh --rm --init --network host \
             -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
             -e QCH_TEST_SHARDS=4 \
@@ -297,7 +297,7 @@ jobs:
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent
           # SYS_PTRACE belongs to the fixture Agent, which verifies cross-UID
           # /proc/exe identity. Each core is still bounded to BIND_SERVICE+ADMIN.
-          docker run --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
+          sh .github/scripts/run-ci-container.sh --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
             -w /src golang:1.25-alpine sh -ec '

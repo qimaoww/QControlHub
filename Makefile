@@ -44,14 +44,16 @@ upgrade-sandbox-test:
 	# The sandbox drops DAC_OVERRIDE; its root UID must access runner-owned cache directories.
 	chmod -R a+rwX "$(QCH_SANDBOX_GOCACHE)"
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
-	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
+	sh .github/scripts/run-ci-container.sh --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
 		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
 		--tmpfs /usr/local/lib/qagent:rw,exec,mode=0755 --tmpfs /etc/qagent:rw,mode=0755 \
 		--tmpfs /etc/systemd:rw,mode=0755 --tmpfs /var/lib/qcontrolhub-shadowsocks-rust:rw,mode=0750 \
 		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/cache -e GOTOOLCHAIN=local \
+		-e QCH_CACHE_UID="$$(id -u)" -e QCH_CACHE_GID="$$(id -g)" \
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
 		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
-		qch-upgrade-lifecycle-test go test ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
+		qch-upgrade-lifecycle-test sh -ec 'trap '\''chown -R "$$QCH_CACHE_UID:$$QCH_CACHE_GID" /cache'\'' EXIT; \
+		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v' 
 
 vet:
 	go vet ./...
