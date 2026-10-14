@@ -57,6 +57,8 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
+Agent 与运行中的安装脚本会在确认仅 IPv6 出站后，自动为公开 GitHub API、Release 和 Raw 下载添加 `https://v6.gh-proxy.org/` 前缀。首次获取一键脚本时尚未运行检测逻辑，仅 IPv6 主机可使用[首个脚本下载命令及网络检测说明](docs/github-downloads.md)。该说明也列出了实测结果、API 配额限制和回滚方式。
+
 该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时会直接复用为一键安装目录。已保存目录中已有的 `.env`、`.secrets` 和数据会保留，只更新运行脚本与生产 Compose 文件。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请完成全部生产部署步骤并核对安全基线。
 
 内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络。选择“更新”时，脚本先显示当前版本和目标标签，再拉取目标镜像并比较镜像 ID；目标镜像都未变化时提示“当前镜像与目标版本一致，无需更新”并跳过服务重建，有变化时才更新。固定标签只与该标签比较。内置模式按 Compose 最终解析的 `QCH_IMAGE_TAG` 检查两个应用镜像及 PostgreSQL 镜像；`local` 模式仍会重新构建。外部模式更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。

@@ -12,6 +12,8 @@ export const deployManifest = [
   {
     output: "deploy/quick-start.sh",
     modules: [
+      "deploy/modules/quick-start/00-header.sh",
+      "deploy/modules/shared/github-download.sh",
       "deploy/modules/quick-start/00-bootstrap-options.sh",
       "deploy/modules/quick-start/10-secrets-state.sh",
       "deploy/modules/quick-start/20-compose.sh",
@@ -20,6 +22,14 @@ export const deployManifest = [
       "deploy/modules/quick-start/50-environment.sh",
       "deploy/modules/quick-start/60-menu.sh",
       "deploy/modules/quick-start/70-dispatch.sh",
+    ],
+  },
+  {
+    output: "deploy/remote/install-core-engines.sh",
+    modules: [
+      "deploy/modules/install-core-engines/00-header.sh",
+      "deploy/modules/shared/github-download.sh",
+      "deploy/modules/install-core-engines/10-install.sh",
     ],
   },
   {
@@ -96,14 +106,16 @@ export function validateDeployManifest(manifest = deployManifest, moduleFiles = 
       throw new Error(`deploy manifest lists output more than once: ${entry.output}`);
     }
     outputs.add(entry.output);
+    const entryModules = new Set();
     for (const modulePath of entry.modules) {
       if (!modulePath.startsWith("deploy/modules/")) {
         throw new Error(`deploy manifest module must be under deploy/modules: ${modulePath}`);
       }
-      if (listedModules.has(modulePath)) {
+      if (entryModules.has(modulePath) || (listedModules.has(modulePath) && !modulePath.startsWith("deploy/modules/shared/"))) {
         throw new Error(`deploy manifest lists module more than once: ${modulePath}`);
       }
       listedModules.add(modulePath);
+      entryModules.add(modulePath);
     }
   }
   const sourceModules = new Set(moduleFiles);

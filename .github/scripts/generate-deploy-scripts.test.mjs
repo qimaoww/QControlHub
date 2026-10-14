@@ -48,3 +48,10 @@ test("the manifest rejects a source slice that was not given an output order", (
     /unlisted=deploy\/modules\/quick-start\/99-unlisted\.sh/,
   );
 });
+
+test("shared download module is reusable across outputs but never duplicated in one script", () => {
+  const shared = "deploy/modules/shared/github-download.sh";
+  const manifest = [{output:"a.sh", modules:[shared]}, {output:"b.sh", modules:[shared]}];
+  assert.doesNotThrow(() => validateDeployManifest(manifest, [shared]));
+  assert.throws(() => validateDeployManifest([{output:"a.sh", modules:[shared, shared]}], [shared]), /more than once/);
+});

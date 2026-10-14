@@ -1,16 +1,3 @@
-#!/usr/bin/env bash
-# QControlHub 一键交互式部署脚本（Linux）
-#
-# 提供两种部署方式：
-#   bundled  — Docker Compose 内置 PostgreSQL + 控制面（从零开始）
-#   external — 连接已有 PostgreSQL，仅部署控制面容器
-#
-# 用法：
-#   ./deploy/quick-start.sh                          # 交互式选择部署方式
-#   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面）
-#   ./deploy/quick-start.sh -m external -d 'postgresql://user:pass@db:5432/qcontrolhub?sslmode=verify-full'
-
-set -euo pipefail
 
 MODE=""
 ACTION=""
@@ -191,8 +178,8 @@ bootstrap_streamed_script() {
         [ -z "$marker_temp" ] || rm -f -- "$marker_temp"
     }
     trap cleanup_bootstrap_downloads EXIT HUP INT TERM
-    curl -fsSL "$base_url/deploy/quick-start.sh" -o "$script_temp" || die "下载 quick-start.sh 失败"
-    curl -fsSL "$base_url/docker-compose.yml" -o "$compose_temp" || die "下载 docker-compose.yml 失败"
+    qch_github_download "$base_url/deploy/quick-start.sh" "$script_temp" 2097152 20 || die "下载 quick-start.sh 失败"
+    qch_github_download "$base_url/docker-compose.yml" "$compose_temp" 2097152 20 || die "下载 docker-compose.yml 失败"
     bash -n "$script_temp" || die "下载的 quick-start.sh 语法无效"
     grep -Fq 'name: qcontrolhub' "$compose_temp" || die "下载的 docker-compose.yml 内容无效"
     chmod 0755 "$script_temp"

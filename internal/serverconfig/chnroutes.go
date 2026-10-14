@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 	"io"
 	"net/http"
 	"net/netip"
@@ -69,7 +70,7 @@ func fetchChinaRoutes(ctx context.Context, client *http.Client, url string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	response, err := client.Do(request)
+	response, err := githubfetch.Wrap(client).Do(request)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
@@ -54,7 +55,7 @@ func Fetch(ctx context.Context, source core.CNIPSource) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := githubfetch.Wrap(client).Do(req)
 	if err != nil {
 		return nil, errors.New("下载 CN IP 数据源失败")
 	}

@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -320,6 +322,31 @@ func validateReleaseAssetMetadata(asset githubReleaseAsset) error {
 }
 
 func (updater *CoreUpdater) getJSON(ctx context.Context, endpoint string, output any) error {
+	for attempt := 1; ; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := updater.getJSONOnce(attemptCtx, endpoint, output)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var retryable retryableCoreDownloadError
+		if attempt >= defaultDownloadAttempts || !errors.As(err, &retryable) {
+			return err
+		}
+		timer := time.NewTimer(defaultDownloadRetryDelay * time.Duration(1<<(attempt-1)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (updater *CoreUpdater) getJSONOnce(ctx context.Context, endpoint string, output any) error {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || updater.trustedURL == nil || !updater.trustedURL(parsed) {
 		return errors.New("refusing untrusted release API URL")
@@ -332,13 +359,31 @@ func (updater *CoreUpdater) getJSON(ctx context.Context, endpoint string, output
 	request.Header.Set("User-Agent", "QControlHub-Agent")
 	response, err := updater.client.Do(request)
 	if err != nil {
-		return err
+		return retryableCoreDownloadError{err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitHub API returned HTTP %d", response.StatusCode)
+		if (response.StatusCode == 403 || response.StatusCode == 429) && response.Header.Get("X-RateLimit-Remaining") == "0" {
+			retryAt := "the upstream quota resets"
+			if reset, err := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil && reset > 0 {
+				retryAt = time.Unix(reset, 0).UTC().Format(time.RFC3339)
+			}
+			return fmt.Errorf("GitHub API metadata rate limit exhausted (HTTP %d); retry after %s; public acceleration shares the provider's upstream quota", response.StatusCode, retryAt)
+		}
+		err := fmt.Errorf("GitHub API metadata returned HTTP %d; check public repository availability, rate limits and the GitHub download channel", response.StatusCode)
+		if response.StatusCode == 408 || response.StatusCode == 429 || response.StatusCode >= 500 {
+			return retryableCoreDownloadError{err: err}
+		}
+		return err
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxReleaseJSONBytes+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxReleaseJSONBytes+1))
+	if err != nil {
+		return retryableCoreDownloadError{err: err}
+	}
+	if len(body) > maxReleaseJSONBytes {
+		return errors.New("GitHub release metadata exceeds size limit")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	if err := decoder.Decode(output); err != nil {
 		return err
 	}
