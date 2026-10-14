@@ -41,6 +41,8 @@ alpine-test: alpine-agent-test
 
 upgrade-sandbox-test:
 	mkdir -p "$(QCH_SANDBOX_GOCACHE)"
+	# The sandbox drops DAC_OVERRIDE; its root UID must access runner-owned cache directories.
+	chmod -R a+rwX "$(QCH_SANDBOX_GOCACHE)"
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
 	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
 		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
@@ -49,7 +51,7 @@ upgrade-sandbox-test:
 		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/cache -e GOTOOLCHAIN=local \
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
 		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
-		qch-upgrade-lifecycle-test go test -count=1 ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
+		qch-upgrade-lifecycle-test go test ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
 
 vet:
 	go vet ./...

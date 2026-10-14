@@ -3,6 +3,8 @@ set -eu
 # Official v1.25.0 musl binaries; isolated from the host network and services.
 cache=${QCH_SANDBOX_GOCACHE:-$(pwd)/.ci-cache/sandbox-build}
 mkdir -p "$cache"
+# The sandbox compiler and this unprivileged compiler use different UIDs.
+chmod -R a+rwX "$cache"
 fixture=$(mktemp -d /tmp/qch-ss-rust-native.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 archive=shadowsocks-v1.25.0.x86_64-unknown-linux-musl.tar.xz

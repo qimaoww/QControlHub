@@ -25,3 +25,6 @@
 
 # Contributor guidance kept in the working tree only.
 /AGENTS.md
+
+.ci-cache/
+.ci-report/
