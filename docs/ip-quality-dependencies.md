@@ -22,6 +22,19 @@ workspace. The sandbox installation failure was reproduced locally; the code
 and current upstream establish this failure mechanism, rather than proving
 which individual repository/package command failed on that production node.
 
+A subsequent report exposed a second failure: `seteuid 42 failed` and
+`setresuid (Operation not permitted)` while APT read a `mirror+file` source.
+This was reproduced on Debian 13 with APT 3.0.3 and systemd 257.13. During
+seccomp setup, [systemd 257's executor](https://github.com/systemd/systemd/blob/v257/src/core/exec-invoke.c)
+drops `CAP_SETUID` unless the service explicitly requests it in its ambient set.
+With `NoNewPrivileges=yes`, root subprocess execution cannot recover the lost
+capability. `User=root` alone therefore does not let APT change to `_apt`.
+The package helper explicitly requests `CAP_SETUID CAP_SETGID`; it retains
+`NoNewPrivileges=yes` and all existing filesystem/network restrictions. APT
+still drops privileges in acquisition workers. The main Agent unit does not
+gain identity-changing capabilities. Debian 12/systemd 252 did not expose this
+failure, which is why the initial live validation missed it.
+
 ## Supported installation
 
 Use the current Agent installer or upgrade the Agent binary. New installations
@@ -129,6 +142,9 @@ command, exit status, retryability, bounded diagnostics and repair advice:
   address-family connectivity and retry.
 - Package lock: wait for the other transaction; do not delete lock files.
 - Permission/read-only failure: fix the root/service/mount environment.
+- `seteuid`/`setresuid`/GID permission failure: update the Agent and check the
+  package helper's `CAP_SETUID/CAP_SETGID`. If it persists, inspect the host or
+  container capability ceiling. Repeated network retries do not fix this.
 - Missing packages/broken transactions: repair trusted repositories or package
   state before retrying. The Agent does not force-unlock or bypass signatures.
 - No valid report: inspect stdout/stderr for detection-service and public
@@ -157,7 +173,16 @@ checks in each fresh Debian 12 slim, Ubuntu 24.04 and Alpine 3.23 container.
 No detector dependencies are installed by the harness. It asserts first-run
 installation, valid reports and second-run dependency reuse. It is opt-in
 because it requires real package repositories and public detection services;
-normal CI uses deterministic fixtures.
+the ordinary detector tests use deterministic fixtures.
+
+`make ip-quality-systemd-test` is also run by the sandbox CI job. It starts
+fresh Debian 12/systemd 252 and Debian 13/systemd 257 containers using every
+shipped Agent restriction, with real `mirror+file` repositories. The Debian 13
+case first reproduces the old helper's UID failure, then installs and verifies
+all missing tools with the fixed policy and confirms repeat preparation reuses
+them. APT's sandbox checks verify workers cannot regain root identity. No
+public detection service is needed by this gate. A separate live Debian 13
+retry also completed the full detector pipeline with a valid IPv4 report.
 
 | Environment | Observed result |
 | --- | --- |

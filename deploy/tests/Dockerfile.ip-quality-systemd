@@ -1,0 +1,14 @@
+ARG IPQUALITY_TEST_BASE=debian:trixie-slim
+FROM ${IPQUALITY_TEST_BASE}
+# Only boot prerequisites: detector tools are installed by the actual helper.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd dbus && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/apt/mirrors /etc/qcontrolhub /var/lib/qcontrolhub \
+    && printf '%s\n' 'http://deb.debian.org/debian' > /etc/apt/mirrors/debian.list \
+    && printf '%s\n' 'http://deb.debian.org/debian-security' > /etc/apt/mirrors/security.list \
+    && sed -i 's|http://deb.debian.org/debian-security|mirror+file:/etc/apt/mirrors/security.list|;s|http://deb.debian.org/debian|mirror+file:/etc/apt/mirrors/debian.list|' /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' 'APT::Sandbox::Verify::Regain "true";' 'APT::Sandbox::Verify::Groups "true";' 'APT::Sandbox::Verify::IDs "true";' > /etc/apt/apt.conf.d/99qch-verify-sandbox \
+    && touch /etc/qcontrolhub/agent.env
+COPY qagent ip-quality.test /usr/local/lib/qagent/
+COPY qagent.service /etc/systemd/system/qagent.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/lib/systemd/systemd"]

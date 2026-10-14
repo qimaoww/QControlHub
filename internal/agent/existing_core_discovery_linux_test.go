@@ -24,6 +24,9 @@ func TestMain(tests *testing.M) {
 	if os.Getenv("QCH_LIVE_REALITY_SYSTEMD_TEST") == "1" && flag.Lookup("test.run").Value.String() == "^TestMihomoRealityAndTLSManagedLifecycle$" {
 		os.Exit(tests.Run())
 	}
+	if os.Getenv("QCH_TEST_IPQUALITY_SYSTEMD_SANDBOX") == "1" && flag.Lookup("test.run").Value.String() == "^TestIPQualityDependencyHelperSystemdSandbox$" {
+		os.Exit(tests.Run())
+	}
 	helper, err := buildExistingDiscoveryCoreHelper()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

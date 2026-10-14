@@ -36,6 +36,10 @@ alpine-agent-test:
 ip-quality-clean-test:
 	sh deploy/tests/ip-quality-clean.sh
 
+.PHONY: ip-quality-systemd-test
+ip-quality-systemd-test:
+	sh deploy/tests/ip-quality-systemd.sh
+
 alpine-test: alpine-agent-test
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$$' $$packages
 
