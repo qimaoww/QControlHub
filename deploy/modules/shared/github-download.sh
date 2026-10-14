@@ -22,9 +22,20 @@ qch_github_original() {
     printf '%s\n' "$qch_original"
 }
 
+qch_github_probe_budget() {
+    qch_budget=3
+    if [ -n "${qch_overall_deadline:-}" ]; then
+        qch_probe_remaining=$((qch_overall_deadline - $(date +%s)))
+        [ "$qch_probe_remaining" -gt 0 ] || return 1
+        [ "$qch_probe_remaining" -ge "$qch_budget" ] || qch_budget=$qch_probe_remaining
+    fi
+    printf '%s\n' "$qch_budget"
+}
+
 qch_github_probe() {
     # TLS validation, two independent providers, literal routes, no HTTP proxy.
-    curl -q --noproxy '*' --silent --head --output /dev/null --connect-timeout 2 --max-time 3 \
+    qch_tls_budget=$(qch_github_probe_budget) || return 1
+    curl -q --noproxy '*' --silent --head --output /dev/null --connect-timeout 2 --max-time "$qch_tls_budget" \
         --resolve "$1:443:$2" "https://$1/" 2>/dev/null
 }
 
@@ -71,15 +82,15 @@ qch_github_probe_network() (
         if ! command -v ip >/dev/null 2>&1 || ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
             # This proves system DNS and TLS work for the actual channel,
             # using a real resource rather than the proxy's homepage.
-            if curl -q --noproxy '*' -6 --silent --head --output /dev/null --connect-timeout 2 --max-time 3 \
+            if qch_channel_budget=$(qch_github_probe_budget) && curl -q --noproxy '*' -6 --silent --head --output /dev/null --connect-timeout 2 --max-time "$qch_channel_budget" \
                 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/go.mod' 2>/dev/null; then
                 qch_github_mode=ipv6-only
                 # API IPv6 connectivity also covers working DNS64/NAT64.
                 # Preserve direct requests when translation already works.
-                if curl -q --noproxy '*' -6 --silent --head --output /dev/null --connect-timeout 2 --max-time 3 \
+                if qch_api_budget=$(qch_github_probe_budget) && curl -q --noproxy '*' -6 --silent --head --output /dev/null --connect-timeout 2 --max-time "$qch_api_budget" \
                     https://api.github.com/meta 2>/dev/null; then
                     qch_github_mode=ipv6-github-direct
-                    if command -v timeout >/dev/null 2>&1 && command -v getent >/dev/null 2>&1 &&
+                    if qch_github_probe_budget >/dev/null && command -v timeout >/dev/null 2>&1 && command -v getent >/dev/null 2>&1 &&
                         timeout 1 getent hosts ipv4only.arpa 2>/dev/null | awk '$1 ~ /:/ && $1 !~ /^::ffff:/ { found=1 } END { exit !found }'; then
                         qch_github_mode=nat64-dns64
                     fi

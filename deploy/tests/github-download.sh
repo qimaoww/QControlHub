@@ -161,3 +161,11 @@ unset HTTPS_PROXY
 if qch_github_download https://api.github.com/repos/o/r/cancel "$test_root/resource"; then exit 1; fi
 [ "$(awk '!/--head/ {n++} END {print n+0}' "$test_root/requests")" -eq 1 ]
 printf '%s\n' 'Unknown fallback, redirects, memoization, proxy failure, TLS refusal and cancellation regressions passed'
+
+# An already exhausted total budget includes detection, not just curl retries.
+qch_github_expires=0
+qch_github_channel_expires=0
+: > "$test_root/requests"
+if qch_github_download https://api.github.com/repos/o/r/file "$test_root/resource" 134217728 0; then exit 1; fi
+[ ! -s "$test_root/requests" ]
+printf '%s\n' 'Probe requests share the total download budget'
