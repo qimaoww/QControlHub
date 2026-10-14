@@ -79,7 +79,9 @@ jobs:
           # iproute2 provides the ip binary that sing-box dual accounting uses
           # to prove existing policy routing cannot hijack outbound marks.
           # postgresql-client creates one isolated database per test shard.
-          apt-get install --no-install-recommends --yes openssl iproute2 postgresql-client
+          # Agent tests validate the real, root-owned systemctl helper. It was
+          # previously pulled through Chromium's udev dependencies.
+          apt-get install --no-install-recommends --yes systemd openssl iproute2 postgresql-client
 
       - name: Download Go modules
         run: sh .github/scripts/ci-time.sh modules go mod download
@@ -168,7 +170,9 @@ jobs:
             -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -e VERSION="${{ github.sha }}" \
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
-              sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git libcap make nftables nodejs openrc openssl postgresql-client
+              # Module smoke uses zh Intl.DisplayNames. Chromium previously
+              # supplied full ICU data transitively; keep that data explicitly.
+              sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client
               sh .github/scripts/ci-time.sh modules go mod download
               bash .github/scripts/run-ci-tests.sh \
                 --checks "make alpine-non-browser-checks" \

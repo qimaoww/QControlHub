@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const started = performance.now();
 
 // One package load, including build constraints and test imports. Never keep a
 // package allowlist: a newly added package must participate on the first run.
 const format = '{{.ImportPath}}|{{.Dir}}|{{join .Imports ","}}|{{join .TestImports ","}}|{{join .XTestImports ","}}';
 const metadata = execFileSync("go", ["list", "-f", format, "./..."], { encoding: "utf8" });
+const metadataSeconds = (performance.now() - started) / 1000;
 const count = Number(process.argv[2]);
 const exclude = process.argv[3] ? new RegExp(process.argv[3]) : null;
 const history = JSON.parse(readFileSync(new URL("../ci-package-times.json", import.meta.url), "utf8"));
@@ -41,5 +45,14 @@ for (const pkg of selected.filter(pkg => !database.has(pkg.name))
 const assigned = shards.flatMap(shard => shard.packages).sort();
 if (new Set(assigned).size !== assigned.length || JSON.stringify(assigned) !== JSON.stringify(selected.map(pkg => pkg.name).sort())) {
   throw new Error("shard assignment did not cover every selected package exactly once");
+}
+const plannerSeconds = (performance.now() - started) / 1000;
+console.error(`package plan: ${selected.length}/${packages.length} packages, metadata=${metadataSeconds.toFixed(3)}s, total=${plannerSeconds.toFixed(3)}s`);
+if (process.env.QCH_CI_REPORT_DIR) {
+  mkdirSync(process.env.QCH_CI_REPORT_DIR, { recursive: true });
+  writeFileSync(join(process.env.QCH_CI_REPORT_DIR, "shard-plan.json"), JSON.stringify({
+    metadataSeconds, plannerSeconds, packageCount: packages.length,
+    selectedCount: selected.length, excluded: packages.filter(pkg => !selected.includes(pkg)).map(pkg => pkg.name), shards,
+  }, null, 2) + "\n");
 }
 for (const shard of shards) process.stdout.write(`${shard.seconds.toFixed(2)}\t${shard.packages.join(" ")}\n`);
