@@ -52,8 +52,7 @@ atomic_install() {
 }
 
 echo '== mihomo v1.19.29 =='
-gunzip -c "$work/mihomo.gz" > "$work/mihomo"
-version_output=$("$work/mihomo" -v)
+version_output=$(qch_stage_gzip_binary "$work/mihomo.gz" "$work/mihomo" -v)
 printf '%s\n' "$version_output" | head -n1
 
 echo '== xray v26.3.27 =='

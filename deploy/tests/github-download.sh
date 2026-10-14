@@ -93,4 +93,23 @@ qch_github_egress_proxy https://raw.githubusercontent.com/o/r/f && exit 1
 qch_github_egress_proxy https://elsewhere.example/file
 export NO_PROXY='*'
 qch_github_egress_proxy https://api.github.com/repos/o/r && exit 1
+
+# curl excludes both the apex and subdomains for a leading dot. Unlike Go's
+# proxy matcher, curl treats *.host and host:port exclusions as literal names.
+# Keep channel selection consistent with the actual curl process's routing.
+qch_github_mode=ipv6-only
+qch_github_expires=$(( $(date +%s) + 300 ))
+for exclusion in .github.com '*.github.com' github.com:443; do
+    export NO_PROXY=$exclusion
+    : > "$test_root/requests"
+    qch_github_download https://github.com/o/r/file "$test_root/resource"
+    case "$exclusion" in
+        .github.com)
+            qch_github_egress_proxy https://github.com/o/r && exit 1
+            grep -Fq 'https://v6.gh-proxy.org/https://github.com/o/r/file' "$test_root/requests" ;;
+        *)
+            qch_github_egress_proxy https://github.com/o/r
+            if grep -Fq 'https://v6.gh-proxy.org/' "$test_root/requests"; then exit 1; fi ;;
+    esac
+done
 printf '%s\n' 'GitHub download network, cache, metadata, redirect and failure regressions passed'

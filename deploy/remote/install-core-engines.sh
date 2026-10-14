@@ -33,7 +33,8 @@ qch_github_probe() {
         --resolve "$1:443:$2" "https://$1/" 2>/dev/null
 }
 
-# Match curl/Go's hostname NO_PROXY exclusions for public HTTPS origins.
+# Match curl's hostname NO_PROXY exclusions for public HTTPS origins. A leading
+# dot includes the apex host; wildcard subdomains and host:port are literals.
 qch_github_egress_proxy() (
     [ -n "${https_proxy:-${HTTPS_PROXY:-${all_proxy:-${ALL_PROXY:-}}}}" ] || exit 1
     qch_host=${1#https://}; qch_host=${qch_host%%/*}; qch_host=${qch_host%%\?*}
@@ -42,13 +43,10 @@ qch_github_egress_proxy() (
     IFS=,
     set -f
     for qch_exclusion in $qch_exclusions; do
-        qch_exclusion=${qch_exclusion%:443}
+        qch_exclusion=${qch_exclusion#.}
         case "$qch_exclusion" in
             '*') exit 1 ;;
             '') continue ;;
-            .*|\*.*)
-                qch_suffix=${qch_exclusion#\*}
-                case "$qch_host" in *"$qch_suffix") exit 1 ;; esac ;;
             *) case "$qch_host" in "$qch_exclusion"|*."$qch_exclusion") exit 1 ;; esac ;;
         esac
     done
@@ -173,6 +171,17 @@ qch_github_download() {
     )
 }
 
+# A gzip stream carries no executable mode. Prepare the staged binary before
+# version verification; installation only starts after every core is verified.
+qch_stage_gzip_binary() {
+  qch_gzip_archive=$1
+  qch_gzip_binary=$2
+  shift 2
+  gunzip -c "$qch_gzip_archive" > "$qch_gzip_binary" || return 1
+  chmod 0755 "$qch_gzip_binary" || return 1
+  "$qch_gzip_binary" "$@"
+}
+
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'must run as root' >&2; exit 1; }
 if [ -f /etc/alpine-release ]; then
   apk add --no-cache coreutils curl findutils gzip jq tar unzip xz >/dev/null
@@ -226,8 +235,7 @@ atomic_install() {
 }
 
 echo '== mihomo v1.19.29 =='
-gunzip -c "$work/mihomo.gz" > "$work/mihomo"
-version_output=$("$work/mihomo" -v)
+version_output=$(qch_stage_gzip_binary "$work/mihomo.gz" "$work/mihomo" -v)
 printf '%s\n' "$version_output" | head -n1
 
 echo '== xray v26.3.27 =='

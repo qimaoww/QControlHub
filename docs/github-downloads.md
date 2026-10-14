@@ -34,6 +34,8 @@ of three seconds each, followed by bounded DNS/channel and NAT64 checks (at most
 ten seconds total). Shell caches in the running process with the same TTLs.
 Shell can identify direct GitHub IPv6 without the optional `getent` utility;
 the DNS64 label additionally requires bounded `getent` support.
+Configured proxy exclusions follow each downloader's native matching rules;
+Shell follows curl, including leading-dot exclusions matching the apex host.
 
 ## Entry points
 
@@ -120,7 +122,7 @@ namespace/container, rather than inferring a node's connectivity from the panel.
 | Dual-stack Linux host | All four stable cores passed the same flow directly, including release asset redirects. |
 | IPv6-only Raw download | Shell downloaded and checked the content of the real repository `go.mod`; API metadata and a real Xray checksum file also returned their expected content. |
 | IPv6-only development | Official Mihomo and Xray passed real development installation and version verification. Mihomo mirror archive passed download/checksum in the first run; its later full installation query, sing-box development and Shadowsocks Rust development were blocked by shared upstream API quotas. |
-| IPv6-only standalone installer | Detected the network and selected the prefix; its pinned-tag metadata request returned upstream HTTP 403. It stopped before installing any core. Full standalone live installation remains unverified. |
+| Standalone installer on dual stack and IPv6-only | Review found and fixed missing execute permission on gzip-extracted Mihomo before its staged version check. The regenerated script then completed pinned-tag API queries, all four archive downloads, size/SHA-256 verification, actual version execution and installation in isolated mount namespaces on both networks. The IPv6-only run had no IPv4 addresses/default route and selected the prefix automatically. An earlier run stopped before installation on upstream HTTP 403; shared API quotas remain an external limit. |
 
 Stable versions observed were Mihomo `v1.19.32`, Xray `v26.3.27`, sing-box
 `v1.14.3` and Shadowsocks Rust `v1.25.0`.
@@ -134,6 +136,8 @@ live. Deterministic regression tests cover the network states, channel URLs,
 all engine/channel metadata selectors, redirects, credential isolation, retries,
 cancellation and failure cleanup. The normal CI suite does not use the public
 service.
+Shell regressions also execute a real gzip fixture and verify that malformed
+archives and failed staged version commands stop before installation.
 
 ## Rollback
 

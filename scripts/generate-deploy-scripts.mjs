@@ -29,6 +29,7 @@ export const deployManifest = [
     modules: [
       "deploy/modules/install-core-engines/00-header.sh",
       "deploy/modules/shared/github-download.sh",
+      "deploy/modules/install-core-engines/05-stage.sh",
       "deploy/modules/install-core-engines/10-install.sh",
     ],
   },
