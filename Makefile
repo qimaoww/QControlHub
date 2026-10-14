@@ -5,14 +5,14 @@ QCH_SANDBOX_GOCACHE ?= $(CURDIR)/.ci-cache/sandbox-build
 export QCH_SANDBOX_GOCACHE
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
-# Non-Go checks. CI runs these next to the Go shards, then the standalone
-# browser group afterward; keep the Go suite out of these targets.
-BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
+# Routine CI runs non-browser checks beside the Go shards. Real-browser checks
+# remain in local make check and the manual Browser validation workflow.
+BROWSER_CHECK_TARGETS := frontend-browser-check
+CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
+ALPINE_CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test -count=1 ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
@@ -22,7 +22,7 @@ build:
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qcontrol-plane ./cmd/control-plane
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qagent ./cmd/agent
 
-# Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
+# Separate databases isolate data, not PostgreSQL's cluster-wide vacuum horizon.
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
 # The native browser matrix also runs through Go; match CI's package deadline.
 test:
@@ -61,8 +61,12 @@ vet:
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:'; gofmt -l .; exit 1; }
 
-frontend-check:
+frontend-check: frontend-module-check frontend-browser-check
+
+frontend-module-check:
 	node frontend/module_smoke.mjs
+
+frontend-browser-check:
 	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v
 
 module-policy-test:
@@ -128,8 +132,8 @@ web-image-test:
 
 check: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS) test
 
-# CI runs the same checks in parallel tasks, then the standalone browser group;
-# these targets keep one source of truth for the targets that "make check" covers.
+# Local checks include the optional real-browser suite. Routine CI shares every
+# other target; module smoke remains mandatory and preserves its serial order.
 checks: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS)
 browser-checks: $(BROWSER_CHECK_TARGETS)
 non-browser-checks: $(CHECK_TARGETS)

@@ -1,0 +1,104 @@
+name: Browser validation
+
+# Explicitly optional: no PR, push, schedule or publication dependency.
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: Maximum isolated browser workers per platform
+        type: choice
+        options: ["2", "1"]
+        default: "2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -buildvcs=false
+  QCH_CI_REPORT_DIR: ${{ github.workspace }}/.ci-report
+  QCH_BROWSER_WORKERS: ${{ inputs.workers }}
+
+jobs:
+  debian:
+    name: Optional browsers / Debian
+    runs-on: ubuntu-latest
+    container: golang:1.25-bookworm
+    timeout-minutes: 25
+    env:
+      GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
+      GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
+      QCH_CHROME_BIN: /usr/bin/chromium
+    steps:
+      - uses: actions/checkout@v6
+      - id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          identity: qch-v4-linux-${{ runner.arch }}-go${{ steps.go.outputs.go-version }}-debian12-glibc
+          paths: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install Chromium
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends --yes chromium
+      - name: Run the complete real-browser matrix
+        run: sh .github/scripts/ci-time.sh browser make browser-checks
+      - name: Upload scene timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-timings-debian
+          path: .ci-report
+          if-no-files-found: warn
+          include-hidden-files: true
+
+  alpine:
+    name: Optional browsers / Alpine
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pull and identify the Alpine toolchain
+        id: toolchain
+        run: sh .github/scripts/container-toolchain.sh golang:1.25-alpine
+      - uses: ./.github/actions/go-cache
+        with:
+          identity: qch-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.identity }}
+          paths: |
+            .ci-cache/alpine-build
+            .ci-cache/alpine-mod
+      - name: Run the complete real-browser matrix on musl
+        run: |
+          sh .github/scripts/run-ci-container.sh --rm --init \
+            -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
+            -e QCH_BROWSER_WORKERS="${{ inputs.workers }}" \
+            -e QCH_CI_REPORT_DIR=/src/.ci-report -e GOFLAGS=-buildvcs=false \
+            -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod \
+            -v "$PWD/.ci-cache/alpine-build:/cache/build" \
+            -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
+            -v "$PWD:/src" -w /src golang:1.25-alpine sh -ec '
+              apk add --no-cache bash chromium make nodejs
+              sh .github/scripts/ci-time.sh browser make browser-checks
+            '
+      - name: Upload scene timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-timings-alpine
+          path: .ci-report
+          if-no-files-found: warn
+          include-hidden-files: true

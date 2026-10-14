@@ -1,0 +1,514 @@
+{
+  "run": 38553871096,
+  "attempt": 1,
+  "url": "https://github.com/qimaoww/QControlHub/actions/runs/38553871096",
+  "headSHA": "ffdc09adbffb6b47bfcebd275b10b6125817a4c0",
+  "conclusion": "success",
+  "startedAt": "2026-10-14T11:03:15Z",
+  "checksSeconds": 1981.0,
+  "jobMinutes": 69.21666666666667,
+  "billingNote": "Actual aggregate job duration, excluding publication; not GitHub billed minute rounding.",
+  "jobs": [
+    {
+      "name": "Agent upgrade read-only sandbox",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 98.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 12.0
+        },
+        {
+          "name": "Run go mod download",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Run make upgrade-sandbox-test",
+          "conclusion": "success",
+          "seconds": 60.0
+        },
+        {
+          "name": "Run make ss-rust-runtime-test",
+          "conclusion": "success",
+          "seconds": 20.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Alpine / OpenRC",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 1898.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success",
+          "seconds": 13.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run project checks on musl/OpenRC",
+          "conclusion": "success",
+          "seconds": 1881.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Debian / systemd",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 5.0,
+      "runSeconds": 1763.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success",
+          "seconds": 26.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Set up Go",
+          "conclusion": "success",
+          "seconds": 17.0
+        },
+        {
+          "name": "Set up Node.js",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Require a schema version bump for schema changes",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Install Debian test dependencies",
+          "conclusion": "success",
+          "seconds": 20.0
+        },
+        {
+          "name": "Run project checks with PostgreSQL",
+          "conclusion": "success",
+          "seconds": 1667.0
+        },
+        {
+          "name": "Build release binaries",
+          "conclusion": "success",
+          "seconds": 20.0
+        },
+        {
+          "name": "Validate systemd bootstrap",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Set up Node.js",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Set up Go",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "All cores / actual service permissions",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 96.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 13.0
+        },
+        {
+          "name": "Verify fixture address readiness regressions",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Fetch verified official kernels",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Verify full systemd service policies and forwarding",
+          "conclusion": "success",
+          "seconds": 21.0
+        },
+        {
+          "name": "Verify Alpine OpenRC policies, migration and forwarding",
+          "conclusion": "success",
+          "seconds": 51.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Mieru UDP over TCP / v1.19.31",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 63.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 9.0
+        },
+        {
+          "name": "Fetch the official pinned Mihomo release",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Verify real forwarding under systemd socket policies",
+          "conclusion": "success",
+          "seconds": 47.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Mieru UDP over TCP / v1.19.32",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 70.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 11.0
+        },
+        {
+          "name": "Fetch the official pinned Mihomo release",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Verify real forwarding under systemd socket policies",
+          "conclusion": "success",
+          "seconds": 50.0
+        },
+        {
+          "name": "Post Run actions/setup-go@v7",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v6",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Build qagent image",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 58.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Validate Compose configuration",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 8.0
+        },
+        {
+          "name": "Build image",
+          "conclusion": "success",
+          "seconds": 37.0
+        },
+        {
+          "name": "Post Build image",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 1.0
+        }
+      ]
+    },
+    {
+      "name": "Build qcontrol-web image",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 29.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Validate Compose configuration",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 13.0
+        },
+        {
+          "name": "Build image",
+          "conclusion": "success",
+          "seconds": 8.0
+        },
+        {
+          "name": "Post Build image",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "name": "Build qcontrol-plane image",
+      "attempt": 1,
+      "conclusion": "success",
+      "queueSeconds": 2.0,
+      "runSeconds": 78.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Check out repository",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Validate Compose configuration",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Build image",
+          "conclusion": "success",
+          "seconds": 63.0
+        },
+        {
+          "name": "Post Build image",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Set up Docker Buildx",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Check out repository",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    }
+  ]
+}

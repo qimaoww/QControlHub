@@ -4,7 +4,7 @@
 
 The implementation is based on `main` at `ffdc09adbffb6b47bfcebd275b10b6125817a4c0`.
 Application code, test assertions, platform integrations and pinned core releases
-are unchanged. PR #267 contains the completed cold/warm run comparison:
+are unchanged. PR #267 tracks the measured cold/warm comparison:
 https://github.com/qimaoww/QControlHub/pull/267
 
 Use attempt-specific job data, not a mixture of original jobs and a retry:
@@ -50,19 +50,26 @@ not be presented as independently measured historical numbers. Baseline Debian
 restored a 249MiB Go cache; Alpine and sandbox compilation were cold on every
 run. This is a mixed-cache baseline, not a fully warm workflow.
 
+After the user narrowed the scope on 2026-10-14, real browsers are optional: local
+`make check` / `make frontend-check` retain all 81 modes; `.github/workflows/browser.yml`
+provides manual Debian and Alpine validation. Routine PR checks and main publication
+do not run or depend on that workflow. Frontend module smoke, contracts, policy,
+style and diagnostic regressions remain mandatory. This is an explicit scope
+change; its time saving is distinguished from scheduling/cache improvements.
+
 Separate dispatch-only measurement branches (`codex/ci-baseline-measure` and
 `codex/ci-optimized-measure`) keep
 the respective workflows and identical application/test code, add `workflow_dispatch`, and
 disable setup-go restoration / select fresh image cache scopes for controlled
 cold comparisons. The optimized experiment also selects fresh platform-cache
 identities, retaining cache-save costs. They never publish because the event is
-not a main push. Their runs and PR cold/warm attempts are recorded in the comparison.
+not a main push. Their runs and final PR cold/warm attempts are recorded in the comparison.
 No extra benchmark workflow runs on routine PRs.
 
 The optimized platform artifacts contain:
 
-- `phases.tsv`: environment dependencies, modules, standalone browser and
-  release compilation elapsed time/status.
+- `phases.tsv`: environment dependencies, modules and release compilation
+  (the optional browser workflow records its own browser phase) elapsed time/status.
 - `go-tests-*.ndjson`: complete per-test Go events, including failure output.
 - `go-tests-*.json`: elapsed shard time, package execution time and outcome.
   Shard elapsed minus serial package execution includes compilation, loading
@@ -80,10 +87,8 @@ flowchart LR
   commit --> mieru[Mieru real systemd UDP: both versions]
   commit --> perms[All core service permission and forwarding checks]
   commit --> bake[Bake all three images with shared objects]
-  deb --> debbrowser[Module smoke then two isolated browser workers]
-  alp --> alpbrowser[Module smoke then two isolated browser workers]
-  debbrowser --> gates[Existing Build image required checks]
-  alpbrowser --> gates
+  deb --> gates[Existing Build image required checks]
+  alp --> gates
   sand --> gates
   mieru --> gates
   perms --> gates
@@ -91,12 +96,14 @@ flowchart LR
   gates --> publish[Main push: publish with SBOM and provenance]
 ```
 
-`make check` and CI run each ordinary Go package once, every existing Node and
-shell check, a full `go vet ./...`, and the complete browser matrix once. The
-architecture package is included in the ordinary sweep. `make frontend-check`
-and the standalone browser phase run the Go browser wrapper plus module smoke;
-the normal package sweep skips that exact wrapper test. `go test ./...` still
-includes real browser coverage for callers who use Go directly.
+`make check` and routine CI share each ordinary Go package, every existing Node
+and shell check, a full `go vet ./...`, and the complete serial module smoke suite.
+The architecture package is included in the ordinary sweep. The only intentional
+scope difference is real browsers: local `make check` includes the Go browser
+wrapper once; routine CI skips that exact wrapper and does not install Chromium.
+`make browser-checks` and the manual workflow execute the complete browser matrix.
+`make frontend-check` includes both module smoke and browsers. `go test ./...`
+still includes real browsers for callers who use Go directly.
 
 The planner performs one `go list` with package directories/imports/test
 imports. Runtime weights in `.github/ci-package-times.json` come from the
@@ -181,12 +188,12 @@ Regression tests exercise failed shards/checks, serial after-check ordering,
 new packages/helper imports, one metadata call, cancellation and all non-success
 gate states. Real local cancellation left no worker/browser/profile or Docker
 container behind. Actual replaced PR runs were cancelled; their required image
-checks failed rather than reporting success. Cold and warm full CI attempts,
-dependency-change experiments and resource limits are detailed in the PR.
+checks failed rather than reporting success. Cold and warm mandatory CI attempts, optional browser experiments, dependency
+changes and resource limits are detailed in the PR.
 
 Rollback controls:
 
-- Set `QCH_BROWSER_WORKERS=1` (also Alpine's container environment) for serial
+- Set `QCH_BROWSER_WORKERS=1` locally or choose worker count `1` in the manual workflow for serial
   browser execution; no coverage or assertion needs to change.
 - Bump `qch-v4` identities / Bake scopes or disable cache restore/save to force
   a rebuild. Never remove `-count=1` to improve measured runtime.
