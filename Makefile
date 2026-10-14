@@ -89,6 +89,9 @@ deploy-modules-check:
 	bash -n deploy/quick-start.sh
 	sh -n deploy/existing-core-mapping.sh
 	sh -n deploy/remote/install-agent.sh
+	sh -n deploy/remote/install-core-engines.sh
+	sh deploy/tests/github-download.sh
+	sh deploy/tests/core-gzip-staging.sh
 
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh

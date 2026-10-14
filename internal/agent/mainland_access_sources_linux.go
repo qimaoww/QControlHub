@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 	"io"
 	"net/http"
 	"os"
@@ -27,7 +28,7 @@ func (manager *MainlandAccessManager) loadRoutes(ctx context.Context) ([]string,
 		return fallback(err)
 	}
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := client.Do(request)
+	response, err := githubfetch.Wrap(client).Do(request)
 	if err != nil {
 		return fallback(err)
 	}
@@ -64,7 +65,7 @@ func (manager *MainlandAccessManager) loadDomains(ctx context.Context) ([]string
 		return fallback(err)
 	}
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := client.Do(request)
+	response, err := githubfetch.Wrap(client).Do(request)
 	if err != nil {
 		return fallback(err)
 	}

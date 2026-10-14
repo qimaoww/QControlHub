@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 )
 
 const (
@@ -75,6 +77,8 @@ func NewCoreUpdater() *CoreUpdater {
 			Proxy:                 http.ProxyFromEnvironment,
 			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 			DisableCompression:    true,
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 20 * time.Second,
 		},
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
@@ -88,7 +92,7 @@ func NewCoreUpdater() *CoreUpdater {
 		},
 	}
 	return &CoreUpdater{
-		client: client, apiBase: githubAPIBase, goarch: runtime.GOARCH, libc: detectLinuxLibc(),
+		client: githubfetch.Wrap(client), apiBase: githubAPIBase, goarch: runtime.GOARCH, libc: detectLinuxLibc(),
 		trustedURL: trustedCoreReleaseURL, downloadAttempts: defaultDownloadAttempts,
 		downloadAttemptTimeout: defaultDownloadTimeout, downloadRetryDelay: defaultDownloadRetryDelay,
 	}

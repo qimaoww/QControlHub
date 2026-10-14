@@ -13,11 +13,12 @@ cat > "$fake_bin/curl" <<'FAKE_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$QCH_BOOTSTRAP_TEST_LOG"
+case "$*" in *--head*) exit 1 ;; esac
 url=""
 output=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -o) output="$2"; shift 2 ;;
+        -o|--output) output="$2"; shift 2 ;;
         http*) url="$1"; shift ;;
         *) shift ;;
     esac
@@ -35,6 +36,7 @@ QUICK_START
         ;;
     *) printf 'unexpected download URL: %s\n' "$url" >&2; exit 1 ;;
 esac
+printf '200\n'
 FAKE_CURL
 chmod 755 "$fake_bin/curl"
 

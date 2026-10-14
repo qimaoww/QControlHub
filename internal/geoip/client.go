@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
@@ -80,7 +81,7 @@ type Client struct {
 // New creates a GeoIP client. The HTTP client is injectable for tests.
 func New(httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: requestTimeout}
+		httpClient = githubfetch.Wrap(&http.Client{Timeout: requestTimeout})
 	}
 	return &Client{
 		http:              httpClient,
