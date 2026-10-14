@@ -34,7 +34,13 @@ def main():
     run = api(base)
     jobs = api(base + "/jobs?per_page=100")["jobs"]
     origin = run["run_started_at"]
+    if run["status"] != "completed":
+        raise SystemExit("Run is incomplete; wait for every necessary job before recording a comparison.")
     active = [job for job in jobs if job["conclusion"] != "skipped" and not job["name"].startswith("Publish ")]
+    # A retry of failed jobs retains old successes, sometimes with updated
+    # run_attempt/created_at. Such a mixture is not a repeated full workflow.
+    if any(timestamp(job["started_at"]) < timestamp(origin) for job in active if job["started_at"]):
+        raise SystemExit("Attempt retains jobs from an earlier run; rerun ALL jobs for a comparable sample.")
     result = {
         "run": args.run, "attempt": args.attempt, "url": run["html_url"],
         "headSHA": run["head_sha"], "conclusion": run["conclusion"], "startedAt": origin,
@@ -43,6 +49,8 @@ def main():
         "billingNote": "Actual aggregate job duration, excluding publication; not GitHub billed minute rounding.",
         "jobs": [{
             "name": job["name"], "attempt": job["run_attempt"], "conclusion": job["conclusion"],
+            "createdAt": job["created_at"], "startedAt": job["started_at"], "completedAt": job["completed_at"],
+            "startOffsetSeconds": seconds(origin, job["started_at"]),
             "queueSeconds": seconds(job["created_at"], job["started_at"]),
             "runSeconds": seconds(job["started_at"], job["completed_at"]),
             "steps": [{"name": step["name"], "conclusion": step["conclusion"],

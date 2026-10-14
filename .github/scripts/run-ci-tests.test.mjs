@@ -154,6 +154,8 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
         ...process.env,
         PATH: `${binPath}:${process.env.PATH}`,
         QCH_RUNNER_FIXTURE: root,
+        // Fixture planners/summary writers must not overwrite real CI evidence.
+        QCH_CI_REPORT_DIR: join(root, "reports"),
         QCH_TEST_DATABASE_URL: "postgresql://fixture.invalid/ci_runner_base?sslmode=disable",
         QCH_TEST_SHARDS: "2",
       },

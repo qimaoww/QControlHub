@@ -13,7 +13,7 @@ runs:
     - uses: actions/cache@v4
       with:
         path: ${{ inputs.paths }}
-        key: ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go') }}
+        key: ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', '!.ci-cache/**') }}
         restore-keys: |
           ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-
           ${{ inputs.identity }}-

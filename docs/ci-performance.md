@@ -7,7 +7,11 @@ Application code, test assertions, platform integrations and pinned core release
 are unchanged. PR #267 tracks the measured cold/warm comparison:
 https://github.com/qimaoww/QControlHub/pull/267
 
-Use attempt-specific job data, not a mixture of original jobs and a retry:
+Use attempt-specific job data and rerun **all** jobs for repetitions. The report
+rejects incomplete runs and retries that retain jobs from an earlier attempt.
+Download timing artifacts before rerunning; GitHub removes the previous attempt's
+artifacts on a full rerun:
+
 
 ```sh
 python3 .github/scripts/ci-report.py RUN_ID --attempt 1 --output report.json
@@ -16,10 +20,75 @@ gh run download RUN_ID --pattern 'ci-timings-*' --dir timing-artifacts
 
 The report measures time from workflow scheduling to completion of every
 necessary job, queue time from job creation to runner start, individual step
-time and aggregate actual runner minutes. It excludes image publication and
-GitHub's rounded billing units. Upload/download and cache save times are included
+time and aggregate actual runner minutes for the CI workflow. It excludes image
+publication, the separate short PR title/body workflow and GitHub's rounded billing units. Upload/download and cache save times are included
 in job duration. Submission webhooks before Actions creates the run are not
 observable from these APIs.
+
+## Successful run comparison
+
+All runs below passed every necessary CI job. The controlled branches use the
+same application code/test assertions as main, on Ubuntu 24.04 runners (4 CPUs,
+about 16GiB), Debian Go 1.25.0/glibc, Alpine Go 1.25.14/musl and PostgreSQL 17.
+All candidate data includes real database/runtime execution, cache upload and
+strict required gates. The scope difference is the user-requested optional
+browser matrix, described below; this is not a claim of identical mandatory coverage.
+
+| Configuration / cache state | Run / attempt | Necessary checks | Actual job minutes |
+| --- | --- | ---: | ---: |
+| Original, controlled cold | [38556917818/1](https://github.com/qimaoww/QControlHub/actions/runs/38556917818) | 32m19s | 66.15 |
+| Original latest main, mixed | [38553871096/1](https://github.com/qimaoww/QControlHub/actions/runs/38553871096) | 33m01s | 69.22 |
+| Original successful PR, mixed | [38549771383/1](https://github.com/qimaoww/QControlHub/actions/runs/38549771383) | 33m20s | 69.50 |
+| Candidate, controlled cold A | [38562198885/1](https://github.com/qimaoww/QControlHub/actions/runs/38562198885) | 8m39s | 23.08 |
+| Candidate, controlled cold B | [38563741568/1](https://github.com/qimaoww/QControlHub/actions/runs/38563741568) | 8m01s | 22.10 |
+| Candidate PR, cold platform / warm other caches | [38562167419/1](https://github.com/qimaoww/QControlHub/actions/runs/38562167419/attempts/1) | 7m59s | 19.80 |
+| Same candidate PR, full warm rerun | [38562167419/2](https://github.com/qimaoww/QControlHub/actions/runs/38562167419/attempts/2) | 6m23s | 17.05 |
+
+Cold completion fell **73.2-75.2%**, with actual runner minutes down **65.1-66.6%**
+against the controlled original cold run. The warm candidate completes **80.7%**
+faster and uses **75.4%** fewer minutes than the successful mixed-cache main run.
+The original architecture cannot produce a fully warm Alpine/sandbox run because
+those object caches were ephemeral; historical warm Debian runs are labelled mixed.
+The cold/warm difference also includes ordinary runner and PostgreSQL timing
+variation; these samples do not establish a statistical reduction in flake rate.
+Final-head validation and its second warm sample are linked in PR #267.
+
+Raw attempt-specific reports are in [ci-performance/](ci-performance/).
+Successful controlled cold runs used fresh Go/image scopes and reported cache
+misses; the warm rerun restored all three exact Go keys and existing Bake layers.
+Database tests, selected runtime tests and the full module suite still ran.
+Failed/cancelled development runs are excluded from this table.
+
+### Measured contributions and limits
+
+| Change | Evidence | Interpretation |
+| --- | --- | --- |
+| One package metadata load | Same local checkout, 3 samples: median 0.669s -> 0.143s; 21 `go list` calls -> 1. CI metadata about 0.19s. | Preparation improves 79% locally; small absolute benefit. |
+| Measured Go allocation | Cold shards Debian 397/279/53/75s; Alpine 406/70/50/68s. Warm 264/207/5/11s and 327/3/3/11s. | Database/agent work is isolated from small packages; database packages remain serial. Residual imbalance reflects the isolation constraint. |
+| Browser execution | Original frontend browser package 850/935s, followed by another complete serial browser suite. Manual candidate matrix: 404/477s, all 81 modes on each platform passed. Local same assertions: 742.103s serial -> 377.142s balanced. | Duplicate browser coverage was removed; two processes roughly halve one full matrix. Moving browsers out of mandatory CI is an additional explicit scope change. |
+| Persisted Go objects | Cold -> warm: release linking 20/21s -> 1/1s; Alpine small shards 50-70s -> 3-11s. Restore 5/6/3s on Debian/Alpine/sandbox. | Compiler work is reused; test execution is forced with count=1. |
+| Sandbox/native reuse | Original sandbox job 95s; candidate cold 76s, warm 56s. Native Rust step 20s historically -> 4s cold / 3s warm. | Both compiler calls share the fingerprinted container toolchain cache; read-only/runtime isolation remains. |
+| Shared image build, earlier start | Original cold image jobs total 219s, longest 115s after platform validation. Candidate shared preparation 84s cold / 29s warm, plus 16/15s of compatibility gates. | One solve reuses binary objects, starts immediately and removes image construction from the final critical chain. |
+
+Cold cache-save steps were 24s Debian, 8s Alpine and 4s sandbox; warm post-cache
+steps were 3/3/1s and did not upload an exact-key hit. Compressed Go entries were
+about 112/244/188MiB. These costs are included above. Cold Bake build/export was
+60s; warm import/solve/export was 11s. Cold image export spans overlapping
+vertices, so those durations are not added as if sequential. Runner job queue
+was typically 1-3s; dependency scheduling/provisioning gaps remain included in
+completion time and can be examined through job start offsets.
+
+Module downloading was 1-3s cold and 0-2s warm. Alpine dependencies were 3s cold
+and 2s warm, with release compilation/linking measured separately. Debian's
+system dependency step was 5s cold and 4s warm. Chromium formerly provided
+systemd helpers and full ICU data transitively; mandatory CI now explicitly
+installs systemd on Debian and icu-data-full on Alpine. Go shard elapsed minus
+package-test elapsed includes compilation/loading/tool overhead, not a precise
+compiler-only measurement. CPU utilization, peak process RSS and actual GitHub
+billing were not measured. Publication with SBOM/provenance is configured and
+gated, but has not run for this PR event.
+
+## Original bottlenecks
 
 Baseline PR run 38549771383 (first attempt, all jobs successful) required **2000s
 (33m20s)** and **69.50 job minutes**. Its workflow completion timestamp is one
@@ -63,13 +132,17 @@ the respective workflows and identical application/test code, add `workflow_disp
 disable setup-go restoration / select fresh image cache scopes for controlled
 cold comparisons. The optimized experiment also selects fresh platform-cache
 identities, retaining cache-save costs. They never publish because the event is
-not a main push. Their runs and final PR cold/warm attempts are recorded in the comparison.
-No extra benchmark workflow runs on routine PRs.
+not a main push. Their runs and final PR cold/warm attempts are recorded in the comparison. Measurement branches/caches are removed after
+exporting evidence. No extra benchmark workflow runs on routine PRs.
 
 The optimized platform artifacts contain:
 
 - `phases.tsv`: environment dependencies, modules and release compilation
   (the optional browser workflow records its own browser phase) elapsed time/status.
+- `shard-plan.json`: one metadata call, selected/excluded packages and complete
+  allocation. Runner regression fixtures write to their own temporary report
+  directories so they cannot overwrite real evidence. Earlier samples' planner
+  artifact was overwritten by fixtures; use their first 20/19-package log entry.
 - `go-tests-*.ndjson`: complete per-test Go events, including failure output.
 - `go-tests-*.json`: elapsed shard time, package execution time and outcome.
   Shard elapsed minus serial package execution includes compilation, loading
@@ -145,7 +218,8 @@ for Debian/glibc, Alpine/musl and the upgrade sandbox. Alpine and sandbox keys
 fingerprint the actual image's Go version, architecture, OS and libc; floating
 base tags continue to receive upstream updates and invalidate objects when their
 fingerprint changes. Debian setup-go still selects Go 1.25.0 from go.mod.
-Dependency hashes and Go source hashes create new cache entries; restore prefixes
+Dependency hashes and Go source hashes (excluding .ci-cache itself) create new
+cache entries; restore prefixes
 can supply older objects/modules, which Go revalidates and recompiles as needed.
 Changing Go/libc/OS identities cannot restore another platform's objects.
 
@@ -188,8 +262,23 @@ Regression tests exercise failed shards/checks, serial after-check ordering,
 new packages/helper imports, one metadata call, cancellation and all non-success
 gate states. Real local cancellation left no worker/browser/profile or Docker
 container behind. Actual replaced PR runs were cancelled; their required image
-checks failed rather than reporting success. Cold and warm mandatory CI attempts, optional browser experiments, dependency
+checks failed rather than reporting success. The local dependency update experiment ran all 24 authn test events on cold,
+warm and changed dependencies (7.751/1.897/1.938s). A real new helper-importing
+package was assigned once to the database shard and executed its new test.
+See [component/local evidence](ci-performance/local-and-component-experiments.json).
+Cold and warm mandatory CI attempts, optional browser experiments, dependency
 changes and resource limits are detailed in the PR.
+
+The optional workflow passed on both platforms in run 38560344524 (all 81 modes
+per platform, 8m31s wall / 16.62 job minutes). A new workflow file is registered
+only after reaching main; the pre-merge test dispatched its exact job definitions
+through the existing ci.yml filename on a temporary branch. After merge:
+
+```sh
+gh workflow run browser.yml --ref main -f workers=2
+# Local full coverage, including module smoke and real browsers:
+make check
+```
 
 Rollback controls:
 
@@ -198,5 +287,8 @@ Rollback controls:
 - Bump `qch-v4` identities / Bake scopes or disable cache restore/save to force
   a rebuild. Never remove `-count=1` to improve measured runtime.
 - Remove `--extra-independent` if an extra task starts using PostgreSQL.
+- To require browsers again, restore the platform Chromium dependencies and add
+  `--after-checks "make browser-checks"` to both platform schedulers. Module smoke
+  already remains mandatory.
 - Revert this PR for the original scheduler, dependency graph and Dockerfile.
   No application schema/data migration is involved.
