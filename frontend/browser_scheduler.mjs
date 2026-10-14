@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { availableParallelism, totalmem } from "node:os";
+
+// Local complete-suite timing on the same source as the baseline CI run.
+// CI artifacts provide replacement weights when timings materially change.
+const seconds = JSON.parse(readFileSync(new URL("./browser-scene-times.json", import.meta.url), "utf8"));
 
 export function browserShards(modes, workers) {
   assert.ok(Number.isInteger(workers) && workers >= 1 && workers <= 2, "browser workers must be 1 or 2");
   assert.equal(new Set(modes).size, modes.length, "duplicate browser mode");
   const shards = Array.from({ length: Math.min(workers, modes.length) }, () => ({ load: 0, modes: [] }));
-  // Motion suites perform many real gestures. Run the longest first, then pack
-  // the short layout/permission suites around them. No mode allowlist here.
-  const weight = mode => mode.startsWith("motion-cards") ? (mode.endsWith("reduced") ? 20 : 40)
-    : mode.startsWith("motion") ? 15 : 3;
+  // Longest-processing-time packing of measured scene runtime. Newly added
+  // modes automatically enter the plan with a conservative fallback weight.
+  const weight = mode => seconds[mode] || 5;
   for (const mode of [...modes].sort((a, b) => weight(b) - weight(a))) {
     const shard = shards.reduce((best, next) => next.load < best.load ? next : best);
     shard.modes.push(mode);
