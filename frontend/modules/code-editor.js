@@ -24,6 +24,7 @@ export function bindCodeEditors() {
     const original = input.value;
     const baselineStatus = status?.textContent || "已保存";
     const baselineValidation = validation?.textContent || "";
+    const baseline = () => editor.codeBaseline || { content: original, status: baselineStatus, validation: baselineValidation };
     input.setAttribute("wrap", "off");
     const updatePosition = () => {
       if (!position) return;
@@ -77,7 +78,7 @@ export function bindCodeEditors() {
     };
     const update = () => {
       const result = inspect();
-      const dirty = editor.configFileController ? editor.configFileController.dirty() : input.value !== original;
+      const dirty = editor.configFileController ? editor.configFileController.dirty() : input.value !== baseline().content;
       gutter.textContent = Array.from(
         { length: Math.max(1, input.value.split("\n").length) },
         (_, index) => String(index + 1),
@@ -98,11 +99,11 @@ export function bindCodeEditors() {
         if (validation)
           updateFeedback(validation, result.json
             ? "JSON 语法有效；提交后仍会由节点内核校验。"
-            : baselineValidation);
+            : baseline().validation);
         if (statusDot) statusDot.style.background = "var(--amber)";
       } else {
-        if (status) updateFeedback(status, baselineStatus);
-        if (validation) updateFeedback(validation, baselineValidation);
+        if (status) updateFeedback(status, baseline().status);
+        if (validation) updateFeedback(validation, baseline().validation);
         if (statusDot) statusDot.style.background = "var(--green)";
       }
       blockSubmit(!result.valid);
@@ -147,9 +148,10 @@ export function bindCodeEditors() {
     bindEvent(reset, "click", () => {
       if (input.readOnly) return;
       if (editor.configFileController) editor.configFileController.reset();
-      else input.value = original;
+      else input.value = baseline().content;
       input.setSelectionRange(0, 0);
       update();
+      input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
     });
     const runFormat = () => {
@@ -190,6 +192,7 @@ export function bindCodeEditors() {
         input.scrollTop = scrollTop;
         input.scrollLeft = scrollLeft;
         update();
+        input.dispatchEvent(new Event("input", { bubbles: true }));
         if (validation)
           updateFeedback(validation, "已格式化；内容未保存，需提交校验。");
         input.focus();

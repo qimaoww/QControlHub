@@ -1,250 +1,111 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { archiveDraftDirty, bindArchiveDraft, createArchiveDraft } from "../modules/archive-drafts.js";
+import { configDefaults } from "../modules/config-defaults.js";
+import { bindCodeEditors } from "../modules/code-editor.js";
 
-import { installAgents } from "../modules/agents.js";
-
-import { installConfigPages } from "../modules/configs.js";
-
-// Inert on import. The runner owns ordering and the few shared read-only fixtures.
-export async function run({ noop }) {
-// The archive new-config engine selector syncs the source editor language,
-// file/language labels, and formatter on change without rebuilding the DOM.
-{
-  const archiveDocument = globalThis.document;
-  const archiveEvent = globalThis.Event;
-  globalThis.Event = class {
-    constructor(type, options) {
-      this.type = type;
-      this.bubbles = options?.bubbles;
-    }
-  };
-
-  const makeTarget = () => {
-    const listeners = new Map();
-    return {
-      textContent: "",
-      style: {},
-      disabled: false,
-      hidden: false,
-      value: "",
-      addEventListener(type, listener) {
-        const list = listeners.get(type) || [];
-        list.push(listener);
-        listeners.set(type, list);
-      },
-      dispatch(type, event = {}) {
-        (listeners.get(type) || []).forEach((listener) => listener(event));
-      },
-      _listeners: listeners,
-    };
-  };
-  const makeInput = (initialValue) => {
-    const listeners = new Map();
-    const input = {
-      value: initialValue,
-      readOnly: false,
-      disabled: false,
-      selectionStart: initialValue.length,
-      selectionEnd: initialValue.length,
-      scrollTop: 0,
-      scrollLeft: 0,
-      classList: { toggle() {} },
-      setAttribute() {},
-      focus() {},
-      closest: () => ({
-        querySelectorAll: () => [],
-        addEventListener: () => {},
-      }),
-      setSelectionRange(start, end) {
-        input.selectionStart = start;
-        input.selectionEnd = end;
-      },
-      addEventListener(type, listener) {
-        const list = listeners.get(type) || [];
-        list.push(listener);
-        listeners.set(type, list);
-      },
-      dispatch(type, event = {}) {
-        (listeners.get(type) || []).forEach((listener) => listener(event));
-      },
-      dispatchEvent(event) {
-        input.dispatch(event?.type || "input", event);
-      },
-    };
-    return input;
-  };
-  const makeArchiveEditor = (initialValue, engine) => {
-    const input = makeInput(initialValue);
-    const gutter = makeTarget();
-    const byteLabel = makeTarget();
-    const position = makeTarget();
-    const status = makeTarget();
-    const statusDot = makeTarget();
-    const validation = makeTarget();
-    const reset = makeTarget();
-    const format = makeTarget();
-    const languageLabel = makeTarget();
-    const fileLabel = makeTarget();
-    const editor = {
-      dataset: {
-        codeLanguage: engine === "mihomo" ? "YAML" : "JSON",
-        codeMaxBytes: "2097152",
-        dirty: "0",
-        codeValid: "1",
-      },
-      querySelector(selector) {
-        if (selector === "[data-code-input]") return input;
-        if (selector === "[data-line-numbers]") return gutter;
-        if (selector === "[data-code-bytes]") return byteLabel;
-        if (selector === "[data-code-position]") return position;
-        if (selector === "[data-code-status]") return status;
-        if (selector === "[data-code-status-dot]") return statusDot;
-        if (selector === "[data-code-validation]") return validation;
-        if (selector === "[data-code-reset]") return reset;
-        if (selector === "[data-code-format]") return format;
-        if (selector === ".code-language") return languageLabel;
-        if (selector === ".code-file-meta b") return fileLabel;
-        return null;
-      },
-      input,
-      gutter,
-      byteLabel,
-      position,
-      status,
-      statusDot,
-      validation,
-      reset,
-      format,
-      languageLabel,
-      fileLabel,
-    };
-    return editor;
-  };
-
-  const engineSelect = makeTarget();
-  engineSelect.value = "mihomo";
-  const archiveForm = {
-    querySelector(selector) {
-      if (selector === 'select[name="engine"]') return engineSelect;
-      if (selector === "[data-code-editor]") return archiveEditor;
-      return null;
-    },
-    addEventListener() {},
-  };
-  const archiveEditor = makeArchiveEditor(
-    "mixed-port: 7890\nproxies: []\n",
-    "mihomo",
-  );
-
-  globalThis.document = {
-    querySelector(selector) {
-      if (selector === "#archive-form") return archiveForm;
-      if (selector === "[data-code-editor]") return archiveEditor;
-      return null;
-    },
-    querySelectorAll(selector) {
-      if (selector === "[data-code-editor]") return [archiveEditor];
-      return [];
-    },
-  };
-
-  const archiveState = { route: "archive-config", data: { newConfig: true } };
-  const { bindCodeEditors } = installAgents(
-    new Proxy(
-      {
-        state: { route: "archive-config", data: {} },
-        engines: ["mihomo", "xray", "sing-box", "ss-rust"],
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-  const { archiveConfigs } = installConfigPages(
-    new Proxy(
-      {
-        state: archiveState,
-        engines: ["mihomo", "xray", "sing-box", "ss-rust"],
-        api: async () => [],
-        optionalAPI: async () => null,
-        can: () => true,
-        esc: (value) => String(value ?? ""),
-        engineName: (value) => value,
-        ago: () => "now",
-        date: () => "now",
-        conciseVersion: () => "1.0.0",
-        bytes: () => "0 B",
-        confirmAction: async () => true,
-        notify: () => {},
-        shell: () => {},
-        submitTask: async () => {},
-        bindCodeEditors,
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-
-  try {
-    await archiveConfigs();
-    assert.equal(
-      archiveEditor.dataset.codeLanguage,
-      "YAML",
-      "new archive config starts with YAML editor language",
-    );
-
-    engineSelect.value = "xray";
-    engineSelect.dispatch("change", {});
-    assert.equal(
-      archiveEditor.dataset.codeLanguage,
-      "JSON",
-      "engine switch updates the editor language to JSON",
-    );
-    assert.equal(
-      archiveEditor.languageLabel.textContent,
-      "JSON",
-      "engine switch updates the language badge",
-    );
-    assert.equal(
-      archiveEditor.fileLabel.textContent,
-      "config.json",
-      "engine switch updates the file name label",
-    );
-
-    archiveEditor.input.value = '{"a":1,"b":[2,3]}';
-    archiveEditor.format.dispatch("click", {});
-    assert.equal(
-      archiveEditor.input.value,
-      '{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}\n',
-      "formatter uses the switched JSON language without rebuilding the editor",
-    );
-    assert.equal(
-      archiveEditor.dataset.dirty,
-      "1",
-      "engine switch preserves dirty state after formatting",
-    );
-
-    engineSelect.value = "mihomo";
-    engineSelect.dispatch("change", {});
-    assert.equal(
-      archiveEditor.dataset.codeLanguage,
-      "YAML",
-      "engine switch back updates the editor language to YAML",
-    );
-    const beforeYaml = archiveEditor.input.value;
-    archiveEditor.format.dispatch("click", {});
-    assert.equal(
-      archiveEditor.input.value,
-      beforeYaml,
-      "YAML fail-closed keeps the original editor text",
-    );
-    assert.equal(
-      /无法安全格式化|保留原文/.test(archiveEditor.validation.textContent),
-      true,
-      "YAML fail-closed shows a local message",
-    );
-  } finally {
-    if (archiveDocument === undefined) delete globalThis.document;
-    else globalThis.document = archiveDocument;
-    if (archiveEvent === undefined) delete globalThis.Event;
-    else globalThis.Event = archiveEvent;
+export async function run() {
+  for (const [engine, file] of Object.entries({ mihomo: "mihomo-minimal.yaml", xray: "xray-minimal.json",
+    "sing-box": "sing-box-minimal.json", "ss-rust": "shadowsocks-rust-minimal.json" })) {
+    assert.equal(configDefaults[engine], await readFile(new URL(`../../examples/configs/${file}`, import.meta.url), "utf8"),
+      `${engine} defaults must reuse the canonical example verbatim`);
+    const archive = createArchiveDraft({ name: "Archive", engine });
+    const template = createArchiveDraft({ name: "Template", engine });
+    assert.equal(archive.sources.get(engine).content, configDefaults[engine]);
+    assert.equal(archiveDraftDirty(archive), false);
+    archive.sources.get(engine).content += "\n";
+    assert.equal(archiveDraftDirty(archive), true);
+    assert.equal(template.sources.get(engine).content, configDefaults[engine], "forms must not share source state");
+    archive.sources.get(engine).content = archive.sources.get(engine).original;
+    assert.equal(archiveDraftDirty(archive), false);
+    archive.name = "Renamed";
+    assert.equal(archiveDraftDirty(archive), true);
+    archive.name = "Archive";
+    archive.description = "Notes";
+    assert.equal(archiveDraftDirty(archive), true);
+    if (engine !== "mihomo") assert.ok(JSON.parse(configDefaults[engine]));
   }
+  assert.notEqual(configDefaults.xray, configDefaults["sing-box"]);
+  assert.notEqual(configDefaults.xray, configDefaults["ss-rust"]);
+  assert.notEqual(configDefaults["sing-box"], configDefaults["ss-rust"]);
+  testEditorSwitches();
+  console.log("Archive defaults reuse all four canonical examples; draft baselines and forms are independent");
 }
 
+function testEditorSwitches() {
+  class Target extends EventTarget {
+    value = ""; textContent = ""; dataset = {}; style = {}; disabled = false;
+    readOnly = false; selectionStart = 0; selectionEnd = 0;
+    attributes = new Map();
+    classList = { toggle() {} };
+    setAttribute(key, value) { this.attributes.set(key, value); }
+    setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
+    focus() {}
+  }
+  const form = new Target(), editor = new Target(), badge = new Target();
+  const fields = Object.fromEntries(["name", "description", "content", "engine"].map(name => [name, new Target()]));
+  const controls = Object.fromEntries(["data-line-numbers", "data-code-bytes", "data-code-position", "data-code-status",
+    "data-code-status-dot", "data-code-validation", "data-code-reset", "data-code-format"].map(key => [`[${key}]`, new Target()]));
+  const submit = new Target(), language = new Target(), file = new Target();
+  controls["[data-code-status]"].textContent = "草稿";
+  form.querySelector = selector => selector === "[data-code-editor]" ? editor : fields[selector.match(/^\[name="(.+)"\]$/)?.[1]];
+  form.querySelectorAll = () => [submit];
+  form.closest = () => ({ querySelector: () => badge });
+  editor.querySelector = selector => ({ ...controls, "[data-code-input]": fields.content, ".code-language": language,
+    ".code-file-meta b": file })[selector];
+  fields.content.closest = () => form;
+  fields.content.dispatchEvent = event => {
+    const result = Target.prototype.dispatchEvent.call(fields.content, event);
+    if (event.bubbles) form.dispatchEvent(new Event(event.type));
+    return result;
+  };
+  const previousDocument = globalThis.document;
+  globalThis.document = { querySelectorAll: () => [editor] };
+  const draft = createArchiveDraft({ name: "My archive", description: "My notes" });
+  const select = engine => {
+    fields.engine.value = engine;
+    fields.engine.dispatchEvent(new Event("change"));
+  };
+  const check = (engine, content = configDefaults[engine], dirty = false, valid = true) => {
+    assert.equal(form.dataset.engine, engine);
+    assert.equal(badge.textContent, engine);
+    assert.equal(badge.className, `engine-badge ${engine}`);
+    assert.equal(fields.content.attributes.get("aria-label"), `${engine} 配置档案源码`);
+    assert.equal(editor.dataset.codeLanguage, engine === "mihomo" ? "YAML" : "JSON");
+    assert.equal(language.textContent, editor.dataset.codeLanguage);
+    assert.equal(file.textContent, engine === "mihomo" ? "config.yaml" : "config.json");
+    assert.equal(fields.content.value, content);
+    assert.equal(editor.dataset.dirty, dirty ? "1" : "0");
+    assert.equal(editor.dataset.codeValid, valid ? "1" : "0");
+    assert.equal(controls["[data-code-reset]"].disabled, !dirty);
+    assert.equal(submit.disabled, !valid);
+    assert.equal(fields.name.value, "My archive");
+    assert.equal(fields.description.value, "My notes");
+  };
+  try {
+    bindArchiveDraft(form, draft, { engineName: value => value, writable: true });
+    bindCodeEditors();
+    for (const engine of ["mihomo", "xray", "sing-box", "ss-rust", "xray", "mihomo"]) {
+      select(engine); check(engine);
+      const edited = engine === "mihomo" ? configDefaults[engine] + "# draft\n" : '{"draft":"' + engine + '"}';
+      fields.content.value = edited;
+      fields.content.dispatchEvent(new Event("input", { bubbles: true }));
+      select(engine === "mihomo" ? "xray" : "mihomo");
+      select(engine); check(engine, edited, true);
+      bindCodeEditors(); check(engine, edited, true);
+      controls["[data-code-reset]"].dispatchEvent(new Event("click"));
+      check(engine);
+    }
+    select("xray");
+    fields.content.value = '{"broken":';
+    fields.content.dispatchEvent(new Event("input", { bubbles: true }));
+    check("xray", '{"broken":', true, false);
+    select("sing-box"); check("sing-box");
+    select("xray"); check("xray", '{"broken":', true, false);
+    controls["[data-code-reset]"].dispatchEvent(new Event("click"));
+    check("xray");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
 }

@@ -1,44 +1,61 @@
 import { bindEvent } from "./refresh.js";
+import { archiveDraftDirty, bindArchiveDraft, createArchiveDraft } from "./archive-drafts.js";
 
 export function createConfigArchive({ api, optionalAPI, state, engines, can, esc, engineName, date, ago, confirmAction, notify, shell, submitTask, bindCodeEditors }) {
 let archiveConfigRequest = 0;
+let captureDrafts = () => {};
+let draftData;
 
 async function archiveConfigs() {
+  const sessionData = state.data;
+  if (draftData === sessionData) captureDrafts();
+  else captureDrafts = () => {};
+  draftData = sessionData;
+  const drafts = sessionData.archiveDrafts ||= { configs: new Map(), template: createArchiveDraft() };
   const request = ++archiveConfigRequest;
+  const isCurrent = () => request === archiveConfigRequest && state.data === sessionData && state.route === "archive-config";
   const [items, templates, agents] = await Promise.all([
     api("/configs"),
     can("templates.read") ? api("/templates") : [],
     can("agents.read") ? api("/agents") : [],
   ]);
-  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
+  if (!isCurrent()) return;
   state.data.configs = items;
   state.data.agents = agents;
   const isNew = state.data.newConfig || items.length === 0;
-  let selected = items.find((item) => item.id === state.data.archiveConfigId);
+  let selected = !isNew && items.find((item) => item.id === state.data.archiveConfigId);
   if (!selected && !isNew) selected = items[0];
-  const formConfig = selected || {
+  const savedConfig = selected || {
     id: "",
     name: "新配置",
     description: "",
     engine: "mihomo",
-    content:
-      "mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n",
     version: 0,
   };
-  state.data.archiveConfigId = formConfig.id;
-  const revisions = formConfig.id
+  const draftKey = savedConfig.id || "new";
+  state.data.archiveConfigId = savedConfig.id;
+  const revisions = savedConfig.id
     ? await api(
-        `/configs/${encodeURIComponent(formConfig.id)}/revisions?limit=50`,
+        `/configs/${encodeURIComponent(savedConfig.id)}/revisions?limit=50`,
       )
     : [];
-  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
+  if (!isCurrent()) return;
   let preview = null;
-  if (formConfig.id && state.data.revisionVersion) {
+  if (savedConfig.id && state.data.revisionVersion) {
     preview = await optionalAPI(
-      `/configs/${encodeURIComponent(formConfig.id)}/revisions/${state.data.revisionVersion}`,
+      `/configs/${encodeURIComponent(savedConfig.id)}/revisions/${state.data.revisionVersion}`,
     );
   }
-  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
+  if (!isCurrent()) return;
+  // Capture edits made while list/revision requests were in flight before the
+  // shell reconciles controls. Session baselines are never taken from the DOM.
+  captureDrafts();
+  let formConfig = drafts.configs.get(draftKey);
+  if (!formConfig || (savedConfig.id && !archiveDraftDirty(formConfig))) {
+    formConfig = createArchiveDraft(savedConfig);
+    drafts.configs.set(draftKey, formConfig);
+  }
+  formConfig.content = formConfig.sources.get(formConfig.engine).content;
   const deployAgents = agents.filter(
     (agent) =>
       agent.status === "online" &&
@@ -97,32 +114,21 @@ async function archiveConfigs() {
     state.data.revisionVersion = 0;
     archiveConfigs();
   });
-  bindCodeEditors();
   const archiveForm = document.querySelector("#archive-form");
-  const archiveEngine = archiveForm?.querySelector('select[name="engine"]');
-  if (archiveEngine && !archiveEngine.disabled) {
-    bindEvent(archiveEngine, "change", () => {
-      const editor = archiveForm.querySelector("[data-code-editor]");
-      if (!editor) return;
-      const engine = archiveEngine.value;
-      const language = engine === "mihomo" ? "YAML" : "JSON";
-      editor.dataset.codeLanguage = language;
-      const languageLabel = editor.querySelector(".code-language");
-      if (languageLabel) languageLabel.textContent = language;
-      const fileLabel = editor.querySelector(".code-file-meta b");
-      if (fileLabel)
-        fileLabel.textContent = engine === "mihomo" ? "config.yaml" : "config.json";
-      const input = editor.querySelector("[data-code-input]");
-      if (input) input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  }
+  const captureConfig = bindArchiveDraft(archiveForm, formConfig, { engineName, writable: can("configs.write") });
+  const captureTemplate = bindArchiveDraft(document.querySelector("#template-form"), drafts.template,
+    { engineName, writable: can("templates.write"), template: true });
+  captureDrafts = () => { captureConfig(); captureTemplate(); };
+  bindCodeEditors();
   bindEvent(document.querySelector("#archive-form"), "submit", async (event) => {
       event.preventDefault();
+      if (!can("configs.write") || archiveForm.querySelector("[data-code-editor]")?.dataset.codeValid === "0") return;
+      captureConfig();
       const form = new FormData(event.currentTarget);
       const payload = {
         name: form.get("name"),
         description: form.get("description"),
-        engine: form.get("engine") || formConfig.engine,
+        engine: archiveForm.querySelector('[name="engine"]').value,
         content: form.get("content"),
         version: formConfig.version,
       };
@@ -136,6 +142,20 @@ async function archiveConfigs() {
             body: JSON.stringify(payload),
           },
         );
+        if (state.data !== sessionData) return;
+        captureConfig();
+        // Keep edits made during a save as a draft of the returned version.
+        const remaining = createArchiveDraft(saved);
+        if (formConfig.name !== payload.name) remaining.name = formConfig.name;
+        if (formConfig.description !== payload.description) remaining.description = formConfig.description;
+        const source = formConfig.sources.get(payload.engine);
+        if (source.content !== payload.content) remaining.sources.get(saved.engine).content = source.content;
+        if (!formConfig.id && (formConfig.engine !== payload.engine || [...formConfig.sources.entries()]
+          .some(([engine, value]) => engine !== payload.engine && value.content !== value.original))) {
+          source.original = payload.content;
+        } else drafts.configs.delete(draftKey);
+        drafts.configs.set(saved.id, remaining);
+        captureDrafts = captureTemplate;
         state.data.newConfig = false;
         state.data.archiveConfigId = saved.id;
         await archiveConfigs();
@@ -171,19 +191,22 @@ async function archiveConfigs() {
       }),
   );
   bindEvent(document.querySelector("[data-restore-revision]"), "click", async (event) => {
+      const version = event.currentTarget.dataset.restoreRevision;
       if (!(await confirmAction(
-        `确定以 v${event.currentTarget.dataset.restoreRevision} 的内容创建新版本？`,
+        `确定以 v${version} 的内容创建新版本？`,
         "创建新版本",
       )))
         return;
       await api(
-        `/configs/${encodeURIComponent(formConfig.id)}/revisions/${event.currentTarget.dataset.restoreRevision}/restore`,
+        `/configs/${encodeURIComponent(formConfig.id)}/revisions/${version}/restore`,
         {
           method: "POST",
           body: JSON.stringify({ expected_version: formConfig.version }),
         },
       );
       state.data.revisionVersion = 0;
+      drafts.configs.delete(draftKey);
+      captureDrafts = captureTemplate;
       await archiveConfigs();
   });
   document.querySelectorAll("[data-remove]").forEach(
@@ -192,6 +215,8 @@ async function archiveConfigs() {
         if (!(await confirmAction("确认删除配置？", "删除配置"))) return;
         try {
           await api(`/configs/${button.dataset.remove}`, { method: "DELETE" });
+          drafts.configs.delete(draftKey);
+          captureDrafts = captureTemplate;
           state.data.archiveConfigId = "";
           state.data.newConfig = false;
           archiveConfigs();
@@ -202,6 +227,8 @@ async function archiveConfigs() {
   );
   bindEvent(document.querySelector("#template-form"), "submit", async (event) => {
       event.preventDefault();
+      if (!can("templates.write")) return;
+      captureTemplate();
       const form = new FormData(event.currentTarget);
       try {
         await api("/templates", {
@@ -212,6 +239,15 @@ async function archiveConfigs() {
             content: form.get("content"),
           }),
         });
+        if (state.data !== sessionData) return;
+        captureTemplate();
+        if (drafts.template.name === form.get("name") && drafts.template.engine === form.get("engine") &&
+            drafts.template.sources.get(drafts.template.engine).content === form.get("content") &&
+            ![...drafts.template.sources.entries()].some(([engine, source]) =>
+              engine !== form.get("engine") && source.content !== source.original)) {
+          drafts.template = createArchiveDraft();
+        }
+        captureDrafts = captureConfig;
         archiveConfigs();
       } catch (error) {
         notify(error.message, "error");
