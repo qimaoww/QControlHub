@@ -18,7 +18,7 @@ const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,ti
 	public_ip_probe_interval_seconds,core_log_minimum_level,core_log_retention_days,agent_core_log_max_mib,
 	agent_core_log_rotate_count,metric_retention_days,audit_retention_days,task_retention_days,config_revision_retention,
 	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,komari_url,komari_api_key,updated_at,
-	COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb),cnip_source,client_connection_retention_days`
+	COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb),cnip_source,client_connection_retention_days,acme_email`
 
 func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 	var value core.PanelSettings
@@ -29,7 +29,7 @@ func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 		&value.PublicIPProbeIntervalSeconds, &value.CoreLogMinimumLevel, &value.CoreLogRetentionDays, &value.AgentCoreLogMaxMiB,
 		&value.AgentCoreLogRotateCount, &value.MetricRetentionDays, &value.AuditRetentionDays, &value.TaskRetentionDays, &value.ConfigRevisionRetention,
 		&value.WebhookURL, &value.NotifyTaskFailed, &value.NotifyAgentOffline, &value.NotifyAgentOnline, &value.NotifyTrafficQuota, &value.KomariURL, &value.KomariAPIKey, &value.UpdatedAt,
-		&value.DefaultAgentEngines, &value.CNIPSource, &value.ClientConnectionRetentionDays,
+		&value.DefaultAgentEngines, &value.CNIPSource, &value.ClientConnectionRetentionDays, &value.ACMEEmail,
 	)
 	return value, err
 }
@@ -140,6 +140,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		return core.PanelSettings{}, ErrForbidden
 	}
 	settings.PanelName = strings.TrimSpace(settings.PanelName)
+	settings.ACMEEmail = strings.TrimSpace(settings.ACMEEmail)
 	settings.PanelDescription = strings.TrimSpace(settings.PanelDescription)
 	settings.CoreLogMinimumLevel = strings.ToLower(strings.TrimSpace(settings.CoreLogMinimumLevel))
 	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
@@ -213,7 +214,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		settings.AgentCoreLogRotateCount, settings.MetricRetentionDays, settings.AuditRetentionDays, settings.TaskRetentionDays,
 		settings.ConfigRevisionRetention, settings.WebhookURL, settings.NotifyTaskFailed, settings.NotifyAgentOffline,
 		settings.NotifyAgentOnline, settings.NotifyTrafficQuota, settings.KomariURL, settings.KomariAPIKey, settings.UpdatedAt,
-		settings.DefaultAgentEngines, settings.CNIPSource, settings.ClientConnectionRetentionDays,
+		settings.DefaultAgentEngines, settings.CNIPSource, settings.ClientConnectionRetentionDays, settings.ACMEEmail,
 	}
 	if expectedRevision > 0 {
 		where += fmt.Sprintf(" AND revision=$%d", len(args)+1)
@@ -226,7 +227,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		public_ip_probe_interval_seconds=$15,core_log_minimum_level=$16,core_log_retention_days=$17,agent_core_log_max_mib=$18,
 		agent_core_log_rotate_count=$19,metric_retention_days=$20,audit_retention_days=$21,task_retention_days=$22,
 		config_revision_retention=$23,webhook_url=$24,notify_task_failed=$25,notify_agent_offline=$26,
-		notify_agent_online=$27,notify_traffic_quota=$28,komari_url=$29,komari_api_key=$30,updated_at=$31,default_agent_engines=$32,cnip_source=$33,client_connection_retention_days=$34 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
+		notify_agent_online=$27,notify_traffic_quota=$28,komari_url=$29,komari_api_key=$30,updated_at=$31,default_agent_engines=$32,cnip_source=$33,client_connection_retention_days=$34,acme_email=$35 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
 	saved, err := scanPanelSettings(s.pool.QueryRow(ctx, query, args...))
 	if errors.Is(err, pgx.ErrNoRows) && expectedRevision > 0 {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
@@ -249,6 +250,7 @@ func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, setti
 	// Only operational, non-secret values are available to background SQL.
 	runtime := settings
 	runtime.CNIPSource = nil
+	runtime.ACMEEmail = ""
 	runtime.WebhookURL, runtime.KomariURL, runtime.KomariAPIKey = "", "", ""
 	runtimeJSON, err := json.Marshal(runtime)
 	if err != nil {

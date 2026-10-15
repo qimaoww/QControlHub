@@ -32,6 +32,7 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	var input struct {
 		core.PanelSettings
+		ACMEEmail                     *string `json:"acme_email"`
 		ClientConnectionRetentionDays *int    `json:"client_connection_retention_days"`
 		KomariURL                     *string `json:"komari_url"`
 		KomariAPIKey                  *string `json:"komari_api_key"`
@@ -42,6 +43,10 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	settings := input.PanelSettings
+	settings.ACMEEmail = previous.ACMEEmail
+	if input.ACMEEmail != nil {
+		settings.ACMEEmail = *input.ACMEEmail
+	}
 	settings.ClientConnectionRetentionDays = previous.ClientConnectionRetentionDays
 	if input.ClientConnectionRetentionDays != nil {
 		settings.ClientConnectionRetentionDays = *input.ClientConnectionRetentionDays

@@ -306,6 +306,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if len(task.TLSFrontends) > 0 && (!containsFeature(features, core.AgentFeatureManagedTLS) || request.Action == core.ActionImportExisting) {
 			return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持面板托管 TLS 反代", ErrConflict)
 		}
+		if len(task.TLSFrontends) > 0 {
+			// Defaults belong to the configuration owner, including a shared
+			// recipient or a configuration submitted by an administrator.
+			ownerSettings, err := s.panelSettingsForOwner(ctx, tx, configOwnerID)
+			if err != nil {
+				return core.Task{}, err
+			}
+			for i := range task.TLSFrontends {
+				if f := &task.TLSFrontends[i]; f.Mode == "caddy" && f.ACMEEmail == "" {
+					f.ACMEEmail = ownerSettings.ACMEEmail
+				}
+			}
+		}
 		for _, frontend := range task.TLSFrontends {
 			if frontend.ACMEEmail != "" && !containsFeature(features, core.AgentFeatureACMEFallback) {
 				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Let’s Encrypt → ZeroSSL 自动回退", ErrConflict)

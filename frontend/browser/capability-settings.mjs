@@ -12,6 +12,8 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   }
   assert.equal(form.querySelectorAll("[data-settings-state]").length, 1, "设置页只保留一处保存状态");
   assert.equal(form.querySelector("header p:empty, .settings-toggle small:empty"), null, "省略说明后不应留下空文案行");
+  const acme = form.querySelector('#settings-certificates [name="acme_email"]');
+  assert.ok(acme && acme.type === "email" && !acme.required, "证书申请应提供可选的邮箱输入");
   if (!mode.endsWith("-readonly")) {
     assert.ok(form.querySelector("[data-settings-state]").getBoundingClientRect().height > 0,
       "手机和桌面都应显示保存状态");
@@ -19,6 +21,7 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   if (new URLSearchParams(location.search).has("preview")) return;
   if (mode.endsWith("-readonly")) {
     assert.ok(inputs.every(input => input.disabled), "只读用户不得修改全局能力");
+    assert.ok(acme.disabled, "只读用户不得修改证书邮箱");
     assert.equal(form.querySelector("[data-save-settings]"), null, "只读页不得提供保存入口");
     return;
   }
@@ -26,6 +29,9 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   assert.ok(ipv4 && ipv6 && !form.querySelector('[name="cnip_format"]'), "CN IP sources must use automatic format and both families");
   const save = form.querySelector("[data-save-settings]");
   assert.ok(save.disabled, "初始状态不应需要保存");
+  acme.value = "not-an-email";
+  assert.ok(!acme.checkValidity(), "邮箱格式错误应触发表单校验");
+  acme.value = "certs@example.test";
   ipv4.value = "https://example.com/cn.mmdb";
   ipv6.value = "https://example.com/cn6.srs";
   form.elements.client_connection_retention_days.value = "45";
@@ -41,9 +47,20 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   form.requestSubmit(save);
   await waitFor(() => testAPI.settings.revision === 2, "全局能力未保存");
   assert.equal(testAPI.settings.client_connection_retention_days, 45, "source IP retention missing from settings save");
+  assert.equal(testAPI.settings.acme_email, "certs@example.test", "证书邮箱未保存");
   assert.equal(testAPI.settings.default_agent_engines.length, 0, "必须允许全部关闭");
   assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value, "IPv4 source missing from save");
   assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value, "IPv6 source missing from save");
   assert.equal(testAPI.settings.cnip_source.format, "auto", "format must be automatic");
   assert.ok(save.disabled, "保存成功后应清除待保存状态");
+  const currentForm = await waitFor(() => {
+    const current = document.querySelector("#settings-form");
+    return current?.getAttribute("aria-busy") !== "true" && current;
+  }, "保存请求未结束");
+  const currentACME = currentForm.elements.acme_email;
+  currentACME.value = "";
+  currentACME.dispatchEvent(new Event("input", { bubbles: true }));
+  currentForm.requestSubmit(currentForm.querySelector("[data-save-settings]"));
+  await waitFor(() => testAPI.settings.revision === 3, "证书邮箱清空未保存");
+  assert.equal(testAPI.settings.acme_email, "", "必须允许明确清空证书邮箱");
 }

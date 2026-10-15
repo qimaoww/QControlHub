@@ -27,9 +27,11 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		`href="#settings-data"><span>04</span>数据与日志`,
 		`href="#settings-notify"><span>05</span>事件通知`,
 		`href="#settings-komari"><span>06</span>Komari 联动`,
-		`href="#settings-deployment"><span>08</span>部署状态`,
+		`href="#settings-certificates"><span>08</span>证书申请`,
+		`href="#settings-deployment"><span>09</span>部署状态`,
 		`"settings-engines": "settings"`,
 		`"settings-data": "settings"`,
+		`"settings-certificates": "settings"`,
 	} {
 		if !strings.Contains(appContent, required) {
 			t.Errorf("core-log storage settings navigation is missing %q", required)

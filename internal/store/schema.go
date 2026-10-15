@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 72
+const currentSchemaVersion = 73
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -350,6 +350,7 @@ ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS public_ip_probe_interval_sec
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_retention_days integer NOT NULL DEFAULT 7;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS client_connection_retention_days integer NOT NULL DEFAULT 30 CHECK(client_connection_retention_days BETWEEN 0 AND 3650);
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS cnip_source jsonb;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS acme_email varchar(254) NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_max_mib integer NOT NULL DEFAULT 16;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_rotate_count integer NOT NULL DEFAULT 1;

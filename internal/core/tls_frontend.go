@@ -70,11 +70,8 @@ func (f TLSFrontend) Validate() error {
 		return fmt.Errorf("本地目标字段仅支持 XHTTP 组合")
 	}
 
-	if f.ACMEEmail != "" {
-		address, err := mail.ParseAddress(f.ACMEEmail)
-		if err != nil || address.Address != f.ACMEEmail || len(f.ACMEEmail) > 254 || strings.ContainsAny(f.ACMEEmail, "\r\n") {
-			return fmt.Errorf("ACME 邮箱无效，请填写用于 ZeroSSL 账户绑定的邮箱地址")
-		}
+	if err := ValidateACMEEmail(f.ACMEEmail); err != nil {
+		return err
 	}
 	if f.Mode != "caddy" && f.Mode != "nginx" {
 		return fmt.Errorf("unsupported managed TLS provider %q", f.Mode)
@@ -109,6 +106,17 @@ func (f TLSFrontend) Validate() error {
 	}
 	if f.Mode == "nginx" && (f.Certificate == "" || f.PrivateKey == "") {
 		return fmt.Errorf("Nginx 托管证书缺少证书或私钥")
+	}
+	return nil
+}
+
+func ValidateACMEEmail(email string) error {
+	if email == "" {
+		return nil
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 254 || strings.ContainsAny(email, "\r\n") {
+		return fmt.Errorf("ACME 邮箱无效，请填写用于 ZeroSSL 账户绑定的邮箱地址")
 	}
 	return nil
 }

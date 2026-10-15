@@ -33,7 +33,7 @@ func (m *tlsFrontendManager) withFrontendDiagnostics(cause error, frontend core.
 	}
 	account := "已启用 Let’s Encrypt → ZeroSSL 回退"
 	if frontend.ACMEEmail == "" {
-		account = "未设置 ACME 邮箱，ZeroSSL 无法自动绑定账户；请在预设中填写邮箱后重试"
+		account = "未设置 ACME 邮箱，ZeroSSL 无法自动绑定账户；请在系统设置的证书申请或预设中填写邮箱后重试"
 	}
 	return fmt.Errorf("%w；%s；证书机构日志：\n%s", cause, account, log)
 }
