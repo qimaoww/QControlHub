@@ -251,7 +251,7 @@ jobs:
       - name: Verify all sing-box upstream presets and exported TCP/UDP clients
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
-        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal)$'
+        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal|SharedFinalInboundDeletion)$'
       - name: Verify actual Caddy and Nginx TCP/UDP proxy clients
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box

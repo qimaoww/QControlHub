@@ -116,7 +116,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		}
 		if reservedFor != shareID {
 			rows.Close()
-			return fmt.Errorf("%w: port %d is already reserved for another user", ErrConflict, port)
+			return portConflict(port, fmt.Errorf("%w: port %d is already reserved for another user", ErrConflict, port))
 		}
 		delete(wanted, port)
 	}
@@ -190,12 +190,12 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		}
 		for _, f := range frontends {
 			if wanted[f.PublicPort] {
-				return fmt.Errorf("%w: 公网反代端口 %d 属于其他用户的部署", ErrConflict, f.PublicPort)
+				return portConflict(f.PublicPort, fmt.Errorf("%w: 公网反代端口 %d 属于其他用户的部署", ErrConflict, f.PublicPort))
 			}
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {
 			if wanted[endpoint.Port] {
-				return fmt.Errorf("%w: port %d belongs to another user's deployed configuration", ErrConflict, endpoint.Port)
+				return portConflict(endpoint.Port, fmt.Errorf("%w: port %d belongs to another user's deployed configuration", ErrConflict, endpoint.Port))
 			}
 		}
 	}

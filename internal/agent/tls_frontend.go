@@ -404,15 +404,10 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 		}
 		if !modes[mode] {
 			if _, statErr := os.Stat(filepath.Join(m.root, mode+".conf")); statErr == nil {
-				if _, err = m.services.command(ctx, service, core.ActionStop); err != nil {
-					return err
+				if output, stopErr := m.services.command(ctx, service, core.ActionStop); stopErr != nil {
+					return fmt.Errorf("%s 反代停止失败：%w；%s", mode, stopErr, output)
 				}
-				if m.services.Kind() == ServiceManagerSystemd {
-					_, err = run(ctx, m.services.enableHelper(), "disable", service)
-				} else {
-					_, err = run(ctx, m.services.enableHelper(), "del", service, "default")
-				}
-				if err != nil {
+				if err = setServiceEnabled(ctx, service, false, m.services); err != nil {
 					return err
 				}
 			}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,10 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 		ports = append(ports, f.PublicPort)
 	}
 	if err := s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, owner, task.AgentID, ports); err != nil {
+		var conflict *PortConflictError
+		if errors.As(err, &conflict) {
+			return &PortConflictError{Port: conflict.Port, Field: "tls_public_port", Cause: conflict.Cause}
+		}
 		return err
 	}
 	if task.SharedTrafficID == "" {
@@ -65,7 +70,7 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 			return err
 		}
 		if !unrestricted && !allocated {
-			return fmt.Errorf("%w: 公网反代端口 %d 未分配给此用户", ErrConflict, port)
+			return &PortConflictError{Port: port, Field: "tls_public_port", Cause: fmt.Errorf("%w: 公网反代端口 %d 未分配给此用户", ErrConflict, port)}
 		}
 		if unrestricted && task.Action == core.ActionDeploy {
 			if _, err := tx.Exec(ctx, `INSERT INTO agent_share_ports(agent_id,port,share_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, task.AgentID, port, task.SharedTrafficID); err != nil {

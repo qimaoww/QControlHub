@@ -83,3 +83,43 @@ func TestSharedTrafficSupportsGeneratedServerPresets(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedTrafficFinalInboundDeletion(t *testing.T) {
+	for engine, content := range map[core.Engine]string{
+		core.EngineMihomo:          "listeners: []\nproxies: []\nrules: ['MATCH,DIRECT']\n",
+		core.EngineXray:            `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`,
+		core.EngineSingBox:         `{"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}],"experimental":{"v2ray_api":{"listen":"127.0.0.1:10086"}}}`,
+		core.EngineShadowsocksRust: `{"servers":[],"mode":"tcp_and_udp","timeout":300}`,
+	} {
+		t.Run(string(engine), func(t *testing.T) {
+			endpoints, err := SharedTrafficEndpoints(engine, content)
+			if err != nil || len(endpoints) != 0 {
+				t.Fatalf("explicit empty configuration: %+v %v", endpoints, err)
+			}
+			runtime, err := SharedInstanceRuntimeContent(engine, content)
+			if err != nil || strings.Contains(runtime, "10086") {
+				t.Fatalf("empty shared runtime retained statistics listener: %s %v", runtime, err)
+			}
+		})
+	}
+	for _, test := range []struct {
+		engine  core.Engine
+		content string
+	}{
+		{core.EngineSingBox, `{}`},
+		{core.EngineSingBox, `{"inbounds":null}`},
+		{core.EngineSingBox, `{"inbounds":[],"Inbounds":[{"type":"http","listen_port":22}]}`},
+		{core.EngineSingBox, `{"inbounds":[],"endpoints":[{"type":"tun"}]}`},
+		{core.EngineSingBox, `{"inbounds":[],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}`},
+		{core.EngineSingBox, `{"inbounds":[],"services":[{"type":"ssm-api"}]}`},
+		{core.EngineXray, `{"inbounds":[],"api":{"listen":"127.0.0.1:10085","services":["HandlerService"]}}`},
+		{core.EngineMihomo, "listeners: []\nmixed-port: 21001\n"},
+		{core.EngineMihomo, "listeners: []\ntun: {enable: true}\n"},
+		{core.EngineShadowsocksRust, `{"servers":[],"server_port":21001}`},
+		{core.EngineShadowsocksRust, `{"servers":[],"manager_address":"127.0.0.1:9001"}`},
+	} {
+		if endpoints, err := SharedTrafficEndpoints(test.engine, test.content); err == nil {
+			t.Fatalf("accepted hidden/malformed ingress: %s %s: %+v", test.engine, test.content, endpoints)
+		}
+	}
+}
