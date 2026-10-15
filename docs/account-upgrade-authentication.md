@@ -136,8 +136,8 @@ account authentication.
 If verified backups demonstrate actual damage, determine which IDs/fields
 changed and preserve a backup of the current database first. Restore only records
 whose identity and ownership can be verified, preserving user IDs and related
-owner IDs. Preserve/bump `auth_revision` to invalidate sessions when restoring
-authentication fields; do not restore a stale revision that could revive a
+owner IDs. Advance the current `auth_revision` to invalidate sessions when
+restoring authentication fields; do not restore a stale revision that could revive a
 session. With no trustworthy hash backup, use the existing authorized password
 reset flow for the affected account. Bcrypt hashes cannot recover plaintext
 passwords. If the wrong database/schema or volume was selected, reconnect the
