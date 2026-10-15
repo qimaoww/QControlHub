@@ -29,6 +29,7 @@ const (
 
 type Protocol struct {
 	Key                  string   `json:"key"`
+	Group                string   `json:"group,omitempty"`
 	Name                 string   `json:"name"`
 	Badge                string   `json:"badge"`
 	Description          string   `json:"description"`
@@ -64,6 +65,11 @@ type Input struct {
 	Flow                         string `json:"flow"`
 	Transport                    string `json:"transport"`
 	TransportPath                string `json:"transport_path"`
+	TransportHost                string `json:"transport_host"`
+	TransportHTTPMethod          string `json:"transport_http_method"`
+	TLSServerName                string `json:"tls_server_name"`
+	TLSALPN                      string `json:"tls_alpn"`
+	TLSClientCertificate         string `json:"tls_client_certificate,omitempty"`
 	TLSEnabled                   bool   `json:"tls_enabled"`
 	CertificatePath              string `json:"certificate_path"`
 	PrivateKeyPath               string `json:"private_key_path"`
@@ -318,6 +324,20 @@ func Protocols(engine core.Engine) []Protocol {
 	}
 	if engine == core.EngineSingBox {
 		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 1.11+ 用户态 WireGuard 端点，监听所有接口；需要 with_wireguard 与 with_gvisor。客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, DefaultListen: "::", Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})
+		for index := range protocols {
+			if protocols[index].Key == ProtocolVMess || protocols[index].Key == ProtocolTrojan {
+				protocols[index].Transports = []string{"raw", "websocket", "grpc", "http", "httpupgrade", "quic"}
+			}
+		}
+		protocols = append(protocols, singBoxPresetProtocols()...)
+		protocols = append(protocols, Protocol{Key: ProtocolVLESSTLS, Name: "VLESS-TLS · 自定义传输", Badge: "VLESS", Description: "兼容已有 VLESS 原生 TLS 配置；TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。", Docs: base + vlessPath, DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"raw", "websocket", "grpc", "http", "httpupgrade", "quic"}, TransportConfig: true, SupportsTLS: true, RequiresTLS: true, DefaultTLS: true})
+		protocols = append(protocols, Protocol{Key: ProtocolShadowsocks, Name: "Shadowsocks AEAD", Badge: "SS", Description: "传统 AEAD，TCP 与 UDP；与 Shadowsocks 2022 分别生成密码。", Docs: base + ssPath, DefaultPort: 8388, Credential: "用户密码", Methods: []string{"aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305"}, Transports: []string{"raw"}, IgnoresUsername: true}, Protocol{Key: ProtocolSocks, Name: "Socks5 · 用户名与密码", Badge: "SOCKS", Description: "原生 Socks5 认证入站，支持 CONNECT 与 UDP ASSOCIATE；请在可信网络使用。", Docs: base + "socks/", DefaultPort: 1080, Credential: "用户密码", Transports: []string{"raw"}})
+		for index := range protocols {
+			protocols[index].Group = map[string]string{ProtocolVLESS: "VLESS", ProtocolVMess: "VMess", ProtocolTrojan: "Trojan", ProtocolShadowsocks: "Shadowsocks", ProtocolSS2022: "Shadowsocks"}[nativeProtocol(protocols[index].Key)]
+			if protocols[index].Group == "" {
+				protocols[index].Group = "其他协议"
+			}
+		}
 		// Tailscale login/state and OpenVPN certificate lifecycle are not
 		// implemented yet. Keep their native source opaque, not preset-editable.
 	}

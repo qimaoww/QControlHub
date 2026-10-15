@@ -246,6 +246,10 @@ jobs:
         run: sudo unshare --net env QCH_TEST_PERMISSION_NETNS=1 python3 -B deploy/tests/core_permission_network_test.py
       - name: Fetch verified official kernels
         run: sh deploy/tests/fetch-permission-cores.sh "$RUNNER_TEMP/permission-cores"
+      - name: Verify all sing-box upstream presets and exported TCP/UDP clients
+        env:
+          QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
+        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal)$'
       - name: Verify full systemd service policies and forwarding
         run: |
           sudo apt-get update

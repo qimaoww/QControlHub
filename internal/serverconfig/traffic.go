@@ -122,6 +122,9 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 		if engine == core.EngineMihomo && kind == ProtocolMieru {
 			protocol = trafficProtocol(entry["transport"], protocol)
 		}
+		if engine == core.EngineSingBox && stringValue(mapValue(entry["transport"])["type"]) == "quic" {
+			protocol = core.TrafficProtocolUDP
+		}
 		if engine == core.EngineXray {
 			if settings, ok := entry["settings"].(map[string]any); ok {
 				protocol = trafficProtocol(settings["network"], protocol)

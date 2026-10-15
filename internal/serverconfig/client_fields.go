@@ -13,14 +13,24 @@ func clientTransport(value string) string {
 		return "grpc"
 	case "xhttp":
 		return "xhttp"
+	case "http":
+		return "h2"
+	case "httpupgrade", "quic":
+		return value
 	default:
 		return "tcp"
 	}
 }
 
 func addTransportQuery(query url.Values, input Input) {
+	if input.TransportHost != "" {
+		query.Set("host", input.TransportHost)
+	}
+	if input.TLSALPN != "" {
+		query.Set("alpn", input.TLSALPN)
+	}
 	switch input.Transport {
-	case "websocket":
+	case "http", "httpupgrade", "websocket":
 		query.Set("path", input.TransportPath)
 	case "grpc":
 		query.Set("serviceName", input.TransportPath)
@@ -36,7 +46,7 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		{Label: "服务器", Value: address},
 		{Label: "端口", Value: strconv.Itoa(input.Port)},
 	}
-	if input.Protocol == ProtocolMieru {
+	if input.Protocol == ProtocolMieru || input.Protocol == ProtocolSocks {
 		fields = append(fields, ClientField{Label: "用户名", Value: input.Username})
 	} else if input.Username != "" && input.Username != "default" {
 		fields = append(fields, ClientField{Label: "用户备注", Value: input.Username})
@@ -90,8 +100,20 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		transport = input.MieruTransport
 	}
 	fields = append(fields, ClientField{Label: "传输", Value: transport})
+	if !isSnellProtocol(input.Protocol) && input.Protocol != ProtocolWireGuard {
+		fields = append(fields, ClientField{Label: "承载流量", Value: "TCP + UDP"})
+	}
 	if isVLESSEncryptionProtocol(input.Protocol) {
 		fields = append(fields, ClientField{Label: "VLESS Encryption", Value: input.VLESSEncryption})
+	}
+	if input.TransportHost != "" {
+		fields = append(fields, ClientField{Label: "HTTP Host", Value: input.TransportHost})
+	}
+	if input.TLSALPN != "" {
+		fields = append(fields, ClientField{Label: "ALPN", Value: input.TLSALPN})
+	}
+	if input.TLSClientCertificate != "" {
+		fields = append(fields, ClientField{Label: "证书信任", Value: "导出 JSON 内的指定 CA / 证书，校验 SNI"})
 	}
 	if input.TransportPath != "" {
 		fields = append(fields, ClientField{Label: "路径 / ServiceName", Value: input.TransportPath})

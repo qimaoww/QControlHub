@@ -105,6 +105,7 @@ func main() {
 	arguments := os.Args[1:]
 	if len(arguments) == 1 && arguments[0] == "version" {
 		fmt.Println("sing-box version 1.14.0")
+        fmt.Println("Tags: with_quic,with_utls")
 		fmt.Println("Tags: with_wireguard,with_tailscale,with_openvpn,with_gvisor")
 		return
 	}

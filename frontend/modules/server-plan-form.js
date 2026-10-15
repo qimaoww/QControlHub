@@ -119,6 +119,7 @@ function installGeneratedFieldButtons(form, protocol) {
 
 export function readServerPlanInput(form, protocol) {
   const values = new FormData(form);
+  const tlsEnabled = values.get("tls_enabled") === "1" || Boolean(protocol.requires_tls);
   const customControl = (name) => form.elements.namedItem(`mieru_custom_${name}`);
   const customValue = (name) => customControl(name)?.value ?? "";
   const nonceType = customValue("nonce_type");
@@ -145,17 +146,21 @@ export function readServerPlanInput(form, protocol) {
     credential: values.get("credential"),
     secondary_credential: values.get("secondary_credential"),
     method: values.get("method"),
-    flow:
-      protocol.key === "vless" ||
+    flow: values.get("flow") || (
+      (protocol.key === "vless" && values.get("reality_enabled") === "1") ||
       (protocol.uses_vless_encryption && protocol.uses_reality)
         ? "xtls-rprx-vision"
-        : "",
+        : ""),
     transport: values.get("transport"),
-    transport_path: values.get("transport_path"),
-    tls_enabled:
-      values.get("tls_enabled") === "1" || protocol.requires_tls,
-    certificate_path: values.get("certificate_path") || "",
-    private_key_path: values.get("private_key_path") || "",
+    transport_path: ["raw", "quic"].includes(values.get("transport")) ? "" : values.get("transport_path") || "",
+    transport_host: ["http", "httpupgrade", "websocket"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
+    transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
+    tls_server_name: values.get("tls_server_name") || "",
+    tls_alpn: values.get("tls_alpn") || "",
+    tls_client_certificate: values.get("tls_client_certificate") || "",
+    tls_enabled: tlsEnabled,
+    certificate_path: tlsEnabled ? values.get("certificate_path") || "" : "",
+    private_key_path: tlsEnabled ? values.get("private_key_path") || "" : "",
     reality_enabled: values.get("reality_enabled") === "1",
     reality_private_key: values.get("reality_private_key") || "",
     reality_public_key: values.get("reality_public_key") || "",
@@ -266,6 +271,28 @@ function sudokuProtocolOptions(plan) {
 }
 
 function bindProtocolOptionVisibility(form) {
+  const transport = form.elements.namedItem("transport");
+  const tls = form.elements.namedItem("tls_enabled");
+  const updateNative = () => {
+    const kind = transport?.value || "raw";
+    const path = form.elements.namedItem("transport_path");
+    const host = form.elements.namedItem("transport_host");
+    const usesPath = !["raw", "quic"].includes(kind);
+    if (path && form.querySelector("[data-transport-path]")) {
+      setVisible(form.querySelector("[data-transport-path]"), usesPath);
+      path.disabled = !usesPath; path.required = usesPath;
+    }
+    if (host) { const active = ["http", "websocket", "httpupgrade"].includes(kind); setVisible(form.querySelector("[data-transport-host]"), active); host.disabled = !active; }
+    const flow = form.elements.namedItem("flow");
+    if (flow?.tagName === "SELECT") { flow.disabled = kind !== "raw"; if (flow.disabled) flow.value = ""; }
+    const method = form.elements.namedItem("transport_http_method");
+    if (method) { setVisible(form.querySelector("[data-http-method]"), kind === "http"); method.disabled = kind !== "http"; }
+    const tlsFields = form.querySelector("[data-native-tls]");
+    if (tlsFields) { setVisible(tlsFields, Boolean(tls?.checked)); tlsFields.querySelectorAll("input, textarea").forEach(control => control.disabled = !tls?.checked); }
+  };
+  bindEvent(transport, "change", updateNative);
+  bindEvent(tls, "change", updateNative);
+  updateNative();
   if (form.querySelector("[data-wireguard-endpoint]")) {
     const listen = form.elements.namedItem("listen");
     if (listen) listen.readOnly = true;
