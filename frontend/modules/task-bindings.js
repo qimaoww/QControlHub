@@ -1,6 +1,9 @@
+import { openTaskEditRetry } from "./task-edit-retry.js";
 import { bindEvent } from "./refresh.js";
-export function createTaskBindings({ api, state, notify, confirmAction }, { tasks }) {
+export function createTaskBindings(ctx, { tasks }) {
+  const { api, state, notify, confirmAction } = ctx;
   function bindTaskActions(root) {
+    root.querySelectorAll("[data-edit-retry]").forEach(button => button.onclick = () => openTaskEditRetry(ctx, button.dataset.editRetry, () => tasks({ background: true }), button));
     root.querySelectorAll("[data-cancel]").forEach(
       (button) =>
         (button.onclick = async () => {

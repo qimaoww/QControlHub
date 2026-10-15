@@ -31,13 +31,19 @@ func requireTaskPermission(ctx context.Context, executor storeExecutor, action c
 	return nil
 }
 
-func (s *Store) openExecutionConfig(task *core.Task) error {
+func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 	if task.ConfigContent != "" {
 		content, err := s.decryptContent(task.ConfigContent)
 		if err != nil {
 			return err
 		}
-		task.ConfigContent = content
+		task.ConfigContent, task.TLSFrontends, err = core.DecodeExecutionSnapshot(content)
+		if err != nil {
+			return err
+		}
+		if len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureManagedTLS) {
+			return fmt.Errorf("Agent 不再支持托管 TLS 反代（managed-tls-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
+		}
 	}
 	if task.Action == core.ActionValidate || task.Action == core.ActionDeploy {
 		return serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent)

@@ -72,7 +72,7 @@ func TestSingBoxUpstreamLiveMatrix(t *testing.T) {
 		}
 		for _, method := range methods {
 			t.Run(protocol.Key+"/"+method, func(t *testing.T) {
-				input, err := NewPlan(protocol)
+				input, err := nativeTLSFixturePlan(protocol)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -183,7 +183,7 @@ func TestSingBoxTLSVerificationAndRenewal(t *testing.T) {
 	}
 	certificate, certPath, keyPath := singBoxTestCertificate(t)
 	protocol, _ := FindProtocol(core.EngineSingBox, "trojan-httpupgrade-tls")
-	input, err := NewPlan(protocol)
+	input, err := nativeTLSFixturePlan(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}

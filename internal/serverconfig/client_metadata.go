@@ -5,25 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 type clientMetadata struct {
-	TLSClientCertificate      string `json:"tls_client_certificate,omitempty"`
-	Version                   int    `json:"version"`
-	Protocol                  string `json:"protocol"`
-	SnellReuse                bool   `json:"snell_reuse,omitempty"`
-	SnellObfsHost             string `json:"snell_obfs_host,omitempty"`
-	SnellClientFingerprint    string `json:"snell_client_fingerprint,omitempty"`
-	SnellShadowTLSALPN        string `json:"snell_shadow_tls_alpn,omitempty"`
-	SudokuClientKey           string `json:"sudoku_client_key,omitempty"`
-	SudokuHTTPMaskMode        string `json:"sudoku_httpmask_mode,omitempty"`
-	SudokuHTTPMaskTLS         bool   `json:"sudoku_httpmask_tls,omitempty"`
-	SudokuHTTPMaskHost        string `json:"sudoku_httpmask_host,omitempty"`
-	SudokuMultiplex           string `json:"sudoku_multiplex,omitempty"`
-	WireGuardClientPrivateKey string `json:"wireguard_client_private_key,omitempty"`
-	WireGuardClientPublicKey  string `json:"wireguard_client_public_key,omitempty"`
-	WireGuardAllowedIPs       string `json:"wireguard_allowed_ips,omitempty"`
-	WireGuardKeepalive        *int   `json:"wireguard_keepalive,omitempty"`
+	TLSALPN                   string            `json:"managed_tls_alpn,omitempty"`
+	TLSAuthorityKey           string            `json:"tls_authority_key,omitempty"`
+	Frontend                  *core.TLSFrontend `json:"tls_frontend,omitempty"`
+	TLSClientCertificate      string            `json:"tls_client_certificate,omitempty"`
+	Version                   int               `json:"version"`
+	Protocol                  string            `json:"protocol"`
+	SnellReuse                bool              `json:"snell_reuse,omitempty"`
+	SnellObfsHost             string            `json:"snell_obfs_host,omitempty"`
+	SnellClientFingerprint    string            `json:"snell_client_fingerprint,omitempty"`
+	SnellShadowTLSALPN        string            `json:"snell_shadow_tls_alpn,omitempty"`
+	SudokuClientKey           string            `json:"sudoku_client_key,omitempty"`
+	SudokuHTTPMaskMode        string            `json:"sudoku_httpmask_mode,omitempty"`
+	SudokuHTTPMaskTLS         bool              `json:"sudoku_httpmask_tls,omitempty"`
+	SudokuHTTPMaskHost        string            `json:"sudoku_httpmask_host,omitempty"`
+	SudokuMultiplex           string            `json:"sudoku_multiplex,omitempty"`
+	WireGuardClientPrivateKey string            `json:"wireguard_client_private_key,omitempty"`
+	WireGuardClientPublicKey  string            `json:"wireguard_client_public_key,omitempty"`
+	WireGuardAllowedIPs       string            `json:"wireguard_allowed_ips,omitempty"`
+	WireGuardKeepalive        *int              `json:"wireguard_keepalive,omitempty"`
 }
 
 // MarshalClientMetadata extracts client-only values for separately encrypted,
@@ -45,7 +50,7 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
 		_, preset := singBoxPresetFor(input.Protocol)
-		if input.TLSClientCertificate == "" && !preset {
+		if input.TLSClientCertificate == "" && !preset && !managedTLS(input) {
 			return "", nil
 		}
 		metadata.TLSClientCertificate = input.TLSClientCertificate
@@ -71,6 +76,11 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	// Stale metadata must neither overwrite source nor break the workspace.
 	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
+	}
+	if f := metadata.Frontend; f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
+		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
+		input.TLSEnabled = true
+		input.TLSALPN = metadata.TLSALPN
 	}
 	if input.TLSEnabled {
 		input.TLSClientCertificate = metadata.TLSClientCertificate

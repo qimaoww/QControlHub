@@ -296,7 +296,17 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 				return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 			}
 		}
+		task.TLSFrontends, err = s.managedTLSFrontendsTx(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+		if err != nil {
+			return core.Task{}, err
+		}
+		if len(task.TLSFrontends) > 0 && (!containsFeature(features, core.AgentFeatureManagedTLS) || request.Action == core.ActionImportExisting) {
+			return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持面板托管 TLS 反代", ErrConflict)
+		}
 		if err := s.prepareSharedTaskTx(ctx, tx, &task, configOwnerID, features, runtime[request.Engine]); err != nil {
+			return core.Task{}, err
+		}
+		if err := s.prepareTLSFrontendPortsTx(ctx, tx, &task, configOwnerID); err != nil {
 			return core.Task{}, err
 		}
 		if request.Engine == core.EngineShadowsocksRust {
@@ -363,7 +373,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err != nil {
 		return core.Task{}, err
 	}
-	storedConfigContent, err := s.encryptContent(task.ConfigContent)
+	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends)
+	if err != nil {
+		return core.Task{}, err
+	}
+	task.TLSFrontends = nil
+	storedConfigContent, err := s.encryptContent(snapshot)
 	if err != nil {
 		return core.Task{}, err
 	}

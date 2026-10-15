@@ -1,3 +1,4 @@
+import { openTaskEditRetry } from "./modules/task-edit-retry.js";
 import { installConfigPages } from "./modules/configs.js";
 import { reconcileView } from "./modules/refresh.js";
 
@@ -117,6 +118,46 @@ async function fixture(engine, readOnly = false, actual) {
   return test;
 }
 
+async function testEditedRetryDialog() {
+  const route = new AbortController();
+  let attempts = 0, acceptClose = false, refreshed = false;
+  const gate = deferred();
+  const ctx = { state: { routeSignal: route.signal }, esc,
+    notify: () => {}, confirmAction: async () => acceptClose,
+    api: async (path, options = {}) => {
+      if (!options.method) return { task: { action: "deploy", config_version: 2, error: "fixture failure" }, config: { id: "cfg", name: "retry fixture", agent_id: "node", engine: "sing-box", version: 5, content: '{"inbounds":[]}' } };
+      attempts++;
+      const payload = JSON.parse(options.body);
+      assert(payload.expected_version === 5 && payload.content.includes('"log"'), "edited retry submitted stale or unedited content");
+      if (attempts === 1) throw Error("模拟配置校验失败");
+      await gate.promise;
+      return { task: { id: "retry", config_version: 6 } };
+    },
+  };
+  await openTaskEditRetry(ctx, "failed", () => { refreshed = true; });
+  const dialog = document.querySelector("dialog[open]");
+  assert(dialog && dialog.textContent.includes("当前 v5") && dialog.textContent.includes("原任务 v2"), "retry editor did not identify exact current and original versions");
+  const content = dialog.querySelector("textarea");
+  content.value = '{"inbounds":[],"log":{"level":"info"}}';
+  content.dispatchEvent(new Event("input", { bubbles: true }));
+  dialog.querySelector("[data-close]").click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(dialog.isConnected, "dirty retry editor closed without confirmation");
+  dialog.querySelector('[type="submit"]').click();
+  await waitFor(() => !dialog.querySelector("[data-error]").hidden, "retry error not shown inline");
+  assert(content.value.includes('"log"'), "failed retry lost user edits");
+  const button = dialog.querySelector('[type="submit"]');
+  button.click(); button.click();
+  assert(button.disabled && attempts === 2, "edited retry allowed duplicate submission");
+  document.querySelector("main").replaceChildren();
+  assert(dialog.isConnected && content.value.includes('"log"'), "task list refresh destroyed retry edits");
+  gate.resolve();
+  await waitFor(() => !dialog.isConnected && refreshed, "retry success did not close and refresh");
+  await openTaskEditRetry(ctx, "failed", () => {});
+  route.abort();
+  assert(!document.querySelector("dialog[open]"), "route navigation leaked retry editor");
+}
+
 export async function testPresetsRuntime(preview = false) {
   if (preview) {
     await fixture(new URLSearchParams(location.search).get("engine") || "xray");
@@ -225,6 +266,15 @@ export async function testPresetsRuntime(preview = false) {
   for (const actual of catalog) {
     const test = await fixture(actual.engine, false, actual);
     covered.add(actual.engine);
+    if (actual.protocol.supports_managed_tls) {
+      assert(control("tls_mode").value === "caddy" && control("tls_public_port").value === "443", "managed TLS defaults lost");
+      assert(control("listen").value === "127.0.0.1" && control("listen").readOnly, "managed backend is not loopback");
+      assert(control("tls_server_name").required && !control("tls_server_name").checkValidity(), "managed domain must be supplied");
+      edit("tls_server_name", "tls.example.test");
+      edit("tls_public_port", "8443");
+      edit("tls_mode", "nginx");
+      assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
+    }
     const invalid = [...form().elements].filter(input => input.willValidate && !input.validity.valid).map(input => input.name);
     assert(invalid.length === 0, `${actual.engine}/${actual.protocol.key}: generated defaults blocked by ${invalid.join(", ")}`);
     if (actual.engine === "sing-box") {
@@ -238,6 +288,7 @@ export async function testPresetsRuntime(preview = false) {
     if (actual.engine === "sing-box") {
       const saved = submissions(test)[0].body.input;
       assert(saved.transport === actual.plan.transport, "native transport changed during save");
+      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === "nginx" && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
       if (actual.plan.tls_enabled) assert(saved.tls_server_name === "tls.example.test" && control("tls_server_name").value === saved.tls_server_name && control("tls_alpn").value === saved.tls_alpn, "native TLS values were lost on reopen");
       if (control("transport_host") && !control("transport_host").disabled) assert(saved.transport_host === "http.example.test" && control("transport_host").value === saved.transport_host, "HTTP Host was conflated with TLS SNI");
       if (saved.transport === "http") assert(saved.transport_http_method === "POST" && control("transport_http_method").value === "POST", "HTTP Method was lost on reopen");
@@ -341,6 +392,7 @@ export async function testPresetsRuntime(preview = false) {
   assert(covered.size === 4 && catalog.length >= 33, "not all engine presets were covered");
   await fixture("xray", true);
   assert(button("deploy").disabled && form().querySelector("[data-regenerate]").disabled, "read-only user can submit mutations");
+  await testEditedRetryDialog();
   assert(errors.length === 0, `uncaught browser errors: ${errors.join("; ")}`);
   window.removeEventListener("unhandledrejection", onError);
   window.removeEventListener("error", onError);

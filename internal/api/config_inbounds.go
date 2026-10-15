@@ -211,7 +211,16 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	var clientMetadata string
 	if input.Operation != "delete" {
-		clientMetadata, err = serverconfig.MarshalClientMetadata(input.Input)
+		var previous string
+		if current.ID != "" {
+			values, metadataErr := s.store.ConfigClientMetadata(request.Context(), current.ID, current.Version)
+			if metadataErr != nil {
+				writeStoreError(w, metadataErr)
+				return
+			}
+			previous = serverconfig.PreviousManagedTLSMetadata(input.Input, values, input.OriginalTag)
+		}
+		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(input.Input, previous)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

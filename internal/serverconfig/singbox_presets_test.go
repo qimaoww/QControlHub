@@ -15,7 +15,7 @@ func TestSingBoxUpstreamPresetLifecycle(t *testing.T) {
 			continue
 		}
 		t.Run(protocol.Key, func(t *testing.T) {
-			input, err := NewPlan(protocol)
+			input, err := nativeTLSFixturePlan(protocol)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func TestSingBoxPresetSecurityAndScope(t *testing.T) {
 		}
 	}
 	protocol, _ := FindProtocol(core.EngineSingBox, ProtocolVLESSHTTP2Reality)
-	input, _ := NewPlan(protocol)
+	input, _ := nativeTLSFixturePlan(protocol)
 	if input.Flow != "" || input.Transport != "http" || !input.RealityEnabled {
 		t.Fatal("H2 Reality uses Vision")
 	}
@@ -126,7 +126,7 @@ func TestSingBoxPresetSecurityAndScope(t *testing.T) {
 	}
 	for _, key := range []string{"vmess-tcp", "vmess-quic", ProtocolSocks} {
 		protocol, _ := FindProtocol(core.EngineSingBox, key)
-		input, _ := NewPlan(protocol)
+		input, _ := nativeTLSFixturePlan(protocol)
 		input.Transport = "httpupgrade"
 		if _, err := Generate(core.EngineSingBox, input); err == nil {
 			t.Fatal("fixed scheme accepted stale transport")
@@ -136,7 +136,7 @@ func TestSingBoxPresetSecurityAndScope(t *testing.T) {
 
 func TestSingBoxImportedCustomOptionsRemainSourceOnly(t *testing.T) {
 	protocol, _ := FindProtocol(core.EngineSingBox, "vmess-h2-tls")
-	input, _ := NewPlan(protocol)
+	input, _ := nativeTLSFixturePlan(protocol)
 	generated, err := Generate(core.EngineSingBox, input)
 	if err != nil {
 		t.Fatal(err)

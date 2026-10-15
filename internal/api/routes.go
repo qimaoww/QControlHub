@@ -93,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 		http.HandlerFunc(s.getTaskConfigSnapshot),
 	))
 	mux.Handle("DELETE /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.cancelTask)))
+	mux.Handle("GET /api/v1/tasks/{id}/retry-editor", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.taskRetryEditor)))
+	mux.Handle("POST /api/v1/tasks/{id}/edit-retry", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.editRetryTask)))
 	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.retryTask)))
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.listEnrollmentTokens)))
 	mux.Handle("POST /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createEnrollmentToken)))

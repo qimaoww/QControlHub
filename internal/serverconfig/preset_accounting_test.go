@@ -12,7 +12,7 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
 		for _, protocol := range Protocols(engine) {
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
-				input, err := NewPlan(protocol)
+				input, err := nativeTLSFixturePlan(protocol)
 				if err != nil {
 					t.Fatal(err)
 				}

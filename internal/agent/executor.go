@@ -210,6 +210,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return output + "\n" + result, err
 	}
 	timeout := 45 * time.Second
+	if len(task.TLSFrontends) > 0 || task.Engine == core.EngineSingBox && managedTLSStateExists() {
+		timeout = 4 * time.Minute
+	}
 	if task.Action == core.ActionInstall {
 		timeout = 4 * time.Minute
 	}
@@ -245,6 +248,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
+		if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
+			return "", err
+		}
 		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if warning != "" {
 			return warning, errors.New("独立出口校验失败，未执行内核校验")
@@ -252,6 +258,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
+			return "", err
+		}
 		originalInput := task.ConfigContent
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if accountingWarning != "" {
@@ -288,6 +297,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return validation, err
 		}
 		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
+		if err == nil {
+			err = e.executeTLSFrontend(ctx, spec, task, false)
+		}
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if accountingWarning != "" {
 			output += "\n" + accountingWarning
@@ -325,9 +337,14 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err := ensureDefaultManagedConfigurationAccess(task.Engine, spec, e.serviceManager()); err != nil {
 			return "", fmt.Errorf("prepare managed %s configuration access: %w", task.Engine, err)
 		}
-		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
+		output, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
+		if err == nil {
+			err = e.executeTLSFrontend(ctx, spec, task, false)
+		}
+		return output, err
 	case core.ActionStop:
-		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
+		output, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
+		return output, errors.Join(err, e.executeTLSFrontend(ctx, spec, task, false))
 	case core.ActionStatus:
 		return serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	case core.ActionInstall:
@@ -380,6 +397,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		return output, nil
 	case core.ActionUninstall:
+		if err := e.executeTLSFrontend(ctx, spec, task, false); err != nil {
+			return "", err
+		}
 		return e.uninstallCore(ctx, task.Engine, spec)
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)

@@ -118,7 +118,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 		return nil, nil
 	}
-	if err := s.openExecutionConfig(&task); err != nil {
+	if err := s.openExecutionConfig(&task, features); err != nil {
 		if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
 			config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(err.Error(), 8<<10)); updateErr != nil {
 			return nil, updateErr
@@ -188,7 +188,7 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing,t.shared_instance`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall), containsFeature(features, core.AgentFeatureIPQuality), containsFeature(features, core.AgentFeatureCoreUninstall))
 	task, err := scanTask(row, true)
 	if err == nil {
-		if configErr := s.openExecutionConfig(&task); configErr != nil {
+		if configErr := s.openExecutionConfig(&task, features); configErr != nil {
 			if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
 				config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(configErr.Error(), 8<<10)); updateErr != nil {
 				return nil, updateErr

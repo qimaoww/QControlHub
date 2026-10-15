@@ -131,48 +131,75 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	}
 	// Include queued deployment snapshots: a different core may be about
 	// to start a foreign listener which has no shared traffic monitor yet.
-	rows, err = tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),
+	rows, err = tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
 				OR (revision.config_id IS NULL AND config.version<>state.config_version)
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
 		UNION ALL
-		SELECT state.engine,COALESCE(revision.content,config.content,''),
+		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
 				OR (revision.config_id IS NULL AND config.version<>state.config_version)
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
 		UNION ALL
-		SELECT task.engine,task.config_content,false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		SELECT task.engine,task.config_content,COALESCE(task.config_id,''),COALESCE(task.config_version,0),false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing')
 			AND COALESCE(config.owner_id,task.owner_id)<>$2 AND task.config_content IS NOT NULL`, agentID, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type deployment struct {
+		engine      core.Engine
+		content, id string
+		version     int
+		uncertain   bool
+	}
+	var deployments []deployment
 	for rows.Next() {
-		var engine core.Engine
-		var content string
-		var uncertain bool
-		if err := rows.Scan(&engine, &content, &uncertain); err != nil {
+		var d deployment
+		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain); err != nil {
+			rows.Close()
 			return err
 		}
-		if uncertain {
-			return fmt.Errorf("%w: stop the uncertain %s core before reserving shared ports", ErrConflict, engine)
+		deployments = append(deployments, d)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, d := range deployments {
+		if d.uncertain {
+			return fmt.Errorf("%w: stop the uncertain %s core before reserving shared ports", ErrConflict, d.engine)
 		}
-		content, err = s.decryptContent(content)
+		content, err := s.decryptContent(d.content)
 		if err != nil {
 			return err
 		}
-		for _, endpoint := range serverconfig.DiscoverTrafficPorts(engine, content) {
+		content, frontends, err := core.DecodeExecutionSnapshot(content)
+		if err != nil {
+			return err
+		}
+		if len(frontends) == 0 {
+			frontends, err = s.managedTLSFrontendsTx(ctx, tx, d.id, d.version, d.engine, content)
+			if err != nil {
+				return err
+			}
+		}
+		for _, f := range frontends {
+			if wanted[f.PublicPort] {
+				return fmt.Errorf("%w: 公网反代端口 %d 属于其他用户的部署", ErrConflict, f.PublicPort)
+			}
+		}
+		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {
 			if wanted[endpoint.Port] {
 				return fmt.Errorf("%w: port %d belongs to another user's deployed configuration", ErrConflict, endpoint.Port)
 			}
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 // Unrestricted means no port allowlist, not unmetered execution. Reserve only
@@ -210,7 +237,7 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 	if uncertain {
 		return fmt.Errorf("%w: stop the user's core before sharing an uncertain deployment", ErrConflict)
 	}
-	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content)
+	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content),state.config_id,state.config_version
 		FROM agent_engine_ownership state JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND state.owner_id=$2 AND state.running
@@ -219,30 +246,45 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 		return err
 	}
 	var endpoints []core.PortTrafficEndpoint
+	type runningDeployment struct {
+		engine      core.Engine
+		content, id string
+		version     int
+	}
+	var deployments []runningDeployment
 	for rows.Next() {
-		var engine core.Engine
-		var content string
-		if err := rows.Scan(&engine, &content); err != nil {
+		var deployment runningDeployment
+		if err := rows.Scan(&deployment.engine, &deployment.content, &deployment.id, &deployment.version); err != nil {
 			rows.Close()
 			return err
 		}
-		content, err = s.decryptContent(content)
-		if err != nil {
-			rows.Close()
-			return err
-		}
-		ports, err := serverconfig.SharedTrafficEndpoints(engine, content)
-		if err != nil {
-			rows.Close()
-			return fmt.Errorf("%w: stop or replace the current %s configuration before sharing: %v", ErrConflict, engine, err)
-		}
-		endpoints = append(endpoints, ports...)
+		deployments = append(deployments, deployment)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	var frontends []core.TLSFrontend
+	for _, deployment := range deployments {
+		content, err := s.decryptContent(deployment.content)
+		if err != nil {
+			return err
+		}
+		ports, err := serverconfig.SharedTrafficEndpoints(deployment.engine, content)
+		if err != nil {
+			return fmt.Errorf("%w: stop or replace the current %s configuration before sharing: %v", ErrConflict, deployment.engine, err)
+		}
+		endpoints = append(endpoints, ports...)
+		managed, err := s.managedTLSFrontendsTx(ctx, tx, deployment.id, deployment.version, deployment.engine, content)
+		if err != nil {
+			return err
+		}
+		frontends = append(frontends, managed...)
+	}
 	if err := s.reserveSharedDeploymentPortsTx(ctx, tx, shareID, userID, agentID, endpoints); err != nil {
+		return err
+	}
+	if err := s.prepareTLSFrontendPortsTx(ctx, tx, &core.Task{AgentID: agentID, SharedTrafficID: shareID, Action: core.ActionDeploy, TLSFrontends: frontends}, userID); err != nil {
 		return err
 	}
 	return bindSharedTrafficPortsTx(ctx, tx, shareID, agentID, endpoints)

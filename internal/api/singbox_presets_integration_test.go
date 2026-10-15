@@ -63,6 +63,11 @@ func TestSingBoxNativePresetSaveReadExportWithPostgreSQL(t *testing.T) {
 			if response.Code != http.StatusCreated || json.Unmarshal(response.Body.Bytes(), &input) != nil {
 				t.Fatalf("plan: %d %s", response.Code, response.Body.String())
 			}
+			// Keep this matrix testing native TLS; managed defaults have a
+			// separate Agent feature and auxiliary deployment snapshot matrix.
+			input.TLSMode = "native"
+			input.CertificatePath = "/etc/qcontrolhub/tls/server.crt"
+			input.PrivateKeyPath = "/etc/qcontrolhub/tls/server.key"
 			port++
 			input.Port = port
 			if input.TLSEnabled {

@@ -62,7 +62,7 @@ func TestSharedTrafficSupportsGeneratedServerPresets(t *testing.T) {
 				// through the endpoint status API instead of shared port stats.
 				continue
 			}
-			input, err := NewPlan(protocol)
+			input, err := nativeTLSFixturePlan(protocol)
 			if err != nil {
 				t.Fatal(err)
 			}

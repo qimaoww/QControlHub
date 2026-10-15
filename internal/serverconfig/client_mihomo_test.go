@@ -29,7 +29,7 @@ func TestMihomoShadowTLSALPNNormalization(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			protocol, _ := FindProtocol(core.EngineMihomo, ProtocolSnellShadowTLS)
-			input, err := NewPlan(protocol)
+			input, err := nativeTLSFixturePlan(protocol)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +83,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 				continue
 			}
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
-				input, err := NewPlan(protocol)
+				input, err := nativeTLSFixturePlan(protocol)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -202,7 +202,7 @@ func TestMihomoClientTransportOptions(t *testing.T) {
 		for _, transport := range []string{"websocket", "grpc"} {
 			t.Run(protocolKey+"/"+transport, func(t *testing.T) {
 				protocol, _ := FindProtocol(core.EngineXray, protocolKey)
-				input, err := NewPlan(protocol)
+				input, err := nativeTLSFixturePlan(protocol)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -241,7 +241,7 @@ func TestMihomoClientTransportOptions(t *testing.T) {
 // keeps the node usable, while the URL format still carries it as pqv.
 func TestMihomoOmitsRealityVerificationItCannotExpress(t *testing.T) {
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
-	input, err := NewPlan(protocol)
+	input, err := nativeTLSFixturePlan(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}
