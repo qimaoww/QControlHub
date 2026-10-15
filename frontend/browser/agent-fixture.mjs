@@ -117,6 +117,13 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode === "tasks-preview") {
+  location.hash = "#tasks";
+  testAPI.retryConfig = { id: "cfg-preview", name: "VLESS · WebSocket · TLS", agent_id: "alpha", engine: "sing-box", version: 3,
+    content: JSON.stringify({ log: { level: "info" }, inbounds: [{ type: "vless", tag: "vless-ws", listen: "127.0.0.1", listen_port: 21001, transport: { type: "ws", path: "/proxy" } }] }, null, 2) };
+  testAPI.previewTasks = [{ id: "failed-tls", agent_id: "alpha", engine: "sing-box", action: "deploy", status: "failed", config_id: "cfg-preview", config_version: 2, attempt: 1,
+    created_at: new Date().toISOString(), error: "mkdir /etc/qagent/tls-frontends: read-only file system" }];
+}
 if (mode.startsWith("client-order")) {
   location.hash = "#client-access";
   testAPI.clientAccessEntries = [
@@ -312,6 +319,15 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (mode === "tasks-preview") {
+    if (method === "GET" && path === "/tasks") return json(testAPI.previewTasks);
+    if (method === "GET" && path.endsWith("/retry-editor")) return json({ task: testAPI.previewTasks[0], config: testAPI.retryConfig });
+    if (method === "POST" && path.endsWith("/edit-retry")) {
+      const payload = JSON.parse(options.body);
+      testAPI.retryConfig = { ...testAPI.retryConfig, content: payload.content, version: testAPI.retryConfig.version + 1 };
+      return json({ config: testAPI.retryConfig, task: { id: "preview-retry" } });
+    }
+  }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);

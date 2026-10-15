@@ -299,7 +299,9 @@ function bindProtocolOptionVisibility(form) {
     const hint = form.querySelector("[data-managed-tls-hint]");
     if (hint) hint.textContent = tlsMode?.value === "nginx"
       ? "面板生成自签证书，客户端通过导出的公共证书验证。请放行所选公网端口。"
-      : "将域名解析到当前节点，并放行 TCP 80 和所选公网端口；Caddy 自动申请和续期证书。";
+      : tlsMode?.value === "caddy"
+        ? "域名解析到节点，放行 TCP 80 和所选公网端口；自动申请并续期证书。"
+        : "使用节点上已有的证书和私钥，需填写下方文件路径。";
     form.querySelectorAll("[data-native-certificate]").forEach(el => { setVisible(el, !managed); el.querySelectorAll("input,textarea").forEach(control => control.disabled = managed || !tls?.checked); });
     const listen = form.elements.namedItem("listen");
     if (listen && tlsMode) {

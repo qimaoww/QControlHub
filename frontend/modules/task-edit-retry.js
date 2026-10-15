@@ -39,16 +39,15 @@ export async function openTaskEditRetry(ctx, id, refresh, trigger) {
     const language = config.engine === "mihomo" ? "YAML" : "JSON";
     const filename = language === "YAML" ? "config.yaml" : "config.json";
     dialog.querySelector("[data-body]").innerHTML = `
-      <section class="task-retry-context"><div><strong>${esc(config.name)}</strong><small>当前 v${config.version} · 原任务 v${task.config_version}</small></div>${config.agent_id ? `<a class="button" data-preset-link href="#live-config?agent=${encodeURIComponent(config.agent_id)}&engine=${encodeURIComponent(config.engine)}">在预设表单中编辑</a>` : ""}</section>
-      ${task.error ? `<details class="task-retry-error" open><summary>上次失败原因</summary><pre class="task-error">${esc(diagnosticError(task.error))}</pre></details>` : ""}
-      <form class="task-retry-form" data-retry-form>
+      <section class="inbound-editor-toolbar task-retry-context"><div><strong>${esc(config.name)}</strong><small>当前 v${config.version} · 原任务 v${task.config_version}</small></div>${config.agent_id ? `<a class="button small" data-preset-link href="#live-config?agent=${encodeURIComponent(config.agent_id)}&engine=${encodeURIComponent(config.engine)}">在预设表单中编辑</a>` : ""}</section>
+      ${task.error ? `<details class="task-retry-error" open><summary>上次失败原因</summary><pre class="alert error">${esc(diagnosticError(task.error))}</pre></details>` : ""}
+      <form class="task-retry-form live-config-workspace" data-retry-form>
         <section class="code-workspace" data-code-editor data-code-language="${language}">
-          <header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${filename}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">当前配置</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header>
+          <header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${filename}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">当前配置</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div><div class="config-editor-actions"><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button><button class="button code-format" type="button" data-code-format>格式化配置</button></div></header>
           <div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input spellcheck="false" required aria-label="重试配置源码">${esc(config.content)}</textarea></div>
-          <footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite">保存后仍会由节点内核校验。</span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button><button class="button code-format" type="button" data-code-format>格式化配置</button></div></footer>
+          <p class="alert error" role="alert" data-error hidden></p>
+          <footer><span class="config-draft-summary"><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite">保存后仍会由节点内核校验。</span></span><div class="task-retry-actions"><button type="button" class="button" data-cancel>取消</button><button type="submit" class="button primary">保存并重试${label}</button></div></footer>
         </section>
-        <p class="alert error" role="alert" data-error hidden></p>
-        <footer class="task-retry-actions"><button type="button" class="button" data-cancel>取消</button><button type="submit" class="button primary">保存并重试${label}</button></footer>
       </form>`;
     const form = dialog.querySelector("form");
     const content = form.elements.namedItem("content");

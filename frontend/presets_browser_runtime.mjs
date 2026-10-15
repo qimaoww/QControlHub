@@ -121,6 +121,8 @@ async function fixture(engine, readOnly = false, actual) {
 }
 
 async function testEditedRetryDialog() {
+  const originalBodyClass = document.body.className;
+  document.body.className = "app-body page-tasks";
   const route = new AbortController();
   let attempts = 0, acceptClose = false, refreshed = false;
   const gate = deferred();
@@ -140,6 +142,13 @@ async function testEditedRetryDialog() {
   const dialog = document.querySelector("dialog[open]");
   assert(dialog && dialog.textContent.includes("当前 v5") && dialog.textContent.includes("原任务 v2"), "retry editor did not identify exact current and original versions");
   const content = dialog.querySelector("[data-code-input]");
+  const error = dialog.querySelector(".task-retry-error pre");
+  assert(error.getBoundingClientRect().width >= content.closest(".code-workspace").getBoundingClientRect().width * .9,
+    "task page styles squeezed the retry failure into a side column");
+  assert(dialog.querySelector("[data-code-format]").getBoundingClientRect().bottom <= content.getBoundingClientRect().top,
+    "retry source tools do not match the existing configuration toolbar");
+  assert(getComputedStyle(error).backgroundColor === getComputedStyle(dialog.querySelector("[data-error]")).backgroundColor,
+    "retry failure bypasses the panel error theme");
   assert(dialog.querySelector("[data-line-numbers]") && dialog.querySelector("[data-code-format]") && !content.hasAttribute("style"), "retry did not reuse the standard source editor");
   content.value = "invalid JSON";
   content.dispatchEvent(new Event("input", { bubbles: true }));
@@ -168,6 +177,7 @@ async function testEditedRetryDialog() {
   await openTaskEditRetry(ctx, "failed", () => {});
   route.abort();
   assert(!document.querySelector("dialog[open]"), "route navigation leaked retry editor");
+  document.body.className = originalBodyClass;
 }
 
 export async function testPresetsRuntime(preview = false) {

@@ -61,7 +61,8 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
     await import("./app.js");
-    if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    if (mode === "tasks-preview" && new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    else if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-cards")) await testCardMoveRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-selection")) await testSelectionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-popup")) await testPopupRuntime(scenario, new URLSearchParams(location.search).has("preview"));
