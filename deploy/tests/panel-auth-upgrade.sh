@@ -10,7 +10,9 @@ trap 'rm -rf -- "$test_dir"' EXIT HUP INT TERM
 # Pin the fixture: using origin/main would stop exercising schema migration.
 previous_ref=e3ff68389cc75d6a29c52822bdd31af3bcd0ab23
 mkdir "$test_dir/previous"
-git -C "$repo_root" archive --format=tar --output="$test_dir/previous.tar" "$previous_ref"
+# Container CI can mount the checkout with a different owner. Trust only this
+# explicitly selected checkout for this read, without changing global Git config.
+git -c safe.directory="$repo_root" -C "$repo_root" archive --format=tar --output="$test_dir/previous.tar" "$previous_ref"
 tar -xf "$test_dir/previous.tar" -C "$test_dir/previous"
 (cd "$test_dir/previous" && go build -buildvcs=false -o "$test_dir/old-panel" ./cmd/control-plane)
 (cd "$repo_root" && go build -buildvcs=false -o "$test_dir/new-panel" ./cmd/control-plane)
