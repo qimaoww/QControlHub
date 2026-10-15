@@ -70,7 +70,7 @@ func TestPanelAuthUpgradeLifecycle(t *testing.T) {
 		}
 		command.Env = append(command.Env, "QCH_LISTEN="+address, "QCH_DATABASE_URL="+schema.URL,
 			"QCH_ADMIN_TOKEN="+adminToken, "QCH_CONFIG_ENCRYPTION_KEY="+strings.Repeat("k", 32),
-			"QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false")
+			"QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false", "QCH_ALLOW_INSECURE_DATABASE=true")
 		command.Stdout, command.Stderr = logFile, logFile
 		if err := command.Start(); err != nil {
 			t.Fatal(err)
