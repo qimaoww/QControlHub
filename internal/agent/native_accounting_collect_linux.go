@@ -153,7 +153,13 @@ func collectNativeAccounting(record *trafficRecord, snapshot nativeAccountingSna
 	if port == nil {
 		return 0, 0, errors.New("listener has no independent outbound mapping")
 	}
-	keys := []string{"inbound>>>" + port.Inbound + ">>>traffic>>>uplink", "inbound>>>" + port.Inbound + ">>>traffic>>>downlink"}
+	var keys []string
+	if port.User != "" {
+		keys = []string{"user>>>" + port.User + ">>>traffic>>>uplink", "user>>>" + port.User + ">>>traffic>>>downlink"}
+	} else {
+		keys = []string{"inbound>>>" + port.Inbound + ">>>traffic>>>uplink", "inbound>>>" + port.Inbound + ">>>traffic>>>downlink"}
+	}
+	clientKeys := len(keys)
 	for _, tag := range port.Outbounds {
 		keys = append(keys, "outbound>>>"+tag+">>>traffic>>>downlink", "outbound>>>"+tag+">>>traffic>>>uplink")
 	}
@@ -161,6 +167,16 @@ func collectNativeAccounting(record *trafficRecord, snapshot nativeAccountingSna
 		return 0, 0, errors.New("too many accounting outbounds")
 	}
 	first := record.Accounting == nil || record.Accounting.Source != "core-api" || record.Accounting.Inbound != port.Inbound || !reflect.DeepEqual(record.Accounting.Outbounds, port.Outbounds)
+	if !first {
+		if len(record.Accounting.Counters) != len(keys) {
+			first = true
+		}
+		for _, key := range keys {
+			if _, exists := record.Accounting.Counters[key]; !exists {
+				first = true
+			}
+		}
+	}
 	// Lazy counters may be absent before their first use. Once a nonzero
 	// baseline exists, absence in the same process is not evidence of reset.
 	// Validate all legs before mutating any baseline so recovery cannot rebill
@@ -200,10 +216,10 @@ func collectNativeAccounting(record *trafficRecord, snapshot nativeAccountingSna
 		} // Establish a new scope, never rebill a process's prior lifetime.
 		accounting.Counters[key] = value
 		switch {
-		case i == 0:
+		case i < clientKeys && i%2 == 0:
 			accounting.ClientReceived = saturatedTrafficAdd(accounting.ClientReceived, delta)
 			received = saturatedTrafficAdd(received, delta)
-		case i == 1:
+		case i < clientKeys:
 			accounting.ClientSent = saturatedTrafficAdd(accounting.ClientSent, delta)
 			sent = saturatedTrafficAdd(sent, delta)
 		case i%2 == 0:

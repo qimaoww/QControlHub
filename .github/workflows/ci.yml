@@ -264,6 +264,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes nginx
           go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLSProxyLiveMatrix$'
+      - name: Verify native XHTTP and all five shared-port clients
+        env:
+          QCH_XRAY_BINARY: ${{ runner.temp }}/permission-cores/bin/xray
+          QCH_MIHOMO_BINARY: ${{ runner.temp }}/permission-cores/bin/mihomo
+          QCH_NGINX_BINARY: /usr/sbin/nginx
+        run: go test -count=1 -timeout 3m -v ./internal/agent -run '^TestXHTTPLiveMatrix$'
       - name: Verify full systemd service policies and forwarding
         run: |
           sudo apt-get update

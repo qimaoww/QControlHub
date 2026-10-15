@@ -120,6 +120,9 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 				return nil, fmt.Errorf("shared listener field %q cannot be safely metered", key)
 			}
 		}
+		if engine == core.EngineXray && xhttpGroupOwner(root, stringValue(entry[nameKey])) != "" {
+			continue
+		}
 		port := trafficPortNumber(entry[portKey])
 		if port == 0 {
 			return nil, fmt.Errorf("shared listeners require a single fixed numeric port")

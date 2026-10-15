@@ -189,8 +189,14 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 			}
 		}
 		for _, f := range frontends {
-			if wanted[f.PublicPort] {
-				return portConflict(f.PublicPort, fmt.Errorf("%w: 公网反代端口 %d 属于其他用户的部署", ErrConflict, f.PublicPort))
+			ports := []int{f.PublicPort}
+			if f.LocalOnly {
+				ports = append(ports, f.BackendPort)
+			}
+			for _, port := range ports {
+				if wanted[port] {
+					return portConflict(port, fmt.Errorf("%w: 入口或内部反代端口 %d 属于其他用户的部署", ErrConflict, port))
+				}
 			}
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {

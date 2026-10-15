@@ -77,11 +77,20 @@ func ParseAll(engine core.Engine, content string) []Input {
 	result := make([]Input, 0, len(items))
 	for _, item := range items {
 		candidate := mapValue(item)
+		if engine == core.EngineXray && xhttpGroupOwner(root, stringValue(candidate["tag"])) != "" {
+			continue
+		}
 		protocol := protocolKey(stringValue(candidate[protocolField]))
 		if _, ok := FindProtocol(engine, protocol); !ok {
 			continue
 		}
 		single := map[string]any{listKey: []any{candidate}}
+		if engine == core.EngineXray {
+			if backend, _ := xhttpGroup(root, candidate); backend != nil {
+				single[listKey] = []any{candidate, backend}
+			}
+			single["routing"] = root["routing"]
+		}
 		var encoded []byte
 		var err error
 		if engine == core.EngineMihomo {

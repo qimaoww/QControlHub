@@ -2,6 +2,7 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -23,21 +24,17 @@ func generateXray(input Input) (string, error) {
 		inbound["settings"] = map[string]any{
 			"network": "tcp,udp", "method": input.Method, "password": input.Credential,
 		}
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain, ProtocolXHTTPTLS, ProtocolXHTTPTLSReality, ProtocolXHTTPRealityTLS, ProtocolXHTTPFive:
 		inbound["protocol"] = "vless"
 		user := map[string]any{"id": input.Credential, "level": 0, "email": input.Username}
 		if input.Flow != "" {
 			user["flow"] = input.Flow
 		}
-		usersKey := "users"
-		if input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) {
-			usersKey = "clients"
-		}
 		decryption := "none"
 		if isVLESSEncryptionProtocol(input.Protocol) {
 			decryption = input.VLESSDecryption
 		}
-		inbound["settings"] = map[string]any{usersKey: []any{user}, "decryption": decryption}
+		inbound["settings"] = map[string]any{"clients": []any{user}, "decryption": decryption}
 	case ProtocolVMess:
 		inbound["protocol"] = "vmess"
 		inbound["settings"] = map[string]any{
@@ -71,13 +68,22 @@ func generateXray(input Input) (string, error) {
 	if routing != nil {
 		outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": mainlandXrayBlockTag})
 	}
+	inbounds := []any{inbound}
+	if isXHTTPGroup(input.Protocol) {
+		inbounds = xhttpGroupInbounds(input, inbound)
+	}
 	root := map[string]any{
 		"log":       map[string]any{"loglevel": "info"},
-		"inbounds":  []any{inbound},
+		"inbounds":  inbounds,
 		"outbounds": outbounds,
 	}
 	if routing != nil {
 		root["routing"] = routing
+		if isXHTTPGroup(input.Protocol) {
+			if err := applyMainlandXray(root, input.Tag+".xh", input.BlockMainlandDestination, input.BlockMainlandSource, nil); err != nil {
+				return "", err
+			}
+		}
 	}
 	value, err := json.MarshalIndent(root, "", "  ")
 	return string(value) + "\n", err
@@ -95,20 +101,20 @@ func xrayStream(input Input) map[string]any {
 		stream["grpcSettings"] = map[string]any{"serviceName": input.TransportPath}
 	case "xhttp":
 		network = "xhttp"
-		stream["xhttpSettings"] = map[string]any{"path": input.TransportPath}
+		stream["xhttpSettings"] = xhttpServerSettings(input)
 	}
 	stream["network"] = network
 	if input.TLSEnabled {
 		stream["security"] = "tls"
-		stream["tlsSettings"] = map[string]any{"certificates": []any{map[string]any{
+		stream["tlsSettings"] = map[string]any{"serverName": input.TLSServerName, "alpn": xhttpALPN(input.TLSALPN), "minVersion": "1.2", "certificates": []any{map[string]any{
 			"certificateFile": input.CertificatePath, "keyFile": input.PrivateKeyPath,
 		}}}
 	}
 	if input.RealityEnabled {
 		stream["security"] = "reality"
 		reality := map[string]any{
-			"show": false, "target": input.RealityServerName + ":443", "xver": 0, "minClientVer": input.RealityMinClientVer,
-			"serverNames": []string{input.RealityServerName}, "privateKey": input.RealityPrivateKey,
+			"show": false, "target": xhttpRealityTarget(input), "xver": 0, "minClientVer": input.RealityMinClientVer,
+			"serverNames": xhttpRealityNames(input), "privateKey": input.RealityPrivateKey,
 			"shortIds": []string{input.RealityShortID},
 		}
 		if input.RealityMLDSA65Seed != "" {
@@ -125,6 +131,11 @@ func parseXray(content string) (Input, bool) {
 		return Input{}, false
 	}
 	inbound := firstSupportedInbound(core.EngineXray, root["inbounds"], "protocol")
+	if inbound != nil {
+		if _, port := xhttpGroup(root, inbound); port > 0 {
+			return parseXHTTPGroup(root, inbound)
+		}
+	}
 	if inbound == nil {
 		return Input{}, false
 	}
@@ -176,9 +187,9 @@ func parseXray(content string) (Input, bool) {
 	case "grpc":
 		input.Transport = "grpc"
 		input.TransportPath = stringValue(mapValue(stream["grpcSettings"])["serviceName"])
-	case "xhttp":
+	case "xhttp", "splithttp":
 		input.Transport = "xhttp"
-		input.TransportPath = stringValue(mapValue(stream["xhttpSettings"])["path"])
+		parseXHTTPSettings(&input, stream)
 	}
 	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
 		var err error
@@ -199,6 +210,11 @@ func parseXray(content string) (Input, bool) {
 	}
 	if stringValue(stream["security"]) == "tls" {
 		input.TLSEnabled = true
+		input.TLSServerName = stringValue(mapValue(stream["tlsSettings"])["serverName"])
+		input.TLSALPN = strings.Join(stringSliceValue(mapValue(stream["tlsSettings"])["alpn"]), ",")
+		if input.Protocol == ProtocolVLESSXHTTP {
+			input.Protocol = ProtocolXHTTPTLS
+		}
 		if certificate := firstMap(mapValue(stream["tlsSettings"])["certificates"]); certificate != nil {
 			input.CertificatePath = stringValue(certificate["certificateFile"])
 			input.PrivateKeyPath = stringValue(certificate["keyFile"])
@@ -211,6 +227,11 @@ func parseXray(content string) (Input, bool) {
 		input.RealityPublicKey = realityPublicKey(input.RealityPrivateKey)
 		input.RealityShortID = firstString(reality["shortIds"])
 		input.RealityServerName = firstString(reality["serverNames"])
+		input.RealityServerNames = strings.Join(stringSliceValue(reality["serverNames"]), ",")
+		input.RealityTarget = stringValue(reality["target"])
+		if input.RealityTarget == "" {
+			input.RealityTarget = stringValue(reality["dest"])
+		}
 		input.RealityMinClientVer = stringValue(reality["minClientVer"])
 		if input.RealityMinClientVer == "" {
 			input.RealityMinClientVer = "0.0.0"

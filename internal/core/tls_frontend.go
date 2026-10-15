@@ -4,26 +4,65 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 )
 
 const AgentFeatureManagedTLS = "managed-tls-v1"
+const AgentFeatureXHTTP = "xhttp-presets-v1"
 
 // TLSFrontend is delivered only in the encrypted execution snapshot. PrivateKey
 // must never be returned by panel task APIs or included in client exports.
 type TLSFrontend struct {
-	Tag         string `json:"tag"`
-	Mode        string `json:"mode"`
-	Domain      string `json:"domain"`
-	PublicPort  int    `json:"public_port"`
-	BackendPort int    `json:"backend_port"`
-	Transport   string `json:"transport"`
-	Path        string `json:"path"`
-	Certificate string `json:"certificate,omitempty"`
-	PrivateKey  string `json:"private_key,omitempty"`
+	LocalOnly       bool     `json:"local_only,omitempty"`
+	RealityNames    []string `json:"reality_names,omitempty"`
+	RealityName     string   `json:"reality_name,omitempty"`
+	CertificatePath string   `json:"certificate_path,omitempty"`
+	PrivateKeyPath  string   `json:"private_key_path,omitempty"`
+	Tag             string   `json:"tag"`
+	Mode            string   `json:"mode"`
+	Domain          string   `json:"domain"`
+	PublicPort      int      `json:"public_port"`
+	BackendPort     int      `json:"backend_port"`
+	Transport       string   `json:"transport"`
+	Path            string   `json:"path"`
+	Certificate     string   `json:"certificate,omitempty"`
+	PrivateKey      string   `json:"private_key,omitempty"`
 }
 
 func (f TLSFrontend) Validate() error {
+	if f.Transport == "xhttp" {
+		if !f.LocalOnly || f.Mode != "nginx" || f.RealityName == "" || f.PublicPort < 1024 || f.BackendPort < 1024 || f.Domain == f.RealityName {
+			return fmt.Errorf("XHTTP 组合需独立本地 Nginx TLS 目标及不同 SNI")
+		}
+		for _, path := range []string{f.CertificatePath, f.PrivateKeyPath} {
+			if !filepath.IsAbs(path) || strings.ContainsAny(path, " \t\r\n\"'`;{}$\\") {
+				return fmt.Errorf("XHTTP 组合证书 / 私钥引用必须为有效绝对路径")
+			}
+		}
+		if len(f.RealityNames) > 16 {
+			return fmt.Errorf("组合允许的 Reality SNI 最多 16 个")
+		}
+		for _, name := range append([]string{f.RealityName}, f.RealityNames...) {
+			if name == "" || len(name) > 253 {
+				return fmt.Errorf("Reality 本地目标 SNI 无效")
+			}
+			for _, label := range strings.Split(name, ".") {
+				if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+					return fmt.Errorf("Reality 本地目标 SNI 无效")
+				}
+				for _, c := range label {
+					if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+						return fmt.Errorf("Reality 本地目标 SNI 无效")
+					}
+				}
+			}
+		}
+		f.Transport, f.Certificate, f.PrivateKey = "websocket", "reference", "reference"
+	} else if len(f.RealityNames) > 0 || f.LocalOnly || f.RealityName != "" || f.CertificatePath != "" || f.PrivateKeyPath != "" {
+		return fmt.Errorf("本地目标字段仅支持 XHTTP 组合")
+	}
+
 	if f.Mode != "caddy" && f.Mode != "nginx" {
 		return fmt.Errorf("unsupported managed TLS provider %q", f.Mode)
 	}

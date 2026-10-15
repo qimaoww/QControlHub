@@ -103,6 +103,12 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				profile, err := BuildClientProfileNamed(parsed, "2001:db8::10", "tls.example.test", "Tokyo: [private]")
+				if input.Protocol == ProtocolXHTTPTLSReality || input.Protocol == ProtocolXHTTPRealityTLS {
+					if err != nil || profile.MihomoError == "" || profile.Mihomo != "" || profile.Xray == "" {
+						t.Fatalf("mixed XHTTP must explain full Xray fallback: %v %#v", err, profile)
+					}
+					return
+				}
 				if input.Transport == "quic" || input.Transport == "httpupgrade" || input.Transport == "http" && (!input.TLSEnabled && !input.RealityEnabled || nativeProtocol(input.Protocol) == ProtocolTrojan) {
 					if err != nil || profile.MihomoError == "" || profile.Mihomo != "" || profile.Format != "sing-box client JSON" {
 						t.Fatalf("unsupported format did not explain native fallback: %v %#v", err, profile)

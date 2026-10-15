@@ -10,6 +10,7 @@ import (
 )
 
 type clientMetadata struct {
+	XHTTP                     *xhttpMetadata    `json:"xhttp,omitempty"`
 	TLSALPN                   string            `json:"managed_tls_alpn,omitempty"`
 	TLSAuthorityKey           string            `json:"tls_authority_key,omitempty"`
 	Frontend                  *core.TLSFrontend `json:"tls_frontend,omitempty"`
@@ -35,6 +36,11 @@ type clientMetadata struct {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
+	if input.Transport == "xhttp" {
+		metadata.XHTTP = marshalXHTTPMetadata(input)
+		encoded, err := json.Marshal(metadata)
+		return string(encoded), err
+	}
 	switch input.Protocol {
 	case ProtocolSnell, ProtocolSnellShadowTLS:
 		normalizeSnellInput(&input)
@@ -74,6 +80,10 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	}
 	// A source edit can reuse a tag for another protocol or rotate a peer.
 	// Stale metadata must neither overwrite source nor break the workspace.
+	if metadata.XHTTP != nil && input.Transport == "xhttp" {
+		applyXHTTPMetadata(input, metadata)
+		return nil
+	}
 	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
 	}

@@ -36,7 +36,7 @@ func addTransportQuery(query url.Values, input Input) {
 		query.Set("serviceName", input.TransportPath)
 	case "xhttp":
 		query.Set("path", input.TransportPath)
-		query.Set("mode", "auto")
+		query.Set("mode", xhttpMode(input.XHTTPMode))
 	}
 }
 

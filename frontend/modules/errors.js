@@ -145,7 +145,7 @@ export async function requestJSON(url, options, {
     error.status = response.status;
     if (body?.code === "port_conflict") {
       error.code = body.code;
-      error.field = ["port", "tls_public_port"].includes(body.field) ? body.field : "";
+      error.field = ["port", "tls_public_port", "xhttp_backend_port", "xhttp_tls_port"].includes(body.field) ? body.field : "";
     }
     throw error;
   }

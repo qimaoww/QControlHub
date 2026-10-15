@@ -76,6 +76,9 @@ func DiscoverMainlandAccessPolicies(engine core.Engine, content string) []Mainla
 		}
 		tag := strings.TrimSpace(stringValue(entry[nameField]))
 		port := trafficPortNumber(entry[portField])
+		if engine == core.EngineXray && xhttpGroupOwner(root, tag) != "" {
+			continue
+		}
 		if !tagPattern.MatchString(tag) || port == 0 {
 			continue
 		}
@@ -128,7 +131,11 @@ func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, p
 	case core.EngineMihomo:
 		err = applyMainlandMihomo(root, policy.Tag, policy.BlockMainlandDestination, policy.BlockMainlandSource)
 	case core.EngineXray:
-		err = applyMainlandXray(root, policy.Tag, policy.BlockMainlandDestination, policy.BlockMainlandSource, prefixes)
+		for _, tag := range xhttpGroupRouteTags(root, policy.Tag) {
+			if err = applyMainlandXray(root, tag, policy.BlockMainlandDestination, policy.BlockMainlandSource, prefixes); err != nil {
+				break
+			}
+		}
 	case core.EngineSingBox:
 		err = applyMainlandSingBox(root, policy.Tag, policy.BlockMainlandDestination, policy.BlockMainlandSource, prefixes)
 	case core.EngineShadowsocksRust:
@@ -155,8 +162,10 @@ func RemoveMainlandAccessPolicy(engine core.Engine, content, tag string) (string
 			return "", err
 		}
 	case core.EngineXray:
-		if err := applyMainlandXray(root, strings.TrimSpace(tag), false, false, nil); err != nil {
-			return "", err
+		for _, managedTag := range xhttpGroupRouteTags(root, strings.TrimSpace(tag)) {
+			if err := applyMainlandXray(root, managedTag, false, false, nil); err != nil {
+				return "", err
+			}
 		}
 	case core.EngineSingBox:
 		if err := applyMainlandSingBox(root, strings.TrimSpace(tag), false, false, nil); err != nil {

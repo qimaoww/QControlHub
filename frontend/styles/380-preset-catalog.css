@@ -2,3 +2,54 @@
 /* Large protocol catalogs use exactly two rows instead of clipping a long single row. */
 .config-command-selectors.protocol-catalog-wide{grid-template-columns:1fr}.config-command-selectors.protocol-catalog-wide>.config-selector{grid-column:1}.config-command-selectors.protocol-catalog-wide>.config-selector+ .config-selector{margin-top:1px;margin-left:0}.protocol-catalog-wide.protocol-two-rows .protocol-browser>nav{display:grid;grid-template-columns:repeat(var(--protocol-columns),minmax(100px,1fr));align-items:stretch;overflow-x:auto}.protocol-catalog-wide.protocol-two-rows .protocol-browser>nav>a{min-width:0}.protocol-catalog-wide.protocol-two-rows .protocol-browser strong{white-space:normal;overflow-wrap:anywhere;line-height:1.2}
 .protocol-catalog-wide.protocol-two-rows .protocol-browser>nav>a{min-height:52px;display:grid;grid-template-columns:1fr;align-content:center;align-items:start;gap:4px}.protocol-catalog-wide.protocol-two-rows .protocol-browser>nav a>b{justify-self:start;width:auto;max-width:100%;height:22px;white-space:nowrap}.protocol-catalog-wide.protocol-two-rows .protocol-browser>nav a>span{min-width:0}.protocol-catalog-wide.protocol-two-rows .protocol-browser strong{display:block;overflow:hidden;font-size:max(9px,calc(8px * var(--ui-font-scale)));line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+
+/* XHTTP extends the existing preset panels and client parameter dialog. */
+.xhttp-options,
+.xhttp-client-exports,
+.xhttp-client-exports > details,
+.xhttp-options .plan-fields > label {
+  min-width: 0;
+  max-width: 100%;
+}
+.xhttp-options small,
+.xhttp-options .validation-note,
+.xhttp-client-exports .validation-note {
+  overflow-wrap: anywhere;
+}
+.xhttp-options textarea,
+.xhttp-client-exports textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre;
+  resize: vertical;
+}
+.xhttp-client-exports .client-export-control {
+  display: flex;
+  flex-wrap: wrap;
+}
+.xhttp-client-exports .client-export-control textarea {
+  flex: 1 0 100%;
+}
+@media (max-width: 640px) {
+  .xhttp-options .plan-fields.two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .page-agent-config .config-command-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .page-agent-config .config-command-title > div { min-width: 0; }
+  .page-agent-config .config-command-state {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+.xhttp-client-exports .client-export-control textarea:not(.is-masked) {
+  min-height: 220px;
+  max-height: 52vh;
+}

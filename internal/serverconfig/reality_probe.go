@@ -66,6 +66,8 @@ type realityResolver interface {
 }
 
 type realityProbeOptions struct {
+	serverName        string
+	port              string
 	resolver          realityResolver
 	dialContext       func(context.Context, string, string) (net.Conn, error)
 	rootCAs           *x509.CertPool
@@ -187,7 +189,11 @@ func probeRealityTarget(ctx context.Context, serverName string, options realityP
 }
 
 func probeRealityAddress(ctx context.Context, serverName string, address netip.Addr, options realityProbeOptions) (RealityTarget, error) {
-	endpoint := net.JoinHostPort(address.String(), "443")
+	port := options.port
+	if port == "" {
+		port = "443"
+	}
+	endpoint := net.JoinHostPort(address.String(), port)
 	connection, err := options.dialContext(ctx, "tcp", endpoint)
 	if err != nil {
 		return RealityTarget{}, fmt.Errorf("Reality target %s at %s: TCP connect failed: %w", serverName, endpoint, err)
@@ -195,7 +201,12 @@ func probeRealityAddress(ctx context.Context, serverName string, address netip.A
 	defer connection.Close()
 
 	tlsConnection := tls.Client(connection, &tls.Config{
-		ServerName: serverName,
+		ServerName: func() string {
+			if options.serverName != "" {
+				return options.serverName
+			}
+			return serverName
+		}(),
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    options.rootCAs,
 		NextProtos: []string{"h2", "http/1.1"},

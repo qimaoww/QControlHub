@@ -19,7 +19,7 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		Protocol string              `json:"protocol"`
 		Input    *serverconfig.Input `json:"input"`
 	}
-	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -262,7 +262,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	// Finish local identity, port, routing and policy checks before spending
 	// time on DNS/TLS. A duplicate inbound should fail immediately.
 	if input.Input.RealityEnabled && input.Operation != "delete" {
-		target, err := serverconfig.ProbeRealityTarget(request.Context(), input.Input.RealityServerName)
+		target, err := serverconfig.ProbePlanRealityTarget(request.Context(), input.Input)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

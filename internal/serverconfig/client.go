@@ -20,6 +20,19 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if isXHTTPGroup(input.Protocol) && input.XHTTPBackendPort > 0 {
+		return buildXHTTPGroupProfile(input, address, serverName, nodeName)
+	}
+	if input.Transport == "xhttp" {
+		address = xhttpClientAddress(input, address)
+		if input.ClientPort > 0 {
+			input.Port = input.ClientPort
+		}
+		input.TransportHost = xhttpClientHost(input)
+		if input.TLSClientALPN != "" {
+			input.TLSALPN = input.TLSClientALPN
+		}
+	}
 	if managedTLS(input) {
 		input.Port = input.TLSPublicPort
 	}
@@ -149,6 +162,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		} else if input.TLSEnabled {
 			query.Set("security", "tls")
 			query.Set("sni", serverName)
+			if input.Transport == "xhttp" && input.TLSClientALPN == "http/1.1" {
+				query.Set("fp", "unsafe")
+			}
 		}
 		addTransportQuery(query, input)
 		profile.Format = "VLESS URI"
@@ -218,6 +234,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		if input.TLSEnabled {
 			query.Set("security", "tls")
 			query.Set("sni", serverName)
+			if input.Transport == "xhttp" && input.TLSClientALPN == "http/1.1" {
+				query.Set("fp", "unsafe")
+			}
 		}
 		addTransportQuery(query, input)
 		profile.Format = "Trojan URI"
@@ -284,6 +303,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		// URL export remains available for protocols whose security options
 		// cannot be represented by Mihomo without losing information.
 		profile.MihomoError = err.Error()
+	}
+	if err := addXHTTPClientExport(&profile, input, address, serverName); err != nil {
+		return ClientProfile{}, err
 	}
 	return profile, nil
 }

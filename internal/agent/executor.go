@@ -210,7 +210,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return output + "\n" + result, err
 	}
 	timeout := 45 * time.Second
-	if len(task.TLSFrontends) > 0 || task.Engine == core.EngineSingBox && managedTLSStateExists() {
+	if len(task.TLSFrontends) > 0 || (task.Engine == core.EngineSingBox || task.Engine == core.EngineXray) && managedTLSStateExists() {
 		timeout = 4 * time.Minute
 	}
 	if task.Action == core.ActionInstall {
@@ -258,6 +258,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		if task.Engine == core.EngineXray {
+			if err := checkXHTTPListenerPorts(spec, task.ConfigContent); err != nil {
+				return "", err
+			}
+		}
 		if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
 			return "", err
 		}

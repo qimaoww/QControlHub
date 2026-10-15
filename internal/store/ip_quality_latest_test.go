@@ -64,8 +64,8 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 		t.Fatalf("per-node latest across different dates = %+v", latest)
 	}
 	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || !slices.Equal(dates, []string{
-		latest[second.ID].CreatedAt.Format(time.DateOnly), latest[first.ID].CreatedAt.Format(time.DateOnly),
-		latest[first.ID].CreatedAt.AddDate(0, 0, -1).Format(time.DateOnly),
+		latest[second.ID].CreatedAt.UTC().Format(time.DateOnly), latest[first.ID].CreatedAt.UTC().Format(time.DateOnly),
+		latest[first.ID].CreatedAt.UTC().AddDate(0, 0, -1).Format(time.DateOnly),
 	}) {
 		t.Fatalf("dates omitted earlier attempts or were not newest first: %+v %v", dates, err)
 	}
@@ -180,7 +180,7 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id=$1`, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || len(dates) != 1 || dates[0] != latest[second.ID].CreatedAt.Format(time.DateOnly) {
+	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || len(dates) != 1 || dates[0] != latest[second.ID].CreatedAt.UTC().Format(time.DateOnly) {
 		t.Fatalf("revoked node left selectable dates: %+v %v", dates, err)
 	}
 }

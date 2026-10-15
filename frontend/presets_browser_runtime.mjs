@@ -1,3 +1,5 @@
+import { createClientAccessResults } from "./modules/client-access-results.js";
+import { createClientAccessProfiles } from "./modules/client-access-profiles.js";
 import { openTaskEditRetry } from "./modules/task-edit-retry.js";
 import { installConfigPages } from "./modules/configs.js";
 import { reconcileView } from "./modules/refresh.js";
@@ -26,8 +28,9 @@ async function fixture(engine, readOnly = false, actual) {
     { key: "vless-enc-tcp-reality-vision", name: "VLESS Encryption", uses_reality: true, uses_vless_encryption: true },
   ] : [{ key: "ss2022", name: "Shadowsocks 2022", ignores_username: true, methods: ["2022-blake3-aes-256-gcm"] }];
   protocols.forEach(protocol => Object.assign(protocol, { badge: protocol.key, transports: protocol.transports || ["raw"] }));
-  const agent = { id: "node", name: "预设测试节点", status: "online", capabilities: [engine], runtime: { [engine]: { installed: true } } };
-  const state = { route: "agent-config", data: { agentId: agent.id, engine,
+  const agent = { id: "node", name: "预设测试节点", status: "online", can_manage: !actual?.shared,
+    capabilities: [engine], features: ["shared-core-instances-v1", "managed-tls-v1", "xhttp-presets-v1"], runtime: { [engine]: { installed: true } } };
+  const state = { route: "agent-config", session: actual?.shared ? { role: "user", user_id: "recipient" } : { role: "admin" }, data: { agentId: agent.id, engine,
     // Simulate returning from an installation with an out-of-date node cache.
     agents: [{ ...agent, runtime: { [engine]: { installed: false } } }], protocol: "unsupported-old-engine-protocol" } };
   const test = { calls: [], notifications: [], confirmed: true, saved: null, inbounds: [], taskState: "succeeded", fieldGate: null, saveGate: null };
@@ -66,7 +69,7 @@ async function fixture(engine, readOnly = false, actual) {
     }
     if (options.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.saveGate) await test.saveGate;
-      if (test.saveFailure) throw Object.assign(new Error("模拟保存失败，请重试"), {status:400});
+      if (test.saveFailure) throw Object.assign(new Error(typeof test.saveFailure === "string" ? test.saveFailure : "模拟保存失败，请重试"), {status:400});
       if (test.portConflict) throw Object.assign(new Error("端口 443 已由其他用户占用"), {status:409, code:"port_conflict", field:test.portConflict});
       if (test.staleRevision) throw Object.assign(new Error("配置版本已变化"), {status:409});
       assert(body.expected_version === (test.saved?.version || 0), "submitted a stale config revision");
@@ -187,6 +190,15 @@ export async function testPresetsRuntime(preview = false) {
     const catalog = query.has("protocol") ? await (await fetch("/assets/preset-plans.json")).json() : [];
     const actual = catalog.find(entry => entry.engine === engine && entry.protocol.key === query.get("protocol"));
     await fixture(engine, false, actual);
+    if (query.has("exports") && actual?.profile) {
+      const render = createClientAccessResults({esc,engineName:String,can:()=>true});
+      const entries=[{agent_id:"node",agent_name:"XHTTP 测试节点",address:"203.0.113.10",engine,profiles:[{tag:actual.plan.tag,port:actual.plan.port,protocol:actual.protocol.name,profile:actual.profile}]}];
+      document.body.className="app-body page-client-access";
+      document.querySelector("main").innerHTML='<section class="client-access-workspace">'+render(entries,entries,[{id:"node",status:"online"}],{},"url")+'</section>';
+      createClientAccessProfiles({api:async()=>{},state:{},can:()=>true,notify:()=>{}},{clientAccess:async()=>{}})();
+      document.querySelector("[data-client-parameter-open]").click();
+      return;
+    }
     if (query.has("retry")) await openTaskEditRetry({ state: {}, esc, notify: () => {},
       confirmAction: async () => window.confirm("修改尚未保存，确定放弃？"),
       api: async () => ({ task: { action: "deploy", config_version: 2,
@@ -314,7 +326,8 @@ export async function testPresetsRuntime(preview = false) {
   assert(catalogResponse.ok, "real preset test catalog failed to load");
   const catalog = await catalogResponse.json();
   const covered = new Set();
-  for (const actual of catalog) {
+  const cases = [...catalog, ...catalog.filter(actual => actual.engine === "xray" && actual.plan.transport === "xhttp").map(actual => ({...actual, shared: true}))];
+  for (const actual of cases) {
     const test = await fixture(actual.engine, false, actual);
     covered.add(actual.engine);
     if (actual.protocol.supports_managed_tls) {
@@ -345,6 +358,36 @@ export async function testPresetsRuntime(preview = false) {
     button("validate").click();
     await waitFor(() => test.saved?.version === 1 && !button("validate").disabled, `${actual.engine}/${actual.protocol.key}: saving real preset defaults stalled`);
     assert(submissions(test)[0].body.input.protocol === actual.protocol.key, "real preset submitted a different protocol");
+    if (actual.engine === "xray" && actual.plan.transport === "xhttp") {
+      assert(!control("transport_host").disabled,"XHTTP Host was disabled by unrelated HTTP transport visibility");
+      edit("client_address","2001:db8::10");edit("client_port","8443");edit("client_host","http.example.test");
+      edit("xhttp_mode","packet-up");
+      const group=["vless-xhttp-five","vless-xhttp-tls-reality","vless-xhttp-reality-tls"].includes(actual.protocol.key);
+      if (group) {
+        edit("xhttp_tls_address","cdn.example.test");edit("xhttp_tls_client_port","443");edit("xhttp_tls_host","tls.example.test");
+      } else {
+        const tls=actual.protocol.key==="vless-xhttp-tls";
+        const extra={xmux:{maxConnections:0,maxConcurrency:"4-8"},downloadSettings:{address:"203.0.113.20",port:443,network:"xhttp",security:tls?"tls":"reality",sockopt:{tcpKeepAliveIdle:25},
+          [tls?"tlsSettings":"realitySettings"]:{serverName:tls?control("tls_server_name").value:control("reality_server_name").value},
+          xhttpSettings:{path:control("transport_path").value,host:"download.example.test",mode:"auto",extra:{xmux:{maxConnections:0,maxConcurrency:8}}}}};
+        edit("xhttp_extra",JSON.stringify(extra));control("xhttp_extra").dispatchEvent(new Event("change",{bubbles:true}));
+        assert(control("xhttp_split").checked && control("xhttp_download_address").value==="203.0.113.20","pasted full downloadSettings did not hydrate split controls");
+        form().querySelector("[data-xhttp-swap]").click();
+        assert(control("client_address").value==="203.0.113.20" && control("xhttp_download_address").value==="2001:db8::10","IPv6 direction exchange failed");
+      }
+      button("validate").click();
+      await waitFor(()=>test.saved?.version===2 && !button("validate").disabled,"XHTTP changed endpoint save stalled");
+      const saved=submissions(test).at(-1).body.input;
+      assert(saved.xhttp_mode==="packet-up" && control("xhttp_mode").value==="packet-up" && saved.client_host==="http.example.test","XHTTP client values were lost on reopen");
+      if(group) assert(control("xhttp_tls_address").value==="cdn.example.test" && saved.xhttp_tls_client_port===443 && saved.xhttp_tls_host==="tls.example.test" && saved.certificate_path,"group TLS endpoint/certificate refs lost");
+      else {
+        const d=JSON.parse(saved.xhttp_extra).downloadSettings;
+        assert(d.sockopt.tcpKeepAliveIdle===25 && d.xhttpSettings.extra.xmux.maxConcurrency===8 && d.address==="2001:db8::10","full download settings lost on edit/reload");
+        control("xhttp_split").checked=false;control("xhttp_split").dispatchEvent(new Event("change",{bubbles:true}));
+        button("validate").click();await waitFor(()=>test.saved?.version===3 && !button("validate").disabled,"XHTTP split removal stalled");
+        assert(!JSON.parse(submissions(test).at(-1).body.input.xhttp_extra).downloadSettings,"explicit split disable retained old download");
+      }
+    }
     if (actual.engine === "sing-box") {
       const saved = submissions(test)[0].body.input;
       assert(saved.transport === actual.plan.transport, "native transport changed during save");
