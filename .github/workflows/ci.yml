@@ -95,6 +95,9 @@ jobs:
       - name: Build release binaries
         run: sh .github/scripts/ci-time.sh release-build make build VERSION="${{ github.sha }}"
 
+      - name: Verify historical panel account upgrade with PostgreSQL
+        run: sh .github/scripts/ci-time.sh panel-auth-upgrade make panel-auth-upgrade-test
+
       - name: Validate systemd bootstrap
         shell: bash
         run: |

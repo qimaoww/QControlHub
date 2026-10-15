@@ -62,6 +62,10 @@ upgrade-sandbox-test:
 vet:
 	go vet ./...
 
+.PHONY: panel-auth-upgrade-test
+panel-auth-upgrade-test:
+	sh deploy/tests/panel-auth-upgrade.sh
+
 fmt-check:
 	@unformatted="$$(find . -type d \( -name .git -o -name .ci-cache \) -prune -o -type f -name '*.go' -print0 | xargs -0 gofmt -l)" || exit $$?; \
 	test -z "$$unformatted" || { printf '%s\n' 'Go files need formatting; run gofmt -w on the listed files:' "$$unformatted"; exit 1; }
