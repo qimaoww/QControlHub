@@ -164,8 +164,8 @@ func addXHTTPClientExport(profile *ClientProfile, input Input, address, name str
 			profile.URIError = "完整 extra / downloadSettings 无统一分享链接标准，请复制或下载 Xray JSON"
 			profile.Mihomo, profile.MihomoError = "", "Mihomo 导出器仅转换基础 XHTTP；extra.downloadSettings / xmux / sockopt 未完整映射到 download-settings / reuse-settings，请使用 Xray JSON"
 		}
-		if input.TLSEnabled && input.TLSClientALPN == "http/1.1" && input.XHTTPMode == "stream-one" {
-			profile.Mihomo, profile.MihomoError = "", "Mihomo 1.19.32 的 HTTP/1.1 + stream-one 未通过连接验证；请使用 Xray JSON，或改为 h2 / packet-up / stream-up"
+		if input.TLSEnabled && input.TLSClientALPN == "http/1.1" && (input.XHTTPMode == "stream-one" || input.XHTTPMode == "stream-up") {
+			profile.Mihomo, profile.MihomoError = "", "Mihomo 1.19.32 的 HTTP/1.1 + "+input.XHTTPMode+" 未通过稳定连接验证；请使用 Xray JSON，或改为 h2 / packet-up"
 		}
 	}
 	return nil
