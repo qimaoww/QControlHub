@@ -2,13 +2,13 @@ import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
 
-export function bindCodeEditors() {
+export function bindCodeEditors(root = document) {
   const formatCodeBytes = (value) => {
     if (value < 1024) return `${value} B`;
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
     return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
   };
-  document.querySelectorAll("[data-code-editor]").forEach((editor) => {
+  root.querySelectorAll("[data-code-editor]").forEach((editor) => {
     const input = editor.querySelector("[data-code-input]");
     const gutter = editor.querySelector("[data-line-numbers]");
     const byteLabel = editor.querySelector("[data-code-bytes]");
@@ -117,6 +117,7 @@ export function bindCodeEditors() {
       bindEvent(input, name, updatePosition),
     );
     bindEvent(input, "keydown", (event) => {
+      if (input.readOnly || input.disabled) return;
       if (
         event.key !== "Tab" ||
         event.altKey ||

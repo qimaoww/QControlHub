@@ -2,9 +2,10 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,6 +26,15 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
+	if _, err := os.Stat(tlsFrontendRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fixture must start without TLS configuration directories: %v", err)
+	}
+	if kind == ServiceManagerSystemd {
+		if err := os.MkdirAll(tlsFrontendRoot, 0700); !errors.Is(err, syscall.EROFS) {
+			t.Fatalf("Agent must retain a read-only /etc mount: %v", err)
+		}
+		t.Log("reproduced read-only TLS configuration directory in the long-running Agent sandbox")
+	}
 	protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, "vless-ws-tls")
 	input, err := serverconfig.NewPlan(protocol)
 	if err != nil {
@@ -47,17 +57,17 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	}
 	invoke := func(service string, action core.Action, stage bool, frontends []core.TLSFrontend, success bool) {
 		t.Helper()
-		suffix, _ := randomSuffix(12)
-		name := suffix + ".json"
-		encoded, _ := json.Marshal(tlsFrontendRequest{service, kind, action, stage, frontends})
-		path := filepath.Join(tlsFrontendRoot, "requests", name)
-		if err := os.WriteFile(path, encoded, 0600); err != nil {
+		name, err := writeTLSFrontendRequest(tlsFrontendRequest{service, kind, action, stage, frontends})
+		if err != nil {
 			t.Fatal(err)
 		}
+		path := filepath.Join(tlsFrontendRequests, name)
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+			t.Fatalf("TLS request must remain private: %v", err)
+		}
 		defer os.Remove(path)
-		args := tlsFrontendHelperArguments("/usr/local/lib/qagent/qagent", "qagent-tls-test-"+suffix+".service", name)
+		args := tlsFrontendHelperArguments("/usr/local/lib/qagent/qagent", "qagent-tls-test-"+name[:24]+".service", name)
 		var output string
-		var err error
 		if kind == ServiceManagerOpenRC {
 			output, err = runIPQualityCommand(ctx, "/usr/local/lib/qagent/qagent", []string{"manage-tls", name})
 		} else {

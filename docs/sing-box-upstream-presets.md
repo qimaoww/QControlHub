@@ -124,6 +124,10 @@ VMess / VLESS / Trojan 的 **WS-TLS、HTTPUpgrade-TLS** 六个入口现在默认
 
 执行记录中，失败或已取消的校验 / 部署任务提供“编辑后重试”：显示原任务错误和当前配置版本，编辑源码后原子保存新版本并提交同种动作。配置变化会拒绝旧版本提交；队列失败回滚保存；原记录保留。弹窗可跳转预设表单修改 TLS 终止方式，未保存关闭有确认，提交过程中禁止重复提交。
 
+首次部署不要求预建 `/etc/qagent/tls-frontends`。Agent 将临时请求写入现有可写状态目录 `/var/lib/qcontrolhub/tls-requests`（目录 0700、文件 0600，执行后清理）；固定安装工具创建反代配置目录，并为非 root 反代服务设置应用父目录的组遍历权限。旧 Agent 单元中的只读 `/etc` 沙箱保持有效；出现 `mkdir /etc/qagent/tls-frontends: read-only file system` 的节点需更新 Agent 后重试。
+
+证书方式、公网端口和原生 TLS 字段沿用现有表单网格，按选择显示对应说明。编辑重试沿用面板源码编辑器，支持行号、格式化、恢复原文和 JSON 语法反馈；提交期间锁定编辑和关闭操作，失败保留草稿。桌面与手机布局使用既有主题、按钮和弹窗样式。
+
 新增验证：sing-box **1.14.3**、Caddy **2.11.7**、Nginx **1.26.3** 的 12 种实际反代组合均通过 TCP / UDP 回环连接（UDP 为隧道内承载）；自定义 SNI、不同 HTTP Host 和非 443 公网端口均参与测试。实际 systemd 与 Alpine OpenRC 沙箱测试覆盖自动安装、443 监听、配置校验、重载、多实例保留、冲突拒绝、停止、恢复和卸载；浏览器覆盖桌面 / 手机表单和编辑重试。公开 ACME 申请未连接真实公网域名验收，Caddy 生产配置使用实际程序校验，连接测试使用本地受信任证书夹具。
 
 参考：[Caddy 自动 HTTPS](https://caddyserver.com/docs/automatic-https)、[Caddy JSON 配置](https://caddyserver.com/docs/json/)、[Nginx WebSocket 反代](https://nginx.org/en/docs/http/websocket.html)。Caddy 使用 Apache-2.0，Nginx 使用 BSD 类许可；项目不打包两者程序，安装时从官方发布或系统软件源取得。

@@ -3,8 +3,8 @@ FROM debian:trixie-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd dbus ca-certificates \
     && groupadd --system qcontrolhub-core \
     && useradd --system --gid qcontrolhub-core --no-create-home qcontrolhub-core \
-    && mkdir -p /etc/qcontrolhub /etc/qagent/tls-frontends/requests /var/lib/qcontrolhub \
-    && touch /etc/qcontrolhub/agent.env && chmod 700 /etc/qagent/tls-frontends/requests
+    && mkdir -p /etc/qcontrolhub /var/lib/qcontrolhub \
+    && touch /etc/qcontrolhub/agent.env
 COPY qagent tls.test /usr/local/lib/qagent/
 COPY qagent.service /etc/systemd/system/qagent.service
 STOPSIGNAL SIGRTMIN+3

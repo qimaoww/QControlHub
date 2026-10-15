@@ -208,6 +208,14 @@ func (m *tlsFrontendManager) prepareDirectories() error {
 			if err = validateProtectedDirectoryChain(path); err != nil {
 				return err
 			}
+			// A first TLS deployment may create /etc/qagent under the helper's
+			// private umask. Give the fixed service group traversal through the
+			// application parent as well as the TLS configuration directory.
+			if path == tlsFrontendRoot {
+				if err = applyManagedConfigurationMetadata(filepath.Dir(path), true, int(identity.gid)); err != nil {
+					return err
+				}
+			}
 		} else {
 			if err = validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
 				return err
