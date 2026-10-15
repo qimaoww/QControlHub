@@ -42,7 +42,11 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 					t.Fatalf("claim: %+v %v", claimed, err)
 				}
 				endpoints, err := serverconfig.SharedTrafficEndpoints(core.EngineSingBox, saved.Config.Content)
-				if err != nil || len(claimed.TLSFrontends) != len(endpoints) {
+				expectedTLSRoutes := len(endpoints)
+				if plan.TLSMode == "native" {
+					expectedTLSRoutes = 0
+				}
+				if err != nil || len(claimed.TLSFrontends) != expectedTLSRoutes {
 					t.Fatalf("TLS routes do not match remaining inbounds: %d %+v %v", len(claimed.TLSFrontends), endpoints, err)
 				}
 				if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
@@ -74,6 +78,15 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 			}
 			plan = first
 			mutate("add", "")
+			plan.TLSMode, plan.Listen, plan.Port, plan.TLSPublicPort = "native", "0.0.0.0", 443, 0
+			plan.CertificatePath, plan.PrivateKeyPath = "/etc/certs/cdn.pem", "/etc/certs/cdn.key"
+			mutate("modify", plan.Tag)
+			plan.CertificatePath, plan.PrivateKeyPath = "/etc/certs/renewed.pem", "/etc/certs/renewed.key"
+			mutate("modify", plan.Tag)
+			cdn.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
+			if len(workspace.Inbounds) != 1 || workspace.Inbounds[0].Port != 443 || workspace.Inbounds[0].CertificatePath != plan.CertificatePath || workspace.Inbounds[0].PrivateKeyPath != plan.PrivateKeyPath {
+				t.Fatalf("native TLS certificate edit lost its port or paths: %+v", workspace.Inbounds)
+			}
 		})
 	}
 }
