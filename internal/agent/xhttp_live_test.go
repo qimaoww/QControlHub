@@ -40,8 +40,20 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 	nginx := os.Getenv("QCH_NGINX_BINARY")
 	dir := t.TempDir()
 	certPath, keyPath := xhttpTestCertificate(t, dir)
+	type deployment struct {
+		key    string
+		shared bool
+	}
+	var deployments []deployment
 	for _, key := range []string{serverconfig.ProtocolVLESSXHTTP, serverconfig.ProtocolXHTTPTLS, serverconfig.ProtocolXHTTPTLSReality, serverconfig.ProtocolXHTTPRealityTLS, serverconfig.ProtocolXHTTPFive} {
-		t.Run(key, func(t *testing.T) {
+		deployments = append(deployments, deployment{key: key}, deployment{key: key, shared: true})
+	}
+	for _, deployment := range deployments {
+		key, name := deployment.key, deployment.key
+		if deployment.shared {
+			name += "/shared-instance"
+		}
+		t.Run(name, func(t *testing.T) {
 			protocol, _ := serverconfig.FindProtocol(core.EngineXray, key)
 			input, err := serverconfig.NewPlan(protocol)
 			if err != nil {
@@ -94,7 +106,9 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 			}
 			var accountingSource map[string]any
 			_ = json.Unmarshal([]byte(content), &accountingSource)
-			accountingSource["api"] = map[string]any{"tag": "qch-stat-api", "listen": net.JoinHostPort("127.0.0.1", strconv.Itoa(singBoxFreePort(t)))}
+			if !deployment.shared {
+				accountingSource["api"] = map[string]any{"tag": "qch-stat-api", "listen": net.JoinHostPort("127.0.0.1", strconv.Itoa(singBoxFreePort(t)))}
+			}
 			accountingJSON, _ := json.Marshal(accountingSource)
 			accounting, err := serverconfig.PlanPresetAccounting(core.EngineXray, string(accountingJSON))
 			if err != nil {
@@ -103,7 +117,18 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 			if group && accounting.Ports[0].User != input.Username {
 				t.Fatal("group lacks independent user statistics")
 			}
-			xhttpTestCore(t, xray, accounting.Content, certPath)
+			runtimeContent := accounting.Content
+			if deployment.shared {
+				runtimeContent, err = serverconfig.SharedInstanceRuntimeContent(core.EngineXray, runtimeContent)
+				if err != nil {
+					t.Fatal("shared runtime preparation", err)
+				}
+				endpoints, err := serverconfig.SharedTrafficEndpoints(core.EngineXray, runtimeContent)
+				if err != nil || len(endpoints) != 1 || endpoints[0].Port != input.Port {
+					t.Fatalf("shared quota endpoint: %+v %v", endpoints, err)
+				}
+			}
+			xhttpTestCore(t, xray, runtimeContent, certPath)
 			profile, err := serverconfig.BuildClientProfile(input, "127.0.0.1", "")
 			if err != nil {
 				t.Fatal(err)
@@ -115,7 +140,7 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 			for _, variant := range variants {
 				t.Run(variant.Name, func(t *testing.T) {
 					xhttpAssertClient(t, xray, variant.Profile.Xray, certPath)
-					if group {
+					if group && !deployment.shared {
 						counters, err := queryNativeTrafficAt(context.Background(), core.EngineXray, accounting.API)
 						if err != nil || counters["user>>>"+input.Username+">>>traffic>>>uplink"] == 0 || counters["user>>>"+input.Username+">>>traffic>>>downlink"] == 0 {
 							t.Fatalf("group user counters unavailable: %v %v", counters, err)

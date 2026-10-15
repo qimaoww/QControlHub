@@ -28,8 +28,9 @@ async function fixture(engine, readOnly = false, actual) {
     { key: "vless-enc-tcp-reality-vision", name: "VLESS Encryption", uses_reality: true, uses_vless_encryption: true },
   ] : [{ key: "ss2022", name: "Shadowsocks 2022", ignores_username: true, methods: ["2022-blake3-aes-256-gcm"] }];
   protocols.forEach(protocol => Object.assign(protocol, { badge: protocol.key, transports: protocol.transports || ["raw"] }));
-  const agent = { id: "node", name: "预设测试节点", status: "online", capabilities: [engine], runtime: { [engine]: { installed: true } } };
-  const state = { route: "agent-config", data: { agentId: agent.id, engine,
+  const agent = { id: "node", name: "预设测试节点", status: "online", can_manage: !actual?.shared,
+    capabilities: [engine], features: ["shared-core-instances-v1", "managed-tls-v1", "xhttp-presets-v1"], runtime: { [engine]: { installed: true } } };
+  const state = { route: "agent-config", session: actual?.shared ? { role: "user", user_id: "recipient" } : { role: "admin" }, data: { agentId: agent.id, engine,
     // Simulate returning from an installation with an out-of-date node cache.
     agents: [{ ...agent, runtime: { [engine]: { installed: false } } }], protocol: "unsupported-old-engine-protocol" } };
   const test = { calls: [], notifications: [], confirmed: true, saved: null, inbounds: [], taskState: "succeeded", fieldGate: null, saveGate: null };
@@ -325,7 +326,8 @@ export async function testPresetsRuntime(preview = false) {
   assert(catalogResponse.ok, "real preset test catalog failed to load");
   const catalog = await catalogResponse.json();
   const covered = new Set();
-  for (const actual of catalog) {
+  const cases = [...catalog, ...catalog.filter(actual => actual.engine === "xray" && actual.plan.transport === "xhttp").map(actual => ({...actual, shared: true}))];
+  for (const actual of cases) {
     const test = await fixture(actual.engine, false, actual);
     covered.add(actual.engine);
     if (actual.protocol.supports_managed_tls) {
