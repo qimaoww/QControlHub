@@ -89,6 +89,7 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	}
 	if f := metadata.Frontend; f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
 		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
+		input.TLSACMEEmail = f.ACMEEmail
 		input.TLSEnabled = true
 		input.TLSALPN = metadata.TLSALPN
 	}

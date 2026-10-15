@@ -158,6 +158,7 @@ export function readServerPlanInput(form, protocol) {
     transport_host: ["http", "httpupgrade", "websocket", "xhttp"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
     transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
     tls_mode: tlsEnabled && protocol.supports_managed_tls ? values.get("tls_mode") || "native" : "",
+    tls_acme_email: tlsEnabled && protocol.supports_managed_tls && values.get("tls_mode") === "caddy" ? (values.get("tls_acme_email") || "").trim() : "",
     tls_public_port: tlsEnabled && ["caddy", "nginx"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
     tls_server_name: values.get("tls_server_name") || "",
     tls_alpn: values.get("tls_alpn") || "",
@@ -298,6 +299,8 @@ function bindProtocolOptionVisibility(form) {
   const updateTLSMode = () => {
     const managed = tls?.checked && ["caddy", "nginx"].includes(tlsMode?.value);
     form.querySelectorAll("[data-managed-tls]").forEach(el => { setVisible(el, managed); el.querySelectorAll("input").forEach(control => { control.disabled = !managed; control.required = managed; }); });
+    const acme = form.querySelector("[data-caddy-acme]");
+    if (acme) { const active = Boolean(tls?.checked && tlsMode?.value === "caddy"); setVisible(acme, active); acme.querySelectorAll("input").forEach(control => control.disabled = !active); }
     const hint = form.querySelector("[data-managed-tls-hint]");
     if (hint) hint.textContent = tlsMode?.value === "nginx"
       ? "面板生成自签证书，客户端通过导出的公共证书验证。请放行所选公网端口。"

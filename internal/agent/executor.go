@@ -297,6 +297,10 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
+		previousStatus, err := e.serviceManager().status(ctx, spec.Service)
+		if err != nil {
+			return validation, fmt.Errorf("inspect service before deployment: %w", err)
+		}
 		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)
 		if err != nil {
 			return validation, err
@@ -316,23 +320,19 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			output += "\n" + restartOutput
 		}
 		if err != nil {
-			rollbackOutput, rollbackErr := rollbackDeploy(spec.ConfigPath, backup)
-			if rollbackOutput != "" {
-				output += "\n" + rollbackOutput
-			}
-			if rollbackErr != nil {
-				return output, fmt.Errorf("configuration deployed but service restart failed (%v); rollback also failed: %w", err, rollbackErr)
-			}
 			recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			recoveryOutput, recoveryErr := serviceCommandAndVerifyWithManager(recoveryContext, e.serviceManager(), spec.Service, core.ActionRestart)
+			recoveryOutput, recoveryErr := recoverConfigurationDeployment(recoveryContext, task.Engine, spec, e.serviceManager(), backup, previousStatus)
 			recoveryCancel()
 			if recoveryOutput != "" {
-				output += "\nrollback restart: " + recoveryOutput
+				output += "\n" + recoveryOutput
 			}
 			if recoveryErr != nil {
-				return output, fmt.Errorf("configuration restart failed (%v); previous file was restored but service recovery failed: %w", err, recoveryErr)
+				return output, fmt.Errorf("configuration deployment failed (%v); rollback failed: %w", err, recoveryErr)
 			}
-			return output, fmt.Errorf("configuration restart failed and the previous configuration was restored: %w", err)
+			if backup == "" {
+				return output, fmt.Errorf("configuration deployment failed; newly created configuration was removed and service was stopped: %w", err)
+			}
+			return output, fmt.Errorf("configuration deployment failed; previous configuration was restored with its service state: %w", err)
 		}
 		return output, nil
 	case core.ActionStart, core.ActionRestart:

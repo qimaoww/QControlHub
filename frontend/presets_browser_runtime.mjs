@@ -334,9 +334,12 @@ export async function testPresetsRuntime(preview = false) {
       assert(control("tls_mode").value === "caddy" && control("tls_public_port").value === "443", "managed TLS defaults lost");
       assert(control("listen").value === "127.0.0.1" && control("listen").readOnly, "managed backend is not loopback");
       assert(control("tls_server_name").required && !control("tls_server_name").checkValidity(), "managed domain must be supplied");
+      assert(!control("tls_acme_email").disabled && control("tls_acme_email").type === "email", "Caddy ACME email not editable");
+      edit("tls_acme_email", "certs@example.test");
       edit("tls_server_name", "tls.example.test");
       edit("tls_public_port", "8443");
       edit("tls_mode", "nginx");
+      assert(control("tls_acme_email").disabled && control("tls_acme_email").closest("[data-caddy-acme]").hidden, "ACME email remained active for Nginx");
       assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
       assert(control("tls_mode").closest(".plan-fields") && control("tls_public_port").closest(".plan-fields") && control("tls_client_certificate").closest(".plan-fields"), "new TLS controls bypass the standard form grid");
       assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("自签证书") && !form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80"), "TLS help did not follow selected certificate mode");
@@ -391,7 +394,7 @@ export async function testPresetsRuntime(preview = false) {
     if (actual.engine === "sing-box") {
       const saved = submissions(test)[0].body.input;
       assert(saved.transport === actual.plan.transport, "native transport changed during save");
-      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === "nginx" && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
+      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === "nginx" && !saved.tls_acme_email && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
       if (actual.plan.tls_enabled) assert(saved.tls_server_name === "tls.example.test" && control("tls_server_name").value === saved.tls_server_name && control("tls_alpn").value === saved.tls_alpn, "native TLS values were lost on reopen");
       if (control("transport_host") && !control("transport_host").disabled) assert(saved.transport_host === "http.example.test" && control("transport_host").value === saved.transport_host, "HTTP Host was conflated with TLS SNI");
       if (saved.transport === "http") assert(saved.transport_http_method === "POST" && control("transport_http_method").value === "POST", "HTTP Method was lost on reopen");

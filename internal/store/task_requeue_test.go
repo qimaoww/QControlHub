@@ -112,4 +112,30 @@ func TestRequeueStaleTasksUsesActionSpecificLeaseAndAttemptLimit(t *testing.T) {
 	if err != nil || len(failedInstalls) != 1 || failedInstalls[0].ID != install.ID {
 		t.Fatalf("failed install filter = %+v, %v", failedInstalls, err)
 	}
+	// A reachable ZeroSSL fallback can follow three 30-second primary CA
+	// connection attempts. Do not expire that running operation at 120 seconds.
+	if _, err = dataStore.pool.Exec(ctx, `UPDATE agents SET capabilities='["mihomo","sing-box"]'::jsonb, features=features||'["managed-tls-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	tlsTask, err := dataStore.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionRestart, Engine: core.EngineSingBox})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := dataStore.ClaimTask(ctx, agent.ID); err != nil || claimed == nil || claimed.ID != tlsTask.ID {
+		t.Fatalf("claim TLS lifecycle task: %+v %v", claimed, err)
+	}
+	setTaskStartedAt(t, ctx, dataStore, tlsTask.ID, time.Now().Add(-3*time.Minute))
+	if err := dataStore.RequeueStaleTasks(ctx, 2*time.Minute, 6*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	if running, err := dataStore.GetTask(ctx, tlsTask.ID); err != nil || running.Status != core.TaskRunning {
+		t.Fatalf("CA fallback lost its execution lease: %+v %v", running, err)
+	}
+	setTaskStartedAt(t, ctx, dataStore, tlsTask.ID, time.Now().Add(-6*time.Minute))
+	if err := dataStore.RequeueStaleTasks(ctx, 2*time.Minute, 6*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	if requeued, err := dataStore.GetTask(ctx, tlsTask.ID); err != nil || requeued.Status != core.TaskPending {
+		t.Fatalf("expired TLS task was not requeued: %+v %v", requeued, err)
+	}
 }

@@ -21,7 +21,11 @@ import (
 func managedTLS(input Input) bool { return input.TLSMode == "caddy" || input.TLSMode == "nginx" }
 
 func frontendFor(input Input) core.TLSFrontend {
-	return core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath}
+	f := core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath}
+	if input.TLSMode == "caddy" {
+		f.ACMEEmail = input.TLSACMEEmail
+	}
+	return f
 }
 
 func validateManagedTLS(engine core.Engine, input Input) error {

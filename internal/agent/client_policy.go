@@ -98,6 +98,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
 		core.AgentFeatureXHTTP,
+		core.AgentFeatureACMEFallback,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,

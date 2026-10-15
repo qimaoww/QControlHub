@@ -90,6 +90,7 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 	localBackends := map[int]bool{}
 	paths := map[string]bool{}
 	backends := map[int]bool{}
+	emails := map[string]string{}
 	services := make([]string, 0, len(deployments))
 	for service := range deployments {
 		services = append(services, service)
@@ -112,6 +113,12 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			}
 			localPorts[f.PublicPort] = localPorts[f.PublicPort] || f.LocalOnly
 			localBackends[f.BackendPort] = localBackends[f.BackendPort] || f.LocalOnly
+			if f.Mode == "caddy" && f.ACMEEmail != "" {
+				if email := emails[f.Domain]; email != "" && email != f.ACMEEmail {
+					return nil, fmt.Errorf("域名 %s 的 ACME 邮箱不一致，请使用同一证书账户", f.Domain)
+				}
+				emails[f.Domain] = f.ACMEEmail
+			}
 			if mode := owners[f.PublicPort]; mode != "" && mode != f.Mode {
 				return nil, fmt.Errorf("公网端口 %d 已用于 %s，不能同时用于 %s", f.PublicPort, mode, f.Mode)
 			}
@@ -143,13 +150,15 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 
 func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, error) {
 	servers := map[string]any{}
-	domains := map[string]bool{}
+	domains := map[string]string{}
 	byPort := map[int][]any{}
 	for _, f := range frontends {
 		if f.Mode != "caddy" {
 			continue
 		}
-		domains[f.Domain] = true
+		if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
+			domains[f.Domain] = f.ACMEEmail
+		}
 		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": []string{f.Path}}}, "handle": []any{map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": []string{"1.1"}}}}, "terminal": true})
 	}
 	names := []string{}
@@ -157,10 +166,24 @@ func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, e
 		names = append(names, domain)
 	}
 	sort.Strings(names)
+	var policies []any
+	for _, name := range names {
+		email := domains[name]
+		issuers := []any{map[string]any{"module": "acme", "ca": letsEncryptDirectory, "email": email, "acme_timeout": "90s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}}}
+		if email != "" {
+			issuers = append(issuers, map[string]any{"module": "acme", "ca": zeroSSLDirectory, "email": email, "acme_timeout": "90s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}})
+		}
+		policies = append(policies, map[string]any{"subjects": []string{name}, "issuers": issuers})
+	}
 	for port, routes := range byPort {
 		servers["https_"+strconv.Itoa(port)] = map[string]any{"listen": []string{":" + strconv.Itoa(port)}, "routes": append(routes, map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}), "protocols": []string{"h1"}, "tls_connection_policies": []any{map[string]any{"alpn": []string{"http/1.1"}}}, "automatic_https": map[string]any{"disable_redirects": true}}
 	}
-	config := map[string]any{"admin": map[string]any{"listen": "unix/" + filepath.Join(state, "caddy-admin.sock")}, "storage": map[string]any{"module": "file_system", "root": filepath.Join(state, "caddy")}, "apps": map[string]any{"http": map[string]any{"servers": servers}, "tls": map[string]any{"certificates": map[string]any{"automate": names}, "automation": map[string]any{"policies": []any{map[string]any{"subjects": names, "issuers": []any{map[string]any{"module": "acme", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}}}}}}}}}
+	config := map[string]any{
+		"admin":   map[string]any{"listen": "unix/" + filepath.Join(state, "caddy-admin.sock"), "config": map[string]any{"persist": false}},
+		"logging": map[string]any{"logs": map[string]any{"default": map[string]any{"writer": map[string]any{"output": "file", "filename": filepath.Join(state, "caddy.log"), "roll_size_mb": 1, "roll_keep": 2, "roll_keep_days": 3}}}},
+		"storage": map[string]any{"module": "file_system", "root": filepath.Join(state, "caddy")},
+		"apps":    map[string]any{"http": map[string]any{"servers": servers}, "tls": map[string]any{"certificates": map[string]any{"automate": names}, "automation": map[string]any{"policies": policies}}},
+	}
 	value, err := json.MarshalIndent(config, "", "  ")
 	return string(value), err
 }
@@ -488,8 +511,11 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 			return fmt.Errorf("%s 反代启动失败：%w；%s；%s", mode, commandErr, output, serviceFailureJournal(ctx, service))
 		}
 		serviceCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err = waitForServiceState(serviceCtx, "active", time.Second, 100*time.Millisecond, func(ctx context.Context) (string, error) { return m.services.status(ctx, service) })
+		status, err = waitForServiceState(serviceCtx, "active", time.Second, 100*time.Millisecond, func(ctx context.Context) (string, error) { return m.services.status(ctx, service) })
 		cancel()
+		if err == nil && status != "active" {
+			err = fmt.Errorf("服务状态为 %s，预期 active", status)
+		}
 		if err != nil {
 			return fmt.Errorf("%s 反代未进入运行状态：%w；%s", mode, err, serviceFailureJournal(ctx, service))
 		}
@@ -550,10 +576,13 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	if err = m.validateConfigs(ctx, newActive); err != nil {
 		return err
 	}
+	started := time.Now()
 	err = m.sync(ctx, next)
 	if err == nil && action != core.ActionStop && action != core.ActionUninstall {
+		readiness, cancel := context.WithTimeout(ctx, 180*time.Second)
+		defer cancel()
 		for _, f := range next[service].Frontends {
-			if err = probeFrontendTLS(ctx, f); err != nil {
+			if err = probeFrontendTLS(readiness, f); err != nil {
 				break
 			}
 		}
@@ -566,10 +595,19 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 		}
 	}
 	if err != nil {
+		for _, f := range next[service].Frontends {
+			if f.Mode == "caddy" {
+				err = m.withFrontendDiagnostics(err, f, started)
+				break
+			}
+		}
 		recovery, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		rollbackErr := m.sync(recovery, previous)
-		return fmt.Errorf("托管 TLS 部署失败：%w；反代恢复结果：%v", err, rollbackErr)
+		if rollbackErr != nil {
+			return fmt.Errorf("托管 TLS 部署失败：%w；反代恢复失败：%v", err, rollbackErr)
+		}
+		return fmt.Errorf("托管 TLS 部署失败：%w；已恢复原反代状态", err)
 	}
 	return nil
 }
@@ -592,7 +630,7 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
 			return errors.New("Nginx 公共证书无效")
 		}
 	}
-	deadline := time.NewTimer(90 * time.Second)
+	deadline := time.NewTimer(180 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -607,9 +645,9 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("TLS 证书验证超时：%w；检查域名 DNS、节点入站端口 80 和公网 HTTPS 端口 %d，以及 Caddy 日志：%v", ctx.Err(), f.PublicPort, lastErr)
+			return fmt.Errorf("TLS 证书验证未通过（%s:%d，%s）：%v；%w", f.Domain, f.PublicPort, f.Mode, lastErr, ctx.Err())
 		case <-deadline.C:
-			return fmt.Errorf("TLS 证书尚未就绪；检查 %s 的 DNS、端口 80、公网端口 %d 和 ACME 日志：%w", f.Domain, f.PublicPort, lastErr)
+			return fmt.Errorf("TLS 证书尚未就绪（%s:%d，%s）：%w", f.Domain, f.PublicPort, f.Mode, lastErr)
 		case <-ticker.C:
 		}
 	}
