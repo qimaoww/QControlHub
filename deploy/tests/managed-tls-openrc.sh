@@ -12,8 +12,7 @@ docker run --name "$container" --init --cap-add NET_ADMIN --cap-add SYS_PTRACE \
  -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.23 sh -ec '
  apk add --no-cache openrc libcap >/dev/null
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
- mkdir -p /usr/local/lib/qagent /etc/qagent/tls-frontends/requests /run/openrc
- chmod 700 /etc/qagent/tls-frontends/requests
+ mkdir -p /usr/local/lib/qagent /run/openrc
  cp /fixtures/qagent /fixtures/tls.test /usr/local/lib/qagent/
  echo default > /run/openrc/softlevel
  cp /src/deploy/openrc/qagent /etc/init.d/qagent

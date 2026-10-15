@@ -54,6 +54,7 @@
   "frontend/styles/515-client-connections.css",
   "frontend/styles/520-live-config-navigation.css",
   "frontend/styles/530-config-file-drafts.css",
+  "frontend/styles/535-tls-and-retry.css",
   "frontend/styles/540-shell-narrow-dock.css",
   "frontend/styles/550-system-tcp-responsive.css",
   "frontend/styles/560-traffic-sync.css",

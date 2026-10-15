@@ -121,6 +121,8 @@ async function fixture(engine, readOnly = false, actual) {
 }
 
 async function testEditedRetryDialog() {
+  const originalBodyClass = document.body.className;
+  document.body.className = "app-body page-tasks";
   const route = new AbortController();
   let attempts = 0, acceptClose = false, refreshed = false;
   const gate = deferred();
@@ -139,9 +141,22 @@ async function testEditedRetryDialog() {
   await openTaskEditRetry(ctx, "failed", () => { refreshed = true; });
   const dialog = document.querySelector("dialog[open]");
   assert(dialog && dialog.textContent.includes("当前 v5") && dialog.textContent.includes("原任务 v2"), "retry editor did not identify exact current and original versions");
-  const content = dialog.querySelector("textarea");
+  const content = dialog.querySelector("[data-code-input]");
+  const error = dialog.querySelector(".task-retry-error pre");
+  assert(error.getBoundingClientRect().width >= content.closest(".code-workspace").getBoundingClientRect().width * .9,
+    "task page styles squeezed the retry failure into a side column");
+  assert(dialog.querySelector("[data-code-format]").getBoundingClientRect().bottom <= content.getBoundingClientRect().top,
+    "retry source tools do not match the existing configuration toolbar");
+  assert(getComputedStyle(error).backgroundColor === getComputedStyle(dialog.querySelector("[data-error]")).backgroundColor,
+    "retry failure bypasses the panel error theme");
+  assert(dialog.querySelector("[data-line-numbers]") && dialog.querySelector("[data-code-format]") && !content.hasAttribute("style"), "retry did not reuse the standard source editor");
+  content.value = "invalid JSON";
+  content.dispatchEvent(new Event("input", { bubbles: true }));
+  assert(dialog.querySelector('[type="submit"]').disabled && attempts === 0, "invalid retry JSON could be submitted");
   content.value = '{"inbounds":[],"log":{"level":"info"}}';
   content.dispatchEvent(new Event("input", { bubbles: true }));
+  dialog.querySelector("[data-code-format]").click();
+  assert(content.value.includes("\n") && !dialog.querySelector('[type="submit"]').disabled, "retry formatting did not preserve valid edits");
   dialog.querySelector("[data-close]").click();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(dialog.isConnected, "dirty retry editor closed without confirmation");
@@ -151,6 +166,10 @@ async function testEditedRetryDialog() {
   const button = dialog.querySelector('[type="submit"]');
   button.click(); button.click();
   assert(button.disabled && attempts === 2, "edited retry allowed duplicate submission");
+  assert(content.readOnly && dialog.querySelector("[data-cancel]").disabled && dialog.querySelector("[data-close]").disabled, "pending retry left editable controls active");
+  const submittedContent = content.value;
+  content.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert(content.value === submittedContent, "editor shortcut changed the pending retry draft");
   document.querySelector("main").replaceChildren();
   assert(dialog.isConnected && content.value.includes('"log"'), "task list refresh destroyed retry edits");
   gate.resolve();
@@ -158,17 +177,33 @@ async function testEditedRetryDialog() {
   await openTaskEditRetry(ctx, "failed", () => {});
   route.abort();
   assert(!document.querySelector("dialog[open]"), "route navigation leaked retry editor");
+  document.body.className = originalBodyClass;
 }
 
 export async function testPresetsRuntime(preview = false) {
   if (preview) {
-    await fixture(new URLSearchParams(location.search).get("engine") || "xray");
+    const query = new URLSearchParams(location.search);
+    const engine = query.get("engine") || "xray";
+    const catalog = query.has("protocol") ? await (await fetch("/assets/preset-plans.json")).json() : [];
+    const actual = catalog.find(entry => entry.engine === engine && entry.protocol.key === query.get("protocol"));
+    await fixture(engine, false, actual);
+    if (query.has("retry")) await openTaskEditRetry({ state: {}, esc, notify: () => {},
+      confirmAction: async () => window.confirm("修改尚未保存，确定放弃？"),
+      api: async () => ({ task: { action: "deploy", config_version: 2,
+        error: "mkdir /etc/qagent/tls-frontends: read-only file system" },
+        config: { id: "preview", name: "VLESS · WebSocket · TLS", agent_id: "node", engine, version: 3,
+          content: JSON.stringify({ log: { level: "info" }, inbounds: [{ type: "vless", tag: "vless-ws", listen: "127.0.0.1", listen_port: 21001, transport: { type: "ws", path: "/proxy" } }] }, null, 2) } }),
+    }, "preview", () => {});
     return;
   }
   const form = () => document.querySelector("#server-plan-form");
   const control = name => form().elements.namedItem(name);
   const button = intent => form().querySelector(`[data-plan-intent="${intent}"]`);
-  const edit = (name, value) => { control(name).value = value; control(name).dispatchEvent(new Event("input", { bubbles: true })); };
+  const edit = (name, value) => {
+    control(name).value = value;
+    control(name).dispatchEvent(new Event("input", { bubbles: true }));
+    if (control(name).tagName === "SELECT") control(name).dispatchEvent(new Event("change", { bubbles: true }));
+  };
   const submissions = test => test.calls.filter(call => call.method === "POST" && call.path.endsWith("/server-inbounds"));
   const errors = [];
   const onError = event => errors.push(String(event.reason || event.message));
@@ -290,6 +325,8 @@ export async function testPresetsRuntime(preview = false) {
       edit("tls_public_port", "8443");
       edit("tls_mode", "nginx");
       assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
+      assert(control("tls_mode").closest(".plan-fields") && control("tls_public_port").closest(".plan-fields") && control("tls_client_certificate").closest(".plan-fields"), "new TLS controls bypass the standard form grid");
+      assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("自签证书") && !form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80"), "TLS help did not follow selected certificate mode");
       test.portConflict = "tls_public_port";
       button("validate").click();
       await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "public HTTPS port conflict blocked retry");

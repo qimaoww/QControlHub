@@ -1,0 +1,39 @@
+/* Layout only: TLS fields and retry use the existing form, task and source theme. */
+.tls-settings{display:grid;gap:14px;min-width:0}
+.tls-settings .plan-fields{align-items:start;min-width:0}
+.tls-settings .plan-fields.one{margin-top:0}
+.tls-settings .plan-fields>label{min-width:0}
+.tls-settings .plan-fields :is(input,select,textarea){box-sizing:border-box;width:100%;max-width:100%}
+.tls-settings .plan-fields textarea{display:block;margin-top:4px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.6}
+.tls-settings .plan-fields small{overflow-wrap:anywhere;line-height:1.6}
+.tls-help{margin:0;color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)));line-height:1.65}
+.task-retry-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.task-retry-dialog .config-inbound-heading{flex-shrink:0}
+.task-retry-dialog .config-inbound-heading>div{min-width:0}
+.task-retry-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.task-retry-context{flex-wrap:wrap}
+.task-retry-context>div{min-width:0}
+.task-retry-context strong,.task-retry-context small{display:block;overflow-wrap:anywhere}
+.task-retry-context strong{font-size:calc(12px * var(--ui-font-scale))}
+.task-retry-context small{margin-top:4px;color:var(--muted);font-size:calc(9px * var(--ui-font-scale))}
+.task-retry-error{margin:0 0 14px}
+.task-retry-error>summary{min-height:32px;cursor:pointer;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.task-retry-error pre{max-height:120px;overflow:auto;margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:calc(10px * var(--ui-font-scale));line-height:1.65}
+.task-retry-dialog .code-editor-frame,.task-retry-dialog .code-editor-input{min-height:240px;height:clamp(240px,36dvh,360px)}
+.task-retry-dialog .code-editor-input{resize:none}
+.task-retry-dialog .code-gutter{font-size:calc(11px * var(--ui-font-scale));line-height:1.65}
+.task-retry-form [data-error]{margin:0;border-radius:0;overflow-wrap:anywhere}
+.task-retry-form[aria-busy=true]{cursor:progress}
+@media(max-width:820px){
+  .tls-settings .plan-fields.two{grid-template-columns:minmax(0,1fr)}
+  .task-retry-dialog .code-editor-frame{grid-template-columns:44px minmax(0,1fr)}
+  .task-retry-dialog :is(.code-editor-input,.code-gutter){font-size:max(16px,calc(12px * var(--ui-font-scale)));line-height:1.65}
+  .task-retry-dialog .code-editor-toolbar .config-editor-actions{width:100%}
+  .task-retry-dialog .config-editor-actions .button{flex:1;min-height:44px}
+  .task-retry-dialog .task-retry-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}
+  .task-retry-dialog .task-retry-actions .button{min-height:44px}
+}
+
+.event-action>.task-inline-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.task-inline-actions:empty{display:none}
+.task-inline-actions .task-inline-action{margin:0}
