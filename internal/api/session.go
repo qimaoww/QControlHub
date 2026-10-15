@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -70,12 +72,15 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	username := strings.TrimSpace(input.Username)
-	secret := strings.TrimSpace(input.Token)
+	// Database passwords are opaque UTF-8 bytes, just as on create/reset.
+	// Whitespace tolerance belongs only to the legacy environment-token path.
+	secret := input.Token
 	role, ok := core.Role(""), false
 	permissions := []core.Permission(nil)
 	userID := ""
 	configOwnerID := ""
 	var authRevision int64
+	var loginLookupErr error
 	if username != "" && secret != "" && s.store != nil {
 		user, hash, lookupErr := s.store.UserForLogin(request.Context(), strings.ToLower(username))
 		if lookupErr == nil {
@@ -85,22 +90,33 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 				authRevision = user.AuthRevision
 				username = user.Username
 			}
-		} else {
+		} else if errors.Is(lookupErr, store.ErrNotFound) {
 			// An unknown username must pay the same bcrypt cost as a wrong
 			// password so logins cannot be timed to enumerate valid users.
 			authn.CheckPasswordDummy(secret)
+		} else {
+			loginLookupErr = fmt.Errorf("lookup database account for login: %w", lookupErr)
 		}
 	}
 	// Keep the environment token as a break-glass administrator credential.
 	// It remains compatible with existing installations while durable users
 	// provide named access for day-to-day panel work.
 	if !ok && (username == "" || strings.EqualFold(username, "admin")) {
-		if principal, found := s.principalForToken(secret); found {
+		if principal, found := s.principalForToken(strings.TrimSpace(secret)); found {
 			role, ok, permissions = principal.Role, true, principal.Permissions
 			configOwnerID = principal.ConfigOwnerID
 		}
 	}
+	if ok && loginLookupErr != nil {
+		slog.Error("database account lookup failed during environment-token login", "error", loginLookupErr)
+	}
 	if !ok {
+		if loginLookupErr != nil {
+			// Infrastructure failures must be diagnosable and must not consume
+			// the credential-failure budget. The response contains no DB detail.
+			writeInternalError(w, loginLookupErr)
+			return
+		}
 		s.adminLimiter.Failure(key, now)
 		writeError(w, http.StatusUnauthorized, "invalid admin token")
 		return

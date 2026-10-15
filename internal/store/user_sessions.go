@@ -11,7 +11,7 @@ import (
 func (s *Store) UserForLogin(ctx context.Context, username string) (core.User, string, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision,password_hash
-		FROM panel_users WHERE username=$1 AND disabled=false`, username)
+		FROM panel_users WHERE lower(username)=lower($1) AND disabled=false`, username)
 	var record userRecord
 	if err := scanUserWithHash(row, &record); errors.Is(err, pgx.ErrNoRows) {
 		return core.User{}, "", ErrNotFound

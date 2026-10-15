@@ -314,6 +314,8 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   document.querySelector("#logout").click();
   const login = await waitFor(() => document.querySelector("#login-form"), "login missing after logout");
   login.elements.username.value = "motion-test";
+  login.elements.token.value = "中文密码";
+  assert.ok(login.checkValidity(), "login must accept historical passwords and UTF-8 byte policies without a character minimum");
   login.elements.token.value = "fixture-password-123";
   login.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await waitFor(() => !document.querySelector("[data-login-error]").hidden, "login failure feedback missing");

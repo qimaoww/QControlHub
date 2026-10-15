@@ -46,7 +46,10 @@ func CheckPassword(hash, password string) bool {
 	if strings.TrimSpace(hash) == "" || password == "" {
 		return false
 	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	// bcrypt comparison accepts suffixes beyond its 72-byte input limit.
+	// Still pay the comparison cost, but never accept a truncated password.
+	// Do not apply the current creation minimum to historical login records.
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil && len(password) <= maxPasswordBytes
 }
 
 // compareBcrypt isolates the comparison primitive so tests can count the exact

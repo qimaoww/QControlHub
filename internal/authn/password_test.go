@@ -23,6 +23,34 @@ func TestHashAndCheckPasswordRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPasswordLoginBoundariesAndHistoricalHashes(t *testing.T) {
+	for _, password := range []string{"short", " 中文密码 ", strings.Repeat("界", 24)} {
+		// Historical records are compared without reapplying creation policy.
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !CheckPassword(string(hash), password) {
+			t.Fatal("original password rejected")
+		}
+		if CheckPassword(string(hash), password+"x") {
+			t.Fatal("password suffix accepted, possibly beyond bcrypt's byte limit")
+		}
+	}
+	for _, tc := range []struct {
+		password string
+		valid    bool
+	}{
+		{strings.Repeat("x", 11), false}, {strings.Repeat("x", 12), true},
+		{strings.Repeat("界", 24), true}, {strings.Repeat("x", 73), false},
+		{strings.Repeat("界", 25), false}, {"invalid UTF-8 \xff", false},
+	} {
+		if (ValidatePassword(tc.password) == nil) != tc.valid {
+			t.Fatal("incorrect UTF-8 byte-length policy")
+		}
+	}
+}
+
 // The dummy hash must be produced once at package init with the production
 // cost. Lazily generating it in a once block on the first unknown-username
 // request would add a second bcrypt hash generation to that request and make it
