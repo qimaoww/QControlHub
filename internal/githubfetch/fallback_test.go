@@ -10,6 +10,7 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -185,6 +186,46 @@ func TestWorkingChannelExpiresAndRecoversChangedNetwork(t *testing.T) {
 	}
 	if !tr.acceleratedUntil.IsZero() {
 		t.Fatal("stale channel retained")
+	}
+}
+
+func TestBrokenChannelBodyReprobesChangedNetwork(t *testing.T) {
+	mode := Unknown
+	d := &Detector{probe: func(context.Context) Mode { return mode }}
+	direct, channel := 0, 0
+	tr := &Transport{Detect: d.Detect, Invalidate: d.Invalidate, Base: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Hostname() == "v6.gh-proxy.org" {
+			channel++
+			response := fixtureResponse(r, 200)
+			response.Body = io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))
+			return response, nil
+		}
+		direct++
+		if mode == Unknown {
+			return nil, dnsTimeout(r.URL.Hostname())
+		}
+		return fixtureResponse(r, 200), nil
+	})}
+	req, _ := http.NewRequest("GET", "https://api.github.com/repos/o/r/releases/latest", nil)
+	response, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The channel worked through headers, then the network changed during
+	// transfer. The caller's bounded retry must be able to discover direct IPv4.
+	mode = IPv4
+	_, readErr := io.ReadAll(response.Body)
+	response.Body.Close()
+	if !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		t.Fatalf("body error=%v", readErr)
+	}
+	response, err = tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if direct != 2 || channel != 1 {
+		t.Fatalf("broken body retained channel: direct=%d channel=%d", direct, channel)
 	}
 }
 

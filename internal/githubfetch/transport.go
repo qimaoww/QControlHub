@@ -221,12 +221,14 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 type cancelBody struct {
 	io.ReadCloser
-	cancel context.CancelFunc
+	cancel  context.CancelFunc
+	onError func(error)
 }
 
 func (b *cancelBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if err != nil {
+		b.onError(err)
 		b.cancel()
 	}
 	return n, err
@@ -261,7 +263,12 @@ func (t *Transport) request(base http.RoundTripper, req *http.Request) (*http.Re
 		return nil, err
 	}
 	response.Request = req
-	response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+	response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel, onError: func(err error) {
+		if !errors.Is(err, io.EOF) && networkFailure(err) && req.Context().Err() == nil {
+			t.invalidate()
+			slog.Warn("GitHub download transfer failed", "host", req.URL.Hostname(), "stage", "response-body", "error", err)
+		}
+	}}
 	return response, nil
 }
 func (t *Transport) accelerated(base http.RoundTripper, req *http.Request) (*http.Response, error) {

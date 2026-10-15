@@ -120,16 +120,24 @@ func TestAuxiliaryTimeoutRetainsPartialEvidence(t *testing.T) {
 	if ctx.Err() != nil {
 		t.Fatal("waited for auxiliary deadline")
 	}
-	probes := fixtureProbes(true)
-	// Interrupted IPv4 probes are not proof of an IPv6-only environment.
-	for i := 0; i < 2; i++ {
-		probes[i].budget = time.Second
-		probes[i].run = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
-	}
-	ctx2, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer stop()
-	if got := probeNetworkWith(ctx2, probes); got != Unknown {
-		t.Fatalf("unfinished probes misclassified: %s", got)
+	// Neither interrupted IPv4 probes nor an interrupted GitHub IPv6 probe
+	// prove those routes unusable. Cancellation can enqueue their results
+	// before the collector drains the channel at the overall deadline.
+	for _, kind := range []string{"v4", "translated"} {
+		t.Run("interrupted "+kind, func(t *testing.T) {
+			probes := fixtureProbes(true)
+			for i := range probes {
+				if probes[i].kind == kind {
+					probes[i].budget = time.Second
+					probes[i].run = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+				}
+			}
+			ctx2, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer stop()
+			if got := probeNetworkWith(ctx2, probes); got != Unknown {
+				t.Fatalf("unfinished probes misclassified: %s", got)
+			}
+		})
 	}
 }
 func TestInvalidationDuringProbeDoesNotCacheStaleResult(t *testing.T) {

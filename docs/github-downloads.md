@@ -31,15 +31,18 @@ required before retaining direct NAT64 downloads.
 Go bounds detection to three seconds, shares concurrent probes, and caches a
 decision for five minutes. Each TLS probe has a 2.5-second budget; channel AAAA
 has 1.5 seconds, route selection 0.5 seconds and auxiliary DNS64 0.75 seconds.
-Logs distinguish success, failure and unfinished observations. Completed
+Logs distinguish success, failure, an individual probe's timeout and observations
+interrupted by the overall deadline/cancellation. Only completed probes or their
+own timeouts can rule out a route; interrupted probes leave it undetermined. Completed
 observations survive the overall deadline; DNS64 is optional and never blocks
 an established usable route. Unknown still means insufficient evidence.
 Unknown expires after 15 seconds. Cancellation does not cache a decision;
 request failures invalidate it, including protection against stale in-flight
 probes repopulating the cache. A successful accelerated resource request is
 remembered separately for 30 seconds, covering subsequent metadata, files and
-redirects without reclassifying Unknown as IPv6-only. Channel failures clear
-that preference and can recover a freshly confirmed direct route.
+redirects without reclassifying Unknown as IPv6-only. Channel failures, including
+interrupted response bodies, clear that preference so a bounded caller retry
+can recover a freshly confirmed direct route.
 
 Shell probes run concurrently with a maximum of three seconds each, followed
 by independently bounded channel/API/DNS64 checks (at most ten seconds total).

@@ -117,6 +117,8 @@ type networkProbe struct {
 }
 type probeResult struct{ name, kind, state string }
 
+var errProbeBudget = errors.New("independent network probe budget exhausted")
+
 func probeNetwork(ctx context.Context) Mode { return probeNetworkWith(ctx, systemProbes()) }
 func systemProbes() []networkProbe {
 	var probes []networkProbe
@@ -164,7 +166,7 @@ func probeNetworkWith(ctx context.Context, probes []networkProbe) Mode {
 	for _, p := range probes {
 		states[p.name] = "pending"
 		go func() {
-			probeCtx, stop := context.WithTimeout(ctx, p.budget)
+			probeCtx, stop := context.WithTimeoutCause(ctx, p.budget, errProbeBudget)
 			defer stop()
 			err := p.run(probeCtx)
 			state := "success"
@@ -172,6 +174,9 @@ func probeNetworkWith(ctx context.Context, probes []networkProbe) Mode {
 				state = "failed"
 				if probeCtx.Err() != nil {
 					state = "unfinished"
+					if errors.Is(context.Cause(probeCtx), errProbeBudget) {
+						state = "timeout"
+					}
 				}
 			}
 			results <- probeResult{p.name, p.kind, state}
@@ -181,13 +186,20 @@ func probeNetworkWith(ctx context.Context, probes []networkProbe) Mode {
 	apply := func(r probeResult) {
 		states[r.name] = r.state
 		ok := r.state == "success"
+		// An independent timeout is a bounded negative observation. Parent
+		// cancellation only interrupts a probe and cannot rule out that route.
+		complete := r.state != "unfinished"
 		switch r.kind {
 		case "v4":
 			e.v4 = e.v4 || ok
-			e.v4Done++
+			if complete {
+				e.v4Done++
+			}
 		case "v6":
 			e.v6 = e.v6 || ok
-			e.v6Done++
+			if complete {
+				e.v6Done++
+			}
 		case "route6":
 			e.route6 = ok
 		case "dns6":
@@ -196,7 +208,7 @@ func probeNetworkWith(ctx context.Context, probes []networkProbe) Mode {
 			e.dns64 = ok
 		case "translated":
 			e.translatedGitHub = ok
-			e.githubDone = true
+			e.githubDone = complete
 		}
 	}
 	finish := func() Mode {
