@@ -218,6 +218,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.TransportHost = current.TransportHost
 	plan.TransportHTTPMethod = current.TransportHTTPMethod
 	plan.TLSMode, plan.TLSPublicPort = current.TLSMode, current.TLSPublicPort
+	plan.TLSACMEEmail = current.TLSACMEEmail
 	plan.TLSServerName = current.TLSServerName
 	plan.TLSALPN = current.TLSALPN
 	plan.TLSClientCertificate = current.TLSClientCertificate

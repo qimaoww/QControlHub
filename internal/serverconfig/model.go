@@ -75,6 +75,7 @@ type Input struct {
 	XHTTPTLSPort                 int    `json:"xhttp_tls_port,omitempty"`
 	XHTTPCDN                     string `json:"xhttp_cdn,omitempty"`
 	TLSMode                      string `json:"tls_mode,omitempty"`
+	TLSACMEEmail                 string `json:"tls_acme_email,omitempty"`
 	TLSPublicPort                int    `json:"tls_public_port,omitempty"`
 	Protocol                     string `json:"protocol"`
 	Tag                          string `json:"tag"`

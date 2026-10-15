@@ -30,6 +30,9 @@ func TestManagedTLSLifecycle(t *testing.T) {
 					}
 					input.TLSALPN = "http/1.1"
 					input.TLSMode = mode
+					if mode == "caddy" {
+						input.TLSACMEEmail = "certs@example.test"
+					}
 					input.TLSPublicPort = 8443
 					input.TLSServerName = "tls.example.test"
 					input.TransportHost = "host.example.test"
@@ -55,6 +58,9 @@ func TestManagedTLSLifecycle(t *testing.T) {
 					if err = ApplyClientMetadata(&parsed, encoded); err != nil {
 						t.Fatal(err)
 					}
+					if parsed.TLSACMEEmail != input.TLSACMEEmail || frontends[0].ACMEEmail != input.TLSACMEEmail {
+						t.Fatal("ACME account lost on save/read")
+					}
 					if parsed.Protocol != input.Protocol || parsed.TLSMode != mode || parsed.TLSPublicPort != 8443 || !parsed.TLSEnabled || parsed.TLSServerName != input.TLSServerName || parsed.TLSALPN != input.TLSALPN || parsed.TransportHost != input.TransportHost {
 						t.Fatalf("lost metadata: %+v", parsed)
 					}
@@ -66,6 +72,9 @@ func TestManagedTLSLifecycle(t *testing.T) {
 					_ = json.Unmarshal(out, &outbound)
 					if outbound["server_port"] != float64(8443) {
 						t.Fatal(string(out))
+					}
+					if strings.Contains(string(out), "certs@example.test") || strings.Contains(content, "certs@example.test") {
+						t.Fatal("ACME account leaked into core or client config")
 					}
 					if strings.Contains(string(out), "PRIVATE KEY") {
 						t.Fatal("server key leaked")

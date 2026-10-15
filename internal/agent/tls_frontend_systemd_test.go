@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -98,6 +99,19 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		shared = "qagent-sing-box-shr_0000000000000001"
 	}
 	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other}, true)
+	// Run the failure inside the same fixed privileged-helper sandbox, so it
+	// can restore service files even though the long-running Agent cannot.
+	if kind == ServiceManagerSystemd {
+		args := ipQualityDependencyHelperArguments("/usr/local/lib/qagent/tls.test", "qagent-tls-recovery-fixture.service")
+		args = append(args[:len(args)-3], "--setenv=QCH_TEST_TLS_FAILURE_MANAGER="+kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSFailureRecoverySandbox$", "-test.v")
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", args); err != nil {
+			t.Fatalf("actual TLS failure recovery: %v\n%s", err, output)
+		}
+	} else {
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", []string{"QCH_TEST_TLS_FAILURE_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSFailureRecoverySandbox$", "-test.v"}); err != nil {
+			t.Fatalf("actual TLS failure recovery: %v\n%s", err, output)
+		}
+	}
 	invoke(service, core.ActionStop, false, nil, true)
 	if err = probeFrontendTLS(ctx, other); err != nil {
 		t.Fatal("stopping one instance broke another", err)
@@ -186,4 +200,56 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	}
 	t.Log("XHTTP local targets validated, deployed, isolated, rolled back, restarted and removed as non-root on " + kind)
 	t.Log("managed TLS installed, validated, reloaded, preserved shared routes, rejected conflicts, stopped and restarted under the shipped Agent sandbox")
+}
+
+func TestManagedTLSFailureRecoverySandbox(t *testing.T) {
+	kind := os.Getenv("QCH_TEST_TLS_FAILURE_MANAGER")
+	if kind == "" {
+		t.Skip("requires disposable TLS helper sandbox")
+	}
+	if _, err := os.Stat("/.dockerenv"); err != nil {
+		t.Fatal("requires disposable Docker node")
+	}
+	services, err := NewServiceManager(kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tlsFrontendManager{tlsFrontendRoot, tlsFrontendState, services, NewCoreUpdater()}
+	previous, err := m.load()
+	if err != nil || len(previous) != 2 {
+		t.Fatalf("expected two active TLS deployments: %+v %v", previous, err)
+	}
+	service := "qagent-sing-box.service"
+	if kind == ServiceManagerOpenRC {
+		service = "qagent-sing-box"
+	}
+	before, err := os.ReadFile(filepath.Join(tlsFrontendRoot, "deployments.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := previous[service].Frontends[0]
+	bad.Domain = "wrong-certificate.example.test"
+	// Configuration syntax passes, but the real TLS handshake must reject
+	// the hostname mismatch. The independent rollback must outlive this deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	err = m.apply(ctx, service, []core.TLSFrontend{bad}, core.ActionDeploy)
+	cancel()
+	if err == nil || !strings.Contains(err.Error(), "已恢复原反代状态") {
+		t.Fatalf("certificate failure did not recover: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(tlsFrontendRoot, "deployments.json"))
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("failed deployment changed the manifest: %v", err)
+	}
+	for service, deployment := range previous {
+		for _, frontend := range deployment.Frontends {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := probeFrontendTLS(ctx, frontend)
+			cancel()
+			if err != nil {
+				t.Fatalf("rollback broke %s: %v", service, err)
+			}
+		}
+	}
+	t.Log("real TLS hostname failure restored both instances after the deployment context expired")
 }

@@ -4,12 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/mail"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
+const AgentFeatureACMEFallback = "managed-tls-acme-fallback-v1"
+
+// Covers the Agent's four-minute operation and its independent recovery.
+const ManagedTLSLeaseTimeout = 5 * time.Minute
 
 // TLSFrontend is delivered only in the encrypted execution snapshot. PrivateKey
 // must never be returned by panel task APIs or included in client exports.
@@ -28,6 +34,7 @@ type TLSFrontend struct {
 	Path            string   `json:"path"`
 	Certificate     string   `json:"certificate,omitempty"`
 	PrivateKey      string   `json:"private_key,omitempty"`
+	ACMEEmail       string   `json:"acme_email,omitempty"`
 }
 
 func (f TLSFrontend) Validate() error {
@@ -63,6 +70,12 @@ func (f TLSFrontend) Validate() error {
 		return fmt.Errorf("本地目标字段仅支持 XHTTP 组合")
 	}
 
+	if f.ACMEEmail != "" {
+		address, err := mail.ParseAddress(f.ACMEEmail)
+		if err != nil || address.Address != f.ACMEEmail || len(f.ACMEEmail) > 254 || strings.ContainsAny(f.ACMEEmail, "\r\n") {
+			return fmt.Errorf("ACME 邮箱无效，请填写用于 ZeroSSL 账户绑定的邮箱地址")
+		}
+	}
 	if f.Mode != "caddy" && f.Mode != "nginx" {
 		return fmt.Errorf("unsupported managed TLS provider %q", f.Mode)
 	}

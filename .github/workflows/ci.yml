@@ -263,7 +263,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP/permission-cores/bin" caddy
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes nginx
-          go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLSProxyLiveMatrix$'
+          go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLS(ProxyLiveMatrix|IssuerFallbackLive)$'
       - name: Verify native XHTTP and all five shared-port clients
         env:
           QCH_XRAY_BINARY: ${{ runner.temp }}/permission-cores/bin/xray

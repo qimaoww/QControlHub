@@ -140,3 +140,17 @@ VMess / VLESS / Trojan 的 **WS-TLS、HTTPUpgrade-TLS** 六个入口现在默认
 - OpenRC 下重复清理已停止、已取消自启动的反代服务不再报错。
 
 回归验证覆盖固定端口授权 / 不限端口授权的共享用户、同账号反复修改 TLS、其他账号占用 443、调整公网端口后重试、过期版本拒绝、多入站删除、删除最后一个入站后重新添加、Agent 空配置执行、桌面 / 手机表单。实际 sing-box 1.14.3 校验并启动空实例；systemd 和 Alpine OpenRC 实际反代验证删除路由及多实例保留。上述回环与夹具测试不代表已核查某台生产节点的 443 分配记录。
+
+### ACME 回退与失败恢复（2026-10-16 补充）
+
+- Caddy 的证书策略按域名保存账户邮箱，签发顺序为 **Let’s Encrypt → ZeroSSL**。预设的“ACME 邮箱（ZeroSSL 回退）”沿用已有表单样式，仅在 Caddy 模式展示，支持保存、编辑、重新生成参数和再次读取；切换 Nginx / 原生 TLS 时不提交此字段。邮箱不会进入 sing-box 服务端配置、分享链接或客户端导出。
+- ZeroSSL 的 ACME 接口要求外部账户绑定（EAB）；Caddy 可凭邮箱自动获取绑定。需要填写自己的有效邮箱。旧配置未填写邮箱时仍可读取和使用 Let’s Encrypt，失败诊断会明确提示尚未启用 ZeroSSL。不会编造邮箱、关闭证书验证或自动切换自签证书。依据：[Caddy ACME issuer](https://github.com/caddyserver/caddy/blob/v2.11.7/modules/caddytls/acmeissuer.go)、[默认签发机构的邮箱要求](https://github.com/caddyserver/caddy/blob/v2.11.7/modules/caddytls/automation.go)。
+- 同一域名采用同一账户；不同域名可分别设置邮箱。两家 CA 都使用公网 TCP 80 的 HTTP-01 验证；自定义公网 HTTPS 端口仍默认 443。节点必须能够通过 HTTPS 访问对应 CA，以及 ZeroSSL 的 EAB 接口；仅域名解析正确并不保证节点能连到 CA。
+- 真实 TLS 就绪检查共享最多 180 秒预算，允许首个 CA 连接失败后尝试备用 CA。`acme_timeout` 限制 ACME 轮询，不等同于整个账户注册过程的网络超时。Agent 原有四分钟执行上限保留；支持托管 TLS 的 sing-box 校验、部署、启动、重启任务至少有五分钟服务端租约，避免常规 120 秒租约提前重排正在签发的任务。
+- Caddy 运行日志写入 `/var/lib/qcontrolhub-tls/caddy.log`，1 MiB 轮转，保留两份历史文件，适用于 systemd 和 OpenRC。失败任务附带本次操作中的 CA 错误与签发机构信息；不会再只留下 `tls: internal error`。Caddy 配置持久化关闭，不尝试向服务用户的 `/nonexistent/.config` 写入 autosave。
+- 回滚分别处理：无旧文件时停止本次服务并删除新文件；旧服务已停止时恢复文件并保持停止；旧配置为空入站时保持停止；旧配置有入站且原先运行时恢复文件并重启验证。空共享实例被心跳检查停用属于预期状态，不能再误报“恢复失败”。反代回滚成功与失败分别显示，不再输出 `<nil>`。
+- `managed-tls-acme-fallback-v1` 单独声明新 Agent 能力。面板不会将携带账户邮箱的任务交给旧 Agent 并静默丢失回退策略；断线后能力降级也会拒绝继续执行，并保留“执行结果未知”的诊断。
+
+验证包括：邮箱的生成 / 保存 / 读取 / 导出隔离、账户冲突及降级拒绝、PostgreSQL 租约边界；实际 Caddy 主 CA 返回 HTTP 503 后由备用本地测试 CA 签发，客户端显式信任该测试 CA 并验证主机名；systemd 与 OpenRC 中真实主机名验证失败后，原两个实例仍可握手；已有十二种反代组合继续通过实际 sing-box 的 TCP / UDP 回环连接。桌面与手机预设表单通过浏览器回归并人工查看。
+
+CI 的备用本地 CA 测试验证 Caddy 的签发机构回退和 TLS 信任链，并不注册真实 ZeroSSL 账户，也不替代生产域名的公网签发验收。生产 ZeroSSL 签发需要用户提供真实账户邮箱及可用的公网 HTTP-01 路径。

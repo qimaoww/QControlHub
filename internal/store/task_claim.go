@@ -227,7 +227,7 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
-	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout)}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout)}
 	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET
@@ -237,7 +237,13 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval) WHEN action='install' OR install_if_missing THEN $2::interval ELSE $1::interval END`+where,
+		WHERE status='running' AND started_at < now() - CASE
+			WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
+			WHEN action='install' OR install_if_missing THEN $2::interval
+			WHEN engine='sing-box' AND action IN ('validate','deploy','start','restart')
+				AND EXISTS(SELECT 1 FROM agents a WHERE a.id=tasks.agent_id AND a.features ? 'managed-tls-v1')
+				THEN GREATEST($1::interval,$5::interval)
+			ELSE $1::interval END`+where,
 		args...)
 	return err
 }
