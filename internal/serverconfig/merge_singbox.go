@@ -82,6 +82,21 @@ func mutateSingBoxGenerated(content, generated, originalTag, operation string) (
 	if err := ValidateSingBoxEntryIdentity(content, candidate, originalTag, operation); err != nil {
 		return "", err
 	}
+	if operation == "modify" && candidate.Section == "inbounds" {
+		var root map[string]any
+		if err := json.Unmarshal([]byte(content), &root); err != nil {
+			return "", err
+		}
+		entries, _ := root["inbounds"].([]any)
+		for _, raw := range entries {
+			entry := mapValue(raw)
+			if stringValue(entry["tag"]) == originalTag {
+				if err := singBoxPresetEditError(entry); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
 	keys := []string{
 		"tag", "listen", "listen_port", "type", "method", "password", "users", "up_mbps", "down_mbps",
 		"congestion_control", "auth_timeout", "heartbeat", "tls", "transport", "network", "override_address", "override_port",

@@ -24,9 +24,14 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
     label.append("协议");
     const select = document.createElement("select");
     select.dataset.presetProtocol = "";
+    const groups = new Map();
     source.querySelectorAll("[data-protocol]").forEach(link => {
       const option = new Option(link.querySelector("strong")?.textContent || link.textContent.trim(), link.dataset.protocol, link.classList.contains("active"), link.classList.contains("active"));
-      select.append(option);
+      const group = link.dataset.protocolGroup;
+      if (group) {
+        if (!groups.has(group)) { const element = document.createElement("optgroup"); element.label = group; groups.set(group, element); select.append(element); }
+        groups.get(group).append(option);
+      } else select.append(option);
     });
     label.append(select);
     toolbar.append(label);

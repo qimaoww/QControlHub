@@ -139,7 +139,7 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		case core.EngineXray:
 			kinds = "http shadowsocks vmess vless trojan hysteria tunnel dokodemo-door wireguard"
 		case core.EngineSingBox:
-			kinds = "http shadowsocks vmess vless trojan hysteria2 tuic anytls direct wireguard"
+			kinds = "socks http shadowsocks vmess vless trojan hysteria2 tuic anytls direct wireguard"
 		}
 		if kindKey != "" && !containsSharedKey(kinds, kind) {
 			return nil, fmt.Errorf("shared listener type %q is not supported", kind)

@@ -51,6 +51,9 @@ func NewPlan(protocol Protocol) (Input, error) {
 		transport = "websocket"
 		transportPath = "/" + suffix
 	}
+	if preset, ok := singBoxPresetFor(protocol.Key); ok && preset.transport != "raw" && preset.transport != "quic" {
+		transportPath = "/" + suffix
+	}
 	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
 		transport = "xhttp"
 		transportPath = "/" + suffix
@@ -140,7 +143,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.Username = "qch-" + suffix
 	}
 	if isVLESSRealityProtocol(protocol.Key) {
-		if protocol.Key != ProtocolVLESSXHTTP {
+		if protocol.Key != ProtocolVLESSXHTTP && protocol.Key != ProtocolVLESSHTTP2Reality {
 			input.Flow = "xtls-rprx-vision"
 		}
 		privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)
@@ -202,12 +205,17 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	randomTransportPath := plan.TransportPath
 	plan.Transport = current.Transport
 	plan.TransportPath = current.TransportPath
-	if current.Transport == "websocket" || current.Transport == "grpc" || current.Transport == "xhttp" {
+	plan.TransportHost = current.TransportHost
+	plan.TransportHTTPMethod = current.TransportHTTPMethod
+	plan.TLSServerName = current.TLSServerName
+	plan.TLSALPN = current.TLSALPN
+	plan.TLSClientCertificate = current.TLSClientCertificate
+	if current.Transport == "websocket" || current.Transport == "grpc" || current.Transport == "xhttp" || current.Transport == "http" || current.Transport == "httpupgrade" {
 		pathSuffix := strings.TrimPrefix(randomTransportPath, "/")
 		if pathSuffix == "" {
 			pathSuffix = strings.TrimPrefix(plan.Tag, protocol.Key+"-")
 		}
-		if current.Transport == "websocket" || current.Transport == "xhttp" {
+		if current.Transport != "grpc" {
 			plan.TransportPath = "/" + pathSuffix
 		} else {
 			plan.TransportPath = pathSuffix

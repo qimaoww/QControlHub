@@ -8,6 +8,7 @@ import (
 )
 
 type clientMetadata struct {
+	TLSClientCertificate      string `json:"tls_client_certificate,omitempty"`
 	Version                   int    `json:"version"`
 	Protocol                  string `json:"protocol"`
 	SnellReuse                bool   `json:"snell_reuse,omitempty"`
@@ -43,7 +44,11 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.WireGuardClientPrivateKey, metadata.WireGuardClientPublicKey = input.WireGuardClientPrivateKey, input.WireGuardClientPublicKey
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
-		return "", nil
+		_, preset := singBoxPresetFor(input.Protocol)
+		if input.TLSClientCertificate == "" && !preset {
+			return "", nil
+		}
+		metadata.TLSClientCertificate = input.TLSClientCertificate
 	}
 	encoded, err := json.Marshal(metadata)
 	return string(encoded), err
@@ -64,8 +69,14 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	}
 	// A source edit can reuse a tag for another protocol or rotate a peer.
 	// Stale metadata must neither overwrite source nor break the workspace.
-	if metadata.Protocol != input.Protocol {
+	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
+	}
+	if input.TLSEnabled {
+		input.TLSClientCertificate = metadata.TLSClientCertificate
+	}
+	if preset, ok := singBoxPresetFor(metadata.Protocol); ok && nativeProtocol(input.Protocol) == preset.base && input.Transport == preset.transport && input.TLSEnabled == preset.tls && input.RealityEnabled == preset.reality {
+		input.Protocol = metadata.Protocol
 	}
 	switch input.Protocol {
 	case ProtocolSnell, ProtocolSnellShadowTLS:

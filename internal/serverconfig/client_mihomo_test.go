@@ -103,6 +103,12 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				profile, err := BuildClientProfileNamed(parsed, "2001:db8::10", "tls.example.test", "Tokyo: [private]")
+				if input.Transport == "quic" || input.Transport == "httpupgrade" || input.Transport == "http" && (!input.TLSEnabled && !input.RealityEnabled || nativeProtocol(input.Protocol) == ProtocolTrojan) {
+					if err != nil || profile.MihomoError == "" || profile.Mihomo != "" || profile.Format != "sing-box client JSON" {
+						t.Fatalf("unsupported format did not explain native fallback: %v %#v", err, profile)
+					}
+					return
+				}
 				if err != nil || profile.MihomoError != "" || profile.Mihomo == "" {
 					t.Fatalf("Mihomo export unavailable: %v %s", err, profile.MihomoError)
 				}
@@ -125,8 +131,8 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 				if proxy["name"] != "Tokyo: [private]" || proxy["server"] != "2001:db8::10" || intValue(proxy["port"]) != input.Port {
 					t.Fatalf("client identity changed: %#v", proxy)
 				}
-				wantType := protocol.Key
-				switch protocol.Key {
+				wantType := nativeProtocol(protocol.Key)
+				switch nativeProtocol(protocol.Key) {
 				case ProtocolShadowsocks, ProtocolSS2022:
 					wantType = "ss"
 					if proxy["cipher"] != input.Method || proxy["password"] != input.Credential {
@@ -162,6 +168,8 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 							t.Fatal("ShadowTLS client settings were lost")
 						}
 					}
+				case ProtocolSocks:
+					wantType = "socks5"
 				case ProtocolHy2:
 					wantType = "hysteria2"
 				case ProtocolTUIC:
@@ -181,7 +189,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 						t.Fatal("server-only private key or file path leaked into subscription")
 					}
 				}
-				if !profile.SubscriptionCompatible || profile.URI == "" {
+				if (!profile.SubscriptionCompatible && profile.Format != "sing-box client JSON") || profile.URI == "" {
 					t.Fatal("adding Mihomo export broke URL/native export")
 				}
 			})

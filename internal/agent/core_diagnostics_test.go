@@ -26,7 +26,7 @@ func TestValidationAndDeployRedactCoreEchoedInlineKeys(t *testing.T) {
 			secret := input.RealityPrivateKey
 			root := t.TempDir()
 			binary := filepath.Join(root, "core")
-			writeExecutable(t, binary, fmt.Sprintf("#!/bin/sh\nprintf 'invalid inline key: %%s\\n' '%s'\nexit 1\n", secret))
+			writeExecutable(t, binary, fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = version ]; then printf 'sing-box version 1.14.3\\nTags: with_utls\\n'; exit 0; fi\nprintf 'invalid inline key: %%s\\n' '%s'\nexit 1\n", secret))
 			executor := &Executor{Specs: map[core.Engine]EngineSpec{engine: {Binary: binary, ConfigPath: filepath.Join(root, "config"), Service: "fixture.service"}}}
 			for _, action := range []core.Action{core.ActionValidate, core.ActionDeploy} {
 				output, err := executor.Execute(context.Background(), core.Task{Engine: engine, Action: action, ConfigContent: content})

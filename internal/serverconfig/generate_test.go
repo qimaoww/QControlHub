@@ -76,12 +76,15 @@ func TestGeneratedConfigurationsRoundTripIntoServerForm(t *testing.T) {
 			Username: "alice", Credential: credential, Flow: "xtls-rprx-vision", Transport: "grpc", TransportPath: "qcontrolhub",
 			TLSEnabled: true, CertificatePath: "/etc/tls/server.crt", PrivateKeyPath: "/etc/tls/server.key",
 		}
+		if engine == core.EngineSingBox {
+			input.Flow = ""
+		}
 		content, err := Generate(engine, input)
 		if err != nil {
 			t.Fatalf("Generate(%s): %v", engine, err)
 		}
 		parsed, ok := Parse(engine, content)
-		if !ok || parsed.Protocol != input.Protocol || parsed.Credential != input.Credential || parsed.Transport != input.Transport || parsed.TransportPath != input.TransportPath || !parsed.TLSEnabled {
+		if !ok || nativeProtocol(parsed.Protocol) != nativeProtocol(input.Protocol) || parsed.Credential != input.Credential || parsed.Transport != input.Transport || parsed.TransportPath != input.TransportPath || !parsed.TLSEnabled {
 			t.Errorf("Parse(%s) = %+v, %v", engine, parsed, ok)
 		}
 	}
@@ -100,7 +103,7 @@ func TestParseSkipsUnsupportedLeadingInbound(t *testing.T) {
 	}
 	for engine, content := range fixtures {
 		parsed, ok := Parse(engine, content)
-		if !ok || parsed.Tag != "managed" || parsed.Protocol != ProtocolVMess {
+		if !ok || parsed.Tag != "managed" || nativeProtocol(parsed.Protocol) != ProtocolVMess {
 			t.Errorf("Parse(%s) = %+v, %v", engine, parsed, ok)
 		}
 	}

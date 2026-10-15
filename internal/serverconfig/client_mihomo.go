@@ -11,6 +11,19 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	// that do not verify it working, so a node using mldsa65Seed is exported
 	// without the parameter instead of failing the whole Mihomo subscription.
 	// The URL format still carries it as pqv for clients that can verify it.
+	input.Protocol = nativeProtocol(input.Protocol)
+	if input.TLSClientCertificate != "" {
+		return "", errors.New("此配置指定了客户端信任证书，请使用 sing-box JSON，Mihomo 同步暂不支持此证书信任方式")
+	}
+	if input.TransportHTTPMethod != "" && input.TransportHTTPMethod != "PUT" {
+		return "", errors.New("Mihomo H2 无法保留此自定义 HTTP Method，请使用 sing-box JSON")
+	}
+	if input.Protocol == ProtocolTrojan && input.Transport == "http" {
+		return "", errors.New("Mihomo Trojan 不支持 H2 传输，请使用 sing-box JSON")
+	}
+	if input.Transport == "quic" || input.Transport == "httpupgrade" || input.Transport == "http" && !input.TLSEnabled && !input.RealityEnabled {
+		return "", errors.New("Mihomo 同步不支持此 sing-box QUIC / HTTPUpgrade / HTTP 1.1 传输，请使用 sing-box JSON")
+	}
 	if input.Protocol == ProtocolMieru {
 		return buildMieruMihomoYAML(input, address, name)
 	}
@@ -53,6 +66,8 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 		proxy["type"], proxy["uuid"], proxy["password"] = "tuic", input.Credential, input.SecondaryCredential
 		proxy["congestion-controller"], proxy["udp-relay-mode"] = "bbr", "native"
 		proxy["alpn"] = []string{"h3"}
+	case ProtocolSocks:
+		proxy["type"], proxy["username"], proxy["password"] = "socks5", input.Username, input.Credential
 	case ProtocolAnyTLS:
 		proxy["type"], proxy["password"] = "anytls", input.Credential
 	case ProtocolSnell, ProtocolSnellShadowTLS:
@@ -90,13 +105,27 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	} else if serverName != "" {
 		proxy["sni"] = serverName
 	}
+	if input.TLSALPN != "" {
+		proxy["alpn"], _ = validatedSingBoxALPN(input.TLSALPN)
+	}
 	if proxyType == "vless" || proxyType == "vmess" || proxyType == "trojan" {
 		switch input.Transport {
+		case "http":
+			proxy["network"] = "h2"
+			host := input.TransportHost
+			if host == "" {
+				host = serverName
+			}
+			proxy["h2-opts"] = map[string]any{"host": []string{host}, "path": input.TransportPath}
 		case "websocket":
 			proxy["network"] = "ws"
 			opts := map[string]any{"path": input.TransportPath}
-			if serverName != "" {
-				opts["headers"] = map[string]string{"Host": serverName}
+			host := input.TransportHost
+			if host == "" {
+				host = serverName
+			}
+			if host != "" {
+				opts["headers"] = map[string]string{"Host": host}
 			}
 			proxy["ws-opts"] = opts
 		case "grpc":
