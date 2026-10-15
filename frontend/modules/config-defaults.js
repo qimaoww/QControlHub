@@ -1,0 +1,7 @@
+// Reuse examples/configs verbatim. The module smoke checks source parity.
+export const configDefaults = Object.freeze({
+  "mihomo": "# Local-only smoke-test configuration. Add authenticated inbounds before exposing it.\nmixed-port: 7890\nbind-address: 127.0.0.1\nallow-lan: false\nmode: rule\nlog-level: info\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n",
+  "xray": "{\n  \"log\": {\n    \"loglevel\": \"info\"\n  },\n  \"inbounds\": [\n    {\n      \"tag\": \"local-socks\",\n      \"listen\": \"127.0.0.1\",\n      \"port\": 10808,\n      \"protocol\": \"socks\",\n      \"settings\": {\n        \"auth\": \"noauth\",\n        \"udp\": true\n      }\n    }\n  ],\n  \"outbounds\": [\n    {\n      \"tag\": \"direct\",\n      \"protocol\": \"freedom\"\n    }\n  ]\n}\n",
+  "sing-box": "{\n  \"log\": {\n    \"level\": \"info\"\n  },\n  \"inbounds\": [\n    {\n      \"type\": \"socks\",\n      \"tag\": \"local-socks\",\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 10809\n    }\n  ],\n  \"outbounds\": [\n    {\n      \"type\": \"direct\",\n      \"tag\": \"direct\"\n    }\n  ],\n  \"route\": {\n    \"final\": \"direct\"\n  }\n}\n",
+  "ss-rust": "{\n  \"server\": \"127.0.0.1\",\n  \"server_port\": 8388,\n  \"password\": \"qcontrolhub-change-this-password\",\n  \"method\": \"chacha20-ietf-poly1305\",\n  \"mode\": \"tcp_and_udp\",\n  \"timeout\": 300,\n  \"no_delay\": true\n}\n",
+});

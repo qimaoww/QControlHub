@@ -25,7 +25,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith("connections")) {
+  if (mode === "archive-engines") {
+    const { testArchiveEnginesRuntime } = await import("./browser/archive-engines.mjs");
+    await testArchiveEnginesRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode.startsWith("connections")) {
     const { testClientConnectionsRuntime } = await import("./browser/client-connections.mjs");
     await testClientConnectionsRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode.startsWith("ip-quality")) {
