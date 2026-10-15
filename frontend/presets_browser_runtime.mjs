@@ -67,6 +67,8 @@ async function fixture(engine, readOnly = false, actual) {
     if (options.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.saveGate) await test.saveGate;
       if (test.saveFailure) throw Object.assign(new Error("模拟保存失败，请重试"), {status:400});
+      if (test.portConflict) throw Object.assign(new Error("端口 443 已由其他用户占用"), {status:409, code:"port_conflict", field:test.portConflict});
+      if (test.staleRevision) throw Object.assign(new Error("配置版本已变化"), {status:409});
       assert(body.expected_version === (test.saved?.version || 0), "submitted a stale config revision");
       if (path.endsWith("/server-inbounds")) {
         if (body.operation === "add") {
@@ -212,6 +214,13 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => !button("validate").disabled, "failed save left buttons disabled");
     assert(document.querySelector("[data-preset-status]").textContent.includes("模拟保存失败"), "save failure was invisible");
     test.saveFailure = false;
+    test.portConflict = "port";
+    const versionBeforeConflict = test.saved.version;
+    button("validate").click();
+    await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "port conflict froze the editor");
+    assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && document.activeElement === control("port"), "port conflict lost draft or did not focus port");
+    assert(!document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "correctable port conflict required reload");
+    test.portConflict = "";
     // Deletion must use the saved identity even when a hidden draft is invalid.
     edit("operation", "delete"); edit("credential", "");
     test.confirmed = false;
@@ -243,6 +252,13 @@ export async function testPresetsRuntime(preview = false) {
     test.workspaceFailure = false;
     document.querySelector("[data-preset-status] button").click();
     await waitFor(() => !button("deploy").disabled, "reload did not recover saved form");
+    test.staleRevision = true;
+    button("validate").click();
+    await waitFor(() => document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "stale revision recovery was lost");
+    assert(button("validate").disabled, "stale revision allowed submitting an outdated draft");
+    test.staleRevision = false;
+    document.querySelector("[data-preset-status] button").click();
+    await waitFor(() => !button("validate").disabled, "stale revision reload did not recover");
     if (engine === "xray") {
       for (const protocol of ["vless-xhttp-reality", "vless-enc-tcp-reality-vision"]) {
         document.querySelector(`[data-protocol="${protocol}"]`).click();
@@ -274,6 +290,13 @@ export async function testPresetsRuntime(preview = false) {
       edit("tls_public_port", "8443");
       edit("tls_mode", "nginx");
       assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
+      test.portConflict = "tls_public_port";
+      button("validate").click();
+      await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "public HTTPS port conflict blocked retry");
+      assert(!test.saved && control("tls_mode").value === "nginx" && control("tls_public_port").value === "8443" && control("tls_server_name").value === "tls.example.test", "public port conflict lost TLS draft");
+      assert(document.activeElement === control("tls_public_port"), "public port conflict did not reveal and focus HTTPS port");
+      test.portConflict = "";
+      test.calls = []; // The subsequent assertions inspect the successful save.
     }
     const invalid = [...form().elements].filter(input => input.willValidate && !input.validity.valid).map(input => input.name);
     assert(invalid.length === 0, `${actual.engine}/${actual.protocol.key}: generated defaults blocked by ${invalid.join(", ")}`);

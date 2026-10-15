@@ -143,6 +143,10 @@ export async function requestJSON(url, options, {
     const message = errorMessage(body?.error, response.status);
     const error = new Error(message);
     error.status = response.status;
+    if (body?.code === "port_conflict") {
+      error.code = body.code;
+      error.field = ["port", "tls_public_port"].includes(body.field) ? body.field : "";
+    }
     throw error;
   }
   if (response.status === 204) return null;

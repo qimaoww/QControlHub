@@ -25,6 +25,45 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestSingBoxSharedFinalInboundDeletion(t *testing.T) {
+	binary := os.Getenv("QCH_SING_BOX_BINARY")
+	if binary == "" {
+		t.Skip("QCH_SING_BOX_BINARY is not set")
+	}
+	protocol, _ := FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.TLSServerName = "tls.example.test"
+	content, err := Generate(core.EngineSingBox, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanPresetAccounting(core.EngineSingBox, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = DeletePresetInbound(core.EngineSingBox, plan.Content, input.Tag)
+	if err == nil {
+		content, err = ReconcilePresetInboundReferences(core.EngineSingBox, content, input.Tag, "")
+	}
+	if err == nil {
+		content, err = SharedInstanceRuntimeContent(core.EngineSingBox, content)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := SharedTrafficEndpoints(core.EngineSingBox, content)
+	if err != nil || len(endpoints) != 0 || strings.Contains(content, `"v2ray_api"`) {
+		t.Fatalf("empty private runtime has ingress: %s %v", content, err)
+	}
+	log := singBoxRun(t, binary, "empty-shared-instance", content)
+	if strings.Contains(log(), "inbound/") {
+		t.Fatalf("empty instance started an inbound: %s", log())
+	}
+}
+
 // Opt-in, hermetic network matrix: official sing-box on both sides, local
 // TCP/UDP echo destinations and a local TLS 1.3 Reality handshake target.
 // CI runs this against the same verified official binary as permission tests.

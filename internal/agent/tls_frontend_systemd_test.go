@@ -112,6 +112,19 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	if err = probeFrontendTLS(ctx, frontends[0]); err != nil {
 		t.Fatal(err)
 	}
+	invoke(shared, core.ActionStart, false, nil, true)
+	invoke(service, core.ActionDeploy, true, nil, true)
+	invoke(service, core.ActionDeploy, false, nil, true)
+	if err = probeFrontendTLS(ctx, other); err != nil {
+		t.Fatal("deleting final inbound broke another instance", err)
+	}
+	// Starting an empty deployment must not restore its removed TLS routes.
+	invoke(shared, core.ActionStop, false, nil, true)
+	invoke(service, core.ActionStart, false, nil, true)
+	status, err = manager.status(ctx, proxyService)
+	if err != nil || status != "inactive" {
+		t.Fatalf("deleted frontend was restored: %s %v", status, err)
+	}
 	invoke(service, core.ActionUninstall, false, nil, true)
 	caddy := frontends[0]
 	caddy.Mode = "caddy"

@@ -100,7 +100,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 					return err
 				}
 				if !reserved {
-					return fmt.Errorf("%w: port %d is not allocated to this user", ErrConflict, endpoint.Port)
+					return portConflict(endpoint.Port, fmt.Errorf("%w: port %d is not allocated to this user", ErrConflict, endpoint.Port))
 				}
 			}
 		}
@@ -118,7 +118,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return err
 		}
 		if foreign {
-			return fmt.Errorf("%w: port %d is reserved for another user", ErrConflict, endpoint.Port)
+			return portConflict(endpoint.Port, fmt.Errorf("%w: port %d is reserved for another user", ErrConflict, endpoint.Port))
 		}
 	}
 	return nil

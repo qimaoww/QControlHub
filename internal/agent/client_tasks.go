@@ -129,11 +129,17 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		}
 		if task.SharedTrafficID != "" {
 			endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
-			if err != nil {
+			if !core.ValidAgentShareID(task.SharedTrafficID) {
+				executionErr = errors.New("invalid shared traffic identity")
+			} else if err != nil {
 				executionErr = fmt.Errorf("unsafe shared configuration: %w", err)
-			} else if task.Action == core.ActionDeploy {
+			} else if len(endpoints) == 0 && len(task.TLSFrontends) != 0 {
+				executionErr = errors.New("empty shared configuration cannot expose TLS frontends")
+			} else if task.Action == core.ActionDeploy && len(endpoints) > 0 {
+				// Explicit empty deployments only remove ingress and TLS routes;
+				// new listeners still require the Agent's quota authorization.
 				executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
-			} else if task.Action != core.ActionValidate {
+			} else if task.Action != core.ActionValidate && task.Action != core.ActionDeploy {
 				executionErr = errors.New("unsupported shared task action")
 			}
 		}

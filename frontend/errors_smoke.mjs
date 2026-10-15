@@ -83,6 +83,15 @@ await assert.rejects(send(new Response("<html>Bad Gateway</html>", { status: 502
 });
 await assert.rejects(send(new Response('{"error":{"bad":"shape"}}', { status: 403 })), /请求被拒绝/);
 await assert.rejects(send(new Response('{"error":"请先保存配置"}', { status: 409 })), /请先保存配置/);
+for (const field of ["port", "tls_public_port", "untrusted-field"]) {
+  await assert.rejects(send(new Response(JSON.stringify({ error: "端口 443 已由其他用户占用", code: "port_conflict", field }), { status: 409 })), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "port_conflict");
+    assert.equal(error.field, field === "untrusted-field" ? "" : field);
+    return true;
+  });
+}
+await assert.rejects(send(new Response('{"error":"revision changed"}', { status: 409 })), error => !error.code);
 await assert.rejects(send(new Response("not JSON")), /响应不完整或格式无效/);
 assert.equal(await send(new Response(null, { status: 204 })), null);
 assert.deepEqual(await send(new Response('{"ok":true}')), { ok: true });

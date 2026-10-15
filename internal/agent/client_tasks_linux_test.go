@@ -48,6 +48,42 @@ func TestCompletedTaskResultsPersistAndReuseCurrentLease(t *testing.T) {
 	}
 }
 
+func TestSharedFinalInboundDeletionExecutesWithoutOpeningIngress(t *testing.T) {
+	for _, test := range []struct {
+		name, content, share string
+		action               core.Action
+		allowed              bool
+		frontends            []core.TLSFrontend
+	}{
+		{"delete-final", `{"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}`, "shr_0000000000000001", core.ActionDeploy, true, nil},
+		{"validate-empty", `{"inbounds":[]}`, "shr_0000000000000001", core.ActionValidate, true, nil},
+		{"missing-list", `{}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
+		{"hidden-listener", `{"inbounds":[],"endpoints":[{"type":"tun"}]}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
+		{"management-api", `{"inbounds":[],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
+		{"unapproved-port", `{"inbounds":[{"type":"http","listen_port":21001}]}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
+		{"unsupported-action", `{"inbounds":[]}`, "shr_0000000000000001", core.ActionStart, false, nil},
+		{"invalid-identity", `{"inbounds":[]}`, "invalid", core.ActionDeploy, false, nil},
+		{"orphan-frontend", `{"inbounds":[]}`, "shr_0000000000000001", core.ActionDeploy, false, []core.TLSFrontend{{PublicPort: 443}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			executed := false
+			client := &Client{config: ClientConfig{StatePath: filepath.Join(t.TempDir(), "state.json")},
+				executeFunc: func(_ context.Context, task core.Task) (string, error) {
+					executed = true
+					if task.ConfigContent != test.content || len(task.TLSFrontends) != 0 {
+						t.Fatal("cleanup task was altered")
+					}
+					return "removed final inbound and TLS route", nil
+				}}
+			result := client.resultForTask(context.Background(), core.Task{ID: "tsk_0000000000000001",
+				Engine: core.EngineSingBox, Action: test.action, ConfigContent: test.content, SharedTrafficID: test.share, TLSFrontends: test.frontends})
+			if result.Success != test.allowed || executed != test.allowed {
+				t.Fatalf("allowed=%t executed=%t result=%+v", test.allowed, executed, result)
+			}
+		})
+	}
+}
+
 func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	t.Parallel()
 	systemctl := filepath.Join(t.TempDir(), "systemctl")

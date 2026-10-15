@@ -264,7 +264,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       buttons.forEach((button) => (button.disabled = true));
       formElement.setAttribute("aria-busy", "true");
       if (submitter) updateFeedback(submitter, "正在保存…");
-      let committedConfig, committedTask;
+      let committedConfig, committedTask, correctionField;
       try {
         if (drafts().otherDirty(draftKey(selector), ctx.draftScope) && !(await confirmAction(
           "本次只保存当前表单。其他入站、字段或源码中有未保存的修改，继续后这些草稿将被清除。是否继续？", "存在其他未保存修改",
@@ -366,13 +366,17 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             renderPresetStatus();
           } else {
             const uncertain = !error.deployPreflight && (!error.status || error.status >= 500);
-            showStatus(error.deployPreflight ? error.message : error.status === 409
+            const portConflict = error.code === "port_conflict";
+            showStatus(error.deployPreflight ? error.message : portConflict
+              ? `${error.message} 可直接调整端口或联系节点所有者核对分配后重试，草稿已保留。`
+              : error.status === 409
               ? `配置或节点状态已变化：${error.message}。草稿已保留，请重新加载后再编辑。`
               : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对版本后再提交。` : error.message, "error");
-            if (!error.deployPreflight && (error.status === 409 || uncertain)) {
+            if (!error.deployPreflight && !portConflict && (error.status === 409 || uncertain)) {
               operationFor(operationKey).reload = true;
               renderPresetStatus();
             }
+            if (portConflict && isPlan) correctionField = error.field;
           }
           notify(error.message, "error");
         }
@@ -383,6 +387,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         if (formElement.isConnected && current())
           buttons.forEach((button) => (button.disabled = !canSubmitForm(selector)));
         if (state.data === sessionData) editor.syncControls();
+        if (correctionField && formElement.isConnected && current()) {
+          const field = formElement.elements.namedItem(correctionField);
+          const section = field?.closest(".builder-section");
+          if (section) root.querySelector(`[data-builder-step="${section.id}"]`)?.click();
+          field?.focus();
+        }
       }
     });
   }

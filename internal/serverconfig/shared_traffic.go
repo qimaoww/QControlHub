@@ -78,6 +78,12 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 			return nil, fmt.Errorf("shared configuration field %q is not supported; use explicit fixed-port server listeners", key)
 		}
 	}
+	// Deleting the final inbound produces an explicit, inert listener list.
+	// Reuse the independent-egress check so hidden ingress or management APIs
+	// cannot qualify merely because best-effort discovery found no ports.
+	if explicitlyEmptyProxyConfig(engine, root) {
+		return []core.PortTrafficEndpoint{}, nil
+	}
 	entries, ok := root[listKey].([]any)
 	if engine == core.EngineSingBox {
 		var err error

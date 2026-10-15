@@ -64,11 +64,17 @@ func decodeJSON(w http.ResponseWriter, request *http.Request, destination any, l
 }
 
 func writeStoreError(w http.ResponseWriter, err error) {
+	var portConflict *store.PortConflictError
 	switch {
 	case errors.Is(err, store.ErrForbidden):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.As(err, &portConflict):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": chineseErrorMessage(http.StatusConflict, err.Error()),
+			"code":  "port_conflict", "port": portConflict.Port, "field": portConflict.Field,
+		})
 	case errors.Is(err, store.ErrConflict):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrInvalid):
