@@ -2,6 +2,7 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -13,8 +14,8 @@ func generateSingBox(input Input) (string, error) {
 	inbound := map[string]any{
 		"tag": input.Tag, "listen": input.Listen, "listen_port": input.Port,
 	}
-	switch input.Protocol {
-	case ProtocolSS2022:
+	switch nativeProtocol(input.Protocol) {
+	case ProtocolShadowsocks, ProtocolSS2022:
 		inbound["type"] = "shadowsocks"
 		inbound["method"] = input.Method
 		inbound["password"] = input.Credential
@@ -47,6 +48,9 @@ func generateSingBox(input Input) (string, error) {
 	case ProtocolAnyTLS:
 		inbound["type"] = "anytls"
 		inbound["users"] = []any{map[string]any{"name": input.Username, "password": input.Credential}}
+	case ProtocolSocks:
+		inbound["type"] = "socks"
+		inbound["users"] = []any{map[string]any{"username": input.Username, "password": input.Credential}}
 	case ProtocolPortForward:
 		inbound["type"] = "direct"
 		if input.Network != "tcp,udp" {
@@ -58,6 +62,7 @@ func generateSingBox(input Input) (string, error) {
 	if input.TLSEnabled {
 		inbound["tls"] = map[string]any{
 			"enabled": true, "certificate_path": input.CertificatePath, "key_path": input.PrivateKeyPath,
+			"server_name": input.TLSServerName,
 		}
 	}
 	if input.RealityEnabled {
@@ -68,6 +73,9 @@ func generateSingBox(input Input) (string, error) {
 				"private_key": input.RealityPrivateKey, "short_id": []string{input.RealityShortID},
 			},
 		}
+	}
+	if tls := mapValue(inbound["tls"]); tls != nil && input.TLSALPN != "" {
+		tls["alpn"], _ = validatedSingBoxALPN(input.TLSALPN)
 	}
 	root := map[string]any{
 		"$schema":   "https://sing-box.sagernet.org/schema.json",
@@ -82,7 +90,23 @@ func generateSingBox(input Input) (string, error) {
 func singBoxTransport(inbound map[string]any, input Input) {
 	switch input.Transport {
 	case "websocket":
-		inbound["transport"] = map[string]any{"type": "ws", "path": input.TransportPath}
+		inbound["transport"] = map[string]any{"type": "ws", "path": input.TransportPath, "early_data_header_name": "Sec-WebSocket-Protocol"}
+		if input.TransportHost != "" {
+			mapValue(inbound["transport"])["headers"] = map[string]any{"Host": input.TransportHost}
+		}
+	case "http":
+		t := map[string]any{"type": "http", "path": input.TransportPath}
+		if input.TransportHTTPMethod != "" {
+			t["method"] = input.TransportHTTPMethod
+		}
+		if input.TransportHost != "" {
+			t["host"] = []string{input.TransportHost}
+		}
+		inbound["transport"] = t
+	case "httpupgrade":
+		inbound["transport"] = map[string]any{"type": "httpupgrade", "path": input.TransportPath, "host": input.TransportHost}
+	case "quic":
+		inbound["transport"] = map[string]any{"type": "quic"}
 	case "grpc":
 		inbound["transport"] = map[string]any{"type": "grpc", "service_name": input.TransportPath}
 	}
@@ -111,6 +135,9 @@ func parseSingBox(content string) (Input, bool) {
 		Listen: stringValue(inbound["listen"]), Port: intValue(inbound["listen_port"]), Username: "default",
 		Method: stringValue(inbound["method"]), Credential: stringValue(inbound["password"]), Transport: "raw",
 	}
+	if input.Protocol == ProtocolSS2022 && !strings.HasPrefix(input.Method, "2022-") {
+		input.Protocol = ProtocolShadowsocks
+	}
 	if input.Protocol == ProtocolPortForward {
 		input.Network = networkListValue(stringValue(inbound["network"]))
 		if input.Network == "" {
@@ -126,6 +153,10 @@ func parseSingBox(content string) (Input, bool) {
 		if input.Protocol == ProtocolTrojan || input.Protocol == ProtocolHy2 || input.Protocol == ProtocolAnyTLS {
 			input.Credential = stringValue(user["password"])
 		}
+		if input.Protocol == ProtocolSocks {
+			input.Username = stringValue(user["username"])
+			input.Credential = stringValue(user["password"])
+		}
 		if input.Protocol == ProtocolTUIC {
 			input.Credential = stringValue(user["uuid"])
 			input.SecondaryCredential = stringValue(user["password"])
@@ -136,18 +167,45 @@ func parseSingBox(content string) (Input, bool) {
 	case "ws":
 		input.Transport = "websocket"
 		input.TransportPath = stringValue(transport["path"])
+	case "http":
+		input.Transport = "http"
+		input.TransportPath = stringValue(transport["path"])
+		input.TransportHost = firstString(transport["host"])
+		input.TransportHTTPMethod = stringValue(transport["method"])
+		if host := stringValue(transport["host"]); host != "" {
+			input.TransportHost = host
+		}
+	case "httpupgrade":
+		input.Transport = "httpupgrade"
+		input.TransportPath = stringValue(transport["path"])
+		input.TransportHost = stringValue(transport["host"])
+	case "quic":
+		input.Transport = "quic"
 	case "grpc":
 		input.Transport = "grpc"
 		input.TransportPath = stringValue(transport["service_name"])
 	}
+	if input.Transport == "websocket" {
+		for key, value := range mapValue(transport["headers"]) {
+			if strings.EqualFold(key, "host") {
+				input.TransportHost = stringValue(value)
+			}
+		}
+	}
+	if input.TransportPath == "" && (input.Transport == "http" || input.Transport == "websocket" || input.Transport == "httpupgrade") {
+		input.TransportPath = "/"
+	}
 	tls := mapValue(inbound["tls"])
 	if enabled, _ := tls["enabled"].(bool); enabled {
 		input.TLSEnabled = true
+		input.TLSServerName = stringValue(tls["server_name"])
+		input.TLSALPN = strings.Join(stringSliceValue(tls["alpn"]), ",")
 		input.CertificatePath = stringValue(tls["certificate_path"])
 		input.PrivateKeyPath = stringValue(tls["key_path"])
 	}
-	if reality := mapValue(tls["reality"]); reality != nil {
+	if reality := mapValue(tls["reality"]); reality["enabled"] == true {
 		input.RealityEnabled = true
+		input.TLSServerName = ""
 		input.TLSEnabled = false
 		input.CertificatePath, input.PrivateKeyPath = "", ""
 		input.RealityPrivateKey = stringValue(reality["private_key"])
@@ -155,6 +213,7 @@ func parseSingBox(content string) (Input, bool) {
 		input.RealityShortID = firstString(reality["short_id"])
 		input.RealityServerName = stringValue(tls["server_name"])
 	}
+	classifySingBoxPreset(&input)
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandSingBoxFlags(root, input.Tag)
 	return input, parsedInputValid(input)
 }

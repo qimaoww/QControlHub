@@ -16,6 +16,10 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	if engine != core.EngineXray && engine != core.EngineSingBox {
 		return nil, fmt.Errorf("此内核不支持节点入站转出站")
 	}
+	if input.Transport == "tcp" {
+		input.Transport = "raw"
+	}
+	input.Protocol = nativeProtocol(input.Protocol)
 	profile, err := BuildClientProfile(input, address, serverName)
 	if err != nil {
 		return nil, err
@@ -31,7 +35,7 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 		protocol = "shadowsocks"
 	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		protocol = "vless"
-	case ProtocolVMess, ProtocolTrojan:
+	case ProtocolVMess, ProtocolTrojan, ProtocolSocks:
 	case ProtocolHy2, ProtocolTUIC, ProtocolAnyTLS:
 		if engine == core.EngineXray {
 			return nil, fmt.Errorf("Xray 出站预设暂不支持 %s 的独立统计", input.Protocol)
@@ -44,6 +48,9 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	}
 	out := map[string]any{"tag": "peer"}
 	if engine == core.EngineXray {
+		if input.Protocol == ProtocolSocks || input.TransportHost != "" || input.TLSClientCertificate != "" || input.TLSALPN != "" {
+			return nil, fmt.Errorf("Xray 出站暂不支持此 Socks / HTTP Host / ALPN / 自定义证书组合，请使用 sing-box JSON")
+		}
 		out["protocol"] = protocol
 		user := map[string]any{"id": input.Credential}
 		switch protocol {
@@ -92,43 +99,61 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 			out["streamSettings"] = stream
 		}
 	} else {
-		out["type"], out["server"], out["server_port"] = protocol, address, input.Port
-		switch protocol {
-		case "vless", "vmess":
-			out["uuid"] = input.Credential
-			if protocol == "vless" && input.Flow != "" {
-				out["flow"] = input.Flow
-			}
-			if protocol == "vmess" {
-				out["security"], out["alter_id"] = "auto", 0
-			}
-		case "tuic":
-			out["uuid"], out["password"], out["congestion_control"] = input.Credential, input.SecondaryCredential, "bbr"
-		default:
-			out["password"] = input.Credential
-		}
-		if protocol == "shadowsocks" {
-			out["method"] = input.Method
-		}
-		if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
-			switch input.Transport {
-			case "", "raw":
-			case "websocket":
-				out["transport"] = map[string]any{"type": "ws", "path": input.TransportPath}
-			case "grpc":
-				out["transport"] = map[string]any{"type": "grpc", "service_name": input.TransportPath}
-			default:
-				return nil, fmt.Errorf("不支持此入站传输：%s", input.Transport)
-			}
-		}
-		if input.TLSEnabled || input.RealityEnabled {
-			tls := map[string]any{"enabled": true, "server_name": serverName}
-			if input.RealityEnabled {
-				tls["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
-				tls["reality"] = map[string]any{"enabled": true, "public_key": input.RealityPublicKey, "short_id": input.RealityShortID}
-			}
-			out["tls"] = tls
+		out, err = singBoxClientOutbound(input, address, serverName)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return json.Marshal(out)
+}
+
+func singBoxClientOutbound(input Input, address, serverName string) (map[string]any, error) {
+	protocol := nativeProtocol(input.Protocol)
+	switch input.Transport {
+	case "", "raw", "websocket", "grpc", "http", "httpupgrade", "quic":
+	default:
+		return nil, fmt.Errorf("不支持此 sing-box 传输: %s", input.Transport)
+	}
+	if protocol == ProtocolSS2022 {
+		protocol = "shadowsocks"
+	}
+	out := map[string]any{"tag": "peer"}
+	out["type"], out["server"], out["server_port"] = protocol, address, input.Port
+	switch protocol {
+	case "vless", "vmess":
+		out["uuid"] = input.Credential
+		if protocol == "vless" && input.Flow != "" {
+			out["flow"] = input.Flow
+		}
+		if protocol == "vmess" {
+			out["security"], out["alter_id"] = "auto", 0
+		}
+	case "socks":
+		out["version"], out["username"], out["password"] = "5", input.Username, input.Credential
+	case "tuic":
+		out["uuid"], out["password"], out["congestion_control"] = input.Credential, input.SecondaryCredential, "bbr"
+	default:
+		out["password"] = input.Credential
+	}
+	if protocol == "shadowsocks" {
+		out["method"] = input.Method
+	}
+	if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
+		singBoxTransport(out, input)
+	}
+	if input.TLSEnabled || input.RealityEnabled {
+		tls := map[string]any{"enabled": true, "server_name": serverName}
+		if input.TLSALPN != "" {
+			tls["alpn"], _ = validatedSingBoxALPN(input.TLSALPN)
+		}
+		if input.TLSClientCertificate != "" {
+			tls["certificate"] = []string{input.TLSClientCertificate}
+		}
+		if input.RealityEnabled {
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
+			tls["reality"] = map[string]any{"enabled": true, "public_key": input.RealityPublicKey, "short_id": input.RealityShortID}
+		}
+		out["tls"] = tls
+	}
+	return out, nil
 }

@@ -91,10 +91,10 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if protocol.PortForward && input.Transport != "raw" {
 		return "", errors.New("端口转发只支持原生 TCP/UDP 传输")
 	}
-	if input.Transport != "raw" && input.Transport != "websocket" && input.Transport != "grpc" && input.Transport != "xhttp" {
+	if input.Transport != "raw" && input.Transport != "websocket" && input.Transport != "grpc" && input.Transport != "xhttp" && !(engine == core.EngineSingBox && (input.Transport == "http" || input.Transport == "httpupgrade" || input.Transport == "quic")) {
 		return "", errors.New("不支持的传输方式")
 	}
-	if input.Transport != "raw" && strings.TrimSpace(input.TransportPath) == "" {
+	if input.Transport != "raw" && input.Transport != "quic" && strings.TrimSpace(input.TransportPath) == "" {
 		return "", errors.New("传输路径或 ServiceName 不能为空")
 	}
 	if len(input.TransportPath) > 256 {
@@ -102,6 +102,11 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	}
 	if (input.Transport == "websocket" || input.Transport == "xhttp") && !strings.HasPrefix(input.TransportPath, "/") {
 		return "", errors.New("WebSocket / XHTTP 路径必须以 / 开头")
+	}
+	if engine == core.EngineSingBox {
+		if err := validateSingBoxInput(input, protocol); err != nil {
+			return "", err
+		}
 	}
 	if protocol.RequiresTLS && !input.TLSEnabled {
 		return "", errors.New("此服务端方案必须启用 TLS")
@@ -119,7 +124,8 @@ func Generate(engine core.Engine, input Input) (string, error) {
 		xhttp := input.Protocol == ProtocolVLESSXHTTP && input.Transport == "xhttp" && input.Flow == ""
 		encTCP := input.Protocol == ProtocolVLESSEncTCP && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
 		encXHTTP := input.Protocol == ProtocolVLESSEncXHTTP && input.Transport == "xhttp" && input.Flow == "xtls-rprx-vision"
-		if !vision && !xhttp && !encTCP && !encXHTTP {
+		h2 := engine == core.EngineSingBox && input.Protocol == ProtocolVLESSHTTP2Reality && input.Transport == "http" && input.Flow == ""
+		if !vision && !h2 && !xhttp && !encTCP && !encXHTTP {
 			return "", errors.New("Reality 方案的协议、传输与 Vision Flow 组合无效")
 		}
 		serverName, err := normalizeRealityServerName(input.RealityServerName)
@@ -198,9 +204,10 @@ func Generate(engine core.Engine, input Input) (string, error) {
 }
 
 func validateCredential(input Input) error {
+	input.Protocol = nativeProtocol(input.Protocol)
 	if input.Protocol == ProtocolShadowsocks {
 		switch input.Method {
-		case "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305":
+		case "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305":
 		default:
 			return errors.New("不支持的 Shadowsocks 加密方法")
 		}

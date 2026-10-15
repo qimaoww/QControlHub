@@ -182,6 +182,15 @@ func firstSupportedInbound(engine core.Engine, value any, protocolField string) 
 		candidate := mapValue(item)
 		protocol := protocolKey(stringValue(candidate[protocolField]))
 		if _, ok := FindProtocol(engine, protocol); ok {
+			if engine == core.EngineSingBox && singBoxPresetEditError(candidate) != nil {
+				continue
+			}
+			if engine == core.EngineSingBox && protocol == ProtocolSocks {
+				user := firstMap(candidate["users"])
+				if stringValue(user["username"]) == "" || stringValue(user["password"]) == "" {
+					continue
+				}
+			}
 			if engine == core.EngineSingBox && protocol == ProtocolWireGuard {
 				// Native WireGuard is an endpoint, never an inbound.
 				continue
@@ -321,6 +330,8 @@ func protocolKey(value string) string {
 		return ProtocolTUIC
 	case "anytls":
 		return ProtocolAnyTLS
+	case "socks":
+		return ProtocolSocks
 	case "wireguard":
 		return ProtocolWireGuard
 	case "tunnel", "dokodemo-door", "direct":

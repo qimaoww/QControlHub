@@ -227,9 +227,23 @@ export async function testPresetsRuntime(preview = false) {
     covered.add(actual.engine);
     const invalid = [...form().elements].filter(input => input.willValidate && !input.validity.valid).map(input => input.name);
     assert(invalid.length === 0, `${actual.engine}/${actual.protocol.key}: generated defaults blocked by ${invalid.join(", ")}`);
+    if (actual.engine === "sing-box") {
+      if (control("transport_host") && !control("transport_host").disabled) edit("transport_host", "http.example.test");
+      if (actual.plan.transport === "http") edit("transport_http_method", "POST");
+      if (actual.plan.tls_enabled) { edit("tls_server_name", "tls.example.test"); edit("tls_alpn", actual.plan.transport === "http" ? "h2" : ["quic"].includes(actual.plan.transport) || ["tuic", "hysteria2"].includes(actual.protocol.key) ? "h3" : "http/1.1"); }
+    }
     button("validate").click();
     await waitFor(() => test.saved?.version === 1 && !button("validate").disabled, `${actual.engine}/${actual.protocol.key}: saving real preset defaults stalled`);
     assert(submissions(test)[0].body.input.protocol === actual.protocol.key, "real preset submitted a different protocol");
+    if (actual.engine === "sing-box") {
+      const saved = submissions(test)[0].body.input;
+      assert(saved.transport === actual.plan.transport, "native transport changed during save");
+      if (actual.plan.tls_enabled) assert(saved.tls_server_name === "tls.example.test" && control("tls_server_name").value === saved.tls_server_name && control("tls_alpn").value === saved.tls_alpn, "native TLS values were lost on reopen");
+      if (control("transport_host") && !control("transport_host").disabled) assert(saved.transport_host === "http.example.test" && control("transport_host").value === saved.transport_host, "HTTP Host was conflated with TLS SNI");
+      if (saved.transport === "http") assert(saved.transport_http_method === "POST" && control("transport_http_method").value === "POST", "HTTP Method was lost on reopen");
+      if (["raw", "quic"].includes(saved.transport)) assert(saved.transport_path === "" && saved.transport_host === "", "irrelevant transport fields survived");
+      if (actual.protocol.key === "vless-http2-reality") assert(saved.flow === "" && saved.reality_enabled, "H2 Reality carried Vision flow");
+    }
     if (actual.protocol.key === "mieru") {
       assert(control("mieru_transport").value === "TCP", "Mieru default transport was lost");
       assert(control("mieru_traffic_pattern").value === "off" && submissions(test)[0].body.input.mieru_traffic_pattern === "off", "Mieru default traffic pattern was lost");

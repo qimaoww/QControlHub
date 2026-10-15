@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,33 @@ func TestValidateSingBoxCapabilitiesChecksVersionAndTags(t *testing.T) {
 	write("'sing-box version 1.11.0'; printf '%s\\n' 'Tags: with_gvisor'")
 	if err := validateSingBoxCapabilities(context.Background(), binary, content); err == nil {
 		t.Fatal("accepted WireGuard endpoint without with_wireguard")
+	}
+}
+
+func TestSingBoxPresetCapabilities(t *testing.T) {
+	for _, test := range []struct{ name, content, version, tags, want string }{
+		{"old AnyTLS", `{"inbounds":[{"type":"anytls"}]}`, "1.11.9", "", "1.12"},
+		{"old HTTPUpgrade", `{"inbounds":[{"type":"vmess","transport":{"type":"httpupgrade"}}]}`, "1.6.9", "", "1.7"},
+		{"QUIC tag", `{"inbounds":[{"type":"vmess","transport":{"type":"quic"}}]}`, "1.14.3", "with_quic_disabled", "with_quic"},
+		{"TUIC tag", `{"inbounds":[{"type":"tuic"}]}`, "1.14.3", "", "with_quic"},
+		{"Reality tag", `{"inbounds":[{"type":"vless","tls":{"reality":{"enabled":true}}}]}`, "1.14.3", "", "with_utls"},
+		{"outbound capabilities", `{"outbounds":[{"type":"anytls"}]}`, "1.11.9", "", "1.12"},
+		{"supported", `{"inbounds":[{"type":"anytls"},{"type":"vmess","transport":{"type":"httpupgrade"}},{"type":"hysteria2"},{"type":"vless","tls":{"reality":{"enabled":true}}}]}`, "1.14.3", "with_quic,with_utls", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "sing-box")
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' 'sing-box version "+test.version+"' 'Tags: "+test.tags+"'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			err := validateSingBoxCapabilities(context.Background(), binary, test.content)
+			if test.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("want %s: %v", test.want, err)
+			}
+		})
 	}
 }
 

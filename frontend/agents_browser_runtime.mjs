@@ -47,7 +47,7 @@ try {
     const { testConfigScopeRuntime, testSubStoreScopeRuntime } = await import("./config_scope_browser_runtime.mjs");
     const test = mode === "config-scope" ? testConfigScopeRuntime : testSubStoreScopeRuntime;
     await test(new URLSearchParams(location.search).has("preview"));
-  } else if (mode === "presets") {
+  } else if (mode === "presets" || mode === "presets-mobile") {
     const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
     await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode === "config-inbounds" || mode === "config-inbounds-mobile") {

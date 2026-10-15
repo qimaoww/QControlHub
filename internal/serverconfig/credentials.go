@@ -7,6 +7,7 @@ import (
 )
 
 func NewCredential(protocol, method string) (string, error) {
+	protocol = nativeProtocol(protocol)
 	if protocol == ProtocolSS2022 {
 		size := 32
 		if method == "2022-blake3-aes-128-gcm" {

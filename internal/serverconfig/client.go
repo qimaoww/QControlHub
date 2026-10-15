@@ -20,6 +20,10 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	input.Protocol = nativeProtocol(input.Protocol)
+	if input.TLSServerName != "" {
+		serverName = input.TLSServerName
+	}
 	if input.RealityMLDSA65Verify == "" && input.RealityMLDSA65Seed != "" {
 		input.RealityMLDSA65Verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
 	}
@@ -70,8 +74,18 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	} else if err := validateCredential(input); err != nil {
 		return ClientProfile{}, err
 	}
-	if input.Transport == "" {
+	if input.Transport == "" || input.Transport == "tcp" {
 		input.Transport = "raw"
+	}
+	switch input.Transport {
+	case "raw", "websocket", "grpc", "xhttp", "http", "httpupgrade", "quic":
+	default:
+		return ClientProfile{}, errors.New("不支持此客户端传输")
+	}
+	if input.TLSALPN != "" {
+		if _, err := validatedSingBoxALPN(input.TLSALPN); err != nil {
+			return ClientProfile{}, err
+		}
 	}
 	if input.RealityEnabled {
 		serverName = input.RealityServerName
@@ -173,16 +187,21 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			Path    string `json:"path"`
 			TLS     string `json:"tls"`
 			SNI     string `json:"sni"`
+			ALPN    string `json:"alpn,omitempty"`
 		}{
 			Version: "2", Name: fragment, Address: address, Port: strconv.Itoa(input.Port), ID: input.Credential,
 			AlterID: "0", Cipher: "auto", Network: transport, Type: "none", Path: input.TransportPath,
 		}
 		if input.Transport == "websocket" {
-			payload.Host = serverName
+			payload.Host = input.TransportHost
+			if payload.Host == "" {
+				payload.Host = serverName
+			}
 		}
 		if input.TLSEnabled {
 			payload.TLS = "tls"
 			payload.SNI = serverName
+			payload.ALPN = input.TLSALPN
 		}
 		encoded, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
@@ -203,6 +222,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.SubscriptionCompatible = true
 	case ProtocolHy2:
 		query := url.Values{}
+		if input.TLSALPN != "" {
+			query.Set("alpn", input.TLSALPN)
+		}
 		if serverName != "" {
 			query.Set("sni", serverName)
 		}
@@ -211,14 +233,24 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.SubscriptionCompatible = true
 	case ProtocolTUIC:
 		query := url.Values{"congestion_control": {"bbr"}, "udp_relay_mode": {"native"}}
+		if input.TLSALPN != "" {
+			query.Set("alpn", input.TLSALPN)
+		}
 		if serverName != "" {
 			query.Set("sni", serverName)
 		}
 		profile.Format = "TUIC v5 URI"
 		profile.URI = (&url.URL{Scheme: "tuic", User: url.UserPassword(input.Credential, input.SecondaryCredential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
+	case ProtocolSocks:
+		profile.Format = "Socks5 URI"
+		profile.URI = (&url.URL{Scheme: "socks5", User: url.UserPassword(input.Username, input.Credential), Host: host, Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
 	case ProtocolAnyTLS:
 		query := url.Values{"security": {"tls"}}
+		if input.TLSALPN != "" {
+			query.Set("alpn", input.TLSALPN)
+		}
 		if serverName != "" {
 			query.Set("sni", serverName)
 		}
@@ -227,6 +259,22 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.SubscriptionCompatible = true
 	default:
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
+	}
+	// QUIC and plain HTTP transports do not share Xray's wire format; a
+	// native sing-box outbound is the unambiguous import format for these.
+	if input.Transport == "quic" || input.Transport == "http" || input.Transport == "httpupgrade" || input.TLSClientCertificate != "" {
+		out, exportErr := singBoxClientOutbound(input, address, serverName)
+		if exportErr != nil {
+			return ClientProfile{}, exportErr
+		}
+		encoded, marshalErr := json.MarshalIndent(map[string]any{"outbounds": []any{out}}, "", "  ")
+		if marshalErr != nil {
+			return ClientProfile{}, marshalErr
+		}
+		profile.Format = "sing-box client JSON"
+		profile.URI = string(encoded)
+		profile.SubscriptionCompatible = false
+		profile.Fields = append(profile.Fields, ClientField{Label: "导出说明", Value: "此组合请导入 sing-box 客户端 JSON；通用分享 URI 无法可靠保留传输或信任证书。"})
 	}
 	profile.Mihomo, err = buildMihomoClientYAML(input, address, serverName, fragment)
 	if err != nil {

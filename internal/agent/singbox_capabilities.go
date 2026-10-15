@@ -16,6 +16,8 @@ var singBoxVersionPattern = regexp.MustCompile(`sing-box version v?([0-9]+)\.([0
 // remains authoritative for the complete configuration syntax.
 func validateSingBoxCapabilities(ctx context.Context, binary, content string) error {
 	var root struct {
+		Inbounds  []map[string]any `json:"inbounds"`
+		Outbounds []map[string]any `json:"outbounds"`
 		Endpoints []struct {
 			Type   string `json:"type"`
 			System *bool  `json:"system,omitempty"`
@@ -24,8 +26,37 @@ func validateSingBoxCapabilities(ctx context.Context, binary, content string) er
 	if err := json.Unmarshal([]byte(content), &root); err != nil {
 		return fmt.Errorf("decode sing-box endpoint capabilities: %w", err)
 	}
-	if len(root.Endpoints) == 0 {
-		return nil
+	type requirement struct {
+		name  string
+		minor int
+		tag   string
+	}
+	var inboundRequirements []requirement
+	for _, entries := range [][]map[string]any{root.Inbounds, root.Outbounds} {
+		for _, entry := range entries {
+			kind, _ := entry["type"].(string)
+			if kind == "anytls" {
+				inboundRequirements = append(inboundRequirements, requirement{"AnyTLS", 12, ""})
+			}
+			if kind == "tuic" {
+				inboundRequirements = append(inboundRequirements, requirement{"TUIC v5", 4, "with_quic"})
+			}
+			if kind == "hysteria2" {
+				inboundRequirements = append(inboundRequirements, requirement{"Hysteria2", 5, "with_quic"})
+			}
+			transport, _ := entry["transport"].(map[string]any)
+			if transport["type"] == "quic" {
+				inboundRequirements = append(inboundRequirements, requirement{"QUIC transport", 0, "with_quic"})
+			}
+			if transport["type"] == "httpupgrade" {
+				inboundRequirements = append(inboundRequirements, requirement{"HTTPUpgrade", 7, ""})
+			}
+			tls, _ := entry["tls"].(map[string]any)
+			reality, _ := tls["reality"].(map[string]any)
+			if reality["enabled"] == true {
+				inboundRequirements = append(inboundRequirements, requirement{"Reality", 2, "with_utls"})
+			}
+		}
 	}
 	required := map[string]struct {
 		major, minor int
@@ -35,7 +66,7 @@ func validateSingBoxCapabilities(ctx context.Context, binary, content string) er
 		"tailscale":      {1, 12, "with_tailscale"},
 		"openvpn-server": {1, 14, "with_openvpn"},
 	}
-	known := false
+	known := len(inboundRequirements) > 0
 	for _, endpoint := range root.Endpoints {
 		if _, ok := required[endpoint.Type]; ok {
 			known = true
@@ -63,6 +94,14 @@ func validateSingBoxCapabilities(ctx context.Context, binary, content string) er
 		}
 	}
 	needGVisor := false
+	for _, req := range inboundRequirements {
+		if major < 1 || major == 1 && minor < req.minor {
+			return fmt.Errorf("sing-box %s requires sing-box 1.%d or newer (installed %s)", req.name, req.minor, match[0])
+		}
+		if req.tag != "" && !tags[req.tag] {
+			return fmt.Errorf("sing-box %s is unavailable in this build (missing %s)", req.name, req.tag)
+		}
+	}
 	for _, endpoint := range root.Endpoints {
 		req, ok := required[endpoint.Type]
 		if !ok {
