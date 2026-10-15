@@ -2,6 +2,7 @@ package githubfetch
 
 import (
 	"context"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,13 +17,13 @@ func TestNetworkEvidence(t *testing.T) {
 	}{
 		{"IPv4", evidence{v4: true}, IPv4},
 		{"dual", evidence{v4: true, v6: true, route6: true, dns6: true}, DualStack},
-		{"IPv6", evidence{v6: true, route6: true, dns6: true}, IPv6Only},
+		{"IPv6", evidence{v6: true, route6: true, dns6: true, v4Done: 2, githubDone: true}, IPv6Only},
 		{"offline", evidence{route6: true, dns6: true}, Unknown},
 		{"DNS failure", evidence{v6: true, route6: true}, Unknown},
 		{"address without route", evidence{v6: true, dns6: true}, Unknown},
 		{"working NAT64", evidence{v6: true, route6: true, dns6: true, dns64: true, translatedGitHub: true}, NAT64},
 		{"native GitHub IPv6", evidence{v6: true, route6: true, dns6: true, translatedGitHub: true}, IPv6Direct},
-		{"DNS64 without working translator", evidence{v6: true, route6: true, dns6: true, dns64: true}, IPv6Only},
+		{"DNS64 without working translator", evidence{v6: true, route6: true, dns6: true, dns64: true, v4Done: 2, githubDone: true}, IPv6Only},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := classify(tc.e); got != tc.want {
@@ -90,5 +91,69 @@ func TestCanceledProbeDoesNotCacheNetworkDecision(t *testing.T) {
 	d.probe = func(context.Context) Mode { return IPv6Only }
 	if d.Detect(context.Background()) != IPv6Only {
 		t.Fatal("canceled detection blocked recovery")
+	}
+}
+
+// These fixtures exercise the collector used by system probes, rather than
+// stubbing Detect to return IPv6Only.
+func fixtureProbes(dnsWorks bool) []networkProbe {
+	ok := func(context.Context) error { return nil }
+	fail := func(context.Context) error { return &net.DNSError{Name: "fixture", Err: "no records"} }
+	slow := func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+	dns := fail
+	if dnsWorks {
+		dns = ok
+	}
+	return []networkProbe{
+		{"v4a", "v4", 10 * time.Millisecond, slow}, {"v4b", "v4", time.Second, fail},
+		{"v6a", "v6", time.Second, ok}, {"v6b", "v6", time.Second, fail},
+		{"route6", "route6", time.Second, ok}, {"dns6", "dns6", time.Second, dns},
+		{"github6", "translated", time.Second, fail}, {"dns64", "dns64", time.Second, slow},
+	}
+}
+func TestAuxiliaryTimeoutRetainsPartialEvidence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if got := probeNetworkWith(ctx, fixtureProbes(true)); got != IPv6Only {
+		t.Fatalf("partial evidence lost: %s", got)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("waited for auxiliary deadline")
+	}
+	// Neither interrupted IPv4 probes nor an interrupted GitHub IPv6 probe
+	// prove those routes unusable. Cancellation can enqueue their results
+	// before the collector drains the channel at the overall deadline.
+	for _, kind := range []string{"v4", "translated"} {
+		t.Run("interrupted "+kind, func(t *testing.T) {
+			probes := fixtureProbes(true)
+			for i := range probes {
+				if probes[i].kind == kind {
+					probes[i].budget = time.Second
+					probes[i].run = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+				}
+			}
+			ctx2, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer stop()
+			if got := probeNetworkWith(ctx2, probes); got != Unknown {
+				t.Fatalf("unfinished probes misclassified: %s", got)
+			}
+		})
+	}
+}
+func TestInvalidationDuringProbeDoesNotCacheStaleResult(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	d := &Detector{probe: func(context.Context) Mode { close(started); <-release; return IPv6Only }}
+	done := make(chan Mode, 1)
+	go func() { done <- d.Detect(context.Background()) }()
+	<-started
+	d.Invalidate()
+	close(release)
+	<-done
+	if !d.expires.IsZero() {
+		t.Fatal("stale probe repopulated cache")
+	}
+	d.probe = func(context.Context) Mode { return IPv4 }
+	if d.Detect(context.Background()) != IPv4 {
+		t.Fatal("network change not detected")
 	}
 }

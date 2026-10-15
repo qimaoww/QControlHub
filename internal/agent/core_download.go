@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 )
 
 func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubReleaseAsset) (string, error) {
@@ -42,6 +45,8 @@ func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubRelea
 		retryDelay = defaultDownloadRetryDelay
 	}
 
+	ctx, stop := context.WithTimeout(ctx, attemptTimeout)
+	defer stop()
 	var lastErr error
 	performedAttempts := 0
 	for attempt := 1; attempt <= attempts; attempt++ {
@@ -52,6 +57,7 @@ func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubRelea
 		if err == nil {
 			return path, nil
 		}
+		slog.Warn("GitHub asset download failed", "stage", "release-asset", "attempt", attempt, "error", err)
 		lastErr = err
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -84,6 +90,9 @@ func (updater *CoreUpdater) downloadAssetOnce(ctx context.Context, parsed *url.U
 	request.Header.Set("User-Agent", "QControlHub-Agent")
 	response, err := updater.client.Do(request)
 	if err != nil {
+		if githubfetch.Terminal(err) {
+			return "", err
+		}
 		if ctx.Err() != nil {
 			return "", retryableCoreDownloadError{err: ctx.Err()}
 		}

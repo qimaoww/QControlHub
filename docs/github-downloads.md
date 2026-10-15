@@ -18,7 +18,8 @@ the source modules; regenerate with `make generate-deploy-scripts`.
 | Working IPv4, including dual stack | Original HTTPS URL |
 | Working IPv6, two failed independent IPv4 probes, IPv6 route and proxy AAAA DNS | `https://v6.gh-proxy.org/` + original URL |
 | IPv6 can already reach GitHub API, including working DNS64/NAT64 | Original HTTPS URL |
-| Offline, inconclusive detection, missing DNS or overall probe deadline | Original URL; short detection cache |
+| Inconclusive detection / Unknown | Try original URL once; on DNS/connect failure validate the actual resource through the fixed accelerator |
+| Both routes fail DNS/connect | Stop with both causes and IPv6 DNS repair advice; invalidate network/channel caches |
 | Explicit HTTPS egress proxy applies to the original host | Preserve configured proxy routing |
 
 TLS probes target Cloudflare and Google using literal IPv4/IPv6 addresses and
@@ -27,13 +28,26 @@ default route or failed GitHub request alone cannot select acceleration. DNS64
 is observed using `ipv4only.arpa`; a working IPv6 GitHub TLS connection is also
 required before retaining direct NAT64 downloads.
 
-Go bounds detection to four seconds, shares concurrent probes, and caches a
-decision for five minutes. Unknown results expire after 15 seconds; canceled
-probes do not populate the cache. Shell probes run concurrently with a maximum
-of three seconds each, followed by bounded DNS/channel and NAT64 checks (at most
-ten seconds total). Shell caches in the running process with the same TTLs.
-Shell can identify direct GitHub IPv6 without the optional `getent` utility;
-the DNS64 label additionally requires bounded `getent` support.
+Go bounds detection to three seconds, shares concurrent probes, and caches a
+decision for five minutes. Each TLS probe has a 2.5-second budget; channel AAAA
+has 1.5 seconds, route selection 0.5 seconds and auxiliary DNS64 0.75 seconds.
+Logs distinguish success, failure, an individual probe's timeout and observations
+interrupted by the overall deadline/cancellation. Only completed probes or their
+own timeouts can rule out a route; interrupted probes leave it undetermined. Completed
+observations survive the overall deadline; DNS64 is optional and never blocks
+an established usable route. Unknown still means insufficient evidence.
+Unknown expires after 15 seconds. Cancellation does not cache a decision;
+request failures invalidate it, including protection against stale in-flight
+probes repopulating the cache. A successful accelerated resource request is
+remembered separately for 30 seconds, covering subsequent metadata, files and
+redirects without reclassifying Unknown as IPv6-only. Channel failures, including
+interrupted response bodies, clear that preference so a bounded caller retry
+can recover a freshly confirmed direct route.
+
+Shell probes run concurrently with a maximum of three seconds each, followed
+by independently bounded channel/API/DNS64 checks (at most ten seconds total).
+They retain IPv6 evidence when optional DNS64 is unavailable. Shell caches the
+same network/channel TTLs and clears them on terminal network failure.
 Configured proxy exclusions follow each downloader's native matching rules;
 Shell follows curl, including leading-dot exclusions matching the apex host.
 
@@ -88,10 +102,22 @@ headers are excluded. Shell disables curlrc loading and does not accept
 credential/header arguments.
 
 Core archives retain the 128 MiB maximum, expected size and SHA-256 checks.
-Metadata is bounded to 2 MiB. API calls have a 20-second attempt deadline;
-archive attempts have a 90-second deadline, including redirects. Transient
-failures retry at most three times, with cancellation and temporary-file
-cleanup. Digest failures are permanent. The standalone installer verifies all
+Metadata is bounded to 2 MiB. Release resolution (including pagination) and
+metadata retries share a 20-second total budget. Archive download retries share
+one 90-second total budget, including probes, channel selection and redirects.
+Go caps each route's DNS/connect/TLS/header phase at five seconds, then stops
+that timer while the body uses the remaining caller budget. Shell bounds
+connection establishment to five seconds; detection, redirects, retries and
+backoff share the requested total download budget.
+
+HTTP transient responses retry at most three times within those budgets.
+Exhausted direct/accelerated network routes stop immediately instead of being
+replayed by the outer installer retry loop. API quota, missing resources, TLS
+verification, digest failures and cancellation do not trigger a channel switch.
+An explicit outbound proxy keeps its original routing/authentication and never
+falls back around that configuration. An accelerator request bypasses environment
+proxies when they were excluded for the original GitHub host. Cancellation and
+temporary-file cleanup remain in force. Digest failures are permanent. The standalone installer verifies all
 four downloads and staged executable versions before replacing any installed
 binary, using same-filesystem renames. Agent installation retains its existing
 backup, service verification and rollback flow.
@@ -139,6 +165,68 @@ cancellation and failure cleanup. The normal CI suite does not use the public
 service.
 Shell regressions also execute a real gzip fixture and verify that malformed
 archives and failed staged version commands stop before installation.
+
+
+## Follow-up to PR #265: DNS/probe failure (2026-10-14)
+
+The affected HK node started Agent `b16f51cdeb4068a886e3a73c8c7cf2441c5047d0`
+at 22:07:33 HKT after an upgrade task. That commit contains merged PR #265
+(`b2e59cf1`). This was a current Agent, not an old binary or a missing API URL
+mapping. The installation started at 22:10:36; the same process logged
+`network=unknown accelerated=false` at 22:10:43 and 22:11:08, then failed at
+22:11:18 with `lookup api.github.com: i/o timeout`.
+
+Read-only checks in the Agent network/mount namespace found no configured
+outbound proxy, working Cloudflare/Google IPv6 TLS, failed IPv4 TLS, and system
+DNS ordered with two unreachable IPv4 servers ahead of reachable IPv6 servers.
+Both the API and accelerator timed out through the system resolver. Explicit
+queries to the IPv6 Google resolver succeeded; the API has A records but no
+native AAAA, while the accelerator has AAAA. The old collector discarded partial
+evidence on its deadline, then the transport/outer retries repeated direct-only
+requests. The historical Agent only logged the final mode, so the precise
+individual probe that hit its deadline cannot be proved retrospectively.
+
+At the user's request, persistent openresolv configuration now prioritizes
+Google and Cloudflare IPv6 DNS, excludes the two unavailable IPv4 resolvers,
+and uses bounded resolver attempts. No Agent/core restart was needed. System
+resolution and an actual accelerated Mihomo stable API query returned success
+(HTTP 200). The user reran installation: the unchanged `b16f51cd` Agent logged
+`network=ipv6-only accelerated=true` at 22:30:58, acknowledged installation at
+22:31:06, and the subsequently deployed Mihomo systemd service was confirmed
+active/running. This independently establishes the immediate DNS cause and
+existing API-prefix coverage. The new PR is not deployed to that running Agent.
+
+Follow-up regression and live checks:
+
+- Real collector/transport fixtures retain partial evidence when DNS64 times out,
+  leave insufficient observations Unknown, recover an API DNS timeout through
+  the accelerator, preserve credentials/redirects/proxy routing, invalidate
+  caches after a changed network, and honor cancellation.
+- All supported engine/source selectors now also exercise Unknown -> API DNS
+  failure -> accelerated metadata -> verified archive. Terminal failure tests
+  verify that existing executables and staging directories remain unchanged
+  before any service-manager call.
+- A fresh macvlan namespace with no IPv4 addresses/routes, and DNS forwarded
+  over IPv6 DoH, passed all four stable core installations/replacements with
+  real binaries, size/digest checks and version execution. Mihomo official/mirror,
+  Xray and sing-box development installations passed. Shadowsocks Rust development
+  was explicitly skipped on upstream quota exhaustion, not counted as success.
+- The precompiled live test also ran on the affected HK node after its DNS
+  repair, in isolated installation directories. Real Mihomo stable API queries,
+  verified archives, compatible-CPU selection, fresh install and replacement
+  passed. The first replacement attempt hit the node's 213 MiB `/tmp` tmpfs;
+  repeating with `TMPDIR=/var/tmp` passed. Agent and existing Mihomo services
+  remained active throughout. The live suite now runs without a node-local Go
+  toolchain because it does not use discovery compiler fixtures.
+- Opt-in `TestLiveIPv6ProbeFailureRecovery` uses real HTTPS API/Raw requests
+  while injecting only auxiliary probe failures: an unfinished DNS64 probe still
+  selects acceleration, and Unknown followed by a real unreachable IPv4 GitHub
+  connection recovers through the actual channel.
+
+The namespace service manager is a fixture; production daemon restarts for the
+new code, real NAT64, non-amd64 targets and cross-version upgrades remain
+unverified. Production DNS repair and the successful existing-Agent Mihomo
+installation are separate evidence from testing this PR's new binary.
 
 ## Rollback
 
