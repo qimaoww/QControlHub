@@ -36,6 +36,14 @@ alpine-agent-test:
 ip-quality-clean-test:
 	sh deploy/tests/ip-quality-clean.sh
 
+.PHONY: managed-tls-openrc-test
+managed-tls-openrc-test:
+	sh deploy/tests/managed-tls-openrc.sh
+
+.PHONY: managed-tls-systemd-test
+managed-tls-systemd-test:
+	sh deploy/tests/managed-tls-systemd.sh
+
 .PHONY: ip-quality-systemd-test
 ip-quality-systemd-test:
 	sh deploy/tests/ip-quality-systemd.sh

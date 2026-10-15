@@ -111,7 +111,10 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if protocol.RequiresTLS && !input.TLSEnabled {
 		return "", errors.New("此服务端方案必须启用 TLS")
 	}
-	if input.TLSEnabled {
+	if err := validateManagedTLS(engine, input); err != nil {
+		return "", err
+	}
+	if input.TLSEnabled && !managedTLS(input) {
 		if len(input.CertificatePath) > 1024 || len(input.PrivateKeyPath) > 1024 {
 			return "", errors.New("TLS 文件路径不能超过 1024 个字符")
 		}

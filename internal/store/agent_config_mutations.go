@@ -19,9 +19,10 @@ func (s *Store) SaveAgentConfig(ctx context.Context, input core.Config, expected
 	return s.saveAgentConfig(ctx, input, expectedVersion, nil)
 }
 
-// ConfigClientMetadataMutation replaces client-only metadata for one inbound
+// ConfigClientMetadataMutation replaces encrypted auxiliary metadata for one inbound
 // in the new configuration version. Content is encrypted with the same keyring
-// as configuration payloads and never sent to an Agent.
+// as configuration payloads. Client keys stay in the panel; managed frontend
+// certificates and leaf keys are delivered only in execution snapshots.
 type ConfigClientMetadataMutation struct {
 	OriginalTag string
 	Tag         string
@@ -195,6 +196,11 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 				VALUES ($1,$2,$3,$4,now())`, currentID, saved.Version, metadataMutation.Tag, storedMetadata); err != nil {
 				return core.Config{}, mapError(err)
 			}
+		}
+	}
+	if saved.Engine == core.EngineSingBox {
+		if _, err := s.managedTLSFrontendsTx(ctx, tx, saved.ID, saved.Version, saved.Engine, saved.Content); err != nil {
+			return core.Config{}, err
 		}
 	}
 	return saved, nil

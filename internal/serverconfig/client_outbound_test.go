@@ -13,7 +13,7 @@ func TestClientOutboundsFromDeployedPresets(t *testing.T) {
 		for _, protocol := range Protocols(source) {
 			for _, target := range []core.Engine{core.EngineXray, core.EngineSingBox} {
 				t.Run(string(source)+"/"+protocol.Key+"/"+string(target), func(t *testing.T) {
-					input, err := NewPlan(protocol)
+					input, err := nativeTLSFixturePlan(protocol)
 					if err != nil {
 						t.Fatal(err)
 					}

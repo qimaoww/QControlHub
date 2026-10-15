@@ -144,7 +144,7 @@ func (c *Client) Run(ctx context.Context) error {
 				return err
 			}
 			_, err = c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
-			return err
+			return errors.Join(err, stopServiceTLSFrontends(ctx, c.executor.serviceManager(), engine, spec))
 		}
 		if c.traffic.awaitingPolicies {
 			for engine, spec := range c.executor.Specs {

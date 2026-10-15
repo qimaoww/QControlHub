@@ -19,6 +19,9 @@ var existingDiscoveryCoreHelper []byte
 
 func TestMain(tests *testing.M) {
 	flag.Parse()
+	if os.Getenv("QCH_TEST_MANAGED_TLS_SYSTEMD") == "1" {
+		os.Exit(tests.Run())
+	}
 	// The precompiled live fixture also runs on nodes without a Go compiler;
 	// it never invokes the synthetic discovery executable.
 	if os.Getenv("QCH_LIVE_REALITY_SYSTEMD_TEST") == "1" && flag.Lookup("test.run").Value.String() == "^TestMihomoRealityAndTLSManagedLifecycle$" {

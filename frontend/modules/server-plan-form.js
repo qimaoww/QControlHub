@@ -155,6 +155,8 @@ export function readServerPlanInput(form, protocol) {
     transport_path: ["raw", "quic"].includes(values.get("transport")) ? "" : values.get("transport_path") || "",
     transport_host: ["http", "httpupgrade", "websocket"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
     transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
+    tls_mode: tlsEnabled && protocol.supports_managed_tls ? values.get("tls_mode") || "native" : "",
+    tls_public_port: tlsEnabled && ["caddy", "nginx"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
     tls_server_name: values.get("tls_server_name") || "",
     tls_alpn: values.get("tls_alpn") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
@@ -273,6 +275,7 @@ function sudokuProtocolOptions(plan) {
 function bindProtocolOptionVisibility(form) {
   const transport = form.elements.namedItem("transport");
   const tls = form.elements.namedItem("tls_enabled");
+  const tlsMode = form.elements.namedItem("tls_mode");
   const updateNative = () => {
     const kind = transport?.value || "raw";
     const path = form.elements.namedItem("transport_path");
@@ -290,9 +293,32 @@ function bindProtocolOptionVisibility(form) {
     const tlsFields = form.querySelector("[data-native-tls]");
     if (tlsFields) { setVisible(tlsFields, Boolean(tls?.checked)); tlsFields.querySelectorAll("input, textarea").forEach(control => control.disabled = !tls?.checked); }
   };
-  bindEvent(transport, "change", updateNative);
-  bindEvent(tls, "change", updateNative);
+  const updateTLSMode = () => {
+    const managed = tls?.checked && ["caddy", "nginx"].includes(tlsMode?.value);
+    form.querySelectorAll("[data-managed-tls]").forEach(el => { setVisible(el, managed); el.querySelectorAll("input").forEach(control => { control.disabled = !managed; control.required = managed; }); });
+    form.querySelectorAll("[data-native-certificate]").forEach(el => { setVisible(el, !managed); el.querySelectorAll("input,textarea").forEach(control => control.disabled = managed || !tls?.checked); });
+    const listen = form.elements.namedItem("listen");
+    if (listen && tlsMode) {
+      listen.readOnly = managed;
+      if (managed) listen.value = "127.0.0.1";
+      else if (form.dataset.managedTLS === "1" && listen.value === "127.0.0.1") listen.value = "0.0.0.0";
+      form.dataset.managedTLS = managed ? "1" : "0";
+    }
+    const domain = form.elements.namedItem("tls_server_name");
+    if (domain && tlsMode) domain.required = managed;
+    const portLabel = form.querySelector("[data-listen-port-label]");
+    if (portLabel) portLabel.textContent = managed ? "内部监听端口" : "监听端口";
+    const port = form.elements.namedItem("tls_public_port");
+    port?.setCustomValidity(managed && port.value === form.elements.namedItem("port")?.value ? "公网端口不能与内部监听端口相同" : "");
+  };
+  bindEvent(tlsMode, "change", updateTLSMode);
+  bindEvent(form.elements.namedItem("tls_public_port"), "input", updateTLSMode);
+  bindEvent(form.elements.namedItem("port"), "input", updateTLSMode);
+  const updateSecurity = () => { updateNative(); updateTLSMode(); };
+  bindEvent(transport, "change", updateSecurity);
+  bindEvent(tls, "change", updateSecurity);
   updateNative();
+  updateTLSMode();
   if (form.querySelector("[data-wireguard-endpoint]")) {
     const listen = form.elements.namedItem("listen");
     if (listen) listen.readOnly = true;

@@ -53,7 +53,7 @@ func TestGenerateRejectsDisabledTLSForRequiredProtocols(t *testing.T) {
 		if !ok || !protocol.RequiresTLS {
 			t.Fatalf("%s Trojan plan is not marked as requiring TLS", engine)
 		}
-		input, err := NewPlan(protocol)
+		input, err := nativeTLSFixturePlan(protocol)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestEveryPublishedServerPlanGeneratesNativeSyntax(t *testing.T) {
 	t.Parallel()
 	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
 		for _, protocol := range Protocols(engine) {
-			input, err := NewPlan(protocol)
+			input, err := nativeTLSFixturePlan(protocol)
 			if err != nil {
 				t.Fatalf("NewPlan(%s/%s): %v", engine, protocol.Key, err)
 			}

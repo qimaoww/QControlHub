@@ -96,6 +96,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
+		core.AgentFeatureManagedTLS,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,

@@ -28,6 +28,7 @@ const (
 )
 
 type Protocol struct {
+	SupportsManagedTLS   bool     `json:"supports_managed_tls,omitempty"`
 	Key                  string   `json:"key"`
 	Group                string   `json:"group,omitempty"`
 	Name                 string   `json:"name"`
@@ -54,6 +55,8 @@ type Protocol struct {
 }
 
 type Input struct {
+	TLSMode                      string `json:"tls_mode,omitempty"`
+	TLSPublicPort                int    `json:"tls_public_port,omitempty"`
 	Protocol                     string `json:"protocol"`
 	Tag                          string `json:"tag"`
 	Listen                       string `json:"listen"`

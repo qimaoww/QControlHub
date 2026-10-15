@@ -51,7 +51,7 @@ export function diagnoseTask(task) {
     if (error.includes("rejected the configuration"))
       return {
         title: "配置未通过真实内核校验",
-        advice: "展开节点返回结果定位字段，修正后使用当前配置重试。",
+        advice: "展开节点返回结果定位字段，可选择“编辑后重试”修正配置并重新提交。",
       };
     if (task.action === "install")
       return {

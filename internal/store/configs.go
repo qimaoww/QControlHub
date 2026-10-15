@@ -58,6 +58,22 @@ func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Confi
 }
 
 func (s *Store) UpdateConfig(ctx context.Context, id string, input core.Config) (core.Config, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.Config{}, err
+	}
+	defer tx.Rollback(ctx)
+	config, err := s.updateConfigTx(ctx, tx, id, input)
+	if err != nil {
+		return core.Config{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return core.Config{}, err
+	}
+	return config, nil
+}
+
+func (s *Store) updateConfigTx(ctx context.Context, tx pgx.Tx, id string, input core.Config) (core.Config, error) {
 	if err := core.ValidateConfig(input.Engine, input.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -72,11 +88,6 @@ func (s *Store) UpdateConfig(ctx context.Context, id string, input core.Config) 
 	if err != nil {
 		return core.Config{}, err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return core.Config{}, err
-	}
-	defer tx.Rollback(ctx)
 	var config core.Config
 	args := []any{id, name, description, input.Engine, storedContent, input.Version}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
@@ -106,9 +117,6 @@ func (s *Store) UpdateConfig(ctx context.Context, id string, input core.Config) 
 		return core.Config{}, err
 	}
 	if err := s.insertConfigRevision(ctx, tx, config); err != nil {
-		return core.Config{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, err
 	}
 	return config, nil

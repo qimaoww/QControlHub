@@ -67,6 +67,12 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
 		input.BlockMainlandDestination = true
 	}
+	if protocol.SupportsManagedTLS {
+		input.TLSMode = "caddy"
+		input.TLSPublicPort = 443
+		input.Listen = "127.0.0.1"
+		input.CertificatePath, input.PrivateKeyPath = "", ""
+	}
 	if protocol.DefaultListen != "" {
 		input.Listen = protocol.DefaultListen
 	}
@@ -207,6 +213,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.TransportPath = current.TransportPath
 	plan.TransportHost = current.TransportHost
 	plan.TransportHTTPMethod = current.TransportHTTPMethod
+	plan.TLSMode, plan.TLSPublicPort = current.TLSMode, current.TLSPublicPort
 	plan.TLSServerName = current.TLSServerName
 	plan.TLSALPN = current.TLSALPN
 	plan.TLSClientCertificate = current.TLSClientCertificate

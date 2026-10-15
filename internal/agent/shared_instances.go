@@ -315,6 +315,9 @@ func stopSharedInstances(ctx context.Context, manager *ServiceManager, engine co
 		if _, err := manager.command(ctx, spec.Service, core.ActionStop); err != nil {
 			failures = append(failures, err)
 		}
+		if err := stopServiceTLSFrontends(ctx, manager, engine, spec); err != nil {
+			failures = append(failures, err)
+		}
 	}
 	return errors.Join(failures...)
 }
@@ -341,7 +344,7 @@ func stopLegacySharedBase(ctx context.Context, manager *ServiceManager, engine c
 	for _, endpoint := range endpoints {
 		if slices.Contains(sharedPorts, endpoint.Port) {
 			_, err := manager.command(ctx, base.Service, core.ActionStop)
-			return err
+			return errors.Join(err, stopServiceTLSFrontends(ctx, manager, engine, base))
 		}
 	}
 	return nil

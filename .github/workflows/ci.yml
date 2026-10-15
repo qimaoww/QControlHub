@@ -231,6 +231,8 @@ jobs:
       - run: make ss-rust-runtime-test
       - name: Verify IPQuality installation with actual systemd and mirror+file
         run: make ip-quality-systemd-test
+      - name: Verify managed TLS under the shipped Agent sandbox
+        run: make managed-tls-systemd-test managed-tls-openrc-test
 
   core-permissions:
     name: All cores / actual service permissions
@@ -250,6 +252,18 @@ jobs:
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
         run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal)$'
+      - name: Verify actual Caddy and Nginx TCP/UDP proxy clients
+        env:
+          QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
+          QCH_CADDY_BINARY: ${{ runner.temp }}/permission-cores/bin/caddy
+          QCH_NGINX_BINARY: /usr/sbin/nginx
+        run: |
+          curl --fail --location --retry 3 --max-time 120 https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz -o "$RUNNER_TEMP/caddy.tar.gz"
+          printf '%s  %s\n' 727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b "$RUNNER_TEMP/caddy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP/permission-cores/bin" caddy
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes nginx
+          go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLSProxyLiveMatrix$'
       - name: Verify full systemd service policies and forwarding
         run: |
           sudo apt-get update

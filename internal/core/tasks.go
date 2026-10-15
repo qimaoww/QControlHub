@@ -71,6 +71,7 @@ const (
 )
 
 type Task struct {
+	TLSFrontends           []TLSFrontend          `json:"tls_frontends,omitempty"`
 	CNIPSource             *CNIPSource            `json:"cnip_source,omitempty"`
 	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
 	SharedInstance         bool                   `json:"shared_instance,omitempty"`

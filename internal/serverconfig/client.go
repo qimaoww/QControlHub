@@ -20,6 +20,9 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if managedTLS(input) {
+		input.Port = input.TLSPublicPort
+	}
 	input.Protocol = nativeProtocol(input.Protocol)
 	if input.TLSServerName != "" {
 		serverName = input.TLSServerName
