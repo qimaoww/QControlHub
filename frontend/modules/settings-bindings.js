@@ -29,6 +29,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
       const number = (name) => Number(data.get(name));
       const body = {
         revision: item.revision,
+        acme_email: String(data.get("acme_email") || "").trim(),
         cnip_source: { ipv4_url: String(data.get("cnip_ipv4_url") || "").trim(), ipv6_url: String(data.get("cnip_ipv6_url") || "").trim(), format: "auto" },
         default_agent_engines: selectedDefaultEngines(data),
         panel_name: data.get("panel_name"), panel_description: data.get("panel_description"),

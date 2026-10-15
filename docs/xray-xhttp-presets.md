@@ -131,7 +131,7 @@ flowchart TD
 | --- | --- |
 | Xray JSON | 全部独立、双栈、双端点、两种混合方向及五合一每种方式；完整 downloadSettings / extra |
 | VLESS 分享链接 | 基础 XHTTP Host / path / mode / TLS / Reality；存在 extra 的复杂方案禁用，提示使用完整 JSON |
-| Mihomo 1.19.32 | 本导出器支持基础 XHTTP 与 Vision / Reality；真实双向连接已验收。HTTP/1.1 + stream-one 在 Mihomo 未通过连接测试，明确禁用；Xray 可用。含 extra 时禁用此映射并提示具体缺失字段 |
+| Mihomo 1.19.32 | 本导出器支持基础 XHTTP 与 Vision / Reality；真实双向连接已验收。HTTP/1.1 + stream-one / stream-up 未通过稳定连接测试，明确禁用；Xray 可用，或改用 h2 / packet-up。含 extra 时禁用此映射并提示具体缺失字段 |
 | sing-box 1.14.3 | 官方没有 XHTTP 传输，XHTTP 显示不支持；已有 Vision 等非 XHTTP 导出沿用原逻辑 |
 
 [Mihomo 官方选项](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/adapter/outbound/vless.go)已具备 `download-settings` / `reuse-settings`，但其结构与 Xray `downloadSettings` / `xmux` 不同，本次不输出丢失参数的近似转换。[sing-box 官方传输类型](https://github.com/SagerNet/sing-box/blob/v1.14.3/option/v2ray_transport.go)没有 XHTTP。客户端支持状态与导出器映射能力分别说明。
@@ -145,7 +145,7 @@ flowchart TD
 - TLS 双端点使用两个本地可达地址、独立 TLS 参数连至同一后端；此测试模拟 CDN 端点拓扑，不代表真实 CDN 账号和边缘网络验收。
 - h2 和 HTTP/1.1 的 packet-up、stream-up、stream-one 模式；HTTP/1.1 使用标准 TLS，证书验证保持开启。
 - 两个混合方向及五合一全部五种配置，Nginx 1.26.3 真实语法校验与 h2c 转发；验证真实用户上下载统计存在。
-- Mihomo 1.19.32 对基础导出执行真实配置校验和连接。
+- Mihomo 1.19.32 对基础导出执行真实配置校验和连接；单核环境连续五次复现 HTTP/1.1 + stream-up 超时，导出时明确说明不支持及替代方案，不输出无法稳定连接的 YAML。Xray 相同组合保留真实连接验证。
 - systemd / OpenRC 容器内受管反代的创建、更新、实例隔离、证书失败恢复、删除和卸载；systemd 使用项目实际只读沙箱。
 - PostgreSQL API 集成覆盖保存、修改、重命名、部署快照、加密元数据恢复、删除及服务端 / 客户端关联；额外验证旧 Agent 拒绝组合及其他用户无法占用排队部署的公共 / 内部端口。
 - 使用真实登录的节点所有者和分享接收方，验证限定端口 / 无限制端口下原生 TLS、两种混合和五合一的完整生命周期、五份导出、所有者服务共存、账号隔离、公共 / 内部端口授权、配额耗尽和撤销分享；Agent 配额执行入口覆盖全部五种预设。真实 Xray 连接矩阵同时运行所有者与共享实例配置，覆盖双栈、双端点和五合一全部连接。

@@ -296,16 +296,30 @@ func TestXHTTPGroupAccountingRejectsSharedUser(t *testing.T) {
 }
 
 func TestXHTTPHTTP1ExportKeepsTLSVerification(t *testing.T) {
-	input := newXHTTPTestPlan(t, ProtocolXHTTPTLS)
-	input.TLSClientALPN, input.XHTTPMode = "http/1.1", "stream-one"
-	profile, err := BuildClientProfile(input, "203.0.113.1", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var root map[string]any
-	_ = json.Unmarshal([]byte(profile.Xray), &root)
-	tls := mapValue(mapValue(firstMap(root["outbounds"])["streamSettings"])["tlsSettings"])
-	if tls["fingerprint"] != "unsafe" || tls["allowInsecure"] != false || profile.Mihomo != "" || !strings.Contains(profile.MihomoError, "HTTP/1.1") {
-		t.Fatal("HTTP/1.1 export silently changed TLS or compatibility", profile)
+	for _, alpn := range []string{"http/1.1", "h2"} {
+		for _, mode := range []string{"auto", "packet-up", "stream-up", "stream-one"} {
+			t.Run(alpn+"/"+mode, func(t *testing.T) {
+				input := newXHTTPTestPlan(t, ProtocolXHTTPTLS)
+				input.TLSClientALPN, input.XHTTPMode = alpn, mode
+				profile, err := BuildClientProfile(input, "203.0.113.1", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string]any
+				_ = json.Unmarshal([]byte(profile.Xray), &root)
+				tls := mapValue(mapValue(firstMap(root["outbounds"])["streamSettings"])["tlsSettings"])
+				if tls["allowInsecure"] != false || (alpn == "http/1.1" && tls["fingerprint"] != "unsafe") {
+					t.Fatal("export changed TLS verification", profile)
+				}
+				unsupported := alpn == "http/1.1" && (mode == "stream-up" || mode == "stream-one")
+				if unsupported {
+					if profile.Mihomo != "" || !strings.Contains(profile.MihomoError, "HTTP/1.1 + "+mode) || !strings.Contains(profile.MihomoError, "Xray JSON") {
+						t.Fatal("unsupported Mihomo combination must explain alternatives", profile)
+					}
+				} else if profile.Mihomo == "" || profile.MihomoError != "" {
+					t.Fatal("supported Mihomo export was disabled", profile)
+				}
+			})
+		}
 	}
 }

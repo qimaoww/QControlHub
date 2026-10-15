@@ -10,6 +10,7 @@ import (
 
 type PanelSettings struct {
 	CNIPSource                     *CNIPSource `json:"cnip_source"`
+	ACMEEmail                      string      `json:"acme_email"`
 	DefaultAgentEngines            []Engine    `json:"default_agent_engines"`
 	Revision                       int64       `json:"revision"`
 	PanelName                      string      `json:"panel_name"`
@@ -82,6 +83,9 @@ func DefaultPanelSettings() PanelSettings {
 }
 
 func (settings PanelSettings) Validate() error {
+	if err := ValidateACMEEmail(settings.ACMEEmail); err != nil {
+		return err
+	}
 	if settings.CNIPSource != nil {
 		if err := settings.CNIPSource.Validate(); err != nil {
 			return err

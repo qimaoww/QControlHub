@@ -34,6 +34,7 @@ const routeAliases = Object.freeze({
   "settings-notify": "settings",
   "settings-komari": "settings",
   "settings-cnip": "settings",
+  "settings-certificates": "settings",
   "settings-deployment": "settings",
   "preset-node": "live-config",
   "settings-node": "node-settings",
