@@ -143,14 +143,15 @@ async function archiveConfigs() {
           },
         );
         if (state.data !== sessionData) return;
-        captureConfig();
+        captureDrafts();
+        const currentDraft = drafts.configs.get(draftKey) || formConfig;
         // Keep edits made during a save as a draft of the returned version.
         const remaining = createArchiveDraft(saved);
-        if (formConfig.name !== payload.name) remaining.name = formConfig.name;
-        if (formConfig.description !== payload.description) remaining.description = formConfig.description;
-        const source = formConfig.sources.get(payload.engine);
+        if (currentDraft.name !== payload.name) remaining.name = currentDraft.name;
+        if (currentDraft.description !== payload.description) remaining.description = currentDraft.description;
+        const source = currentDraft.sources.get(payload.engine);
         if (source.content !== payload.content) remaining.sources.get(saved.engine).content = source.content;
-        if (!formConfig.id && (formConfig.engine !== payload.engine || [...formConfig.sources.entries()]
+        if (!currentDraft.id && (currentDraft.engine !== payload.engine || [...currentDraft.sources.entries()]
           .some(([engine, value]) => engine !== payload.engine && value.content !== value.original))) {
           source.original = payload.content;
         } else drafts.configs.delete(draftKey);

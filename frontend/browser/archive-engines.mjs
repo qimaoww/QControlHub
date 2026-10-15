@@ -80,9 +80,9 @@ export async function testArchiveEnginesRuntime(preview = false) {
   const render = createConfigArchive({ api, optionalAPI: api, state, engines, ...display,
     can: permission => writable || permission.endsWith(".read"),
     confirmAction: async () => true, notify: message => records.errors.push(message), submitTask: async () => {}, bindCodeEditors,
-    shell: markup => {
+    shell: (markup, title, { viewKey } = {}) => {
       const fresh = document.createElement("main");
-      fresh.innerHTML = `<button id="new-config" type="button">New archive</button>${markup}`;
+      fresh.innerHTML = `<button id="new-config" type="button">New archive</button><div data-refresh-key="${viewKey}">${markup}</div>`;
       reconcileView(root, fresh);
       renderCount++;
     },
@@ -249,6 +249,24 @@ export async function testArchiveEnginesRuntime(preview = false) {
   await waitFor(() => renderCount > beforePendingSave, "pending save never finished");
   check("xray", '{"edited":"during save"}', true);
   assert.equal(field(archive(), "description").value, "Unsaved during save");
+  archive().querySelector("[data-code-reset]").click();
+  check("xray");
+  // A history preview replaces the workspace while a clean save is pending.
+  // Later edits belong to the new mounted draft, not the submit handler's form.
+  fill(archive(), "description", "");
+  saveGate = deferred();
+  archive().requestSubmit();
+  state.data.revisionVersion = 1;
+  await render();
+  fill(archive(), "name", "Edited during history preview");
+  fill(archive(), "content", '{"edited":"after history preview"}');
+  fill(archive(), "description", "Keep history preview draft");
+  const beforeHistorySave = renderCount;
+  saveGate.resolve(); saveGate = null;
+  await waitFor(() => renderCount > beforeHistorySave, "history save never finished");
+  check("xray", '{"edited":"after history preview"}', true);
+  assert.equal(field(archive(), "name").value, "Edited during history preview");
+  assert.equal(field(archive(), "description").value, "Keep history preview draft");
   archive().querySelector("[data-code-reset]").click();
   check("xray");
   // Latest refresh wins and another account cannot inherit a page draft.
