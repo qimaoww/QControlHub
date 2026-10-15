@@ -44,7 +44,7 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 		var business []any
 		inbounds, _ := root["inbounds"].([]any)
 		for _, raw := range inbounds {
-			if !xrayInternalAPIInbound(root, mapValue(raw)) {
+			if !xrayInternalAPIInbound(root, mapValue(raw)) && xhttpGroupOwner(root, stringValue(mapValue(raw)["tag"])) == "" {
 				business = append(business, raw)
 			}
 		}

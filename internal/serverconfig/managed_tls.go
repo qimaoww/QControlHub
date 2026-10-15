@@ -191,6 +191,9 @@ func ManagedTLSFrontends(engine core.Engine, content string, metadata map[string
 			} `json:"transport"`
 		} `json:"inbounds"`
 	}
+	if engine == core.EngineXray {
+		return xhttpManagedFrontends(content, metadata)
+	}
 	if engine != core.EngineSingBox {
 		return nil, nil
 	}

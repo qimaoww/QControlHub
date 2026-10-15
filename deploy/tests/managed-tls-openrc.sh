@@ -8,11 +8,18 @@ trap cleanup EXIT INT TERM
 cd "$root"
 CGO_ENABLED=0 go build -buildvcs=false -o "$work/qagent" ./cmd/agent
 CGO_ENABLED=0 go test -buildvcs=false -c -o "$work/tls.test" ./internal/agent
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
+ -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
+ -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
 docker run --name "$container" --init --cap-add NET_ADMIN --cap-add SYS_PTRACE \
  -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.23 sh -ec '
  apk add --no-cache openrc libcap >/dev/null
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
- mkdir -p /usr/local/lib/qagent /run/openrc
+ mkdir -p /usr/local/lib/qagent /run/openrc /etc/qcontrolhub/tls
+ cp /fixtures/xhttp.crt /fixtures/xhttp.key /etc/qcontrolhub/tls/
+ chown -R root:qcontrolhub-core /etc/qcontrolhub/tls
+ chmod 0750 /etc/qcontrolhub/tls
+ chmod 0640 /etc/qcontrolhub/tls/*
  cp /fixtures/qagent /fixtures/tls.test /usr/local/lib/qagent/
  echo default > /run/openrc/softlevel
  cp /src/deploy/openrc/qagent /etc/init.d/qagent

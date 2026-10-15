@@ -10,6 +10,24 @@ import (
 // BuildClientOutbound exports only client connection material from a deployed
 // inbound. Never serialize Input: it also contains server private keys.
 func BuildClientOutbound(engine core.Engine, input Input, address, serverName string) (json.RawMessage, error) {
+	if engine == core.EngineXray && input.Transport == "xhttp" {
+		if isXHTTPGroup(input.Protocol) && input.XHTTPBackendPort > 0 {
+			if input.ClientAddress == "" {
+				input.ClientAddress = address
+			}
+			kind := input.Protocol
+			if kind == ProtocolXHTTPFive {
+				kind = ProtocolVLESS
+			}
+			input = xhttpClientVariant(input, kind)
+		}
+		if _, err := BuildClientProfile(input, address, serverName); err != nil {
+			return nil, err
+		}
+		out := xrayVLESSOutbound(input, address, serverName)
+		out["tag"] = "peer"
+		return json.Marshal(out)
+	}
 	if input.Protocol == ProtocolTailscale || input.Protocol == ProtocolOpenVPNServer {
 		return nil, fmt.Errorf("%s 服务端端点没有 sing-box 出站等价物", input.Protocol)
 	}

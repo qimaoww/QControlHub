@@ -48,7 +48,7 @@ func singBoxPresetFor(key string) (singBoxPreset, bool) {
 }
 
 func nativeProtocol(key string) string {
-	if key == ProtocolVLESSTLS {
+	if key == ProtocolVLESSTLS || key == ProtocolXHTTPTLS || isXHTTPGroup(key) {
 		return ProtocolVLESS
 	}
 	if preset, ok := singBoxPresetFor(key); ok {

@@ -12,6 +12,8 @@ import (
 const accountingPrefix = "qch-trf-"
 
 type AccountingPort struct {
+	User      string   `json:"user,omitempty"`
+	Aliases   []string `json:"aliases,omitempty"`
 	Port      int      `json:"port"`
 	Inbound   string   `json:"inbound"`
 	Outbounds []string `json:"outbounds,omitempty"`

@@ -28,6 +28,11 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")
 	}
+	if engine == core.EngineXray {
+		if err := validateXHTTPInput(&input); err != nil {
+			return "", err
+		}
+	}
 	if isSnellProtocol(input.Protocol) {
 		if err := validateSnellPresetIdentity(input); err != nil {
 			return "", err
@@ -124,7 +129,7 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	}
 	if input.RealityEnabled {
 		vision := input.Protocol == ProtocolVLESS && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
-		xhttp := input.Protocol == ProtocolVLESSXHTTP && input.Transport == "xhttp" && input.Flow == ""
+		xhttp := (input.Protocol == ProtocolVLESSXHTTP || isXHTTPGroup(input.Protocol)) && input.Transport == "xhttp" && input.Flow == ""
 		encTCP := input.Protocol == ProtocolVLESSEncTCP && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
 		encXHTTP := input.Protocol == ProtocolVLESSEncXHTTP && input.Transport == "xhttp" && input.Flow == "xtls-rprx-vision"
 		h2 := engine == core.EngineSingBox && input.Protocol == ProtocolVLESSHTTP2Reality && input.Transport == "http" && input.Flow == ""
@@ -145,7 +150,7 @@ func Generate(engine core.Engine, input Input) (string, error) {
 			return "", errors.New("Reality X25519 密钥对无效")
 		}
 		shortID, err := hex.DecodeString(input.RealityShortID)
-		if err != nil || len(shortID) != 8 {
+		if err != nil || len(shortID) > 8 {
 			return "", errors.New("Reality Short ID 无效")
 		}
 		if engine == core.EngineXray {

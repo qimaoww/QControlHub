@@ -1,3 +1,4 @@
+import { bindXHTTPOptions } from "./server-plan-xhttp.js";
 import { setVisible, updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { bindProtocolOptionVisibility, bindServerPlanRegeneration, installGeneratedFieldButtons, readServerPlanInput } from "./server-plan-form.js";
@@ -117,6 +118,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
   if (serverPlanForm) drafts().bind(serverPlanForm, draftKey("#server-plan-form"));
   if (serverPlanForm && !fieldsOnly) {
     bindProtocolOptionVisibility(serverPlanForm);
+    bindXHTTPOptions(serverPlanForm);
     installGeneratedFieldButtons(serverPlanForm, ctx.protocol);
   }
   const regenerateStatus = serverPlanForm?.querySelector(
@@ -391,6 +393,11 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
           const field = formElement.elements.namedItem(correctionField);
           const section = field?.closest(".builder-section");
           if (section) root.querySelector(`[data-builder-step="${section.id}"]`)?.click();
+          let parent = field?.parentElement;
+          while (parent && parent !== formElement) {
+            if (parent.tagName === "DETAILS") parent.open = true;
+            parent = parent.parentElement;
+          }
           field?.focus();
         }
       }

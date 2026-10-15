@@ -79,13 +79,15 @@ func (m *tlsFrontendManager) load() (tlsDeployments, error) {
 }
 
 func frontendKey(f core.TLSFrontend) string {
-	sum := sha256.Sum256([]byte(f.Domain + f.Certificate + f.PrivateKey))
+	sum := sha256.Sum256([]byte(f.Domain + f.Certificate + f.PrivateKey + f.CertificatePath + f.PrivateKeyPath))
 	return hex.EncodeToString(sum[:12])
 }
 
 func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) {
 	var result []core.TLSFrontend
 	owners := map[int]string{}
+	localPorts := map[int]bool{}
+	localBackends := map[int]bool{}
 	paths := map[string]bool{}
 	backends := map[int]bool{}
 	services := make([]string, 0, len(deployments))
@@ -102,6 +104,14 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			if err := f.Validate(); err != nil {
 				return nil, err
 			}
+			if owners[f.PublicPort] != "" && (f.LocalOnly || localPorts[f.PublicPort]) {
+				return nil, fmt.Errorf("本地 TLS 端口 %d 已被其他入口占用", f.PublicPort)
+			}
+			if backends[f.BackendPort] && (f.LocalOnly || localBackends[f.BackendPort]) {
+				return nil, fmt.Errorf("组合内部端口 %d 已被其他入站占用", f.BackendPort)
+			}
+			localPorts[f.PublicPort] = localPorts[f.PublicPort] || f.LocalOnly
+			localBackends[f.BackendPort] = localBackends[f.BackendPort] || f.LocalOnly
 			if mode := owners[f.PublicPort]; mode != "" && mode != f.Mode {
 				return nil, fmt.Errorf("公网端口 %d 已用于 %s，不能同时用于 %s", f.PublicPort, mode, f.Mode)
 			}
@@ -182,6 +192,10 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string) stri
 		for _, name := range names {
 			f := domains[name]
 			key := frontendKey(f)
+			if f.Transport == "xhttp" {
+				renderNginxXHTTP(&body, f)
+				continue
+			}
 			fmt.Fprintf(&body, " server {\n  listen %d ssl;\n  server_name %s;\n  ssl_protocols TLSv1.2 TLSv1.3;\n  ssl_certificate %s;\n  ssl_certificate_key %s;\n", port, name, filepath.Join(root, key+".crt"), filepath.Join(root, key+".key"))
 			// All paths on a port are available in every virtual host. HTTP Host is
 			// independent of TLS SNI, including clients connecting to an IP address.
@@ -311,7 +325,12 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
-		if f.Mode == "nginx" {
+		if f.Mode == "nginx" && f.Transport == "xhttp" {
+			if err := validateXHTTPCertificate(ctx, f); err != nil {
+				return err
+			}
+		}
+		if f.Mode == "nginx" && f.Transport != "xhttp" {
 			if _, err := tls.X509KeyPair([]byte(f.Certificate), []byte(f.PrivateKey)); err != nil {
 				return fmt.Errorf("托管 Nginx 证书无效：%w", err)
 			}
@@ -447,7 +466,11 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 			return err
 		}
 		status, _ := m.services.status(ctx, service)
-		if status == "active" && string(stored) == content {
+		referencedCertificates := false
+		for _, f := range frontends {
+			referencedCertificates = referencedCertificates || f.Mode == mode && f.Transport == "xhttp"
+		}
+		if status == "active" && string(stored) == content && !referencedCertificates {
 			continue
 		}
 		var output string
@@ -553,7 +576,17 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 
 func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
 	config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: f.Domain, NextProtos: []string{"http/1.1"}}
-	if f.Mode == "nginx" {
+	if f.Transport == "xhttp" {
+		config.NextProtos = []string{"h2"}
+		data, err := os.ReadFile(f.CertificatePath)
+		if err != nil {
+			return err
+		}
+		config.RootCAs = x509.NewCertPool()
+		if !config.RootCAs.AppendCertsFromPEM(data) {
+			return errors.New("XHTTP 本地目标证书无效")
+		}
+	} else if f.Mode == "nginx" {
 		config.RootCAs = x509.NewCertPool()
 		if !config.RootCAs.AppendCertsFromPEM([]byte(f.Certificate)) {
 			return errors.New("Nginx 公共证书无效")

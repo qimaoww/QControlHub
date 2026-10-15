@@ -136,7 +136,7 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 			proxy["grpc-opts"] = map[string]string{"grpc-service-name": input.TransportPath}
 		case "xhttp":
 			proxy["network"] = "xhttp"
-			proxy["xhttp-opts"] = map[string]string{"path": input.TransportPath, "mode": "auto"}
+			proxy["xhttp-opts"] = map[string]string{"path": input.TransportPath, "host": xhttpClientHost(input), "mode": xhttpMode(input.XHTTPMode)}
 		}
 	}
 	return marshalSingleLineYAML(proxy)

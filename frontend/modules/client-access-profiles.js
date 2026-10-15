@@ -1,3 +1,4 @@
+import { bindXrayDownloads } from "./client-xray-exports.js";
 import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { bindDialogBackdrop } from "./popup.js";
@@ -5,6 +6,7 @@ import { bindDialogBackdrop } from "./popup.js";
 import { copyClientValue } from "./client-clipboard.js";
 export function createClientAccessProfiles({ api, state, can, notify }, { clientAccess }) {
   return () => {
+    bindXrayDownloads();
     document.querySelectorAll("[data-secret-visibility]").forEach((button) => {
       button.onclick = () => {
         const input = button.parentElement.querySelector("input, textarea");

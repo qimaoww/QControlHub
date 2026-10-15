@@ -41,6 +41,9 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 		if err != nil {
 			return err
 		}
+		if task.Engine == core.EngineXray && len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureXHTTP) {
+			return fmt.Errorf("XHTTP 组合需要新版 Agent（xhttp-presets-v1）")
+		}
 		if len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureManagedTLS) {
 			return fmt.Errorf("Agent 不再支持托管 TLS 反代（managed-tls-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
 		}

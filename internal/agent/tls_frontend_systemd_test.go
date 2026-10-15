@@ -144,5 +144,46 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	if err := validatePrivilegedExecutable(managedCaddyBinary); err != nil {
 		t.Fatal("official Caddy installation", err)
 	}
+	// The same privileged helper must handle local Xray targets while the
+	// long-running Agent retains its shipped read-only /etc sandbox.
+	xrayService, sharedXray := "qagent-xray.service", "qagent-xray@shr_0000000000000001.service"
+	if kind == ServiceManagerOpenRC {
+		xrayService, sharedXray = "qagent-xray", "qagent-xray-shr_0000000000000001"
+	}
+	xhttp := core.TLSFrontend{Tag: "five", Mode: "nginx", Domain: "tls.example.test", RealityName: "reality.example.test", PublicPort: 31001, BackendPort: 31002, Transport: "xhttp", Path: "/xhttp-five", LocalOnly: true, CertificatePath: "/etc/qcontrolhub/tls/xhttp.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/xhttp.key"}
+	invoke(xrayService, core.ActionDeploy, true, []core.TLSFrontend{xhttp}, true)
+	invoke(xrayService, core.ActionDeploy, false, []core.TLSFrontend{xhttp}, true)
+	if err := probeFrontendTLS(ctx, xhttp); err != nil {
+		t.Fatal("local XHTTP TLS target", err)
+	}
+	second := xhttp
+	second.Tag, second.Path, second.PublicPort, second.BackendPort = "mixed", "/xhttp-mixed", 31003, 31004
+	invoke(sharedXray, core.ActionDeploy, false, []core.TLSFrontend{second}, true)
+	invoke(xrayService, core.ActionStop, false, nil, true)
+	if err := probeFrontendTLS(ctx, second); err != nil {
+		t.Fatal("stopping Xray group removed another instance", err)
+	}
+	invoke(xrayService, core.ActionDeploy, false, []core.TLSFrontend{second}, false)
+	broken := xhttp
+	broken.PrivateKeyPath = "/etc/qcontrolhub/tls/missing.key"
+	invoke(xrayService, core.ActionDeploy, true, []core.TLSFrontend{broken}, false)
+	if err := probeFrontendTLS(ctx, second); err != nil {
+		t.Fatal("failed stage damaged existing target", err)
+	}
+	invoke(xrayService, core.ActionStart, false, nil, true)
+	invoke(xrayService, core.ActionRestart, false, nil, true)
+	if err := probeFrontendTLS(ctx, xhttp); err != nil {
+		t.Fatal("Xray target restart", err)
+	}
+	invoke(xrayService, core.ActionDeploy, false, nil, true)
+	if err := probeFrontendTLS(ctx, second); err != nil {
+		t.Fatal("deleting Xray group removed another instance", err)
+	}
+	invoke(sharedXray, core.ActionUninstall, false, nil, true)
+	status, err = manager.status(ctx, proxyService)
+	if err != nil || status != "inactive" {
+		t.Fatalf("last Xray target not stopped: %s %v", status, err)
+	}
+	t.Log("XHTTP local targets validated, deployed, isolated, rolled back, restarted and removed as non-root on " + kind)
 	t.Log("managed TLS installed, validated, reloaded, preserved shared routes, rejected conflicts, stopped and restarted under the shipped Agent sandbox")
 }

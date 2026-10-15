@@ -244,13 +244,13 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		in := mapValue(raw)
 		tag := stringValue(in["tag"])
 		port := trafficPortNumber(in[portKey])
-		if xray && xrayInternalAPIInbound(root, in) {
+		if xray && (xrayInternalAPIInbound(root, in) || xhttpGroupOwner(root, tag) != "") {
 			continue
 		}
 		if !tagPattern.MatchString(tag) || port == 0 || seenPorts[port] || seenTags[tag] {
 			return fmt.Errorf("accounting requires unique tagged single-port inbounds")
 		}
-		if settings := mapValue(in["settings"]); settings["fallbacks"] != nil {
+		if settings := mapValue(in["settings"]); settings["fallbacks"] != nil && len(xhttpGroupRouteTags(root, tag)) == 1 {
 			return fmt.Errorf("inbound fallbacks require explicit independent exit mapping")
 		}
 		for _, key := range []string{"allocate", "detour", "listen_ports"} {
@@ -260,6 +260,16 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		seenPorts[port], seenTags[tag] = true, true
 		entry := AccountingPort{Port: port, Inbound: tag}
+		if xray {
+			if tags := xhttpGroupRouteTags(root, tag); len(tags) > 1 {
+				entry.Aliases = tags[1:]
+				var err error
+				entry.User, err = xhttpAccountingUser(root, in)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		if marked {
 			entry.Mark = uint32(0x51430000) | uint32(port)
 		}
@@ -323,7 +333,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 			continue
 		}
 		for _, entry := range plan.Ports {
-			if !accountingRuleMatches(rule[inKey], entry.Inbound) {
+			if !accountingEntryMatches(rule[inKey], entry) {
 				continue
 			}
 			out := byTag[target]
@@ -331,7 +341,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 				continue
 			}
 			clone := cloneAccountingObject(rule)
-			clone[inKey] = []string{entry.Inbound}
+			clone[inKey] = accountingEntryRuleTags(rule[inKey], entry)
 			clone[targetKey] = accountingTag(entry.Port, target)
 			compiled = append(compiled, clone)
 		}
@@ -342,7 +352,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		if out[kindKey] == "block" || out[kindKey] == "blackhole" || out[kindKey] == "dns" {
 			continue
 		}
-		rule := map[string]any{inKey: []string{entry.Inbound}, targetKey: accountingTag(entry.Port, defaultTag)}
+		rule := map[string]any{inKey: append([]string{entry.Inbound}, entry.Aliases...), targetKey: accountingTag(entry.Port, defaultTag)}
 		if xray {
 			rule["type"] = "field"
 		} else {
@@ -387,6 +397,22 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 			system[key] = true
 		}
 		policy["system"] = system
+		for _, entry := range plan.Ports {
+			if entry.User == "" {
+				continue
+			}
+			levels := mapValue(policy["levels"])
+			if levels == nil {
+				levels = map[string]any{}
+			}
+			level := mapValue(levels["0"])
+			if level == nil {
+				level = map[string]any{}
+			}
+			level["statsUserUplink"], level["statsUserDownlink"] = true, true
+			levels["0"] = level
+			policy["levels"] = levels
+		}
 		root["policy"] = policy
 	} else {
 		plan.API = "127.0.0.1:10086"

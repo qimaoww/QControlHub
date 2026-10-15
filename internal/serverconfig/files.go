@@ -83,12 +83,27 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	type listenerFile struct {
 		section string
 		index   int
-		entry   json.RawMessage
+		entries []json.RawMessage
 	}
 	var listeners []listenerFile
+	var graph map[string]any
+	if engine == core.EngineXray {
+		_ = json.Unmarshal([]byte(content), &graph)
+	}
 	for _, key := range ingressKeys {
-		for i, entry := range lists[key] {
-			listeners = append(listeners, listenerFile{section: key, index: i, entry: entry})
+		for i := 0; i < len(lists[key]); i++ {
+			entries := []json.RawMessage{lists[key][i]}
+			var primary map[string]any
+			_ = json.Unmarshal(entries[0], &primary)
+			if backend, _ := xhttpGroup(graph, primary); key == "inbounds" && backend != nil && i+1 < len(lists[key]) {
+				var following map[string]any
+				_ = json.Unmarshal(lists[key][i+1], &following)
+				if following["tag"] == backend["tag"] {
+					entries = append(entries, lists[key][i+1])
+					i++
+				}
+			}
+			listeners = append(listeners, listenerFile{section: key, index: i, entries: entries})
 		}
 	}
 	// Only move an ordered suffix of dedicated exits. The shared/default
@@ -101,7 +116,7 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	}
 	for i, listener := range listeners {
 		var in map[string]any
-		_ = json.Unmarshal(listener.entry, &in)
+		_ = json.Unmarshal(listener.entries[0], &in)
 		if port := trafficPortNumber(in[portKey]); port != 0 {
 			if _, exists := owners[port]; exists {
 				owners[port] = -1
@@ -149,14 +164,14 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	files := []ConfigFile{{Path: "common.json"}}
 	used := map[string]bool{}
 	for i, listener := range listeners {
-		fragment := map[string]any{listener.section: []json.RawMessage{listener.entry}}
+		fragment := map[string]any{listener.section: listener.entries}
 		if len(paired[i]) > 0 {
 			fragment["outbounds"] = paired[i]
 		}
 		var in struct {
 			Tag string `json:"tag"`
 		}
-		_ = json.Unmarshal(listener.entry, &in)
+		_ = json.Unmarshal(listener.entries[0], &in)
 		value, _ := json.MarshalIndent(fragment, "", "  ")
 		files = append(files, ConfigFile{Path: listener.section + "/" + configEntryFilename(in.Tag, listener.section, listener.index, used), Content: string(value) + "\n"})
 	}
@@ -217,10 +232,19 @@ func MergeConfigFiles(engine core.Engine, files []ConfigFile) (string, error) {
 			}
 		}
 		var entries []json.RawMessage
-		if err := json.Unmarshal(fragment[key], &entries); err != nil || len(entries) != 1 {
-			return "", fmt.Errorf("%s must contain exactly one entry", file.Path)
+		if err := json.Unmarshal(fragment[key], &entries); err != nil {
+			return "", fmt.Errorf("%s entries must be an array", file.Path)
 		}
-		lists[key] = append(lists[key], entries[0])
+		if len(entries) != 1 {
+			var group map[string]any
+			_ = json.Unmarshal([]byte(file.Content), &group)
+			primary := firstMap(group["inbounds"])
+			backend, _ := xhttpGroup(group, primary)
+			if engine != core.EngineXray || key != "inbounds" || len(entries) != 2 || backend == nil {
+				return "", fmt.Errorf("%s must contain one entry or a complete managed XHTTP pair", file.Path)
+			}
+		}
+		lists[key] = append(lists[key], entries...)
 		if key == "outbounds" {
 			standaloneExits = true
 		} else if raw, exists := fragment["outbounds"]; exists {

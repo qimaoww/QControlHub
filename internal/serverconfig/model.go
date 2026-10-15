@@ -5,26 +5,30 @@ package serverconfig
 import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
-	ProtocolShadowsocks    = "shadowsocks"
-	ProtocolSS2022         = "ss2022"
-	ProtocolVLESS          = "vless"
-	ProtocolVLESSXHTTP     = "vless-xhttp-reality"
-	ProtocolVLESSEncTCP    = "vless-enc-tcp-reality-vision"
-	ProtocolVLESSEncXHTTP  = "vless-enc-xhttp-reality-vision"
-	ProtocolVLESSEncPlain  = "vless-enc-tcp"
-	ProtocolVMess          = "vmess"
-	ProtocolTrojan         = "trojan"
-	ProtocolHy2            = "hysteria2"
-	ProtocolTUIC           = "tuic"
-	ProtocolAnyTLS         = "anytls"
-	ProtocolSnell          = "snell"
-	ProtocolSnellShadowTLS = "snell-shadow-tls-v3"
-	ProtocolMieru          = "mieru"
-	ProtocolSudoku         = "sudoku"
-	ProtocolPortForward    = "port-forward"
-	ProtocolWireGuard      = "wireguard"
-	ProtocolTailscale      = "tailscale"
-	ProtocolOpenVPNServer  = "openvpn-server"
+	ProtocolShadowsocks     = "shadowsocks"
+	ProtocolSS2022          = "ss2022"
+	ProtocolVLESS           = "vless"
+	ProtocolVLESSXHTTP      = "vless-xhttp-reality"
+	ProtocolXHTTPTLS        = "vless-xhttp-tls"
+	ProtocolXHTTPTLSReality = "vless-xhttp-tls-reality"
+	ProtocolXHTTPRealityTLS = "vless-xhttp-reality-tls"
+	ProtocolXHTTPFive       = "vless-xhttp-five"
+	ProtocolVLESSEncTCP     = "vless-enc-tcp-reality-vision"
+	ProtocolVLESSEncXHTTP   = "vless-enc-xhttp-reality-vision"
+	ProtocolVLESSEncPlain   = "vless-enc-tcp"
+	ProtocolVMess           = "vmess"
+	ProtocolTrojan          = "trojan"
+	ProtocolHy2             = "hysteria2"
+	ProtocolTUIC            = "tuic"
+	ProtocolAnyTLS          = "anytls"
+	ProtocolSnell           = "snell"
+	ProtocolSnellShadowTLS  = "snell-shadow-tls-v3"
+	ProtocolMieru           = "mieru"
+	ProtocolSudoku          = "sudoku"
+	ProtocolPortForward     = "port-forward"
+	ProtocolWireGuard       = "wireguard"
+	ProtocolTailscale       = "tailscale"
+	ProtocolOpenVPNServer   = "openvpn-server"
 )
 
 type Protocol struct {
@@ -55,6 +59,21 @@ type Protocol struct {
 }
 
 type Input struct {
+	XHTTPMode                    string `json:"xhttp_mode,omitempty"`
+	XHTTPExtra                   string `json:"xhttp_extra,omitempty"`
+	XHTTPServerExtra             string `json:"xhttp_server_extra,omitempty"`
+	ClientAddress                string `json:"client_address,omitempty"`
+	ClientPort                   int    `json:"client_port,omitempty"`
+	ClientHost                   string `json:"client_host,omitempty"`
+	TLSClientALPN                string `json:"tls_client_alpn,omitempty"`
+	RealityTarget                string `json:"reality_target,omitempty"`
+	RealityServerNames           string `json:"reality_server_names,omitempty"`
+	XHTTPTLSAddress              string `json:"xhttp_tls_address,omitempty"`
+	XHTTPTLSClientPort           int    `json:"xhttp_tls_client_port,omitempty"`
+	XHTTPTLSHost                 string `json:"xhttp_tls_host,omitempty"`
+	XHTTPBackendPort             int    `json:"xhttp_backend_port,omitempty"`
+	XHTTPTLSPort                 int    `json:"xhttp_tls_port,omitempty"`
+	XHTTPCDN                     string `json:"xhttp_cdn,omitempty"`
 	TLSMode                      string `json:"tls_mode,omitempty"`
 	TLSPublicPort                int    `json:"tls_public_port,omitempty"`
 	Protocol                     string `json:"protocol"`
@@ -323,6 +342,7 @@ func Protocols(engine core.Engine) []Protocol {
 		)
 	}
 	if engine == core.EngineXray {
+		protocols = append(protocols, xhttpProtocols()...)
 		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，单客户端预设。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
 	}
 	if engine == core.EngineSingBox {

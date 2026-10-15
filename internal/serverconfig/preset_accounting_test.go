@@ -33,6 +33,10 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 					t.Fatal(err)
 				}
 				input.Tag, input.Port = "second", 21002
+				if isXHTTPGroup(input.Protocol) {
+					input.XHTTPBackendPort, input.XHTTPTLSPort = 31002, 32002
+					input.Username = "second-group"
+				}
 				second, err := Generate(engine, input)
 				if err != nil {
 					t.Fatal(err)
@@ -61,7 +65,11 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 								Tag string `json:"tag"`
 							} `json:"outbounds"`
 						}
-						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds)+len(fragment.Endpoints) != 1 || len(fragment.Outbounds) == 0 {
+						members := 1
+						if isXHTTPGroup(input.Protocol) {
+							members = 2
+						}
+						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds)+len(fragment.Endpoints) != members || len(fragment.Outbounds) == 0 {
 							t.Fatalf("missing paired exit: %s %v", files[i+1].Content, err)
 						}
 						var tags []string

@@ -21,7 +21,7 @@ export function clientAccessExport(item, format) {
   return {
     value: native ? "" : value,
     format: profile.format || "URL",
-    error: native ? "此协议不支持 URL，请使用其他显示格式或查看参数详情。" : value ? "" : "暂无可用 URL",
+    error: profile.uri_error || (native ? "此协议不支持 URL，请使用其他显示格式或查看参数详情。" : value ? "" : "暂无可用 URL"),
   };
 }
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {

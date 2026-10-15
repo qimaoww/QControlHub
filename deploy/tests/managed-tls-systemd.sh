@@ -22,6 +22,9 @@ unit = unit.replace('Restart=on-failure', 'Restart=no')
 unit += '\n[Service]\nEnvironment=QCH_TEST_MANAGED_TLS_SYSTEMD=1\n'
 Path(sys.argv[1]).write_text(unit)
 PY
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
+ -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
+ -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
 docker build -t "$image" -f deploy/tests/Dockerfile.managed-tls "$work"
 docker run -d --name "$container" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock --tmpfs /tmp "$image" >/dev/null
 ready=false

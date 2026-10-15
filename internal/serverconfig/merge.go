@@ -62,6 +62,11 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 }
 
 func mutateGenerated(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
+	if engine == core.EngineXray {
+		if merged, handled, err := mutateXHTTPGroup(currentContent, generatedContent, matchValue, operation); handled {
+			return merged, err
+		}
+	}
 	if engine == core.EngineShadowsocksRust {
 		return mutateShadowsocksRust(currentContent, generatedContent, matchValue, operation)
 	}

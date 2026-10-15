@@ -13,10 +13,14 @@ type ClientField struct {
 // as explicit fields. Most protocols use a URI; protocols without a portable
 // URI use their native single-line client configuration instead.
 type ClientProfile struct {
-	Format                 string        `json:"format"`
-	URI                    string        `json:"uri"`
-	Mihomo                 string        `json:"-"`
-	MihomoError            string        `json:"-"`
-	SubscriptionCompatible bool          `json:"subscription_compatible"`
-	Fields                 []ClientField `json:"fields"`
+	Xray                   string          `json:"xray_json,omitempty"`
+	URIError               string          `json:"uri_error,omitempty"`
+	SingBoxError           string          `json:"sing_box_error,omitempty"`
+	Variants               []ClientVariant `json:"variants,omitempty"`
+	Format                 string          `json:"format"`
+	URI                    string          `json:"uri"`
+	Mihomo                 string          `json:"-"`
+	MihomoError            string          `json:"mihomo_error,omitempty"`
+	SubscriptionCompatible bool            `json:"subscription_compatible"`
+	Fields                 []ClientField   `json:"fields"`
 }

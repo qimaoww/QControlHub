@@ -272,3 +272,27 @@ func TestSingleProtocolUpgradePreservesQuotaBaseline(t *testing.T) {
 		t.Fatalf("upgrade rebilled old scope: %+v", got)
 	}
 }
+
+func TestXHTTPGroupNativeCountersIncludeBackend(t *testing.T) {
+	record := &trafficRecord{Policy: core.PortTrafficPolicy{Port: 443}}
+	counters := map[string]uint64{}
+	snapshot := nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "core-api", Ports: []serverconfig.AccountingPort{{Port: 443, Inbound: "five", Aliases: []string{"five.xh"}, User: "group-user", Outbounds: []string{"exit"}}}}, Counters: counters, ProcessEpoch: "same"}
+	if _, _, err := collectNativeAccounting(record, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	counters["inbound>>>five>>>traffic>>>uplink"] = 10
+	counters["inbound>>>five>>>traffic>>>downlink"] = 20
+	counters["inbound>>>five.xh>>>traffic>>>uplink"] = 30
+	counters["inbound>>>five.xh>>>traffic>>>downlink"] = 40
+	counters["user>>>group-user>>>traffic>>>uplink"] = 40
+	counters["user>>>group-user>>>traffic>>>downlink"] = 60
+	counters["outbound>>>exit>>>traffic>>>downlink"] = 50
+	counters["outbound>>>exit>>>traffic>>>uplink"] = 60
+	received, sent, err := collectNativeAccounting(record, snapshot)
+	if err != nil || received != 90 || sent != 120 || record.Accounting.ClientReceived != 40 || record.Accounting.ClientSent != 60 || record.Accounting.TargetReceived != 50 {
+		t.Fatalf("group accounting rx=%d tx=%d %+v %v", received, sent, record.Accounting, err)
+	}
+	if received, sent, err = collectNativeAccounting(record, snapshot); err != nil || received != 0 || sent != 0 {
+		t.Fatal("repeated sample rebilled", received, sent, err)
+	}
+}

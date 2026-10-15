@@ -1,3 +1,4 @@
+import { readXHTTPOptions } from "./server-plan-xhttp.js";
 import { setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 
@@ -138,6 +139,7 @@ export function readServerPlanInput(form, protocol) {
     mask_rotation: lowEntropyMode === 0 ? "none" : customValue("mask_rotation"),
   } : undefined;
   return {
+    ...readXHTTPOptions(form, protocol, values),
     protocol: protocol.key,
     tag: values.get("tag"),
     listen: values.get("listen"),
@@ -153,7 +155,7 @@ export function readServerPlanInput(form, protocol) {
         : ""),
     transport: values.get("transport"),
     transport_path: ["raw", "quic"].includes(values.get("transport")) ? "" : values.get("transport_path") || "",
-    transport_host: ["http", "httpupgrade", "websocket"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
+    transport_host: ["http", "httpupgrade", "websocket", "xhttp"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
     transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
     tls_mode: tlsEnabled && protocol.supports_managed_tls ? values.get("tls_mode") || "native" : "",
     tls_public_port: tlsEnabled && ["caddy", "nginx"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
@@ -161,8 +163,8 @@ export function readServerPlanInput(form, protocol) {
     tls_alpn: values.get("tls_alpn") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
     tls_enabled: tlsEnabled,
-    certificate_path: tlsEnabled ? values.get("certificate_path") || "" : "",
-    private_key_path: tlsEnabled ? values.get("private_key_path") || "" : "",
+    certificate_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("certificate_path") || "" : "",
+    private_key_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("private_key_path") || "" : "",
     reality_enabled: values.get("reality_enabled") === "1",
     reality_private_key: values.get("reality_private_key") || "",
     reality_public_key: values.get("reality_public_key") || "",
@@ -285,7 +287,7 @@ function bindProtocolOptionVisibility(form) {
       setVisible(form.querySelector("[data-transport-path]"), usesPath);
       path.disabled = !usesPath; path.required = usesPath;
     }
-    if (host) { const active = ["http", "websocket", "httpupgrade"].includes(kind); setVisible(form.querySelector("[data-transport-host]"), active); host.disabled = !active; }
+    if (host) { const active = ["http", "websocket", "httpupgrade", "xhttp"].includes(kind); setVisible(form.querySelector("[data-transport-host]"), active); host.disabled = !active; }
     const flow = form.elements.namedItem("flow");
     if (flow?.tagName === "SELECT") { flow.disabled = kind !== "raw"; if (flow.disabled) flow.value = ""; }
     const method = form.elements.namedItem("transport_http_method");

@@ -54,7 +54,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if preset, ok := singBoxPresetFor(protocol.Key); ok && preset.transport != "raw" && preset.transport != "quic" {
 		transportPath = "/" + suffix
 	}
-	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
+	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP || protocol.Key == ProtocolXHTTPTLS || isXHTTPGroup(protocol.Key) {
 		transport = "xhttp"
 		transportPath = "/" + suffix
 	}
@@ -64,7 +64,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
 		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
 	}
-	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
+	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP || protocol.Key == ProtocolXHTTPTLS || isXHTTPGroup(protocol.Key) {
 		input.BlockMainlandDestination = true
 	}
 	if protocol.SupportsManagedTLS {
@@ -175,6 +175,9 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 	}
+	if err := initializeXHTTPPlan(protocol, &input); err != nil {
+		return Input{}, err
+	}
 	return input, nil
 }
 
@@ -201,6 +204,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		}
 	}
 
+	copyXHTTPOptions(&plan, current)
 	plan.Listen = current.Listen
 	plan.SSRustDNS = current.SSRustDNS
 	plan.SSRustOutboundBindAddr = current.SSRustOutboundBindAddr
@@ -300,6 +304,9 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.WireGuardServerAddress = current.WireGuardServerAddress
 		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
 		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive
+	}
+	if err := regenerateXHTTPReferences(&plan, current); err != nil {
+		return Input{}, err
 	}
 	return plan, nil
 }
