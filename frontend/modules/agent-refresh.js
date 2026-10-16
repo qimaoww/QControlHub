@@ -273,7 +273,9 @@ function updateAgentMetrics(item) {
       button.disabled = Boolean(reason) || Boolean(button.form?.dataset.installBusy);
       button.title = reason;
       const hint = button.form?.querySelector("[data-core-install-hint]");
-      if (hint) hint.textContent = reason || "Release · SHA-256 校验";
+      if (hint) hint.textContent = reason || (item.can_manage === false
+        ? "受控准备缺少的稳定版内核；已有版本直接复用，不启停宿主服务。"
+        : "Release · SHA-256 校验");
     },
   );
   root.querySelectorAll("[data-open-version-form]").forEach((button) => {

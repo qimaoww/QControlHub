@@ -154,14 +154,14 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				executionErr = fmt.Errorf("apply Shadowsocks Rust mainland access policy: %w", err)
 			}
 		}
-		if executionErr == nil && c.logs != nil && task.Engine == core.EngineSingBox &&
+		if executionErr == nil && c.logs != nil && !task.SharedInstance && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
 			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
 				slog.Warn("prepare managed sing-box log capture window", "error", err)
 			} else {
 				preparedLogTransition = true
 			}
-		} else if executionErr == nil && c.logs != nil && task.Engine == core.EngineSingBox &&
+		} else if executionErr == nil && c.logs != nil && !task.SharedInstance && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
 			if err := c.logs.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
 				slog.Warn("wait for managed sing-box console log source", "error", err)
@@ -325,7 +325,11 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
-	if task.SharedInstance && ((task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
+	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
+		return false
+	}
+	if task.SharedInstance && task.Action == core.ActionInstall && (task.CoreVersion != core.CoreVersionStable || task.CoreSource != "" ||
+		task.ConfigID != "" || task.ConfigContent != "" || task.ConfigVersion != 0 || task.InstallIfMissing || len(task.TLSFrontends) != 0 || len(task.MainlandAccessPolicies) != 0) {
 		return false
 	}
 	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||

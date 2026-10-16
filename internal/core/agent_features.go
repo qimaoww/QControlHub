@@ -73,6 +73,6 @@ const AgentFeatureIndependentEgress = "independent-egress-v1"
 const AgentFeatureSharedCoreInstances = "shared-core-instances-v1"
 
 // AgentFeatureSharedCorePrepare negotiates stable binary preparation without
-// starting or rewriting the host service. Both private validate and deploy
-// tasks retain their share identity throughout preparation.
+// starting or rewriting the host service. Manual install and private validate
+// or deploy tasks retain their share identity throughout preparation.
 const AgentFeatureSharedCorePrepare = "shared-core-prepare-v1"

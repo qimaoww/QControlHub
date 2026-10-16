@@ -2,13 +2,14 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func TestSharedCorePreparationRevocationAndIsolation(t *testing.T) {
-	for _, change := range []string{"execute", "share", "disabled", "feature"} {
+	for _, change := range []string{"execute", "share", "disabled", "feature", "manual-execute", "manual-share", "manual-disabled", "manual-feature"} {
 		for _, running := range []bool{false, true} {
 			t.Run(change+map[bool]string{false: "/queued", true: "/running"}[running], func(t *testing.T) {
 				db, ctx, _ := isolatedConfigScopeStore(t)
@@ -19,12 +20,20 @@ func TestSharedCorePreparationRevocationAndIsolation(t *testing.T) {
 				user, account := sharedTestUser(t, db, ctx, "prepare-user")
 				sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 0, 21001)
 				config := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "private prepare", Content: "listeners: [{name: a, type: trojan, port: 21001}]\nrules: ['MATCH,DIRECT']\n"}
-				saved, task, err := db.SaveAgentConfigAndTask(account, config, 0, ConfigMutationOptions{Action: core.ActionDeploy, InstallIfMissing: true})
+				var saved core.Config
+				var task core.Task
+				var err error
+				manual := strings.HasPrefix(change, "manual-")
+				if manual {
+					task, err = db.CreateTask(account, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionInstall, CoreVersion: core.CoreVersionStable})
+				} else {
+					saved, task, err = db.SaveAgentConfigAndTask(account, config, 0, ConfigMutationOptions{Action: core.ActionDeploy, InstallIfMissing: true})
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				// The snapshot and sharing identity survive ordinary duplicate requests.
-				request := core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: task.Action, ConfigID: saved.ID, ExpectedConfigVersion: saved.Version, InstallIfMissing: true}
+				request := core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: task.Action, ConfigID: saved.ID, ExpectedConfigVersion: saved.Version, InstallIfMissing: !manual, CoreVersion: task.CoreVersion}
 				reused, err := db.CreateTask(account, request)
 				if err != nil || !reused.Reused || reused.ID != task.ID {
 					t.Fatalf("duplicate preparation: %+v %v", reused, err)
@@ -36,7 +45,7 @@ func TestSharedCorePreparationRevocationAndIsolation(t *testing.T) {
 					}
 				}
 				var sql string
-				switch change {
+				switch strings.TrimPrefix(change, "manual-") {
 				case "execute":
 					sql = `UPDATE panel_users SET permissions=permissions-'tasks.execute' WHERE id=$1`
 				case "disabled":

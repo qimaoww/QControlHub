@@ -160,4 +160,19 @@ func TestSharedPrepareTaskShapeRetainsIsolation(t *testing.T) {
 			t.Fatal("private preparation lost sharing identity")
 		}
 	}
+	manual := core.Task{ID: "tsk_0123456789abcdef", AgentID: "agt_fixture", Status: core.TaskRunning, LeaseID: strings.Repeat("l", 32), Action: core.ActionInstall, Engine: core.EngineMihomo, SharedInstance: true, SharedTrafficID: "shr_0123456789abcdef", CoreVersion: core.CoreVersionStable}
+	if !client.validTask(manual) {
+		t.Fatal("manual private preparation rejected")
+	}
+	for _, action := range []core.Action{core.ActionStop, core.ActionStart, core.ActionRestart, core.ActionUninstall} {
+		invalid := manual
+		invalid.Action = action
+		if client.validTask(invalid) {
+			t.Fatalf("private host action accepted: %s", action)
+		}
+	}
+	manual.CoreVersion = "v1.19.29"
+	if client.validTask(manual) {
+		t.Fatal("private version switch accepted")
+	}
 }

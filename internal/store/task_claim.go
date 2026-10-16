@@ -91,7 +91,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		(task.Action == core.ActionIPQuality && !containsFeature(features, core.AgentFeatureIPQuality)) ||
 		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) ||
 		(task.SharedInstance && (!containsFeature(features, core.AgentFeatureSharedCoreInstances) ||
-			(task.InstallIfMissing && !containsFeature(features, core.AgentFeatureSharedCorePrepare)))) {
+			((task.InstallIfMissing || task.Action == core.ActionInstall) && !containsFeature(features, core.AgentFeatureSharedCorePrepare)))) {
 		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
 		if task.Action.SystemBBR() {
 			message = "Agent no longer advertises system-bbr-v1; TCP tuning cannot safely resume and previous execution before disconnect is unknown"

@@ -110,6 +110,22 @@ esac
 			if requests != 2 {
 				t.Fatalf("expected one stable preparation, got %d download requests", requests)
 			}
+			if err := os.Remove(spec.Binary); err != nil {
+				t.Fatal(err)
+			}
+			manual := core.Task{Action: core.ActionInstall, Engine: engine, SharedInstance: true, SharedTrafficID: task.SharedTrafficID, CoreVersion: core.CoreVersionStable}
+			for attempt := 0; attempt < 2; attempt++ {
+				output, err := executor.Execute(context.Background(), manual)
+				if err != nil {
+					t.Fatalf("manual preparation: %s %v", output, err)
+				}
+				if attempt == 1 && !strings.Contains(output, "keeping the current version") {
+					t.Fatal("manual preparation replaced an installed core")
+				}
+			}
+			if requests != 4 {
+				t.Fatalf("manual preparation did not reuse the core: %d requests", requests)
+			}
 			if _, err := os.Stat(spec.ConfigPath); !os.IsNotExist(err) {
 				t.Fatal("private validation wrote the owner's configuration")
 			}

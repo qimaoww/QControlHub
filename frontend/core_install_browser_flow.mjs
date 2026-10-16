@@ -19,9 +19,10 @@ async function run() {
   location.hash = `#settings-node-${agentID}`;
   await waitFor(() => document.querySelector(`.node-operations-workspace[data-agent-node="${agentID}"]`), "node did not render");
   if (shared) {
-    assert.equal(document.querySelector(".core-version-form"), null, "recipient received host version management");
-    buttonFor("mihomo", "[data-config]").click();
-  } else {
+    assert.equal(document.querySelector("[data-core-uninstall], [data-service-action]"), null, "recipient received host lifecycle management");
+    assert.equal(formFor("mihomo").querySelectorAll('input[name="release_channel"]').length, 1, "recipient received host version selection");
+  }
+  {
     const open = buttonFor("mihomo", "[data-open-version-form]");
     assert.equal(open.disabled, false);
     open.click();
@@ -30,7 +31,7 @@ async function run() {
     await waitFor(() => {
       const bounds = form.getBoundingClientRect();
       const controls = [...form.querySelectorAll("button, .release-channel-options label")].filter(element => element.checkVisibility());
-      return controls.length >= 4 && controls.every(element => {
+      return controls.length >= (shared ? 2 : 4) && controls.every(element => {
         const rect = element.getBoundingClientRect();
         return rect.width > 0 && rect.left >= bounds.left && rect.right <= bounds.right + 1;
       });
@@ -60,7 +61,7 @@ async function run() {
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "page overflows viewport");
   const status = document.createElement("pre");
   status.id = "browser-smoke-result";
-  status.textContent = `${username}: real password session, ${shared ? "private preparation" : "manual failure/retry/refresh and automatic preparation"}, exact revision deployment, viewport ${innerWidth}: passed`;
+  status.textContent = `${username}: real password session, manual failure/retry/refresh and ${shared ? "private" : "owner"} automatic preparation, exact revision deployment, viewport ${innerWidth}: passed`;
   document.body.append(status);
   document.documentElement.dataset.browserSmoke = "passed";
 }

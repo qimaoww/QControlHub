@@ -11,6 +11,37 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
+// A recipient may prepare the shared read-only binary, without gaining any
+// host lifecycle or version-switch authority. Identity is derived from the
+// accepted allocation; clients cannot choose a share or instance themselves.
+func prepareCoreInstallScopeTx(ctx context.Context, tx pgx.Tx, task *core.Task, features []string) error {
+	var isolated bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=$2
+		WHERE u.id=$1 AND u.role='user' AND a.owner_id<>u.id)`, scopeForConfig(ctx).OwnerID, task.AgentID).Scan(&isolated); err != nil {
+		return err
+	}
+	if !isolated || scopeForConfig(ctx).Admin {
+		return requireAgentAdministration(ctx, tx, task.AgentID)
+	}
+	if task.CoreVersion != core.CoreVersionStable || task.CoreSource != "" {
+		return fmt.Errorf("%w: shared users may only prepare a missing stable core; version changes require the node owner", ErrForbidden)
+	}
+	if !supportsSharedEngines(features) || !containsFeature(features, core.AgentFeatureSharedCoreInstances) || !containsFeature(features, core.AgentFeatureSharedCorePrepare) {
+		return fmt.Errorf("%w: ask the node owner to upgrade the Agent before preparing a private core instance", ErrConflict)
+	}
+	var limit, used int64
+	if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares
+		WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted' AND $3=ANY(engines)`,
+		scopeForConfig(ctx).OwnerID, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used); err != nil {
+		return mapError(err)
+	}
+	if limit > 0 && used >= limit {
+		return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
+	}
+	task.SharedInstance = true
+	return nil
+}
+
 func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.Task, configOwner string, features []string, runtime core.RuntimeState) error {
 	var isolated, disabled bool
 	err := tx.QueryRow(ctx, `SELECT u.role='user' AND a.owner_id<>u.id,u.disabled

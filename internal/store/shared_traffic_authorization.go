@@ -23,7 +23,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			OR (`+unauthorizedTaskPrincipalSQL+`)
 			OR (`+unauthorizedHostConfigTaskSQL+`)
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
-			OR (t.shared_instance AND (NOT $4::boolean OR (t.install_if_missing AND NOT $6::boolean)))
+			OR (t.shared_instance AND (NOT $4::boolean OR ((t.install_if_missing OR t.action='install') AND NOT $6::boolean)))
 			OR (t.action='uninstall' AND (NOT $5::boolean
 				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.agent_id=t.agent_id
 					AND s.enabled AND t.engine=ANY(s.engines))
@@ -58,9 +58,13 @@ const unauthorizedTaskPrincipalSQL = `(t.owner_id<>'' AND NOT starts_with(t.owne
 		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' ELSE 'tasks.execute' END)
 		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp','ip-quality') AND NOT u.permissions ? 'agents.manage')
 		 OR (a.owner_id<>u.id AND
-			((t.install_if_missing AND NOT t.shared_instance) OR t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
+			((t.install_if_missing AND NOT t.shared_instance)
+			 OR (t.action NOT IN ('deploy','validate','status') AND NOT (t.action='install' AND t.shared_instance
+				AND t.shared_traffic_id<>'' AND t.core_version='stable' AND COALESCE(t.core_source,'')=''))
+			 OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
 			 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id
-				AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines))))))))
+				AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines)
+				AND (t.shared_traffic_id='' OR s.id=t.shared_traffic_id))))))))
 	OR EXISTS(SELECT 1 FROM configs c JOIN panel_users u ON u.id=c.owner_id JOIN agents a ON a.id=t.agent_id
 		WHERE c.id=t.config_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND
 			(t.shared_traffic_id='' OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id

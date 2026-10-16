@@ -63,7 +63,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err
 	}
-	if request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
+	if request.Action != core.ActionInstall && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
 		if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
 			return core.Task{}, err
 		}
@@ -255,6 +255,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if task.TCPSettings == nil {
 		task.TCPSettings = core.TCPSettings{}
 	}
+	if task.Action == core.ActionInstall {
+		if err := prepareCoreInstallScopeTx(ctx, tx, &task, features); err != nil {
+			return core.Task{}, err
+		}
+	}
 	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
 		var configAgentID, configOwnerID string
@@ -380,18 +385,20 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
 		  AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
+		  AND shared_traffic_id=$10 AND shared_instance=$11
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
 		      WHERE mutation.agent_id=existing.agent_id AND mutation.engine=existing.engine
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
 		}
 		existing.Reused = true
+		existing.SharedTrafficID = task.SharedTrafficID
 		return existing, nil
 	}
 	if !errors.Is(existingErr, pgx.ErrNoRows) {

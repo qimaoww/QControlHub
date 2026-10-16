@@ -171,7 +171,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 	}
 	if task.SharedInstance {
-		if (task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
+		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
 			!core.ValidAgentShareID(task.SharedTrafficID) {
 			return "", errors.New("invalid shared core deployment task")
 		}
@@ -179,7 +179,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if spec != DefaultSpecsForServiceManager(managerKind)[task.Engine] {
 			return "", errors.New("shared core instance requires the standard managed service")
 		}
-		if task.InstallIfMissing {
+		if task.Action == core.ActionInstall && (task.CoreVersion != core.CoreVersionStable || task.CoreSource != "" ||
+			task.ConfigID != "" || task.ConfigContent != "" || task.ConfigVersion != 0 || task.InstallIfMissing || len(task.TLSFrontends) != 0 || len(task.MainlandAccessPolicies) != 0) {
+			return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
+		}
+		if task.InstallIfMissing || task.Action == core.ActionInstall {
 			if err := prepareSharedCorePrerequisites(spec); err != nil {
 				return "", fmt.Errorf("prepare private core prerequisites: %w", err)
 			}
@@ -194,6 +198,20 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
 			return "", fmt.Errorf("prepare shared core service: %w", err)
+		}
+		if task.Action == core.ActionInstall {
+			if _, err := exec.LookPath(spec.Binary); err == nil {
+				return "core already installed; keeping the current version", nil
+			} else if _, statErr := os.Lstat(spec.Binary); !errors.Is(statErr, os.ErrNotExist) {
+				return "", fmt.Errorf("existing core binary is not executable; owner intervention is required: %w", err)
+			}
+			ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
+			defer cancel()
+			updater := e.Updater
+			if updater == nil {
+				updater = NewCoreUpdater()
+			}
+			return updater.install(ctx, task.Engine, spec, core.CoreVersionStable, "", e.serviceManager(), false)
 		}
 	}
 	if task.InstallIfMissing {

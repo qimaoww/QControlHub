@@ -10,7 +10,8 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
-	"only the Agent owner may manage its host":                                                                "宿主机内核版本仅限节点所有者管理；共享用户请通过增加入站准备独立实例，版本管理请联系所有者在节点设置处理。",
+	"shared users may only prepare a missing stable core; version changes require the node owner":             "共享用户可安装缺少的稳定版内核；已有版本直接复用，切换版本请联系所有者。",
+	"only the Agent owner may manage its host":                                                                "卸载、启停及版本切换由节点所有者在节点设置处理；共享用户可安装缺少的稳定版，或通过增加入站准备独立实例。",
 	"ask the node owner to upgrade the Agent before preparing a private core instance":                        "请联系节点所有者在节点设置升级 Agent，再准备独立实例内核。",
 	"engine is not supported by this Agent":                                                                   "节点不支持此内核，请检查 Agent 安装配置。",
 	"engine capability is disabled on this Agent":                                                             "内核能力未启用，请由所有者在节点设置的 Agent 页开启。",

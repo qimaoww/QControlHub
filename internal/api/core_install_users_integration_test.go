@@ -85,7 +85,16 @@ func TestCoreFirstInstallUserSessions(t *testing.T) {
 				t.Fatal("share granted host administration")
 			}
 			bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine,
-				Action: core.ActionInstall, CoreVersion: "stable"}, http.StatusForbidden, nil)
+				Action: core.ActionInstall, CoreVersion: "stable"}, http.StatusCreated, &task)
+			if !task.SharedInstance || task.SharedTrafficID == "" {
+				t.Fatal("manual preparation lost share identity")
+			}
+			completeConfigScopeAPITask(t, ctx, db, task)
+			bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine,
+				Action: core.ActionInstall, CoreVersion: "v1.19.29"}, http.StatusForbidden, nil)
+			for _, action := range []core.Action{core.ActionUninstall, core.ActionStop, core.ActionStart, core.ActionRestart} {
+				bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine, Action: action}, http.StatusForbidden, nil)
+			}
 			input, err = serverconfig.NewPlan(serverconfig.Protocols(engine)[0])
 			if err != nil {
 				t.Fatal(err)
@@ -111,12 +120,21 @@ func TestCoreFirstInstallUserSessions(t *testing.T) {
 }
 
 func TestCoreInstallExecuteAndReadPermissionsAreIndependent(t *testing.T) {
-	db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	token, err := db.CreateEnrollmentToken(store.WithConfigScope(ctx, alice.userID, false), core.EnrollmentTokenRequest{Name: "permission matrix"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent := enrollTaskAPIAgent(t, ctx, db, token.Token, "permission matrix")
+	sharedToken, err := db.CreateEnrollmentToken(store.WithConfigScope(ctx, bob.userID, false), core.EnrollmentTokenRequest{Name: "shared permission matrix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := enrollTaskAPIAgent(t, ctx, db, sharedToken.Token, "shared permission matrix")
+	if err := db.Heartbeat(ctx, shared.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress, core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare}}); err != nil {
+		t.Fatal(err)
+	}
+	grantConfigScopeAPIAgent(t, ctx, db, shared, alice, 21001)
 	for _, test := range []struct {
 		name                  string
 		execute, read, manage bool
@@ -152,15 +170,17 @@ func TestCoreInstallExecuteAndReadPermissionsAreIndependent(t *testing.T) {
 			if test.execute {
 				status = http.StatusCreated
 			}
-			var task core.Task
-			alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionInstall, CoreVersion: "stable"}, status, &task)
-			if test.execute {
-				want := http.StatusForbidden
-				if test.read {
-					want = http.StatusOK
+			for _, target := range []core.Agent{agent, shared} {
+				var task core.Task
+				alice.call("POST", "/tasks", core.TaskRequest{AgentID: target.ID, Engine: core.EngineMihomo, Action: core.ActionInstall, CoreVersion: "stable"}, status, &task)
+				if test.execute {
+					want := http.StatusForbidden
+					if test.read {
+						want = http.StatusOK
+					}
+					alice.call("GET", "/tasks/"+task.ID, nil, want, nil)
+					completeConfigScopeAPITask(t, ctx, db, task)
 				}
-				alice.call("GET", "/tasks/"+task.ID, nil, want, nil)
-				completeConfigScopeAPITask(t, ctx, db, task)
 			}
 		})
 	}
