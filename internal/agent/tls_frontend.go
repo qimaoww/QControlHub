@@ -149,6 +149,10 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 }
 
 func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, error) {
+	return renderCaddyWithFallback(frontends, state, nil)
+}
+
+func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallback map[string]bool) (string, error) {
 	servers := map[string]any{}
 	domains := map[string]string{}
 	byPort := map[int][]any{}
@@ -159,7 +163,11 @@ func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, e
 		if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
 			domains[f.Domain] = f.ACMEEmail
 		}
-		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": []string{f.Path}}}, "handle": []any{map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": []string{"1.1"}}}}, "terminal": true})
+		versions := []string{"1.1"}
+		if f.Transport == "http" {
+			versions = []string{"h2c"}
+		}
+		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": []string{f.Path}}}, "handle": []any{map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": versions}}}, "terminal": true})
 	}
 	names := []string{}
 	for domain := range domains {
@@ -169,14 +177,17 @@ func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, e
 	var policies []any
 	for _, name := range names {
 		email := domains[name]
-		issuers := []any{map[string]any{"module": "acme", "ca": letsEncryptDirectory, "email": email, "acme_timeout": "90s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}}}
+		issuers := []any{map[string]any{"module": "acme", "ca": letsEncryptDirectory, "email": email, "acme_timeout": "45s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}}}
 		if email != "" {
-			issuers = append(issuers, map[string]any{"module": "acme", "ca": zeroSSLDirectory, "email": email, "acme_timeout": "90s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}})
+			issuers = append(issuers, map[string]any{"module": "acme", "ca": zeroSSLDirectory, "email": email, "acme_timeout": "45s", "challenges": map[string]any{"tls-alpn": map[string]any{"disabled": true}}})
+		}
+		if fallback[name] && email != "" {
+			issuers = issuers[1:]
 		}
 		policies = append(policies, map[string]any{"subjects": []string{name}, "issuers": issuers})
 	}
 	for port, routes := range byPort {
-		servers["https_"+strconv.Itoa(port)] = map[string]any{"listen": []string{":" + strconv.Itoa(port)}, "routes": append(routes, map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}), "protocols": []string{"h1"}, "tls_connection_policies": []any{map[string]any{"alpn": []string{"http/1.1"}}}, "automatic_https": map[string]any{"disable_redirects": true}}
+		servers["https_"+strconv.Itoa(port)] = map[string]any{"listen": []string{":" + strconv.Itoa(port)}, "routes": append(routes, map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}), "protocols": []string{"h1", "h2"}, "tls_connection_policies": []any{map[string]any{"alpn": []string{"h2", "http/1.1"}}}, "automatic_https": map[string]any{"disable_redirects": true}}
 	}
 	config := map[string]any{
 		"admin":   map[string]any{"listen": "unix/" + filepath.Join(state, "caddy-admin.sock"), "config": map[string]any{"persist": false}},
@@ -278,7 +289,7 @@ func (m *tlsFrontendManager) prepareDirectories() error {
 		return err
 	}
 	defer root.Close()
-	for _, name := range []string{"caddy", "client_temp", "proxy_temp", "fastcgi_temp", "uwsgi_temp", "scgi_temp"} {
+	for _, name := range []string{"caddy", "data", "config", "client_temp", "proxy_temp", "fastcgi_temp", "uwsgi_temp", "scgi_temp"} {
 		if err = root.Mkdir(name, 0750); err != nil && !errors.Is(err, os.ErrExist) {
 			return err
 		}
@@ -367,7 +378,15 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	}
 	for mode := range modes {
 		if err := m.ensureDependency(ctx, mode); err != nil {
-			return err
+			return tlsPhaseError("依赖和环境检查", err)
+		}
+		if err := m.ensureService(ctx, mode); err != nil {
+			return tlsPhaseError("依赖和环境检查", err)
+		}
+		if mode == "caddy" {
+			if err := m.checkCaddyAccess(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -398,7 +417,7 @@ func (m *tlsFrontendManager) validateConfigs(ctx context.Context, frontends []co
 			return identityErr
 		}
 		if mode == "caddy" {
-			output, err = runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedCaddyBinary, &identity, "validate", "--config", path)
+			output, err = m.runCaddy(ctx, &identity, "validate", "--config", path)
 		} else {
 			output, err = runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", path)
 		}
@@ -432,22 +451,55 @@ func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontend
 	if err = m.checkPorts(previous, next); err != nil {
 		return err
 	}
-	if err = m.prepare(ctx, next); err != nil {
+	environment, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	if err = m.prepare(environment, next); err != nil {
 		return err
 	}
-	return m.validateConfigs(ctx, next)
+	if err = m.validateConfigs(environment, next); err != nil {
+		return tlsPhaseError("配置生成及校验", err)
+	}
+	if err = m.preflight(environment, frontends); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployments) error {
+	return m.syncWithFallback(ctx, deployments, nil)
+}
+
+func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments tlsDeployments, fallback map[string]bool, certificateRoutes ...tlsDeployments) error {
 	frontends, err := activeTLSFrontends(deployments)
 	if err != nil {
 		return err
+	}
+	if len(certificateRoutes) > 0 {
+		old, err := activeTLSFrontends(certificateRoutes[0])
+		if err != nil {
+			return err
+		}
+		domains := map[string]bool{}
+		for _, f := range frontends {
+			if f.Mode == "caddy" {
+				domains[f.Domain] = true
+			}
+		}
+		for _, f := range old {
+			if f.Mode == "caddy" && !domains[f.Domain] {
+				frontends = append(frontends, f)
+				domains[f.Domain] = true
+			}
+		}
 	}
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
 	}
 	for _, mode := range []string{"caddy", "nginx"} {
+		if len(certificateRoutes) > 0 && mode != "caddy" {
+			continue
+		}
 		service := "qagent-tls-" + mode
 		if m.services.Kind() == ServiceManagerSystemd {
 			service += ".service"
@@ -466,6 +518,9 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 	}
 	// Release ports owned by an outgoing provider before starting its replacement.
 	for _, mode := range []string{"caddy", "nginx"} {
+		if len(certificateRoutes) > 0 && mode != "caddy" {
+			continue
+		}
 		if !modes[mode] {
 			continue
 		}
@@ -475,7 +530,14 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 		}
 		content := renderNginxFrontends(frontends, m.root, m.state)
 		if mode == "caddy" {
-			content, err = renderCaddyFrontends(frontends, m.state)
+			content, err = renderCaddyWithFallback(frontends, m.state, fallback)
+			if err == nil && len(certificateRoutes) > 0 {
+				previous, previousErr := activeTLSFrontends(certificateRoutes[0])
+				if previousErr != nil {
+					return previousErr
+				}
+				content, err = certificatePreparationRoutes(content, previous, m.state)
+			}
 			if err != nil {
 				return err
 			}
@@ -486,6 +548,9 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 			return err
 		}
 		if err = m.ensureService(ctx, mode); err != nil {
+			return err
+		}
+		if err = setServiceEnabled(ctx, service, true, m.services); err != nil {
 			return err
 		}
 		status, _ := m.services.status(ctx, service)
@@ -500,7 +565,7 @@ func (m *tlsFrontendManager) sync(ctx context.Context, deployments tlsDeployment
 		var commandErr error
 		if status == "active" {
 			if mode == "caddy" {
-				output, commandErr = run(ctx, managedCaddyBinary, "reload", "--config", path, "--address", "unix/"+filepath.Join(m.state, "caddy-admin.sock"))
+				output, commandErr = m.runCaddy(ctx, nil, "reload", "--config", path, "--address", "unix/"+filepath.Join(m.state, "caddy-admin.sock"))
 			} else {
 				output, commandErr = run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload")
 			}
@@ -576,14 +641,20 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	if err = m.validateConfigs(ctx, newActive); err != nil {
 		return err
 	}
+	snapshots, err := m.snapshotRuntime(ctx)
+	if err != nil {
+		return err
+	}
 	started := time.Now()
 	err = m.sync(ctx, next)
 	if err == nil && action != core.ActionStop && action != core.ActionUninstall {
-		readiness, cancel := context.WithTimeout(ctx, 180*time.Second)
-		defer cancel()
-		for _, f := range next[service].Frontends {
-			if err = probeFrontendTLS(readiness, f); err != nil {
-				break
+		err = m.waitReady(ctx, next, service)
+		if err == nil {
+			for _, f := range next[service].Frontends {
+				if err = probeFrontendTLS(ctx, f, true); err != nil {
+					err = tlsPhaseError("TLS与协议就绪检查", err)
+					break
+				}
 			}
 		}
 	}
@@ -603,7 +674,7 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 		}
 		recovery, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		rollbackErr := m.sync(recovery, previous)
+		rollbackErr := m.restoreRuntime(recovery, previous, snapshots)
 		if rollbackErr != nil {
 			return fmt.Errorf("托管 TLS 部署失败：%w；反代恢复失败：%v", err, rollbackErr)
 		}
@@ -612,8 +683,11 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	return nil
 }
 
-func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
+func probeFrontendTLS(ctx context.Context, f core.TLSFrontend, protocol ...bool) error {
 	config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: f.Domain, NextProtos: []string{"http/1.1"}}
+	if f.Transport == "http" {
+		config.NextProtos = []string{"h2"}
+	}
 	if f.Transport == "xhttp" {
 		config.NextProtos = []string{"h2"}
 		data, err := os.ReadFile(f.CertificatePath)
@@ -630,7 +704,7 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
 			return errors.New("Nginx 公共证书无效")
 		}
 	}
-	deadline := time.NewTimer(180 * time.Second)
+	deadline := time.NewTimer(150 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -640,6 +714,9 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend) error {
 		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(f.PublicPort)))
 		if err == nil {
 			conn.Close()
+			if len(protocol) > 0 && protocol[0] {
+				return probeFrontendProtocol(ctx, f, config)
+			}
 			return nil
 		}
 		lastErr = err

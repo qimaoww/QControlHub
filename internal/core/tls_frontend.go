@@ -12,10 +12,12 @@ import (
 
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
+const AgentFeatureManagedTLSH2 = "managed-tls-h2-v1"
 const AgentFeatureACMEFallback = "managed-tls-acme-fallback-v1"
 
-// Covers the Agent's four-minute operation and its independent recovery.
-const ManagedTLSLeaseTimeout = 5 * time.Minute
+// Includes optional core installation, environment checks, both issuers and independent recovery.
+const ManagedTLSOperationTimeout = 6 * time.Minute
+const ManagedTLSLeaseTimeout = 12 * time.Minute
 
 // TLSFrontend is delivered only in the encrypted execution snapshot. PrivateKey
 // must never be returned by panel task APIs or included in client exports.
@@ -32,6 +34,8 @@ type TLSFrontend struct {
 	BackendPort     int      `json:"backend_port"`
 	Transport       string   `json:"transport"`
 	Path            string   `json:"path"`
+	Host            string   `json:"host,omitempty"`
+	Method          string   `json:"method,omitempty"`
 	Certificate     string   `json:"certificate,omitempty"`
 	PrivateKey      string   `json:"private_key,omitempty"`
 	ACMEEmail       string   `json:"acme_email,omitempty"`
@@ -70,6 +74,12 @@ func (f TLSFrontend) Validate() error {
 		return fmt.Errorf("本地目标字段仅支持 XHTTP 组合")
 	}
 
+	if len(f.Method) > 32 || strings.ContainsAny(f.Method, " \t\r\n") {
+		return fmt.Errorf("HTTP 方法无效")
+	}
+	if len(f.Host) > 253 || strings.ContainsAny(f.Host, " \t\r\n/\\") {
+		return fmt.Errorf("HTTP Host 无效")
+	}
 	if err := ValidateACMEEmail(f.ACMEEmail); err != nil {
 		return err
 	}
@@ -92,14 +102,14 @@ func (f TLSFrontend) Validate() error {
 			}
 		}
 	}
-	if f.Mode == "caddy" && f.PublicPort == 80 {
-		return fmt.Errorf("Caddy 自动证书需要独立 HTTP 验证端口 80，请使用其他公网 HTTPS 端口")
+	if f.Mode == "caddy" && (f.PublicPort == 80 || f.BackendPort == 80) {
+		return fmt.Errorf("Caddy 自动证书需要独立 HTTP 验证端口 80，请使用其他公网 HTTPS 与内部端口")
 	}
 	if f.Mode == "caddy" && (net.ParseIP(f.Domain) != nil || !strings.Contains(f.Domain, ".")) {
 		return fmt.Errorf("Caddy 自动证书需要指向节点的公网域名")
 	}
-	if f.Transport != "websocket" && f.Transport != "httpupgrade" {
-		return fmt.Errorf("托管 TLS 反代当前支持 WebSocket 和 HTTPUpgrade；其他传输请选择原生 TLS")
+	if f.Transport != "websocket" && f.Transport != "httpupgrade" && !(f.Transport == "http" && f.Mode == "caddy") {
+		return fmt.Errorf("托管 TLS 反代当前支持 WebSocket、HTTPUpgrade 和 Caddy HTTP/H2；其他传输请选择原生 TLS")
 	}
 	if !strings.HasPrefix(f.Path, "/") || len(f.Path) > 256 || strings.ContainsAny(f.Path, "\r\n\t \"'`$\\{};#?*%") {
 		return fmt.Errorf("反代路径必须以 / 开头，不得包含查询参数、空白或配置控制字符")

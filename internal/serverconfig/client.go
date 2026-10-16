@@ -33,7 +33,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			input.TLSALPN = input.TLSClientALPN
 		}
 	}
-	if managedTLS(input) {
+	if proxiedTLS(input) {
 		input.Port = input.TLSPublicPort
 	}
 	input.Protocol = nativeProtocol(input.Protocol)

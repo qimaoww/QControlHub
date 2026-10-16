@@ -31,7 +31,7 @@ export function createTaskView({ state, actions, can, esc, statusName, engineNam
               ${item.config_id ? `<span><b>配置</b><small>${esc(short(item.config_id))} · v${item.config_version}</small></span>` : item.core_version ? `<span><b>版本</b><small>${esc(item.core_version)}${sourceLabel ? ` · ${esc(sourceLabel)}` : ""}</small></span>` : ""}
               ${item.install_if_missing ? "<span><b>自动安装</b><small>缺少时安装稳定版；已有内核保持版本</small></span>" : ""}
               <span class="task-lifecycle"><b>耗时</b><small data-task-timing>${esc(taskTiming(item))}</small></span></div>
-            <div class="event-result">${diagnostic ? `<div class="task-diagnostic"><b>${esc(diagnostic.title)}</b><small>${esc(diagnostic.advice)}</small></div>` : ""}
+            <div class="event-result">${diagnostic ? `<div class="task-diagnostic"><b>${esc(diagnostic.title)}</b><small>${esc(diagnostic.advice)}</small>${diagnostic.rollback ? `<small>${esc(diagnostic.rollback)}</small>` : ""}</div>` : ""}
               ${item.error || item.output ? `<details data-task-result${resultOpen}><summary>节点结果 <span>→</span></summary>${item.error ? `<div class="task-result-block"><header><b>错误</b></header><pre class="task-error">${esc(diagnosticError(item.error))}</pre></div>` : ""}${item.output ? `<div class="task-result-block"><header><b>输出</b></header><pre>${esc(redactDiagnostic(item.output))}</pre></div>` : ""}</details>` : item.status === "pending" || item.status === "running" ? "<span>执行中</span>" : ""}
             </div></div></div></article>`;
         })

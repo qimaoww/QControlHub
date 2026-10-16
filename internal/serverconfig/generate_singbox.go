@@ -59,7 +59,7 @@ func generateSingBox(input Input) (string, error) {
 		inbound["override_address"] = input.TargetAddress
 		inbound["override_port"] = input.TargetPort
 	}
-	if input.TLSEnabled && !managedTLS(input) {
+	if input.TLSEnabled && !proxiedTLS(input) {
 		inbound["tls"] = map[string]any{
 			"enabled": true, "certificate_path": input.CertificatePath, "key_path": input.PrivateKeyPath,
 			"server_name": input.TLSServerName,

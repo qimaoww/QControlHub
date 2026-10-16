@@ -239,8 +239,9 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			lease_id=NULL
 		WHERE status='running' AND started_at < now() - CASE
 			WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
+			WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
 			WHEN action='install' OR install_if_missing THEN $2::interval
-			WHEN engine='sing-box' AND action IN ('validate','deploy','start','restart')
+			WHEN engine IN ('sing-box','xray') AND action IN ('validate','deploy','start','restart')
 				AND EXISTS(SELECT 1 FROM agents a WHERE a.id=tasks.agent_id AND a.features ? 'managed-tls-v1')
 				THEN GREATEST($1::interval,$5::interval)
 			ELSE $1::interval END`+where,

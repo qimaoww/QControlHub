@@ -20,6 +20,15 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "tls-network-preflight" {
+		ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+		defer cancel()
+		if err := agent.RunTLSNetworkPreflight(ctx, os.Args[2], os.Args[3] == "true"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "ip-quality" {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
@@ -34,7 +43,7 @@ func main() {
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "manage-tls" {
-		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), core.ManagedTLSOperationTimeout)
 		defer cancel()
 		if err := agent.RunTLSFrontendRequest(ctx, os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

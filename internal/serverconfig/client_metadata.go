@@ -10,6 +10,7 @@ import (
 )
 
 type clientMetadata struct {
+	ExternalFrontend          *core.TLSFrontend `json:"external_tls_frontend,omitempty"`
 	XHTTP                     *xhttpMetadata    `json:"xhttp,omitempty"`
 	TLSALPN                   string            `json:"managed_tls_alpn,omitempty"`
 	TLSAuthorityKey           string            `json:"tls_authority_key,omitempty"`
@@ -56,7 +57,7 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
 		_, preset := singBoxPresetFor(input.Protocol)
-		if input.TLSClientCertificate == "" && !preset && !managedTLS(input) {
+		if input.TLSClientCertificate == "" && !preset && !proxiedTLS(input) {
 			return "", nil
 		}
 		metadata.TLSClientCertificate = input.TLSClientCertificate
@@ -87,7 +88,11 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
 	}
-	if f := metadata.Frontend; f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
+	f := metadata.Frontend
+	if metadata.ExternalFrontend != nil {
+		f = metadata.ExternalFrontend
+	}
+	if f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
 		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
 		input.TLSACMEEmail = f.ACMEEmail
 		input.TLSEnabled = true

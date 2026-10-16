@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -129,6 +130,11 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		return nil, fmt.Errorf("upgrade managed core logging policy: %w", err)
 	}
 	logUpgradeCancel()
+	repairCtx, repairCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := executor.repairTLSRuntime(repairCtx); err != nil {
+		slog.Warn("managed TLS runtime needs repair", "error", err)
+	}
+	repairCancel()
 	parsed, err := url.Parse(config.ServerURL)
 	if err != nil || parsed.Host == "" {
 		return nil, errors.New("QCH_SERVER_URL must be a valid absolute URL")

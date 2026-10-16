@@ -17,7 +17,8 @@ export function managedTLSPlanFields(protocol, plan, esc) {
         <div class="tls-settings" data-native-tls>
           <div class="plan-fields one"><label>证书方式<select name="tls_mode">
             <option value="caddy" ${plan.tls_mode === "caddy" ? "selected" : ""}>Caddy 自动证书（默认）</option>
-            <option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx 自签证书</option>
+            ${plan.transport !== "http" ? `<option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx 自签证书</option>` : ""}
+            <option value="external" ${plan.tls_mode === "external" ? "selected" : ""}>外部反代 · 自行管理 TLS</option>
             <option value="native" ${native ? "selected" : ""}>已有证书 · 原生 TLS</option>
           </select></label></div>
           <div class="plan-fields three">
@@ -30,12 +31,13 @@ export function managedTLSPlanFields(protocol, plan, esc) {
             <label class="secret-input">${esc(protocol.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
           </div>
           <div class="plan-fields two">
-            <label>传输<select name="transport"><option value="${esc(plan.transport)}">${plan.transport === "httpupgrade" ? "HTTPUpgrade" : "WebSocket"}</option></select></label>
+            <label>传输<select name="transport"><option value="${esc(plan.transport)}">${plan.transport === "http" ? "HTTP / H2" : plan.transport === "httpupgrade" ? "HTTPUpgrade" : "WebSocket"}</option></select></label>
             <label data-transport-path>路径<input name="transport_path" value="${esc(plan.transport_path)}"><small>已自动生成，反代与客户端使用相同路径。</small></label>
             <label data-transport-host>HTTP Host<input name="transport_host" value="${esc(plan.transport_host || "")}" maxlength="253" placeholder="留空使用域名"><small>需要独立 Host 时填写；不会修改证书域名。</small></label>
+            ${plan.transport === "http" ? `<label data-http-method>HTTP 方法<input name="transport_http_method" value="${esc(plan.transport_http_method || "")}" placeholder="留空使用 PUT"></label>` : ""}
             <label>ALPN<input name="tls_alpn" value="${esc(plan.tls_alpn || "")}" placeholder="留空使用传输默认值"></label>
           </div>
-          <div class="plan-fields one" data-caddy-acme><label>ACME 邮箱（可选覆盖）<input name="tls_acme_email" type="email" maxlength="254" value="${esc(plan.tls_acme_email || "")}" placeholder="留空使用本账号系统设置中的邮箱"><small>配置邮箱后，Let’s Encrypt 失败会尝试 ZeroSSL。</small></label></div>
+          <div class="plan-fields one" data-caddy-acme><label>ACME 邮箱（可选覆盖）<input name="tls_acme_email" type="email" maxlength="254" value="${esc(plan.tls_acme_email || "")}" placeholder="留空使用本账号系统设置中的邮箱"><small>预设值优先于账号默认值；两处均未设置时仅尝试 Let’s Encrypt。填写邮箱可启用 ZeroSSL 自动账户绑定与回退。</small></label></div>
           <div class="plan-fields two" data-native-certificate>
             <label>证书路径<input name="certificate_path" value="${esc(plan.certificate_path || "")}"></label>
             <label>私钥路径<input name="private_key_path" value="${esc(plan.private_key_path || "")}"></label>

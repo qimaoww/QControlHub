@@ -131,7 +131,7 @@ func TestRequeueStaleTasksUsesActionSpecificLeaseAndAttemptLimit(t *testing.T) {
 	if running, err := dataStore.GetTask(ctx, tlsTask.ID); err != nil || running.Status != core.TaskRunning {
 		t.Fatalf("CA fallback lost its execution lease: %+v %v", running, err)
 	}
-	setTaskStartedAt(t, ctx, dataStore, tlsTask.ID, time.Now().Add(-6*time.Minute))
+	setTaskStartedAt(t, ctx, dataStore, tlsTask.ID, time.Now().Add(-core.ManagedTLSLeaseTimeout-time.Minute))
 	if err := dataStore.RequeueStaleTasks(ctx, 2*time.Minute, 6*time.Minute, 3); err != nil {
 		t.Fatal(err)
 	}

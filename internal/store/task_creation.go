@@ -320,6 +320,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 		}
 		for _, frontend := range task.TLSFrontends {
+			if frontend.Transport == "http" && !containsFeature(features, core.AgentFeatureManagedTLSH2) {
+				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent 以支持 Caddy HTTP/H2 托管反代（managed-tls-h2-v1）", ErrConflict)
+			}
 			if frontend.ACMEEmail != "" && !containsFeature(features, core.AgentFeatureACMEFallback) {
 				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Let’s Encrypt → ZeroSSL 自动回退", ErrConflict)
 			}
