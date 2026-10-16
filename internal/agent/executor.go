@@ -170,6 +170,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return "", errors.New("invalid automatic core installation task")
 		}
 	}
+	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {
+		return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
+	}
 	if task.SharedInstance {
 		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
 			!core.ValidAgentShareID(task.SharedTrafficID) {
@@ -178,9 +181,6 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		managerKind := e.serviceManager().Kind()
 		if spec != DefaultSpecsForServiceManager(managerKind)[task.Engine] {
 			return "", errors.New("shared core instance requires the standard managed service")
-		}
-		if task.Action == core.ActionInstall && !validSharedCoreInstallTask(task) {
-			return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
 		}
 		if task.InstallIfMissing || task.Action == core.ActionInstall {
 			if err := prepareSharedCorePrerequisites(spec); err != nil {

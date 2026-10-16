@@ -334,7 +334,7 @@ func (c *Client) validTask(task core.Task) bool {
 	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
 		return false
 	}
-	if task.SharedInstance && task.Action == core.ActionInstall && !validSharedCoreInstallTask(task) {
+	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {
 		return false
 	}
 	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
