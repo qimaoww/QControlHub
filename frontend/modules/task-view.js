@@ -9,9 +9,13 @@ export function createTaskView({ state, actions, can, esc, statusName, engineNam
           const agent = agents.find((entry) => entry.id === item.agent_id);
           const configVersion = Number.isInteger(item.config_version) && item.config_version > 0 ? item.config_version : null;
           const missingConfigVersion = Boolean(item.config_id && configVersion === null);
-          const diagnostic = missingConfigVersion && ["failed", "canceled"].includes(item.status)
-            ? { title: "历史任务缺少配置版本", advice: "请核对配置后，选择编辑后重试或重新部署。" }
-            : diagnoseTask(item);
+          let diagnostic = diagnoseTask(item);
+          if (missingConfigVersion && ["failed", "canceled"].includes(item.status)) {
+            const advice = "历史任务缺少配置版本，请核对配置后，选择编辑后重试或重新部署。";
+            diagnostic = diagnostic
+              ? { ...diagnostic, advice: `${diagnostic.advice} ${advice}` }
+              : { title: "配置版本未知", advice };
+          }
           const tone = statusTone(item.status);
           const statusLabel = statusName(item.status);
           const taskEngine =

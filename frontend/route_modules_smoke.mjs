@@ -78,4 +78,7 @@ assert.match(statusTask, /data-retry="historical-task"/);
 assert.match(statusTask, /重试任务/);
 assert.doesNotMatch(statusTask, /缺少配置版本|版本未知/);
 assert.doesNotMatch(taskCards(taskFixture, []), /data-retry=|data-edit-retry=/);
+const failedLegacy = taskCards({ ...taskFixture, status: "failed", error: "Caddy rollback failed" });
+assert.match(failedLegacy, /缺少配置版本/);
+assert.match(failedLegacy, /回滚失败：需检查节点最终服务与路由状态/);
 console.log("Task retry rendering handles omitted historical revisions and operation permissions");
