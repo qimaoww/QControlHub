@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -174,5 +175,53 @@ func TestSharedPrepareTaskShapeRetainsIsolation(t *testing.T) {
 	manual.CoreVersion = "v1.19.29"
 	if client.validTask(manual) {
 		t.Fatal("private version switch accepted")
+	}
+}
+
+func TestSharedManualInstallationReachesClientExecutor(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+		t.Run(string(engine), func(t *testing.T) {
+			task := core.Task{ID: "tsk_0123456789abcdef", AgentID: "agt_fixture", Status: core.TaskRunning,
+				LeaseID: strings.Repeat("l", 32), Action: core.ActionInstall, Engine: engine,
+				SharedInstance: true, SharedTrafficID: "shr_0123456789abcdef", CoreVersion: core.CoreVersionStable}
+			calls := 0
+			client := &Client{creds: credentials{AgentID: task.AgentID}, executor: &Executor{Specs: DefaultSpecs()},
+				config: ClientConfig{StatePath: filepath.Join(t.TempDir(), "agent.json")},
+				executeFunc: func(_ context.Context, received core.Task) (string, error) {
+					calls++
+					if received.SharedTrafficID != task.SharedTrafficID || !received.SharedInstance || received.CoreVersion != core.CoreVersionStable {
+						t.Fatal("client lost controlled installation scope")
+					}
+					return "prepared", nil
+				}}
+			if !client.validTask(task) {
+				t.Fatal("manual preparation rejected at dispatch")
+			}
+			if result := client.resultForTask(context.Background(), task); !result.Success || calls != 1 {
+				t.Fatalf("manual preparation did not reach execution: %+v; calls=%d", result, calls)
+			}
+			for i, change := range []func(*core.Task){
+				func(task *core.Task) { task.CoreVersion = "v1.19.29" },
+				func(task *core.Task) { task.CoreSource = "official" },
+				func(task *core.Task) { task.ConfigID = "cfg_private" },
+				func(task *core.Task) { task.ConfigContent = "{}" },
+				func(task *core.Task) { task.ConfigVersion = 1 },
+				func(task *core.Task) { task.InstallIfMissing = true },
+				func(task *core.Task) { task.SharedInstance = false },
+				func(task *core.Task) { task.SharedTrafficID = "../owner" },
+				func(task *core.Task) { task.Action = core.ActionStop },
+				func(task *core.Task) { task.Action = core.ActionUninstall },
+			} {
+				invalid := task
+				invalid.ID = fmt.Sprintf("tsk_%016x", i+1)
+				change(&invalid)
+				if client.validTask(invalid) {
+					t.Fatalf("unsafe preparation accepted at dispatch: %+v", invalid)
+				}
+				if result := client.resultForTask(context.Background(), invalid); result.Success || calls != 1 {
+					t.Fatalf("unsafe preparation reached execution: %+v; calls=%d", result, calls)
+				}
+			}
+		})
 	}
 }

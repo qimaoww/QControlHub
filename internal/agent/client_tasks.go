@@ -127,7 +127,13 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		if execute == nil {
 			execute = c.executor.Execute
 		}
-		if task.SharedTrafficID != "" {
+		if task.SharedTrafficID != "" && task.Action == core.ActionInstall {
+			// Binary preparation has no configuration or ingress to authorize.
+			// Keep the strict stable-only shape before bypassing the port gate.
+			if !validSharedCoreInstallTask(task) {
+				executionErr = errors.New("invalid shared core installation task")
+			}
+		} else if task.SharedTrafficID != "" {
 			endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
 			if !core.ValidAgentShareID(task.SharedTrafficID) {
 				executionErr = errors.New("invalid shared traffic identity")
@@ -328,8 +334,7 @@ func (c *Client) validTask(task core.Task) bool {
 	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
 		return false
 	}
-	if task.SharedInstance && task.Action == core.ActionInstall && (task.CoreVersion != core.CoreVersionStable || task.CoreSource != "" ||
-		task.ConfigID != "" || task.ConfigContent != "" || task.ConfigVersion != 0 || task.InstallIfMissing || len(task.TLSFrontends) != 0 || len(task.MainlandAccessPolicies) != 0) {
+	if task.SharedInstance && task.Action == core.ActionInstall && !validSharedCoreInstallTask(task) {
 		return false
 	}
 	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||

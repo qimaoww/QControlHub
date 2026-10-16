@@ -113,13 +113,20 @@ esac
 			if err := os.Remove(spec.Binary); err != nil {
 				t.Fatal(err)
 			}
-			manual := core.Task{Action: core.ActionInstall, Engine: engine, SharedInstance: true, SharedTrafficID: task.SharedTrafficID, CoreVersion: core.CoreVersionStable}
+			client := &Client{executor: executor, creds: credentials{AgentID: "agt_fixture"},
+				config: ClientConfig{StatePath: filepath.Join(t.TempDir(), "agent.json")}}
+			manual := core.Task{AgentID: "agt_fixture", Status: core.TaskRunning, LeaseID: strings.Repeat("l", 32),
+				Action: core.ActionInstall, Engine: engine, SharedInstance: true, SharedTrafficID: task.SharedTrafficID, CoreVersion: core.CoreVersionStable}
 			for attempt := 0; attempt < 2; attempt++ {
-				output, err := executor.Execute(context.Background(), manual)
-				if err != nil {
-					t.Fatalf("manual preparation: %s %v", output, err)
+				manual.ID = fmt.Sprintf("tsk_%016x", attempt+1)
+				if !client.validTask(manual) {
+					t.Fatal("manual preparation rejected at dispatch")
 				}
-				if attempt == 1 && !strings.Contains(output, "keeping the current version") {
+				result := client.resultForTask(context.Background(), manual)
+				if !result.Success {
+					t.Fatalf("manual preparation through client: %+v", result)
+				}
+				if attempt == 1 && !strings.Contains(result.Output, "keeping the current version") {
 					t.Fatal("manual preparation replaced an installed core")
 				}
 			}

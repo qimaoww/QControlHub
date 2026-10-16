@@ -20,6 +20,13 @@ func sharedInstanceRoot(engine core.Engine) string {
 	return filepath.Join(managedCoreConfigurationRoot, managedCoreAssetName(engine), "shares")
 }
 
+func validSharedCoreInstallTask(task core.Task) bool {
+	return task.Action == core.ActionInstall && task.Engine.Valid() && task.SharedInstance && core.ValidAgentShareID(task.SharedTrafficID) &&
+		task.CoreVersion == core.CoreVersionStable && task.CoreSource == "" && task.ConfigID == "" && task.ConfigContent == "" &&
+		task.ConfigVersion == 0 && !task.InstallIfMissing && len(task.TLSFrontends) == 0 && len(task.MainlandAccessPolicies) == 0 &&
+		task.CNIPSource == nil && len(task.TCPSettings) == 0
+}
+
 func sharedCoreTemplatesSupported(specs map[core.Engine]EngineSpec, manager *ServiceManager) bool {
 	for engine, spec := range specs {
 		if spec != DefaultSpecsForServiceManager(manager.Kind())[engine] {

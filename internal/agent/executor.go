@@ -179,8 +179,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if spec != DefaultSpecsForServiceManager(managerKind)[task.Engine] {
 			return "", errors.New("shared core instance requires the standard managed service")
 		}
-		if task.Action == core.ActionInstall && (task.CoreVersion != core.CoreVersionStable || task.CoreSource != "" ||
-			task.ConfigID != "" || task.ConfigContent != "" || task.ConfigVersion != 0 || task.InstallIfMissing || len(task.TLSFrontends) != 0 || len(task.MainlandAccessPolicies) != 0) {
+		if task.Action == core.ActionInstall && !validSharedCoreInstallTask(task) {
 			return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
 		}
 		if task.InstallIfMissing || task.Action == core.ActionInstall {
