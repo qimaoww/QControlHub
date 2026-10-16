@@ -2,10 +2,15 @@ import { reducedMotion } from "./motion.js";
 import { updateFeedback, removePresented } from "./presence-motion.js";
 
 let installed = false, tooltip, owner, anchor, showTimer, closeTimer, watch;
-let hovered, focused, errorID = 0;
+let hovered, focused, touched, errorID = 0;
 const errors = new WeakMap();
-const target = node => node?.closest?.("[title],[data-motion-title]");
+const target = node => node?.closest?.("[title],[data-motion-title],[data-disabled-reason]");
+const isInteractiveTipTarget = element =>
+  element.matches("a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[role='button']:not([aria-disabled='true'])") ||
+  Boolean(element.closest("a[href],button:not(:disabled),summary,[role='button']:not([aria-disabled='true'])")) ||
+  (element.tagName === "LABEL" && Boolean(element.querySelector("input:not(:disabled),select:not(:disabled),textarea:not(:disabled)")));
 function hideTip(immediate = false) {
+  touched = null;
   clearTimeout(showTimer);
   if (!tooltip) return;
   tooltip.removeAttribute("data-open");
@@ -30,14 +35,18 @@ function showTip(element) {
   if (!element?.isConnected || element.closest("[hidden],[inert]")) return;
   const modal = document.querySelector("dialog:modal");
   if (modal && !modal.contains(element)) return;
-  const text = element.dataset.motionTitle ?? element.getAttribute("title");
+  const text = element.dataset.motionTitle ?? element.getAttribute("title") ?? element.dataset.disabledReason;
   if (!text?.trim()) return;
   clearTimeout(closeTimer);
   if (owner !== element) {
+    const retainedTouch = touched === element ? element : null;
     hideTip(true);
+    touched = retainedTouch;
     owner = element;
-    element.dataset.motionTitle = text;
-    element.removeAttribute("title");
+    if (element.hasAttribute("title")) {
+      element.dataset.motionTitle = element.getAttribute("title");
+      element.removeAttribute("title");
+    }
     if (!element.hasAttribute("aria-description")) {
       element.setAttribute("aria-description", text);
       element.dataset.motionDescription = "";
@@ -56,12 +65,12 @@ function showTip(element) {
         owner.dataset.motionTitle = owner.title;
         owner.removeAttribute("title");
       }
-      const message = owner.dataset.motionTitle;
+      const message = owner.dataset.motionTitle ?? owner.dataset.disabledReason;
       if (!message) return hideTip(true);
       if (owner.hasAttribute("data-motion-description")) owner.setAttribute("aria-description", message);
       updateFeedback(tooltip, message);
     });
-    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-motion-title", "aria-pressed"] });
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-motion-title", "data-disabled-reason", "aria-pressed"] });
   }
   const bounds = element.getBoundingClientRect(), tip = tooltip.getBoundingClientRect();
   anchor = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
@@ -120,16 +129,26 @@ export function installInteractionFeedback() {
     if (element) scheduleTip(element); else if (!focused) hideTip();
   });
   document.addEventListener("pointerout", event => {
-    if (!hovered?.contains(event.relatedTarget)) { hovered = null; if (!focused) hideTip(); }
+    if (!hovered?.contains(event.relatedTarget)) { hovered = null; if (!focused && !touched) hideTip(); }
   });
   document.addEventListener("focusin", event => {
     focused = target(event.target);
-    if (focused) scheduleTip(focused, 80); else hideTip();
+    if (focused) { touched = null; scheduleTip(focused, 80); } else if (!touched) hideTip();
   });
   document.addEventListener("focusout", event => {
-    if (!focused?.contains(event.relatedTarget)) { focused = null; if (!hovered) hideTip(); }
+    if (!focused?.contains(event.relatedTarget)) { focused = null; if (!hovered && !touched) hideTip(); }
   });
-  document.addEventListener("pointerdown", () => hideTip(), true);
+  document.addEventListener("pointerdown", event => {
+    if (event.pointerType === "touch") {
+      const element = target(event.target);
+      if (element && !isInteractiveTipTarget(element)) {
+        if (touched === element && tooltip?.hasAttribute("data-open")) hideTip();
+        else { touched = element; showTip(element); }
+        return;
+      }
+    }
+    hideTip();
+  }, true);
   document.addEventListener("beforetoggle", event => {
     if (event.target.tagName === "DIALOG" && event.newState === "open") hideTip();
   }, true);

@@ -42,9 +42,21 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       const eligibility = batchAgentEligibility(agent, action, engine);
       input.dataset.batchEligible = eligibility.eligible ? "1" : "0";
       input.disabled = busy || !eligibility.eligible;
+      const reason = busy ? "批量任务正在提交中" : eligibility.eligible ? "" : eligibility.reason;
+      if (reason) {
+        input.dataset.disabledReason = reason;
+        input.title = reason;
+      } else {
+        delete input.dataset.disabledReason;
+        input.removeAttribute("title");
+      }
       const card = input.closest(".node-card");
       const control = input.closest(".node-card-select");
-      if (control) control.title = eligibility.reason;
+      if (control) {
+        control.title = eligibility.reason;
+        if (!eligibility.eligible) control.dataset.disabledReason = eligibility.reason;
+        else delete control.dataset.disabledReason;
+      }
       if (card) card.dataset.batchEligible = eligibility.eligible ? "1" : "0";
       if (!eligibility.eligible) input.checked = false;
       card?.classList.toggle("selected", input.checked);
@@ -59,6 +71,14 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         "aria-checked",
         selection.indeterminate ? "mixed" : String(selection.checked),
       );
+      const selectReason = busy ? "批量任务正在提交中" : selection.eligible === 0 ? "当前操作没有符合条件的节点" : "";
+      if (selectReason) {
+        selectAll.title = selectReason;
+        selectAll.dataset.disabledReason = selectReason;
+      } else {
+        selectAll.removeAttribute("title");
+        delete selectAll.dataset.disabledReason;
+      }
     }
     const selectAllLabel = batchForm.querySelector(
       "[data-batch-select-all-label]",
@@ -70,6 +90,22 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       button.disabled = selection.selected === 0 || busy;
       updateFeedback(button, busy ? "提交中" : "执行");
       button.classList.toggle("batch-danger", feedback.tone === "danger");
+      const submitReason = busy
+        ? "批量任务正在提交中"
+        : selection.eligible === 0
+          ? "当前操作没有符合条件的节点"
+          : selection.selected === 0
+            ? "请先勾选要执行操作的节点"
+            : "";
+      if (submitReason) {
+        button.title = submitReason;
+        button.dataset.disabledReason = submitReason;
+      } else {
+        button.removeAttribute("title");
+        delete button.dataset.disabledReason;
+      }
+      if (busy) button.setAttribute("aria-busy", "true");
+      else button.removeAttribute("aria-busy");
     }
     document.querySelectorAll("[data-node-batch-toggle]").forEach((toggle) => { toggle.disabled = busy; });
     const label = batchForm?.querySelector("[data-batch-count]");
@@ -101,6 +137,8 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         );
         retry.disabled = busy || !eligibility.eligible;
         retry.title = eligibility.eligible ? "重试失败任务" : eligibility.reason;
+        if (!eligibility.eligible) retry.dataset.disabledReason = eligibility.reason;
+        else delete retry.dataset.disabledReason;
       });
   };
   const setBatchBusy = (busy) => {

@@ -19,6 +19,17 @@ export { komariCycleRange, komariResetDay } from "./agent-komari.js";
 export { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "./agent-card-drag.js";
 export { formatHostPort, manualConnectionAddressNote, publicAddressRows, updatePublicIPDisplays } from "./agent-addresses.js";
 export { geoRegionDetails } from "./regions.js";
+export {
+  STATUS_MODEL_CATALOG,
+  connectionStateLabel,
+  describeConnectionState,
+  describeCoreRuntime,
+  describeEngineCapability,
+  describeNodeMetrics,
+  describeServiceAction,
+  normalizeConnectionState,
+  resolveRetainedNodeMetrics,
+} from "./status-controls.js";
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, can: permission, esc, bytes, notify, renderConfigDiff } = ctx;

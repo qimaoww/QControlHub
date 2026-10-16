@@ -174,7 +174,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
 	}
 	if task.SharedInstance {
-		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
+		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && task.Action != core.ActionStatus && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
 			!core.ValidAgentShareID(task.SharedTrafficID) {
 			return "", errors.New("invalid shared core deployment task")
 		}
@@ -192,11 +192,13 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return "", err
 		}
-		if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
-			return "", fmt.Errorf("prepare shared core configuration: %w", err)
-		}
-		if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
-			return "", fmt.Errorf("prepare shared core service: %w", err)
+		if task.Action == core.ActionDeploy {
+			if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
+				return "", fmt.Errorf("prepare shared core configuration: %w", err)
+			}
+			if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
+				return "", fmt.Errorf("prepare shared core service: %w", err)
+			}
 		}
 		if task.Action == core.ActionInstall {
 			if _, err := exec.LookPath(spec.Binary); err == nil {

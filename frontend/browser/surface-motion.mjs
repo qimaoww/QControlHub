@@ -276,6 +276,16 @@ export async function checkInteractionFeedback(reduced) {
   assert.ok(!movingTip.hasAttribute("data-open"), "moving the anchor must dismiss its tooltip immediately");
   if (!reduced) assert.ok(movingTip.isConnected, "anchor-scroll dismissal keeps the complete tooltip exit");
   await waitFor(() => !movingTip.isConnected, "anchor-scroll tooltip exit must settle");
+  const touchBadge = document.createElement("span");
+  touchBadge.dataset.disabledReason = "Touch disabled reason tip";
+  touchBadge.textContent = "Disabled switch";
+  host.append(touchBadge);
+  touchBadge.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+  const touchTip = await waitFor(() => document.querySelector('.interaction-tooltip[data-open]'), "touch tap on disabled-reason target must open tooltip");
+  assert.equal(touchTip.textContent, "Touch disabled reason tip");
+  touchBadge.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+  assert.ok(!touchTip.hasAttribute("data-open"), "second touch tap on same target must toggle tooltip closed");
+  await waitFor(() => !touchTip.isConnected, "touch tooltip exit must settle");
   host.remove();
 }
 

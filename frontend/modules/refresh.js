@@ -69,6 +69,8 @@ function nodeKey(node) {
     "data-access-control-agent",
     "data-filter-engine",
     "data-node-tab",
+    "data-node-subtab",
+    "data-node-subpanel",
     "data-core-log-page-index",
     "data-context-traffic-agent",
     "data-ip-quality-agent",

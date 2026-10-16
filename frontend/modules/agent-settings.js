@@ -11,8 +11,25 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
     const agent = agentsByID.get(agentID);
     const deleting = pendingAgentDeletes.get(agentID) === "deleting";
     const deleted = pendingAgentDeletes.get(agentID) === "deleted";
-    button.disabled = pendingAgentDeletes.has(agentID) || !permission("agents.manage", agent) || agent?.can_manage === false;
+    const readOnly = !permission("agents.manage", agent) || agent?.can_manage === false;
+    button.disabled = pendingAgentDeletes.has(agentID) || readOnly;
     button.textContent = deleted ? "已删除" : deleting ? "正在删除…" : "删除节点";
+    const reason = deleted
+      ? "节点已删除"
+      : deleting
+        ? "正在删除节点…"
+        : pendingAgentDeletes.has(agentID)
+          ? "正在等待确认删除…"
+          : readOnly
+            ? "只读权限"
+            : "";
+    if (reason) {
+      button.title = reason;
+      button.dataset.disabledReason = reason;
+    } else {
+      button.removeAttribute("title");
+      delete button.dataset.disabledReason;
+    }
     if (deleting) button.setAttribute("aria-busy", "true");
     else button.removeAttribute("aria-busy");
   };
@@ -60,6 +77,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
   document.querySelectorAll("[data-agent-visibility]").forEach((input) => {
     input.onchange = async () => {
       input.disabled = true;
+      input.setAttribute("aria-busy", "true");
       try {
         await api(`/agents/${encodeURIComponent(input.dataset.agentVisibility)}/visibility`, {
           method: "PUT",
@@ -70,6 +88,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       } catch (error) {
         input.checked = !input.checked;
         input.disabled = false;
+        input.removeAttribute("aria-busy");
         notify(error.message, "error");
       }
     };
@@ -80,6 +99,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
     section.querySelectorAll("[data-engine-capability]").forEach((input) => {
       const engine = input.dataset.engineCapability;
       const key = `${agentID}|${engine}`;
+      const row = input.closest(".core-capability-row");
       // These are immediate-action controls, not an unsaved form draft.
       // Reconciliation updates attributes but a checkbox's dirty-checkedness
       // flag can retain its old property after an asynchronous service result.
@@ -87,13 +107,25 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
         input.checked = (agentsByID.get(agentID)?.capabilities || []).includes(engine);
         input.defaultChecked = input.checked;
       }
-      if (pendingEngineCapabilities.has(key)) input.disabled = true;
+      if (pendingEngineCapabilities.has(key)) {
+        input.disabled = true;
+        input.setAttribute("aria-busy", "true");
+        if (row) {
+          row.dataset.disabledReason = "正在提交状态切换请求…";
+          row.title = "正在提交状态切换请求…";
+        }
+      }
       bindEvent(input, "change", async () => {
         if (!can("agents.manage") || pendingEngineCapabilities.has(key)) return;
         const enabled = input.checked;
         let awaitingService = false;
         pendingEngineCapabilities.add(key);
         input.disabled = true;
+        input.setAttribute("aria-busy", "true");
+        if (row) {
+          row.dataset.disabledReason = "正在提交状态切换请求…";
+          row.title = "正在提交状态切换请求…";
+        }
         try {
           const saved = await api(`/agents/${encodeURIComponent(agentID)}/capabilities/${engine}`, {
             method: "PUT", body: JSON.stringify({ enabled }),
@@ -102,13 +134,14 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
           input.defaultChecked = saved.enabled;
           awaitingService = Boolean(saved.task_id);
           notify(saved.task_id
-            ? `${engineName(engine)} ${enabled ? "启动" : "停止"}任务已提交，成功后更新能力；离线节点上线后执行`
-            : `${engineName(engine)} 能力已${enabled ? "开启" : "关闭"}（未安装内核，不执行启停）`);
+            ? `${engineName(engine)} ${enabled ? "启动" : "停止"}任务已提交，成功后生效；离线节点上线后执行`
+            : `${engineName(engine)} 已${enabled ? "开启" : "关闭"}（未安装内核，不执行启停）`);
         } catch (error) {
           input.checked = !enabled;
           notify(error.message, "error");
         } finally {
           pendingEngineCapabilities.delete(key);
+          input.removeAttribute("aria-busy");
           input.disabled = awaitingService || !can("agents.manage");
           try {
             await refreshAgentPage();
@@ -123,7 +156,23 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
     const agentID = form.dataset.agentNameForm;
     const can = (capability) => permission(capability, agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
     const button = form.querySelector("button[type=submit]");
-    if (button) button.disabled = !can("agents.manage") || pendingAgentNames.has(agentID);
+    const syncNameButton = (target) => {
+      if (!target) return;
+      const saving = pendingAgentNames.has(agentID);
+      const readOnly = !can("agents.manage");
+      target.disabled = readOnly || saving;
+      const reason = saving ? "正在保存节点名称…" : readOnly ? "只读权限" : "";
+      if (reason) {
+        target.title = reason;
+        target.dataset.disabledReason = reason;
+      } else {
+        target.removeAttribute("title");
+        delete target.dataset.disabledReason;
+      }
+      if (saving) target.setAttribute("aria-busy", "true");
+      else target.removeAttribute("aria-busy");
+    };
+    syncNameButton(button);
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
       if (!can("agents.manage") || pendingAgentNames.has(agentID)) return;
@@ -134,7 +183,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       }
       pendingAgentNames.add(agentID);
       form.dataset.busy = "1";
-      if (button) button.disabled = true;
+      syncNameButton(button);
       try {
         const saved = await api(`/agents/${encodeURIComponent(agentID)}/name`, {
           method: "PUT", body: JSON.stringify({ name }),
@@ -152,9 +201,9 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       } finally {
         pendingAgentNames.delete(agentID);
         delete form.dataset.busy;
-        if (button) button.disabled = !can("agents.manage");
+        syncNameButton(button);
         document.querySelectorAll("[data-agent-name-form]").forEach((current) => {
-          if (current.dataset.agentNameForm === agentID) current.querySelector("button[type=submit]").disabled = !can("agents.manage");
+          if (current.dataset.agentNameForm === agentID) syncNameButton(current.querySelector("button[type=submit]"));
         });
       }
     });
@@ -167,7 +216,10 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       const uuid = String(new FormData(form).get("uuid") || "").trim();
       const agentID = form.dataset.komariForm;
       const button = form.querySelector("button[type=submit]");
-      if (button) button.disabled = true;
+      if (button) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+      }
       try {
         await api(`/agents/${encodeURIComponent(agentID)}/komari`, {
           method: "PUT",
@@ -183,7 +235,10 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
         notify(uuid ? "Komari 服务器已关联" : "Komari 服务器关联已清除");
       } catch (error) {
         notify(error.message, "error");
-        if (button) button.disabled = false;
+        if (button) {
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+        }
       }
     };
   });

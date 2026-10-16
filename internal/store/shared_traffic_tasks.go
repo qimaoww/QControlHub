@@ -214,6 +214,23 @@ func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, acti
 			SELECT agent_id,engine,'','',0,$2,now() FROM tasks WHERE id=$1
 			ON CONFLICT(agent_id,engine) DO UPDATE SET running=$2,uncertain=false,traffic_settled=$3,updated_at=now()`, taskID, action != core.ActionStop && action != core.ActionUninstall, (action == core.ActionStop || action == core.ActionUninstall) && settled)
 		return err
+	case core.ActionStatus:
+		var sharedInstance bool
+		var output string
+		if err := tx.QueryRow(ctx, `SELECT shared_instance,TRIM(COALESCE(output,'')) FROM tasks WHERE id=$1`, taskID).Scan(&sharedInstance, &output); err != nil {
+			return err
+		}
+		if sharedInstance && (output == "active" || output == "inactive" || output == "failed") {
+			active := output == "active"
+			_, err := tx.Exec(ctx, `UPDATE agent_shared_instance_ownership SET running=$2,
+				uncertain=CASE WHEN $2 THEN uncertain ELSE false END,
+				config_uncertain=CASE WHEN $2 THEN config_uncertain ELSE false END,
+				updated_at=now()
+				FROM tasks t WHERE t.id=$1 AND agent_shared_instance_ownership.agent_id=t.agent_id
+					AND agent_shared_instance_ownership.engine=t.engine
+					AND agent_shared_instance_ownership.share_id=t.shared_traffic_id`, taskID, active)
+			return err
+		}
 	}
 	return nil
 }

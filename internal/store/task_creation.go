@@ -367,6 +367,21 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 	} else {
 		task.ConfigID = ""
+		if request.Action == core.ActionStatus && !scope.Admin && scope.OwnerID != "" && !strings.HasPrefix(scope.OwnerID, "token_") {
+			var isolated bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=$2
+				WHERE u.id=$1 AND u.role='user' AND a.owner_id<>u.id)`, scope.OwnerID, task.AgentID).Scan(&isolated); err != nil {
+				return core.Task{}, err
+			}
+			if isolated && containsFeature(features, core.AgentFeatureSharedCoreInstances) {
+				if err := tx.QueryRow(ctx, `SELECT id FROM agent_shares
+					WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted' AND $3=ANY(engines)`,
+					scope.OwnerID, task.AgentID, task.Engine).Scan(&task.SharedTrafficID); err != nil {
+					return core.Task{}, mapError(err)
+				}
+				task.SharedInstance = true
+			}
+		}
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
