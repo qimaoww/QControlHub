@@ -27,10 +27,12 @@
 | 停用后重新启用，再放行旧请求 | 旧会话和请求仍失效，新登录可正常操作 | 重新启用恢复了在途管理员请求能力 | 仅判断当前角色或 disabled 无法识别撤销后重新授予 | 比较认证时与锁定后的持久化版本 | 同一在途测试的 `revoke-regrant`；另检查新登录可成功创建任务 |
 | 删除用户与档案 / 模板 / 设置 / Sub-Store 创建交错 | 已提交数据按 purge 转移 / 清理；删除后的写入拒绝 | 删除后仍插入五类孤立 owner_id 记录 | 为兼容令牌身份，owner_id 无用户外键；这些入口未锁账号 | 配置、模板、个人设置和 Sub-Store 在账号锁保护的事务中写入；相关编辑 / 删除同步采用账号锁 | `TestPurgedPrincipalCannotRecreatePersonalResources` 覆盖五类记录；`TestArchiveAndTemplateCreationSerializeWithPurge` 使用 PostgreSQL 行锁和 `pg_blocking_pids` 固定顺序 |
 | 取消 / 失败的配置任务之后又保存新版本，再点普通重试 | 不能悄悄切换已确认的配置版本 | 重试读取最新草稿并下发，原任务版本失去意义 | 只有自动安装任务设置 expected version | 所有配置重试绑定原版本；冲突返回 409，无排队副作用；按钮 / 确认说明显示版本 | `TestRetryDoesNotDeployANewerConfiguration` 覆盖 validate / deploy；`TestRetryRequiresDurableConfigurationRevision` 检查原快照和重复重试幂等；桌面 / 移动端真实会话验证 |
-| 升级后的历史任务缺少配置版本 | 说明无法确认内容，要求核对后新提交 | version=0 会继续使用当前配置 | 0 同时是“未指定版本”兼容值 | 普通重试对缺失版本返回明确 409；不更改历史记录 | `TestRetryRequiresDurableConfigurationRevision` 使用真实 PostgreSQL 历史形状；已有 v58 → v73 升级独立运行 |
+| 升级后的历史任务缺少配置版本 | 说明无法确认内容，要求核对后新提交 | version=0 会继续使用当前配置；版本字段省略时页面出现 vundefined | 0 同时是“未指定版本”兼容值；前端未区分省略的 JSON 字段 | 普通重试对缺失版本返回明确 409；页面显示版本未知及处理说明，保留有权限的编辑重试，移除无效的普通重试入口 | `TestRetryRequiresDurableConfigurationRevision` 使用真实 PostgreSQL 历史形状；`route_modules_smoke.mjs` 覆盖省略 / null / 0、有版本和非配置任务及只读账号；已有 v58 → v73 升级独立运行 |
 | 管理员编辑他人档案后重试，同时删除配置所有者 | 先锁账号再修改资源；等待结束后提交准确快照 | 编辑重试先锁配置、再等待所有者账号；删除用户先锁账号、再等待配置，形成死锁环 | 编辑重试直到创建任务时才锁配置所有者 | 修改配置前按 ID 顺序锁操作者及配置所有者，沿用任务创建的锁顺序 | `TestEditedRetryLocksConfigurationOwnerBeforeResources` 以 PostgreSQL 锁屏障稳定复现；修复后三轮 `-race` 通过，并检查版本与领取快照 |
 
 原实现的复现记录见 [baseline-failures.txt](multi-user-regression/baseline-failures.txt)。只保存失败用例名，不保存响应中的随机配置密钥。新增测试放到未修改的基线工作树运行，35 个子场景及普通用户权限撤销用例失败；历史无版本任务和编辑重试锁顺序用例另行在基线复现失败，修复后的对应测试通过。
+
+合并前审查另外复现了历史任务卡片的 vundefined 问题：新增渲染用例在 `536cd43d` 失败，补充修复后前端模块及边界检查通过；该修复仅改变缺失版本的任务展示和操作入口。
 
 ### 业务规则冲突与修正依据
 

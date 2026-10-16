@@ -7,7 +7,11 @@ export function createTaskView({ state, actions, can, esc, statusName, engineNam
       items
         .map((item) => {
           const agent = agents.find((entry) => entry.id === item.agent_id);
-          const diagnostic = diagnoseTask(item);
+          const configVersion = Number.isInteger(item.config_version) && item.config_version > 0 ? item.config_version : null;
+          const missingConfigVersion = Boolean(item.config_id && configVersion === null);
+          const diagnostic = missingConfigVersion && ["failed", "canceled"].includes(item.status)
+            ? { title: "历史任务缺少配置版本", advice: "请核对配置后，选择编辑后重试或重新部署。" }
+            : diagnoseTask(item);
           const tone = statusTone(item.status);
           const statusLabel = statusName(item.status);
           const taskEngine =
@@ -19,16 +23,16 @@ export function createTaskView({ state, actions, can, esc, statusName, engineNam
           const resultOpen = openResults.has(item.id) ? " open" : "";
           const sourceLabel = coreSourceLabel(item.engine, item.core_version, item.core_source);
           const actionLabel = `${item.install_if_missing ? "准备内核并" : ""}${actionName(item.action)}`;
-          const retryLabel = item.config_id ? `重试配置 v${item.config_version}` : "重试任务";
+          const retryLabel = item.config_id ? `重试配置 v${configVersion}` : "重试任务";
           const taskActions = `${item.status === "pending" && can("tasks.execute") ? `<button class="button small task-inline-action" data-cancel="${esc(item.id)}">取消任务</button>` : ""}
-              ${["failed", "canceled"].includes(item.status) && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}" data-retry-version="${item.config_id ? item.config_version : ""}" data-retry-install="${Boolean(item.install_if_missing)}">${esc(retryLabel)}</button>` : ""}
+              ${["failed", "canceled"].includes(item.status) && !missingConfigVersion && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}" data-retry-version="${item.config_id ? configVersion : ""}" data-retry-install="${Boolean(item.install_if_missing)}">${esc(retryLabel)}</button>` : ""}
               ${["failed", "canceled"].includes(item.status) && item.config_id && ["validate", "deploy"].includes(item.action) && can("tasks.execute") && (can("agent-config.write") || can("configs.write")) ? `<button class="button small task-inline-action" data-edit-retry="${esc(item.id)}">编辑后重试</button>` : ""}`.trim();
           return `<article id="task-${esc(item.id)}" class="audit-event task-event" data-task-id="${esc(item.id)}" data-task-status="${esc(item.status)}" aria-busy="${item.status === "pending" || item.status === "running"}"><div class="timeline-marker"><i class="${tone}"></i><span></span></div><div class="task-event-card">
             <header><div class="event-action"><span class="status-label ${tone}">${esc(statusLabel)}</span><strong>${esc(actionLabel)}</strong><small><code title="${esc(item.id)}">${esc(short(item.id))}</code> · ${item.attempt ? `第 ${item.attempt} 次执行` : "尚未开始"}</small>
               ${taskActions ? `<div class="task-inline-actions">${taskActions}</div>` : ""}
             </div><time><b>${date(item.created_at)}</b><small data-task-age>${ago(item.created_at)}</small></time></header>
             <div class="task-event-body"><div class="event-target"><span class="engine-badge ${esc(taskEngine)}">${esc(taskEngineLabel)}</span><span><b>节点</b><small>${esc(agent?.name || short(item.agent_id))}</small></span>
-              ${item.config_id ? `<span><b>配置</b><small>${esc(short(item.config_id))} · v${item.config_version}</small></span>` : item.core_version ? `<span><b>版本</b><small>${esc(item.core_version)}${sourceLabel ? ` · ${esc(sourceLabel)}` : ""}</small></span>` : ""}
+              ${item.config_id ? `<span><b>配置</b><small>${esc(short(item.config_id))} · ${configVersion ? `v${configVersion}` : "版本未知"}</small></span>` : item.core_version ? `<span><b>版本</b><small>${esc(item.core_version)}${sourceLabel ? ` · ${esc(sourceLabel)}` : ""}</small></span>` : ""}
               ${item.install_if_missing ? "<span><b>自动安装</b><small>缺少时安装稳定版；已有内核保持版本</small></span>" : ""}
               <span class="task-lifecycle"><b>耗时</b><small data-task-timing>${esc(taskTiming(item))}</small></span></div>
             <div class="event-result">${diagnostic ? `<div class="task-diagnostic"><b>${esc(diagnostic.title)}</b><small>${esc(diagnostic.advice)}</small>${diagnostic.rollback ? `<small>${esc(diagnostic.rollback)}</small>` : ""}</div>` : ""}

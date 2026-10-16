@@ -10,6 +10,7 @@ import * as logs from "./modules/core-logs.js";
 import * as traffic from "./modules/traffic.js";
 import * as users from "./modules/users.js";
 import * as quality from "./modules/ip-quality.js";
+import { createTaskView } from "./modules/task-view.js";
 
 const boundaries = [
   [quality, "installIPQuality"],
@@ -52,3 +53,29 @@ assert.equal(client.copyClientValue, (await import("./modules/client-clipboard.j
 assert.equal(traffic.resetTrafficCreateForm, (await import("./modules/traffic-form-model.js")).resetTrafficCreateForm);
 assert.equal(traffic.renderTrafficAccounting, (await import("./modules/traffic-accounting-view.js")).renderTrafficAccounting);
 console.log("Remaining route factories are inert and preserve their public APIs");
+
+// Historical task JSON omits config_version when the database value is NULL.
+// It must not offer an ordinary retry which the server cannot authorize.
+const taskFixture = { id: "historical-task", agent_id: "node", engine: "mihomo", action: "deploy", status: "canceled", config_id: "archive" };
+const taskCards = (task, permissions = ["tasks.execute", "configs.write"]) => createTaskView({
+  state: { data: {} }, actions: [], can: permission => permissions.includes(permission),
+  esc: value => String(value ?? ""), statusName: String, engineName: String, short: String,
+  date: () => "fixture date", ago: () => "fixture age", actionName: String, statusTone: () => "neutral",
+}).renderTaskCards([task], [], new Set());
+for (const config_version of [undefined, null, 0]) {
+  const html = taskCards({ ...taskFixture, config_version });
+  assert.match(html, /版本未知/);
+  assert.match(html, /缺少配置版本/);
+  assert.doesNotMatch(html, /data-retry=|vundefined|vnull|· v0/);
+  assert.match(html, /data-edit-retry="historical-task"/);
+}
+const versioned = taskCards({ ...taskFixture, config_version: 3 });
+assert.match(versioned, /重试配置 v3/);
+assert.match(versioned, /data-retry-version="3"/);
+assert.doesNotMatch(versioned, /缺少配置版本|版本未知/);
+const statusTask = taskCards({ ...taskFixture, action: "status", config_id: "" });
+assert.match(statusTask, /data-retry="historical-task"/);
+assert.match(statusTask, /重试任务/);
+assert.doesNotMatch(statusTask, /缺少配置版本|版本未知/);
+assert.doesNotMatch(taskCards(taskFixture, []), /data-retry=|data-edit-retry=/);
+console.log("Task retry rendering handles omitted historical revisions and operation permissions");
