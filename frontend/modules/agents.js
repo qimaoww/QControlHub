@@ -30,7 +30,7 @@ export function installAgents(ctx) {
   const komari = createAgentKomariDisplay({ api, state, esc, bytes });
   const enrollment = createAgentEnrollment({ ...ctx, refreshAgentPage });
   const { showCommand } = enrollment;
-  const core = createAgentCoreActions(ctx);
+  const core = createAgentCoreActions(ctx, { refreshAgentPage });
   const { submitTask } = core;
   const cards = createAgentCardInteractions(ctx, { can, cardInteractions, loadRegionDisplay, loadKomariDisplay: komari.loadKomariDisplay });
   const batch = createAgentBatchController(ctx, { renderAgentPage, cancelCardDrag: cards.cancel });

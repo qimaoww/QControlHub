@@ -17,6 +17,10 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 					t.Fatal(err)
 				}
 				input.Tag, input.Port = "first", 21001
+				if isXHTTPGroup(input.Protocol) {
+					// Keep fixture internals separate from the public ports used below.
+					input.XHTTPBackendPort, input.XHTTPTLSPort = 31001, 32001
+				}
 				content, err := Generate(engine, input)
 				if err != nil {
 					t.Fatal(err)

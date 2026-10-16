@@ -118,7 +118,7 @@ func TestPresetAutoInstallNegotiatesBeforeDispatchAndResume(t *testing.T) {
 	}
 }
 
-func TestPresetAutoInstallRequiresHostOwnershipAndCurrentPermission(t *testing.T) {
+func TestPresetAutoInstallRequiresPrivatePreparationFeatureAndCurrentPermission(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
@@ -129,8 +129,8 @@ func TestPresetAutoInstallRequiresHostOwnershipAndCurrentPermission(t *testing.T
 	input := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "shared add",
 		Content: "listeners: [{name: a, type: socks, port: 21001}]\nrules: ['MATCH,DIRECT']\n"}
 	options := ConfigMutationOptions{Action: core.ActionValidate, InstallIfMissing: true}
-	if _, _, err := db.SaveAgentConfigAndTask(account, input, 0, options); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("shared recipient installed a host core: %v", err)
+	if _, _, err := db.SaveAgentConfigAndTask(account, input, 0, options); !errors.Is(err, ErrConflict) {
+		t.Fatalf("legacy shared Agent accepted automatic preparation: %v", err)
 	}
 	if _, err := db.AgentConfig(account, agent.ID, input.Engine); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("forbidden install left a saved config: %v", err)

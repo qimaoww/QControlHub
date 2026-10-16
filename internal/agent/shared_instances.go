@@ -20,6 +20,13 @@ func sharedInstanceRoot(engine core.Engine) string {
 	return filepath.Join(managedCoreConfigurationRoot, managedCoreAssetName(engine), "shares")
 }
 
+func validSharedCoreInstallTask(task core.Task) bool {
+	return task.Action == core.ActionInstall && task.Engine.Valid() && task.SharedInstance && core.ValidAgentShareID(task.SharedTrafficID) &&
+		task.CoreVersion == core.CoreVersionStable && task.CoreSource == "" && task.ConfigID == "" && task.ConfigContent == "" &&
+		task.ConfigVersion == 0 && !task.InstallIfMissing && len(task.TLSFrontends) == 0 && len(task.MainlandAccessPolicies) == 0 &&
+		task.CNIPSource == nil && len(task.TCPSettings) == 0
+}
+
 func sharedCoreTemplatesSupported(specs map[core.Engine]EngineSpec, manager *ServiceManager) bool {
 	for engine, spec := range specs {
 		if spec != DefaultSpecsForServiceManager(manager.Kind())[engine] {
@@ -411,4 +418,21 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 		}
 	}
 	return statuses
+}
+
+// Only create protected managed directories. The owner's configuration, unit,
+// enablement and running services are untouched by a recipient's preparation.
+func prepareSharedCorePrerequisites(base EngineSpec) error {
+	for _, path := range []string{filepath.Dir(base.Binary), filepath.Dir(base.ConfigPath)} {
+		if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+			return err
+		}
+		if err := os.Mkdir(path, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := validateProtectedDirectoryChain(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }

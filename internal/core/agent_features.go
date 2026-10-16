@@ -71,3 +71,8 @@ const AgentFeatureIndependentEgress = "independent-egress-v1"
 // AgentFeatureSharedCoreInstances means each accepted share deploys to its
 // own managed service and configuration path.
 const AgentFeatureSharedCoreInstances = "shared-core-instances-v1"
+
+// AgentFeatureSharedCorePrepare negotiates stable binary preparation without
+// starting or rewriting the host service. Manual install and private validate
+// or deploy tasks retain their share identity throughout preparation.
+const AgentFeatureSharedCorePrepare = "shared-core-prepare-v1"

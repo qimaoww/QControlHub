@@ -122,7 +122,7 @@ func TestTaskAPIPrefersRecentConfigurationSnapshot(t *testing.T) {
 		status                int
 	}{
 		{"disabled engine", `UPDATE agents SET capabilities='[]' WHERE id=$1`,
-			`UPDATE agents SET capabilities='["mihomo"]' WHERE id=$1`, http.StatusBadRequest},
+			`UPDATE agents SET capabilities='["mihomo"]' WHERE id=$1`, http.StatusConflict},
 		{"unsafe existing service", `UPDATE agents SET runtime='{"mihomo":{"existing_config_unsupported_reason":"ambiguous service"}}' WHERE id=$1`,
 			`UPDATE agents SET runtime='{}' WHERE id=$1`, http.StatusConflict},
 	} {

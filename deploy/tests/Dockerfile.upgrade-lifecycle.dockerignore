@@ -1,0 +1,4 @@
+*
+!deploy/
+!deploy/tests/
+!deploy/tests/sandbox-systemd-run.sh
