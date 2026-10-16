@@ -38,12 +38,23 @@ func (s *Store) CreateConfigTemplate(ctx context.Context, name, engineName strin
 		return core.ConfigTemplate{}, err
 	}
 	template := core.ConfigTemplate{ID: id, OwnerID: scopeForConfig(ctx).OwnerID, Name: name, Engine: engine, Content: content, CreatedAt: now, UpdatedAt: now}
-	_, err = s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.ConfigTemplate{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.ConfigTemplate{}, err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO config_templates (id,name,engine,content,created_at,updated_at,owner_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		template.ID, template.Name, template.Engine, storedContent, template.CreatedAt, template.UpdatedAt, template.OwnerID)
 	if err != nil {
 		return core.ConfigTemplate{}, mapError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.ConfigTemplate{}, err
 	}
 	return template, nil
 }
@@ -77,16 +88,24 @@ func (s *Store) ListConfigTemplates(ctx context.Context) ([]core.ConfigTemplate,
 
 // DeleteConfigTemplate removes a template by id.
 func (s *Store) DeleteConfigTemplate(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return err
+	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
-	command, err := s.pool.Exec(ctx, `DELETE FROM config_templates WHERE id=$1`+ownerWhere, args...)
+	command, err := tx.Exec(ctx, `DELETE FROM config_templates WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return fmt.Errorf("delete config template: %w", err)
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // RenderConfigTemplate fills the {{variable}} placeholders with node-specific

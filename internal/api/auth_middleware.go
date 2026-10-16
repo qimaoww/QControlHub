@@ -62,8 +62,9 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		value, _ := s.sessionForRequest(request)
+		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))
 		if role == core.RoleAdmin {
-			value, _ := s.sessionForRequest(request)
 			request = request.WithContext(store.WithUserManagementAuth(request.Context(), s.sessionUserID(request), value.AuthRevision, s.tokenAdministratorAvailable()))
 		}
 		if !s.authorizeAgentResource(w, request) {

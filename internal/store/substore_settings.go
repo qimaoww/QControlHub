@@ -71,6 +71,9 @@ func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL string
 		return core.SubStoreSyncSettings{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.SubStoreSyncSettings{}, err
+	}
 	backendKey := subStoreBackendKey(endpointURL)
 	if ownerID != "" {
 		_, err = tx.Exec(ctx, `INSERT INTO user_substore_settings(owner_id,endpoint_ciphertext,backend_key,updated_at)

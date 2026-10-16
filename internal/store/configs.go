@@ -41,6 +41,9 @@ func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Confi
 		return core.Config{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.Config{}, err
+	}
 	_, err = tx.Exec(ctx, `
 			INSERT INTO configs (id,agent_id,name,description,engine,content,version,created_at,updated_at,owner_id)
 		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$8,$9)`,
@@ -63,6 +66,9 @@ func (s *Store) UpdateConfig(ctx context.Context, id string, input core.Config) 
 		return core.Config{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.Config{}, err
+	}
 	config, err := s.updateConfigTx(ctx, tx, id, input)
 	if err != nil {
 		return core.Config{}, err
@@ -128,6 +134,9 @@ func (s *Store) DeleteConfig(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return err
+	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	command, err := tx.Exec(ctx, `UPDATE configs SET deleted_at=now(),content='' WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL`+ownerWhere, args...)

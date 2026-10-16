@@ -256,7 +256,15 @@ func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, setti
 	if err != nil {
 		return core.PanelSettings{}, err
 	}
-	err = s.pool.QueryRow(ctx, `INSERT INTO user_panel_settings(owner_id,content,runtime,revision,updated_at)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.PanelSettings{}, err
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO user_panel_settings(owner_id,content,runtime,revision,updated_at)
 		SELECT $1,$2,$3,2,$5 WHERE $4=1 OR EXISTS(SELECT 1 FROM user_panel_settings WHERE owner_id=$1)
 		ON CONFLICT(owner_id) DO UPDATE SET content=EXCLUDED.content,runtime=EXCLUDED.runtime,
 			revision=user_panel_settings.revision+1,updated_at=EXCLUDED.updated_at
@@ -265,7 +273,10 @@ func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, setti
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
 	}
-	return settings, err
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	return settings, tx.Commit(ctx)
 }
 
 // InitializeDefaultAgentEngines seeds installation preferences once. Subsequent

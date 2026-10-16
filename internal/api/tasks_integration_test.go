@@ -149,22 +149,38 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 	}
 
 	retryResponse := taskAPIRequest(t, handler, adminToken, http.MethodPost, "/api/v1/tasks/"+canceledTask.ID+"/retry")
+	if retryResponse.Code != http.StatusConflict {
+		t.Fatalf("changed revision retry status=%d body=%s", retryResponse.Code, retryResponse.Body.String())
+	}
+	// A new version must be selected explicitly. Edited retry keeps this
+	// action and scope while atomically saving and snapshotting the edit.
+	payload, err := json.Marshal(map[string]any{"content": secondContent, "expected_version": updated.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+canceledTask.ID+"/edit-retry", bytes.NewReader(payload))
+	retryRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	retryResponse = httptest.NewRecorder()
+	handler.ServeHTTP(retryResponse, retryRequest)
 	if retryResponse.Code != http.StatusCreated {
 		t.Fatalf("retry canceled task status=%d body=%s", retryResponse.Code, retryResponse.Body.String())
 	}
-	if strings.Contains(retryResponse.Body.String(), "config_content") || strings.Contains(retryResponse.Body.String(), secondContent) {
+	if strings.Contains(retryResponse.Body.String(), "config_content") {
 		t.Fatalf("retry response exposed snapshotted configuration: %s", retryResponse.Body.String())
 	}
-	var retried core.Task
-	if err := json.Unmarshal(retryResponse.Body.Bytes(), &retried); err != nil {
+	var edited struct {
+		Task core.Task `json:"task"`
+	}
+	if err := json.Unmarshal(retryResponse.Body.Bytes(), &edited); err != nil {
 		t.Fatalf("decode retried task: %v", err)
 	}
+	retried := edited.Task
 	if retried.ID == "" || retried.ID == canceledTask.ID || retried.AgentID != primaryAgent.ID ||
 		retried.Action != canceledTask.Action || retried.Engine != canceledTask.Engine || retried.Status != core.TaskPending || retried.ConfigContent != "" {
 		t.Fatalf("retried task = %+v", retried)
 	}
 	claimed, err := dataStore.ClaimTask(ctx, primaryAgent.ID)
-	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != secondContent || claimed.ConfigVersion != updated.Version {
+	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != secondContent || claimed.ConfigVersion != updated.Version+1 {
 		t.Fatalf("claimed retried task = %+v, %v", claimed, err)
 	}
 	original, err := dataStore.GetTask(ctx, canceledTask.ID)

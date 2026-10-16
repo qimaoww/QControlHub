@@ -9,7 +9,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 
 # Routine CI runs non-browser checks beside the Go shards. Real-browser checks
 # remain in local make check and the manual Browser validation workflow.
-BROWSER_CHECK_TARGETS := frontend-browser-check core-install-browser-check
+BROWSER_CHECK_TARGETS := frontend-browser-check core-install-browser-check multi-user-browser-check
 CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
 ALPINE_CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
@@ -85,6 +85,10 @@ frontend-module-check:
 
 core-install-browser-check:
 	QCH_CORE_INSTALL_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreFirstInstallBrowserSessions$$' -v
+
+.PHONY: multi-user-browser-check
+multi-user-browser-check:
+	QCH_MULTI_USER_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestMultiUserBrowserSessions$$' -v
 
 frontend-browser-check:
 	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v

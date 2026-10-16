@@ -74,6 +74,9 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID stri
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return nil, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE target_id=$1`, targetID); err != nil {
 		return nil, err
 	}

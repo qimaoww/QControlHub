@@ -8,20 +8,31 @@ import (
 )
 
 func (s *Store) CancelTask(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return err
+	}
+	if err := requireTaskPermission(ctx, tx, core.ActionStatus, false); err != nil {
+		return err
+	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
-	command, err := s.pool.Exec(ctx, `
+	command, err := tx.Exec(ctx, `
 		UPDATE tasks SET status='canceled',error='canceled by administrator',finished_at=now(),config_content=NULL,lease_id=NULL
 		WHERE id=$1 AND status='pending'`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}
 	if command.RowsAffected() != 0 {
-		return nil
+		return tx.Commit(ctx)
 	}
 	var exists bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id=$1`+ownerWhere+`)`, args...).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id=$1`+ownerWhere+`)`, args...).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -53,9 +64,12 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		return s.GetTask(ctx, change.TaskID)
 	}
 	expectedVersion := 0
-	if previous.InstallIfMissing {
-		// Never silently deploy a newer draft when retrying a partially
-		// completed install + configuration operation.
+	if previous.ConfigID != "" {
+		// A retry preserves the reviewed intent. A changed draft requires an
+		// explicit new deployment or edited retry, including ordinary tasks.
+		if previous.ConfigVersion < 1 {
+			return core.Task{}, fmt.Errorf("%w: task has no configuration revision; submit a new task", ErrConflict)
+		}
 		expectedVersion = previous.ConfigVersion
 	}
 	return s.CreateTask(ctx, core.TaskRequest{

@@ -41,24 +41,15 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 // revision and its exact task snapshot to be published in one transaction.
 func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration) (core.Task, error) {
 	scope := scopeForConfig(ctx)
-	if err := lockAgentUser(ctx, tx); err != nil {
+	var configIDs []string
+	if scope.Admin && request.ConfigID != "" {
+		configIDs = append(configIDs, request.ConfigID)
+	}
+	if err := lockAgentUser(ctx, tx, configIDs...); err != nil {
 		return core.Task{}, err
 	}
 	if err := requireTaskPermission(ctx, tx, request.Action, false); err != nil {
 		return core.Task{}, err
-	}
-	if scope.Admin && request.ConfigID != "" {
-		// An administrator may deploy someone else's configuration. Lock its
-		// durable owner before the Agent, just like the owner's own request.
-		rows, err := tx.Query(ctx, `SELECT id FROM panel_users
-			WHERE id=(SELECT owner_id FROM configs WHERE id=$1) FOR SHARE`, request.ConfigID)
-		if err != nil {
-			return core.Task{}, err
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return core.Task{}, err
-		}
 	}
 	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err

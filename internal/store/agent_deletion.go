@@ -30,6 +30,12 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) (err error) {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return err
+	}
+	if err := requireAgentDeletion(ctx, tx, id); err != nil {
+		return err
+	}
 	var enrollmentID *string
 	stage = "revoke identity"
 	err = tx.QueryRow(ctx, `

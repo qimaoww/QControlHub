@@ -90,7 +90,15 @@ func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 	if err != nil || updated.Version != 2 {
 		t.Fatalf("save current agent config = %+v, %v", updated, err)
 	}
-	retried, err := dataStore.RetryTask(ctx, original.ID)
+	if _, err := dataStore.RetryTask(ctx, original.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("retry must reject the changed configuration: %v", err)
+	}
+	assertTaskOverview(t, ctx, dataStore, baselineOverview, 0, 0, 0)
+	// Selecting a new revision is an explicit new task, separate from retry.
+	retried, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionValidate, Engine: core.EngineMihomo,
+		ConfigID: updated.ID, ExpectedConfigVersion: updated.Version,
+	})
 	if err != nil || retried.ID == original.ID || retried.Status != core.TaskPending || retried.ConfigVersion != updated.Version {
 		t.Fatalf("retry canceled task = %+v, %v", retried, err)
 	}

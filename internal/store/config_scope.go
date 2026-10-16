@@ -7,6 +7,20 @@ import (
 
 type configScopeKey struct{}
 
+type principalAuthKey struct{}
+
+type principalAuth struct {
+	UserID       string
+	AuthRevision int64
+}
+
+// WithPrincipalAuth carries the authenticated database session revision into
+// writes. Row locks then close the gap between HTTP authentication and commit.
+// Environment tokens and internal maintenance have no database session.
+func WithPrincipalAuth(ctx context.Context, userID string, revision int64) context.Context {
+	return context.WithValue(ctx, principalAuthKey{}, principalAuth{userID, revision})
+}
+
 type configScope struct {
 	OwnerID string
 	Admin   bool

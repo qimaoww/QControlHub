@@ -19,9 +19,9 @@ export function createTaskView({ state, actions, can, esc, statusName, engineNam
           const resultOpen = openResults.has(item.id) ? " open" : "";
           const sourceLabel = coreSourceLabel(item.engine, item.core_version, item.core_source);
           const actionLabel = `${item.install_if_missing ? "准备内核并" : ""}${actionName(item.action)}`;
-          const retryLabel = item.install_if_missing ? `重试配置 v${item.config_version}` : item.config_id ? "使用当前配置重试" : "重试任务";
+          const retryLabel = item.config_id ? `重试配置 v${item.config_version}` : "重试任务";
           const taskActions = `${item.status === "pending" && can("tasks.execute") ? `<button class="button small task-inline-action" data-cancel="${esc(item.id)}">取消任务</button>` : ""}
-              ${["failed", "canceled"].includes(item.status) && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}" data-retry-version="${item.install_if_missing ? item.config_version : ""}">${esc(retryLabel)}</button>` : ""}
+              ${["failed", "canceled"].includes(item.status) && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}" data-retry-version="${item.config_id ? item.config_version : ""}" data-retry-install="${Boolean(item.install_if_missing)}">${esc(retryLabel)}</button>` : ""}
               ${["failed", "canceled"].includes(item.status) && item.config_id && ["validate", "deploy"].includes(item.action) && can("tasks.execute") && (can("agent-config.write") || can("configs.write")) ? `<button class="button small task-inline-action" data-edit-retry="${esc(item.id)}">编辑后重试</button>` : ""}`.trim();
           return `<article id="task-${esc(item.id)}" class="audit-event task-event" data-task-id="${esc(item.id)}" data-task-status="${esc(item.status)}" aria-busy="${item.status === "pending" || item.status === "running"}"><div class="timeline-marker"><i class="${tone}"></i><span></span></div><div class="task-event-card">
             <header><div class="event-action"><span class="status-label ${tone}">${esc(statusLabel)}</span><strong>${esc(actionLabel)}</strong><small><code title="${esc(item.id)}">${esc(short(item.id))}</code> · ${item.attempt ? `第 ${item.attempt} 次执行` : "尚未开始"}</small>

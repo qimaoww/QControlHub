@@ -98,6 +98,8 @@ COLUMNS=40 NO_COLOR=1 bash scripts/preview-quick-start.sh update
 
 开发环境需要 Go、Node.js 和 PostgreSQL 测试库（`QCH_TEST_DATABASE_URL`）。
 
+多用户权限矩阵、已复现缺陷、并发 / 升级 / 浏览器回归和截图见 [多用户排查与回归记录](docs/multi-user-regression.md)。
+
 ## License
 
 QControlHub 依据 [GNU General Public License version 3](LICENSE) 发布，SPDX 标识为 `GPL-3.0-only`。

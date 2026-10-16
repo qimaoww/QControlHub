@@ -14,19 +14,75 @@ func (s *Store) IsAgentIsolated(ctx context.Context) (bool, error) {
 	return isolatedAgentUser(ctx, s.pool)
 }
 
-func lockAgentUser(ctx context.Context, tx pgx.Tx) error {
+func lockAgentUser(ctx context.Context, tx pgx.Tx, configIDs ...string) error {
 	scope := scopeForConfig(ctx)
-	if scope.Admin || strings.HasPrefix(scope.OwnerID, "token_") {
+	auth, session := ctx.Value(principalAuthKey{}).(principalAuth)
+	userID := scope.OwnerID
+	if scope.System {
+		userID = ""
+		session = false
+	} else if session {
+		userID = auth.UserID
+	} else if scope.Admin || strings.HasPrefix(userID, "token_") {
+		userID = ""
+	}
+	if userID == "" && len(configIDs) == 0 {
 		return nil
 	}
-	var id string
-	err := tx.QueryRow(ctx, `SELECT id FROM panel_users WHERE id=$1 AND NOT disabled FOR SHARE`, scope.OwnerID).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// A request that waited behind account deletion must fail closed.
-		// Only explicit token identities may lack a durable panel-user row.
+	// Administrators can submit other users' configurations. Lock both owners
+	// together in stable order, matching sharing and account deletion.
+	rows, err := tx.Query(ctx, `SELECT id,role,disabled,auth_revision FROM panel_users
+		WHERE id=$1 OR id IN(SELECT owner_id FROM configs WHERE id=ANY($2::text[]))
+		ORDER BY id FOR SHARE`, userID, configIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := userID == ""
+	for rows.Next() {
+		var id string
+		var role core.Role
+		var disabled bool
+		var revision int64
+		if err := rows.Scan(&id, &role, &disabled, &revision); err != nil {
+			return err
+		}
+		if id == userID {
+			found = !disabled
+			if (session && auth.AuthRevision != revision) || (scope.Admin && role != core.RoleAdmin) {
+				return fmt.Errorf("%w: account authorization changed; sign in again", ErrForbidden)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !found {
 		return ErrNotFound
 	}
-	return err
+	return nil
+}
+
+func (s *Store) beginAgentAdministrationTx(ctx context.Context, agentID string) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err = lockAgentUser(ctx, tx); err == nil {
+		var id string
+		err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = ErrNotFound
+		}
+	}
+	if err == nil {
+		err = requireAgentAdministration(ctx, tx, agentID)
+	}
+	if err != nil {
+		tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
 }
 
 func isolatedAgentUser(ctx context.Context, executor storeExecutor) (bool, error) {
