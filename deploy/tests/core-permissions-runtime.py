@@ -13,13 +13,15 @@ import pwd
 import shutil
 import ssl
 import socket
-import struct
 import subprocess
 import tempfile
 import threading
 import time
 
-from core_permission_network import add_loopback_alias, bind_backend_socket, wait_tcp_listener
+from core_permission_network import (
+    add_loopback_alias, address, bind_backend_socket, socks, tcp_roundtrip,
+    wait_for_forwarding, wait_tcp_listener,
+)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 MANAGER = os.environ.get("QCH_SERVICE_MANAGER", "systemd")
@@ -42,34 +44,6 @@ def port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
-
-
-def receive(sock, size):
-    data = b""
-    while len(data) < size:
-        more = sock.recv(size - len(data))
-        if not more:
-            raise RuntimeError("unexpected SOCKS EOF")
-        data += more
-    return data
-
-
-def address(host, p):
-    family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    return bytes([4 if family == socket.AF_INET6 else 1]) + socket.inet_pton(family, host) + struct.pack("!H", p)
-
-
-def socks(p, command, host, target):
-    sock = socket.create_connection(("127.0.0.1", p), timeout=3)
-    sock.sendall(b"\x05\x01\x00")
-    assert receive(sock, 2) == b"\x05\x00"
-    sock.sendall(b"\x05" + bytes([command, 0]) + address(host, target))
-    header = receive(sock, 4)
-    assert header[:2] == b"\x05\x00", header
-    size = 16 if header[3] == 4 else 4
-    peer = socket.inet_ntop(socket.AF_INET6 if size == 16 else socket.AF_INET, receive(sock, size))
-    bound = struct.unpack("!H", receive(sock, 2))[0]
-    return sock, peer, bound
 
 
 def backend(host, udp):
@@ -111,10 +85,13 @@ def marked_packets():
 def traffic(p, targets=None):
     for host, tcp, udp in TARGETS if targets is None else targets:
         before = tcp[2][0]
-        sock, _, _ = socks(p, 1, host, tcp[1])
-        with sock:
-            sock.sendall(b"GET / HTTP/1.0\r\n\r\n")
-            assert receive(sock, len(TCP_RESPONSE)) == TCP_RESPONSE
+        try:
+            tcp_roundtrip(p, host, tcp[1], b"GET / HTTP/1.0\r\n\r\n", TCP_RESPONSE)
+        except (OSError, EOFError, AssertionError) as error:
+            raise RuntimeError(
+                f"TCP forwarding proxy=127.0.0.1:{p} target={host}:{tcp[1]} "
+                f"backend_hits={tcp[2][0] - before}: {error}"
+            ) from error
         assert tcp[2][0] == before + 1
         control, relay, rp = socks(p, 3, "127.0.0.1", 0)
         with control, socket.socket(socket.AF_INET6 if ":" in relay else socket.AF_INET, socket.SOCK_DGRAM) as datagram:
@@ -129,6 +106,16 @@ def traffic(p, targets=None):
                 size = 22 if reply[3] == 4 else 10
                 assert reply[size:] == b"qch-echo:" + body, "UDP payload mismatch"
                 assert udp[2][0] == before + 1, "traffic did not reach controlled core target"
+
+
+def wait_proxy(p):
+    host, tcp, _ = TARGETS[0]
+    wait_for_forwarding(
+        lambda timeout: tcp_roundtrip(
+            p, host, tcp[1], b"GET / HTTP/1.0\r\n\r\n", TCP_RESPONSE, timeout=timeout,
+        ),
+        f"proxy=127.0.0.1:{p} target={host}:{tcp[1]}",
+    )
 
 
 def write(path, content, state=False):
@@ -257,6 +244,12 @@ def test(engine, shared):
             context = ssl._create_unverified_context()
             with socket.create_connection(("127.0.0.1", tls_port), timeout=3) as raw, context.wrap_socket(raw, server_hostname="qch-local-test") as tls:
                 assert tls.getpeercert(binary_form=True), "core did not read certificate and private key"
+        # Mihomo accepts SOCKS before tunnel.OnRunning; a successful TCP
+        # connect (or even SOCKS handshake) does not prove forwarding readiness.
+        # Warm up only the controlled loopback TCP target, then take fresh mark
+        # and hit baselines for the strict TCP/UDP matrix below.
+        for proxy in dict.fromkeys([p, local] if engine == "mihomo" else [local]):
+            wait_proxy(proxy)
         before_marks = marked_packets()
         traffic(p if engine == "mihomo" else local)
         after_marks = marked_packets()
@@ -269,7 +262,7 @@ def test(engine, shared):
                 with denied:
                     denied.sendall(b"GET / HTTP/1.0\r\n\r\n")
                     denied.recv(4096)
-            except (OSError, RuntimeError, AssertionError):
+            except (OSError, EOFError, RuntimeError, AssertionError):
                 pass
             assert BLOCKED_TARGET[2][0] == 0, "core did not read/enforce its protected ACL"
         # An atomic binary replacement and a real service restart retain grants.
@@ -283,6 +276,9 @@ def test(engine, shared):
         action("restart")
         wait_tcp_listener("127.0.0.1", p)
         assert inspect_process(name, unit) != pid, "binary update did not replace the process"
+        # Restarted cores must finish routing initialization again.
+        for proxy in dict.fromkeys([p, local] if engine == "mihomo" else [local]):
+            wait_proxy(proxy)
         before_marks = marked_packets()
         traffic(p if engine == "mihomo" else local)
         assert all(after > before for before, after in zip(before_marks, marked_packets())), "binary/config replacement lost actual outbound marks"
@@ -301,7 +297,7 @@ def test(engine, shared):
         try:
             traffic(local, TARGETS[:2] if engine == "mihomo" else None)
             stopped_passed = True
-        except (OSError, RuntimeError, AssertionError):
+        except (OSError, EOFError, RuntimeError, AssertionError):
             pass
         assert not stopped_passed, "stopped core forwarded traffic"
         assert before == sum(t[1][2][0] + t[2][2][0] for t in TARGETS)

@@ -295,11 +295,11 @@ jobs:
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
             -w /src golang:1.25-alpine sh -ec '
               apk add --no-cache python3 openrc libcap openssl coreutils nftables iproute2 >/dev/null
-              python3 -B deploy/tests/core_permission_network_test.py
               QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh --prepare-agent
               mkdir /binaries
               cp /official/bin/mihomo /official/bin/xray /official/bin/ssserver /official/bin/sslocal /binaries/
               cp /official/musl/sing-box /binaries/
+              QCH_PERMISSION_BIN=/binaries python3 -B deploy/tests/core_permission_network_test.py
               QCH_PERMISSION_BIN=/binaries QCH_SERVICE_MANAGER=openrc \
                 QCH_LIVE_CORE_PERMISSION_MIGRATION=1 /permission-agent.test \
                 -test.run "^TestInstalledOpenRCCorePermissionMigration$" -test.count=1 -test.v
