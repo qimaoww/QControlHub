@@ -321,10 +321,23 @@ function bindProtocolOptionVisibility(form) {
     if (portLabel) portLabel.textContent = managed ? "内部监听端口" : "监听端口";
     const port = form.elements.namedItem("tls_public_port");
     port?.setCustomValidity(managed && port.value === form.elements.namedItem("port")?.value ? "公网端口不能与内部监听端口相同" : "");
+    const domainLabel = form.querySelector("[data-tls-domain-label]");
+    if (domainLabel) domainLabel.textContent = managed ? "域名" : "证书域名 / TLS SNI";
+    const route = form.querySelector("[data-managed-tls-route]");
+    if (route) {
+      setVisible(route, Boolean(managed));
+      route.textContent = `${tlsMode?.value === "nginx" ? "Nginx" : "Caddy"}：${domain?.value || "你的域名"}:${port?.value || "443"}${form.elements.namedItem("transport_path")?.value || ""} → ${listen?.value}:${form.elements.namedItem("port")?.value}`;
+    }
+    if (tlsMode?.value === "native") {
+      const advanced = form.querySelector("[data-tls-advanced]");
+      if (advanced) advanced.open = true;
+    }
   };
   bindEvent(tlsMode, "change", updateTLSMode);
   bindEvent(form.elements.namedItem("tls_public_port"), "input", updateTLSMode);
   bindEvent(form.elements.namedItem("port"), "input", updateTLSMode);
+  bindEvent(form.elements.namedItem("tls_server_name"), "input", updateTLSMode);
+  bindEvent(form.elements.namedItem("transport_path"), "input", updateTLSMode);
   const updateSecurity = () => { updateNative(); updateTLSMode(); };
   bindEvent(transport, "change", updateSecurity);
   bindEvent(tls, "change", updateSecurity);

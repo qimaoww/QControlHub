@@ -55,6 +55,13 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	if engine == core.EngineSingBox && protocol.SupportsManagedTLS && !agent.CanManage && (plan.TLSMode == "caddy" || plan.TLSMode == "nginx") {
+		plan.Port, err = s.sharedManagedTLSPlanPort(request.Context(), s.configOwnerID(request), agent.ID, plan, input.Input)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
 	s.recordAudit(request, "agent_config.plan_created", agent.ID, string(engine)+" "+protocol.Key)
 	writeJSON(w, http.StatusCreated, plan)
 }

@@ -7,6 +7,7 @@
 .tls-settings .plan-fields textarea{display:block;margin-top:4px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.6}
 .tls-settings .plan-fields small{overflow-wrap:anywhere;line-height:1.6}
 .tls-help{margin:0;color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)));line-height:1.65}
+.managed-tls-plan>.builder-section>.tls-help{margin-top:12px;overflow-wrap:anywhere}
 .task-retry-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
 .task-retry-dialog .config-inbound-heading{flex-shrink:0}
 .task-retry-dialog .config-inbound-heading>div{min-width:0}
@@ -25,6 +26,7 @@
 .task-retry-form [data-error]{margin:0;border-radius:0;overflow-wrap:anywhere}
 .task-retry-form[aria-busy=true]{cursor:progress}
 @media(max-width:820px){
+  .managed-tls-plan .plan-fields:is(.two,.three){grid-template-columns:minmax(0,1fr)}
   .tls-settings .plan-fields.two{grid-template-columns:minmax(0,1fr)}
   .task-retry-dialog .code-editor-frame{grid-template-columns:44px minmax(0,1fr)}
   .task-retry-dialog :is(.code-editor-input,.code-gutter){font-size:max(16px,calc(12px * var(--ui-font-scale)));line-height:1.65}
