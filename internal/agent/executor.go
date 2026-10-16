@@ -163,14 +163,26 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
 	}
+	if task.InstallIfMissing {
+		if (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
+			task.ConfigVersion < 1 || task.ConfigContent == "" || (task.SharedTrafficID != "" && !task.SharedInstance) ||
+			task.CoreVersion != "" || task.CoreSource != "" {
+			return "", errors.New("invalid automatic core installation task")
+		}
+	}
 	if task.SharedInstance {
-		if task.Action != core.ActionDeploy ||
+		if (task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
 			!core.ValidAgentShareID(task.SharedTrafficID) {
 			return "", errors.New("invalid shared core deployment task")
 		}
 		managerKind := e.serviceManager().Kind()
 		if spec != DefaultSpecsForServiceManager(managerKind)[task.Engine] {
 			return "", errors.New("shared core instance requires the standard managed service")
+		}
+		if task.InstallIfMissing {
+			if err := prepareSharedCorePrerequisites(spec); err != nil {
+				return "", fmt.Errorf("prepare private core prerequisites: %w", err)
+			}
 		}
 		var err error
 		spec, err = sharedInstanceSpec(task.Engine, spec, task.SharedTrafficID, managerKind)
@@ -185,11 +197,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 	}
 	if task.InstallIfMissing {
-		if (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
-			task.ConfigVersion < 1 || task.ConfigContent == "" || task.SharedTrafficID != "" ||
-			task.CoreVersion != "" || task.CoreSource != "" {
-			return "", errors.New("invalid automatic core installation task")
-		}
+
 		// This is one durable task with one immutable configuration snapshot.
 		// Recheck locally: a retry or a preceding task may have installed the
 		// core since the heartbeat. Never update an already installed binary.
@@ -197,13 +205,37 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		defer cancel()
 		output := "core already installed; keeping the current version"
 		if _, err := exec.LookPath(spec.Binary); err != nil {
+			if _, statErr := os.Lstat(spec.Binary); !errors.Is(statErr, os.ErrNotExist) {
+				return output, fmt.Errorf("existing core binary is not executable; owner intervention is required: %w", err)
+			}
 			var installErr error
-			output, installErr = e.Execute(ctx, core.Task{
-				Action: core.ActionInstall, Engine: task.Engine, CoreVersion: core.CoreVersionStable,
-			})
+			if task.SharedInstance {
+				updater := e.Updater
+				if updater == nil {
+					updater = NewCoreUpdater()
+				}
+				output, installErr = updater.install(ctx, task.Engine, spec, core.CoreVersionStable, "", e.serviceManager(), false)
+			} else {
+				output, installErr = e.Execute(ctx, core.Task{
+					Action: core.ActionInstall, Engine: task.Engine, CoreVersion: core.CoreVersionStable,
+				})
+			}
 			if installErr != nil {
 				return output, fmt.Errorf("stable core installation failed; configuration was not executed: %w", installErr)
 			}
+		}
+		if task.Action == core.ActionValidate && task.SharedInstance {
+			// Validation uses the private paths prepared above, without starting a service.
+			task.InstallIfMissing = false
+			if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
+				return output, err
+			}
+			prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+			if warning != "" {
+				return output, errors.New(warning)
+			}
+			result, err := e.validate(ctx, task.Engine, spec, prepared)
+			return output + "\n" + result, err
 		}
 		task.InstallIfMissing = false
 		result, err := e.Execute(ctx, task)

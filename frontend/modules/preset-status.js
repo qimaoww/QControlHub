@@ -37,7 +37,7 @@ function renderPresetStatus() {
   status.setAttribute("aria-live", "polite");
   status.textContent = operation.message;
   if (changed) enterSurface(status, { token: "--motion-feedback" });
-  if (operation.task?.id) {
+  if (operation.task?.id && can("tasks.read")) {
     const link = document.createElement("a");
     link.href = "#tasks";
     link.textContent = " 查看执行记录 →";

@@ -5,11 +5,11 @@ QCH_SANDBOX_GOCACHE ?= $(CURDIR)/.ci-cache/sandbox-build
 export QCH_SANDBOX_GOCACHE
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check core-install-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Routine CI runs non-browser checks beside the Go shards. Real-browser checks
 # remain in local make check and the manual Browser validation workflow.
-BROWSER_CHECK_TARGETS := frontend-browser-check
+BROWSER_CHECK_TARGETS := frontend-browser-check core-install-browser-check
 CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
 ALPINE_CHECK_TARGETS := fmt-check frontend-module-check module-policy-test ci-runner-test browser-diagnostics-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
@@ -65,7 +65,7 @@ upgrade-sandbox-test:
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
 		-v "$(QCH_SANDBOX_GOCACHE):/cache" \
 		qch-upgrade-lifecycle-test sh -ec 'trap '\''chown -R "$$QCH_CACHE_UID:$$QCH_CACHE_GID" /cache'\'' EXIT; \
-		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v'
+		go test ./internal/agent -run "^(TestAgentLifecycleReadOnlySandbox|TestSharedCoreFirstUseReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$" -count=1 -v'
 
 vet:
 	go vet ./...
@@ -82,6 +82,9 @@ frontend-check: frontend-module-check frontend-browser-check
 
 frontend-module-check:
 	node frontend/module_smoke.mjs
+
+core-install-browser-check:
+	QCH_CORE_INSTALL_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreFirstInstallBrowserSessions$$' -v
 
 frontend-browser-check:
 	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v

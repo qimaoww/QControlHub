@@ -63,7 +63,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err
 	}
-	if request.InstallIfMissing || (request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus) {
+	if request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
 		if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
 			return core.Task{}, err
 		}
@@ -186,7 +186,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		uninstallDisabled := request.Action == core.ActionUninstall &&
 			containsEngine(supported, request.Engine) && runtime[request.Engine].Installed
 		if !containsEngine(capabilities, request.Engine) && !uninstallDisabled {
-			return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
+			if !containsEngine(supported, request.Engine) {
+				return core.Task{}, fmt.Errorf("%w: engine is not supported by this Agent", ErrInvalid)
+			}
+			return core.Task{}, fmt.Errorf("%w: engine capability is disabled on this Agent", ErrConflict)
 		}
 		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
@@ -326,6 +329,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 		if err := s.prepareSharedTaskTx(ctx, tx, &task, configOwnerID, features, runtime[request.Engine]); err != nil {
 			return core.Task{}, err
+		}
+		if task.InstallIfMissing && task.SharedTrafficID == "" {
+			if err := requireAgentAdministration(ctx, tx, task.AgentID); err != nil {
+				return core.Task{}, err
+			}
 		}
 		if err := s.prepareTLSFrontendPortsTx(ctx, tx, &task, configOwnerID); err != nil {
 			return core.Task{}, err

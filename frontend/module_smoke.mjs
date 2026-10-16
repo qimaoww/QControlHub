@@ -1,5 +1,6 @@
 import "./formatting_smoke.mjs";
 import "./permissions_smoke.mjs";
+import "./core_install_state_smoke.mjs";
 import "./refresh_smoke.mjs";
 import "./route_loader_smoke.mjs";
 import "./requests_smoke.mjs";

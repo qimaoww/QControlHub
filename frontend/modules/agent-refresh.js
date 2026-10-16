@@ -1,3 +1,4 @@
+import { coreInstallBlockReason } from "./core-install-state.js";
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
 import { updateAgentPresence } from "./agent-presence.js";
@@ -265,14 +266,32 @@ function updateAgentMetrics(item) {
   }
   root.querySelectorAll(".core-version-form button[type=submit]").forEach(
     (button) => {
-      const card = button.closest(".service-card");
-      button.disabled =
-        !online ||
-        !can("operator") ||
-        card?.dataset.capabilityEnabled === "0" ||
-        Boolean(card?.dataset.existingUnsupported);
+      const engine = button.form?.dataset.versionEngine;
+      const reason = coreInstallBlockReason(item, engine, permission, {
+        pending: Boolean(state.data.coreInstallTasks?.[`${item.id}|${engine}`]),
+      });
+      button.disabled = Boolean(reason) || Boolean(button.form?.dataset.installBusy);
+      button.title = reason;
+      const hint = button.form?.querySelector("[data-core-install-hint]");
+      if (hint) hint.textContent = reason || "Release · SHA-256 校验";
     },
   );
+  root.querySelectorAll("[data-open-version-form]").forEach((button) => {
+    const engine = button.closest(".service-card")?.querySelector(".core-version-form")?.dataset.versionEngine;
+    const reason = coreInstallBlockReason(item, engine, permission, {
+      pending: Boolean(state.data.coreInstallTasks?.[`${item.id}|${engine}`]),
+    });
+    button.disabled = Boolean(reason);
+    button.title = reason;
+  });
+  root.querySelectorAll("[data-core-install-block]").forEach((hint) => {
+    const engine = hint.closest(".service-card")?.querySelector("[data-core-version]")?.dataset.coreVersion;
+    const reason = coreInstallBlockReason(item, engine, permission, {
+      pending: Boolean(state.data.coreInstallTasks?.[`${item.id}|${engine}`]),
+    });
+    hint.textContent = reason;
+    hint.hidden = !reason;
+  });
   root.querySelectorAll("[data-core-uninstall]").forEach((button) => {
     const runtime = item.runtime?.[button.dataset.taskEngine] || {};
     const key = `${item.id}|${button.dataset.taskEngine}`;
@@ -311,7 +330,10 @@ async function pollAgentMetrics() {
         const selected = state.data.selectedAgent;
         // A user can execute tasks without being allowed to read their status.
         // Release any locally tracked task if that read permission is removed.
-        if (!can("tasks.read")) state.data.coreUninstallTasks = {};
+        if (!can("tasks.read")) {
+          state.data.coreUninstallTasks = {};
+          state.data.coreInstallTasks = {};
+        }
         const pendingUninstalls = Object.entries(state.data.coreUninstallTasks || {});
         const [items, deployments, configs, uninstallStates] = await Promise.all([
           api("/agents", { signal }),

@@ -1,3 +1,4 @@
+import { coreInstallBlockReason } from "./core-install-state.js";
 import { managedTLSPlanFields } from "./server-plan-managed-tls.js";
 import { xhttpProtocolOptions, isXHTTPGroup } from "./server-plan-xhttp.js";
 import { protocolNavigationNames, snellProtocolOptions, sudokuProtocolOptions, wireguardProtocolOptions } from "./server-plan-form.js";
@@ -71,10 +72,10 @@ export function createPresetView({ state, can, esc, engineName, shell }) {
   const revisionTimeline = config
     ? `<details class="revision-timeline node-revision-timeline" id="revisions"><summary><b>版本历史</b><strong>当前 v${config.version}</strong></summary><div class="timeline-body" data-revision-body>展开加载版本历史</div></details>`
     : "";
-  const canAutoInstall = !engineInstalled && (state.session?.role === "admin" || agent.can_manage === true) &&
-    (agent.features || []).includes("preset-auto-install-v1");
+  const installReason = coreInstallBlockReason(agent, engine, can, { automatic: true });
+  const canAutoInstall = !engineInstalled && !installReason;
   const executionCallout = !engineInstalled
-    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>${commonMutation ? "通用配置提交需要已安装内核。增加入站可自动安装稳定版；管理内核版本请到节点设置。" : canAutoInstall ? "增加入站并提交时，将自动安装最新稳定版，再执行校验或部署。切换版本请到节点设置。" : "自动安装需要节点管理权及新版 Agent；请到节点设置检查权限或升级 Agent。"}</small></span><a class="button small" href="#node-${esc(agent.id)}">节点设置</a></aside>`
+    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>${commonMutation ? "通用配置提交需要已安装内核。增加入站可自动安装稳定版；管理内核版本请到节点设置。" : canAutoInstall ? agent.can_manage === false ? "增加入站时将受控准备稳定版内核，再校验或部署您的独立实例；宿主机版本由所有者管理。" : "增加入站并提交时，将自动安装最新稳定版，再执行校验或部署。切换版本请到节点设置。" : esc(installReason)}</small></span><a class="button small" href="#node-${esc(agent.id)}">节点设置</a></aside>`
     : agent.runtime?.[engine]?.existing_config_unsupported_reason
       ? `<aside class="config-execution-callout"><span><b>当前内核暂不可提交任务</b><small>${esc(agent.runtime[engine].existing_config_unsupported_reason)}</small></span><a class="button small" href="#node-settings">检查节点配置</a></aside>`
       : agent.status !== "online"

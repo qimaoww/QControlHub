@@ -90,7 +90,7 @@ func TestEngineCapabilityDefaultsAndNodeOverrides(t *testing.T) {
 	if got, err := s.AgentConfig(ctx, agent.ID, core.EngineMihomo); err != nil || got.ID != config.ID {
 		t.Fatalf("configuration removed: %+v, %v", got, err)
 	}
-	if _, err := s.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStatus}); !errors.Is(err, ErrInvalid) {
+	if _, err := s.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStatus}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("disabled task accepted: %v", err)
 	}
 	if _, err := s.SaveAgentConfig(ctx, config, config.Version); !errors.Is(err, ErrInvalid) {
@@ -369,7 +369,7 @@ func TestEngineCapabilityServiceLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertState(false, core.TaskSucceeded)
-	if _, err := s.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStart}); !errors.Is(err, ErrInvalid) {
+	if _, err := s.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStart}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("disabled core ordinary start accepted: %v", err)
 	}
 	start, err := s.ChangeAgentEngineCapability(ctx, agent.ID, core.EngineMihomo, true)

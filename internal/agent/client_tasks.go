@@ -325,12 +325,11 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
-	if task.SharedInstance && (task.Action != core.ActionDeploy || !core.ValidAgentShareID(task.SharedTrafficID) ||
-		task.InstallIfMissing) {
+	if task.SharedInstance && ((task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
 		return false
 	}
 	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
-		task.ConfigVersion < 1 || task.ConfigID == "" || task.ConfigContent == "" || task.SharedTrafficID != "" ||
+		task.ConfigVersion < 1 || task.ConfigID == "" || task.ConfigContent == "" || (task.SharedTrafficID != "" && !task.SharedInstance) ||
 		task.CoreVersion != "" || task.CoreSource != "") {
 		return false
 	}

@@ -150,12 +150,12 @@ export async function run({ noop }) {
           if (path === "/agents/gamma/configs") return [];
           if (path === "/tasks") {
             taskBodies.push(options?.body);
-            return { id: "task-1" };
+            return { id: "task-1", status: "succeeded" };
           }
           assert.fail(`unexpected preset interaction API path ${path}`);
         },
         optionalAPI: async () => null,
-        can: () => true,
+        can: permission => permission !== "tasks.read",
         esc: (value) => String(value ?? ""),
         engineName: (value) => value,
         serviceStatusName: (value) => value,

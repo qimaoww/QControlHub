@@ -10,6 +10,10 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"only the Agent owner may manage its host":                                                                "宿主机内核版本仅限节点所有者管理；共享用户请通过增加入站准备独立实例，版本管理请联系所有者在节点设置处理。",
+	"ask the node owner to upgrade the Agent before preparing a private core instance":                        "请联系节点所有者在节点设置升级 Agent，再准备独立实例内核。",
+	"engine is not supported by this Agent":                                                                   "节点不支持此内核，请检查 Agent 安装配置。",
+	"engine capability is disabled on this Agent":                                                             "内核能力未启用，请由所有者在节点设置的 Agent 页开启。",
 	"family must be 4 or 6":                                                                                   "报告地址族必须为 IPv4 或 IPv6。",
 	"IPQuality requires agents.manage and tasks.execute":                                                      "IP 质量检测需要节点管理和任务执行权限。",
 	"date must use YYYY-MM-DD":                                                                                "检测日期须使用 YYYY-MM-DD 格式。",

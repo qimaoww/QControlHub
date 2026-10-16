@@ -62,6 +62,9 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 	}
 	endpoints := serverconfig.DiscoverTrafficPorts(task.Engine, task.ConfigContent)
 	if isolated {
+		if task.InstallIfMissing && (!containsFeature(features, core.AgentFeatureSharedCoreInstances) || !containsFeature(features, core.AgentFeatureSharedCorePrepare)) {
+			return fmt.Errorf("%w: ask the node owner to upgrade the Agent before preparing a private core instance", ErrConflict)
+		}
 		if !supportsSharedEngines(features) {
 			return fmt.Errorf("%w: upgrade the Agent before shared deployments", ErrConflict)
 		}
@@ -76,7 +79,8 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			configOwner, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used, &unrestricted); err != nil {
 			return mapError(err)
 		}
-		task.SharedInstance = task.Action == core.ActionDeploy && containsFeature(features, core.AgentFeatureSharedCoreInstances)
+
+		task.SharedInstance = (task.Action == core.ActionDeploy || task.InstallIfMissing) && containsFeature(features, core.AgentFeatureSharedCoreInstances)
 		if limit > 0 && used >= limit {
 			return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
 		}

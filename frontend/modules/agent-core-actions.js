@@ -1,3 +1,6 @@
+import { coreInstallBlockReason } from "./core-install-state.js";
+import { taskTerminal } from "./task-monitor.js";
+import { createCoreInstallMonitor } from "./core-install-monitor.js";
 import { setVisible } from "./presence-motion.js";
 import { prepareDisclosure } from "./popup.js";
 import { bindEvent } from "./refresh.js";
@@ -13,8 +16,9 @@ export function coreSourceForInstall(engine, channel, rawSource) {
 }
 
 
-export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }) {
-async function submitTask(payload) {
+export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }, { refreshAgentPage } = {}) {
+  const { watchInstall, installFeedback } = createCoreInstallMonitor({ api, state, can, notify, refreshAgentPage });
+async function submitTask(payload, onError) {
   try {
     const agent = state.data.agents?.find((item) => item.id === payload.agent_id);
     if (agent?.can_manage === false && !["deploy", "validate", "status"].includes(payload.action))
@@ -27,6 +31,7 @@ async function submitTask(payload) {
     return task;
   } catch (error) {
     notify(error.message, "error");
+    onError?.(error.message);
     return null;
   }
 }
@@ -156,14 +161,31 @@ async function submitTask(payload) {
           : payload.core_source === "official"
             ? "来源：MetaCubeX/mihomo 官方（默认）。"
             : "";
-      if (
-        !(await confirmAction(
-          `确定提交内核安装或版本切换任务？${sourceNote}下载和校验完成后，目标服务会重启。`,
-          "提交任务",
-        ))
-      )
-        return;
-      await submitTask(payload);
+      if (form.dataset.installBusy) return;
+      const agentID = form.dataset.versionAgent;
+      const key = `${agentID}|${engine}`;
+      const agent = state.data.agents?.find(item => item.id === agentID);
+      const reason = agent ? coreInstallBlockReason(agent, engine, can, {pending: Boolean(state.data.coreInstallTasks?.[key])}) : "节点授权已变化，请刷新后重试。";
+      if (reason) { installFeedback(agentID, engine, reason); return; }
+      const sessionData = state.data;
+      form.dataset.installBusy = "1";
+      const submit = form.querySelector("button[type=submit]");
+      if (submit) submit.disabled = true;
+      try {
+        if (!(await confirmAction(`确定提交内核安装或版本切换任务？${sourceNote}下载和校验完成后，目标服务会重启。`, "提交任务"))) return;
+        if (state.data !== sessionData || form.isConnected === false) return;
+        const latest = state.data.agents?.find(item => item.id === agentID);
+        const changed = latest ? coreInstallBlockReason(latest, engine, can) : "节点授权已变化，请刷新后重试。";
+        if (changed) { installFeedback(agentID, engine, changed); return; }
+        const task = await submitTask(payload, message => installFeedback(agentID, engine, message));
+        if (task && state.data === sessionData) {
+          installFeedback(agentID, engine, taskTerminal(task) ? "安装任务已结束。" : "内核安装任务已提交…");
+          watchInstall(task, agentID, engine, sessionData);
+        }
+      } finally {
+        delete form.dataset.installBusy;
+        if (submit?.isConnected) submit.disabled = Boolean(state.data.coreInstallTasks?.[key]) || Boolean(coreInstallBlockReason(agent, engine, can));
+      }
     };
   });
   document.querySelectorAll("[data-open-version-form]").forEach((button) => {

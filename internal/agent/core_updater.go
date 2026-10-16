@@ -99,6 +99,11 @@ func NewCoreUpdater() *CoreUpdater {
 }
 
 func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager) (string, error) {
+	return updater.install(ctx, engine, spec, selector, source, manager, true)
+}
+
+// Preparation verifies and publishes the binary without touching any service.
+func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager, activate bool) (string, error) {
 	if updater == nil {
 		return "", errors.New("core updater is required")
 	}
@@ -173,7 +178,11 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		assetBackups[name] = assetBackup
 	}
 
-	restartOutput, restartErr := serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
+	restartOutput := ""
+	var restartErr error
+	if activate {
+		restartOutput, restartErr = serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
+	}
 	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Digest, spec.Binary)
 	if fallbackReason != "" {
 		output += "\nfallback: " + fallbackReason

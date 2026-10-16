@@ -412,3 +412,20 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 	}
 	return statuses
 }
+
+// Only create protected managed directories. The owner's configuration, unit,
+// enablement and running services are untouched by a recipient's preparation.
+func prepareSharedCorePrerequisites(base EngineSpec) error {
+	for _, path := range []string{filepath.Dir(base.Binary), filepath.Dir(base.ConfigPath)} {
+		if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+			return err
+		}
+		if err := os.Mkdir(path, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := validateProtectedDirectoryChain(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}

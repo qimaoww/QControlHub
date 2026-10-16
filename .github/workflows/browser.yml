@@ -31,7 +31,18 @@ jobs:
     env:
       GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
       GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
+      QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qcontrolhub?sslmode=disable
       QCH_CHROME_BIN: /usr/bin/chromium
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v6
       - id: go
@@ -70,6 +81,17 @@ jobs:
     name: Optional browsers / Alpine
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v6
       - name: Pull and identify the Alpine toolchain
@@ -83,8 +105,9 @@ jobs:
             .ci-cache/alpine-mod
       - name: Run the complete real-browser matrix on musl
         run: |
-          sh .github/scripts/run-ci-container.sh --rm --init \
+          sh .github/scripts/run-ci-container.sh --rm --init --network host \
             -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
+            -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
             -e QCH_BROWSER_WORKERS="${{ inputs.workers }}" \
             -e QCH_CI_REPORT_DIR=/src/.ci-report -e GOFLAGS=-buildvcs=false \
             -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod \

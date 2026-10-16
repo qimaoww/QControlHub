@@ -1,3 +1,4 @@
+import { coreInstallBlockReason } from "./core-install-state.js";
 import { updateFeedback } from "./presence-motion.js";
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
@@ -90,7 +91,8 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   if (emptyManaged) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    updateFeedback(hint, `${engineName(engine)} 未安装；提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。`);
+    const reason = coreInstallBlockReason(agent, engine, can, { automatic: true });
+    updateFeedback(hint, `${engineName(engine)} 未安装；${reason || (agent.can_manage === false ? "增加入站时将受控准备稳定版内核并初始化您的独立实例。" : "提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。")}`);
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.cached) {
     const hint = document.createElement("p");
