@@ -12,6 +12,10 @@ const tlsIssuerBudget = 65 * time.Second
 // request deadline. A config reload cancels that issuer's in-flight work and
 // gives the backup a separate opportunity within the deployment deadline.
 func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeployments, service string, certificateRoutes ...tlsDeployments) error {
+	phase := "TLS与协议就绪检查"
+	if len(certificateRoutes) > 0 {
+		phase = "证书准备"
+	}
 	frontends := deployments[service].Frontends
 	fallback := map[string]bool{}
 	primary, cancel := context.WithTimeout(ctx, tlsIssuerBudget)
@@ -39,7 +43,7 @@ func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeplo
 		}
 	}
 	if len(fallback) == 0 || ctx.Err() != nil {
-		return fmt.Errorf("[阶段:证书准备] %w", err)
+		return tlsPhaseError(phase, err)
 	}
 	if err = m.syncWithFallback(ctx, deployments, fallback, certificateRoutes...); err != nil {
 		return err
@@ -56,7 +60,7 @@ func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeplo
 			err = probeFrontendTLS(backup, f)
 		}
 		if err != nil {
-			return fmt.Errorf("[阶段:证书准备] 备用机构等待失败：%w", err)
+			return tlsPhaseError(phase, fmt.Errorf("备用机构等待失败：%w", err))
 		}
 	}
 	// Restore the normal issuer chain for renewal. CertMagic discovers and

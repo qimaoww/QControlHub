@@ -41,7 +41,14 @@ func (m *tlsFrontendManager) withFrontendDiagnostics(cause error, frontend core.
 			errorsOnly = append(errorsOnly, line)
 		}
 	}
-	reason, remedy := classifyTLSFailure(strings.Join(errorsOnly, "\n") + "\n" + cause.Error())
+	// Readiness normally ends with a generic deadline. Diagnose the issuer's
+	// actual failure first so that deadline cannot hide an account/challenge
+	// error; warnings alone still fall back to the readiness failure.
+	failure := strings.Join(errorsOnly, "\n")
+	if failure == "" {
+		failure = cause.Error()
+	}
+	reason, remedy := classifyTLSFailure(failure)
 	return fmt.Errorf("%w；[原因:%s] %s；%s；证书机构日志：\n%s", cause, reason, remedy, account, log)
 }
 

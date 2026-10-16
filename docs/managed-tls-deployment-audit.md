@@ -78,7 +78,7 @@ systemd 保留 `ProtectSystem=strict`、`ProtectHome=yes`、`ReadWritePaths=/var
 
 邮箱优先级：**预设非空覆盖 → 配置所有者账号默认 → 空值**。账号设置、队列快照已有加密链路；不改排队任务、不进入核心源码或客户端。共享用户、管理员代交均按配置所有者取值。ZeroSSL 自动 EAB 需要真实邮箱及绑定 API 可达；directory 检查不注册账户，也不证明 EAB 成功。
 
-成功恢复 LE → ZeroSSL 续期链，同 storage 证书复用。有效缓存允许 ACME 出站失败时告警继续，明确 DNS 错误仍提前拒绝。网络超时、DNS、挑战、账户、限流、权限分别分类；实例 ID warn 不掩盖 CA error。
+成功恢复 LE → ZeroSSL 续期链，同 storage 证书复用。有效缓存允许 ACME 出站失败时告警继续，明确 DNS 错误仍提前拒绝。网络超时、DNS、挑战、账户、限流、权限分别分类；实例 ID warn 不掩盖 CA error。优先按实际 CA 错误分类，通用就绪等待截止不覆盖账户或挑战错误；未取得 CA 错误时才使用等待错误，并区分证书准备与服务应用后的 TLS 检查阶段。
 
 ## 网络验证范围和使用入口
 
