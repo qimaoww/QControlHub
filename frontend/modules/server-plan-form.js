@@ -159,7 +159,7 @@ export function readServerPlanInput(form, protocol) {
     transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
     tls_mode: tlsEnabled && protocol.supports_managed_tls ? values.get("tls_mode") || "native" : "",
     tls_acme_email: tlsEnabled && protocol.supports_managed_tls && values.get("tls_mode") === "caddy" ? (values.get("tls_acme_email") || "").trim() : "",
-    tls_public_port: tlsEnabled && ["caddy", "nginx"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
+    tls_public_port: tlsEnabled && ["caddy", "nginx", "external"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
     tls_server_name: values.get("tls_server_name") || "",
     tls_alpn: values.get("tls_alpn") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
@@ -297,13 +297,15 @@ function bindProtocolOptionVisibility(form) {
     if (tlsFields) { setVisible(tlsFields, Boolean(tls?.checked)); tlsFields.querySelectorAll("input, textarea").forEach(control => control.disabled = !tls?.checked); }
   };
   const updateTLSMode = () => {
-    const managed = tls?.checked && ["caddy", "nginx"].includes(tlsMode?.value);
+    const managed = tls?.checked && ["caddy", "nginx", "external"].includes(tlsMode?.value);
     form.querySelectorAll("[data-managed-tls]").forEach(el => { setVisible(el, managed); el.querySelectorAll("input").forEach(control => { control.disabled = !managed; control.required = managed; }); });
     const acme = form.querySelector("[data-caddy-acme]");
     if (acme) { const active = Boolean(tls?.checked && tlsMode?.value === "caddy"); setVisible(acme, active); acme.querySelectorAll("input").forEach(control => control.disabled = !active); }
     const hint = form.querySelector("[data-managed-tls-hint]");
     if (hint) hint.textContent = tlsMode?.value === "nginx"
       ? "面板生成自签证书，客户端通过导出的公共证书验证。请放行所选公网端口。"
+      : tlsMode?.value === "external"
+        ? "自行配置可信 TLS 证书和公网反代，回源到本机内部端口与路径；HTTP/H2 使用 h2c，WS/HTTPUpgrade 使用 HTTP/1.1 Upgrade。节点检查不验证外部入口。"
       : tlsMode?.value === "caddy"
         ? "域名解析到节点，放行 TCP 80 和所选公网端口；自动申请并续期证书。"
         : "使用节点上已有的证书和私钥，需填写下方文件路径。";
@@ -326,7 +328,7 @@ function bindProtocolOptionVisibility(form) {
     const route = form.querySelector("[data-managed-tls-route]");
     if (route) {
       setVisible(route, Boolean(managed));
-      route.textContent = `${tlsMode?.value === "nginx" ? "Nginx" : "Caddy"}：${domain?.value || "你的域名"}:${port?.value || "443"}${form.elements.namedItem("transport_path")?.value || ""} → ${listen?.value}:${form.elements.namedItem("port")?.value}`;
+      route.textContent = `${tlsMode?.value === "external" ? "外部反代" : tlsMode?.value === "nginx" ? "Nginx" : "Caddy"}：${domain?.value || "你的域名"}:${port?.value || "443"}${form.elements.namedItem("transport_path")?.value || ""} → ${listen?.value}:${form.elements.namedItem("port")?.value}`;
     }
     if (tlsMode?.value === "native") {
       const advanced = form.querySelector("[data-tls-advanced]");

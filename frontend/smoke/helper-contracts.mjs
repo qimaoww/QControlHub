@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { diagnoseTask } from "../modules/task-model.js";
 
 import { komariCycleRange, geoRegionDetails, komariResetDay } from "../modules/agents.js";
 
@@ -6,6 +7,12 @@ import { renderTrafficAccounting } from "../modules/traffic.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run() {
+const tlsFailure = {status:"failed",action:"deploy",error:"[阶段:证书准备] [原因:网络超时] 检查出站网络；已恢复原反代状态"};
+assert.match(diagnoseTask(tlsFailure).title,/证书准备/);
+assert.match(diagnoseTask(tlsFailure).advice,/网络超时/);
+assert.match(diagnoseTask(tlsFailure).rollback,/已恢复/);
+assert.match(diagnoseTask({...tlsFailure,error:tlsFailure.error+"；反代恢复失败"}).rollback,/回滚失败/);
+
 assert.equal(
   komariCycleRange(27, new Date(2026, 7, 20)),
   "7.27–8.27",

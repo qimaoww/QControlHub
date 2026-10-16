@@ -37,7 +37,7 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	if input.Transport == "tcp" {
 		input.Transport = "raw"
 	}
-	if managedTLS(input) {
+	if proxiedTLS(input) {
 		input.Port = input.TLSPublicPort
 	}
 	input.Protocol = nativeProtocol(input.Protocol)

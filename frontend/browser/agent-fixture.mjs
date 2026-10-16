@@ -122,7 +122,9 @@ if (mode === "tasks-preview") {
   testAPI.retryConfig = { id: "cfg-preview", name: "VLESS · WebSocket · TLS", agent_id: "alpha", engine: "sing-box", version: 3,
     content: JSON.stringify({ log: { level: "info" }, inbounds: [{ type: "vless", tag: "vless-ws", listen: "127.0.0.1", listen_port: 21001, transport: { type: "ws", path: "/proxy" } }] }, null, 2) };
   testAPI.previewTasks = [{ id: "failed-tls", agent_id: "alpha", engine: "sing-box", action: "deploy", status: "failed", config_id: "cfg-preview", config_version: 2, attempt: 1,
-    created_at: new Date().toISOString(), error: "mkdir /etc/qagent/tls-frontends: read-only file system" }];
+    created_at: new Date().toISOString(),
+    error: "[阶段:证书准备] tls: internal error；[原因:网络超时] 检查节点到 ACME 的 DNS/TCP 443/TLS；未设置 ACME 邮箱，未启用 ZeroSSL；已恢复原反代状态；业务配置与服务未替换\n[错误] 请求 https://acme-v02.api.letsencrypt.org/directory 超时\n[告警] unable to get instance ID: mkdir /nonexistent: read-only file system",
+    output: "[信息] 域名：very-long-domain-name-for-managed-tls-readiness-check.example.test\n[信息] 证书 storage：/var/lib/qcontrolhub-tls/caddy/certificates/acme-v02.api.letsencrypt.org-directory/very-long-domain-name-for-managed-tls-readiness-check.example.test\n[告警] 本机监听和节点出站检查不证明公网 HTTP-01 可达。\nrollback: 原配置、反代路由与服务状态已恢复。" }];
 }
 if (mode.startsWith("client-order")) {
   location.hash = "#client-access";

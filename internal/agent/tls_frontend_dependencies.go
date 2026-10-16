@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 const managedCaddyBinary = "/usr/local/lib/qagent/cores/caddy"
@@ -45,8 +47,27 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 			}
 		}
 	}
+	if mode == "caddy" && ipQualityRootCAs() == nil {
+		if err := installManagedPackages(ctx, false); err != nil {
+			return err
+		}
+	}
 	if _, err := os.Lstat(binary); err == nil {
-		return validatePrivilegedExecutable(binary)
+		if err := validatePrivilegedExecutable(binary); err != nil {
+			return err
+		}
+		if mode == "caddy" {
+			output, err := m.runCaddy(ctx, nil, "list-modules")
+			if err != nil {
+				return err
+			}
+			for _, module := range []string{"tls.issuance.acme", "caddy.storage.file_system", "http.handlers.reverse_proxy", "http.reverse_proxy.transport.http"} {
+				if !strings.Contains(output, module) {
+					return fmt.Errorf("Caddy 缺少必要能力 %s；重新安装官方稳定版", module)
+				}
+			}
+		}
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -55,11 +76,6 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 			return err
 		}
 		return validatePrivilegedExecutable(managedNginxBinary())
-	}
-	if ipQualityRootCAs() == nil {
-		if err := installManagedPackages(ctx, false); err != nil {
-			return err
-		}
 	}
 	updater := m.updater
 	if updater == nil {
@@ -209,7 +225,7 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 	return nil
 }
 
-func (m *tlsFrontendManager) ensureService(ctx context.Context, mode string) error {
+func (m *tlsFrontendManager) serviceDefinition(mode string, legacy bool) (string, string, string) {
 	name := "qagent-tls-" + mode
 	binary := managedCaddyBinary
 	arguments := "run --config " + filepath.Join(m.root, "caddy.conf")
@@ -237,12 +253,44 @@ done
 no_new_privs=true`, 1)
 	}
 
+	if mode == "caddy" && !legacy {
+		if m.services.Kind() == ServiceManagerSystemd {
+			content = strings.Replace(content, "UMask=0027\n", "UMask=0027\nWorkingDirectory="+m.state+"\nEnvironment=XDG_DATA_HOME="+m.state+"/data XDG_CONFIG_HOME="+m.state+"/config HOME="+m.state+"\n", 1)
+		} else {
+			content = strings.Replace(content, "command_user=", "directory=\""+m.state+"\"\nexport XDG_DATA_HOME=\""+m.state+"/data\"\nexport XDG_CONFIG_HOME=\""+m.state+"/config\"\nexport HOME=\""+m.state+"\"\ncommand_user=", 1)
+		}
+	}
+	return name, path, content
+}
+
+func (m *tlsFrontendManager) ensureService(ctx context.Context, mode string) error {
+	name, path, content := m.serviceDefinition(mode, false)
+	if m.services.Kind() == ServiceManagerSystemd {
+		if err := validateManagedUnitDropIns(ctx, name); err != nil {
+			return err
+		}
+	}
+	pending := filepath.Join(m.root, mode+"-runtime.pending")
+	_, pendingErr := os.Lstat(pending)
+	changed := pendingErr == nil
 	if stored, err := os.ReadFile(path); err == nil {
 		if err = validateManagedUnitFile(path); err != nil {
 			return err
 		}
 		if string(stored) != content {
-			return fmt.Errorf("%s 已被修改，请检查服务配置后重试", path)
+			_, _, legacy := m.serviceDefinition(mode, true)
+			if string(stored) != legacy {
+				return fmt.Errorf("%s 已被用户修改，未覆盖；备份并与项目生成版本核对，将自定义设置移至其他服务后重试", path)
+			}
+			if err := m.writeConfig(pending, "runtime-v2", true); err != nil {
+				return err
+			}
+			// Only the exact historical project template is eligible. The atomic
+			// deploy keeps a root-owned backup and never touches certificate storage.
+			if _, err = atomicDeployWithDefaultMetadata(path, content, fileMetadata{mode: 0644}); err != nil {
+				return err
+			}
+			changed = true
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -255,27 +303,31 @@ no_new_privs=true`, 1)
 			return err
 		}
 		_, writeErr := file.WriteString(content)
-		closeErr := file.Close()
-		if err = errors.Join(writeErr, closeErr); err != nil {
+		if err = errors.Join(writeErr, file.Close()); err != nil {
 			return err
 		}
+		changed = true
+	}
+	if changed {
 		if m.services.Kind() == ServiceManagerOpenRC {
-			if err = os.Chmod(path, 0755); err != nil {
+			if err := os.Chmod(path, 0755); err != nil {
 				return err
 			}
-		} else {
-			if _, err = run(ctx, m.services.executable, "daemon-reload"); err != nil {
-				return err
-			}
-		}
-	}
-	if m.services.Kind() == ServiceManagerSystemd {
-		if err := validateManagedUnitDropIns(ctx, name); err != nil {
+		} else if _, err := run(ctx, m.services.executable, "daemon-reload"); err != nil {
 			return err
 		}
-		_, err := run(ctx, m.services.enableHelper(), "enable", name)
-		return err
+		// Reloading JSON does not update a process environment. A migrated
+		// running service needs one restart, including when routes are unchanged.
+		if status, err := m.services.status(ctx, name); err != nil {
+			return err
+		} else if status == "active" {
+			if output, err := m.services.command(ctx, name, core.ActionRestart); err != nil {
+				return fmt.Errorf("应用 TLS 服务环境失败：%w；%s", err, output)
+			}
+		}
+		if err := os.Remove(pending); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
-	_, err := run(ctx, m.services.enableHelper(), "add", name, "default")
-	return err
+	return nil
 }

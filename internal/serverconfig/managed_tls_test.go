@@ -15,6 +15,71 @@ func nativeTLSFixturePlan(protocol Protocol) (Input, error) {
 	return NewPlan(protocol)
 }
 
+func TestManagedTLSHTTPAndExternalExport(t *testing.T) {
+	for _, mode := range []string{"caddy", "external"} {
+		for _, transport := range []string{"ws", "httpupgrade", "h2"} {
+			t.Run(mode+"/"+transport, func(t *testing.T) {
+				protocol, _ := FindProtocol(core.EngineSingBox, "vless-"+transport+"-tls")
+				input, _ := NewPlan(protocol)
+				input.TLSMode, input.TLSServerName, input.TransportHost = mode, "tls.example.test", "host.example.test"
+				input.Port, input.TLSPublicPort = 24567, 8443
+				if transport == "h2" {
+					input.TLSALPN = "h2"
+				}
+				content, err := Generate(core.EngineSingBox, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				metadata, err := MarshalClientMetadataWithPrevious(input, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				frontends, err := ManagedTLSFrontends(core.EngineSingBox, content, map[string]string{input.Tag: metadata})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "external" && len(frontends) != 0 {
+					t.Fatal("external proxy was sent to Agent")
+				}
+				if mode == "caddy" && (len(frontends) != 1 || frontends[0].Host != input.TransportHost) {
+					t.Fatal("managed route lost Host")
+				}
+				if mode == "caddy" {
+					edited := strings.ReplaceAll(content, input.TransportHost, "edited.example.test")
+					changed, err := ManagedTLSFrontends(core.EngineSingBox, edited, map[string]string{input.Tag: metadata})
+					if err != nil || len(changed) != 1 || changed[0].Host != "edited.example.test" {
+						t.Fatal("readiness probe retained stale Host from metadata", changed, err)
+					}
+				}
+				parsed, ok := Parse(core.EngineSingBox, content)
+				if !ok {
+					t.Fatal("parse")
+				}
+				if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+					t.Fatal(err)
+				}
+				if parsed.TLSMode != mode || parsed.TLSPublicPort != 8443 || !parsed.TLSEnabled {
+					t.Fatal(parsed)
+				}
+				outbound, err := BuildClientOutbound(core.EngineSingBox, parsed, "127.0.0.1", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out struct {
+					Port int `json:"server_port"`
+					TLS  struct {
+						Enabled bool   `json:"enabled"`
+						SNI     string `json:"server_name"`
+					} `json:"tls"`
+				}
+				if err := json.Unmarshal(outbound, &out); err != nil || out.Port != 8443 || !out.TLS.Enabled || out.TLS.SNI != input.TLSServerName {
+					t.Fatal(string(outbound), err)
+				}
+			})
+		}
+	}
+}
+
 func TestManagedTLSLifecycle(t *testing.T) {
 	for _, mode := range []string{"caddy", "nginx"} {
 		for _, base := range []string{"vmess", "vless", "trojan"} {

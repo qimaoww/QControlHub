@@ -73,8 +73,11 @@ func singBoxPresetProtocols() []Protocol {
 		dependency := ""
 		if preset.tls {
 			dependency = "；原生 TLS，需证书及匹配 SNI"
-			if preset.transport == "websocket" || preset.transport == "httpupgrade" {
+			if preset.transport == "websocket" || preset.transport == "httpupgrade" || preset.transport == "http" {
 				dependency = "；默认 Caddy 自动证书反代，可选 Nginx 自签证书或原生 TLS"
+			}
+			if preset.transport == "http" {
+				dependency = "；默认 Caddy 自动证书反代（h2c 回源），可选外部反代或原生 TLS"
 			}
 		}
 		if preset.transport == "quic" {
@@ -84,7 +87,7 @@ func singBoxPresetProtocols() []Protocol {
 			Description: "sing-box " + minimum + "+" + dependency + "。参数与客户端配置同步保存。",
 			Docs:        "https://sing-box.sagernet.org/configuration/shared/v2ray-transport/", DefaultPort: 443,
 			Credential:         map[string]string{ProtocolVLESS: "用户 UUID", ProtocolVMess: "用户 UUID", ProtocolTrojan: "用户密码"}[preset.base],
-			SupportsManagedTLS: preset.tls && (preset.transport == "websocket" || preset.transport == "httpupgrade"),
+			SupportsManagedTLS: preset.tls && (preset.transport == "websocket" || preset.transport == "httpupgrade" || preset.transport == "http"),
 			Transports:         []string{preset.transport}, TransportConfig: true, SupportsTLS: preset.tls, RequiresTLS: preset.tls, DefaultTLS: preset.tls, UsesReality: preset.reality})
 	}
 	return result

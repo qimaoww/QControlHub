@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,5 +129,22 @@ func TestCaddyFailureDiagnosticsUseCurrentAttempt(t *testing.T) {
 	}
 	if value = caddyFailureLog(dir, now); value != "" {
 		t.Fatal("followed a proxy-writable diagnostic symlink")
+	}
+}
+
+func TestCaddyFailureSeparatesWarningAndCause(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	log := fmt.Sprintf(`{"level":"warn","ts":%d,"msg":"unable to get instance ID","error":"mkdir /nonexistent: read-only file system"}
+{"level":"error","ts":%d,"msg":"registering account","error":"Get https://acme-v02.api.letsencrypt.org/directory: i/o timeout"}`, now.Unix()+1, now.Unix()+1)
+	if err := os.WriteFile(filepath.Join(dir, "caddy.log"), []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := tlsFrontendManager{state: dir}
+	err := m.withFrontendDiagnostics(errors.New("tls: internal error"), core.TLSFrontend{Mode: "caddy"}, now)
+	for _, want := range []string{"[原因:网络超时]", "[告警]", "[错误]", "ZeroSSL 无法自动绑定账户"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatal(err)
+		}
 	}
 }
