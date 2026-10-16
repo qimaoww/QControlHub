@@ -3,6 +3,7 @@ import { createClientAccessProfiles } from "./modules/client-access-profiles.js"
 import { openTaskEditRetry } from "./modules/task-edit-retry.js";
 import { installConfigPages } from "./modules/configs.js";
 import { reconcileView } from "./modules/refresh.js";
+import { readServerPlanInput } from "./modules/server-plan-form.js";
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const waitFor = async (condition, message) => {
@@ -325,16 +326,45 @@ export async function testPresetsRuntime(preview = false) {
   const catalogResponse = await fetch("/assets/preset-plans.json");
   assert(catalogResponse.ok, "real preset test catalog failed to load");
   const catalog = await catalogResponse.json();
+  const caddyPreset = catalog.find(entry => entry.engine === "sing-box" && entry.protocol.key === "vless-ws-tls");
+  for (const shared of [false, true]) {
+    const test = await fixture("sing-box", false, {...caddyPreset, shared});
+    edit("tls_server_name", "proxy.example.test");
+    const previousPort = control("port").value;
+    form().querySelector(".builder-actions [data-regenerate]").click();
+    await waitFor(() => control("port").value !== previousPort, "Caddy parameters did not regenerate");
+    assert(control("tls_server_name").value === "proxy.example.test" && form().querySelector("[data-managed-tls-route]").textContent.endsWith(`127.0.0.1:${control("port").value}`), "regeneration lost the domain or left a stale route");
+    const backendPort = control("port").value;
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 1 && !button("deploy").disabled, "domain-only Caddy deployment stalled");
+    const saved = submissions(test)[0].body.input;
+    assert(saved.tls_mode === "caddy" && saved.listen === "127.0.0.1" && saved.tls_public_port === 443 && String(saved.port) === backendPort && !saved.certificate_path && !saved.private_key_path, "Caddy deployment did not use a generated loopback backend");
+    assert(control("tls_server_name").value === "proxy.example.test" && !form().querySelector("[data-tls-advanced]").open && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy domain-only settings did not survive reload");
+  }
   const covered = new Set();
   const cases = [...catalog, ...catalog.filter(actual => actual.engine === "xray" && actual.plan.transport === "xhttp").map(actual => ({...actual, shared: true}))];
   for (const actual of cases) {
     const test = await fixture(actual.engine, false, actual);
     covered.add(actual.engine);
     if (actual.protocol.supports_managed_tls) {
+      assert(!form().querySelector("[data-builder-step]"), "managed TLS still requires the four-tab workflow");
+      assert(!form().querySelector("[data-tls-advanced]").open, "generated settings should start collapsed");
+      const basic = [...form().querySelectorAll("input,select,textarea")].filter(input => input.willValidate && input.checkVisibility());
+      assert(basic.every(input => ["operation", "tls_server_name", "tls_public_port"].includes(input.name)), "managed TLS asks for generated settings in the basic flow");
       assert(control("tls_mode").value === "caddy" && control("tls_public_port").value === "443", "managed TLS defaults lost");
       assert(control("listen").value === "127.0.0.1" && control("listen").readOnly, "managed backend is not loopback");
       assert(control("tls_server_name").required && !control("tls_server_name").checkValidity(), "managed domain must be supplied");
       assert(!control("tls_acme_email").disabled && control("tls_acme_email").type === "email", "Caddy ACME email not editable");
+      edit("tls_server_name", "tls.example.test");
+      assert(form().checkValidity(), "domain-only Caddy flow is invalid");
+      assert(form().querySelector("[data-managed-tls-route]").textContent.includes(`tls.example.test:443${control("transport_path").value} → 127.0.0.1:`), "Caddy route does not follow the supplied domain");
+      const draft = readServerPlanInput(form(), actual.protocol);
+      assert(draft.tls_enabled && draft.tls_mode === "caddy" && draft.tls_public_port === 443 && !draft.certificate_path && !draft.private_key_path && draft.credential && draft.transport_path, "domain-only Caddy payload needs manual core/TLS settings");
+      edit("tls_mode", "native");
+      assert(form().querySelector("[data-tls-advanced]").open && !control("certificate_path").disabled && control("listen").value === "0.0.0.0", "native certificate fields were not revealed");
+      edit("tls_mode", "caddy");
+      assert(control("listen").value === "127.0.0.1" && control("certificate_path").disabled, "switching back to Caddy retained native TLS fields");
+      form().querySelector("[data-tls-advanced]").open = true;
       edit("tls_acme_email", "certs@example.test");
       edit("tls_server_name", "tls.example.test");
       edit("tls_public_port", "8443");

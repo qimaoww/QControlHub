@@ -12,10 +12,11 @@ import (
 )
 
 type clientAddressCandidate struct {
-	address     string
-	source      string
-	family      string
-	profileOnly bool
+	address       string
+	source        string
+	family        string
+	profileOnly   bool
+	tlsDomainOnly bool
 }
 
 func normalizeClientAddressMode(value string) string {
@@ -42,6 +43,13 @@ func clientProfileAddress(candidates []clientAddressCandidate, mode string) clie
 	return clientAddressCandidate{}
 }
 
+func managedTLSClientDomain(input serverconfig.Input) string {
+	if input.TLSMode == "caddy" || input.TLSMode == "nginx" {
+		return strings.TrimSpace(input.TLSServerName)
+	}
+	return ""
+}
+
 // buildClientAccessProfiles renders the effective profile of every listening
 // endpoint. Only profile-scoped labels provide a display override: node-wide
 // client display values are deliberately not inherited, so an upgraded node
@@ -58,7 +66,11 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 		if address != "" {
 			overridden = true
 		} else {
-			address = clientProfileAddress(candidates, mode).address
+			available := candidates
+			if domain := managedTLSClientDomain(input); domain != "" && strings.TrimSpace(labels["client_address"]) == "" {
+				available = append([]clientAddressCandidate{{address: domain, family: "hostname"}}, candidates...)
+			}
+			address = clientProfileAddress(available, mode).address
 		}
 		name, nameOverridden := "", false
 		if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
@@ -86,6 +98,17 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 	// Publish it only for that profile; do not use it as another port's
 	// automatic candidate or discard the entire entry when all ports override.
 	candidates = append([]clientAddressCandidate(nil), candidates...)
+	for _, input := range inputs {
+		domain := managedTLSClientDomain(input)
+		found := domain == ""
+		for _, candidate := range candidates {
+			found = found || candidate.address == domain
+		}
+		if !found {
+			candidates = append(candidates, clientAddressCandidate{address: domain,
+				source: "入站证书域名", family: "hostname", tlsDomainOnly: true})
+		}
+	}
 	if len(labelSets) > 0 {
 		for _, input := range inputs {
 			address := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)])
@@ -103,6 +126,13 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
 		for _, input := range inputs {
+			manual := ""
+			if len(labelSets) > 0 {
+				manual = strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)])
+			}
+			if candidate.tlsDomainOnly && managedTLSClientDomain(input) != candidate.address && manual != candidate.address {
+				continue
+			}
 			if len(labelSets) > 0 {
 				// A port with a manual address is pinned to exactly one candidate;
 				// exposing it under another family would publish a second URI.

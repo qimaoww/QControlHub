@@ -22,15 +22,16 @@ export async function testPresetFieldLayoutRuntime() {
           mode.value = "custom";
           mode.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        for (const tab of form.querySelectorAll("[data-builder-step]")) {
-          tab.click();
+        const tabs = [...form.querySelectorAll("[data-builder-step]")];
+        for (const tab of tabs.length ? tabs : [null]) {
+          tab?.click();
           await pause();
           form.querySelectorAll(".builder-section:not([hidden]) .preset-option-panel")
             .forEach(panel => { panel.open = true; });
           for (const [theme, scale] of [["light", "1"], ["dark", "1.35"]]) {
             root.dataset.theme = theme;
             root.style.setProperty("--ui-font-scale", scale);
-            const context = `${entry.engine}/${entry.protocol.key}/${tab.dataset.builderStep}/${scale}`;
+            const context = `${entry.engine}/${entry.protocol.key}/${tab?.dataset.builderStep || "connection"}/${scale}`;
             assert(dialog.scrollWidth <= dialog.clientWidth + 1, `${context}: dialog overflows`);
             if (entry.protocol.key === "mieru") {
               assert(document.documentElement.scrollWidth <= innerWidth, `${context}: page overflows`);

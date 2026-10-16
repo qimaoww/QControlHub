@@ -145,6 +145,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         updateFeedback(regenerateStatus, message);
       },
       onApplied: (plan) => {
+        serverPlanForm.elements.namedItem("port")?.dispatchEvent(new Event("input", { bubbles: true }));
         if (!ctx.selectedInbound) state.data.serverPlans[
           `${ctx.agent.id}|${ctx.engine}|${ctx.protocol.key}`
         ] = plan;
