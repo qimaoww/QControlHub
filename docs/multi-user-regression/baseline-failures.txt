@@ -38,3 +38,8 @@ Only case names retained; response bodies and generated secrets omitted.
 --- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/client-preferences (1.89s)
 --- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/template (1.81s)
 --- FAIL: TestOrdinaryUserInFlightSaveLosesRevokedPermission (1.39s)
+
+Additional isolated baseline reproductions:
+--- FAIL: TestRetryRequiresDurableConfigurationRevision
+--- FAIL: TestEditedRetryLocksConfigurationOwnerBeforeResources
+Edited retry holds configs before waiting for panel_users; purge-order resource lock times out (SQLSTATE 55P03).

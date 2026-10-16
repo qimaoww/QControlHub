@@ -179,3 +179,65 @@ func TestPrincipalRevocationPreservesOtherUsersAndMaintenance(t *testing.T) {
 		t.Fatalf("legacy token compatibility: %v", err)
 	}
 }
+
+func TestEditedRetryLocksConfigurationOwnerBeforeResources(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	administrator := createLifecycleAdministrator(t, db, ctx, "retry-administrator")
+	admin := WithPrincipalAuth(WithConfigScope(ctx, administrator.ID, true), administrator.ID, administrator.AuthRevision)
+	user, owner := sharedTestUser(t, db, ctx, "retry-config-owner")
+	agent := sharedTestAgent(t, db, admin)
+	sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 0, 21001, 21002)
+	config, err := db.CreateConfig(owner, core.Config{Name: "foreign archive", Engine: core.EngineMihomo, Content: "listeners: [{name: a, type: http, port: 21001}]\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := db.CreateTask(admin, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionValidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CancelTask(admin, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(ctx)
+	if _, err := blocker.Exec(ctx, `SELECT id FROM panel_users WHERE id=$1 FOR UPDATE`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		config core.Config
+		task   core.Task
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		saved, task, err := db.SaveEditedRetry(admin, original.ID, "listeners: [{name: a, type: http, port: 21002}]\n", config.Version)
+		finished <- outcome{saved, task, err}
+	}()
+	waitForPurgeBlockedBy(t, db, ctx, blocker.Conn().PgConn().PID())
+	if _, err := blocker.Exec(ctx, `SET LOCAL lock_timeout='500ms'`); err != nil {
+		t.Fatal(err)
+	}
+	// Purge holds the configuration owner's account before locking the
+	// Agent and configuration. A waiting edited retry must hold neither.
+	for _, resource := range []struct{ table, id string }{{"agents", agent.ID}, {"configs", config.ID}} {
+		if _, err := blocker.Exec(ctx, `SELECT id FROM `+resource.table+` WHERE id=$1 FOR UPDATE`, resource.id); err != nil {
+			blocker.Rollback(ctx)
+			<-finished
+			t.Fatalf("edited retry inverted the account/%s lock order: %v", resource.table, err)
+		}
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	result := <-finished
+	if result.err != nil || result.config.Version != config.Version+1 || result.task.ConfigVersion != result.config.Version {
+		t.Fatalf("edited retry after releasing owner: version=%d task version=%d error=%v", result.config.Version, result.task.ConfigVersion, result.err)
+	}
+	claimed, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.ID != result.task.ID || claimed.ConfigContent != result.config.Content {
+		t.Fatalf("edited retry snapshot after contention: %v", err)
+	}
+}

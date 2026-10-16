@@ -28,14 +28,15 @@
 | 删除用户与档案 / 模板 / 设置 / Sub-Store 创建交错 | 已提交数据按 purge 转移 / 清理；删除后的写入拒绝 | 删除后仍插入五类孤立 owner_id 记录 | 为兼容令牌身份，owner_id 无用户外键；这些入口未锁账号 | 配置、模板、个人设置和 Sub-Store 在账号锁保护的事务中写入；相关编辑 / 删除同步采用账号锁 | `TestPurgedPrincipalCannotRecreatePersonalResources` 覆盖五类记录；`TestArchiveAndTemplateCreationSerializeWithPurge` 使用 PostgreSQL 行锁和 `pg_blocking_pids` 固定顺序 |
 | 取消 / 失败的配置任务之后又保存新版本，再点普通重试 | 不能悄悄切换已确认的配置版本 | 重试读取最新草稿并下发，原任务版本失去意义 | 只有自动安装任务设置 expected version | 所有配置重试绑定原版本；冲突返回 409，无排队副作用；按钮 / 确认说明显示版本 | `TestRetryDoesNotDeployANewerConfiguration` 覆盖 validate / deploy；`TestRetryRequiresDurableConfigurationRevision` 检查原快照和重复重试幂等；桌面 / 移动端真实会话验证 |
 | 升级后的历史任务缺少配置版本 | 说明无法确认内容，要求核对后新提交 | version=0 会继续使用当前配置 | 0 同时是“未指定版本”兼容值 | 普通重试对缺失版本返回明确 409；不更改历史记录 | `TestRetryRequiresDurableConfigurationRevision` 使用真实 PostgreSQL 历史形状；已有 v58 → v73 升级独立运行 |
+| 管理员编辑他人档案后重试，同时删除配置所有者 | 先锁账号再修改资源；等待结束后提交准确快照 | 编辑重试先锁配置、再等待所有者账号；删除用户先锁账号、再等待配置，形成死锁环 | 编辑重试直到创建任务时才锁配置所有者 | 修改配置前按 ID 顺序锁操作者及配置所有者，沿用任务创建的锁顺序 | `TestEditedRetryLocksConfigurationOwnerBeforeResources` 以 PostgreSQL 锁屏障稳定复现；修复后三轮 `-race` 通过，并检查版本与领取快照 |
 
-原实现的复现记录见 [baseline-failures.txt](multi-user-regression/baseline-failures.txt)。只保存失败用例名，不保存响应中的随机配置密钥。新增测试放到未修改的基线工作树运行，35 个子场景及普通用户权限撤销用例失败；修复后的对应测试通过。
+原实现的复现记录见 [baseline-failures.txt](multi-user-regression/baseline-failures.txt)。只保存失败用例名，不保存响应中的随机配置密钥。新增测试放到未修改的基线工作树运行，35 个子场景及普通用户权限撤销用例失败；历史无版本任务和编辑重试锁顺序用例另行在基线复现失败，修复后的对应测试通过。
 
 ### 业务规则冲突与修正依据
 
 `internal/store/task_cancellation.go`、原 `TestTaskCancelRetryAndFiltersWithPostgreSQL` / `TestTaskAPIWithPostgreSQL` 以及任务页“使用当前配置重试”共同实现了“普通重试使用最新配置”，而自动安装重试固定旧版本。这与本次要求的准确快照、避免错误版本部署冲突。统一为：普通重试必须仍是原版本；编辑后重试明确生成新版本并原子提交任务；用户也可从配置页选择新版本部署。更新相关旧测试，同时保留快照脱敏和任务过滤断言。
 
-锁顺序为账号（多个账号按 ID 排序）→ Agent → 分享 / 配置 / 任务。管理员代其他账号提交配置时，一次按顺序锁操作者与配置所有者，避免新增账号锁后出现相反的取锁顺序。显式 `WithSystemScope` 运维仍按内部信任边界运行；不能把发起请求的旧会话身份误用为系统身份的拒绝依据。
+锁顺序为账号（多个账号按 ID 排序）→ Agent → 分享 / 配置 / 任务。管理员代其他账号提交配置或编辑后重试时，一次按顺序锁操作者与配置所有者，避免修改资源后才获取所有者账号锁。显式 `WithSystemScope` 运维仍按内部信任边界运行；不能把发起请求的旧会话身份误用为系统身份的拒绝依据。
 
 ## 已验证符合预期的场景
 
@@ -67,7 +68,7 @@
 
 ## 复跑
 
-本地结果：`make check`、新增桌面 / 移动浏览器矩阵、`make build`、历史面板账号升级、Agent 只读断网沙箱和所列 `-race -count=3` 并发回归均通过。最终增量用例（历史无版本任务、系统监控与令牌兼容、更新后的任务 API / Store 规则）另行复跑通过。
+本地结果：`make check`、新增桌面 / 移动浏览器矩阵、`make build`、历史面板账号升级、Agent 只读断网沙箱和所列 `-race -count=3` 并发回归均通过。最终增量用例（历史无版本任务、系统监控与令牌兼容、更新后的任务 API / Store 规则）另行复跑通过。编辑重试锁顺序补丁后，完整 Store 套件和三轮 `-race` 回归通过。首轮可选 Alpine 浏览器发现刷新与 CDP 求值竞态；测试改为等待 `Page.loadEventFired`，仅只读 DOM 轮询允许跨文档重试，写请求不自动重放；修改后桌面 / 移动流程连续三轮通过。
 
 先为 `QCH_TEST_DATABASE_URL` 配置仅用于测试的 PostgreSQL 数据库；集成测试创建 / 删除随机 schema。数据库测试包按项目要求串行运行：独立 schema 仍共享 PostgreSQL 的 vacuum horizon，并行长事务会干扰 HOT 页面性能验收。
 
@@ -77,6 +78,7 @@ make multi-user-browser-check
 make panel-auth-upgrade-test
 make upgrade-sandbox-test
 go test -race -count=3 ./internal/store -run 'Test(ArchiveAndTemplateCreationSerializeWithPurge|RetryDoesNotDeployANewerConfiguration|AgentInvitationResponsesAndEditsSerialize|SharedCorePreparationSerializesUsersAndKeepsSnapshots|UnrestrictedSharedPortsConcurrentDeployment|ConcurrentAdministratorRemovalPreservesLogin)'
+go test -race -count=3 ./internal/store -run '^Test(EditedRetryLocksConfigurationOwnerBeforeResources|EditedRetryIsAtomicAndVersioned)$'
 ```
 
 新增浏览器检查已加入 `make browser-checks`、`make check` 和现有可选 Browser validation workflow。`QCH_MULTI_USER_ARTIFACT_DIR` 指定截图 / 记录目录；可选 `QCH_MULTI_USER_BASELINE_ROOT` 指向基线 `frontend` 目录，用相同 API 和数据采集对比。浏览器关闭后清理 profile；不把登录 Cookie、CSRF 或生成配置写入报告。
@@ -93,4 +95,5 @@ go test -race -count=3 ./internal/store -run 'Test(ArchiveAndTemplateCreationSer
 - 没有对所有真实核心发行版本、真实 systemd / Alpine OpenRC 主机、真实流量 / nftables 内核路径和公网 ACME 故障组合做完整新部署验收。本次使用项目的执行器、服务 / 网络夹具与隔离容器；相关外网 live 测试需要专门环境变量和外部依赖。
 - 新增多用户浏览器流程的 Agent 领取 / 结果是确定性测试驱动，不宣称浏览器驱动了真实远端代理进程。实际执行隔离和失败回滚由单独 Agent / sandbox 回归验证。
 - 未进行长时间高负载、真实网络分区、PostgreSQL 进程崩溃 / 断电或多个控制面进程部署的端到端混沌测试；已覆盖数据库锁屏障、并发事务、插入失败回滚、会话跨 Server 验证、Agent 断线和旧租约恢复。
-- 仍需在本 PR 上确认托管 CI 的 Debian / Alpine / 核心集成全部完成；最终状态以 PR checks 为准。
+
+托管 CI 的 Debian / Alpine / 核心集成与可选完整浏览器矩阵结果见本 PR 的 checks；最终交付以提交版本对应的检查结果为准。

@@ -37,13 +37,13 @@ try {
     if (!entry) return;
     pending.delete(message.id);
     clearTimeout(entry.timer);
-    if (message.error) entry.reject(new Error(JSON.stringify(message.error)));
+    if (message.error) entry.reject(new Error(`${entry.method}: ${JSON.stringify(message.error)}`));
     else entry.resolve(message.result);
   });
   const call = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
     const id = ++sequence;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 10000);
-    pending.set(id, { resolve, reject, timer });
+    pending.set(id, { resolve, reject, timer, method });
     socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const evaluate = async (page, expression) => {
@@ -53,11 +53,35 @@ try {
   };
   const wait = async (page, expression) => {
     for (let attempt = 0; attempt < 160; attempt++) {
-      const result = await evaluate(page, expression);
-      if (result) return result;
+      try {
+        const result = await evaluate(page, expression);
+        if (result) return result;
+      } catch (error) {
+        // Only read-only DOM polling may resume across document navigation.
+        if (!/Execution context was destroyed|Cannot find context|Inspected target navigated/.test(String(error))) throw error;
+      }
       await delay(50);
     }
     throw new Error(`Browser condition timed out: ${expression}`);
+  };
+  const reload = async page => {
+    let timeout;
+    let onMessage;
+    const loaded = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error("Page reload did not finish")), 10000);
+      onMessage = ({ data }) => {
+        const message = JSON.parse(String(data));
+        if (message.sessionId === page && message.method === "Page.loadEventFired") resolve();
+      };
+      socket.addEventListener("message", onMessage);
+    });
+    try {
+      // Register before reloading: command acknowledgement precedes navigation.
+      await Promise.all([call("Page.reload", {}, page), loaded]);
+    } finally {
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+    }
   };
   const createPage = async (url = base) => {
     const { browserContextId } = await call("Target.createBrowserContext");
@@ -162,7 +186,7 @@ try {
   await api(manager, admin, "DELETE", `/users/${alice.user_id}`, undefined, 204);
   await api(a, alice, "GET", "/auth/session", undefined, 401);
   await api(b, bob, "GET", "/auth/session");
-  await call("Page.reload", {}, a);
+  await reload(a);
   await wait(a, "!!document.querySelector('#login-form')");
   const switched = await login(a, "bob");
   assert.equal(switched.user_id, bob.user_id);
