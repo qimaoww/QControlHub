@@ -119,3 +119,24 @@ func TestSSRustSourceEditReplansVerifiedMarks(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountingUpdateRetainsEditedSingBoxStatsAPI(t *testing.T) {
+	plan, err := PrepareAccounting(core.EngineSingBox, `{"inbounds":[{"type":"socks","tag":"a","listen_port":21001}],"outbounds":[{"type":"direct","tag":"direct"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := decodeAccountingRoot(core.EngineSingBox, plan.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats := mapValue(mapValue(mapValue(root["experimental"])["v2ray_api"])["stats"])
+	stats["users"] = []any{"preserve-custom-user"}
+	data, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := AccountingUpdateSource(core.EngineSingBox, string(data), plan.Content)
+	if err != nil || !strings.Contains(source, "preserve-custom-user") || !strings.Contains(source, "v2ray_api") || strings.Contains(source, accountingPrefix) {
+		t.Fatalf("edited stats API was discarded or retained generated exits: %s %v", source, err)
+	}
+}

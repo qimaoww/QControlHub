@@ -251,7 +251,7 @@ jobs:
       - name: Verify all sing-box upstream presets and exported TCP/UDP clients
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
-        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal|SharedFinalInboundDeletion)$'
+        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal|FinalInboundDeletion)$'
       - name: Verify actual Caddy and Nginx TCP/UDP proxy clients
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
@@ -284,7 +284,7 @@ jobs:
           sudo env QCH_LIVE_REALITY_SYSTEMD_TEST=1 \
             QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
             "$RUNNER_TEMP/reality-agent.test" \
-            -test.run '^TestMihomoRealityAndTLSManagedLifecycle$' -test.count=1 -test.v
+            -test.run '^(TestMihomoRealityAndTLSManagedLifecycle|TestSingBoxEmptyAccountingTaskValidation)$' -test.count=1 -test.v
       - name: Verify Alpine OpenRC policies, migration and forwarding
         run: |
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent
