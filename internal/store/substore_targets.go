@@ -140,15 +140,26 @@ func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationI
 		return core.SubStoreSyncTarget{}, err
 	}
 	now := time.Now().UTC()
-	settings, err := s.SubStoreSyncSettings(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
-	if _, err := s.pool.Exec(ctx, `
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	settings, err := s.subStoreSyncSettings(ctx, tx)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO substore_sync_targets
 			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at,owner_id,sync_format,backend_key)
 		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5,$6,$7,$8)`, id, name, integrationID, mode, now, scopeForConfig(ctx).OwnerID, format, settings.BackendKey); err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.SubStoreSyncTarget{}, err
 	}
 	return s.SubStoreSyncTarget(ctx, id)
 }
@@ -175,7 +186,15 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 	}
 	args := []any{strings.TrimSpace(id), displayName, subscriptionName, mode, format}
 	ownerWhere := workspaceOwnerClause(ctx, "owner_id", &args)
-	command, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	command, err := tx.Exec(ctx, `
 		UPDATE substore_sync_targets SET
 			display_name=$2,subscription_name=$3,sync_mode=$4,sync_format=COALESCE(NULLIF($5,''),sync_format),updated_at=now()
 		WHERE id=$1`+ownerWhere, args...)
@@ -185,18 +204,29 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 	if command.RowsAffected() == 0 {
 		return core.SubStoreSyncTarget{}, ErrNotFound
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
 	return s.SubStoreSyncTarget(ctx, id)
 }
 
 func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return err
+	}
 	args := []any{strings.TrimSpace(id)}
 	ownerWhere := workspaceOwnerClause(ctx, "owner_id", &args)
-	command, err := s.pool.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`+ownerWhere, args...)
+	command, err := tx.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }

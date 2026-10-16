@@ -36,17 +36,22 @@ func requireNodeOwner(ctx context.Context, executor storeExecutor, agentID strin
 // change it: administrators cannot see or manage a hidden node, and they can
 // never hide or unhide a node that belongs to another account.
 func (s *Store) SetAgentAdminHidden(ctx context.Context, id string, hidden bool) error {
-	if err := requireNodeOwner(ctx, s.pool, id); err != nil {
+	tx, err := s.beginAgentAdministrationTx(ctx, id)
+	if err != nil {
 		return err
 	}
-	command, err := s.pool.Exec(ctx, `UPDATE agents SET admin_hidden=$2 WHERE id=$1 AND revoked_at IS NULL`, id, hidden)
+	defer tx.Rollback(ctx)
+	if err := requireNodeOwner(ctx, tx, id); err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `UPDATE agents SET admin_hidden=$2 WHERE id=$1 AND revoked_at IS NULL`, id, hidden)
 	if err != nil {
 		return fmt.Errorf("set node administration visibility: %w", err)
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ListAgentDirectory returns the read-only cross-account summary behind the

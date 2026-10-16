@@ -75,7 +75,7 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 		}
 		shares[index].Ports = ports
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.beginUserManagementTx(ctx)
 	if err != nil {
 		return core.AgentAccess{}, err
 	}

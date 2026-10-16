@@ -44,7 +44,13 @@ func (s *Store) SaveEditedRetry(ctx context.Context, id, content string, version
 		return core.Config{}, core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockAgentUser(ctx, tx); err != nil {
+	var configIDs []string
+	if scopeForConfig(ctx).Admin {
+		configIDs = append(configIDs, input.ID)
+	}
+	// Lock an administrator's foreign configuration owner before the edit,
+	// matching task submission and purge's account-before-resource order.
+	if err = lockAgentUser(ctx, tx, configIDs...); err != nil {
 		return core.Config{}, core.Task{}, err
 	}
 	permission := core.PermissionConfigsWrite

@@ -48,13 +48,10 @@ func (s *Store) SetAgentClientProfilePreferences(ctx context.Context, id, nameLa
 }
 
 func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, addressLabel, addressModeLabel string, address, name, addressMode *string) error {
-	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
-		return err
-	}
 	if name != nil && (!utf8.ValidString(*name) || utf8.RuneCountInString(*name) > 100 || strings.ContainsFunc(*name, unicode.IsControl)) {
 		return fmt.Errorf("%w: client name must not exceed 100 characters or contain control characters", ErrInvalid)
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.beginAgentAdministrationTx(ctx, id)
 	if err != nil {
 		return err
 	}

@@ -92,6 +92,9 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 	if err := rows.Err(); err != nil {
 		return core.AgentSharing{}, err
 	}
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.AgentSharing{}, err
+	}
 	if err := requireAgentAdministration(ctx, tx, agentID); err != nil {
 		return core.AgentSharing{}, err
 	}

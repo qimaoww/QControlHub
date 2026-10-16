@@ -1,0 +1,6 @@
+mobile: three independent browser contexts, real password/cookie/CSRF identities
+mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated

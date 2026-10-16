@@ -29,10 +29,12 @@ func (s *Store) SetAgentRegionCode(ctx context.Context, id, code string) error {
 	if code != "" && !geoip.ValidRegionCode(code) {
 		return fmt.Errorf("%w: unsupported country/region code", ErrInvalid)
 	}
-	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
+	tx, err := s.beginAgentAdministrationTx(ctx, id)
+	if err != nil {
 		return err
 	}
-	command, err := s.pool.Exec(ctx, `
+	defer tx.Rollback(ctx)
+	command, err := tx.Exec(ctx, `
 		UPDATE agents SET labels = CASE
 			WHEN $2='' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'region_code'
 			ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{region_code}', to_jsonb($2::text), true)
@@ -44,7 +46,7 @@ func (s *Store) SetAgentRegionCode(ctx context.Context, id, code string) error {
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // SetAgentName changes only panel display metadata. Enrollment credentials
@@ -54,17 +56,19 @@ func (s *Store) SetAgentName(ctx context.Context, id, name string) error {
 	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) {
 		return fmt.Errorf("%w: agent name must contain 1 to 100 characters without control characters", ErrInvalid)
 	}
-	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
+	tx, err := s.beginAgentAdministrationTx(ctx, id)
+	if err != nil {
 		return err
 	}
-	command, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, name)
+	defer tx.Rollback(ctx)
+	command, err := tx.Exec(ctx, `UPDATE agents SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, name)
 	if err != nil {
 		return err
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // AgentKomariUUID returns the optional Komari node UUID stored with the
@@ -80,10 +84,12 @@ func (s *Store) SetAgentKomariUUID(ctx context.Context, id, uuid string) error {
 	if len(uuid) > 100 || strings.ContainsAny(uuid, "\r\n\t") {
 		return fmt.Errorf("%w: Komari server UUID is invalid", ErrInvalid)
 	}
-	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
+	tx, err := s.beginAgentAdministrationTx(ctx, id)
+	if err != nil {
 		return err
 	}
-	command, err := s.pool.Exec(ctx, `
+	defer tx.Rollback(ctx)
+	command, err := tx.Exec(ctx, `
 		UPDATE agents SET labels = CASE
 			WHEN $2='' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $3::text
 			ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$3::text], to_jsonb($2::text), true)
@@ -95,5 +101,5 @@ func (s *Store) SetAgentKomariUUID(ctx context.Context, id, uuid string) error {
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }

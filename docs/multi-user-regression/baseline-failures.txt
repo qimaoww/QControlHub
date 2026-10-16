@@ -1,0 +1,45 @@
+Base: 8ac5bbe1 (origin/main at branch creation)
+PostgreSQL 17, isolated database and schemas; fixture password sessions.
+Only case names retained; response bodies and generated secrets omitted.
+
+--- FAIL: TestRetryDoesNotDeployANewerConfiguration/validate (0.42s)
+--- FAIL: TestRetryDoesNotDeployANewerConfiguration/deploy (0.43s)
+--- FAIL: TestPurgedPrincipalCannotRecreatePersonalResources/archive (0.39s)
+--- FAIL: TestPurgedPrincipalCannotRecreatePersonalResources/template (0.41s)
+--- FAIL: TestPurgedPrincipalCannotRecreatePersonalResources/settings (0.39s)
+--- FAIL: TestPurgedPrincipalCannotRecreatePersonalResources/substore-settings (0.57s)
+--- FAIL: TestPurgedPrincipalCannotRecreatePersonalResources/substore-target (0.38s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/task (1.80s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/archive (1.76s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/node-config (1.65s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/allocation (1.66s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/metadata (1.67s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/client-preferences (1.69s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/demote/template (1.67s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/task (1.69s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/archive (1.65s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/node-config (1.69s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/allocation (1.71s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/metadata (1.68s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/client-preferences (1.70s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/disable/template (1.72s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/task (1.72s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/archive (1.65s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/node-config (1.76s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/allocation (1.77s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/metadata (1.71s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/client-preferences (1.74s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/purge/template (2.28s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/task (1.97s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/archive (1.95s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/node-config (2.28s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/allocation (2.12s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/metadata (1.77s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/client-preferences (1.89s)
+--- FAIL: TestInFlightAccountMutationCannotKeepOldAuthority/revoke-regrant/template (1.81s)
+--- FAIL: TestOrdinaryUserInFlightSaveLosesRevokedPermission (1.39s)
+
+Additional isolated baseline reproductions:
+--- FAIL: TestRetryRequiresDurableConfigurationRevision
+--- FAIL: TestEditedRetryLocksConfigurationOwnerBeforeResources
+Edited retry holds configs before waiting for panel_users; purge-order resource lock times out (SQLSTATE 55P03).
