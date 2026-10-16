@@ -134,6 +134,25 @@ sing-box log/cache writes, atomic binary/config replacement and restart,
 OpenRC copytruncate rotation and stopped-core negative controls. OpenRC explicitly
 sets the unprivileged port threshold to 1024.
 
+The fixture waits for an actual SOCKS TCP round trip before measuring the strict
+traffic matrix, both after startup and after atomic replacement/restart. In
+Mihomo v1.19.32, listeners and SOCKS success replies are available before
+`tunnel.OnRunning`; connections in that interval are closed without forwarding.
+This caused main CI run `38850583404` to fail with `unexpected SOCKS EOF` in
+Alpine despite correct permissions. The bounded readiness probe uses only an
+owned loopback target. Timeouts retain the last connection error; rejected
+SOCKS replies, wrong payloads and permission errors fail immediately. Subsequent
+TCP/UDP payloads, target hits, marks and stopped-core controls have no retries.
+SOCKS negotiation failures close their sockets, and TCP failures identify the
+proxy, target and backend hit delta.
+
+`QCH_PERMISSION_BIN=PATH python3 -B deploy/tests/core_permission_network_test.py`
+also runs an official-Mihomo regression with a gated local HTTP provider. It
+holds startup between listener creation and routing readiness, proves the old
+port-only check reaches EOF without hitting the target, then proves the
+forwarding probe succeeds after initialization resumes. CI runs this regression
+inside Alpine; it requires no Internet or public domain.
+
 The real installed-node OpenRC test creates all eight exact historical services,
 loses config/binary access and leaves root-owned cache files. Four services start
 active and four remain stopped. It invokes `syncManagedCorePermissions`, verifies
@@ -163,3 +182,5 @@ the service's socket permissions, not public IPv6 reachability.
 - [OpenRC supervise-daemon capability application](https://github.com/OpenRC/openrc/blob/master/src/supervise-daemon/supervise-daemon.c)
 - [Mihomo v1.19.32 scoped safe paths](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/constant/path.go)
 - [Mihomo v1.19.32 mark handling](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/component/dialer/mark_linux.go)
+- [Mihomo v1.19.32 listener/provider/routing startup order](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/hub/executor/executor.go)
+- [Mihomo v1.19.32 forwarding readiness gate](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/tunnel.go)
