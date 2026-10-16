@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,5 +130,67 @@ func TestCaddyFailureDiagnosticsUseCurrentAttempt(t *testing.T) {
 	}
 	if value = caddyFailureLog(dir, now); value != "" {
 		t.Fatal("followed a proxy-writable diagnostic symlink")
+	}
+}
+
+func TestCaddyFailureSeparatesWarningAndCause(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	log := fmt.Sprintf(`{"level":"warn","ts":%d,"msg":"unable to get instance ID","error":"mkdir /nonexistent: read-only file system"}
+{"level":"error","ts":%d,"msg":"registering account","error":"Get https://acme-v02.api.letsencrypt.org/directory: i/o timeout"}`, now.Unix()+1, now.Unix()+1)
+	if err := os.WriteFile(filepath.Join(dir, "caddy.log"), []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := tlsFrontendManager{state: dir}
+	err := m.withFrontendDiagnostics(errors.New("tls: internal error"), core.TLSFrontend{Mode: "caddy"}, now)
+	for _, want := range []string{"[原因:网络超时]", "[告警]", "[错误]", "ZeroSSL 无法自动绑定账户"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCaddyIssuerFailureTakesPriorityOverReadinessDeadline(t *testing.T) {
+	for _, test := range []struct{ name, level, message, reason string }{
+		{"account", "error", "ACME account requires external account binding (EAB)", "证书账户"},
+		{"challenge", "error", "HTTP-01 challenge unauthorized: invalid response", "挑战失败"},
+		{"dns", "error", "DNS problem: NXDOMAIN", "DNS"},
+		{"rate_limit", "error", "urn:ietf:params:acme:error:rateLimited", "机构限流"},
+		{"permission", "error", "permission denied writing certificate", "存储权限"},
+		{"network", "error", "registering account: i/o timeout", "网络超时"},
+		{"warning_only", "warn", "mkdir /nonexistent: read-only file system", "网络超时"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			now := time.Now().Truncate(time.Second)
+			entry, _ := json.Marshal(map[string]any{"level": test.level, "ts": now.Unix() + 1, "msg": "certificate issuance", "error": test.message})
+			if err := os.WriteFile(filepath.Join(dir, "caddy.log"), entry, 0600); err != nil {
+				t.Fatal(err)
+			}
+			m := tlsFrontendManager{state: dir}
+			err := m.withFrontendDiagnostics(context.DeadlineExceeded, core.TLSFrontend{Mode: "caddy"}, now)
+			if !strings.Contains(err.Error(), "[原因:"+test.reason+"]") || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), test.message) {
+				t.Fatal("issuer diagnosis or original failure lost:", err)
+			}
+		})
+	}
+}
+
+func TestManagedTLSReadinessReportsActualPhase(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m := tlsFrontendManager{state: t.TempDir()}
+	deployments := tlsDeployments{"service": {Frontends: []core.TLSFrontend{{Mode: "caddy", Domain: "phase.example.test", PublicPort: 8443}}}}
+	for _, preparation := range []bool{false, true} {
+		phase := "TLS与协议就绪检查"
+		var previous []tlsDeployments
+		if preparation {
+			phase = "证书准备"
+			previous = []tlsDeployments{{}}
+		}
+		err := m.waitReady(ctx, deployments, "service", previous...)
+		if err == nil || !strings.Contains(err.Error(), "[阶段:"+phase+"]") {
+			t.Fatal("readiness reported incorrect phase:", err)
+		}
 	}
 }

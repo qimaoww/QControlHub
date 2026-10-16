@@ -218,7 +218,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		// This is one durable task with one immutable configuration snapshot.
 		// Recheck locally: a retry or a preceding task may have installed the
 		// core since the heartbeat. Never update an already installed binary.
-		ctx, cancel := context.WithTimeout(parent, 4*time.Minute+45*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 4*time.Minute+core.ManagedTLSOperationTimeout)
 		defer cancel()
 		output := "core already installed; keeping the current version"
 		if _, err := exec.LookPath(spec.Binary); err != nil {
@@ -260,7 +260,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 	}
 	timeout := 45 * time.Second
 	if len(task.TLSFrontends) > 0 || (task.Engine == core.EngineSingBox || task.Engine == core.EngineXray) && managedTLSStateExists() {
-		timeout = 4 * time.Minute
+		timeout = core.ManagedTLSOperationTimeout
 	}
 	if task.Action == core.ActionInstall {
 		timeout = 4 * time.Minute
@@ -297,7 +297,8 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
-		if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
+		var report strings.Builder
+		if err := e.executeTLSFrontend(ctx, spec, task, true, &report); err != nil {
 			return "", err
 		}
 		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
@@ -305,15 +306,17 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return warning, errors.New("独立出口校验失败，未执行内核校验")
 		}
 		task.ConfigContent = prepared
-		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
+		value, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
+		return report.String() + "\n" + value, tlsPhaseError("配置生成及校验", err)
 	case core.ActionDeploy:
 		if task.Engine == core.EngineXray {
 			if err := checkXHTTPListenerPorts(spec, task.ConfigContent); err != nil {
 				return "", err
 			}
 		}
-		if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
-			return "", err
+		var report strings.Builder
+		if err := e.executeTLSFrontend(ctx, spec, task, true, &report); err != nil {
+			return "", tlsPhaseError("依赖和环境检查", err)
 		}
 		originalInput := task.ConfigContent
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
@@ -329,8 +332,18 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
+		if report.Len() > 0 {
+			validation = report.String() + "\n" + validation
+		}
 		if err != nil {
-			return validation, err
+			return validation, tlsPhaseError("配置生成及校验", err)
+		}
+		var certificateReport strings.Builder
+		if err := e.executeTLSFrontendRequest(ctx, spec, task, true, true, &certificateReport); err != nil {
+			return validation, tlsPhaseError("证书准备", err)
+		}
+		if certificateReport.Len() > 0 {
+			validation += "\n" + certificateReport.String()
 		}
 		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] &&
 			accountingWarning == "" && strings.Contains(originalInput, "qch-trf-") && originalInput != prepared {
@@ -355,6 +368,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return validation, err
 		}
 		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
+		err = tlsPhaseError("服务应用", err)
 		if err == nil {
 			err = e.executeTLSFrontend(ctx, spec, task, false)
 		}
@@ -383,7 +397,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			}
 			return output, fmt.Errorf("configuration deployment failed; previous configuration was restored with its service state: %w", err)
 		}
-		return output, nil
+		return output + "\n[阶段:提交成功状态] 服务 active；TLS 与代理链路就绪（如配置托管 TLS）；部署已提交", nil
 	case core.ActionStart, core.ActionRestart:
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err

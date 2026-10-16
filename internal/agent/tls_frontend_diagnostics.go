@@ -35,7 +35,21 @@ func (m *tlsFrontendManager) withFrontendDiagnostics(cause error, frontend core.
 	if frontend.ACMEEmail == "" {
 		account = "未设置 ACME 邮箱，ZeroSSL 无法自动绑定账户；请在系统设置的证书申请或预设中填写邮箱后重试"
 	}
-	return fmt.Errorf("%w；%s；证书机构日志：\n%s", cause, account, log)
+	var errorsOnly []string
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, "[错误]") {
+			errorsOnly = append(errorsOnly, line)
+		}
+	}
+	// Readiness normally ends with a generic deadline. Diagnose the issuer's
+	// actual failure first so that deadline cannot hide an account/challenge
+	// error; warnings alone still fall back to the readiness failure.
+	failure := strings.Join(errorsOnly, "\n")
+	if failure == "" {
+		failure = cause.Error()
+	}
+	reason, remedy := classifyTLSFailure(failure)
+	return fmt.Errorf("%w；[原因:%s] %s；%s；证书机构日志：\n%s", cause, reason, remedy, account, log)
 }
 
 func caddyFailureLog(state string, since time.Time) string {
@@ -76,7 +90,11 @@ func summarizeCaddyFailure(value string, since time.Time) string {
 		if json.Unmarshal([]byte(line), &entry) != nil || (entry.Level != "error" && entry.Level != "warn") || entry.Time < float64(since.UnixMilli())/1000 {
 			continue
 		}
-		message := entry.Message
+		label := "[错误] "
+		if entry.Level == "warn" {
+			label = "[告警] "
+		}
+		message := label + entry.Message
 		if entry.Identifier != "" {
 			message += " (" + entry.Identifier + ")"
 		}
@@ -93,4 +111,24 @@ func summarizeCaddyFailure(value string, since time.Time) string {
 		output = strings.ToValidUTF8(output[len(output)-6000:], "�")
 	}
 	return output
+}
+
+func classifyTLSFailure(value string) (string, string) {
+	value = strings.ToLower(value)
+	switch {
+	case strings.Contains(value, "permission denied"), strings.Contains(value, "read-only file system"):
+		return "存储权限", "升级 Agent 修复受管目录；检查服务账号和 XDG 目录权限"
+	case strings.Contains(value, "ratelimited"), strings.Contains(value, "rate limit"), strings.Contains(value, "too many requests"):
+		return "机构限流", "按机构 Retry-After 等待，避免反复提交；可使用已有证书或外部反代"
+	case strings.Contains(value, "no such host"), strings.Contains(value, "nxdomain"), strings.Contains(value, "dns problem"):
+		return "DNS", "检查域名 A/AAAA 及节点 DNS；IPv4/IPv6 记录均应指向可提供挑战的入口"
+	case strings.Contains(value, "timeout"), strings.Contains(value, "timed out"), strings.Contains(value, "deadline exceeded"):
+		return "网络超时", "检查节点到 ACME 的 DNS/TCP 443/TLS；核对公网 TCP 80 挑战、CDN 回源和 NAT"
+	case strings.Contains(value, "eab"), strings.Contains(value, "account"), strings.Contains(value, "email"):
+		return "证书账户", "检查账号默认邮箱或预设覆盖值及 ZeroSSL EAB 绑定条件"
+	case strings.Contains(value, "challenge"), strings.Contains(value, "unauthorized"), strings.Contains(value, "connection refused"):
+		return "挑战失败", "检查 A/AAAA、公网 TCP 80、防火墙、CDN 和反代回源；可改用已有证书或外部反代"
+	default:
+		return "TLS未就绪", "查看本次机构错误，检查证书域名、信任和代理路径"
+	}
 }

@@ -1,5 +1,7 @@
 # sing-box 原生预设对照与验收
 
+> 最新部署流程、H2 / 外部反代支持、非 root Caddy 迁移及 ACME 预算见[托管 TLS 部署核对与修复](managed-tls-deployment-audit.md)。下文包含此前阶段的验收记录。
+
 ## 来源与范围
 
 对照日期：2026-10-15。上游固定为 [233boy/sing-box @ 2d78583b5aecccb0da0148a816bc1495a284509f](https://github.com/233boy/sing-box/tree/2d78583b5aecccb0da0148a816bc1495a284509f)，实际阅读：
@@ -63,7 +65,7 @@ Shadowsocks 实际验收了上游全部七个方法：
 
 ## TLS、证书与运行依赖
 
-上游部分 WS/HTTPUpgrade 方案由 Caddy 接收公网 TLS，再反代至本地 core；H2 脚本还生成 core TLS 与 Caddy h2c 规则。WS / HTTPUpgrade 方案默认采用下文的面板托管反代，其余方案使用 sing-box **原生 TLS 等价实现**。已有原生 TLS 配置继续兼容；托管反代提供自动证书及独立公网端口，不生成上游的伪装网站。
+上游部分 WS/HTTPUpgrade 方案由 Caddy 接收公网 TLS，再反代至本地 core；H2 脚本还生成 core TLS 与 Caddy h2c 规则。WS / HTTPUpgrade / H2 方案默认采用面板托管 Caddy，H2 回环后端使用 h2c；其余方案使用 sing-box **原生 TLS 等价实现**。已有原生 TLS 配置继续兼容；托管反代提供自动证书及独立公网端口，不生成上游的伪装网站。
 
 部署步骤：
 
@@ -111,7 +113,7 @@ make test
 
 ## 托管 TLS 反代与编辑重试（2026-10-15 补充）
 
-VMess / VLESS / Trojan 的 **WS-TLS、HTTPUpgrade-TLS** 六个入口现在默认使用面板托管的 **Caddy 自动证书**，也可选 **Nginx 自签证书**或已有证书的原生 TLS。原有未填写 `tls_mode` 的配置继续使用原生 TLS；H2、Reality、QUIC 和非 HTTP 协议保持原有原生实现。标准 Caddy / Nginx 的 HTTP 反代不能作为任意 TCP / UDP 协议的 TLS 终止层。
+VMess / VLESS / Trojan 的 **WS-TLS、HTTPUpgrade-TLS** 六个入口现在默认使用面板托管的 **Caddy 自动证书**，也可选 **Nginx 自签证书**或已有证书的原生 TLS。原有未填写 `tls_mode` 的配置继续使用原生 TLS；本次 H2 已补齐托管 Caddy，Reality、QUIC 和非 HTTP 协议保持原生实现。标准 Caddy / Nginx 的 HTTP 反代不能作为任意 TCP / UDP 协议的 TLS 终止层。
 
 - 公网 HTTPS 端口独立可编辑，默认 **443**；客户端导出始终使用该端口。sing-box 使用独立的内部端口，固定监听 **127.0.0.1**，不引用占位证书路径。
 - 填写证书域名 / TLS SNI；连接地址、HTTP Host 和反代路径分别保存。Caddy 需要该域名的 DNS 指向节点，且公网 TCP 80（HTTP-01 验证）和所选 HTTPS 端口可达；自定义 HTTPS 端口不改变 ACME 的验证端口。
@@ -163,7 +165,7 @@ sing-box 不启用 TLS，也不引用证书文件；Caddy 负责申请、续期�
 - Caddy 的证书策略按域名保存账户邮箱，签发顺序为 **Let’s Encrypt → ZeroSSL**。预设的“ACME 邮箱（ZeroSSL 回退）”沿用已有表单样式，仅在 Caddy 模式展示，支持保存、编辑、重新生成参数和再次读取；切换 Nginx / 原生 TLS 时不提交此字段。邮箱不会进入 sing-box 服务端配置、分享链接或客户端导出。
 - ZeroSSL 的 ACME 接口要求外部账户绑定（EAB）；Caddy 可凭邮箱自动获取绑定。需要填写自己的有效邮箱。旧配置未填写邮箱时仍可读取和使用 Let’s Encrypt，失败诊断会明确提示尚未启用 ZeroSSL。不会编造邮箱、关闭证书验证或自动切换自签证书。依据：[Caddy ACME issuer](https://github.com/caddyserver/caddy/blob/v2.11.7/modules/caddytls/acmeissuer.go)、[默认签发机构的邮箱要求](https://github.com/caddyserver/caddy/blob/v2.11.7/modules/caddytls/automation.go)。
 - 同一域名采用同一账户；不同域名可分别设置邮箱。两家 CA 都使用公网 TCP 80 的 HTTP-01 验证；自定义公网 HTTPS 端口仍默认 443。节点必须能够通过 HTTPS 访问对应 CA，以及 ZeroSSL 的 EAB 接口；仅域名解析正确并不保证节点能连到 CA。
-- 真实 TLS 就绪检查共享最多 180 秒预算，允许首个 CA 连接失败后尝试备用 CA。`acme_timeout` 限制 ACME 轮询，不等同于整个账户注册过程的网络超时。Agent 原有四分钟执行上限保留；支持托管 TLS 的 sing-box 校验、部署、启动、重启任务至少有五分钟服务端租约，避免常规 120 秒租约提前重排正在签发的任务。
+- 当前预算已调整为主机构 / 备用机构各 65 秒、托管执行 6 分钟、租约 12 分钟；支持 sing-box 与 Xray 托管操作。`acme_timeout=45s` 只限制轮询，不等于请求或整个机构时限。证书在替换业务前准备，回退以重载保证执行机会，详见最新部署核对文档。
 - Caddy 运行日志写入 `/var/lib/qcontrolhub-tls/caddy.log`，1 MiB 轮转，保留两份历史文件，适用于 systemd 和 OpenRC。失败任务附带本次操作中的 CA 错误与签发机构信息；不会再只留下 `tls: internal error`。Caddy 配置持久化关闭，不尝试向服务用户的 `/nonexistent/.config` 写入 autosave。
 - 回滚分别处理：无旧文件时停止本次服务并删除新文件；旧服务已停止时恢复文件并保持停止；旧配置为空入站时保持停止；旧配置有入站且原先运行时恢复文件并重启验证。空共享实例被心跳检查停用属于预期状态，不能再误报“恢复失败”。反代回滚成功与失败分别显示，不再输出 `<nil>`。
 - `managed-tls-acme-fallback-v1` 单独声明新 Agent 能力。面板不会将携带账户邮箱的任务交给旧 Agent 并静默丢失回退策略；断线后能力降级也会拒绝继续执行，并保留“执行结果未知”的诊断。

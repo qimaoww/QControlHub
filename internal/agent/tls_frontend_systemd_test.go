@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +61,7 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	}
 	invoke := func(service string, action core.Action, stage bool, frontends []core.TLSFrontend, success bool) {
 		t.Helper()
-		name, err := writeTLSFrontendRequest(tlsFrontendRequest{service, kind, action, stage, frontends})
+		name, err := writeTLSFrontendRequest(tlsFrontendRequest{Service: service, Kind: kind, Action: action, Stage: stage, Frontends: frontends})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,6 +88,23 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	if kind == ServiceManagerOpenRC {
 		service = "qagent-sing-box"
 	}
+	backend, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", input.Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	backend2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", input.Port+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend2.Close()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		w.WriteHeader(101)
+	})
+	go http.Serve(backend, handler)
+	go http.Serve(backend2, handler)
 	invoke(service, core.ActionDeploy, true, frontends, true)
 	invoke(service, core.ActionDeploy, false, frontends, true)
 	if err = probeFrontendTLS(ctx, frontends[0]); err != nil {
@@ -154,9 +174,21 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	caddy.Mode = "caddy"
 	caddy.Certificate = ""
 	caddy.PrivateKey = ""
-	invoke(service, core.ActionDeploy, true, []core.TLSFrontend{caddy}, true)
+	invoke(service, core.ActionValidate, true, []core.TLSFrontend{caddy}, false)
 	if err := validatePrivilegedExecutable(managedCaddyBinary); err != nil {
 		t.Fatal("official Caddy installation", err)
+	}
+	fixtureArgs := []string{"-test.run=^TestManagedTLSRuntimePersistenceSandbox$", "-test.v"}
+	if kind == ServiceManagerSystemd {
+		args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test"}
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", append(args, fixtureArgs...)); err != nil {
+			t.Fatalf("Caddy runtime: %v\n%s", err, output)
+		}
+	} else {
+		args := append([]string{"QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test"}, fixtureArgs...)
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
+			t.Fatalf("Caddy runtime: %v\n%s", err, output)
+		}
 	}
 	// The same privileged helper must handle local Xray targets while the
 	// long-running Agent retains its shipped read-only /etc sandbox.

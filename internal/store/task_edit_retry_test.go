@@ -54,14 +54,19 @@ func TestEditedRetryIsAtomicAndVersioned(t *testing.T) {
 }
 
 func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
-	for _, mode := range []string{"nginx", "caddy"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, variant := range []string{"nginx", "caddy", "caddy-h2"} {
+		mode := strings.TrimSuffix(variant, "-h2")
+		t.Run(variant, func(t *testing.T) {
 			db, ctx, _ := isolatedConfigScopeStore(t)
 			agent, _ := enrollTaskTestAgent(t, ctx, db)
 			if _, err := db.pool.Exec(ctx, `UPDATE agents SET capabilities='["sing-box"]',supported_capabilities='["sing-box"]' WHERE id=$1`, agent.ID); err != nil {
 				t.Fatal(err)
 			}
-			protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, "vless-ws-tls")
+			protocolKey := "vless-ws-tls"
+			if variant == "caddy-h2" {
+				protocolKey = "vless-h2-tls"
+			}
+			protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, protocolKey)
 			input, err := serverconfig.NewPlan(protocol)
 			if err != nil {
 				t.Fatal(err)
@@ -90,6 +95,14 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 			}
 			if _, err = db.pool.Exec(ctx, `UPDATE agents SET features=features||'["managed-tls-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 				t.Fatal(err)
+			}
+			if variant == "caddy-h2" {
+				if _, _, err = db.SaveAgentConfigAndTask(ctx, config, 0, options); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "managed-tls-h2-v1") {
+					t.Fatalf("old agent accepted H2: %v", err)
+				}
+				if _, err = db.pool.Exec(ctx, `UPDATE agents SET features=features||'["managed-tls-h2-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if mode == "caddy" {
 				if _, _, err = db.SaveAgentConfigAndTask(ctx, config, 0, options); !errors.Is(err, ErrConflict) {
@@ -123,6 +136,9 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 			feature := core.AgentFeatureManagedTLS
 			if mode == "caddy" {
 				feature = core.AgentFeatureACMEFallback
+			}
+			if variant == "caddy-h2" {
+				feature = core.AgentFeatureManagedTLSH2
 			}
 			if _, err = db.pool.Exec(ctx, `UPDATE agents SET features=features-$2 WHERE id=$1`, agent.ID, feature); err != nil {
 				t.Fatal(err)

@@ -11,7 +11,7 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	// that do not verify it working, so a node using mldsa65Seed is exported
 	// without the parameter instead of failing the whole Mihomo subscription.
 	// The URL format still carries it as pqv for clients that can verify it.
-	if managedTLS(input) {
+	if proxiedTLS(input) {
 		input.Port = input.TLSPublicPort
 	}
 	input.Protocol = nativeProtocol(input.Protocol)

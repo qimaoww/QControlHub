@@ -44,3 +44,17 @@ docker exec "$container" journalctl -u qagent.service --no-pager
 [ "$finished" = true ]
 [ "$(docker exec "$container" systemctl show qagent.service -p ExecMainStatus --value)" = 0 ]
 docker exec "$container" journalctl -u qagent.service --no-pager | grep -q 'managed TLS installed, validated, reloaded'
+
+# A real node-init restart must load the migrated environment and reuse state.
+docker exec "$container" systemctl enable --now qagent-tls-caddy.service
+before=$(docker exec "$container" sha256sum /var/lib/qcontrolhub-tls/data/caddy/instance.uuid /var/lib/qcontrolhub-tls/caddy/certificates/local/runtime.example.test/runtime.example.test.crt)
+docker restart "$container" >/dev/null
+ready=false
+for attempt in $(seq 1 40); do
+ if docker exec "$container" systemctl is-active --quiet qagent-tls-caddy.service 2>/dev/null; then ready=true; break; fi
+ sleep 1
+done
+[ "$ready" = true ]
+after=$(docker exec "$container" sha256sum /var/lib/qcontrolhub-tls/data/caddy/instance.uuid /var/lib/qcontrolhub-tls/caddy/certificates/local/runtime.example.test/runtime.example.test.crt)
+[ "$before" = "$after" ]
+printf '%s\n' 'Caddy state survived a real systemd node container restart'

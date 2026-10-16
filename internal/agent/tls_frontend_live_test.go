@@ -2,6 +2,9 @@ package agent
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +32,10 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 			t.Skip("requires proxy binary")
 		}
 		for _, base := range []string{"vmess", "vless", "trojan"} {
-			for _, transport := range []string{"ws", "httpupgrade"} {
+			for _, transport := range []string{"ws", "httpupgrade", "h2"} {
+				if mode == "nginx" && transport == "h2" {
+					continue
+				}
 				t.Run(mode+"/"+base+"/"+transport, func(t *testing.T) {
 					protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, base+"-"+transport+"-tls")
 					input, err := serverconfig.NewPlan(protocol)
@@ -39,6 +45,9 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 					// Use the panel-generated self-signed certificate as an isolated TLS fixture
 					// for both actual proxies. Public ACME requires a publicly delegated domain.
 					input.TLSMode = "nginx"
+					if transport == "h2" {
+						input.TLSMode = "caddy"
+					}
 					input.Port = singBoxFreePort(t)
 					input.TLSPublicPort = singBoxFreePort(t)
 					input.TLSServerName = "tls.example.test"
@@ -73,6 +82,23 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 					serverLog := singBoxRun(t, binary, "backend", string(checked))
 					dir := t.TempDir()
 					f := frontends[0]
+					if transport == "h2" {
+						fixture := input
+						fixture.Protocol, fixture.Transport, fixture.TLSMode = base+"-ws-tls", "websocket", "nginx"
+						local, err := serverconfig.MarshalClientMetadataWithPrevious(fixture, "")
+						if err != nil {
+							t.Fatal(err)
+						}
+						var metadata struct {
+							Frontend *core.TLSFrontend `json:"tls_frontend"`
+						}
+						_ = json.Unmarshal([]byte(local), &metadata)
+						f.Certificate, f.PrivateKey = metadata.Frontend.Certificate, metadata.Frontend.PrivateKey
+						var out map[string]any
+						_ = json.Unmarshal(outbound, &out)
+						out["tls"].(map[string]any)["certificate"] = []string{f.Certificate}
+						outbound, _ = json.Marshal(out)
+					}
 					f.Mode = mode
 					cert := filepath.Join(dir, frontendKey(f)+".crt")
 					key := filepath.Join(dir, frontendKey(f)+".key")
@@ -133,6 +159,15 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 							t.Fatalf("proxy did not listen: %s", data)
 						}
 						time.Sleep(20 * time.Millisecond)
+					}
+					pool := x509.NewCertPool()
+					pool.AppendCertsFromPEM([]byte(f.Certificate))
+					alpn := []string{"http/1.1"}
+					if transport == "h2" {
+						alpn = []string{"h2"}
+					}
+					if err := probeFrontendProtocol(context.Background(), f, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: f.Domain, RootCAs: pool, NextProtos: alpn}); err != nil {
+						t.Fatalf("readiness handshake: %v", err)
 					}
 					for _, network := range []string{"tcp", "udp"} {
 						t.Run(network, func(t *testing.T) {

@@ -15,11 +15,13 @@ import (
 )
 
 type tlsFrontendRequest struct {
-	Service   string             `json:"service"`
-	Kind      string             `json:"kind"`
-	Action    core.Action        `json:"action"`
-	Stage     bool               `json:"stage"`
-	Frontends []core.TLSFrontend `json:"frontends"`
+	Service      string             `json:"service"`
+	Kind         string             `json:"kind"`
+	Action       core.Action        `json:"action"`
+	Stage        bool               `json:"stage"`
+	Frontends    []core.TLSFrontend `json:"frontends"`
+	Certificates bool               `json:"certificates,omitempty"`
+	Deadline     time.Time          `json:"deadline,omitempty"`
 }
 
 var tlsRequestName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
@@ -83,13 +85,28 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 			return err
 		}
 	}
+	if !request.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
+		defer cancel()
+	}
+	if request.Action == core.ActionStatus {
+		return manager.repairRuntime(ctx)
+	}
+	if request.Certificates {
+		return manager.prepareStagedCertificates(ctx, request.Service, request.Frontends)
+	}
 	if request.Stage {
 		return manager.stage(ctx, request.Service, request.Frontends)
 	}
 	return manager.apply(ctx, request.Service, request.Frontends, request.Action)
 }
 
-func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task core.Task, stage bool) error {
+func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task core.Task, stage bool, reports ...*strings.Builder) error {
+	return e.executeTLSFrontendRequest(ctx, spec, task, stage, false, reports...)
+}
+
+func (e *Executor) executeTLSFrontendRequest(ctx context.Context, spec EngineSpec, task core.Task, stage, certificates bool, reports ...*strings.Builder) error {
 	if task.Engine != core.EngineSingBox && task.Engine != core.EngineXray {
 		if len(task.TLSFrontends) > 0 {
 			return errors.New("managed TLS requires Xray or sing-box")
@@ -105,14 +122,11 @@ func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task
 	if !ok || engine != task.Engine {
 		return errors.New("托管 TLS 需要标准面板管理的 Xray / sing-box 服务")
 	}
-	name, err := writeTLSFrontendRequest(tlsFrontendRequest{spec.Service, e.serviceManager().Kind(), task.Action, stage, task.TLSFrontends})
+	name, err := writeTLSFrontendRequest(tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates})
 	if err != nil {
 		return err
 	}
 	defer os.Remove(filepath.Join(tlsFrontendRequests, name))
-	if e.serviceManager().Kind() == ServiceManagerOpenRC {
-		return RunTLSFrontendRequest(ctx, name)
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -120,6 +134,18 @@ func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task
 	executable, err = ipQualityExecutable(executable)
 	if err != nil {
 		return err
+	}
+	helperCtx, helperCancel := context.WithDeadline(context.WithoutCancel(ctx), tlsOperationDeadline(ctx).Add(40*time.Second))
+	defer helperCancel()
+	if e.serviceManager().Kind() == ServiceManagerOpenRC {
+		output, err := runIPQualityCommand(helperCtx, executable, []string{"manage-tls", name})
+		if len(reports) > 0 {
+			reports[0].WriteString(output)
+		}
+		if err != nil {
+			return fmt.Errorf("托管 TLS 操作失败：%w；%s", err, output)
+		}
+		return nil
 	}
 	runner, err := ipQualityExecutable("/usr/bin/systemd-run")
 	if err != nil {
@@ -129,10 +155,13 @@ func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task
 	args := tlsFrontendHelperArguments(executable, unit, name)
 	// The same fixed helper sandbox supports package installation and service
 	// setup without broadening the long-running Agent's mount permissions.
-	output, runErr := runIPQualityCommand(ctx, runner, args)
+	output, runErr := runIPQualityCommand(helperCtx, runner, args)
 	cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _ = run(cleanup, e.serviceManager().executable, "stop", unit)
+	if len(reports) > 0 {
+		reports[0].WriteString(output)
+	}
 	if runErr != nil {
 		return fmt.Errorf("托管 TLS 操作失败：%w；%s", runErr, output)
 	}
@@ -165,6 +194,11 @@ func writeTLSFrontendRequest(request tlsFrontendRequest) (string, error) {
 func tlsFrontendHelperArguments(executable, unit, name string) []string {
 	args := ipQualityDependencyHelperArguments(executable, unit)
 	args = args[:len(args)-1]
+	for index, value := range args {
+		if strings.HasPrefix(value, "--property=RuntimeMaxSec=") {
+			args[index] = "--property=RuntimeMaxSec=405s"
+		}
+	}
 	return append(args, "manage-tls", name)
 }
 
@@ -179,4 +213,12 @@ func stopServiceTLSFrontends(ctx context.Context, manager *ServiceManager, engin
 	}
 	executor := &Executor{Services: manager}
 	return executor.executeTLSFrontend(ctx, spec, core.Task{Engine: engine, Action: core.ActionStop}, false)
+}
+
+func tlsOperationDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(core.ManagedTLSOperationTimeout)
+	if parent, ok := ctx.Deadline(); ok && parent.Before(deadline) {
+		return parent
+	}
+	return deadline
 }

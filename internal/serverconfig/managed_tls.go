@@ -20,8 +20,10 @@ import (
 
 func managedTLS(input Input) bool { return input.TLSMode == "caddy" || input.TLSMode == "nginx" }
 
+func proxiedTLS(input Input) bool { return managedTLS(input) || input.TLSMode == "external" }
+
 func frontendFor(input Input) core.TLSFrontend {
-	f := core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath}
+	f := core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath, Host: input.TransportHost, Method: input.TransportHTTPMethod}
 	if input.TLSMode == "caddy" {
 		f.ACMEEmail = input.TLSACMEEmail
 	}
@@ -33,7 +35,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 		return nil
 	}
 	if engine != core.EngineSingBox || !input.TLSEnabled || input.RealityEnabled {
-		return fmt.Errorf("托管反代仅支持 sing-box 的 TLS WebSocket / HTTPUpgrade 方案")
+		return fmt.Errorf("托管反代仅支持 sing-box 的 TLS WebSocket / HTTPUpgrade / Caddy HTTP/H2 方案")
 	}
 	if input.Listen != "127.0.0.1" {
 		return fmt.Errorf("托管反代的内部监听地址必须为 127.0.0.1")
@@ -43,11 +45,18 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 	if f.Mode == "nginx" {
 		f.Certificate, f.PrivateKey = "pending", "pending"
 	}
+	if input.TLSMode == "external" {
+		f.Mode = "caddy"
+	}
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	if input.TLSALPN != "" && input.TLSALPN != "http/1.1" {
-		return fmt.Errorf("WS / HTTPUpgrade 托管反代的 ALPN 必须留空或为 http/1.1")
+	alpn := "http/1.1"
+	if input.Transport == "http" {
+		alpn = "h2"
+	}
+	if input.TLSALPN != "" && input.TLSALPN != alpn {
+		return fmt.Errorf("此托管传输的 ALPN 必须留空或为 %s", alpn)
 	}
 	return nil
 }
@@ -56,7 +65,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 // versioned encrypted metadata. A form never receives or supplies that key.
 func MarshalClientMetadataWithPrevious(input Input, previous string) (string, error) {
 	encoded, err := MarshalClientMetadata(input)
-	if err != nil || !managedTLS(input) {
+	if err != nil || !proxiedTLS(input) {
 		return encoded, err
 	}
 	var metadata clientMetadata
@@ -64,6 +73,12 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 		return "", err
 	}
 	f := frontendFor(input)
+	if input.TLSMode == "external" {
+		metadata.ExternalFrontend = &f
+		metadata.TLSALPN = input.TLSALPN
+		data, err := json.Marshal(metadata)
+		return string(data), err
+	}
 	var old clientMetadata
 	if json.Unmarshal([]byte(previous), &old) == nil && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain {
 		f.Certificate, f.PrivateKey = old.Frontend.Certificate, old.Frontend.PrivateKey
@@ -190,8 +205,11 @@ func ManagedTLSFrontends(engine core.Engine, content string, metadata map[string
 			Port      int             `json:"listen_port"`
 			TLS       json.RawMessage `json:"tls"`
 			Transport struct {
-				Type string `json:"type"`
-				Path string `json:"path"`
+				Type    string            `json:"type"`
+				Path    string            `json:"path"`
+				Host    json.RawMessage   `json:"host"`
+				Method  string            `json:"method"`
+				Headers map[string]string `json:"headers"`
 			} `json:"transport"`
 		} `json:"inbounds"`
 	}
@@ -212,26 +230,54 @@ func ManagedTLSFrontends(engine core.Engine, content string, metadata map[string
 	}
 	for tag, value := range metadata {
 		var m clientMetadata
-		if json.Unmarshal([]byte(value), &m) == nil && m.Frontend != nil && !tags[tag] && ports[m.Frontend.BackendPort] {
+		if json.Unmarshal([]byte(value), &m) == nil && (m.Frontend != nil || m.ExternalFrontend != nil) && !tags[tag] && ports[metadataFrontend(m).BackendPort] {
 			return nil, fmt.Errorf("请通过预设表单重命名托管 TLS 入站 %s，以保留反代和证书归属", tag)
 		}
 	}
 	var result []core.TLSFrontend
 	for _, ib := range root.Inbounds {
 		var m clientMetadata
-		if json.Unmarshal([]byte(metadata[ib.Tag]), &m) != nil || m.Frontend == nil {
+		if json.Unmarshal([]byte(metadata[ib.Tag]), &m) != nil || metadataFrontend(m) == nil {
 			continue
 		}
-		f := *m.Frontend
-		transport := map[string]string{"ws": "websocket", "httpupgrade": "httpupgrade"}[ib.Transport.Type]
+		f := *metadataFrontend(m)
+		transport := map[string]string{"ws": "websocket", "httpupgrade": "httpupgrade", "http": "http"}[ib.Transport.Type]
 		if nativeProtocol(m.Protocol) != ib.Type || ib.Listen != "127.0.0.1" || ib.Port != f.BackendPort || transport != f.Transport || ib.Transport.Path != f.Path || len(ib.TLS) > 0 && string(ib.TLS) != "null" {
 			return nil, fmt.Errorf("入站 %s 使用托管 TLS，请通过预设表单修改内部端口、路径或 TLS 模式", ib.Tag)
 		}
 		f.Tag = ib.Tag
+		f.Host = ""
+		_ = json.Unmarshal(ib.Transport.Host, &f.Host)
+		if f.Host == "" {
+			var hosts []string
+			_ = json.Unmarshal(ib.Transport.Host, &hosts)
+			if len(hosts) > 0 {
+				f.Host = hosts[0]
+			}
+		}
+		if f.Host == "" {
+			f.Host = ib.Transport.Headers["Host"]
+		}
+		f.Method = ib.Transport.Method
+		if m.ExternalFrontend != nil {
+			check := f
+			check.Mode = "caddy"
+			if err := check.Validate(); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err := f.Validate(); err != nil {
 			return nil, err
 		}
 		result = append(result, f)
 	}
 	return result, nil
+}
+
+func metadataFrontend(m clientMetadata) *core.TLSFrontend {
+	if m.ExternalFrontend != nil {
+		return m.ExternalFrontend
+	}
+	return m.Frontend
 }
