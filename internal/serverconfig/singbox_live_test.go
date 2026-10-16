@@ -25,7 +25,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestSingBoxSharedFinalInboundDeletion(t *testing.T) {
+func TestSingBoxFinalInboundDeletion(t *testing.T) {
 	binary := os.Getenv("QCH_SING_BOX_BINARY")
 	if binary == "" {
 		t.Skip("QCH_SING_BOX_BINARY is not set")
@@ -44,23 +44,38 @@ func TestSingBoxSharedFinalInboundDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, err = DeletePresetInbound(core.EngineSingBox, plan.Content, input.Tag)
+	content, err = PresetAccountingSource(core.EngineSingBox, plan.Content)
 	if err == nil {
-		content, err = ReconcilePresetInboundReferences(core.EngineSingBox, content, input.Tag, "")
+		content, err = DeletePresetInbound(core.EngineSingBox, content, input.Tag)
 	}
 	if err == nil {
-		content, err = SharedInstanceRuntimeContent(core.EngineSingBox, content)
+		content, err = ReconcilePresetInboundReferences(core.EngineSingBox, content, input.Tag, "")
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err := SharedTrafficEndpoints(core.EngineSingBox, content)
-	if err != nil || len(endpoints) != 0 || strings.Contains(content, `"v2ray_api"`) {
-		t.Fatalf("empty private runtime has ingress: %s %v", content, err)
-	}
-	log := singBoxRun(t, binary, "empty-shared-instance", content)
-	if strings.Contains(log(), "inbound/") {
-		t.Fatalf("empty instance started an inbound: %s", log())
+	for _, shared := range []bool{false, true} {
+		name, runtime := "ordinary", content
+		if shared {
+			name = "shared"
+		}
+		t.Run(name, func(t *testing.T) {
+			if shared {
+				var err error
+				runtime, err = SharedInstanceRuntimeContent(core.EngineSingBox, runtime)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			endpoints, err := SharedTrafficEndpoints(core.EngineSingBox, runtime)
+			if err != nil || len(endpoints) != 0 || strings.Contains(runtime, `"v2ray_api"`) {
+				t.Fatalf("empty runtime has ingress or statistics API: %s %v", runtime, err)
+			}
+			log := singBoxRun(t, binary, "empty-"+name+"-instance", runtime)
+			if strings.Contains(log(), "inbound/") {
+				t.Fatalf("empty instance started an inbound: %s", log())
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -112,9 +113,14 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 		}
 	}
 	if engine == core.EngineSingBox {
-		// The stats allow-list also references generated exits. Normally the
-		// next plan replaces it, but deleting the final inbound has no next
-		// plan and must not leave dangling references in the saved source.
+		// A verified, unchanged generated API belongs to the accounting plan
+		// too. Removing only its outbound allow-list leaves an unsupported
+		// v2ray_api in the source when the final inbound has no next plan.
+		if reflect.DeepEqual(mapValue(root["experimental"])["v2ray_api"], mapValue(old["experimental"])["v2ray_api"]) {
+			removeManagedSingBoxStatsAPI(root)
+		}
+		// If the API was edited, retain that edit but remove verified generated
+		// references from its allow-list before the next accounting plan.
 		stats := mapValue(mapValue(mapValue(root["experimental"])["v2ray_api"])["stats"])
 		oldStats := mapValue(mapValue(mapValue(old["experimental"])["v2ray_api"])["stats"])
 		if stats != nil {

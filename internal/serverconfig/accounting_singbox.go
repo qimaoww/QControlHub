@@ -14,6 +14,23 @@ func PrepareMarkedSingBoxAccounting(content string) (AccountingPlan, error) {
 	return prepareAccounting(core.EngineSingBox, content, true)
 }
 
+// The fixed loopback statistics API is generated alongside per-port exits.
+// Editable source must drop it before replanning, and an empty configuration
+// must not require with_v2ray_api merely to remove its last proxy listener.
+// Preserve all other experimental settings and custom API addresses.
+func removeManagedSingBoxStatsAPI(root map[string]any) bool {
+	experimental := mapValue(root["experimental"])
+	api := mapValue(experimental["v2ray_api"])
+	if stringValue(api["listen"]) != "127.0.0.1:10086" {
+		return false
+	}
+	delete(experimental, "v2ray_api")
+	if len(experimental) == 0 {
+		delete(root, "experimental")
+	}
+	return true
+}
+
 // Only a user-space, server-only WireGuard endpoint has the same attributable
 // ingress contract as an inbound. System interfaces, peer dialers and relay
 // protocols can bypass those routes and require a separate accounting design.

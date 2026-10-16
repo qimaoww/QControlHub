@@ -32,6 +32,15 @@ func PrepareIndependentEgress(engine core.Engine, content string) (AccountingPla
 		return AccountingPlan{}, err
 	}
 	if explicitlyEmptyProxyConfig(engine, root) {
+		// Older saved revisions and queued tasks can still contain the
+		// generated statistics API after their final inbound was deleted.
+		if engine == core.EngineSingBox && removeManagedSingBoxStatsAPI(root) {
+			encoded, err := json.MarshalIndent(root, "", "  ")
+			if err != nil {
+				return AccountingPlan{}, err
+			}
+			content = string(encoded) + "\n"
+		}
 		return AccountingPlan{Content: content, Source: "disabled"}, nil
 	}
 	plan, err := PrepareAccounting(engine, content)
