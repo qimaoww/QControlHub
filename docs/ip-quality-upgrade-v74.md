@@ -204,11 +204,22 @@ replacement tables using the historical unnamed check.
 
 ## Execution record
 
-Local validation uses Linux amd64, Go 1.25.12, PostgreSQL 17 in a disposable
+Local validation uses Linux amd64, Go 1.25.12, PostgreSQL 17.11 in a disposable
 container bound to localhost, isolated schemas, and Chromium. Automated probes
 are controlled fixtures, including Agent bash execution and signed WebSocket
-result delivery; they do not measure a public node's IP reputation. No
-feedback-provider or production node was accessed. A live external-node probe
-was not performed because no such environment was supplied.
+result delivery; they do not measure a public node's IP reputation.
+
+The opt-in live check also passed on 2026-10-17 with
+`QCH_IPQUALITY_TEST_IMAGES=debian:bookworm-slim make ip-quality-clean-test`.
+This used the current Agent in a disposable Linux amd64 Debian container
+(image digest `sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587`),
+actual package repositories and upstream probe services. Both first and repeat
+detections exited successfully and produced one validated report each. The
+script verified first-run dependency installation and repeat-run reuse; the
+whole command, including build/container setup and both detections, took
+100.56 seconds. This is an observation, not a detection-time promise. The
+container was removed by the test. No feedback-provider or production node
+was accessed; the live CLI probe and the controlled authenticated API lifecycle
+are separate checks, not a production deployment acceptance run.
 
 Final command results and hosted CI status are recorded in the PR.
