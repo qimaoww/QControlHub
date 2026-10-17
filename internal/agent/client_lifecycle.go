@@ -412,6 +412,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 		return err
 	}
+	managedScan := make(chan struct{}, 1)
 	var activeTask string
 	var sentLogBatch string
 	for {
@@ -448,6 +449,13 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 		case message := <-incoming:
 			switch message.Type {
+			case core.WireManagedCertificateSources:
+				select {
+				case managedScan <- struct{}{}:
+					sources := message.ManagedCertificateSources
+					go func() { defer func() { <-managedScan }(); c.syncManagedCertificates(sessionContext, sources, outgoing) }()
+				default:
+				}
 			case core.WireCertificateChallenges:
 				_ = challenges.Replace(sessionContext, message.CertificateChallenges)
 				continue

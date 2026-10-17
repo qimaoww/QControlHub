@@ -29,6 +29,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 	rows, err := s.pool.Query(ctx, `SELECT share.id,share.user_id,share.agent_id,agent.name,share.enabled,
 		share.status,share.invitation_revision,COALESCE(agent_owner.username,''),
 		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,share.engines,
+ ARRAY(SELECT domain FROM certificate_http_grants g WHERE g.agent_id=share.agent_id AND g.user_id=share.user_id ORDER BY domain),
 		CASE WHEN share.ports_unrestricted THEN ARRAY[0]
 			ELSE ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port) END
 		FROM agent_shares share JOIN agents agent ON agent.id=share.agent_id
@@ -42,7 +43,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.AgentID, &share.AgentName, &share.Enabled,
 			&share.Status, &share.InvitationRevision, &share.OwnerUsername,
-			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.Ports); err != nil {
+			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.HTTPDomains, &share.Ports); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -177,6 +178,11 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	}
 	for _, share := range shares {
 		if err := s.setAgentShareTx(ctx, tx, userID, share.AgentID, share.LimitBytes, share.Engines, share.Ports, shareEnabled(share), share.Reinvite); err != nil {
+			return core.AgentAccess{}, err
+		}
+	}
+	for _, share := range shares {
+		if err := setShareHTTPDomainsTx(ctx, tx, share.AgentID, userID, share.HTTPDomains); err != nil {
 			return core.AgentAccess{}, err
 		}
 	}

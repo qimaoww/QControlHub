@@ -1,0 +1,34 @@
+Scope dry check: PASS (root manifest, immutable Docker IDs, task labels, exact paths, 72-hour interval)
+Unit=qch-cert-e528-cleanup.service
+TimersCalendar={ OnCalendar=2026-10-20 15:20:57 UTC ; next_elapse=Tue 2026-10-20 23:20:57 CST }
+NextElapseUSecRealtime=Tue 2026-10-20 23:20:57 CST
+LastTriggerUSec=
+Persistent=yes
+Id=qch-cert-e528-cleanup.timer
+ActiveState=active
+
+[Unit]
+Description=Certificate unified e528 fixture cleanup after 72 hours
+
+[Timer]
+OnCalendar=2026-10-20 15:20:57 UTC
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=qch-cert-e528-cleanup.service
+
+[Install]
+WantedBy=timers.target
+
+[Unit]
+Description=Remove only certificate-unified-e528 retained test fixtures
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /var/lib/qch-certificate-unified-e528/cleanup.py
+Restart=on-failure
+RestartSec=300
+UMask=0077

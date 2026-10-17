@@ -1,0 +1,22 @@
+go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$' ./...
+ok  	github.com/qimaoww/qcontrolhub	0.002s
+ok  	github.com/qimaoww/qcontrolhub/cmd/agent	0.347s
+ok  	github.com/qimaoww/qcontrolhub/cmd/control-plane	25.616s
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.055s
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	242.104s
+ok  	github.com/qimaoww/qcontrolhub/internal/api	222.057s
+ok  	github.com/qimaoww/qcontrolhub/internal/architecture	0.012s
+ok  	github.com/qimaoww/qcontrolhub/internal/authn	1.703s
+ok  	github.com/qimaoww/qcontrolhub/internal/certificates	0.065s
+ok  	github.com/qimaoww/qcontrolhub/internal/cnip	0.018s
+ok  	github.com/qimaoww/qcontrolhub/internal/configschema	0.003s
+ok  	github.com/qimaoww/qcontrolhub/internal/core	0.015s
+ok  	github.com/qimaoww/qcontrolhub/internal/geoip	5.270s
+ok  	github.com/qimaoww/qcontrolhub/internal/githubfetch	2.165s
+ok  	github.com/qimaoww/qcontrolhub/internal/hostmetrics	0.028s
+ok  	github.com/qimaoww/qcontrolhub/internal/komari	0.004s
+ok  	github.com/qimaoww/qcontrolhub/internal/netpolicy	0.001s
+ok  	github.com/qimaoww/qcontrolhub/internal/notify	0.056s
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.361s
+ok  	github.com/qimaoww/qcontrolhub/internal/store	156.252s
+?   	github.com/qimaoww/qcontrolhub/internal/testdb	[no test files]

@@ -1,0 +1,29 @@
+### Result
+{"video":"shared-http-caddy.webm","account":"cert-alice","flow":"actual shared-node HTTP-01 issuance; Caddy v2 and target binding; source sync"}
+### Ran Playwright code
+```js
+await (async rootPage => {
+ const context=await rootPage.context().browser().newContext({storageState:await rootPage.context().storageState(),viewport:{width:1440,height:1000},reducedMotion:'reduce',recordVideo:{dir:'/root/.codex/worktrees/e528/qcontrolhub/.preview/certificate-unified-e528/video',size:{width:1440,height:1000}}});
+ const page=await context.newPage();const video=page.video();
+ try {
+  await page.goto('http://127.0.0.1:36479/#certificates');await page.locator('[data-cert-create]').click();
+  await page.locator('[name=name]').fill('流程录屏 · 共享节点 HTTP-01');
+  await page.locator('[name=domains]').fill('alice-alt.example.test');
+  await page.locator('[name=method]').selectOption('http-01');
+  await page.locator('[name=agent_id]').selectOption('agt_312d30a5c7196ab5');
+  const account=await page.locator('[name=account_id] option').nth(1).getAttribute('value');
+  await page.locator('[name=account_id]').selectOption(account);
+  await page.waitForTimeout(1500);
+  await page.getByRole('button',{name:'提交申请',exact:true}).click();
+  await page.locator('.cert-order .status-label').filter({hasText:'成功'}).waitFor({timeout:60000});
+  await page.waitForTimeout(1200);await page.keyboard.press('Escape');
+  await page.locator('[data-cert-detail="crt_10e0ed07f69aa48a"]').click();await page.locator('.cert-source-status').waitFor();
+  await page.waitForTimeout(1200);
+  await page.getByText('证书版本历史 · 2',{exact:true}).click();await page.getByText('证书版本历史 · 2',{exact:true}).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(1500);await page.keyboard.press('Escape');
+  await page.locator('[data-cert-sources]').first().click();await page.locator('.cert-source-record').waitFor();await page.waitForTimeout(1200);
+ } finally {await context.close();}
+ await video.saveAs('/root/.codex/worktrees/e528/qcontrolhub/docs/certificate-unified/video/shared-http-caddy.webm');
+ return {video:'shared-http-caddy.webm',account:'cert-alice',flow:'actual shared-node HTTP-01 issuance; Caddy v2 and target binding; source sync'};
+})(page);
+```

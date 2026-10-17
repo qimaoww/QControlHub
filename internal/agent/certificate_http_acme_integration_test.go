@@ -23,8 +23,17 @@ import (
 // Optional real CA + existing Nginx service gate. The panel never listens on
 // the challenge port: Pebble validates Nginx's route to the Agent handler.
 func TestCertificateHTTP01ExistingNginxWithLocalACME(t *testing.T) {
+	testCertificateHTTP01ProxyWithLocalACME(t, "nginx")
+}
+func TestCertificateHTTP01ManagedCaddyWithLocalACME(t *testing.T) {
+	testCertificateHTTP01ProxyWithLocalACME(t, "caddy")
+}
+func testCertificateHTTP01ProxyWithLocalACME(t *testing.T, provider string) {
 	binary := os.Getenv("QCH_PEBBLE_BIN")
 	nginx := os.Getenv("QCH_NGINX_BIN")
+	if provider == "caddy" {
+		nginx = os.Getenv("QCH_CADDY_BIN")
+	}
 	if binary == "" || nginx == "" {
 		t.Skip("requires local Pebble and Nginx binaries")
 	}
@@ -63,7 +72,30 @@ func TestCertificateHTTP01ExistingNginxWithLocalACME(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); log.Close() })
 	}
-	start(nginx, "-p", root, "-c", configPath)
+	if provider == "caddy" {
+		content, err := renderCaddyFrontends(nil, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config map[string]any
+		if err = json.Unmarshal([]byte(content), &config); err != nil {
+			t.Fatal(err)
+		}
+		apps := config["apps"].(map[string]any)
+		delete(apps, "tls")
+		server := apps["http"].(map[string]any)["servers"].(map[string]any)["http_challenges"].(map[string]any)
+		server["listen"] = []string{":" + strconv.Itoa(websitePort)}
+		routes := server["routes"].([]any)
+		routes[0].(map[string]any)["handle"].([]any)[0].(map[string]any)["upstreams"] = []any{map[string]any{"dial": strings.TrimPrefix(backend.URL, "http://")}}
+		routes[1].(map[string]any)["handle"] = []any{map[string]any{"handler": "static_response", "body": "existing business"}}
+		encoded, _ := json.Marshal(config)
+		if err = os.WriteFile(configPath, encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+		start(nginx, "run", "--config", configPath)
+	} else {
+		start(nginx, "-p", root, "-c", configPath)
+	}
 	module := os.Getenv("QCH_PEBBLE_CERT_DIR")
 	config := map[string]any{"pebble": map[string]any{"listenAddress": "127.0.0.1:" + strconv.Itoa(caPort), "managementListenAddress": "127.0.0.1:" + strconv.Itoa(managementPort), "certificate": filepath.Join(module, "localhost/cert.pem"), "privateKey": filepath.Join(module, "localhost/key.pem"), "httpPort": websitePort, "tlsPort": port(), "retryAfter": map[string]int{"authz": 1, "order": 1}, "keyAlgorithm": "ecdsa"}}
 	raw, _ := json.Marshal(config)
@@ -159,5 +191,5 @@ func TestCertificateHTTP01ExistingNginxWithLocalACME(t *testing.T) {
 	if response.StatusCode != 404 {
 		t.Fatal("challenge cleanup failed")
 	}
-	t.Log("Pebble actually validated two HTTP-01 authorizations through running Nginx -> Agent handler; business route preserved; panel has no challenge listener")
+	t.Logf("Pebble actually validated two HTTP-01 authorizations through running %s -> Agent handler; business route preserved; challenge cleanup verified", provider)
 }

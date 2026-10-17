@@ -1,0 +1,64 @@
+QCH_MULTI_USER_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(MultiUserBrowserSessions|CertificateBrowserSessions)$' -v
+=== RUN   TestCertificateBrowserSessions
+=== RUN   TestCertificateBrowserSessions/desktop
+2026/10/17 22:54:51 INFO waiting for PostgreSQL migration lock backend_pid=3129
+2026/10/17 22:54:51 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:54:51 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=194.948142ms
+2026/10/17 22:54:53 ERROR HTTP request failed request_id=req_43d3584a1763dbb1 error="context canceled"
+2026/10/17 22:54:53 ERROR HTTP request failed request_id=req_356f6c55a3eb8692 error="context canceled"
+2026/10/17 22:54:55 ERROR HTTP request failed request_id=req_3007bb303d6df063 error="context canceled"
+    certificates_browser_integration_test.go:46: desktop: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        desktop: same-browser logout/login clears private filters, dialogs and credential-account state
+        
+=== RUN   TestCertificateBrowserSessions/mobile
+2026/10/17 22:54:55 INFO waiting for PostgreSQL migration lock backend_pid=3141
+2026/10/17 22:54:55 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:54:55 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=192.7157ms
+2026/10/17 22:54:57 ERROR HTTP request failed request_id=req_75293d6b12b3f331 error="context canceled"
+2026/10/17 22:54:57 ERROR HTTP request failed request_id=req_e2a4cfd09181d69c error="context canceled"
+2026/10/17 22:54:58 ERROR HTTP request failed request_id=req_edd9aaf7bcaf719a error="context canceled"
+    certificates_browser_integration_test.go:46: mobile: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        mobile: same-browser logout/login clears private filters, dialogs and credential-account state
+        
+--- PASS: TestCertificateBrowserSessions (7.90s)
+    --- PASS: TestCertificateBrowserSessions/desktop (3.99s)
+    --- PASS: TestCertificateBrowserSessions/mobile (3.92s)
+=== RUN   TestMultiUserBrowserSessions
+=== RUN   TestMultiUserBrowserSessions/desktop
+2026/10/17 22:54:59 INFO waiting for PostgreSQL migration lock backend_pid=3150
+2026/10/17 22:54:59 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:54:59 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=194.393442ms
+2026/10/17 22:55:01 ERROR HTTP request failed request_id=req_7e59645873cf65e2 error="error preprocessing batch (prepare): context canceled"
+2026/10/17 22:55:01 ERROR HTTP request failed request_id=req_f10694324f8d6a5f error="context canceled"
+2026/10/17 22:55:01 ERROR HTTP request failed request_id=req_0c98f0c9445822ae error="context canceled"
+2026/10/17 22:55:01 ERROR HTTP request failed request_id=req_59ead79730ecdfb5 error="context canceled"
+2026/10/17 22:55:02 ERROR HTTP request failed request_id=req_6309776cdd3f7f99 error="context canceled"
+    multi_user_browser_integration_test.go:80: desktop: three independent browser contexts, real password/cookie/CSRF identities
+        desktop: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        desktop: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        desktop: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        desktop: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        desktop: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+        
+=== RUN   TestMultiUserBrowserSessions/mobile
+2026/10/17 22:55:02 INFO waiting for PostgreSQL migration lock backend_pid=3164
+2026/10/17 22:55:02 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:55:03 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=203.000972ms
+2026/10/17 22:55:05 ERROR HTTP request failed request_id=req_eed8d80db09e15e0 error="context canceled"
+2026/10/17 22:55:05 ERROR HTTP request failed request_id=req_c27c9192712149eb error="error preprocessing batch (prepare): context canceled"
+2026/10/17 22:55:05 ERROR HTTP request failed request_id=req_b59e5cfbf8b51ef3 error="context canceled"
+2026/10/17 22:55:05 ERROR HTTP request failed request_id=req_618f7ca7068e1c88 error="context canceled"
+2026/10/17 22:55:05 ERROR HTTP request failed request_id=req_bf3a497dd39cb55b error="context canceled"
+2026/10/17 22:55:06 ERROR HTTP request failed request_id=req_ebbce66d3344627c error="context canceled"
+    multi_user_browser_integration_test.go:80: mobile: three independent browser contexts, real password/cookie/CSRF identities
+        mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+        
+--- PASS: TestMultiUserBrowserSessions (6.89s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (3.45s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (3.44s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	15.016s

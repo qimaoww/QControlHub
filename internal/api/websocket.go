@@ -115,6 +115,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
 	var agentHasFeatureFromStore bool
+	var agentHasManagedCertificates bool
+	var lastManagedScan time.Time
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
 	var sharedEnginesSupported, independentEgressSupported bool
@@ -193,6 +195,13 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			return
 		case message := <-incoming:
 			switch message.Type {
+			case core.WireManagedCertificateReport:
+				if !heartbeatReceived || message.ManagedCertificateReport == nil {
+					return
+				}
+				// Never log the envelope or its key material. Failed imports are
+				// persisted as sanitized source status and retried on next scan.
+				_ = s.store.ImportManagedCertificate(ctx, id, *message.ManagedCertificateReport)
 			case core.WireHeartbeat:
 				if message.Heartbeat == nil {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid heartbeat")
@@ -202,6 +211,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
 				agentHasFeatureFromStore = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCertificates)
+				agentHasManagedCertificates = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCaddyCertificates)
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
 				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
@@ -321,6 +331,15 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			}
 		case <-taskTicker.C:
 			if heartbeatReceived {
+				if agentHasManagedCertificates && time.Since(lastManagedScan) > 30*time.Second {
+					sources, sourceErr := s.store.AgentManagedCertificateSources(ctx, id)
+					if sourceErr == nil {
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireManagedCertificateSources, ManagedCertificateSources: sources}); err != nil {
+							return
+						}
+					}
+					lastManagedScan = time.Now()
+				}
 				routes, routeErr := s.store.AgentCertificateChallenges(ctx, id)
 				if routeErr != nil {
 					return

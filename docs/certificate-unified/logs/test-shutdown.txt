@@ -1,0 +1,7 @@
+Browser session cert-e528 closed.
+Task host DNS process terminated after executable identity verification.
+All three task containers stopped and retained.
+Loopback ports 36478-36489 verified free by binding.
+Order challenge rows and DNS overrides cleared before shutdown; see live-final.txt and live-http-users.txt.
+Test finished UTC: 2026-10-17T15:20:57+00:00
+Cleanup scheduled Asia/Shanghai: 2026-10-20T23:20:57+08:00

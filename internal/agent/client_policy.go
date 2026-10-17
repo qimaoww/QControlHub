@@ -107,6 +107,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
 		core.AgentFeatureCertificates,
+		core.AgentFeatureCaddyCertificates,
 		core.AgentFeatureManagedTLSH2,
 		core.AgentFeatureXHTTP,
 		core.AgentFeatureACMEFallback,

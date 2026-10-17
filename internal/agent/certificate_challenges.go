@@ -14,7 +14,7 @@ import (
 )
 
 // Challenge routes are in memory, expire independently, and are removed when
-// the authenticated session ends. Existing web services are never rewritten.
+// the authenticated session ends. Managed proxies use a fixed scoped route.
 type certificateChallengeService struct {
 	mu      sync.RWMutex
 	routes  map[string]core.HTTPChallenge

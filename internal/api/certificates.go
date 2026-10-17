@@ -29,6 +29,9 @@ func (s *Server) certificateRoutes(mux *http.ServeMux) {
 		"POST /api/v1/certificate-accounts":                      s.createCertificateAccount,
 		"DELETE /api/v1/certificate-accounts/{id}":               s.deleteCertificateAccount,
 		"POST /api/v1/certificate-accounts/{id}/check":           s.checkCertificateAccount,
+		"GET /api/v1/certificate-http-nodes":                     s.getCertificateHTTPNodes,
+		"GET /api/v1/certificate-managed-sources":                s.getManagedCertificateSources,
+		"PUT /api/v1/certificate-managed-sources/{id}":           s.setManagedCertificateSync,
 		"GET /api/v1/certificate-http-grants":                    s.getCertificateHTTPGrants,
 		"POST /api/v1/certificate-http-grants":                   s.putCertificateHTTPGrant,
 		"DELETE /api/v1/certificate-http-grants":                 s.deleteCertificateHTTPGrant,
@@ -344,4 +347,35 @@ func (s *Server) updateCertificateDNSCredentials(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, 200, item)
+}
+
+func (s *Server) getCertificateHTTPNodes(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.CertificateHTTPNodes(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+func (s *Server) getManagedCertificateSources(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ManagedCertificateSources(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+func (s *Server) setManagedCertificateSync(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Action string `json:"action"`
+	}
+	if err := decodeJSON(w, r, &input, 1024); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err := s.store.SetManagedCertificateSync(r.Context(), r.PathValue("id"), input.Action); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
