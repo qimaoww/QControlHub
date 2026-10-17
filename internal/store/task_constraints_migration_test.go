@@ -338,6 +338,10 @@ func TestTaskConstraintsNodeTaskLifecycleAndRejections(t *testing.T) {
 			}
 		})
 	}
+	config, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "install snapshot", Engine: core.EngineMihomo, Content: "mixed-port: 21001\n"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct{ name, action, engine, extra, constraint string }{
 		{"kernel_requires_engine", "status", "", "", "tasks_engine_check"},
 		{"unknown_action", "unknown", "mihomo", "", "tasks_action_check"},
@@ -345,7 +349,9 @@ func TestTaskConstraintsNodeTaskLifecycleAndRejections(t *testing.T) {
 		{"invalid_status", "status", "mihomo", ",status='unknown'", "tasks_status_check"},
 		{"automatic_install_action", "status", "mihomo", ",install_if_missing=true", "tasks_install_if_missing_check"},
 		{"automatic_install_revision", "deploy", "mihomo", ",install_if_missing=true,config_version=0", "tasks_install_if_missing_check"},
-		{"automatic_install_missing_config", "validate", "mihomo", ",install_if_missing=true,config_version=1", "tasks_install_if_missing_check"},
+		{"automatic_install_negative_revision", "deploy", "mihomo", ",install_if_missing=true,config_version=-1", "tasks_install_if_missing_check"},
+		{"automatic_install_missing_revision", "validate", "mihomo", ",install_if_missing=true,config_version=NULL", "tasks_install_if_missing_check"},
+		{"automatic_install_missing_config", "validate", "mihomo", ",install_if_missing=true,config_id=NULL", "tasks_install_if_missing_check"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// Each negative insertion has its own transaction: 23514 aborts only this one.
@@ -354,7 +360,8 @@ func TestTaskConstraintsNodeTaskLifecycleAndRejections(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback(ctx)
-			_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,action,engine,status,created_at) VALUES('invalid',$1,$2,$3,'pending',now())`, agent.ID, test.action, test.engine)
+			_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,action,engine,status,created_at,config_id,config_version)
+				VALUES('invalid',$1,$2,$3,'pending',now(),$4,$5)`, agent.ID, test.action, test.engine, config.ID, config.Version)
 			if test.extra != "" {
 				if err != nil {
 					t.Fatal(err)
@@ -401,10 +408,6 @@ func TestTaskConstraintsNodeTaskLifecycleAndRejections(t *testing.T) {
 		if err != nil {
 			t.Errorf("supported engine %s: %v", engine, err)
 		}
-	}
-	config, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "install snapshot", Engine: core.EngineMihomo, Content: "mixed-port: 21001\n"}, 0)
-	if err != nil {
-		t.Fatal(err)
 	}
 	for _, action := range []core.Action{core.ActionValidate, core.ActionDeploy} {
 		tx, err := db.pool.Begin(ctx)
