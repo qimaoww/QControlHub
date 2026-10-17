@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -240,6 +241,28 @@ func TestSharedPortReplacementSettlesOldCountersWithoutStoppingInstance(t *testi
 	if m.Snapshot()[0].UsedBytes != 42 {
 		t.Fatal("old tail billed twice")
 	}
+	// A policy refresh can overlap the next queued deployment. It must retry
+	// with the old protection intact rather than classify that transition as
+	// an actual port revocation and stop the new instance.
+	verifiedSource := m.sharedSource
+	guardBefore, err := os.ReadFile(m.sharedGuardPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.sharedSource = func(ctx context.Context, engine core.Engine, share string) (nativeAccountingSnapshot, error) {
+		if share == policies[0].SharedQuota.ID {
+			return nativeAccountingSnapshot{}, errSharedAccountingTransition
+		}
+		return verifiedSource(ctx, engine, share)
+	}
+	if err := m.SetPolicies(ctx, policies[1:], "agt_shared"); !errors.Is(err, errSharedAccountingTransition) || stopped != 0 || m.records[policies[0].ID] == nil {
+		t.Fatalf("transition refresh must retry without removing protection: stopped=%d err=%v", stopped, err)
+	}
+	guardAfter, err := os.ReadFile(m.sharedGuardPath())
+	if err != nil || string(guardBefore) != string(guardAfter) {
+		t.Fatalf("transition replaced the persisted activation guard: %v", err)
+	}
+	m.sharedSource = verifiedSource
 	if err := m.SetPolicies(ctx, policies[1:], "agt_shared"); err != nil {
 		t.Fatal(err)
 	}

@@ -289,19 +289,6 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		record.Policy = policy
 		next[policy.ID] = record
 	}
-	guard := trafficState{Records: make(map[string]*trafficRecord)}
-	for id, record := range next {
-		if record.Policy.SharedQuota != nil {
-			guard.Records[id] = record
-		}
-	}
-	if len(guard.Records) > 0 || len(manager.recoveryEngines) > 0 || hasSharedTraffic(manager.records) {
-		if err := saveTrafficState(manager.sharedGuardPath(), guard); err != nil {
-			manager.awaitingPolicies = true
-			manager.recoverSharedEngines(next)
-			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
-		}
-	}
 	type instanceKey struct {
 		shareID string
 		engine  core.Engine
@@ -341,6 +328,12 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				// the protected local mapping before treating removal as safe.
 				if len(authorized[key]) > 0 && manager.sharedSource != nil {
 					snapshot, err := manager.sharedSource(ctx, key.engine, key.shareID)
+					if errors.Is(err, errSharedAccountingTransition) {
+						// The session retries this policy snapshot after the queued
+						// deployment. Keep both old rules and its activation guard
+						// until the replacement can be independently verified.
+						return fmt.Errorf("shared port retirement awaiting deployment: %w", err)
+					}
 					oldPresent, newPresent := false, false
 					if err == nil && snapshot.Plan.Source == "nft-dual" {
 						for _, port := range snapshot.Plan.Ports {
@@ -357,6 +350,19 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
 			}
+		}
+	}
+	guard := trafficState{Records: make(map[string]*trafficRecord)}
+	for id, record := range next {
+		if record.Policy.SharedQuota != nil {
+			guard.Records[id] = record
+		}
+	}
+	if len(guard.Records) > 0 || len(manager.recoveryEngines) > 0 || hasSharedTraffic(manager.records) {
+		if err := saveTrafficState(manager.sharedGuardPath(), guard); err != nil {
+			manager.awaitingPolicies = true
+			manager.recoverSharedEngines(next)
+			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
 		}
 	}
 	// Stop removed, revoked, or exhausted instances while the old nftables
