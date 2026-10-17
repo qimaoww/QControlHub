@@ -64,12 +64,14 @@ func testManagedTLSIssuerFallback(t *testing.T, hang bool) {
 	defer occupied.Close()
 	var committed map[string]any
 	_ = json.Unmarshal([]byte(value), &committed)
+	relocateCaddyChallengeListener(t, committed, challengePort)
 	value, err = certificatePreparationRoutes(value, nil, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var root map[string]any
 	_ = json.Unmarshal([]byte(value), &root)
+	relocateCaddyChallengeListener(t, root, challengePort)
 	apps := root["apps"].(map[string]any)
 	policy := apps["tls"].(map[string]any)["automation"].(map[string]any)["policies"].([]any)[0].(map[string]any)
 	issuers := policy["issuers"].([]any)

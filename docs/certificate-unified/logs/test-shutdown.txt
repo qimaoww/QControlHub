@@ -5,3 +5,7 @@ Loopback ports 36478-36489 verified free by binding.
 Order challenge rows and DNS overrides cleared before shutdown; see live-final.txt and live-http-users.txt.
 Test finished UTC: 2026-10-17T15:20:57+00:00
 Cleanup scheduled Asia/Shanghai: 2026-10-20T23:20:57+08:00
+
+Final optional proxy matrix process cleanup completed.
+Final test finished UTC: 2026-10-17T15:27:51+00:00
+Final cleanup Asia/Shanghai: 2026-10-20T23:27:51+08:00

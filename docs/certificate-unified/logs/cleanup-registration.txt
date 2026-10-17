@@ -1,8 +1,9 @@
 Scope dry check: PASS (root manifest, immutable Docker IDs, task labels, exact paths, 72-hour interval)
+Final test timestamp updated after the optional CI proxy matrix regression.
 Unit=qch-cert-e528-cleanup.service
-TimersCalendar={ OnCalendar=2026-10-20 15:20:57 UTC ; next_elapse=Tue 2026-10-20 23:20:57 CST }
-NextElapseUSecRealtime=Tue 2026-10-20 23:20:57 CST
-LastTriggerUSec=
+TimersCalendar={ OnCalendar=2026-10-20 15:27:51 UTC ; next_elapse=Tue 2026-10-20 23:27:51 CST }
+NextElapseUSecRealtime=Tue 2026-10-20 23:27:51 CST
+LastTriggerUSec=Sat 2026-10-17 23:20:58 CST
 Persistent=yes
 Id=qch-cert-e528-cleanup.timer
 ActiveState=active
@@ -11,7 +12,7 @@ ActiveState=active
 Description=Certificate unified e528 fixture cleanup after 72 hours
 
 [Timer]
-OnCalendar=2026-10-20 15:20:57 UTC
+OnCalendar=2026-10-20 15:27:51 UTC
 Persistent=true
 AccuracySec=1s
 RandomizedDelaySec=0

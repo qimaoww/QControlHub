@@ -70,6 +70,7 @@ Agent 主服务仍沿用原 capability 范围。读取 Caddy 非 root 所有的 
 | 构建、格式、模块、样式、schema / PR 策略、部署脚本与 vet | [通过](logs/final-build-checks.txt)，`make build non-browser-checks` |
 | 新增 API 两普通用户 / 伪造请求 / 来源隔离与版本测试 | [通过](logs/new-api-tests.txt)，[最终来源回归](logs/final-source-tests.txt) |
 | 定向 HTTP / Caddy / 证书回归 | [通过](logs/final-regressions.txt) |
+| 真实协议矩阵与 Caddy 签发回退（CI 非特权端口适配） | [通过](logs/ci-proxy-matrix.txt)，Caddy / Nginx，VMess / VLESS / Trojan，WS / HTTPUpgrade / h2，TCP / UDP |
 | Agent / API / Store 证书相关 race 检查 | [通过](logs/race-tests.txt) |
 | 真实 Nginx、Caddy → Agent → Pebble 两 SAN 验证与业务保留 / 清理 | [通过](logs/real-acme-proxies.txt) |
 | 三个真实账号、独立 Agent、Caddy 自动导入 | [通过](logs/live-caddy-import.txt) |
@@ -86,7 +87,7 @@ Agent 主服务仍沿用原 capability 范围。读取 Caddy 非 root 所有的 
 
 本地 ACME 使用 Pebble 的**真实验证器**，没有跳过验证。测试域名与公开格式的合成双栈地址仅存在任务容器的 DNS / network namespace；通过 fixture Go overlay 将 Caddy CA 端点改成本地 CA，生产代码的 CA 常量保持原样。覆盖真实 TCP 80、A / AAAA 检查、挑战路由、TLS、ARI 续期、认证 Agent 和内核，但**没有验证真实互联网 DNS、防火墙 / NAT 或生产公开 CA 签发**。不需要也没有创建外部 DNS 记录。运行环境的临时 AAAA 故障注入均已恢复。
 
-本地新通道在真实 Debian / systemd 上验证；OpenRC 通道完成代码 / 项目回归，完整 CI 的 Alpine / OpenRC 结果见 PR checks。未逐一在物理移动设备或所有外部网站软件上验证。CI 结果以 PR 最新提交为准。
+本地新通道在真实 Debian / systemd 上验证；OpenRC 通道完成代码 / 项目回归，完整 CI 的 Alpine / OpenRC 结果见 PR checks。未逐一在物理移动设备或所有外部网站软件上验证。CI 结果以 PR 最新提交为准。首轮 CI 发现新增显式 80 路由与普通 runner 用户的端口权限冲突；仅在原有协议 / 回退测试 fixture 中将该路由映射到随机高端口，保留生产配置和真实 80 的 ACME 测试。修复后本地完整代理矩阵与回退通过，CI 重新执行。
 
 ## 修改前后截图
 
@@ -123,6 +124,6 @@ Agent 主服务仍沿用原 capability 范围。读取 Caddy 非 root 所有的 
 
 ## 72 小时资源保留与清理
 
-测试结束即停止本任务测试进程、浏览器和三个容器，释放映射端口；临时 DNS 覆盖与订单挑战此前已恢复 / 清理。测试数据库、账号、源 / 目标节点及 fixture 文件在停止状态保留 72 小时。测试结束时间：`2026-10-17T23:20:57+08:00`；准确清理时间：**`2026-10-20T23:20:57+08:00`（Asia/Shanghai）**；任务 **`qch-cert-e528-cleanup.timer`**。系统持久 timer 的实际注册信息见 [cleanup.json](cleanup.json) 与 [注册校验记录](logs/cleanup-registration.txt)。
+测试结束即停止本任务测试进程、浏览器和三个容器，释放映射端口；临时 DNS 覆盖与订单挑战此前已恢复 / 清理。测试数据库、账号、源 / 目标节点及 fixture 文件在停止状态保留 72 小时。测试结束时间：`2026-10-17T23:27:51+08:00`；准确清理时间：**`2026-10-20T23:27:51+08:00`（Asia/Shanghai）**；任务 **`qch-cert-e528-cleanup.timer`**。系统持久 timer 的实际注册信息见 [cleanup.json](cleanup.json) 与 [注册校验记录](logs/cleanup-registration.txt)。
 
 清理脚本 [cleanup-certificate-unified.py](../../scripts/cleanup-certificate-unified.py) 的 root 副本和 manifest 存放 `/var/lib/qch-certificate-unified-e528`，不依赖聊天继续运行。它核对固定 64 位 Docker ID、任务标签、root 所有 manifest、精确目录白名单与 72 小时时间，再移除本次三个容器、一个网络和两个临时目录。不删除公共镜像、其他任务环境、测试报告、脱敏日志、截图、录屏或源码。`Persistent=true`；机器关机错过时间会在恢复后执行，Docker 暂时不可用则服务重试。
