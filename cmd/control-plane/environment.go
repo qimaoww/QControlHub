@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -10,6 +11,19 @@ import (
 	"strings"
 	"time"
 )
+
+// Upgrades may rebuild indexes over retained logs. Their budget must exceed
+// an ordinary connection timeout, while remaining bounded for unattended boots.
+func databaseStartupTimeout(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return 5 * time.Minute, nil
+	}
+	timeout, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || timeout < time.Second || timeout > time.Hour {
+		return 0, fmt.Errorf("QCH_DATABASE_STARTUP_TIMEOUT must be a duration between 1s and 1h")
+	}
+	return timeout, nil
+}
 
 func splitList(value string) []string {
 	if strings.TrimSpace(value) == "" {

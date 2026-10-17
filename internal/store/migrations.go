@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,10 +15,17 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	defer connection.Release()
+	slog.Info("waiting for PostgreSQL migration lock", "backend_pid", connection.Conn().PgConn().PID())
 	if _, err := connection.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(0x52464f524745)); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
-	defer connection.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", int64(0x52464f524745))
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := connection.Exec(cleanup, "SELECT pg_advisory_unlock($1)", int64(0x52464f524745)); err != nil {
+			slog.Warn("release PostgreSQL migration lock", "error", err)
+		}
+	}()
 	if _, err := connection.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS qcontrolhub_schema_migrations (
 			version integer PRIMARY KEY CHECK (version > 0),
@@ -35,6 +43,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if appliedVersion == currentSchemaVersion {
 		return nil
 	}
+	started := time.Now()
+	slog.Info("applying PostgreSQL schema migration", "from_version", appliedVersion, "to_version", currentSchemaVersion,
+		"hint", "retained log indexes may take several minutes; readiness waits until migration commits")
 
 	tx, err := connection.Begin(ctx)
 	if err != nil {
@@ -166,7 +177,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("apply PostgreSQL schema: %w", err)
+		return fmt.Errorf("apply PostgreSQL schema v%d -> v%d after %s: %w", appliedVersion, currentSchemaVersion, time.Since(started).Round(time.Millisecond), err)
 	}
 	if appliedVersion < 52 {
 		// Legacy selections referred only to a node/engine/tag. Pin them to the
@@ -284,6 +295,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit schema migration: %w", err)
 	}
+	slog.Info("PostgreSQL schema migration committed", "from_version", appliedVersion, "to_version", currentSchemaVersion, "elapsed", time.Since(started))
 	// The log table is partitioned by receive day and needs a partition for
 	// today before the first upload arrives, so this runs once the migration
 	// committed. Creating the partitions inside the transaction would be fine

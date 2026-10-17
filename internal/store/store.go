@@ -72,7 +72,12 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
+	// Keep unreachable databases bounded without imposing that short deadline
+	// on schema changes such as building indexes over retained kernel logs.
+	connectContext, cancelConnect := context.WithTimeout(ctx, 20*time.Second)
+	err = pool.Ping(connectContext)
+	cancelConnect()
+	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}

@@ -213,7 +213,7 @@ YAML
         fi
         rollback_args+=(-f "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml")
         if ! run_compose "${rollback_args[@]}" config --quiet || \
-            ! run_compose "${rollback_args[@]}" up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
+            ! start_application_services "${rollback_args[@]}"; then
             echo "错误：旧部署恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
             return 1
         fi
@@ -275,7 +275,7 @@ update_external_services() (
 
     compose config --quiet || die "Docker Compose 配置校验失败"
     UPDATE_SERVICES_CHANGED=true
-    if ! compose up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
+    if ! start_application_services "${COMPOSE_ARGS[@]}"; then
         show_diagnostics
         die "使用新镜像重建应用容器失败"
     fi

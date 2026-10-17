@@ -27,6 +27,7 @@ QCH_ADMIN_TOKEN_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 QCH_CONFIG_ENCRYPTION_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=older-a,older-b
 QCH_ALLOW_INSECURE_DATABASE=false
+QCH_DATABASE_STARTUP_TIMEOUT=8m
 QCH_DOCKER_NETWORK=existing-site-network
 QCH_PORT=18081
 QCH_BIND_ADDRESS=127.0.0.1
@@ -62,6 +63,7 @@ export QCH_DATABASE_URL='postgres://wrong-database.invalid/other?sslmode=disable
 export QCH_ADMIN_TOKEN=wrong-token QCH_ADMIN_TOKEN_SHA256=wrong-digest
 export QCH_CONFIG_ENCRYPTION_KEY=wrong-key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=wrong-previous
 export QCH_ALLOW_INSECURE_DATABASE=true QCH_DOCKER_NETWORK=wrong-network
+export QCH_DATABASE_STARTUP_TIMEOUT=1s
 export QCH_BIND_ADDRESS=0.0.0.0 QCH_PORT=19999
 prepare_external_update_compose
 cmp "$test_root/expected.env" "$ENV_FILE"
@@ -80,13 +82,14 @@ const expected = Object.fromEntries(fs.readFileSync(process.argv[3], 'utf8').tri
   return [line.slice(0, index), line.slice(index + 1)];
 }));
 const control = config.services['control-plane'];
-for (const key of ['QCH_DATABASE_URL', 'QCH_ADMIN_TOKEN', 'QCH_ADMIN_TOKEN_SHA256', 'QCH_CONFIG_ENCRYPTION_KEY', 'QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS', 'QCH_ALLOW_INSECURE_DATABASE']) {
+for (const key of ['QCH_DATABASE_URL', 'QCH_ADMIN_TOKEN', 'QCH_ADMIN_TOKEN_SHA256', 'QCH_CONFIG_ENCRYPTION_KEY', 'QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS', 'QCH_ALLOW_INSECURE_DATABASE', 'QCH_DATABASE_STARTUP_TIMEOUT']) {
   assert.equal(control.environment[key], expected[key], `${key} must come from .env`);
 }
 assert.deepEqual(Object.keys(config.services).sort(), ['control-plane', 'qcontrol-web']);
 assert.equal(control.image, 'ghcr.io/qimaoww/qcontrol-plane:latest');
 assert.equal(config.services['qcontrol-web'].image, 'ghcr.io/qimaoww/qcontrol-web:latest');
 assert.equal(control.restart, 'unless-stopped');
+assert.equal(control.healthcheck.start_period, '8m0s');
 assert.equal(config.networks.site.external, true);
 assert.equal(config.networks.site.name, 'existing-site-network');
 assert.deepEqual(Object.keys(control.networks), ['site']);

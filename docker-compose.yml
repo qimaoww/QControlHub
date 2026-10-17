@@ -38,6 +38,7 @@ services:
         condition: service_healthy
     environment:
       QCH_DATABASE_URL: postgresql://${POSTGRES_USER:-qcontrolhub}:${POSTGRES_PASSWORD:?run make init-env or set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qcontrolhub}?sslmode=disable
+      QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       # New deployments inject only the digest through the generated secrets
       # override. The raw value remains for legacy/manual compatibility.
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
@@ -85,7 +86,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 6
-      start_period: 10s
+      start_period: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
     stop_grace_period: 15s
 
   qcontrol-web:
