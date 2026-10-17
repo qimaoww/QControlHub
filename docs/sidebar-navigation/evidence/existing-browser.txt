@@ -1,0 +1,13 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=8
+browser timing {"mode":"motion-mobile","startupMs":124.62071900000001,"testMs":8525.237818000001,"cleanupMs":69.2232329999988,"passed":true,"elapsedMs":8719.099594000001}
+browser timing {"mode":"motion","startupMs":133.10127199999988,"testMs":8354.737427,"cleanupMs":49.05436499999996,"passed":true,"elapsedMs":8536.902982}
+browser timing {"mode":"motion-popup-mobile-reduced","startupMs":123.49137599999813,"testMs":4876.758923000001,"cleanupMs":24.093761000000086,"passed":true,"elapsedMs":5024.347869999998}
+browser timing {"mode":"shell-layout","startupMs":140.56315800000084,"testMs":1631.6917219999996,"cleanupMs":27.957531000000017,"passed":true,"elapsedMs":1800.224431999999}
+browser timing {"mode":"motion-mobile-reduced","startupMs":118.70209700000123,"testMs":1378.8443910000024,"cleanupMs":48.572800999998435,"passed":true,"elapsedMs":1546.124742}
+browser timing {"mode":"motion-reduced","startupMs":141.92851300000257,"testMs":1170.7330829999992,"cleanupMs":44.64947100000063,"passed":true,"elapsedMs":1357.3228280000003}
+browser timing {"mode":"shell-layout-mobile","startupMs":145.898204000001,"testMs":869.7055170000021,"cleanupMs":38.32044799999858,"passed":true,"elapsedMs":1053.9366769999979}
+agents browser runtime smoke passed
+browser timing {"mode":"motion-popup-mobile","startupMs":160.680156,"testMs":36099.15213,"cleanupMs":108.61926099999982,"passed":true,"elapsedMs":36368.467072}
+agents browser runtime smoke passed
+browser suite elapsed=36.422s
+agents browser runtime smoke passed

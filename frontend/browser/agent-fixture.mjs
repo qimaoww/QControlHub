@@ -379,7 +379,9 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json(mode === "uninstall-writeonly"
+    return json(mode === "tasks-preview" && new URLSearchParams(location.search).get("role") === "user"
+      ? { role: "user", user_id: "navigation-user", permissions: ["overview.read", "agents.read", "agent-config.read", "core-logs.read", "tasks.read", "agent-access.read"], csrf_token: "browser-test-csrf" }
+      : mode === "uninstall-writeonly"
       ? { role: "user", permissions: ["agents.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
       : mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
