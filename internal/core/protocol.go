@@ -20,17 +20,18 @@ type SharedInstanceStatus struct {
 }
 
 const (
-	WireHello         = "hello"
-	WirePublicIPProbe = "public_ip_probe"
-	WireAgentPolicy   = "agent_policy"
-	WireHeartbeat     = "heartbeat"
-	WireMetrics       = "metrics"
-	WireTask          = "task"
-	WireResult        = "result"
-	WireResultAck     = "result_ack"
-	WireCoreLogs      = "core_logs"
-	WireCoreLogsAck   = "core_logs_ack"
-	WireError         = "error"
+	WireHello                 = "hello"
+	WireCertificateChallenges = "certificate_challenges"
+	WirePublicIPProbe         = "public_ip_probe"
+	WireAgentPolicy           = "agent_policy"
+	WireHeartbeat             = "heartbeat"
+	WireMetrics               = "metrics"
+	WireTask                  = "task"
+	WireResult                = "result"
+	WireResultAck             = "result_ack"
+	WireCoreLogs              = "core_logs"
+	WireCoreLogsAck           = "core_logs_ack"
+	WireError                 = "error"
 )
 
 type TaskResultEnvelope struct {
@@ -39,17 +40,18 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
-	Type            string               `json:"type"`
-	Heartbeat       *HeartbeatRequest    `json:"heartbeat,omitempty"`
-	Metrics         *HostMetrics         `json:"metrics,omitempty"`
-	TrafficUsage    []PortTrafficUsage   `json:"traffic_usage,omitempty"`
-	Task            *Task                `json:"task,omitempty"`
-	Result          *TaskResultEnvelope  `json:"result,omitempty"`
-	CoreLogs        *CoreLogBatch        `json:"core_logs,omitempty"`
-	TrafficPolicies []PortTrafficPolicy  `json:"traffic_policies,omitempty"`
-	PublicIPProbe   *PublicIPProbeConfig `json:"public_ip_probe,omitempty"`
-	AgentPolicy     *AgentPolicy         `json:"agent_policy,omitempty"`
-	TaskID          string               `json:"task_id,omitempty"`
-	BatchID         string               `json:"batch_id,omitempty"`
-	Error           string               `json:"error,omitempty"`
+	CertificateChallenges []HTTPChallenge      `json:"certificate_challenges,omitempty"`
+	Type                  string               `json:"type"`
+	Heartbeat             *HeartbeatRequest    `json:"heartbeat,omitempty"`
+	Metrics               *HostMetrics         `json:"metrics,omitempty"`
+	TrafficUsage          []PortTrafficUsage   `json:"traffic_usage,omitempty"`
+	Task                  *Task                `json:"task,omitempty"`
+	Result                *TaskResultEnvelope  `json:"result,omitempty"`
+	CoreLogs              *CoreLogBatch        `json:"core_logs,omitempty"`
+	TrafficPolicies       []PortTrafficPolicy  `json:"traffic_policies,omitempty"`
+	PublicIPProbe         *PublicIPProbeConfig `json:"public_ip_probe,omitempty"`
+	AgentPolicy           *AgentPolicy         `json:"agent_policy,omitempty"`
+	TaskID                string               `json:"task_id,omitempty"`
+	BatchID               string               `json:"batch_id,omitempty"`
+	Error                 string               `json:"error,omitempty"`
 }

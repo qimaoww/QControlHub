@@ -250,6 +250,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		if task.Action == core.ActionValidate && task.SharedInstance {
 			// Validation uses the private paths prepared above, without starting a service.
+			if err := preparePanelCertificates(spec, &task); err != nil {
+				return output, err
+			}
 			task.InstallIfMissing = false
 			if err := e.executeTLSFrontend(ctx, spec, task, true); err != nil {
 				return output, err
@@ -264,6 +267,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		task.InstallIfMissing = false
 		result, err := e.Execute(ctx, task)
 		return output + "\n" + result, err
+	}
+	if err := preparePanelCertificates(spec, &task); err != nil {
+		return "", err
 	}
 	timeout := 45 * time.Second
 	if len(task.TLSFrontends) > 0 || (task.Engine == core.EngineSingBox || task.Engine == core.EngineXray) && managedTLSStateExists() {
@@ -378,6 +384,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		err = tlsPhaseError("服务应用", err)
 		if err == nil {
 			err = e.executeTLSFrontend(ctx, spec, task, false)
+		}
+		if err == nil {
+			err = tlsPhaseError("TLS与协议就绪检查", waitPanelCertificateListeners(ctx, task))
 		}
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if accountingWarning != "" {

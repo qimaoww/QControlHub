@@ -71,31 +71,32 @@ const (
 )
 
 type Task struct {
-	TLSFrontends           []TLSFrontend          `json:"tls_frontends,omitempty"`
-	CNIPSource             *CNIPSource            `json:"cnip_source,omitempty"`
-	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
-	SharedInstance         bool                   `json:"shared_instance,omitempty"`
-	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
-	ID                     string                 `json:"id"`
-	AgentID                string                 `json:"agent_id"`
-	Action                 Action                 `json:"action"`
-	Engine                 Engine                 `json:"engine"`
-	ConfigID               string                 `json:"config_id,omitempty"`
-	ConfigVersion          int                    `json:"config_version,omitempty"`
-	ConfigContent          string                 `json:"config_content,omitempty"`
-	MainlandAccessPolicies []MainlandAccessPolicy `json:"mainland_access_policies,omitempty"`
-	CoreVersion            string                 `json:"core_version,omitempty"`
-	CoreSource             string                 `json:"core_source,omitempty"`
-	InstallIfMissing       bool                   `json:"install_if_missing,omitempty"`
-	Status                 TaskStatus             `json:"status"`
-	Attempt                int                    `json:"attempt"`
-	LeaseID                string                 `json:"lease_id,omitempty"`
-	Output                 string                 `json:"output,omitempty"`
-	Error                  string                 `json:"error,omitempty"`
-	Reused                 bool                   `json:"reused,omitempty"`
-	CreatedAt              time.Time              `json:"created_at"`
-	StartedAt              *time.Time             `json:"started_at,omitempty"`
-	FinishedAt             *time.Time             `json:"finished_at,omitempty"`
+	Certificates           []DeploymentCertificate `json:"certificates,omitempty"`
+	TLSFrontends           []TLSFrontend           `json:"tls_frontends,omitempty"`
+	CNIPSource             *CNIPSource             `json:"cnip_source,omitempty"`
+	SharedTrafficID        string                  `json:"shared_traffic_id,omitempty"`
+	SharedInstance         bool                    `json:"shared_instance,omitempty"`
+	TCPSettings            TCPSettings             `json:"tcp_settings,omitempty"`
+	ID                     string                  `json:"id"`
+	AgentID                string                  `json:"agent_id"`
+	Action                 Action                  `json:"action"`
+	Engine                 Engine                  `json:"engine"`
+	ConfigID               string                  `json:"config_id,omitempty"`
+	ConfigVersion          int                     `json:"config_version,omitempty"`
+	ConfigContent          string                  `json:"config_content,omitempty"`
+	MainlandAccessPolicies []MainlandAccessPolicy  `json:"mainland_access_policies,omitempty"`
+	CoreVersion            string                  `json:"core_version,omitempty"`
+	CoreSource             string                  `json:"core_source,omitempty"`
+	InstallIfMissing       bool                    `json:"install_if_missing,omitempty"`
+	Status                 TaskStatus              `json:"status"`
+	Attempt                int                     `json:"attempt"`
+	LeaseID                string                  `json:"lease_id,omitempty"`
+	Output                 string                  `json:"output,omitempty"`
+	Error                  string                  `json:"error,omitempty"`
+	Reused                 bool                    `json:"reused,omitempty"`
+	CreatedAt              time.Time               `json:"created_at"`
+	StartedAt              *time.Time              `json:"started_at,omitempty"`
+	FinishedAt             *time.Time              `json:"finished_at,omitempty"`
 }
 
 type TaskRequest struct {

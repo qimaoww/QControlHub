@@ -88,7 +88,7 @@ core-install-browser-check:
 
 .PHONY: multi-user-browser-check
 multi-user-browser-check:
-	QCH_MULTI_USER_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestMultiUserBrowserSessions$$' -v
+	QCH_MULTI_USER_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(MultiUserBrowserSessions|CertificateBrowserSessions)$$' -v
 
 .PHONY: core-log-browser-check
 core-log-browser-check:

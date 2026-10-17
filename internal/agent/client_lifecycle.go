@@ -356,6 +356,8 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	connection.SetReadLimit(core.MaxConfigEnvelopeBytes)
 	slog.Info("WSS session established", "agent_id", c.creds.AgentID)
 
+	challenges := &certificateChallengeService{}
+	defer challenges.Close()
 	sessionContext, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	incoming := make(chan core.WireMessage, 1)
@@ -439,6 +441,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 		case message := <-incoming:
 			switch message.Type {
+			case core.WireCertificateChallenges:
+				_ = challenges.Replace(sessionContext, message.CertificateChallenges)
+				continue
 			case core.WireHello:
 				// The result ACK can be lost after the control plane committed
 				// it. A subsequent authenticated connection must not leave the

@@ -10,6 +10,7 @@ export function createPermissionChecker(state) {
   const can = (capability, agent) => {
     const role = state.session?.role;
     if (role === "admin") return true;
+    if (capability === "certificates.read") return Boolean(state.session);
     if (capability === "agent-access.read") return Boolean(state.session);
     if (capability === "users.manage") return false;
     if (agent && ["host.manage", "operator", "agents.manage", "traffic.manage", "enrollment.manage"].includes(capability) && (agent.can_manage === false || (role === "user" && agent.can_manage !== true))) return false;

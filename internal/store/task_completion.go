@@ -69,6 +69,10 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 		return tx.Commit(ctx)
 	}
+	if err := s.completeCertificateBindingsTx(ctx, tx, taskID, result.Success, result.Error); err != nil {
+		return err
+	}
+
 	status := core.TaskFailed
 	if result.Success {
 		status = core.TaskSucceeded

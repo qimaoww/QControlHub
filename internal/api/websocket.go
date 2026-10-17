@@ -114,6 +114,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// unknown core_source. Once the heartbeat is committed, ClaimTask and
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
+	var agentHasFeatureFromStore bool
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
 	var sharedEnginesSupported, independentEgressSupported bool
@@ -200,6 +201,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if message.Heartbeat.Metrics != nil {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
+				agentHasFeatureFromStore = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCertificates)
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
 				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
@@ -320,6 +322,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				return
 			}
 		case <-taskTicker.C:
+			if heartbeatReceived {
+				routes, routeErr := s.store.AgentCertificateChallenges(ctx, id)
+				if routeErr != nil {
+					return
+				}
+				if agentHasFeatureFromStore {
+					if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCertificateChallenges, CertificateChallenges: routes}); err != nil {
+						return
+					}
+				}
+			}
 			if err := dispatchTask(); err != nil {
 				slog.Error("claim fallback task for websocket", "agent_id", id, "error", err)
 				return

@@ -10,6 +10,8 @@ import (
 )
 
 type clientMetadata struct {
+	PanelCertificateID        string            `json:"panel_certificate_id,omitempty"`
+	PanelCertificateName      string            `json:"panel_certificate_name,omitempty"`
 	ExternalFrontend          *core.TLSFrontend `json:"external_tls_frontend,omitempty"`
 	XHTTP                     *xhttpMetadata    `json:"xhttp,omitempty"`
 	TLSALPN                   string            `json:"managed_tls_alpn,omitempty"`
@@ -37,6 +39,10 @@ type clientMetadata struct {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
+	if input.PanelCertificateID != "" {
+		metadata.PanelCertificateID = input.PanelCertificateID
+		metadata.PanelCertificateName = input.TLSServerName
+	}
 	if input.Transport == "xhttp" {
 		metadata.XHTTP = marshalXHTTPMetadata(input)
 		encoded, err := json.Marshal(metadata)
@@ -57,7 +63,7 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
 		_, preset := singBoxPresetFor(input.Protocol)
-		if input.TLSClientCertificate == "" && !preset && !proxiedTLS(input) {
+		if input.TLSClientCertificate == "" && !preset && !proxiedTLS(input) && input.PanelCertificateID == "" {
 			return "", nil
 		}
 		metadata.TLSClientCertificate = input.TLSClientCertificate
@@ -97,6 +103,10 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		input.TLSACMEEmail = f.ACMEEmail
 		input.TLSEnabled = true
 		input.TLSALPN = metadata.TLSALPN
+	}
+	if metadata.PanelCertificateID != "" && input.CertificatePath == core.PanelCertificatePrefix+metadata.PanelCertificateID+"/cert.pem" && input.PrivateKeyPath == core.PanelCertificatePrefix+metadata.PanelCertificateID+"/key.pem" {
+		input.PanelCertificateID = metadata.PanelCertificateID
+		input.TLSServerName = metadata.PanelCertificateName
 	}
 	if input.TLSEnabled {
 		input.TLSClientCertificate = metadata.TLSClientCertificate

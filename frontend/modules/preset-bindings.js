@@ -1,3 +1,4 @@
+import { bindCertificateSelector } from "./certificate-selector.js";
 import { bindXHTTPOptions } from "./server-plan-xhttp.js";
 import { setVisible, updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
@@ -14,6 +15,8 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
   const root = ctx.root;
   const visible = () => ctx.host === editor.host && presetVisible() && editor.context === ctx &&
     state.data === ctx.sessionData && state.navigationEpoch === ctx.navigationEpoch;
+  const certForm = root.querySelector("#server-plan-form");
+  void bindCertificateSelector({ api, form: certForm, protocol: ctx.protocol, plan: ctx.plan, visible }).catch(error => { if (visible()) notify(error.message, "error"); });
   const current = () => visible() &&
     state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine;
   const draftKey = selector => `${ctx.draftScope}${ctx.draftVersion}|${selector}|${

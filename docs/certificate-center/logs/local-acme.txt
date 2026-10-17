@@ -1,0 +1,11 @@
+=== RUN   TestCertificateLocalACMEPersistenceRenewalAndCancellation
+    certificate_acme_integration_test.go:196: Pebble verified DNS-01 SAN + wildcard; encrypted v1 survived panel restart; persisted account renewed to v2 without login; exact TXT cleanup and cancellation passed
+--- PASS: TestCertificateLocalACMEPersistenceRenewalAndCancellation (0.49s)
+=== RUN   TestCertificateSecretsRequireEncryptionAndSupportRotation
+--- PASS: TestCertificateSecretsRequireEncryptionAndSupportRotation (0.16s)
+=== RUN   TestCertificateHTTPPreflightChecksEveryPublicAddress
+--- PASS: TestCertificateHTTPPreflightChecksEveryPublicAddress (0.00s)
+=== RUN   TestCertificateDNSResponseLossRecoveryPreservesExistingRecords
+--- PASS: TestCertificateDNSResponseLossRecoveryPreservesExistingRecords (0.17s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/store	1.052s

@@ -1,0 +1,20 @@
+=== RUN   TestCertificateHTTPPreflightChecksEveryPublicAddress
+--- PASS: TestCertificateHTTPPreflightChecksEveryPublicAddress (0.00s)
+=== RUN   TestCertificateCancellationDuringValidationDoesNotDelayCleanup
+=== RUN   TestCertificateCancellationDuringValidationDoesNotDelayCleanup/queued
+=== RUN   TestCertificateCancellationDuringValidationDoesNotDelayCleanup/canceling
+--- PASS: TestCertificateCancellationDuringValidationDoesNotDelayCleanup (0.20s)
+    --- PASS: TestCertificateCancellationDuringValidationDoesNotDelayCleanup/queued (0.02s)
+    --- PASS: TestCertificateCancellationDuringValidationDoesNotDelayCleanup/canceling (0.01s)
+=== RUN   TestCertificateFinishedOrderSchedulesImmediateCleanup
+=== RUN   TestCertificateFinishedOrderSchedulesImmediateCleanup/invalid_authorization
+=== RUN   TestCertificateFinishedOrderSchedulesImmediateCleanup/retry_limit_reached
+--- PASS: TestCertificateFinishedOrderSchedulesImmediateCleanup (0.39s)
+    --- PASS: TestCertificateFinishedOrderSchedulesImmediateCleanup/invalid_authorization (0.20s)
+    --- PASS: TestCertificateFinishedOrderSchedulesImmediateCleanup/retry_limit_reached (0.19s)
+=== RUN   TestCertificateHTTPPreflightWaitsForAgentSnapshot
+--- PASS: TestCertificateHTTPPreflightWaitsForAgentSnapshot (1.00s)
+=== RUN   TestCertificateHTTPPreflightStopsOnCancellationAndRevocation
+--- PASS: TestCertificateHTTPPreflightStopsOnCancellationAndRevocation (0.03s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/store	5.293s
