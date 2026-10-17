@@ -65,23 +65,44 @@ export function enterWorkspace(main, context) {
   });
 }
 
-// Mounted navigation keeps one highlight owner. Native CSS width transitions
-// can reverse while the compositor carries the highlight to the next route.
-export function syncDockMotion(dock) {
-  const marker = dock?.querySelector(".dock-active-indicator");
+// Each route's decoration lives inside its link: scrolling, clipping, borders,
+// zoom and rail expansion are handled by layout, including compositor scrolling.
+// Only a route change starts motion; refresh and scroll never retarget it.
+export function captureDockMotion(dock) {
   const selected = dock?.querySelector('.dock-nav [aria-current="page"],.dock-tools [aria-current="page"]');
-  if (!marker) return;
-  if (!selected?.getClientRects().length) { marker.hidden = true; return; }
-  const bounds = selected.getBoundingClientRect(), root = dock.getBoundingClientRect();
-  const next = `0 ${bounds.top - root.top}px`;
-  const previous = marker.style.translate;
-  const painted = previous ? getComputedStyle(marker).translate : next;
-  marker.hidden = false;
-  marker.style.translate = next;
-  marker.style.height = `${bounds.height}px`;
-  if (previous && previous !== next) animateMotion(marker, [
-    { translate: painted }, { translate: next },
-  ], { id: "qch-navigation", token: "--motion-base" });
+  const marker = selected?.querySelector(".dock-active-indicator");
+  return marker ? { selected, marker, bounds: marker.getBoundingClientRect() } : null;
+}
+export function syncDockMotion(dock, previous) {
+  if (!dock) return;
+  const selected = dock.querySelector('.dock-nav [aria-current="page"],.dock-tools [aria-current="page"]');
+  if (previous?.selected === selected) return;
+  const oldMarker = previous?.marker;
+  const marker = selected?.querySelector(".dock-active-indicator");
+  // Capture an interrupted transition before releasing its previous owner.
+  const painted = previous?.selected.isConnected ? previous.bounds : null;
+  if (oldMarker) cancelMotion(oldMarker);
+  if (!marker || !painted || reducedMotion() || previous.selected.parentElement !== selected.parentElement) return;
+  const bounds = selected.getBoundingClientRect();
+  const clip = selected.parentElement.getBoundingClientRect();
+  // Do not fly a decoration in from an invisible item or another tool region.
+  if (!bounds.width || !bounds.height || painted.bottom <= clip.top || painted.top >= clip.bottom
+    || bounds.bottom <= clip.top || bounds.top >= clip.bottom) return;
+  const offset = (painted.top - bounds.top) / (bounds.height / selected.offsetHeight);
+  if (Math.abs(offset) < .5) return;
+  // Resize during playback releases the transient offset. The resting geometry
+  // is always inset:0, so no old dimensions or deferred positioning can survive.
+  const initialSizes = new Map([[selected, bounds], [selected.parentElement, clip]]);
+  const observer = new ResizeObserver(entries => {
+    if (entries.some(({ target }) => {
+      const initial = initialSizes.get(target), current = target.getBoundingClientRect();
+      return Math.abs(current.width - initial.width) > .5 || Math.abs(current.height - initial.height) > .5;
+    })) cancelMotion(marker);
+  });
+  initialSizes.forEach((_, element) => observer.observe(element));
+  animateMotion(marker, [{ translate: `0 ${offset}px` }, { translate: "0 0" }], {
+    id: "qch-navigation", token: "--motion-base", onSettled: () => observer.disconnect(),
+  });
 }
 
 export function departWorkspace(main) {

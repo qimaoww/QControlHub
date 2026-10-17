@@ -5,7 +5,7 @@ QCH_SANDBOX_GOCACHE ?= $(CURDIR)/.ci-cache/sandbox-build
 export QCH_SANDBOX_GOCACHE
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check core-install-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: dock-navigation-browser-check build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test core-permission-network-test vet fmt-check frontend-check frontend-module-check frontend-browser-check core-install-browser-check browser-diagnostics-test module-policy-test ci-runner-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Routine CI runs non-browser checks beside the Go shards. Real-browser checks
 # remain in local make check and the manual Browser validation workflow.
@@ -94,7 +94,10 @@ multi-user-browser-check:
 core-log-browser-check:
 	QCH_CORE_LOG_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreLogsBrowserSessions$$' -v
 
-frontend-browser-check:
+dock-navigation-browser-check:
+	node frontend/dock_navigation_browser.mjs
+
+frontend-browser-check: dock-navigation-browser-check
 	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v
 
 module-policy-test:
