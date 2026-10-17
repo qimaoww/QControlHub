@@ -141,8 +141,15 @@ export async function requestJSON(url, options, {
     }
     assertCurrent();
     const message = errorMessage(body?.error, response.status);
-    const error = new Error(message);
+    const requestID = body?.request_id || response.headers?.get?.("X-Request-ID");
+    const safeRequestID = typeof requestID === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(requestID) ? requestID : "";
+    const error = new Error(`${message}${safeRequestID ? `（请求 ID：${safeRequestID}）` : ""}`);
     error.status = response.status;
+    error.requestID = safeRequestID;
+    if (body?.code === "task_schema_incompatible" && body?.stage === "task_creation" && response.status === 500) {
+      error.code = body.code;
+      error.stage = body.stage;
+    }
     if (body?.code === "port_conflict") {
       error.code = body.code;
       error.field = ["port", "tls_public_port", "xhttp_backend_port", "xhttp_tls_port"].includes(body.field) ? body.field : "";

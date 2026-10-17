@@ -81,6 +81,20 @@ export function ipQualityStatusTone(status) {
   return ipQualityStatusTones[status] || "unknown";
 }
 
+// Use persisted lifecycle timestamps. Agents currently send their diagnostic
+// stages with the final result, so a running check has no live stage to infer.
+export function ipQualityTiming(record, now = Date.now()) {
+  if (!record) return "";
+  const queued = record.status === "pending";
+  const active = queued || record.status === "running";
+  const start = Date.parse(queued ? record.created_at : record.started_at || record.created_at);
+  const end = active ? now : Date.parse(record.finished_at);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "";
+  const seconds = Math.floor((end - start) / 1000);
+  const duration = `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  return `${queued ? "已排队" : active ? "已执行" : record.started_at ? "执行耗时" : "总耗时"} ${duration}`;
+}
+
 // The sidebar and the detail panel must agree on which node is shown, so one
 // helper resolves both: every managed node in latest/today views, only nodes with a
 // record on a historical day, and the first visible node when the remembered

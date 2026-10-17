@@ -1769,6 +1769,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .ip-quality-addresses dd{margin:6px 0 0;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:600;line-height:1.7;overflow-wrap:anywhere}
 .ip-quality-alert,.ip-quality-error{margin:0;overflow-wrap:anywhere}
 .ip-quality-no-report,.ip-quality-source{margin:0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
+.ip-quality-lifecycle{display:grid;gap:4px;min-height:42px;overflow-wrap:anywhere}
 .ip-quality-result-note{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--accent-soft);color:var(--ink);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
 .ip-quality-source a{color:var(--accent)}
 .ip-quality-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--surface-2)}

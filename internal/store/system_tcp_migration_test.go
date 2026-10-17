@@ -51,6 +51,7 @@ func testOpenMigratesSystemTCPTasks(t *testing.T, version int) {
 		ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK(action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent'));
 		ALTER TABLE tasks DROP CONSTRAINT tasks_engine_check;
 		ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
+		ALTER TABLE tasks ADD CHECK(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
 		INSERT INTO agents(id,name,version,os,arch,capabilities,features,public_key,last_seen,enrolled_at)
 		VALUES('agt_tcp_migration','legacy','test','linux','amd64','["mihomo"]','["system-bbr-v1"]',decode(repeat('01',32),'hex'),now(),now());
 		INSERT INTO tasks(id,agent_id,action,engine,status,created_at)

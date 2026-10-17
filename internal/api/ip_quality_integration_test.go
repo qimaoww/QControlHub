@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
@@ -94,10 +95,45 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if err := db.Heartbeat(ctx, agent.ID, beat); err != nil {
 		t.Fatal(err)
 	}
+	// Reproduce the reported post-upgrade database, including its applied v73
+	// ledger. Both entry points fail before dispatch, then formal startup repairs
+	// the same schema and the rest of this test exercises the signed WSS lifecycle.
+	connectionDB, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connectionDB.Close(context.Background())
+	if _, err := connectionDB.Exec(ctx, `ALTER TABLE tasks ADD CHECK
+		(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
+		DELETE FROM qcontrolhub_schema_migrations;
+		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(73)`); err != nil {
+		t.Fatal(err)
+	}
+	response := call("POST", "/ip-quality", "quality-admin", input, 500)
+	var failure map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil ||
+		failure["code"] != "task_schema_incompatible" || failure["stage"] != "task_creation" ||
+		failure["request_id"] == "" || response.Header().Get("X-Request-ID") != failure["request_id"] ||
+		!strings.Contains(failure["error"], "尚未进入 Agent") {
+		t.Fatalf("schema error lost actionable feedback: %s %v", response.Body.String(), err)
+	}
+	call("POST", "/tasks", "quality-admin", generic, 500)
+	var tasksBefore int
+	if err := connectionDB.QueryRow(ctx, `SELECT count(*) FROM tasks`).Scan(&tasksBefore); err != nil || tasksBefore != 0 {
+		t.Fatalf("failed creation persisted a task: %d %v", tasksBefore, err)
+	}
+	upgraded, err := store.Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded.Close()
 	for _, bad := range []core.TaskRequest{
 		{AgentID: agent.ID, Action: core.ActionIPQuality, Engine: core.EngineMihomo},
 		{AgentID: agent.ID, Action: core.ActionIPQuality, CoreSource: "https://example.test/evil.sh"},
 		{AgentID: agent.ID, Action: core.ActionIPQuality, TCPSettings: core.TCPSettings{"net.core.default_qdisc": "fq"}},
+		{AgentID: agent.ID, Action: core.ActionStatus},
+		{AgentID: agent.ID, Action: "unknown", Engine: core.EngineMihomo},
+		{AgentID: agent.ID, Action: core.ActionStatus, Engine: "unknown"},
 	} {
 		call("POST", "/tasks", "quality-admin", bad, 400)
 	}
