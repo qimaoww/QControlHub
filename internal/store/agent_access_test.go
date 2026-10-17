@@ -217,7 +217,7 @@ func TestSharedTrafficCumulativeQuotaAndPortOwnership(t *testing.T) {
 		t.Fatalf("exhausted allocation deployed: %v", err)
 	}
 	access = sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 2000, 21001, 21002)
-	if access.Shares[0].UsedBytes != 1100 || access.Shares[0].LimitBytes != 2000 {
+	if access.Shares[0].UsedBytes != 1200 || access.Shares[0].LimitBytes != 2000 {
 		t.Fatalf("top-up reset cumulative usage: %+v", access)
 	}
 	if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true}); err != nil {
@@ -231,7 +231,7 @@ func TestSharedTrafficCumulativeQuotaAndPortOwnership(t *testing.T) {
 		t.Fatalf("revoked cached principal still sees Agent: %v", err)
 	}
 	access = sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 2000, 21001, 21002)
-	if access.Shares[0].UsedBytes != 1100 {
+	if access.Shares[0].UsedBytes != 1200 {
 		t.Fatal("regrant reset cumulative usage")
 	}
 	if _, err := db.SetUserAgentAccess(ctx, other.ID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}}}}); !errors.Is(err, ErrConflict) {
@@ -260,6 +260,8 @@ func TestSharedTrafficConcurrentReportsPreserveCombinedUsage(t *testing.T) {
 			start, end, _ := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
 			errs <- db.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{{
 				PolicyID: policy.ID, ResetGeneration: 1, ShareID: policy.SharedQuota.ID, ShareUsedBytes: uint64(i * 10),
+				ReceivedBytes: uint64(i * 10), UsedBytes: uint64(i * 10), LifetimeReceivedBytes: uint64(i * 10),
+				CounterEpoch: strings.Repeat("a", 32), CollectedAt: now.Add(time.Duration(i) * time.Second), EnforcementAvailable: true,
 				PeriodStart: start, PeriodEnd: end,
 			}}, now.Add(time.Duration(i)*time.Second))
 		}(i)

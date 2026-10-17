@@ -1,0 +1,2 @@
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	237.346s
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.330s

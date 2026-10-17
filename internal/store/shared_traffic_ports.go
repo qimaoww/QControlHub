@@ -322,7 +322,13 @@ func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID s
 			return fmt.Errorf("%w: remove the existing per-port quota on port %d before using a shared allowance", ErrConflict, endpoint.Port)
 		}
 		if boundID != "" {
-			continue // Changes of config/name must not reset the shared counters.
+			// A previously retired port may return in a later deployment. Keep
+			// its identity/history; the Agent reconciles the next source epoch.
+			if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET name=$3,monitoring_enabled=true,updated_at=now()
+				WHERE agent_id=$1 AND port=$2`, agentID, endpoint.Port, endpoint.Name); err != nil {
+				return err
+			}
+			continue
 		}
 		id, err := core.NewID("trf")
 		if err != nil {

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sort"
@@ -135,6 +137,14 @@ func trafficRate(delta uint64, seconds float64) uint64 {
 	return uint64(rate)
 }
 
+// A released listener's delayed replies must not enter its next allocation.
+// Socket marks select the port; conntrack marks additionally bind its policy
+// and counter epoch. Retained nft counters still survive ordinary restarts.
+func trafficConnectionMark(record *trafficRecord) uint32 {
+	sum := sha256.Sum256([]byte(record.Policy.ID + "/" + record.CounterEpoch))
+	return binary.BigEndian.Uint32(sum[:4]) | 0x80000000
+}
+
 func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, counters map[string]uint64) string {
 	var script strings.Builder
 	if len(records) == 0 {
@@ -164,9 +174,9 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 					if _, exists := counters[name]; !exists {
 						fmt.Fprintf(&script, "add counter inet %s %s\n", trafficTableName, name)
 					}
-					chain, match := "input", fmt.Sprintf("ct direction reply ct mark %d", mark)
+					chain, match := "input", fmt.Sprintf("ct direction reply ct mark %d", trafficConnectionMark(record))
 					if direction == "targetout" {
-						chain, match = "output", fmt.Sprintf("ct direction original meta mark %d ct mark set meta mark", mark)
+						chain, match = "output", fmt.Sprintf("ct direction original meta mark %d ct mark set %d", mark, trafficConnectionMark(record))
 					}
 					fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s counter name %s comment %s\n", trafficTableName, chain, protocol, match, name, strconv.Quote(trafficRuleComment(id, direction, protocol)))
 				}

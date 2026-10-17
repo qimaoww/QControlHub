@@ -479,6 +479,12 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		if readErr := wsjson.Read(ctx, connection, &ack); readErr != nil || ack.TaskID != created.ID {
 			t.Fatalf("read %s acknowledgment: message=%+v error=%v", action, ack, readErr)
 		}
+		if action == core.ActionDeploy || action == core.ActionImportExisting {
+			var policies core.WireMessage
+			if readErr := wsjson.Read(ctx, connection, &policies); readErr != nil || policies.Type != core.WireHello || len(policies.TrafficPolicies) != 2 {
+				t.Fatalf("confirmed deployment did not refresh monitoring: %+v %v", policies, readErr)
+			}
+		}
 		stored, getErr := dataStore.GetTask(ctx, created.ID)
 		if getErr != nil || stored.Status != core.TaskSucceeded {
 			t.Fatalf("stored %s task = %+v, %v", action, stored, getErr)

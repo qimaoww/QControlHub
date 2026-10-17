@@ -20,6 +20,13 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	if len(usages) == 0 {
 		return nil
 	}
+	// PostgreSQL stores microseconds. Normalize before deduplication so the
+	// nanosecond tail of the same wire sample cannot look newer on retry.
+	reportedAt = reportedAt.UTC().Truncate(time.Microsecond)
+	usages = slices.Clone(usages)
+	for i := range usages {
+		usages[i].CollectedAt = usages[i].CollectedAt.UTC().Truncate(time.Microsecond)
+	}
 	seen := make(map[string]struct{}, len(usages))
 	ids := make([]string, 0, len(usages))
 	for _, usage := range usages {
@@ -78,7 +85,10 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	rows, err := tx.Query(ctx, `
 		SELECT id,reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 		       traffic_history_initialized,period_start,period_end,last_reported_at,last_collected_at,counter_epoch,
-		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,accounting
+		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,accounting,COALESCE(share_id,''),port,
+               (share_id IS NULL OR EXISTS(SELECT 1 FROM agent_shares sh JOIN agent_share_ports sp ON sp.share_id=sh.id
+                 WHERE sh.id=port_traffic_policies.share_id AND sh.agent_id=port_traffic_policies.agent_id
+                 AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port))
 		FROM port_traffic_policies
 		WHERE id=ANY($1::text[]) AND agent_id=$2 AND monitoring_enabled=true
 		ORDER BY id FOR UPDATE`, ids, agentID)
@@ -86,6 +96,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	type trafficBaseline struct {
+		port                           int
+		shareID                        string
+		bindingValid                   bool
 		accounting                     *core.TrafficAccounting
 		generation                     uint64
 		received, sent                 uint64
@@ -108,7 +121,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			&current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,
 			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor,
-			&current.accounting,
+			&current.accounting, &current.shareID, &current.port, &current.bindingValid,
 		); err != nil {
 			rows.Close()
 			return err
@@ -169,6 +182,18 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		if !exists {
 			continue
 		}
+		if usage.ShareID != current.shareID || !current.bindingValid {
+			return fmt.Errorf("%w: traffic allocation does not match reserved policy", ErrInvalid)
+		}
+		if current.shareID != "" && (usage.EnforcementAvailable && (usage.CounterEpoch == "" || usage.CollectedAt.IsZero()) ||
+			usage.Accounting != nil && usage.Accounting.Source != "listener" && (usage.Accounting.Source != "nft-dual" || usage.Accounting.Mark != uint32(0x51430000)|uint32(current.port))) {
+			return fmt.Errorf("%w: shared traffic requires timestamped counters with an allocated per-port outbound mark", ErrInvalid)
+		}
+		if current.shareID != "" && usage.Accounting != nil && usage.Accounting.Source == "nft-dual" &&
+			(saturatedStoredTrafficAdd(usage.Accounting.ClientReceived, usage.Accounting.TargetReceived) != usage.LifetimeReceivedBytes ||
+				saturatedStoredTrafficAdd(usage.Accounting.ClientSent, usage.Accounting.TargetSent) != usage.LifetimeSentBytes) {
+			return fmt.Errorf("%w: shared traffic legs do not match lifetime counters", ErrInvalid)
+		}
 		if current.generation != usage.ResetGeneration {
 			continue
 		}
@@ -180,7 +205,13 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		}
 		// A failed sample updates health only. It must not advance the byte
 		// baseline, create history, or turn an old sample into a live rate.
-		if !usage.EnforcementAvailable && (usage.CounterEpoch != "" || !usage.CollectedAt.IsZero()) {
+		if !usage.EnforcementAvailable && (current.shareID != "" || usage.CounterEpoch != "" || !usage.CollectedAt.IsZero()) {
+			// A restored Agent can report health before its first fresh sample.
+			// Keep its checkpoint bytes out of all ledgers while allowing the
+			// heartbeat handshake to deliver authenticated policies and recover.
+			if !usage.CollectedAt.IsZero() && current.lastCollected != nil && usage.CollectedAt.Before(*current.lastCollected) {
+				continue
+			}
 			writes = append(writes, trafficUsageWrite{ID: usage.PolicyID, Generation: usage.ResetGeneration,
 				Blocked: usage.Blocked, EnforcementError: strings.TrimSpace(usage.EnforcementError)})
 			continue
@@ -287,9 +318,6 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			return err
 		}
 	}
-	if err := applySharedTrafficUsageTx(ctx, tx, agentID, usages); err != nil {
-		return err
-	}
 	return tx.Commit(ctx)
 }
 
@@ -331,6 +359,9 @@ const applyTrafficUsageSQL = `
 	), updated AS (
 		UPDATE port_traffic_policies policy SET
 			accounting=CASE WHEN input.record_sample THEN NULLIF(input.accounting,'null'::jsonb) ELSE policy.accounting END,
+            share_used_bytes=CASE WHEN input.record_sample AND policy.share_id IS NOT NULL
+                THEN LEAST(9223372036854775807::numeric,policy.share_used_bytes::numeric+input.used_delta)::bigint
+                ELSE policy.share_used_bytes END,
 			received_bytes=CASE WHEN input.record_sample THEN input.received ELSE policy.received_bytes END,
 			sent_bytes=CASE WHEN input.record_sample THEN input.sent ELSE policy.sent_bytes END,
 			used_bytes=CASE WHEN input.record_sample THEN input.used ELSE policy.used_bytes END,
@@ -346,7 +377,15 @@ const applyTrafficUsageSQL = `
 			reported_received_bytes=CASE WHEN input.record_sample THEN input.reported_received ELSE policy.reported_received_bytes END,
 			reported_sent_bytes=CASE WHEN input.record_sample THEN input.reported_sent ELSE policy.reported_sent_bytes END
 		FROM input WHERE policy.id=input.id AND policy.agent_id=$1 AND policy.reset_generation=input.generation
-		RETURNING policy.id,policy.agent_id,policy.name,policy.engine,policy.port,policy.protocol
+		RETURNING policy.id,policy.agent_id,policy.name,policy.engine,policy.port,policy.protocol,policy.share_id
+    ), share_totals AS (
+        SELECT updated.share_id,SUM(input.used_delta) AS delta
+        FROM updated JOIN input ON input.id=updated.id
+        WHERE updated.share_id IS NOT NULL AND input.record_sample AND input.used_delta>0
+        GROUP BY updated.share_id
+    ), shares_written AS (
+        UPDATE agent_shares sh SET used_bytes=LEAST(9223372036854775807::numeric,sh.used_bytes::numeric+t.delta)::bigint,
+            updated_at=now() FROM share_totals t WHERE sh.id=t.share_id
 	), scoped_daily AS (
 		INSERT INTO port_traffic_daily_accounting (policy_id,agent_id,reset_generation,usage_date,source,received_bytes,sent_bytes)
 		SELECT updated.id,updated.agent_id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,

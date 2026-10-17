@@ -109,6 +109,7 @@ func (c *Client) Run(ctx context.Context) error {
 	c.executor.migrateNativeAccounting(ctx)
 	if c.traffic != nil {
 		c.traffic.nativeSource = c.executor.nativeAccounting
+		c.traffic.sharedSource = c.executor.sharedAccounting
 		c.traffic.haltShared = func(ctx context.Context, engine core.Engine) error {
 			c.executor.specsMu.RLock()
 			spec, exists := c.executor.Specs[engine]

@@ -339,11 +339,13 @@ window.fetch = async (input, options = {}) => {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;
         if (testAPI.trafficPreviewUnauthorized) return json({ error: "session expired" }, 401);
         if (testAPI.trafficPreviewFailure) return json({ error: "preview unavailable" }, 500);
-        return json({ candidates: testAPI.trafficCandidates });
+        return json({ snapshot: "scan-version-1", candidates: testAPI.trafficCandidates });
       }
       const body = JSON.parse(options.body);
+      testAPI.trafficSnapshot = body.snapshot;
       testAPI.trafficSelection = body.selections;
       if (testAPI.trafficSyncGate) await testAPI.trafficSyncGate;
+      if (testAPI.trafficSyncStale) return json({error:"配置或部署版本已变化，请重新扫描"},409);
       if (testAPI.trafficSyncFailure) return json({ error: "sync unavailable" }, 500);
       testAPI.trafficCandidates = testAPI.trafficCandidates.filter(candidate => {
         if (!body.selections.some(item => item.agent_id === candidate.agent_id && item.port === candidate.port)) return true;

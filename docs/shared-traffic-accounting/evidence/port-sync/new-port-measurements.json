@@ -1,0 +1,49 @@
+{
+  "transfers": [
+    {
+      "application_bytes": 4194304,
+      "direction": "upload",
+      "label": "new-port-verified-upload",
+      "seconds": 0.615498814,
+      "sha256": "cf83d9e79fa234f1e6b6eaff9084ca8495008df6bbb80c71559d87db7fdb0521",
+      "verified": true
+    },
+    {
+      "application_bytes": 2097152,
+      "direction": "download",
+      "label": "new-port-verified-download",
+      "seconds": 0.315057895,
+      "sha256": "b96e6644f734e2f6371c60307294a0e092128fe6fc964e2d2bb80012ac4b9be8",
+      "verified": true
+    }
+  ],
+  "delta": {
+    "received_bytes": 6393249,
+    "sent_bytes": 6384963,
+    "used_bytes": 12778212,
+    "policy_id": "trf_434048d5e3375147"
+  },
+  "quota_delta": 12778212,
+  "bob_growth": 0,
+  "old_ports_growth": {
+    "25101": 0,
+    "25103": 0
+  },
+  "pcap": [
+    {
+      "client_received": 4255098,
+      "client_sent": 2149753,
+      "target_received": 2138151,
+      "target_sent": 4235210,
+      "port": 25104,
+      "transport_payload_upload": 4213846,
+      "transport_payload_download": 2108409,
+      "pcap_upload": 6393249,
+      "pcap_download": 6384963,
+      "agent_upload": 6393249,
+      "agent_download": 6384963,
+      "upload_difference": 0,
+      "download_difference": 0
+    }
+  ]
+}

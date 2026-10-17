@@ -7,8 +7,9 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     if (trafficSyncPending) return;
     trafficSyncPending = true;
     const navigationEpoch = state.navigationEpoch;
+    const accountData = state.data;
     const routeSignal = state.routeSignal;
-    const isCurrent = () => state.route === "traffic" && state.navigationEpoch === navigationEpoch;
+    const isCurrent = () => state.route === "traffic" && state.navigationEpoch === navigationEpoch && state.data === accountData;
     const controller = new AbortController();
     // Keep this dialog outside the reconciled workspace so polling cannot reset
     // selection, focus or scroll while the operator reviews candidates.
@@ -16,7 +17,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     dialog.className = "traffic-edit-dialog traffic-sync-dialog";
     dialog.dataset.trafficSyncDialog = "";
     dialog.setAttribute("aria-labelledby", "traffic-sync-title");
-    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2><p>选择已删除或尚未监控的端口</p></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><p class="traffic-sync-help">仅处理勾选项，保留已有监控。恢复后仅计新流量，已删除的历史和配额不恢复。新端口取自已保存配置。</p><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry hidden>重新读取</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>恢复 / 添加所选</button></footer></form>`;
+    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2><p>核对已生效端口与待部署变更</p></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><p class="traffic-sync-help">按确认生效的配置同步。待部署端口不会提前计量；旧端口保留历史和共享累计，端口预留由节点所有者管理。</p><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry>重新扫描</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>同步所选</button></footer></form>`;
     document.body.append(dialog);
     const list = dialog.querySelector("[data-sync-list]");
     const errorBox = dialog.querySelector("[data-sync-error]");
@@ -24,14 +25,17 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     const retry = dialog.querySelector("[data-sync-retry]");
     let candidates = [];
     let saving = false;
+    let loading = false;
+    let snapshot = "";
     let closed = false;
     const selectedInputs = () => [...list.querySelectorAll("[data-sync-choice]:checked")];
     const updateSelection = () => {
       const count = selectedInputs().length;
       updateFeedback(dialog.querySelector("[data-sync-count]"), `已选 ${count} 项`);
-      submit.disabled = saving || count === 0 || count > 4096;
+      submit.disabled = saving || loading || count === 0 || count > 4096;
       const all = list.querySelector("[data-sync-all]");
-      if (all) { all.checked = count === candidates.length; all.indeterminate = count > 0 && count < candidates.length; }
+      const available = candidates.filter(candidate => !candidate.blocked_reason).length;
+      if (all) { all.checked = available > 0 && count === available; all.indeterminate = count > 0 && count < available; all.disabled = loading || saving || !available; }
     };
     const showError = (message) => { errorBox.className = "alert error"; updateFeedback(errorBox, message); };
     const cleanup = () => {
@@ -54,23 +58,32 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     dialog.querySelectorAll("[data-sync-close]").forEach(button => { button.onclick = close; });
     bindDialogBackdrop(dialog, close);
     async function loadCandidates() {
+      if (loading || saving || closed) return;
+      loading = true;
+      candidates = []; snapshot = "";
+      retry.disabled = true;
       setVisible(errorBox, false);
-      setVisible(retry, false);
+      updateFeedback(list, "正在扫描配置与部署版本…");
+      updateSelection();
       try {
         const resource = await api("/traffic-endpoints/sync", { signal: controller.signal });
         if (closed || !isCurrent()) { cleanup(); return; }
         candidates = resource.candidates || [];
+        snapshot = resource.snapshot || "";
         const agentNames = new Map((state.data.agents || []).map(agent => [agent.id, agent.name]));
-        updateFeedbackHTML(list, candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选 · ${candidates.length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${candidate.kind === "deleted" ? "恢复" : "添加"}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · :${Number(candidate.port)} · ${esc(protocolName(candidate.protocol))}</small></span><span class="status-label ${candidate.kind === "deleted" ? "warn" : "muted"}">${candidate.kind === "deleted" ? "已删除 · 可恢复" : "未监控 · 可添加"}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>');
+        const labels = { new: "新增", changed: "修改", removed: "移除 · 历史保留", unchanged: "保持不变", deleted: "已删除 · 可恢复" };
+        updateFeedbackHTML(list, candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选可同步项 · ${candidates.filter(candidate => !candidate.blocked_reason).length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" ${candidate.blocked_reason ? "disabled" : ""} aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${esc(labels[candidate.kind] || "同步")}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")} · ${candidate.previous_port ? `${Number(candidate.previous_port)} → ` : ""}${Number(candidate.port)}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · ${esc(protocolName(candidate.protocol))}</small><small>${candidate.share_id ? `实例 ${esc(candidate.share_id)}` : "节点基础实例"} · ${candidate.config_version ? `配置 v${Number(candidate.config_version)} · ` : ""}${candidate.deployment_status === "pending" ? "待部署" : candidate.deployment_status === "uncertain" ? "部署未确认" : candidate.deployment_status === "retained" ? "旧端口" : "已部署"}</small>${candidate.blocked_reason ? `<small>${esc(candidate.blocked_reason)}</small>` : ""}</span><span class="status-label ${candidate.blocked_reason ? "warn" : "muted"}">${esc(labels[candidate.kind] || "未监控 · 可添加")}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>');
         const all = list.querySelector("[data-sync-all]");
-        if (all) all.onchange = () => { list.querySelectorAll("[data-sync-choice]").forEach(input => { input.checked = all.checked; }); updateSelection(); };
+        if (all) all.onchange = () => { list.querySelectorAll("[data-sync-choice]:not(:disabled)").forEach(input => { input.checked = all.checked; }); updateSelection(); };
         list.querySelectorAll("[data-sync-choice]").forEach(input => { input.onchange = updateSelection; });
         updateSelection();
       } catch (error) {
         if (closed || !isCurrent()) { cleanup(); return; }
         updateFeedback(list, "无法读取待同步端口");
         showError(error.message);
-        setVisible(retry, true);
+      } finally {
+        loading = false;
+        if (!closed) { retry.disabled = false; updateSelection(); }
       }
     }
     retry.onclick = loadCandidates;
@@ -84,21 +97,28 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       dialog.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
       submit.textContent = "同步中…";
       try {
-        await api("/traffic-endpoints/sync", { method: "POST", body: JSON.stringify({ selections: chosen.map(({ agent_id, port }) => ({ agent_id, port })) }) });
+        await api("/traffic-endpoints/sync", { method: "POST", body: JSON.stringify({ snapshot, selections: chosen.map(({ agent_id, port }) => ({ agent_id, port })) }) });
         if (closed || !isCurrent()) { cleanup(); return; }
-        const restored = chosen.filter(candidate => candidate.kind === "deleted").length;
+
         closeRetiringDialog(dialog);
         cleanup();
         const refreshed = await traffic();
-        if (isCurrent()) notify(`所选端口已同步：恢复 ${restored} 项，添加 ${chosen.length - restored} 项${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
+        if (isCurrent()) notify(`所选 ${chosen.length} 项已核验并同步${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
       } catch (error) {
         if (closed || !isCurrent()) cleanup();
-        else showError(error.message);
+        else {
+          showError(error.message);
+          if (error.status === 409 || /重新扫描|refresh|changed/i.test(error.message)) {
+            candidates = []; snapshot = "";
+            updateFeedback(list, "候选已失效，请重新扫描后选择端口");
+          }
+        }
       } finally {
         saving = false;
         if (!closed) {
-          dialog.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
-          submit.textContent = "恢复 / 添加所选";
+          dialog.querySelectorAll("button").forEach(control => { control.disabled = false; });
+          list.querySelectorAll("[data-sync-choice]").forEach(control => { control.disabled = Boolean(candidates[Number(control.dataset.syncChoice)]?.blocked_reason); });
+          submit.textContent = "同步所选";
           updateSelection();
         }
       }

@@ -44,7 +44,8 @@ type Executor struct {
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex
 	sharedStateMu            sync.Mutex
-	accountingConfigs        map[core.Engine]nativeAccountingConfigEntry
+	sharedAccountingLocks    sync.Map
+	accountingConfigs        map[string]nativeAccountingConfigEntry
 	completedMigrations      map[core.Engine]completedCoreMigration
 	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
 }
@@ -140,6 +141,11 @@ func (e *Executor) Validate() error {
 }
 
 func (e *Executor) Execute(parent context.Context, task core.Task) (output string, resultErr error) {
+	if task.SharedInstance && task.Action.ChangesInstance() && task.Engine.Valid() && core.ValidAgentShareID(task.SharedTrafficID) {
+		lock := e.sharedAccountingLock(task.Engine, task.SharedTrafficID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	if task.Action == core.ActionValidate || task.Action == core.ActionDeploy || task.Action == core.ActionImportExisting {
 		redact := coreDiagnosticRedactor(task.Engine, task.ConfigContent)
 		defer func() {
@@ -538,4 +544,12 @@ func mainlandDestinationPolicyEnabled(policies []core.MainlandAccessPolicy) bool
 		}
 	}
 	return false
+}
+
+// Each allocation has its own lock: sampling never observes a half-written
+// deployment digest, and another user's core continues sampling independently.
+func (e *Executor) sharedAccountingLock(engine core.Engine, shareID string) *sync.RWMutex {
+	key := string(engine) + "/" + shareID
+	lock, _ := e.sharedAccountingLocks.LoadOrStore(key, &sync.RWMutex{})
+	return lock.(*sync.RWMutex)
 }

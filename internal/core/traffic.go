@@ -106,6 +106,8 @@ type PortTrafficEndpoint struct {
 	Engine          Engine          `json:"engine"`
 	Port            int             `json:"port"`
 	Protocol        TrafficProtocol `json:"protocol"`
+	ConfigID        string          `json:"config_id,omitempty"`
+	ShareID         string          `json:"share_id,omitempty"`
 	ConfigVersion   int             `json:"config_version"`
 	ConfigUpdatedAt time.Time       `json:"config_updated_at"`
 }
@@ -118,7 +120,10 @@ type TrafficSyncSelection struct {
 
 type TrafficSyncCandidate struct {
 	PortTrafficEndpoint
-	Kind string `json:"kind"` // deleted or new
+	Kind             string `json:"kind"` // new, changed, removed, unchanged or deleted
+	PreviousPort     int    `json:"previous_port,omitempty"`
+	DeploymentStatus string `json:"deployment_status"`
+	BlockedReason    string `json:"blocked_reason,omitempty"`
 }
 
 type PortTrafficUsage struct {

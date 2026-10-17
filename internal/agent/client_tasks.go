@@ -21,7 +21,7 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 	result := c.resultForTask(executionContext, task)
 	message := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{TaskID: task.ID, Result: result}}
 	if c.traffic != nil {
-		message.TrafficUsage, message.Result.Result.TrafficSettled = c.traffic.settledSnapshot(executionContext)
+		message.TrafficUsage, message.Result.Result.TrafficSettled = c.traffic.settledSnapshot(executionContext, task)
 	}
 	select {
 	case outgoing <- message:

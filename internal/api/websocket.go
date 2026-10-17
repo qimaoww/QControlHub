@@ -107,6 +107,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		heartbeatDeadline.Reset(heartbeatTimeout)
 	}
 	var inFlightTask string
+	var inFlightAction core.Action
 	// Dispatch is deferred until this connection has supplied a heartbeat that
 	// was persisted. Reading the stored features before the first heartbeat
 	// could observe a stale mihomo-development-source-v1 left by a previous
@@ -164,6 +165,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			return err
 		}
 		inFlightTask = task.ID
+		inFlightAction = task.Action
 		return nil
 	}
 	taskReady := s.store.TaskReady(id)
@@ -310,6 +312,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
 					_ = connection.Close(websocket.StatusPolicyViolation, "task result rejected")
 					return
+				}
+				if message.Result.Result.Success && (inFlightAction == core.ActionDeploy || inFlightAction == core.ActionImportExisting) {
+					s.refreshAgentTrafficPolicies(id)
 				}
 				s.notifyTaskFailure(id, message.Result.TaskID, message.Result.Result)
 				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireResultAck, TaskID: message.Result.TaskID}); err != nil {

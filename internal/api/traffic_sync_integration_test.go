@@ -38,108 +38,97 @@ func TestTrafficSyncPreservesPortsThroughReconnectWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{
-		Name: "traffic sync", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineXray},
+		Name: "traffic sync", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineXray}, Features: []string{core.AgentFeatureIndependentEgress},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t)),
 	}, enrollment.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ReconcilePortTrafficEndpoints(ctx, []core.PortTrafficEndpoint{{
-		AgentID: agent.ID, Engine: core.EngineXray, Name: "stale", Port: 443, Protocol: core.TrafficProtocolTCP,
-	}}, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.SaveAgentConfig(ctx, core.Config{
-		AgentID: agent.ID, Engine: core.EngineXray, Name: "new listener",
-		Content: `{"inbounds":[{"tag":"new","port":8443,"protocol":"vless"}],"outbounds":[{"protocol":"freedom"}]}`,
-	}, 0); err != nil {
-		t.Fatal(err)
-	}
+
 	const token = "traffic-sync-test-admin-token"
 	server := New(db, Config{AdminToken: token})
 	handler := server.Handler()
-	sync := func() []string {
+	call := func(method, body string) (int, []byte) {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/traffic-endpoints/sync", strings.NewReader(`{"selections":[{"agent_id":"`+agent.ID+`","port":8443}]}`))
+		request := httptest.NewRequest(method, "/api/v1/traffic-endpoints/sync", strings.NewReader(body))
 		request.Header.Set("Authorization", "Bearer "+token)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		var result struct {
-			ChangedAgents []string `json:"changed_agents"`
+		if response.Header().Get("Cache-Control") != "no-store" && response.Code == http.StatusOK {
+			t.Fatal("cacheable scan")
 		}
-		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("sync: %d %s, %v", response.Code, response.Body.String(), err)
+		return response.Code, response.Body.Bytes()
+	}
+	preview := func() store.TrafficSyncPreview {
+		t.Helper()
+		code, body := call(http.MethodGet, "")
+		var p store.TrafficSyncPreview
+		if err := json.Unmarshal(body, &p); err != nil || code != 200 {
+			t.Fatalf("preview %d %s %v", code, body, err)
 		}
-		return result.ChangedAgents
+		return p
 	}
-	if changed := sync(); len(changed) != 1 || changed[0] != agent.ID {
-		t.Fatalf("changed agents = %v", changed)
+	sync := func(snapshot string, port int) int {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"snapshot": snapshot, "selections": []core.TrafficSyncSelection{{AgentID: agent.ID, Port: port}}})
+		code, _ := call(http.MethodPost, string(body))
+		return code
 	}
+	c, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Engine: core.EngineXray, Name: "listener", Content: `{"inbounds":[{"tag":"stable","port":8443,"protocol":"vless"}],"outbounds":[{"protocol":"freedom"}]}`}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := preview()
+	if len(pending.Candidates) != 1 || pending.Candidates[0].DeploymentStatus != "pending" || sync(pending.Snapshot, 8443) != 409 {
+		t.Fatalf("undeployed scan: %+v", pending)
+	}
+	deploy := func() {
+		t.Helper()
+		task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: c.Engine, ConfigID: c.ID, Action: core.ActionDeploy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := db.ClaimTask(ctx, agent.ID)
+		if err != nil || lease == nil {
+			t.Fatalf("claim: %+v %v", lease, err)
+		}
+		if err = db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deploy()
+	p := preview()
+	if len(p.Endpoints) != 1 || p.Endpoints[0].Port != 8443 {
+		t.Fatalf("applied scan: %+v", p)
+	}
+	if sync(p.Snapshot, 8443) != 200 || sync(p.Snapshot, 8443) != 200 {
+		t.Fatal("sync is not idempotent")
+	}
+	c.Content = strings.ReplaceAll(c.Content, "8443", "9443")
+	c, err = db.SaveAgentConfig(ctx, c, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sync(p.Snapshot, 8443) != 409 {
+		t.Fatal("stale config scan accepted")
+	}
+	server.refreshSavedAgentTrafficMonitoring(ctx, agent.ID)
 	server.refreshPortTrafficMonitoring(ctx, agent.ID)
-	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 2 || policies[0].Port != 443 || policies[1].Port != 8443 {
-		t.Fatalf("manual sync/reconnect deleted a port: %+v, %v", policies, err)
+	active, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(active) != 1 || active[0].Port != 8443 {
+		t.Fatalf("draft/reconnect switched rules: %+v %v", active, err)
 	}
-	if changed := sync(); len(changed) != 0 {
-		t.Fatalf("idempotent sync reconnects agents: %v", changed)
+	deploy()
+	p = preview()
+	if len(p.Endpoints) != 1 || p.Endpoints[0].Port != 9443 || sync(p.Snapshot, 9443) != 200 {
+		t.Fatalf("replacement scan: %+v", p)
 	}
-	// Configuration-change refreshes still remove stale discovered monitors.
-	server.refreshPortTrafficMonitoring(ctx, "")
-	policies, err = db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 1 || policies[0].Port != 8443 {
-		t.Fatalf("configuration refresh did not prune: %+v, %v", policies, err)
+	if sync(p.Snapshot, 8443) != 409 {
+		t.Fatal("retired port reactivated")
 	}
-	if _, err := db.DeletePortTrafficMonitoring(ctx, policies[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Engine: core.EngineXray, Name: "selection", Content: `{"inbounds":[{"tag":"selected","port":9443,"protocol":"vless"},{"tag":"unselected","port":10443,"protocol":"vless"}],"outbounds":[{"protocol":"freedom"}]}`}, 1); err != nil {
-		t.Fatal(err)
-	}
-	preview := httptest.NewRequest(http.MethodGet, "/api/v1/traffic-endpoints/sync", nil)
-	preview.Header.Set("Authorization", "Bearer "+token)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, preview)
-	var candidates struct {
-		Candidates []core.TrafficSyncCandidate `json:"candidates"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &candidates); err != nil || response.Code != http.StatusOK || len(candidates.Candidates) != 3 {
-		t.Fatalf("preview: %d %s %v", response.Code, response.Body.String(), err)
-	}
-	if candidates.Candidates[0].Kind != "deleted" || candidates.Candidates[0].Port != 8443 {
-		t.Fatalf("missing tombstone: %+v", candidates)
-	}
-	if policies, _ := db.AgentPortTrafficPolicies(ctx, agent.ID); len(policies) != 0 {
-		t.Fatal("preview wrote policies")
-	}
-	cancelled := false
-	updates := server.registerConnection(agent.ID, "selected-sync-test", func() { cancelled = true })
-	defer server.unregisterConnection(agent.ID, "selected-sync-test")
-	selected := httptest.NewRequest(http.MethodPost, "/api/v1/traffic-endpoints/sync", strings.NewReader(`{"selections":[{"agent_id":"`+agent.ID+`","port":8443},{"agent_id":"`+agent.ID+`","port":9443}]}`))
-	selected.Header.Set("Authorization", "Bearer "+token)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, selected)
-	if response.Code != http.StatusOK {
-		t.Fatalf("selected: %d %s", response.Code, response.Body.String())
-	}
-	if cancelled {
-		t.Fatal("selective sync forced reconnect discovery")
-	}
-	select {
-	case <-updates:
-	default:
-		t.Fatal("live session not notified")
-	}
-	policies, err = db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 2 || policies[0].Port != 8443 || policies[1].Port != 9443 {
-		t.Fatalf("selected scope: %+v %v", policies, err)
-	}
-	for _, body := range []string{"", `{}`, `{"selections":[]}`, `{"selections":[{"agent_id":"` + agent.ID + `","port":10443,"name":"untrusted"}]}`} {
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/traffic-endpoints/sync", strings.NewReader(body))
-		request.Header.Set("Authorization", "Bearer "+token)
-		response = httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest {
-			t.Fatalf("invalid selection accepted: %s => %d", body, response.Code)
+	for _, body := range []string{"", `{}`, `{"selections":[]}`, `{"snapshot":"bad","selections":[{"agent_id":"` + agent.ID + `","port":9443,"name":"untrusted"}]}`} {
+		if code, _ := call(http.MethodPost, body); code != 400 {
+			t.Fatalf("invalid body accepted: %s %d", body, code)
 		}
 	}
 }

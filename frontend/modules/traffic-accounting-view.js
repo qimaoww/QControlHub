@@ -1,5 +1,5 @@
 export function renderTrafficAccounting(policy, esc, bytes) {
-  if (policy.shared_quota && policy.enforcement_available !== false && !policy.enforcement_error)
+  if (policy.shared_quota && !["core-api", "nft-dual"].includes(policy.accounting?.source) && policy.enforcement_available !== false && !policy.enforcement_error)
     return '<span class="settings-hint">共享额度 · 监听端口收发</span>';
   const accounting = policy.accounting;
   const dual = ["core-api", "nft-dual"].includes(accounting?.source);
