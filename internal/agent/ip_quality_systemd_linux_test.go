@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -31,9 +32,9 @@ func TestIPQualityDependencyHelperSystemdSandbox(t *testing.T) {
 	for _, line := range strings.Split(string(status), "\n") {
 		if strings.HasPrefix(line, "CapBnd:") {
 			caps, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "CapBnd:")), 16, 64)
-			// The main Agent remains limited to CHOWN and NET_ADMIN; identity
-			// capabilities belong exclusively to the fixed installation helper.
-			if err != nil || caps != (1<<0)|(1<<12) {
+			// The main Agent needs CHOWN, NET_ADMIN and NET_BIND_SERVICE for
+			// HTTP-01. Identity capabilities remain exclusive to the fixed helper.
+			if err != nil || caps != (1<<0)|(1<<10)|(1<<12) {
 				t.Fatalf("main Agent capabilities changed: %s %v", line, err)
 			}
 		}
@@ -41,6 +42,11 @@ func TestIPQualityDependencyHelperSystemdSandbox(t *testing.T) {
 	if !strings.Contains(string(status), "NoNewPrivs:\t1") {
 		t.Fatal("main Agent must retain NoNewPrivileges")
 	}
+	listener, err := net.Listen("tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("shipped Agent cannot bind the HTTP-01 port: %v", err)
+	}
+	_ = listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	p := newIPQualityDependencyPreparer()

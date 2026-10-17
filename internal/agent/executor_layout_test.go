@@ -16,9 +16,9 @@ func TestProductionAgentUnitAllowsOnlyRequiredCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := string(contents)
-	requiredCapabilities := "CAP_CHOWN CAP_NET_ADMIN"
+	requiredCapabilities := "CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE"
 	if !strings.Contains(unit, "CapabilityBoundingSet="+requiredCapabilities) || !strings.Contains(unit, "AmbientCapabilities="+requiredCapabilities) {
-		t.Fatal("production Agent unit does not retain the metadata and traffic-accounting capabilities")
+		t.Fatal("production Agent unit does not retain the metadata, HTTP-01 and traffic-accounting capabilities")
 	}
 	for _, forbidden := range []string{"CAP_SYS_ADMIN", "CAP_SYS_PTRACE", "CAP_DAC_OVERRIDE", "CAP_NET_RAW", "CAP_SETUID", "CAP_SETGID"} {
 		if strings.Contains(unit, forbidden) {
