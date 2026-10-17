@@ -1,5 +1,5 @@
 import { createIPQualityBindings } from "./ip-quality-bindings.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityAvailableDates, ipQualityBlockReason, ipQualityFeature } from "./ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityAvailableDates, ipQualityBlockReason, ipQualityFeature, ipQualityReportRecord } from "./ip-quality-model.js";
 import { createPoller } from "./refresh.js";
 
 export function createIPQualityController(ctx, view) {
@@ -13,6 +13,7 @@ export function createIPQualityController(ctx, view) {
   let scopeEpoch = -1, requestController = null, releaseLifecycle = () => {};
   const daySnapshots = new Map();
   let submitting = new Set();
+  let creating = new Set(), creationErrors = new Map();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
   const editable = (agent) => agent?.can_manage !== false && can("agents.manage", agent) && can("tasks.execute");
@@ -51,7 +52,7 @@ export function createIPQualityController(ctx, view) {
   function render(date, options = {}) {
     view({ date, timezone, agents: pendingAgents || [], ...snapshot,
       availableDates: availableDates || [], month: state.data.ipQualityCalendarMonth,
-      loading: foregroundLoading, submitting, editable, readFailed, error: readError, recordsRemoved, ...options });
+      loading: foregroundLoading, submitting, creating, creationErrors, editable, readFailed, error: readError, recordsRemoved, ...options });
     bind();
   }
   function restrictNodes(agents) {
@@ -76,6 +77,8 @@ export function createIPQualityController(ctx, view) {
       foregroundLoading = false;
       daySnapshots.clear();
       submitting = new Set();
+      creating = new Set();
+      creationErrors = new Map();
       readFailed = false;
       readError = "";
       availableDates = null;
@@ -183,7 +186,7 @@ export function createIPQualityController(ctx, view) {
     }
   }
   async function mutate(agentID, enabled) {
-    const data = state.data, epoch = state.navigationEpoch, pending = submitting, selectedDate = data.ipQualityDate;
+    const data = state.data, epoch = state.navigationEpoch, pending = submitting, activeCreates = creating, failures = creationErrors, selectedDate = data.ipQualityDate;
     const agent = snapshot?.agents.find((item) => item.id === agentID);
     const record = snapshot?.history.records.find((item) => item.agent_id === agentID);
     const scheduling = typeof enabled === "boolean";
@@ -200,20 +203,43 @@ export function createIPQualityController(ctx, view) {
         : `${scheduling ? "为" : "检测"} ${agent.name}${scheduling ? "启用每日检测" : "的出口 IP"}？检测会访问第三方服务，耗时数分钟；缺少依赖时自动安装，不上传报告。`;
       if (!(await confirmAction(message, scheduling ? "每日 IP 检测" : "开始 IP 检测")) ||
           !current(data, epoch) || selectedDate !== data.ipQualityDate || !canOperate() || readFailed) return false;
-      await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {
+      if (!scheduling) {
+        failures.delete(agentID);
+        activeCreates.add(agentID);
+        render(data.ipQualityDate);
+      }
+      const task = await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {
         method: scheduling ? "PUT" : "POST",
         body: JSON.stringify(scheduling ? { enabled } : { agent_id: agentID }),
       });
       if (!current(data, epoch)) return false;
+      activeCreates.delete(agentID);
+      // The POST has confirmed creation. Keep that actual task visible even
+      // when the following history read is slow or fails, with its own prior
+      // successful report. Do not put another day's reused task into history.
+      if (!scheduling && snapshot?.date === selectedDate && task?.id && task.agent_id === agentID &&
+          task.action === "ip-quality" && ["pending", "running"].includes(task.status) &&
+          (selectedDate === ipQualityLatest || ipQualityToday(new Date(task.created_at)) === selectedDate)) {
+        const accepted = { task_id: task.id, agent_id: agentID, status: task.status,
+          created_at: task.created_at, started_at: task.started_at,
+          last_successful: ipQualityReportRecord(record, selectedDate, timezone) };
+        snapshot = { ...snapshot, history: { ...snapshot.history,
+          records: [...snapshot.history.records.filter(item => item.agent_id !== agentID), accepted] } };
+        if (daySnapshots.has(selectedDate)) daySnapshots.set(selectedDate, snapshot);
+      }
       notify(scheduling ? (enabled ? "每日检测已启用，将在节点在线时执行" : "每日检测已关闭") : "检测任务已提交");
       pending.delete(agentID);
       await load(data.ipQualityDate);
       return true;
     } catch (error) {
-      if (current(data, epoch) && error?.name !== "AbortError") notify(error.message, "error");
+      if (current(data, epoch) && error?.name !== "AbortError") {
+        if (!scheduling) failures.set(agentID, error.message);
+        notify(error.message, "error");
+      }
       return false;
     } finally {
       pending.delete(agentID);
+      activeCreates.delete(agentID);
       if (current(data, epoch)) render(data.ipQualityDate);
     }
   }

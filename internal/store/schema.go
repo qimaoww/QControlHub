@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 73
+const currentSchemaVersion = 74
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -181,15 +181,15 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
-	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
+    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
+	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
 	    mainland_access_policies jsonb NOT NULL DEFAULT '[]'::jsonb,
 	    core_version varchar(64),
 	    core_source varchar(32),
-	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
+	    status varchar(20) NOT NULL CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled')),
 	    attempt integer NOT NULL DEFAULT 0,
     output text,
     error text,

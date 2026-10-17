@@ -421,7 +421,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18)`,
 		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance)
 	if err != nil {
-		return core.Task{}, mapError(err)
+		return core.Task{}, taskInsertError(err, task)
 	}
 	return task, nil
 }

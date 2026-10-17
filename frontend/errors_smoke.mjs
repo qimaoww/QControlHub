@@ -149,3 +149,15 @@ assert.match(diagnosticError("GitHub API metadata rate limit exhausted (HTTP 403
 assert.match(diagnosticError("GitHub API metadata returned HTTP 404"), /资源不存在/);
 assert.match(diagnosticError("downloaded release asset SHA-256 does not match GitHub metadata"), /校验失败/);
 assert.match(diagnosticError("context canceled"), /操作已取消/);
+
+const schemaMessage = '任务创建失败，尚未进入 Agent 执行。请检查控制面升级及数据库迁移状态。';
+await assert.rejects(send(new Response(JSON.stringify({ error: schemaMessage, code: 'task_schema_incompatible', stage: 'task_creation', request_id: 'req_fixture123' }), { status: 500 })), error => {
+  assert.equal(error.status, 500);
+  assert.equal(error.code, 'task_schema_incompatible');
+  assert.equal(error.stage, 'task_creation');
+  assert.equal(error.requestID, 'req_fixture123');
+  assert.equal(error.message, `${schemaMessage}（请求 ID：req_fixture123）`);
+  return true;
+});
+await assert.rejects(send(new Response('{"error":"internal server error"}', {status:500,headers:{'X-Request-ID':'req_header'}})), error => error.requestID === 'req_header' && !error.code);
+await assert.rejects(send(new Response(JSON.stringify({error:schemaMessage,request_id:'<script>bad</script>'}),{status:500})), error => !error.requestID && !error.message.includes('<script>'));
