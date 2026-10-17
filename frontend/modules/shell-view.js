@@ -1,5 +1,5 @@
 import { installInteractionFeedback } from "./interaction-feedback.js";
-import { enterWorkspace, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
+import { enterWorkspace, captureDockMotion, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
 import { cancelMotion, syncSelectionMotion } from "./motion.js";
 import { bindPopups } from "./popup.js";
 import { observeFeedback } from "./presence-motion.js";
@@ -12,6 +12,7 @@ export function createShellView(ctx) {
   const { app, state, can, esc, api, applyTheme, toggleTheme, render, renderLogin, bindConfirmationDialog } = ctx;
   const contextMarkup = createShellContext(ctx);
 function shell(content, title, { viewKey = state.route } = {}) {
+  const dockMotion = captureDockMotion(app.querySelector(".app-dock"));
   const previousMain = document.querySelector(".workspace-main");
   const previousRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
   const outgoing = previousMain && (previousRoute !== state.route || previousMain.dataset.refreshKey !== `workspace-${viewKey}`)
@@ -21,7 +22,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
-    ["certificates", "证书", dockIcons.shield || dockIcons.fileCode],
+    ["certificates", "证书", dockIcons.shield || dockIcons.fileCode, true],
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["ip-quality", "IP 质量", dockIcons.gauge, true],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
@@ -104,16 +105,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
                 : state.route === "tasks"
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                   : "";
+  const indicatorMarkup = '<i class="dock-active-indicator" aria-hidden="true"></i>';
   const navigationMarkup = links
     .map(([id, text, icon, mobileSecondary], index) => {
       const active = activeDockRoute(id);
       const groupStart = index > 0 && navGroups[id] !== navGroups[links[index - 1][0]];
-      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}${groupStart ? " dock-group-start" : ""}" href="#${id}" title="${text}" data-dock-group="${navGroups[id] || ""}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
+      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}${groupStart ? " dock-group-start" : ""}" href="#${id}" title="${text}" data-dock-group="${navGroups[id] || ""}" ${active ? 'aria-current="page"' : ""}>${indicatorMarkup}<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
     })
     .join("");
   const settingsActive = activeDockRoute("settings");
   const settingsDockLink = can(linkPermissions.settings)
-    ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
+    ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}>${indicatorMarkup}<svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
     ["system-bbr", "BBR / TCP 调优"],
@@ -142,7 +144,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   // Selection only changes the sidebar's highlight/content. Keep its links
   // mounted so rapid node switches retain the launcher and keyboard focus.
   const contextKey = state.route;
-  const markup = `<div class="desktop-app"><aside class="app-dock"><i class="dock-active-indicator" data-refresh-key="motion-highlight" aria-hidden="true"></i><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"${state.data.dockExpanded ? " data-expanded" : ""}><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><button class="dock-toggle" type="button" aria-label="展开或收起导航" aria-expanded="${Boolean(state.data.dockExpanded)}" aria-controls="dock-navigation"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.panelLeft}</svg></button><nav id="dock-navigation" class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
   if (previousMain && currentView) {
     const template = document.createElement("template");
@@ -183,7 +185,13 @@ function shell(content, title, { viewKey = state.route } = {}) {
     cancelMotion(renderedMain);
     enterWorkspace(renderedMain, routeChanged ? app.querySelector(".context-sidebar") : null);
   }
-  syncDockMotion(app.querySelector(".app-dock"));
+  const renderedDock = app.querySelector(".app-dock");
+  syncDockMotion(renderedDock, dockMotion);
+  renderedDock.querySelector(".dock-toggle").onclick = event => {
+    state.data.dockExpanded = !state.data.dockExpanded;
+    renderedDock.toggleAttribute("data-expanded", state.data.dockExpanded);
+    event.currentTarget.setAttribute("aria-expanded", String(state.data.dockExpanded));
+  };
   syncSelectionMotion(renderedMain, { animate: !routeChanged && !viewChanged });
   observeFeedback(app);
   installInteractionFeedback();

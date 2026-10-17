@@ -1,0 +1,7 @@
+node frontend/dock_navigation_browser.mjs
+PASS desktop-light-admin
+PASS tablet-dark-admin
+PASS tablet-light-user-reduced
+PASS phone-dark-admin
+PASS phone-light-user
+PASS desktop-browser-zoom-125

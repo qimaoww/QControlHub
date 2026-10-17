@@ -19,13 +19,14 @@
   .app-dock:is(:hover,:has(:focus-visible)){transition-delay:35ms}
   .app-dock .dock-label{transition-duration:var(--motion-feedback),var(--motion-base)}
   .app-dock:is(:hover,:has(:focus-visible)) :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{transition-delay:65ms}
-  .dock-active-indicator:not([hidden]){display:block;position:absolute;top:0;left:var(--dock-rail-pad);right:var(--dock-rail-pad);border-radius:10px;background:linear-gradient(125deg,var(--accent),color-mix(in srgb,var(--accent) 78%,var(--accent-2)));box-shadow:0 6px 24px -9px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.25);pointer-events:none}
+  .app-dock :is(.dock-nav a,.dock-tools a)[aria-current="page"]>.dock-active-indicator{display:block;position:absolute;inset:0;z-index:-1;border-radius:10px;background:linear-gradient(125deg,var(--accent),color-mix(in srgb,var(--accent) 78%,var(--accent-2)));box-shadow:0 6px 24px -9px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.25);pointer-events:none}
   .app-dock .dock-nav a.active,.app-dock .dock-tools .dock-settings.active{background:transparent;box-shadow:none}
   .app-dock .dock-nav a.active::before,.app-dock .dock-tools .dock-settings.active::before{opacity:0}
+  .app-dock :is(.dock-nav a,.dock-tools .dock-settings){isolation:isolate}
   .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button){z-index:1}
 }
 @media(max-width:820px) and (pointer:fine){
-  :is(.page-live-config,.page-client-connections) .dock-active-indicator{display:none}
+  :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a>.dock-active-indicator{display:none}
   :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a.active{background:var(--accent)}
 }
 /* Floating content grows from its launcher; native details owns the complete
