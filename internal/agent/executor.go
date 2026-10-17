@@ -192,7 +192,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return "", err
 		}
-		if task.Action == core.ActionDeploy {
+		if task.Action != core.ActionStatus {
 			if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
 				return "", fmt.Errorf("prepare shared core configuration: %w", err)
 			}
