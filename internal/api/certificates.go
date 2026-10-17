@@ -24,6 +24,7 @@ func (s *Server) certificateRoutes(mux *http.ServeMux) {
 		"DELETE /api/v1/certificates/{id}/orders/{order}":        s.cancelCertificateOrder,
 		"POST /api/v1/certificates/{id}/grants":                  s.grantCertificate,
 		"DELETE /api/v1/certificates/{id}/grants":                s.revokeCertificate,
+		"PUT /api/v1/certificate-accounts/{id}/credentials":      s.updateCertificateDNSCredentials,
 		"GET /api/v1/certificate-accounts":                       s.listCertificateAccounts,
 		"POST /api/v1/certificate-accounts":                      s.createCertificateAccount,
 		"DELETE /api/v1/certificate-accounts/{id}":               s.deleteCertificateAccount,
@@ -326,4 +327,21 @@ func (s *Server) certificatePublicChain(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Disposition", `attachment; filename="certificate-chain.pem"`)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(chain))
+}
+
+func (s *Server) updateCertificateDNSCredentials(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name        string                      `json:"name"`
+		Credentials certificates.DNSCredentials `json:"credentials"`
+	}
+	if err := decodeJSON(w, r, &input, 32<<10); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	item, err := s.store.UpdateCertificateDNSCredentials(r.Context(), r.PathValue("id"), input.Name, input.Credentials)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, 200, item)
 }

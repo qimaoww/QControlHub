@@ -34,6 +34,8 @@ func TestCertificateOrdinaryUserIsolationSharingAndDeployment(t *testing.T) {
 		t.Fatal("credential escaped API")
 	}
 	bob.call("POST", "/certificate-accounts/"+account.ID+"/check", nil, 404, nil)
+	bob.call("PUT", "/certificate-accounts/"+account.ID+"/credentials", map[string]any{"name": "stolen", "credentials": map[string]string{"zone": "example.test", "token": "other-token"}}, 404, nil)
+	alice.call("PUT", "/certificate-accounts/"+account.ID+"/credentials", map[string]any{"name": "rotated DNS", "credentials": map[string]string{"zone": "example.test", "token": "rotated-secret-fixture"}}, 200, nil)
 	alice.call("POST", "/certificates/"+cert.ID+"/grants", map[string]string{"username": "bob"}, 204, nil)
 	var detail map[string]json.RawMessage
 	raw = bob.call("GET", "/certificates/"+cert.ID, nil, 200, &detail)
@@ -47,6 +49,19 @@ func TestCertificateOrdinaryUserIsolationSharingAndDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 24443)
+	admin.call("POST", "/certificate-http-grants", map[string]string{"agent_id": agent.ID, "username": "bob", "domain": "auth.example.test"}, 204, nil)
+	bob.call("POST", "/certificate-http-grants", map[string]string{"agent_id": agent.ID, "username": "alice", "domain": "auth.example.test"}, 404, nil)
+	var httpGrants []core.HTTPChallengeGrant
+	bob.call("GET", "/certificate-http-grants", nil, 200, &httpGrants)
+	if len(httpGrants) != 1 || httpGrants[0].Username != "bob" {
+		t.Fatal("missing explicit domain grant")
+	}
+	raw = alice.call("GET", "/certificate-http-grants", nil, 200, nil)
+	if strings.Contains(string(raw), "auth.example.test") {
+		t.Fatal("unrelated HTTP grant exposed")
+	}
+	admin.call("DELETE", "/certificate-http-grants", httpGrants[0], 204, nil)
+
 	protocol, _ := serverconfig.FindProtocol(core.EngineMihomo, serverconfig.ProtocolTrojan)
 	plan, err := serverconfig.NewPlan(protocol)
 	if err != nil {

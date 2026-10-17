@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +27,11 @@ import (
 )
 
 func main() {
+	fixtureURL, err := url.Parse(os.Getenv("QCH_DATABASE_URL"))
+	if err != nil || fixtureURL.Hostname() != "127.0.0.1" || fixtureURL.Port() != "35478" || fixtureURL.Path != "/qch_certificate_test" {
+		log.Fatal("certificate preview requires the dedicated loopback fixture database")
+	}
+
 	if os.Getenv("QCH_CERTIFICATE_LOCAL_ACME") == "1" {
 		certificates.Directories["letsencrypt-staging"] = "https://localhost:35481/dir"
 		net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -156,7 +162,10 @@ func main() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
-		for _, a := range byName {
+		for name, a := range byName {
+			if name != "HTTP 验证节点 · 香港" && name != "TLS 部署节点 · 东京" && name != "共享实例 · 新加坡" {
+				continue
+			}
 			_ = db.Heartbeat(ctx, a.ID, core.HeartbeatRequest{Features: a.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true, ServiceStatus: "inactive"}, core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}})
 		}
 		select {

@@ -91,6 +91,15 @@ func preparePanelCertificates(spec EngineSpec, task *core.Task) error {
 				cleanup()
 				return err
 			}
+			directory, openErr := os.Open(base)
+			if openErr != nil {
+				return openErr
+			}
+			syncErr := directory.Sync()
+			directory.Close()
+			if syncErr != nil {
+				return syncErr
+			}
 		} else if err != nil {
 			return err
 		} else {

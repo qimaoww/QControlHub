@@ -262,3 +262,28 @@ func TestCertificateHTTPPreflightChecksEveryPublicAddress(t *testing.T) {
 		t.Fatal("accepted incorrect challenge response")
 	}
 }
+
+func TestCertificateDNSResponseLossRecoveryPreservesExistingRecords(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	var body = `{"success":true,"result":[{"id":"existing","name":"_acme-challenge.example.test","content":"same-proof"},{"id":"created-by-order","name":"_acme-challenge.example.test","content":"same-proof"},{"id":"other-proof","name":"_acme-challenge.example.test","content":"other"}]}`
+	client := certificates.DNSClient{Provider: "cloudflare", Credentials: certificates.DNSCredentials{Zone: "example.test", Token: "fixture"}, HTTP: &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+		response := body
+		if r.URL.Path == "/client/v4/zones" {
+			response = `{"success":true,"result":[{"id":"zone"}]}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(response)), Header: http.Header{}}, nil
+	})}}
+	challenge := certificateChallengeState{CreatePending: true, BeforeIDs: []string{"existing"}, Public: core.CertificateChallenge{Name: "_acme-challenge.example.test", Value: "same-proof"}}
+	if err := db.recoverDNSCreate(ctx, client, &challenge); err != nil {
+		t.Fatal(err)
+	}
+	if challenge.Record.ID != "created-by-order" || challenge.CreatePending {
+		t.Fatalf("incorrect recovery: %+v", challenge)
+	}
+	body = `{"success":true,"result":[{"id":"existing","name":"_acme-challenge.example.test","content":"same-proof"},{"id":"ambiguous-1","name":"_acme-challenge.example.test","content":"same-proof"},{"id":"ambiguous-2","name":"_acme-challenge.example.test","content":"same-proof"}]}`
+	challenge.Record = certificates.DNSRecord{}
+	challenge.CreatePending = true
+	if err := db.recoverDNSCreate(ctx, client, &challenge); err == nil || challenge.Record.ID != "" {
+		t.Fatal("ambiguous response claimed another writer's record")
+	}
+}

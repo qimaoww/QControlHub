@@ -1,0 +1,21 @@
+{
+  "task": "certificate-center-a978",
+  "test_end_utc": "2026-10-17T09:08:21+00:00",
+  "execute_utc": "2026-10-20T09:08:21+00:00",
+  "execute_hong_kong": "2026-10-20T17:08:21+08:00",
+  "units": [
+    "qch-cert-a978-preview.service",
+    "qch-cert-a978-relay.service",
+    "qch-cert-a978-pebble.service",
+    "qch-cert-a978-challenges.service"
+  ],
+  "containers": [
+    "72f9d822fb99182886bd2ddb84ab7fe0cd20f0398e1ec2bbfb886c0cc9850d21",
+    "8fe930a10e152be90ceb5cfde5ad1530da1cb8d725abd47a1bdd386e80410912"
+  ],
+  "paths": [
+    "/root/.codex/worktrees/a978/qcontrolhub/.preview/certificate-center-a978",
+    "/root/.codex/worktrees/a978/qcontrolhub/output/playwright/certificate-center",
+    "/tmp/qch-cert-tools"
+  ]
+}

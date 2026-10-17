@@ -485,3 +485,40 @@ func (s *Store) CertificatePublicChain(ctx context.Context, id string) (string, 
 	}
 	return pair.Certificate, nil
 }
+
+// Credential rotation keeps the account identifier used by renewal orders.
+func (s *Store) UpdateCertificateDNSCredentials(ctx context.Context, id, name string, credentials certificates.DNSCredentials) (core.CertificateAccount, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.CertificateAccount{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockAgentUser(ctx, tx); err != nil {
+		return core.CertificateAccount{}, err
+	}
+	var raw []byte
+	var item core.CertificateAccount
+	if err = tx.QueryRow(ctx, `SELECT metadata FROM certificate_accounts WHERE id=$1 AND owner_id=$2 AND kind='dns' FOR UPDATE`, id, certificateActor(ctx)).Scan(&raw); err != nil {
+		return item, mapError(err)
+	}
+	if err = json.Unmarshal(raw, &item); err != nil {
+		return item, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 100 {
+		return item, ErrInvalid
+	}
+	if err = (certificates.DNSClient{Provider: item.Provider, Credentials: credentials}).Validate(); err != nil {
+		return item, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	sealed, err := s.sealCertificate(credentials)
+	if err != nil {
+		return item, err
+	}
+	item.Name = name
+	raw, _ = json.Marshal(item)
+	if _, err = tx.Exec(ctx, `UPDATE certificate_accounts SET metadata=$2,secret=$3 WHERE id=$1`, id, raw, sealed); err != nil {
+		return item, err
+	}
+	return item, tx.Commit(ctx)
+}

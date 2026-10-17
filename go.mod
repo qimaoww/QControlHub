@@ -11,9 +11,10 @@ require (
 	github.com/enfein/mieru/v3 v3.37.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/oschwald/maxminddb-golang v1.13.1
+	github.com/quic-go/quic-go v0.60.0
 	github.com/ulikunitz/xz v0.5.15
-	golang.org/x/crypto v0.41.0
-	golang.org/x/net v0.42.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/net v0.56.0
 	golang.org/x/sync v0.21.0
 	google.golang.org/grpc v1.75.1
 	google.golang.org/protobuf v1.36.6
@@ -25,7 +26,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
 )

@@ -1,0 +1,7 @@
+TimersCalendar={ OnCalendar=2026-10-20 09:08:21 UTC ; next_elapse=Tue 2026-10-20 17:08:21 CST }
+NextElapseUSecRealtime=Tue 2026-10-20 17:08:21 CST
+ActiveState=active
+UnitFileState=enabled
+Execution timezone: Asia/Hong_Kong (UTC+08:00)
+Execution: 2026-10-20T17:08:21+08:00
+Persistent=true, AccuracySec=1s; root-owned runner and manifest survive checkout changes/reboots.

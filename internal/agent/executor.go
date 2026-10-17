@@ -385,6 +385,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err == nil {
 			err = e.executeTLSFrontend(ctx, spec, task, false)
 		}
+		if err == nil {
+			err = tlsPhaseError("TLS与协议就绪检查", waitPanelCertificateListeners(ctx, task))
+		}
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if accountingWarning != "" {
 			output += "\n" + accountingWarning

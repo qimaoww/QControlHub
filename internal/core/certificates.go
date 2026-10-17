@@ -94,7 +94,8 @@ type HTTPChallenge struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 type HTTPChallengeGrant struct {
-	AgentID string `json:"agent_id"`
-	UserID  string `json:"user_id"`
-	Domain  string `json:"domain"`
+	Username string `json:"username,omitempty"`
+	AgentID  string `json:"agent_id"`
+	UserID   string `json:"user_id"`
+	Domain   string `json:"domain"`
 }

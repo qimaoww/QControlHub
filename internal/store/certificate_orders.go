@@ -220,6 +220,11 @@ func (s *Store) SetCertificateHTTPGrant(ctx context.Context, grant core.HTTPChal
 	if err = tx.QueryRow(ctx, `SELECT owner_id FROM agents WHERE id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, grant.AgentID, certificateActor(ctx)).Scan(&owner); err != nil {
 		return mapError(err)
 	}
+	if grant.Username != "" {
+		if err = tx.QueryRow(ctx, `SELECT u.id FROM panel_users u JOIN agent_shares sh ON sh.user_id=u.id WHERE u.username=$1 AND sh.agent_id=$2 AND sh.status='accepted'`, grant.Username, grant.AgentID).Scan(&grant.UserID); err != nil {
+			return mapError(err)
+		}
+	}
 	var otherOwner bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM certificate_http_grants WHERE agent_id=$1 AND domain=$2 AND user_id<>$3)`, grant.AgentID, grant.Domain, grant.UserID).Scan(&otherOwner); err != nil {
 		return err
@@ -246,7 +251,7 @@ func (s *Store) SetCertificateHTTPGrant(ctx context.Context, grant core.HTTPChal
 	return tx.Commit(ctx)
 }
 func (s *Store) CertificateHTTPGrants(ctx context.Context) ([]core.HTTPChallengeGrant, error) {
-	rows, err := s.pool.Query(ctx, `SELECT g.agent_id,g.user_id,g.domain FROM certificate_http_grants g JOIN agents a ON a.id=g.agent_id WHERE a.owner_id=$1 OR g.user_id=$1`, certificateActor(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT g.agent_id,g.user_id,g.domain,u.username FROM certificate_http_grants g JOIN agents a ON a.id=g.agent_id JOIN panel_users u ON u.id=g.user_id WHERE a.owner_id=$1 OR g.user_id=$1`, certificateActor(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +259,7 @@ func (s *Store) CertificateHTTPGrants(ctx context.Context) ([]core.HTTPChallenge
 	out := []core.HTTPChallengeGrant{}
 	for rows.Next() {
 		var g core.HTTPChallengeGrant
-		if err = rows.Scan(&g.AgentID, &g.UserID, &g.Domain); err != nil {
+		if err = rows.Scan(&g.AgentID, &g.UserID, &g.Domain, &g.Username); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -438,12 +443,17 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			if err != nil {
 				return errors.New("ACME 授权读取失败")
 			}
-			if auth.Status == acme.StatusValid {
-				continue
+			domain := auth.Identifier.Value
+			if auth.Wildcard {
+				domain = "*." + strings.TrimPrefix(domain, "*.")
 			}
 			typ := "dns-01"
 			if item.Method == "http-01" {
 				typ = "http-01"
+			}
+			if auth.Status == acme.StatusValid {
+				state.Challenges = append(state.Challenges, certificateChallengeState{AuthURL: authURL, Public: core.CertificateChallenge{Domain: domain, Type: typ, Status: auth.Status}})
+				continue
 			}
 			var challenge *acme.Challenge
 			for _, c := range auth.Challenges {
@@ -465,19 +475,23 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			if err != nil {
 				return err
 			}
-			state.Challenges = append(state.Challenges, certificateChallengeState{Public: core.CertificateChallenge{Domain: auth.Identifier.Value, Token: challenge.Token, Value: value, Name: name, Type: typ, Status: auth.Status}, URL: challenge.URI, AuthURL: authURL})
+			state.Challenges = append(state.Challenges, certificateChallengeState{Public: core.CertificateChallenge{Domain: domain, Token: challenge.Token, Value: value, Name: name, Type: typ, Status: auth.Status}, URL: challenge.URI, AuthURL: authURL})
 		}
 		if err = s.saveCertificateOrderState(ctx, id, state, "challenges_ready"); err != nil {
 			return err
 		}
 	}
-	if item.Method == "dns-manual" && status != "queued" {
+	pending := false
+	for _, challenge := range state.Challenges {
+		pending = pending || challenge.Public.Status != acme.StatusValid
+	}
+	if item.Method == "dns-manual" && pending && status != "queued" {
 		_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='waiting_dns',stage='waiting_dns',updated_at=now() WHERE id=$1 AND status<>'canceling'`, id)
 		return err
 	}
 	// A newly-created manual order stops before validation. Continue uses queued
 	// with persisted challenges and bypasses this first-visit condition.
-	if item.Method == "dns-manual" && status == "queued" && state.Cleanup == false {
+	if item.Method == "dns-manual" && pending && status == "queued" && !state.Cleanup {
 		var stage string
 		s.pool.QueryRow(ctx, `SELECT stage FROM certificate_orders WHERE id=$1`, id).Scan(&stage)
 		if stage == "challenges_ready" {
@@ -494,6 +508,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		dns := certificates.DNSClient{Provider: meta.Provider, Credentials: credentials, HTTP: s.certificateDNSHTTP}
 		for i := range state.Challenges {
 			c := &state.Challenges[i]
+			if c.Public.Status == acme.StatusValid {
+				continue
+			}
 			if s.certificateOrderCanceled(ctx, id) {
 				return errors.New("订单已取消")
 			}
@@ -538,6 +555,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	}
 	if item.Method == "http-01" {
 		for _, challenge := range state.Challenges {
+			if challenge.Public.Status == acme.StatusValid {
+				continue
+			}
 			if err = s.CheckCertificateHTTPPermission(ctx, item.AgentID, challenge.Public.Domain); err != nil {
 				return err
 			}
@@ -605,6 +625,13 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	}
 	if s.certificateOrderCanceled(ctx, id) {
 		return errors.New("订单已取消")
+	}
+	if item.Method == "http-01" {
+		for _, domain := range item.Domains {
+			if err = s.CheckCertificateHTTPPermission(ctx, item.AgentID, domain); err != nil {
+				return err
+			}
+		}
 	}
 	var pair certificates.Pair
 	if order.Status == acme.StatusValid && order.CertURL != "" {

@@ -70,7 +70,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : state.route === "certificates" ? " no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.route === "core-logs" ? { agents_online: (state.data.coreLogAgents || []).filter(agent => agent.status === "online").length } : state.data.overview || {};

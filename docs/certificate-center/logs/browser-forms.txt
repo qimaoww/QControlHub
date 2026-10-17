@@ -1,0 +1,16 @@
+=== RUN   TestCertificateBrowserSessions
+=== RUN   TestCertificateBrowserSessions/desktop
+2026/10/17 17:07:38 ERROR HTTP request failed request_id=req_240ad27a30ca0938 error="context canceled"
+2026/10/17 17:07:39 ERROR HTTP request failed request_id=req_64b540a26c1b9578 error="context canceled"
+    certificates_browser_integration_test.go:46: desktop: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        
+=== RUN   TestCertificateBrowserSessions/mobile
+2026/10/17 17:07:42 ERROR HTTP request failed request_id=req_9714f778ced4226b error="context canceled"
+2026/10/17 17:07:42 ERROR HTTP request failed request_id=req_11f51ec74ad5b245 error="context canceled"
+    certificates_browser_integration_test.go:46: mobile: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        
+--- PASS: TestCertificateBrowserSessions (6.29s)
+    --- PASS: TestCertificateBrowserSessions/desktop (3.15s)
+    --- PASS: TestCertificateBrowserSessions/mobile (3.14s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	6.519s
