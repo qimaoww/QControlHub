@@ -44,7 +44,7 @@ type Executor struct {
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex
 	sharedStateMu            sync.Mutex
-	accountingConfigs        map[core.Engine]nativeAccountingConfigEntry
+	accountingConfigs        map[string]nativeAccountingConfigEntry
 	completedMigrations      map[core.Engine]completedCoreMigration
 	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
 }

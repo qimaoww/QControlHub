@@ -54,6 +54,51 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	return configuration, nil
 }
 
+// Only the authenticated allocation selects this root-owned configuration and
+// service. An engine name alone must never select another user's counters.
+func (e *Executor) sharedAccounting(ctx context.Context, engine core.Engine, shareID string) (nativeAccountingSnapshot, error) {
+	var result nativeAccountingSnapshot
+	e.specsMu.RLock()
+	base, ok := e.Specs[engine]
+	issue := e.ExistingDiscoveryIssues[engine]
+	e.specsMu.RUnlock()
+	if !ok || base != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] || issue != "" {
+		return result, errors.New("shared accounting requires a verified managed core")
+	}
+	spec, err := sharedInstanceSpec(engine, base, shareID, e.serviceManager().Kind())
+	if err != nil {
+		return result, err
+	}
+	epoch, err := e.accountingProcessEpoch(ctx, spec)
+	if err != nil {
+		status, statusErr := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
+		if statusErr != nil || (status != "inactive" && status != "failed") {
+			return result, fmt.Errorf("cannot verify shared accounting process: %w", err)
+		}
+		// nft counters outlive the stopped process. Read the still-verified config
+		// to settle its final packets before releasing ports or revoking access.
+		epoch = "stopped"
+	}
+	content, err := readConfigurationFile(spec.ConfigPath)
+	if err != nil {
+		return result, err
+	}
+	if state, stateErr := readSharedDeploymentState(spec); stateErr == nil && state.Digest != configurationDigest(content) {
+		return result, errors.New("shared instance configuration does not match its deployed version")
+	} else if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
+		return result, stateErr
+	}
+	result, err = e.scopedAccountingConfiguration(engine, shareID, content)
+	if err != nil {
+		return result, err
+	}
+	if result.Plan.Source != "nft-dual" {
+		return result, errors.New("shared instance has no independently marked exits")
+	}
+	result.ProcessEpoch = epoch
+	return result, nil
+}
+
 func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) (string, error) {
 	if e.serviceManager().Kind() == ServiceManagerOpenRC {
 		return managedCoreProcessEpoch(spec)

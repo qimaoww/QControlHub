@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -42,34 +43,48 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		manager.rulesDirty = true
 	}
 	desired := make(map[string]*trafficRecord, len(manager.records))
-	nativeSnapshots := map[core.Engine]nativeAccountingSnapshot{}
-	nativeErrors := map[core.Engine]error{}
-	if manager.nativeSource != nil {
-		for _, record := range manager.records {
-			if record.Policy.SharedQuota != nil {
-				continue // Shared allocations use ingress network bytes only.
-			}
-			engine := record.Policy.Engine
-			if _, checked := nativeErrors[engine]; checked {
+	type sourceKey struct {
+		engine  core.Engine
+		shareID string
+	}
+	snapshots := map[sourceKey]nativeAccountingSnapshot{}
+	sourceErrors := map[sourceKey]error{}
+	for _, record := range manager.records {
+		key := sourceKey{engine: record.Policy.Engine, shareID: sharedQuotaID(record.Policy.SharedQuota)}
+		if _, checked := sourceErrors[key]; checked {
+			continue
+		}
+		var snapshot nativeAccountingSnapshot
+		var err error
+		if key.shareID != "" {
+			if manager.sharedSource == nil {
 				continue
 			}
-			snapshot, err := manager.nativeSource(ctx, engine)
-			nativeSnapshots[engine], nativeErrors[engine] = snapshot, err
+			snapshot, err = manager.sharedSource(ctx, key.engine, key.shareID)
+		} else {
+			if manager.nativeSource == nil {
+				continue
+			}
+			snapshot, err = manager.nativeSource(ctx, key.engine)
 		}
+		snapshots[key], sourceErrors[key] = snapshot, err
 	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
 		shared := record.Policy.SharedQuota != nil
-		nativeAllowed := !shared && nativeAccountingScopeAllowed(record.Policy, nativeSnapshots[record.Policy.Engine])
+		key := sourceKey{record.Policy.Engine, sharedQuotaID(record.Policy.SharedQuota)}
+		snapshot, sourceErr := snapshots[key], sourceErrors[key]
+		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
+		nativeAllowed := hasSource && nativeAccountingScopeAllowed(record.Policy, snapshot)
 		// A transient source failure must freeze an established native baseline,
 		// not change its scope or substitute listener bytes.
-		if !shared && nativeErrors[record.Policy.Engine] != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
+		if hasSource && sourceErr != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
 			nativeAllowed = true
 		}
 		// Core counters and per-port marks do not distinguish the originating
 		// listener transport. A TCP-only policy must not bill another UDP flow
 		// (nor mistake a QUIC outbound carrying TCP for a UDP listener flow).
-		if (manager.nativeSource != nil || shared) && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
+		if hasSource && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
 			epoch, err := randomSuffix(16)
 			if err != nil {
 				return manager.setUnavailableLocked(err)
@@ -99,17 +114,40 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		previousRecord.KernelCounters = maps.Clone(record.KernelCounters)
 		previousRecord.Accounting = cloneTrafficAccounting(record.Accounting)
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
-		if manager.nativeSource != nil && nativeAllowed {
-			err := nativeErrors[record.Policy.Engine]
+		if hasSource && (nativeAllowed || shared) {
+			err := sourceErr
 			if err == nil {
 				previousEpoch := record.CounterEpoch
-				if nativeSnapshots[record.Policy.Engine].Plan.Source == "nft-dual" {
-					err = prepareMarkedAccounting(record, nativeSnapshots[record.Policy.Engine])
+				if snapshot.Plan.Source == "nft-dual" {
+					err = prepareMarkedAccounting(record, snapshot)
 					if err == nil {
-						receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, previousEpoch != record.CounterEpoch)
+						if shared && previousEpoch != record.CounterEpoch &&
+							(previousRecord.Accounting == nil || previousRecord.Accounting.Source == "listener") {
+							// A restored checkpoint has no in-memory collection time.
+							// Reconcile its last listener interval against the server's
+							// acknowledged lifetime, including any replay overlap.
+							quota := record.Policy.SharedQuota
+							if quota.CounterEpoch != previousRecord.CounterEpoch {
+								receivedDelta, sentDelta = 0, 0
+							} else {
+								if quota.LifetimeReceivedBytes > previousRecord.LifetimeReceivedBytes {
+									overlap := quota.LifetimeReceivedBytes - previousRecord.LifetimeReceivedBytes
+									receivedDelta -= min(receivedDelta, overlap)
+								}
+								if quota.LifetimeSentBytes > previousRecord.LifetimeSentBytes {
+									overlap := quota.LifetimeSentBytes - previousRecord.LifetimeSentBytes
+									sentDelta -= min(sentDelta, overlap)
+								}
+							}
+							// Target counters start at zero; no historical exit is estimated.
+							record.Accounting.ClientReceived = saturatedTrafficAdd(record.Accounting.ClientReceived, receivedDelta)
+							record.Accounting.ClientSent = saturatedTrafficAdd(record.Accounting.ClientSent, sentDelta)
+						} else {
+							receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, previousEpoch != record.CounterEpoch)
+						}
 					}
 				} else {
-					receivedDelta, sentDelta, err = collectNativeAccounting(record, nativeSnapshots[record.Policy.Engine])
+					receivedDelta, sentDelta, err = collectNativeAccounting(record, snapshot)
 				}
 				if previousEpoch != record.CounterEpoch {
 					manager.rulesDirty = true
@@ -122,12 +160,23 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				if len(record.AccountingError) > 400 {
 					record.AccountingError = record.AccountingError[:400]
 				}
-				if record.Accounting != nil && record.Accounting.Source != "listener" {
+				if shared || record.Accounting != nil && record.Accounting.Source != "listener" {
 					// Preserve native baselines and do not substitute network bytes.
 					message := record.AccountingError
 					*record = previousRecord
 					record.AccountingError = message
+					if record.PeriodStart.IsZero() || record.PeriodEnd.IsZero() {
+						record.PeriodStart, record.PeriodEnd = periodStart, periodEnd
+					}
 					record.ReceiveBPS, record.SendBPS = 0, 0
+					// Invalid attribution stops only this allocation. Stopped or not-yet
+					// deployed services remain deployable under listener quota protection.
+					if shared && manager.haltShare != nil && !errors.Is(err, os.ErrNotExist) {
+						manager.haltReason = "共享出口计量不可用，实例已保护性停止；请检查统计状态并重新部署"
+						if stopErr := manager.haltShare(ctx, record.Policy.Engine, record.Policy.SharedQuota.ID); stopErr != nil {
+							record.AccountingError += "; stop instance: " + stopErr.Error()
+						}
+					}
 					next := *record
 					// Explicit quota relaxation and calendar expiry do not depend
 					// on a working stats API. Keep accounting timestamps intact
@@ -144,11 +193,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				}
 			}
 		}
-		if shared {
-			record.AccountingError = ""
-		} else if manager.nativeSource != nil && !nativeAllowed {
+		if !shared && manager.nativeSource != nil && !nativeAllowed {
 			record.AccountingError = "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
-			if sourceErr := nativeErrors[record.Policy.Engine]; sourceErr != nil {
+			if sourceErr != nil {
 				record.AccountingError = sourceErr.Error()
 				if len(record.AccountingError) > 400 {
 					record.AccountingError = record.AccountingError[:400]

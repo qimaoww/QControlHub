@@ -1,0 +1,6 @@
+=== RUN   TestSharedMissingTargetReceiveReproduction
+    shared_missing_exit_repro_linux_test.go:14: missing shared exit: received=10 sent=1000; expected received=910 sent=1020
+--- FAIL: TestSharedMissingTargetReceiveReproduction (0.01s)
+FAIL
+FAIL	github.com/qimaoww/qcontrolhub/internal/agent	0.336s
+FAIL

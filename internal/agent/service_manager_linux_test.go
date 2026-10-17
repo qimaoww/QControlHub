@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,26 @@ func TestOpenRCServiceManagerRestartsActiveService(t *testing.T) {
 	}
 	if got := string(commands); got != "qagent-xray status\nqagent-xray restart\n" {
 		t.Fatalf("OpenRC commands = %q", got)
+	}
+}
+
+func TestOpenRCMissingBaseDoesNotFailSharedEnforcement(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			directory := t.TempDir()
+			helper := filepath.Join(directory, "rc-service")
+			output := "permission denied"
+			if missing {
+				output = " * rc-service: service `qagent-sing-box' does not exist"
+			}
+			writeExecutable(t, helper, "#!/bin/sh\nif [ \"$2\" != status ]; then exit 99; fi\ncat <<'EOF'\n"+output+"\nEOF\nexit 1\n")
+			manager := &ServiceManager{kind: ServiceManagerOpenRC, executable: helper}
+			base := DefaultSpecsForServiceManager(ServiceManagerOpenRC)[core.EngineSingBox]
+			err := stopLegacySharedBase(context.Background(), manager, core.EngineSingBox, base, []int{25101})
+			if (err == nil) != missing {
+				t.Fatalf("missing=%v legacy enforcement error: %v", missing, err)
+			}
+		})
 	}
 }
 

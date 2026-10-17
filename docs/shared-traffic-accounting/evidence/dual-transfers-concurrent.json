@@ -1,0 +1,42 @@
+[
+  {
+    "application_bytes": 4194304,
+    "direction": "download",
+    "label": "A-download",
+    "seconds": 0.567464717,
+    "sha256": "cf83d9e79fa234f1e6b6eaff9084ca8495008df6bbb80c71559d87db7fdb0521",
+    "verified": true
+  },
+  {
+    "application_bytes": 2097152,
+    "direction": "upload",
+    "label": "A-second-upload",
+    "seconds": 0.287593799,
+    "sha256": "b96e6644f734e2f6371c60307294a0e092128fe6fc964e2d2bb80012ac4b9be8",
+    "verified": true
+  },
+  {
+    "application_bytes": 1048576,
+    "direction": "download",
+    "label": "A-second-download",
+    "seconds": 0.148940507,
+    "sha256": "8e0c97c153d2dfe7cef29787cb318a7934e10e708038d161a0484b97a3490985",
+    "verified": true
+  },
+  {
+    "application_bytes": 4194304,
+    "direction": "upload",
+    "label": "B-upload",
+    "seconds": 0.569063679,
+    "sha256": "cf83d9e79fa234f1e6b6eaff9084ca8495008df6bbb80c71559d87db7fdb0521",
+    "verified": true
+  },
+  {
+    "application_bytes": 2097152,
+    "direction": "download",
+    "label": "B-download",
+    "seconds": 0.297221786,
+    "sha256": "b96e6644f734e2f6371c60307294a0e092128fe6fc964e2d2bb80012ac4b9be8",
+    "verified": true
+  }
+]

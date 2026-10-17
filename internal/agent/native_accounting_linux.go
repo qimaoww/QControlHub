@@ -27,31 +27,46 @@ type nativeAccountingConfigEntry struct {
 
 // Cache only immutable, content-derived metadata, never counters or process
 // identity. Every sample still securely reads the file and checks the live core.
-// A single entry per engine bounds memory and also avoids recompiling unchanged
+// One entry per engine and allocation bounds memory and avoids recompiling unchanged
 // invalid configurations every second. Changes and rollbacks are checked at once.
 func (e *Executor) accountingConfiguration(engine core.Engine, content string) (nativeAccountingSnapshot, error) {
 	if !engine.Valid() {
 		return nativeAccountingSnapshot{}, errors.New("invalid accounting engine")
 	}
+	return e.scopedAccountingConfiguration(engine, "", content)
+}
+
+func (e *Executor) scopedAccountingConfiguration(engine core.Engine, shareID, content string) (nativeAccountingSnapshot, error) {
+	key := string(engine) + "/" + shareID
 	digest := sha256.Sum256([]byte(content))
 	e.accountingConfigMu.Lock()
 	defer e.accountingConfigMu.Unlock()
-	if entry, ok := e.accountingConfigs[engine]; ok && entry.digest == digest {
+	if entry, ok := e.accountingConfigs[key]; ok && entry.digest == digest {
 		return entry.snapshot, entry.err
 	}
-	snapshot, err := compileAccountingConfiguration(engine, content)
+	snapshot, err := compileScopedAccountingConfiguration(engine, shareID, content)
 	if e.accountingConfigs == nil {
-		e.accountingConfigs = make(map[core.Engine]nativeAccountingConfigEntry)
+		e.accountingConfigs = make(map[string]nativeAccountingConfigEntry)
 	}
-	e.accountingConfigs[engine] = nativeAccountingConfigEntry{digest: digest, snapshot: snapshot, err: err}
+	if len(e.accountingConfigs) >= 260 {
+		clear(e.accountingConfigs)
+	}
+	e.accountingConfigs[key] = nativeAccountingConfigEntry{digest: digest, snapshot: snapshot, err: err}
 	return snapshot, err
 }
 
 // The returned plan and listener map are read-only to accounting consumers.
 func compileAccountingConfiguration(engine core.Engine, content string) (nativeAccountingSnapshot, error) {
+	return compileScopedAccountingConfiguration(engine, "", content)
+}
+
+func compileScopedAccountingConfiguration(engine core.Engine, shareID, content string) (nativeAccountingSnapshot, error) {
 	plan, err := serverconfig.PrepareAccounting(engine, content)
 	if engine == core.EngineSingBox && (err != nil || !strings.Contains(content, `"v2ray_api"`)) {
 		plan, err = serverconfig.PrepareMarkedSingBoxAccounting(content)
+	}
+	if shareID != "" {
+		plan, err = serverconfig.PrepareSharedAccounting(engine, content)
 	}
 	if err != nil {
 		return nativeAccountingSnapshot{}, err

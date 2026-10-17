@@ -501,3 +501,38 @@ func TestSharedTrafficActivationGuardRejectsOlderValidCheckpoint(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedTrafficAcknowledgedEpochRepairsRestoredPendingUsage(t *testing.T) {
+	manager, backend, policies, now := sharedTrafficFixture(t)
+	for i := range policies {
+		policies[i].SharedQuota.LimitBytes = 10000
+	}
+	if err := manager.SetPolicies(context.Background(), policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range policies[:2] {
+		record := manager.records[p.ID]
+		backend.counters[trafficCounterName(record, "in", "tcp")] = uint64(100 * (i + 1))
+	}
+	*now = now.Add(time.Second)
+	manager.collect(context.Background(), false)
+	for i := range policies[:2] {
+		record := manager.records[policies[i].ID]
+		q := *policies[i].SharedQuota
+		q.UsedBytes = 300
+		q.PortUsedBytes = record.ShareUsedBytes
+		q.CounterEpoch = record.CounterEpoch
+		q.LifetimeReceivedBytes = record.LifetimeReceivedBytes
+		q.LifetimeSentBytes = record.LifetimeSentBytes
+		policies[i].SharedQuota = &q
+		// A checkpoint can retain a larger quota counter than its accepted epoch
+		// baseline. The server's actual settled counter is the reconciliation key.
+		record.ShareUsedBytes += 700
+	}
+	if err := manager.SetPolicies(context.Background(), policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedTrafficUsed(manager.records, policies[0].SharedQuota.ID); got != 300 {
+		t.Fatalf("acknowledged epoch retained phantom pending bytes: %d", got)
+	}
+}

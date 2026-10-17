@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,7 +339,9 @@ func TestAgentInvitationEditsAndResponsesPreserveTrafficLockOrder(t *testing.T) 
 		for _, policy := range policies {
 			start, end, _ := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
 			usages = append(usages, core.PortTrafficUsage{PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration,
-				ShareID: policy.SharedQuota.ID, ShareUsedBytes: total, PeriodStart: start, PeriodEnd: end})
+				ShareID: policy.SharedQuota.ID, ShareUsedBytes: total, PeriodStart: start, PeriodEnd: end,
+				ReceivedBytes: total, UsedBytes: total, LifetimeReceivedBytes: total, CounterEpoch: strings.Repeat("a", 32),
+				CollectedAt: now.Add(time.Duration(total) * time.Millisecond), EnforcementAvailable: true})
 		}
 		return db.UpdatePortTrafficUsage(ctx, agent.ID, usages, now.Add(time.Duration(total)*time.Millisecond))
 	}

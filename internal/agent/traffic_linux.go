@@ -56,6 +56,7 @@ type trafficState struct {
 
 type TrafficManager struct {
 	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
+	sharedSource     func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
 	haltShared       func(context.Context, core.Engine) error
 	haltReason       string // Set under mu before invoking the stop callbacks.
 	haltLegacyShared func(context.Context, core.Engine, []int) error
@@ -194,6 +195,8 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			}
 			group := quota
 			group.PortUsedBytes = 0
+			group.CounterEpoch = ""
+			group.LifetimeReceivedBytes, group.LifetimeSentBytes = 0, 0
 			if previous, exists := groups[quota.ID]; exists && !sameSharedQuota(&previous, &group) {
 				return errors.New("control plane returned inconsistent shared allocation totals")
 			}
@@ -269,6 +272,17 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		}
 		if policy.SharedQuota != nil {
 			record.ShareUsedBytes = max(sharedUsed, policy.SharedQuota.PortUsedBytes)
+			quota := policy.SharedQuota
+			if quota.CounterEpoch != "" && record.CounterEpoch == quota.CounterEpoch {
+				var pendingRX, pendingTX uint64
+				if record.LifetimeReceivedBytes > quota.LifetimeReceivedBytes {
+					pendingRX = record.LifetimeReceivedBytes - quota.LifetimeReceivedBytes
+				}
+				if record.LifetimeSentBytes > quota.LifetimeSentBytes {
+					pendingTX = record.LifetimeSentBytes - quota.LifetimeSentBytes
+				}
+				record.ShareUsedBytes = saturatedTrafficAdd(quota.PortUsedBytes, saturatedTrafficAdd(pendingRX, pendingTX))
+			}
 		} else {
 			record.ShareUsedBytes = 0
 		}

@@ -1,0 +1,41 @@
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/failed
+2026/10/17 22:00:49 INFO waiting for PostgreSQL migration lock backend_pid=64
+2026/10/17 22:00:49 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:49 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=182.716585ms
+    shared_traffic_settlement_test.go:44: failed: accepted=100 shared=5000; want both 100
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/old-generation
+2026/10/17 22:00:49 INFO waiting for PostgreSQL migration lock backend_pid=68
+2026/10/17 22:00:49 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:49 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=170.916401ms
+    shared_traffic_settlement_test.go:44: old-generation: accepted=100 shared=5000; want both 100
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/duplicate
+2026/10/17 22:00:50 INFO waiting for PostgreSQL migration lock backend_pid=72
+2026/10/17 22:00:50 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:50 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=193.305712ms
+    shared_traffic_settlement_test.go:44: duplicate: accepted=200 shared=5000; want both 100
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/late
+2026/10/17 22:00:50 INFO waiting for PostgreSQL migration lock backend_pid=76
+2026/10/17 22:00:50 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:50 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=188.485239ms
+    shared_traffic_settlement_test.go:44: late: accepted=100 shared=5000; want both 100
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/rollback
+2026/10/17 22:00:51 INFO waiting for PostgreSQL migration lock backend_pid=80
+2026/10/17 22:00:51 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:51 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=176.908702ms
+    shared_traffic_settlement_test.go:44: rollback: accepted=100 shared=5000; want both 100
+=== RUN   TestSharedTrafficSettlesOnlyAcceptedDeltas/restart
+2026/10/17 22:00:51 INFO waiting for PostgreSQL migration lock backend_pid=84
+2026/10/17 22:00:51 INFO applying PostgreSQL schema migration from_version=0 to_version=77 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/17 22:00:51 INFO PostgreSQL schema migration committed from_version=0 to_version=77 elapsed=197.393523ms
+    shared_traffic_settlement_test.go:44: restart: accepted=140 shared=100; want both 140
+--- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas (2.64s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/failed (0.43s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/old-generation (0.41s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/duplicate (0.44s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/late (0.44s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/rollback (0.44s)
+    --- FAIL: TestSharedTrafficSettlesOnlyAcceptedDeltas/restart (0.48s)
+FAIL
+FAIL	github.com/qimaoww/qcontrolhub/internal/store	2.868s
+FAIL

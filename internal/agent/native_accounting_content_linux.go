@@ -28,6 +28,16 @@ func (e *Executor) prepareNativeAccountingContent(ctx context.Context, engine co
 			return content, "independent egress unavailable: " + err.Error()
 		}
 	}
+	if isSharedInstanceSpec(engine, spec, e.serviceManager().Kind()) {
+		plan, err := serverconfig.PrepareSharedAccounting(engine, content)
+		if err != nil {
+			return content, "shared accounting unavailable: " + err.Error()
+		}
+		if err := checkOutboundMarkRouting(ctx); err != nil {
+			return content, "shared accounting unavailable: " + err.Error()
+		}
+		return plan.Content, ""
+	}
 	if engine == core.EngineSingBox {
 		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 			return content, "native accounting unavailable: " + err.Error()

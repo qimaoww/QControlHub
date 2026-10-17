@@ -8,10 +8,34 @@ import (
 )
 
 // SharedInstanceRuntimeContent removes fixed local statistics APIs from a
-// private process. Shared quotas use authenticated per-port ingress counters;
+// private process. Both legs use verified, per-port socket marks;
 // keeping the generated 10085/10086 listeners would make two processes of the
 // same engine fight for the same loopback port. The independent exits remain.
 func SharedInstanceRuntimeContent(engine core.Engine, content string) (string, error) {
+	plan, err := PrepareSharedAccounting(engine, content)
+	return plan.Content, err
+}
+
+// PrepareSharedAccounting never exposes a fixed statistics API shared by two
+// users' processes. Every permitted exit is tied to its allocated listener.
+func PrepareSharedAccounting(engine core.Engine, content string) (AccountingPlan, error) {
+	initial, err := PrepareIndependentEgress(engine, content)
+	if err == nil && initial.Source == "disabled" {
+		runtime, stripErr := stripSharedStatisticsAPI(engine, initial.Content)
+		initial.Content = runtime
+		return initial, stripErr
+	}
+	plan, err := prepareAccounting(engine, content, true)
+	if err != nil {
+		return plan, err
+	}
+	runtime, err := stripSharedStatisticsAPI(engine, plan.Content)
+	plan.Content = runtime
+	plan.API = ""
+	return plan, err
+}
+
+func stripSharedStatisticsAPI(engine core.Engine, content string) (string, error) {
 	if engine != core.EngineXray && engine != core.EngineSingBox {
 		return content, nil
 	}

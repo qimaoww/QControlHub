@@ -1,0 +1,898 @@
+[
+  {
+    "phase": "dual-before",
+    "time": "2026-10-17T15:24:42.983131+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 5403338,
+          "sent_bytes": 4284267,
+          "used_bytes": 9687605,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:24:43.097301Z",
+          "share_used_bytes": 12900018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 2132330,
+          "sent_bytes": 1080083,
+          "used_bytes": 3212413,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:24:43.097301Z",
+          "share_used_bytes": 12900018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 4395182,
+          "sent_bytes": 2158820,
+          "used_bytes": 6554002,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:24:43.097301Z",
+          "share_used_bytes": 6554002,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-after-download",
+    "time": "2026-10-17T15:25:07.611848+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 9654058,
+          "sent_bytes": 8548547,
+          "used_bytes": 18202605,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:25:07.102459Z",
+          "share_used_bytes": 21415018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 29331,
+            "client_sent": 4237202,
+            "target_received": 4221389,
+            "target_sent": 27078
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 2132330,
+          "sent_bytes": 1080083,
+          "used_bytes": 3212413,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:25:07.102459Z",
+          "share_used_bytes": 21415018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 4395182,
+          "sent_bytes": 2158820,
+          "used_bytes": 6554002,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:25:08.230249Z",
+          "share_used_bytes": 6554002,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-capture-before",
+    "time": "2026-10-17T15:26:13.561087+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 9654058,
+          "sent_bytes": 8548547,
+          "used_bytes": 18202605,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:13.096525Z",
+          "share_used_bytes": 21415018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 29331,
+            "client_sent": 4237202,
+            "target_received": 4221389,
+            "target_sent": 27078
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 2132330,
+          "sent_bytes": 1080083,
+          "used_bytes": 3212413,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:13.096525Z",
+          "share_used_bytes": 21415018,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 4395182,
+          "sent_bytes": 2158820,
+          "used_bytes": 6554002,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:14.097245Z",
+          "share_used_bytes": 6554002,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-only",
+    "time": "2026-10-17T15:26:18.031235+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 13920303,
+          "sent_bytes": 12799569,
+          "used_bytes": 26719872,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:18.097764Z",
+          "share_used_bytes": 29932285,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4268402,
+            "client_sent": 4266728,
+            "target_received": 4248563,
+            "target_sent": 4248574
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 2132330,
+          "sent_bytes": 1080083,
+          "used_bytes": 3212413,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:18.097764Z",
+          "share_used_bytes": 29932285,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 4395182,
+          "sent_bytes": 2158820,
+          "used_bytes": 6554002,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:26:18.097764Z",
+          "share_used_bytes": 6554002,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 0,
+            "client_sent": 0,
+            "target_received": 0,
+            "target_sent": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-concurrent",
+    "time": "2026-10-17T15:27:01.561244+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 18171023,
+          "sent_bytes": 17064018,
+          "used_bytes": 35235041,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:27:01.097448Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4297733,
+            "client_sent": 8504099,
+            "target_received": 8469952,
+            "target_sent": 4275652
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:27:01.097448Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:27:02.097589Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-before-restarts",
+    "time": "2026-10-17T15:28:11.974789+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 18171023,
+          "sent_bytes": 17064018,
+          "used_bytes": 35235041,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:12.097289Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4297733,
+            "client_sent": 8504099,
+            "target_received": 8469952,
+            "target_sent": 4275652
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:12.097289Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:12.097289Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-after-restarts",
+    "time": "2026-10-17T15:28:19.555794+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 18171023,
+          "sent_bytes": 17064018,
+          "used_bytes": 35235041,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:19.402284Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4297733,
+            "client_sent": 8504099,
+            "target_received": 8469952,
+            "target_sent": 4275652
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:19.402284Z",
+          "share_used_bytes": 44843520,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:19.402284Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-capture-final",
+    "time": "2026-10-17T15:28:23.652076+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 19240092,
+          "sent_bytes": 18129376,
+          "used_bytes": 37369468,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:23.403024Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 5359544,
+            "client_sent": 8513709,
+            "target_received": 8477210,
+            "target_sent": 5331400
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:23.403024Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:28:23.403024Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-owner-system-before",
+    "time": "2026-10-17T15:30:18.026565+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 19240092,
+          "sent_bytes": 18129376,
+          "used_bytes": 37369468,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:18.402868Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 5359544,
+            "client_sent": 8513709,
+            "target_received": 8477210,
+            "target_sent": 5331400
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:18.402868Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:18.402868Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-owner-system-after",
+    "time": "2026-10-17T15:30:18.959808+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 19240092,
+          "sent_bytes": 18129376,
+          "used_bytes": 37369468,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:18.402868Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 5359544,
+            "client_sent": 8513709,
+            "target_received": 8477210,
+            "target_sent": 5331400
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:18.402868Z",
+          "share_used_bytes": 46977947,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10788453,
+          "sent_bytes": 8543861,
+          "used_bytes": 19332314,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:30:19.402522Z",
+          "share_used_bytes": 19332314,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4255120,
+            "client_sent": 2149831,
+            "target_received": 2138151,
+            "target_sent": 4235210
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-before-udp",
+    "time": "2026-10-17T15:31:10.578914+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 19310037,
+          "sent_bytes": 18199250,
+          "used_bytes": 37509287,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:31:10.402517Z",
+          "share_used_bytes": 47117766,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 5428473,
+            "client_sent": 8517117,
+            "target_received": 8478226,
+            "target_sent": 5397866
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:31:10.402517Z",
+          "share_used_bytes": 47117766,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10858398,
+          "sent_bytes": 8613695,
+          "used_bytes": 19472093,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:31:10.402517Z",
+          "share_used_bytes": 19472093,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4324049,
+            "client_sent": 2153199,
+            "target_received": 2139167,
+            "target_sent": 4301676
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "dual-after-udp",
+    "time": "2026-10-17T15:32:42.153928+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 20437323,
+          "sent_bytes": 19324140,
+          "used_bytes": 39761463,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:32:42.402176Z",
+          "share_used_bytes": 49369942,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 6012015,
+            "client_sent": 9098263,
+            "target_received": 9021970,
+            "target_sent": 5941610
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:32:42.402176Z",
+          "share_used_bytes": 49369942,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10858398,
+          "sent_bytes": 8613695,
+          "used_bytes": 19472093,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:32:42.402176Z",
+          "share_used_bytes": 19472093,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4324049,
+            "client_sent": 2153199,
+            "target_received": 2139167,
+            "target_sent": 4301676
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "isolation-before",
+    "time": "2026-10-17T15:35:20.801621+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 20437323,
+          "sent_bytes": 19324140,
+          "used_bytes": 39761463,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:20.404589Z",
+          "share_used_bytes": 49369942,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 6012015,
+            "client_sent": 9098263,
+            "target_received": 9021970,
+            "target_sent": 5941610
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:20.404589Z",
+          "share_used_bytes": 49369942,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10858398,
+          "sent_bytes": 8613695,
+          "used_bytes": 19472093,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:21.403006Z",
+          "share_used_bytes": 19472093,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4324049,
+            "client_sent": 2153199,
+            "target_received": 2139167,
+            "target_sent": 4301676
+          }
+        }
+      ]
+    }
+  },
+  {
+    "phase": "isolation-after",
+    "time": "2026-10-17T15:35:25.207065+00:00",
+    "users": {
+      "alice": [
+        {
+          "id": "trf_01ac539b6cd56b8a",
+          "port": 25101,
+          "received_bytes": 24703576,
+          "sent_bytes": 23575099,
+          "used_bytes": 48278675,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:25.40218Z",
+          "share_used_bytes": 57887154,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 10251146,
+            "client_sent": 9127778,
+            "target_received": 9049092,
+            "target_sent": 10163054
+          }
+        },
+        {
+          "id": "trf_9482fbbb8c62b5ef",
+          "port": 25102,
+          "received_bytes": 5332425,
+          "sent_bytes": 4276054,
+          "used_bytes": 9608479,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:25.40218Z",
+          "share_used_bytes": 57887154,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 2130488,
+            "client_sent": 1077881,
+            "target_received": 1069607,
+            "target_sent": 2118090
+          }
+        }
+      ],
+      "bob": [
+        {
+          "id": "trf_34546b4277073f0d",
+          "port": 25201,
+          "received_bytes": 10858398,
+          "sent_bytes": 8613695,
+          "used_bytes": 19472093,
+          "enforcement_available": true,
+          "enforcement_error": null,
+          "last_collected_at": "2026-10-17T15:35:25.40218Z",
+          "share_used_bytes": 19472093,
+          "source": "nft-dual",
+          "legs": {
+            "client_received": 4324049,
+            "client_sent": 2153199,
+            "target_received": 2139167,
+            "target_sent": 4301676
+          }
+        }
+      ]
+    }
+  }
+]
