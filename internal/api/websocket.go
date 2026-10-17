@@ -89,7 +89,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(trafficPolicies, false)}); err != nil {
+	if err := writeWire(ctx, connection, trafficPolicyHello(trafficPolicies, false)); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -154,7 +154,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
+			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return err
 			}
 		}
@@ -177,7 +177,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
+			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return
 			}
 		case <-ctx.Done():
@@ -234,14 +234,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					if err != nil {
 						return
 					}
-					for _, policy := range policies {
-						if policy.SharedQuota == nil {
-							continue
-						}
-						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, true)}); err != nil {
+					// Send even an empty policy set: a share may have been revoked
+					// while this Agent was disconnected.
+					if hasSharedTrafficPolicies(trafficPolicies) || hasSharedTrafficPolicies(policies) {
+						if err := writeWire(ctx, connection, trafficPolicyHello(policies, true)); err != nil {
 							return
 						}
-						break
 					}
 					if managedPublicIPProbe {
 						probeConfig := effectivePublicIPProbe

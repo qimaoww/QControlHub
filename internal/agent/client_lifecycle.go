@@ -116,7 +116,9 @@ func (c *Client) Run(ctx context.Context) error {
 			if !exists {
 				return errors.New("shared core service is not configured")
 			}
-			return stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec)
+			c.executor.sharedStateMu.Lock()
+			defer c.executor.sharedStateMu.Unlock()
+			return stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec, c.traffic.haltReason)
 		}
 		c.traffic.haltLegacyShared = func(ctx context.Context, engine core.Engine, ports []int) error {
 			c.executor.specsMu.RLock()
@@ -144,6 +146,11 @@ func (c *Client) Run(ctx context.Context) error {
 				return err
 			}
 			_, err = c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
+			if err == nil {
+				c.executor.sharedStateMu.Lock()
+				rememberSharedStopReason(spec, c.traffic.haltReason)
+				c.executor.sharedStateMu.Unlock()
+			}
 			return errors.Join(err, stopServiceTLSFrontends(ctx, c.executor.serviceManager(), engine, spec))
 		}
 		if c.traffic.awaitingPolicies {
@@ -450,6 +457,11 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				// old process running forever with a new binary on disk.
 				if c.committedUpgradeAwaitingRestart() {
 					go c.reexecAfterUpgrade()
+				}
+				// Retain the persisted quota and nftables enforcement during the
+				// handshake. A provisional denial is not a share revocation.
+				if message.TrafficPoliciesPending {
+					continue
 				}
 				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)

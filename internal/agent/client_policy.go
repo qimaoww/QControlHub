@@ -130,7 +130,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureIPQuality,
 	}
 	if sharedCoreTemplatesSupported(c.executor.Specs, c.executor.serviceManager()) {
-		features = append(features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare)
+		features = append(features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle)
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)

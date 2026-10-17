@@ -44,7 +44,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
         if (
           intent === "deploy" &&
           !(await confirmAction(
-            "确定保存当前源码、替换此主机该内核的当前配置并重启服务？同一内核只运行一份配置，可能影响其他用户的已部署服务。",
+            agent.can_manage === false ? "确定保存并部署到本人的独立实例？部署后启动实例并检查运行结果；失败时保留草稿并恢复上一有效配置。" : "确定保存当前源码、替换此主机该内核的基础服务配置并启动服务？",
             "保存并部署",
           ))
         )
@@ -77,7 +77,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           },
         });
         if (accountData !== state.data) return;
-        if (intent === "save") notify("个人配置已保存");
+        if (intent === "save") notify("已保存，尚未部署");
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
         }

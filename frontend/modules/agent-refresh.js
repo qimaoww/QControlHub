@@ -2,6 +2,7 @@ import { coreInstallBlockReason } from "./core-install-state.js";
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
 import { updateAgentPresence } from "./agent-presence.js";
+import { sharedInstancePresentation, sharedAllocationText, updateSharedInstanceMarkup } from "./shared-instance-state.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -229,16 +230,18 @@ function updateAgentMetrics(item) {
     const service = root.querySelector(
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
+    const instanceState = sharedInstancePresentation(item, engine);
+    updateSharedInstanceMarkup(root, item, engine, date);
     if (service) {
-      service.textContent = existingUnsupportedReason
+      service.textContent = instanceState?.label || (existingUnsupportedReason
         ? "检测到但不可迁移"
         : !capabilityEnabled
         ? "能力已关闭"
         : installed
         ? serviceStatusName(runtime.service_status)
-        : "未安装";
+        : "未安装");
       service.closest(".engine-state").className =
-        `engine-state ${existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed ? statusTone(runtime.service_status) : "muted"}`;
+        `engine-state ${instanceState?.tone || (existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed ? statusTone(runtime.service_status) : "muted")}`;
       service
         .closest(".service-card")
         ?.querySelectorAll("[data-service-action]")
@@ -249,7 +252,8 @@ function updateAgentMetrics(item) {
             installed,
             runtime.service_status,
             item,
-          ) || !capabilityEnabled || (button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
+            engine,
+          ) || Boolean(state.data.instanceTasks?.[`${item.id}|${engine}`]) || !capabilityEnabled || (item.can_manage !== false && button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
         });
     }
   });
@@ -258,7 +262,7 @@ function updateAgentMetrics(item) {
     const installedCount = (item.capabilities || []).filter(
       (engine) => item.runtime?.[engine]?.installed,
     ).length;
-    installedSummary.textContent = `${item.os || ""} / ${item.arch || ""} · ${
+    installedSummary.textContent = item.can_manage === false ? sharedAllocationText(item, bytes) : `${item.os || ""} / ${item.arch || ""} · ${
       installedCount
         ? `${installedCount}/${(item.capabilities || []).length} 内核已安装`
         : "尚未安装内核"

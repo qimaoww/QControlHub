@@ -100,3 +100,88 @@ func TestRunWebSocketAppliesCapabilityGatedPublicIPProbeMessage(t *testing.T) {
 		t.Fatalf("runWebSocket after cancellation: %v", err)
 	}
 }
+
+func TestWebSocketReconnectRetainsEnforcementUntilVerifiedPolicy(t *testing.T) {
+	requireAgentRoot(t)
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, _, policies, _ := sharedTrafficFixture(t)
+	const id = "agt_0123456789abcdef"
+	for i := range policies {
+		policies[i].AgentID = id
+	}
+	if err := manager.SetPolicies(context.Background(), policies, id); err != nil {
+		t.Fatal(err)
+	}
+	halted := make(chan string, 8)
+	manager.haltShare = func(_ context.Context, _ core.Engine, share string) error { halted <- share; return nil }
+	heartbeatSeen, verify := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"qcontrolhub.agent.v1"}})
+		if err != nil {
+			return
+		}
+		defer connection.Close(websocket.StatusNormalClosure, "test complete")
+		pending := append([]core.PortTrafficPolicy(nil), policies...)
+		for i := range pending {
+			quota := *pending[i].SharedQuota
+			quota.Revoked = true
+			pending[i].SharedQuota = &quota
+		}
+		if wsjson.Write(r.Context(), connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: pending, TrafficPoliciesPending: true}) != nil {
+			return
+		}
+		var heartbeat core.WireMessage
+		if wsjson.Read(r.Context(), connection, &heartbeat) != nil || heartbeat.Heartbeat == nil {
+			return
+		}
+		close(heartbeatSeen)
+		select {
+		case <-verify:
+		case <-r.Context().Done():
+			return
+		}
+		// A genuine post-verification revocation must still stop the instance.
+		if wsjson.Write(r.Context(), connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: pending}) != nil {
+			return
+		}
+		var last core.WireMessage
+		_ = wsjson.Read(r.Context(), connection, &last)
+	}))
+	defer server.Close()
+	client, err := NewClient(ClientConfig{ServerURL: server.URL, StatePath: filepath.Join(t.TempDir(), "state.json"), HeartbeatEvery: 30 * time.Second, MetricsEvery: 30 * time.Second}, testClientExecutor(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.traffic = manager
+	client.creds = credentials{AgentID: id, PrivateKey: authn.EncodePrivateKey(key)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { finished <- client.runWebSocket(ctx) }()
+	select {
+	case <-heartbeatSeen:
+	case <-ctx.Done():
+		t.Fatal("missing heartbeat")
+	}
+	select {
+	case share := <-halted:
+		t.Fatalf("provisional handshake stopped %s", share)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if usage := manager.Snapshot(); len(usage) != len(policies) || usage[0].Blocked || !usage[0].EnforcementAvailable {
+		t.Fatalf("handshake discarded quota enforcement: %+v", usage)
+	}
+	close(verify)
+	select {
+	case <-halted:
+	case <-ctx.Done():
+		t.Fatal("verified revocation did not stop instance")
+	}
+	cancel()
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}

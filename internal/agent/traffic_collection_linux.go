@@ -5,11 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules bool) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		// A WSS reconnect or Agent shutdown cancels its sampling request, not
+		// the installed nftables rules. Verify them with a bounded fresh sample
+		// before deciding that accounting is unavailable and stopping instances.
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 6*time.Second)
+		defer cancel()
+		return manager.collectLocked(recovery, forceRules)
+	}
 	if manager.awaitingPolicies {
 		return manager.setUnavailableLocked(errors.New("traffic checkpoint unavailable; waiting for authenticated policies"))
 	}
@@ -23,6 +32,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	counters, tableExists, err := manager.backend.Counters(ctx)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return manager.collectLocked(ctx, forceRules)
+		}
 		return manager.setUnavailableLocked(err)
 	}
 	now := manager.now().UTC()
@@ -202,6 +214,8 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			// those observed bytes durable even through repeated apply errors.
 			if saveErr := manager.saveLocked(); saveErr != nil {
 				err = errors.Join(err, fmt.Errorf("persist traffic counters: %w", saveErr))
+			} else if errors.Is(ctx.Err(), context.Canceled) {
+				return manager.collectLocked(ctx, forceRules)
 			}
 			return manager.setUnavailableLocked(err)
 		}

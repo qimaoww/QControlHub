@@ -73,8 +73,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		var allowed bool
 		if err := tx.QueryRow(ctx, `SELECT $2::boolean AND EXISTS(SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
 			WHERE s.id=$1 AND s.agent_id=$3 AND $4=ANY(s.engines) AND NOT u.disabled
-				AND s.enabled AND s.status='accepted' AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
-			task.SharedTrafficID, supportsSharedEngines(features), agentID, task.Engine).Scan(&allowed); err != nil {
+				AND s.enabled AND s.status='accepted' AND ($5::boolean OR s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
+			task.SharedTrafficID, supportsSharedEngines(features), agentID, task.Engine,
+			task.Action == core.ActionStop || task.Action == core.ActionStatus || task.Action == core.ActionReadConfig || task.Action == core.ActionReadManagedConfig).Scan(&allowed); err != nil {
 			return nil, err
 		}
 		if !allowed {
@@ -91,6 +92,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		(task.Action == core.ActionIPQuality && !containsFeature(features, core.AgentFeatureIPQuality)) ||
 		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) ||
 		(task.SharedInstance && (!containsFeature(features, core.AgentFeatureSharedCoreInstances) ||
+			(task.Action.SharedInstanceOperation() && !containsFeature(features, core.AgentFeatureSharedCoreLifecycle)) ||
 			((task.InstallIfMissing || task.Action == core.ActionInstall) && !containsFeature(features, core.AgentFeatureSharedCorePrepare)))) {
 		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
 		if task.Action.SystemBBR() {

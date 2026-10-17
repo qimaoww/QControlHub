@@ -81,4 +81,11 @@ func TestSharedPoliciesStayRevokedUntilCurrentHeartbeat(t *testing.T) {
 	if !verified[0].SharedQuota.AllowsEngine(core.EngineMihomo) || verified[0].SharedQuota.AllowsEngine(core.EngineXray) {
 		t.Fatal("verified session lost its exact engine allocation")
 	}
+	initial := trafficPolicyHello(policies, false)
+	if !initial.TrafficPoliciesPending || !initial.TrafficPolicies[0].SharedQuota.Revoked {
+		t.Fatal("initial hello must defer new Agents while older Agents remain blocked")
+	}
+	if trafficPolicyHello(policies, true).TrafficPoliciesPending || trafficPolicyHello(nil, false).TrafficPoliciesPending {
+		t.Fatal("verified policies and an actual empty policy set must apply immediately")
+	}
 }

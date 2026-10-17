@@ -63,7 +63,7 @@ func TestPresetAutoInstallTaskLifecycle(t *testing.T) {
 	if running, err := db.GetTaskState(ctx, task.ID); err != nil || running.Status != core.TaskRunning || !running.InstallIfMissing {
 		t.Fatalf("compound task lost its installation lease: %+v %v", running, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Error: "validation failed after install"}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Error: "validation failed after install"}); err != nil {
 		t.Fatal(err)
 	}
 	heartbeat(true, features)

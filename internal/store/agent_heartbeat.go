@@ -39,9 +39,8 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		if len(instance.CoreLogError) > 100 {
 			return fmt.Errorf("%w: invalid instance log error", ErrInvalid)
 		}
-		if !instance.Engine.Valid() || !core.ValidAgentShareID(instance.ShareID) ||
-			(instance.Status != "active" && instance.Status != "inactive" && instance.Status != "failed" && instance.Status != "unknown") {
-			return fmt.Errorf("%w: invalid shared instance status", ErrInvalid)
+		if err := validateSharedInstanceStatus(instance); err != nil {
+			return err
 		}
 	}
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
@@ -134,22 +133,23 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 			return err
 		}
 	}
-	for _, instance := range heartbeat.SharedInstances {
-		if instance.Status == "unknown" {
-			continue
+	if len(heartbeat.SharedInstances) > 0 {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return err
 		}
-		active := instance.Status == "active"
-		if _, err := s.pool.Exec(ctx, `UPDATE agent_shared_instance_ownership SET running=$4,
-			uncertain=CASE WHEN $4 THEN uncertain ELSE false END,
-			config_uncertain=CASE WHEN $4 THEN config_uncertain ELSE false END,
-			traffic_settled=NOT $4 AND COALESCE(cardinality($5::text[])>0,false)
-				AND EXISTS(SELECT 1 FROM port_traffic_policies p
-				WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled)
-				AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p
-					WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled
-					AND NOT(p.id=ANY($5::text[]))),updated_at=now()
-			WHERE agent_id=$1 AND engine=$2 AND share_id=$3`,
-			id, instance.Engine, instance.ShareID, active, reportedPolicies[instance.ShareID]); err != nil {
+		defer tx.Rollback(ctx)
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&locked); err != nil {
+			return mapError(err)
+		}
+		for _, instance := range heartbeat.SharedInstances {
+			if err := recordSharedInstanceObservationTx(ctx, tx, id, instance,
+				containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreLifecycle), receivedAt, false, reportedPolicies[instance.ShareID]); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 	}

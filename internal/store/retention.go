@@ -11,6 +11,9 @@ func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, err
 	args := []any{olderThan}
 	where := workspaceOwnerClause(ctx, "t.owner_id", &args)
 	result, err := s.pool.Exec(ctx, `DELETE FROM tasks t WHERE status IN ('succeeded','failed','canceled') AND COALESCE(finished_at,created_at) < $1
+		AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership state WHERE state.applied_task_id=t.id OR state.last_task_id=t.id
+			OR state.agent_id=t.agent_id AND state.engine=t.engine AND state.share_id=t.shared_traffic_id
+			AND state.config_id=t.config_id AND state.config_version=t.config_version AND t.action='deploy' AND t.status='succeeded')
 		AND NOT (status='succeeded' AND action IN ('deploy','import-existing') AND NOT EXISTS(
 			SELECT 1 FROM tasks newer WHERE newer.agent_id=t.agent_id AND newer.engine=t.engine
 			AND newer.owner_id=t.owner_id

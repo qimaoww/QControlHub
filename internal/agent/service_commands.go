@@ -120,6 +120,11 @@ func serviceFailureJournal(ctx context.Context, service string) string {
 		if current == "" || len(outputs) > 0 && current == outputs[0] {
 			continue
 		}
+		// Bound each source separately. Otherwise systemd restart chatter
+		// appended after the core namespace can evict the actual bind/TLS error.
+		if len(current) > 2000 {
+			current = strings.ToValidUTF8(current[len(current)-2000:], "�")
+		}
 		outputs = append(outputs, current)
 	}
 	output := strings.Join(outputs, "\n")

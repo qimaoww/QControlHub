@@ -133,6 +133,19 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			if !validSharedCoreInstallTask(task) {
 				executionErr = errors.New("invalid shared core installation task")
 			}
+		} else if task.SharedTrafficID != "" && task.Action.SharedInstanceOperation() {
+			if !task.SharedInstance || !core.ValidAgentShareID(task.SharedTrafficID) || task.CoreVersion != "" || task.CoreSource != "" || task.InstallIfMissing {
+				executionErr = errors.New("invalid shared instance operation")
+			} else if task.Action == core.ActionStart || task.Action == core.ActionRestart {
+				endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
+				if err != nil {
+					executionErr = fmt.Errorf("unsafe retained instance configuration: %w", err)
+				} else if len(endpoints) == 0 {
+					executionErr = errors.New("实例没有可用协议，请先添加协议并部署")
+				} else {
+					executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
+				}
+			}
 		} else if task.SharedTrafficID != "" {
 			endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
 			if !core.ValidAgentShareID(task.SharedTrafficID) {
@@ -202,6 +215,21 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
 		IPQuality: ipQuality,
+	}
+	if task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus) {
+		if executionErr != nil && task.Action.ChangesInstance() {
+			spec, err := sharedInstanceSpec(task.Engine, c.executor.Specs[task.Engine], task.SharedTrafficID, c.executor.serviceManager().Kind())
+			if err == nil {
+				c.executor.recordSharedOperation(spec, task, executionErr)
+			}
+		}
+		instance := c.executor.sharedInstanceStatus(ctx, task.Engine, task.SharedTrafficID)
+		// A failure before the executor is entered (quota/authorization) still
+		// reports the observed old configuration and process, never success.
+		if task.Action.ChangesInstance() {
+			instance.TaskID = task.ID
+		}
+		result.InstanceStatus = &instance
 	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
@@ -291,7 +319,7 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 	}
 	return core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error,
-		IPQuality: cached.IPQuality,
+		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus,
 	}, true
 }
 
@@ -314,7 +342,7 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 	c.creds.CompletedTasks[taskID] = completedTask{
 		Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
-		IPQuality: result.IPQuality,
+		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus,
 	}
 	if err := c.boundCompletedTaskCache(taskID); err != nil {
 		return err
@@ -331,7 +359,10 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
-	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
+	if task.SharedInstance && task.Action.SharedInstanceOperation() && (task.CoreVersion != "" || task.CoreSource != "" || task.InstallIfMissing) {
+		return false
+	}
+	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && task.Action != core.ActionValidate && !task.Action.SharedInstanceOperation()) || !core.ValidAgentShareID(task.SharedTrafficID)) {
 		return false
 	}
 	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {

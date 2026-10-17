@@ -38,11 +38,11 @@ func generateXray(input Input) (string, error) {
 	case ProtocolVMess:
 		inbound["protocol"] = "vmess"
 		inbound["settings"] = map[string]any{
-			"users": []any{map[string]any{"id": input.Credential, "level": 0, "email": input.Username}},
+			"clients": []any{map[string]any{"id": input.Credential, "level": 0, "email": input.Username}},
 		}
 	case ProtocolTrojan:
 		inbound["protocol"] = "trojan"
-		inbound["settings"] = map[string]any{"users": []any{map[string]any{"password": input.Credential, "email": input.Username, "level": 0}}}
+		inbound["settings"] = map[string]any{"clients": []any{map[string]any{"password": input.Credential, "email": input.Username, "level": 0}}}
 	case ProtocolHy2:
 		inbound["protocol"] = "hysteria"
 		inbound["settings"] = map[string]any{"version": 2, "users": []any{map[string]any{"auth": input.Credential, "email": input.Username, "level": 0}}}

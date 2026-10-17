@@ -11,7 +11,7 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
-		Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress, "port-traffic-v1"},
+		Features: append(agent.Features, "port-traffic-v1"),
 		Runtime:  map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}},
 	}); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 	}
 	alice.call("PUT", "/agents/"+agent.ID+"/name", map[string]string{"name": "stolen"}, http.StatusForbidden, nil)
 	alice.call("PUT", "/substore-sync/settings", map[string]string{"endpoint_url": "http://127.0.0.1/private"}, http.StatusOK, nil)
-	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusForbidden, nil)
+	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusConflict, nil)
 	// Personal integration settings and groups do not grant host operations.
 	alice.call("POST", "/substore-sync/targets", map[string]string{"display_name": "private", "sync_format": "mihomo"}, http.StatusCreated, nil)
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", core.AgentAccessRequest{Revision: access.Revision, Isolated: true}, http.StatusOK, &access)

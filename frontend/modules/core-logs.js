@@ -70,6 +70,11 @@ export function installCoreLogs(ctx) {
     restoreSelection();
     if (routeSignal !== state.routeSignal) {
       routeSignal = state.routeSignal;
+      const params = new URLSearchParams(globalThis.location?.hash.split("?")[1] || "");
+      if (/^agt_[0-9a-f]{16}$/.test(params.get("agent") || "") && /^shr_[0-9a-f]{16}$/.test(params.get("instance") || "")) {
+        state.data.coreLogFilters = {...state.data.coreLogFilters, agent_id:params.get("agent"), instance_id:params.get("instance"), engine:engines.includes(params.get("engine")) ? params.get("engine") : ""};
+        rememberSelection();
+      }
       routeSignal?.addEventListener("abort", () => { refresh.invalidate(); poller.stop(); pending = null; }, { once: true });
     }
     const key = coreLogScopeKey(state.data.coreLogFilters);

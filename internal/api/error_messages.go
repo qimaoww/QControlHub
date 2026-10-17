@@ -13,7 +13,7 @@ var errorMessages = map[string]string{
 	"task has no configuration revision; submit a new task":                                                   "旧任务缺少配置版本，无法确认重试内容，请核对配置后重新提交任务。",
 	"account authorization changed; sign in again":                                                            "账号权限或登录凭据已变更，本次操作未提交，请重新登录。",
 	"shared users may only prepare a missing stable core; version changes require the node owner":             "共享用户可安装缺少的稳定版内核；已有版本直接复用，切换版本请联系所有者。",
-	"only the Agent owner may manage its host":                                                                "卸载、启停及版本切换由节点所有者在节点设置处理；共享用户可安装缺少的稳定版，或通过增加入站准备独立实例。",
+	"only the Agent owner may manage its host":                                                                "宿主服务、卸载和版本切换仅限节点所有者管理；共享用户请通过本人实例操作入口管理自己的服务。",
 	"ask the node owner to upgrade the Agent before preparing a private core instance":                        "请联系节点所有者在节点设置升级 Agent，再准备独立实例内核。",
 	"engine is not supported by this Agent":                                                                   "节点不支持此内核，请检查 Agent 安装配置。",
 	"engine capability is disabled on this Agent":                                                             "内核能力未启用，请由所有者在节点设置的 Agent 页开启。",

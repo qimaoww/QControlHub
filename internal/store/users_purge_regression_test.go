@@ -91,6 +91,11 @@ func TestPurgeUserInvalidatesWorkBeforeTransferringOwnership(t *testing.T) {
 			recipientUser, recipient := sharedTestUser(t, db, ctx, "task-recipient")
 			agent := sharedTestAgent(t, db, owner)
 			sharedTestAllocation(t, db, ctx, recipientUser.ID, agent.ID, 0, 21001)
+			// Model a historical base-service deployment made while this user
+			// owned the node. New recipients always receive independent services.
+			if _, err := db.pool.Exec(ctx, `UPDATE agents SET owner_id=$2 WHERE id=$1`, agent.ID, recipientUser.ID); err != nil {
+				t.Fatal(err)
+			}
 			config := sharedTestConfig(t, db, recipient, agent.ID, 21001)
 			running, err := db.CreateTask(recipient, core.TaskRequest{
 				AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy,
@@ -101,6 +106,9 @@ func TestPurgeUserInvalidatesWorkBeforeTransferringOwnership(t *testing.T) {
 			lease, err := db.ClaimTask(ctx, agent.ID)
 			if err != nil || lease == nil || lease.ID != running.ID {
 				t.Fatalf("claim deployment: %+v %v", lease, err)
+			}
+			if _, err := db.pool.Exec(ctx, `UPDATE agents SET owner_id=$2 WHERE id=$1`, agent.ID, ownerUser.ID); err != nil {
+				t.Fatal(err)
 			}
 			queued, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStatus})
 			if err != nil {
@@ -138,7 +146,7 @@ func TestPurgeUserInvalidatesWorkBeforeTransferringOwnership(t *testing.T) {
 			if resumed, err := db.RunningTask(ctx, agent.ID); err != nil || resumed != nil {
 				t.Errorf("purge kept an old running lease: %+v %v", resumed, err)
 			}
-			if err := db.CompleteTask(ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
+			if err := completeSharedTestTask(db, ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
 				t.Errorf("purge accepted the old deployment result: %v", err)
 			}
 			var uncertain, configUncertain bool
@@ -176,7 +184,7 @@ func TestPurgeUserPreservesCollidingConfigurationWorkspaces(t *testing.T) {
 	if err != nil || lease == nil || lease.ID != deployment.ID {
 		t.Fatalf("claim retained deployment: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, deployment.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, deployment.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	existing := sharedTestConfig(t, db, admin, agent.ID, 21002)

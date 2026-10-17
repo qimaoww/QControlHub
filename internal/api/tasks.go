@@ -105,7 +105,7 @@ func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.store.CheckAgentAccess(request.Context(), task.AgentID, true); err != nil {
+	if err := s.store.CheckAgentAccess(request.Context(), task.AgentID, !task.SharedInstance); err != nil {
 		writeStoreError(w, err)
 		return
 	}

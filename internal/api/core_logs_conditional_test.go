@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -46,7 +47,7 @@ func TestCoreLogSharedSessionsAndPrivacy(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	host := enrollConfigScopeAPIAgent(t, ctx, db)
 	host.Features = append(host.Features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureCoreLogInstances)
-	if err := db.Heartbeat(ctx, host.ID, core.HeartbeatRequest{Features: host.Features}); err != nil {
+	if err := db.Heartbeat(ctx, host.ID, core.HeartbeatRequest{Features: host.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 		t.Fatal(err)
 	}
 	ownA, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "private-A")
@@ -63,7 +64,8 @@ func TestCoreLogSharedSessionsAndPrivacy(t *testing.T) {
 			t.Fatalf("claim %+v %v", claimed, err)
 		}
 		shareIDs = append(shareIDs, claimed.SharedTrafficID)
-		if err := db.CompleteTask(ctx, host.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+		if err := db.CompleteTask(ctx, host.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true,
+			InstanceStatus: &core.SharedInstanceStatus{Engine: claimed.Engine, ShareID: claimed.SharedTrafficID, ConfigID: claimed.ConfigID, ConfigVersion: claimed.ConfigVersion, TaskID: claimed.ID, AppliedTaskID: claimed.ID, Status: "active", ObservedAt: time.Now().UTC()}}); err != nil {
 			t.Fatal(err)
 		}
 	}

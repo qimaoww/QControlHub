@@ -86,6 +86,20 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		action := core.ActionStop
 		if enabled {
 			action = core.ActionStart
+			var onlyInstances bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2)
+				AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$2 AND config_id<>'')`, id, engine).Scan(&onlyInstances); err != nil {
+				return change, err
+			}
+			if onlyInstances {
+				// Restoring shared management does not start an unrelated,
+				// unconfigured base service. Recipients start their own instance.
+				if err := setEngineCapability(ctx, tx, id, engine, true, selected); err != nil {
+					return change, err
+				}
+				change.Enabled = true
+				return change, tx.Commit(ctx)
+			}
 			if err := requireSafeEngineStart(ctx, tx, id, engine); err != nil {
 				if !errors.Is(err, ErrConflict) {
 					return change, err

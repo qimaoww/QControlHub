@@ -76,7 +76,7 @@ func TestSharedEngineAllocationScopesResourcesAndInvalidatesOldLeases(t *testing
 		if err != nil || lease == nil || lease.ID != task.ID {
 			t.Fatalf("claim %s: %+v %v", saved.Engine, lease, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestSharedEngineAllocationScopesResourcesAndInvalidatesOldLeases(t *testing
 	if claimed, err := db.ClaimTask(ctx, agent.ID); err != nil || claimed != nil {
 		t.Fatalf("regrant restored old queued task: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
+	if err := completeSharedTestTask(db, ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("old lease completion was accepted: %v", err)
 	}
 }

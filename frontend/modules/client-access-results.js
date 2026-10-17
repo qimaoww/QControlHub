@@ -73,7 +73,8 @@ export function createClientAccessResults({ esc, engineName, can }) {
                 const shareValue = exported.value;
                 const title = item.client_name || item.tag;
                 // The title already names the inbound unless a client name replaced its tag.
-                const meta = [group.entries.length > 1 ? engineName(entry.engine) : "", item.protocol, `端口 ${Number(item.port)}`, title === item.tag ? "" : item.tag, exported.format]
+                const instanceStatus = entry.instance_id ? ({active:"实例运行中", inactive:"实例已停止，请先启动", failed:"实例启动失败，请查看日志", activating:"实例启动中", deactivating:"实例停止中", reloading:"实例重启中"}[entry.service_status] || "实例状态未知") : "";
+                const meta = [group.entries.length > 1 ? engineName(entry.engine) : "", item.protocol, `端口 ${Number(item.port)}`, title === item.tag ? "" : item.tag, entry.config_version ? `已部署 v${entry.config_version}` : "", instanceStatus, exported.format]
                   .filter(Boolean)
                   .map((value) => `<span>${esc(value)}</span>`).join("");
                 const shareControl = shareValue.includes("\n")

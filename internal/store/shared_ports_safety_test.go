@@ -59,7 +59,7 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 	if err != nil || lease == nil || lease.ID != task.ID {
 		t.Fatalf("claim foreign task: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	checkDenied() // The deployed revision still has 21002, not 22002.
@@ -140,7 +140,7 @@ func TestUnrestrictedSharedPortsRejectUncertainForeignDeployment(t *testing.T) {
 		if err != nil || lease == nil || lease.ID != task.ID {
 			t.Fatalf("claim task: %+v %v", lease, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: success, TrafficSettled: success}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: success, TrafficSettled: success}); err != nil {
 			t.Fatal(err)
 		}
 	}

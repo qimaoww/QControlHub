@@ -4,6 +4,7 @@ import { createCoreInstallMonitor } from "./core-install-monitor.js";
 import { setVisible } from "./presence-motion.js";
 import { prepareDisclosure } from "./popup.js";
 import { bindEvent } from "./refresh.js";
+import { createTaskMonitor } from "./task-monitor.js";
 
 export function developmentSourceVisible(engine, channel) {
   return engine === "mihomo" && channel === "development";
@@ -18,11 +19,14 @@ export function coreSourceForInstall(engine, channel, rawSource) {
 
 export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }, { refreshAgentPage } = {}) {
   const { watchInstall, installFeedback } = createCoreInstallMonitor({ api, state, can, notify, refreshAgentPage });
+  const waitForOperation = createTaskMonitor({read:id => api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"}), session:() => state.data});
 async function submitTask(payload, onError) {
   try {
     const agent = state.data.agents?.find((item) => item.id === payload.agent_id);
-    if (agent?.can_manage === false && !["install", "deploy", "validate", "status"].includes(payload.action))
+    if (agent?.can_manage === false && !["install", "deploy", "validate", "status", "start", "stop", "restart", "read-config", "read-managed-config"].includes(payload.action))
       throw new Error("共享节点的主机操作仅限所有者");
+    if (agent?.can_manage === false && ["start", "stop", "restart", "status"].includes(payload.action) && !can("instance.manage", agent))
+      throw new Error("请联系所有者升级 Agent 后操作本人实例");
     const task = await api("/tasks", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -40,6 +44,15 @@ async function submitTask(payload, onError) {
   function bindCoreActions() {
   document.querySelectorAll("[data-task-action]").forEach((button) => {
     button.onclick = async () => {
+      if (button.disabled) return;
+      const sessionData = state.data;
+      const key = `${button.dataset.taskAgent}|${button.dataset.taskEngine}`;
+      state.data.instanceTasks ||= {};
+      if (state.data.instanceTasks[key]) return;
+      state.data.instanceTasks[key] = "submitting";
+      const group = [...document.querySelectorAll("[data-task-action]")].filter(item => item.dataset.taskAgent === button.dataset.taskAgent && item.dataset.taskEngine === button.dataset.taskEngine);
+      group.forEach(item => { item.disabled = true; item.setAttribute("aria-busy", "true"); });
+      try {
       if (
         button.dataset.taskAction === "stop" &&
         !(await confirmAction(
@@ -48,11 +61,29 @@ async function submitTask(payload, onError) {
         ))
       )
         return;
-      await submitTask({
+      const task = await submitTask({
         agent_id: button.dataset.taskAgent,
         engine: button.dataset.taskEngine,
         action: button.dataset.taskAction,
       });
+      if (task?.id && state.data === sessionData) {
+        state.data.instanceTasks[key] = task.id;
+        if (can("tasks.read")) {
+          const result = await waitForOperation(task.id);
+          if (state.data !== sessionData) return;
+          const shared = state.data.agents?.find(item => item.id === button.dataset.taskAgent)?.can_manage === false;
+          notify(result.status === "succeeded" ? shared ? "本人实例操作完成" : "服务操作完成" : result.error || "服务操作失败，请查看日志", result.status === "succeeded" ? "success" : "error");
+        }
+      }
+      } catch (error) {
+        if (state.data === sessionData && error.name !== "AbortError") notify(error.message, "error");
+      } finally {
+        if (state.data === sessionData) {
+          delete state.data.instanceTasks[key];
+          group.forEach(item => item.removeAttribute("aria-busy"));
+          if (["node-settings", "agents"].includes(state.route)) await refreshAgentPage?.();
+        }
+      }
     };
   });
   document.querySelectorAll("[data-core-uninstall]").forEach((button) => {

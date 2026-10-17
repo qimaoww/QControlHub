@@ -21,7 +21,7 @@ func (s *Store) CreateTaskWithReadCache(ctx context.Context, request core.TaskRe
 }
 
 func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, action core.Action, maxAge time.Duration) (core.Task, error) {
-	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
+	if err := requireConfigSnapshotAccess(ctx, s.pool, agentID, engine); err != nil {
 		return core.Task{}, err
 	}
 	return s.recentReadTask(ctx, s.pool, agentID, engine, action, maxAge)
@@ -34,6 +34,10 @@ func (s *Store) recentReadTask(ctx context.Context, executor storeExecutor, agen
 	if maxAge <= 0 {
 		return core.Task{}, ErrNotFound
 	}
+	shared, err := sharedInstanceRecipient(ctx, executor, agentID)
+	if err != nil {
+		return core.Task{}, err
+	}
 	row := executor.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
@@ -41,11 +45,14 @@ func (s *Store) recentReadTask(ctx context.Context, executor storeExecutor, agen
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
 		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval AND owner_id=$5
+		  AND shared_instance=$6
+		  AND (NOT shared_instance OR EXISTS(SELECT 1 FROM agent_shares sh WHERE sh.id=tasks.shared_traffic_id
+			AND sh.user_id=$5 AND sh.agent_id=$1 AND sh.enabled AND sh.status='accepted' AND $2=ANY(sh.engines)))
 		  AND NOT EXISTS(
 		      SELECT 1 FROM tasks mutation WHERE mutation.agent_id=$1 AND mutation.engine=$2
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running'))
-		ORDER BY finished_at DESC LIMIT 1`, agentID, engine, action, intervalString(maxAge), scopeForConfig(ctx).OwnerID)
+		ORDER BY finished_at DESC LIMIT 1`, agentID, engine, action, intervalString(maxAge), scopeForConfig(ctx).OwnerID, shared)
 	task, err := scanTask(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Task{}, ErrNotFound
@@ -72,8 +79,10 @@ func invalidateConfigReadSnapshotsTx(ctx context.Context, tx pgx.Tx, task core.T
 	// Invalidate before execution: even failed or lost mutations may have
 	// changed the file or the validating binary. read-config can target the
 	// managed file on legacy Agents, so both source variants must be cleared.
+	globalBinary := task.Action == core.ActionInstall || task.Action == core.ActionUninstall || task.InstallIfMissing
 	_, err := tx.Exec(ctx, `UPDATE tasks SET config_content=NULL
 		WHERE agent_id=$1 AND engine=$2 AND action IN ('read-config','read-managed-config')
-		  AND config_content IS NOT NULL`, task.AgentID, task.Engine)
+		  AND config_content IS NOT NULL AND ($3::boolean OR shared_instance=$4 AND shared_traffic_id=$5)`,
+		task.AgentID, task.Engine, globalBinary, task.SharedInstance, task.SharedTrafficID)
 	return err
 }

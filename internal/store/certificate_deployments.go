@@ -95,7 +95,18 @@ func (s *Store) prepareCertificateExecutionTx(ctx context.Context, tx pgx.Tx, ta
 		}
 		var secret string
 		var version int
-		if err = tx.QueryRow(ctx, `SELECT v.secret,v.version FROM panel_certificates c LEFT JOIN certificate_task_versions pinned ON pinned.task_id=$2 AND pinned.certificate_id=c.id JOIN certificate_versions v ON v.certificate_id=c.id AND v.version=COALESCE(pinned.version,c.version) WHERE c.id=$1 FOR SHARE OF c`, id, task.ID).Scan(&secret, &version); err != nil {
+		certificateTaskID := task.ID
+		lifecycle := task.SharedInstance && (task.Action == core.ActionStart || task.Action == core.ActionRestart)
+		if lifecycle {
+			// A start reuses the deployed file and its immutable certificate pair.
+			// Never rotate it to a newer certificate without a deployment.
+			if err := tx.QueryRow(ctx, `SELECT applied_task_id FROM agent_shared_instance_ownership
+				WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND owner_id=$4`, task.AgentID, task.Engine, task.SharedTrafficID, owner).
+				Scan(&certificateTaskID); err != nil {
+				return err
+			}
+		}
+		if err = tx.QueryRow(ctx, `SELECT v.secret,v.version FROM panel_certificates c LEFT JOIN certificate_task_versions pinned ON pinned.task_id=$2 AND pinned.certificate_id=c.id JOIN certificate_versions v ON v.certificate_id=c.id AND v.version=COALESCE(pinned.version,c.version) WHERE c.id=$1 FOR SHARE OF c`, id, certificateTaskID).Scan(&secret, &version); err != nil {
 			return mapError(err)
 		}
 		if err = certificateUseTx(ctx, tx, id, owner); err != nil {
@@ -110,6 +121,9 @@ func (s *Store) prepareCertificateExecutionTx(ctx context.Context, tx pgx.Tx, ta
 		}
 		if err := s.validateCertificateConfigNamesTx(ctx, tx, task, id, pair); err != nil {
 			return err
+		}
+		if lifecycle {
+			continue // Authorization and validity checked; no secret or file mutation.
 		}
 		task.Certificates = append(task.Certificates, core.DeploymentCertificate{ID: id, Version: version, Certificate: pair.Certificate, PrivateKey: pair.PrivateKey})
 		_, err = tx.Exec(ctx, `INSERT INTO certificate_task_versions(task_id,certificate_id,version) VALUES($1,$2,$3) ON CONFLICT(task_id,certificate_id) DO UPDATE SET version=certificate_task_versions.version`, task.ID, id, version)
