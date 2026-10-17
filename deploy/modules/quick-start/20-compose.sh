@@ -12,6 +12,7 @@ services:
     restart: unless-stopped
     environment:
       QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_LISTEN: 0.0.0.0:8080
@@ -78,7 +79,7 @@ YAML
       interval: 10s
       timeout: 3s
       retries: 6
-      start_period: 10s
+      start_period: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
     stop_grace_period: 15s
   qcontrol-web:
     image: ghcr.io/qimaoww/qcontrol-web:latest
@@ -183,7 +184,8 @@ run_compose() (
             QCH_CONFIG_ENCRYPTION_KEY QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS \
             QCH_CONFIG_ENCRYPTION_KEY_FILE QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE \
             QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE \
-            QCH_ALLOW_INSECURE_DATABASE QCH_DOCKER_NETWORK QCH_BIND_ADDRESS QCH_PORT
+            QCH_ALLOW_INSECURE_DATABASE QCH_DOCKER_NETWORK QCH_BIND_ADDRESS QCH_PORT \
+            QCH_DATABASE_STARTUP_TIMEOUT
     fi
     QCH_SOURCE_DIR="$REPO_ROOT" docker compose -p qcontrolhub --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "$@"
 )
@@ -222,11 +224,14 @@ services:
     restart: unless-stopped
     environment:
       QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
       QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-false}
+    healthcheck:
+      start_period: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
   qcontrol-web:
     image: ghcr.io/qimaoww/qcontrol-web:latest
     restart: unless-stopped

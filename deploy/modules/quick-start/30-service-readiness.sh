@@ -43,10 +43,38 @@ start_external_services() {
     docker pull ghcr.io/qimaoww/qcontrol-web:latest
     echo "-> 校验 Docker Compose 配置"
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
-    if ! compose up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
+    if ! start_application_services "${COMPOSE_ARGS[@]}"; then
         show_diagnostics
         die "Docker Compose 启动失败；请确认已登录 ghcr.io 且镜像可用"
     fi
+}
+
+# Compose still waits on dependencies between services explicitly named in the
+# same `up`, even with --no-deps. Start one at a time so our readiness budget
+# governs migrations and rollback also starts the web container after recovery.
+start_application_services() {
+    run_compose "$@" up -d --force-recreate --no-build --pull never --no-deps control-plane || return 1
+    echo "-> 等待控制面就绪（最多 ${READY_TIMEOUT} 秒；数据库迁移期间尚未提供服务）"
+    wait_control_plane_ready "$READY_TIMEOUT" "$@" || return 1
+    run_compose "$@" up -d --force-recreate --no-build --pull never --no-deps qcontrol-web
+}
+
+wait_control_plane_ready() {
+    local timeout="$1" deadline container
+    shift
+    deadline=$(( $(date +%s) + timeout ))
+    container="$(run_compose "$@" ps -q control-plane)" || return 1
+    [ -n "$container" ] || return 1
+    while :; do
+        if docker exec "$container" wget -q -T 3 -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "错误：控制面未在 ${timeout} 秒内就绪；请检查数据库迁移、锁等待及 QCH_DATABASE_STARTUP_TIMEOUT" >&2
+            return 1
+        fi
+        sleep 2
+    done
 }
 
 wait_ready() {
