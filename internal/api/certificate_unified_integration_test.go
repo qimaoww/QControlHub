@@ -147,6 +147,15 @@ func TestCaddyImportVerifiedSourceIsolationVersionsAndTombstone(t *testing.T) {
 	if detail.Certificate.Version != 2 || len(detail.Versions) != 2 || len(detail.Grants) != 1 || strings.Contains(string(raw), "PRIVATE KEY") {
 		t.Fatalf("version or secret isolation failed: %s", raw)
 	}
+	raw = bob.call("GET", "/certificates/"+cert.ID, nil, 200, &detail)
+	if len(detail.Versions) != 2 {
+		t.Fatal("authorized recipient lost version history")
+	}
+	for _, internalID := range []string{source.ID, node.ID, cert.SourceConfig} {
+		if internalID == "" || strings.Contains(string(raw), internalID) {
+			t.Fatal("owner's source identity escaped through shared certificate history")
+		}
+	}
 	owner.call("GET", "/certificates/"+cert.ID, nil, 404, nil)
 	alice.call("PUT", "/certificate-managed-sources/"+source.ID, map[string]string{"action": "pause"}, 204, nil)
 	if err = db.ImportManagedCertificate(ctx, node.ID, report); err == nil {

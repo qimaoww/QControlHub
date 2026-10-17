@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -132,7 +133,7 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 		}
 		content := renderNginxFrontends(active, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
-			content, err = renderCaddyFrontends(active, m.state)
+			content, err = upgradeCaddyHTTPChallengeConfig(string(old))
 			if err != nil {
 				return err
 			}
@@ -172,4 +173,40 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 		}
 	}
 	return nil
+}
+
+// Migrate the committed runtime, preserving issuer fallback, storage and every
+// business route. Re-rendering the manifest would reset runtime issuer choices.
+func upgradeCaddyHTTPChallengeConfig(stored string) (string, error) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stored), &root); err != nil || root == nil {
+		return "", fmt.Errorf("托管 Caddy 配置格式无效")
+	}
+	keys := []string{"apps", "http", "servers"}
+	layers := []map[string]json.RawMessage{root}
+	for _, key := range keys {
+		var child map[string]json.RawMessage
+		if err := json.Unmarshal(layers[len(layers)-1][key], &child); err != nil || child == nil {
+			return "", fmt.Errorf("托管 Caddy 配置缺少 %s", key)
+		}
+		layers = append(layers, child)
+	}
+	servers := layers[len(layers)-1]
+	if _, exists := servers["http_challenges"]; exists {
+		return stored, nil
+	}
+	challenge, err := json.Marshal(managedCaddyHTTPChallenges())
+	if err != nil {
+		return "", err
+	}
+	servers["http_challenges"] = challenge
+	for i := len(keys) - 1; i >= 0; i-- {
+		raw, err := json.Marshal(layers[i+1])
+		if err != nil {
+			return "", err
+		}
+		layers[i][keys[i]] = raw
+	}
+	data, err := json.MarshalIndent(root, "", "  ")
+	return string(data), err
 }

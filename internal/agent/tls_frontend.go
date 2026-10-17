@@ -172,13 +172,7 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 	// A fixed route delegates only ACME challenge paths to the authenticated
 	// Agent's in-memory, Host/token scoped handler. Caddy's own ACME solver
 	// retains precedence. No per-order edits to business routes are necessary.
-	servers["http_challenges"] = map[string]any{
-		"listen": []string{":80"},
-		"routes": []any{map[string]any{"match": []any{map[string]any{"path": []string{"/.well-known/acme-challenge/*"}}},
-			"handle": []any{map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": "127.0.0.1:9080"}}}}, "terminal": true},
-			map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}},
-		"automatic_https": map[string]any{"disable": true},
-	}
+	servers["http_challenges"] = managedCaddyHTTPChallenges()
 	names := []string{}
 	for domain := range domains {
 		names = append(names, domain)
@@ -207,6 +201,16 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 	}
 	value, err := json.MarshalIndent(config, "", "  ")
 	return string(value), err
+}
+
+func managedCaddyHTTPChallenges() map[string]any {
+	return map[string]any{
+		"listen": []string{":80"},
+		"routes": []any{map[string]any{"match": []any{map[string]any{"path": []string{"/.well-known/acme-challenge/*"}}},
+			"handle": []any{map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": "127.0.0.1:9080"}}}}, "terminal": true},
+			map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}},
+		"automatic_https": map[string]any{"disable": true},
+	}
 }
 
 func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, managedHTTP ...bool) string {

@@ -89,6 +89,12 @@ Agent 主服务仍沿用原 capability 范围。读取 Caddy 非 root 所有的 
 
 本地新通道在真实 Debian / systemd 上验证；OpenRC 通道完成代码 / 项目回归，完整 CI 的 Alpine / OpenRC 结果见 PR checks。未逐一在物理移动设备或所有外部网站软件上验证。CI 结果以 PR 最新提交为准。首轮 CI 发现新增显式 80 路由与普通 runner 用户的端口权限冲突；仅在原有协议 / 回退测试 fixture 中将该路由映射到随机高端口，保留生产配置和真实 80 的 ACME 测试。修复后本地完整代理矩阵与回退通过，CI 重新执行。
 
+## 合并前审查修复
+
+- 版本历史原先保留 Caddy 来源节点、配置和来源标识，获授权使用证书的其他用户可以从详情响应获取这些所有者信息。新增真实普通用户接口断言先复现失败，再让列表和版本历史复用同一脱敏规则；保留版本可见性与使用授权。
+- 启动时挑战路由升级原先从部署 manifest 重建 Caddy 配置，会重置已生效的 CA 回退选择。现在只在受保护的已提交 JSON 中补入缺失的挑战 server，保留其他路由、签发策略、存储与配置；已有路由时不写入或重载。
+- [API / Store 定向 race 回归](logs/review-regressions.txt)、[Agent 定向 race 回归](logs/review-agent.txt) 与 [non-browser-checks](logs/review-checks.txt) 均通过。没有修改视觉效果，沿用以上实际截图；最新完整 CI 以 PR checks 为准。
+
 ## 修改前后截图
 
 同一账号 `cert-alice`、同一数据库、同一筛选数据、主题和视口；所有者共享对照使用同一 `cert-admin`。修改前使用基线提交归档前端，连接同一测试 API。共有功能为真实前后渲染；新增 Caddy 同步只展示修改后，不虚构旧版界面。
@@ -124,6 +130,6 @@ Agent 主服务仍沿用原 capability 范围。读取 Caddy 非 root 所有的 
 
 ## 72 小时资源保留与清理
 
-测试结束即停止本任务测试进程、浏览器和三个容器，释放映射端口；临时 DNS 覆盖与订单挑战此前已恢复 / 清理。测试数据库、账号、源 / 目标节点及 fixture 文件在停止状态保留 72 小时。测试结束时间：`2026-10-17T23:27:51+08:00`；准确清理时间：**`2026-10-20T23:27:51+08:00`（Asia/Shanghai）**；任务 **`qch-cert-e528-cleanup.timer`**。系统持久 timer 的实际注册信息见 [cleanup.json](cleanup.json) 与 [注册校验记录](logs/cleanup-registration.txt)。
+测试结束即停止本任务测试进程、浏览器和三个容器，释放映射端口；临时 DNS 覆盖与订单挑战此前已恢复 / 清理。测试数据库、账号、源 / 目标节点及 fixture 文件在停止状态保留 72 小时。测试结束时间：`2026-10-17T23:59:02+08:00`；准确清理时间：**`2026-10-20T23:59:02+08:00`（Asia/Shanghai）**；任务 **`qch-cert-e528-cleanup.timer`**。系统持久 timer 的实际注册信息见 [cleanup.json](cleanup.json) 与 [注册校验记录](logs/cleanup-registration.txt)。
 
 清理脚本 [cleanup-certificate-unified.py](../../scripts/cleanup-certificate-unified.py) 的 root 副本和 manifest 存放 `/var/lib/qch-certificate-unified-e528`，不依赖聊天继续运行。它核对固定 64 位 Docker ID、任务标签、root 所有 manifest、精确目录白名单与 72 小时时间，再移除本次三个容器、一个网络和两个临时目录。不删除公共镜像、其他任务环境、测试报告、脱敏日志、截图、录屏或源码。`Persistent=true`；机器关机错过时间会在恢复后执行，Docker 暂时不可用则服务重试。

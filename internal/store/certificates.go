@@ -165,15 +165,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error
 		}
 		// Account identifiers and validation infrastructure belong to the owner.
 		if !item.Owned {
-			item.AccountID = ""
-			item.DNSAccountID = ""
-			item.AgentID = ""
-			item.AgentName = ""
-			item.SourceID = ""
-			item.SourceConfig = ""
-			item.SourceAgent = ""
-			item.SyncError = ""
-			item.Error = ""
+			redactCertificateOwnerMetadata(&item)
 		}
 		out = append(out, item)
 	}
@@ -206,6 +198,19 @@ func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error
 	}
 	return out, nil
 }
+
+func redactCertificateOwnerMetadata(item *core.Certificate) {
+	item.AccountID = ""
+	item.DNSAccountID = ""
+	item.AgentID = ""
+	item.AgentName = ""
+	item.SourceID = ""
+	item.SourceConfig = ""
+	item.SourceAgent = ""
+	item.SyncError = ""
+	item.Error = ""
+}
+
 func (s *Store) GetCertificate(ctx context.Context, id string) (core.Certificate, error) {
 	items, err := s.ListCertificates(ctx)
 	if err != nil {
@@ -447,7 +452,8 @@ func (s *Store) SetCertificateAutoRenew(ctx context.Context, id string, enabled 
 }
 
 func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]core.Certificate, error) {
-	if _, err := s.GetCertificate(ctx, id); err != nil {
+	item, err := s.GetCertificate(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT metadata FROM certificate_versions WHERE certificate_id=$1 ORDER BY version DESC LIMIT 100`, id)
@@ -468,6 +474,9 @@ func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]cor
 		c.AccountID = ""
 		c.DNSAccountID = ""
 		c.AgentID = ""
+		if !item.Owned {
+			redactCertificateOwnerMetadata(&c)
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()

@@ -1,7 +1,7 @@
 {
   "task": "certificate-unified-e528",
-  "test_finished_utc": "2026-10-17T15:27:51+00:00",
-  "execute_utc": "2026-10-20T15:27:51+00:00",
+  "test_finished_utc": "2026-10-17T15:59:02+00:00",
+  "execute_utc": "2026-10-20T15:59:02+00:00",
   "containers": [
     {
       "id": "459aee5f7ee830248df562ffa61fcc8b3796c2149f4a16ee8503447395d7cc59",
@@ -29,8 +29,8 @@
   "timer": "qch-cert-e528-cleanup.timer",
   "service": "qch-cert-e528-cleanup.service",
   "timezone": "Asia/Shanghai",
-  "test_finished_local": "2026-10-17T23:27:51+08:00",
-  "execute_local": "2026-10-20T23:27:51+08:00",
+  "test_finished_local": "2026-10-17T23:59:02+08:00",
+  "execute_local": "2026-10-20T23:59:02+08:00",
   "registration": "enabled; active; Persistent=true; cleanup scope dry check passed",
   "ports_released": [
     36478,
