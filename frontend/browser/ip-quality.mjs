@@ -90,10 +90,12 @@ export async function testIPQualityRuntime(mode, preview = false) {
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
       assert.equal(JSON.parse(options.body).agent_id, "quality-a");
+      if (fixture.createGate) await fixture.createGate();
+      if (fixture.createFailure) return json(fixture.createFailure, 500);
       fixture.checks += 1;
       fixture.records = [{ task_id: "new-quality-task", agent_id: "quality-a", status: "pending", created_at: new Date().toISOString(),
         last_successful: fixture.records.find((record) => record.agent_id === "quality-a") }];
-      return json({ id: "new-quality-task", status: "pending", action: "ip-quality" }, 201);
+      return json({ id: "new-quality-task", agent_id: "quality-a", status: "pending", action: "ip-quality", created_at: fixture.records[0].created_at }, 201);
     }
     if (path === "/ip-quality/schedules/quality-a" && method === "PUT") {
       assert.ok(!readonly, "read-only page changed a schedule");
@@ -257,16 +259,45 @@ export async function testIPQualityRuntime(mode, preview = false) {
       if (external) assert.ok(dialog.textContent.includes("第三方"), "confirmation omitted external service access");
       dialog.querySelector("[data-confirm-accept]").click();
     };
+    let releaseCreate;
+    fixture.createGate = () => new Promise(resolve => { releaseCreate = resolve; });
+    const requestID = `req_${"a".repeat(100)}`;
+    fixture.createFailure = {error:"任务创建失败，尚未进入 Agent 执行。请检查控制面升级及数据库迁移状态。",code:"task_schema_incompatible",stage:"task_creation",request_id:requestID};
+    const postsBefore = fixture.calls.filter(call => call.path === "/ip-quality" && call.method === "POST").length;
+    card().querySelector("[data-ip-quality-run]").click();
+    await confirm();
+    await waitFor(() => releaseCreate && card().textContent.includes("任务创建中…"), "creation has no pending feedback");
+    card().querySelector("[data-ip-quality-run]").click();
+    assert.equal(fixture.calls.filter(call => call.path === "/ip-quality" && call.method === "POST").length, postsBefore + 1,
+      "double click repeated an in-flight creation");
+    releaseCreate();
+    await waitFor(() => card()?.querySelector(".ip-quality-error")?.textContent.includes(requestID), "creation failure lost request ID");
+    assert.ok(!card().querySelector("[data-ip-quality-run]").disabled, "creation failure did not restore button");
+    assert.equal(card().querySelectorAll(".ip-quality-archive img").length, 2, "creation failure erased the successful report");
+    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "long error request ID overflowed the page");
+    fixture.createGate = null;
+    fixture.createFailure = null;
     card().querySelector("[data-ip-quality-run]").click();
     await confirm();
     await waitFor(() => card()?.textContent.includes("等待执行"), "queued check was not shown");
     assert.equal(fixture.checks, 1, "check was submitted more than once");
     assert.ok(card().querySelector("[data-ip-quality-run]").disabled, "active check can be duplicated");
+    assert.ok(card().textContent.includes("排队中，等待 Agent 领取") && card().textContent.includes("已排队"), "pending check lost queue timing");
+    assert.equal(card().querySelector(".ip-quality-error"), null, "successful creation retained the previous API error");
     assert.ok(card().textContent.includes("上次成功检测") && card().querySelector("time").dateTime === `${reportDay}T06:05:00Z`,
       "fresh check discarded the previous report");
     assert.equal(card().querySelectorAll(".ip-quality-archive img").length, 2, "fresh check removed the previous archives");
     assert.ok(card().querySelector(".ip-quality-archive img").src.includes("quality-task/archives"),
       "previous archive was attributed to the pending task");
+    fixture.records[0].status = "running";
+    fixture.records[0].started_at = new Date(Date.now()-83000).toISOString();
+    await refresh();
+    assert.ok(card().textContent.includes("执行中") && card().textContent.includes("已执行 1 分"), "running check lost real elapsed time");
+    assert.ok(card().textContent.includes("数分钟") && !card().querySelector('[role="progressbar"]'), "running check has missing guidance or fake percentage");
+    fixture.records[0].finished_at = new Date().toISOString();
+    fixture.records[0].status = "canceled";
+    await refresh();
+    assert.ok(card().textContent.includes("已取消") && card().textContent.includes("执行耗时"), "canceled check lost final duration");
     fixture.records[0].status = "failed";
     fixture.records[0].error = "本次检测超时";
     await refresh();

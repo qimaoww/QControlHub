@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -89,8 +91,33 @@ func writeStoreError(w http.ResponseWriter, err error) {
 }
 
 func writeInternalError(w http.ResponseWriter, err error) {
-	slog.Error("HTTP request failed", "error", err)
-	writeError(w, http.StatusInternalServerError, "internal server error")
+	requestID, idErr := core.NewID("req")
+	if idErr != nil {
+		slog.Error("generate HTTP request ID", "error", idErr)
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	fields := []any{"request_id", requestID}
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) {
+		// PgError.Detail can contain the entire failing row, including secrets.
+		fields = append(fields, "sqlstate", pgError.Code, "constraint", pgError.ConstraintName,
+			"table", pgError.TableName, "schema", pgError.SchemaName,
+			// Preserve store/operation wrappers (e.g. account lookup) while
+			// excluding the database message, which can quote input values.
+			"error", strings.ReplaceAll(err.Error(), pgError.Error(), "PostgreSQL error"))
+	} else {
+		fields = append(fields, "error", err)
+	}
+	body := map[string]string{"error": chineseErrorMessage(http.StatusInternalServerError, "internal server error"), "request_id": requestID}
+	var schemaError *store.TaskSchemaError
+	if errors.As(err, &schemaError) {
+		fields = append(fields, "stage", "task_creation", "agent_id", schemaError.AgentID, "action", schemaError.Action)
+		body["code"] = "task_schema_incompatible"
+		body["stage"] = "task_creation"
+		body["error"] = "任务创建失败，尚未进入 Agent 执行。请联系管理员检查控制面升级及数据库迁移状态。"
+	}
+	slog.Error("HTTP request failed", fields...)
+	writeJSON(w, http.StatusInternalServerError, body)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

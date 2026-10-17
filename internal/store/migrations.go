@@ -41,6 +41,16 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if appliedVersion < 74 {
+		// PostgreSQL names the old inline engine CHECK tasks_check because it
+		// references both action and engine. Replacing tasks_engine_check never
+		// removed that second rule. Only this confirmed historical name is
+		// superseded; keep every other integrity constraint. schemaSQL now names
+		// the inline rule explicitly so fresh installs cannot recreate it.
+		if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS tasks DROP CONSTRAINT IF EXISTS tasks_check`); err != nil {
+			return fmt.Errorf("schema v74 remove superseded tasks_check: %w", err)
+		}
+	}
 	// substore_sync_targets was split out of the legacy single-target settings
 	// row in schema v31. Create and populate that table before the rest of the
 	// schema so the legacy substore_sync_items rows can receive their target_id.
