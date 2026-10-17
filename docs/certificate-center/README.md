@@ -29,7 +29,7 @@
 
 **已有节点 HTTP-01**
 
-验证节点与部署节点独立保存。Agent 仅接收本订单的域名、令牌、响应及有效期；账号密钥与证书私钥留在面板。挑战严格匹配 Host、路径和令牌，不写业务目录，不接管他人路由。过期、断开、取消、失败及重启会移除本任务资源。
+验证节点与部署节点独立保存。Agent 仅接收本订单的域名、令牌、响应及有效期；账号密钥与证书私钥留在面板。挑战严格匹配 Host、路径和令牌，不写业务目录，不接管他人路由。预检查最多等待 15 秒供 Agent 接收挑战，每次重试重新检查订单与授权。过期、断开、取消、失败及重启会移除本任务资源。
 
 没有网站且端口空闲时 Agent 临时监听公网 TCP 80。已有 Caddy / Nginx 需由入口所有者配置一次挑战路由并保留 Host，转发到该节点 `127.0.0.1:9080`。不会自动改写未知网站配置；端口占用且未接入时签发失败并显示入口检查原因。面板自身不需要开放 80。公网必须能访问验证节点的 80；泛域名只能使用 DNS-01。
 
@@ -54,6 +54,7 @@ location /.well-known/acme-challenge/ {
 
 | 验证 | 结果 / 证据 |
 | --- | --- |
+| 合并前审查 | 修复挑战下发与预检查的时序竞争、处理中取消被长退避延迟清理、失效 / 重试耗尽订单继续等待的问题；保留清理失败后的退避。竞态检测、PostgreSQL 调度 / 清理及普通用户权限回归通过。[调度回归](logs/merge-review-regressions.txt)、[权限回归](logs/merge-review-permissions.txt) |
 | 项目检查 | `make check`、`make build`、schema 75 → 76 检查及最终模块 / 样式 / 格式检查通过。[记录](logs/project-checks.txt) |
 | 普通用户完整浏览器流程 | cert-alice 创建 ACME 账号 → 双 SAN 真实本地 DNS 验证 → v1 加密保存 → Trojan 选择证书 → 真实签名 Agent → 非 root Mihomo v1.19.32 → CA 及主机名验证的 TLS 1.3 → 浏览器续期 v2 → 自动同步 → 运行叶指纹更新。[记录](logs/ordinary-user-browser-deployment.txt) |
 | 自动续期 / 重启 | 本地真实 CA、DNS API 契约服务：持久订单 / 账号恢复、无人登录自动续期 v2、精确 TXT 清理、取消及加密轮换。[记录](logs/local-acme.txt) |
@@ -88,7 +89,7 @@ location /.well-known/acme-challenge/ {
 
 **72 小时清理**
 
-测试进程、浏览器及本次两个容器已经停止，测试监听端口已释放。任务 `qch-cert-a978-cleanup.timer` 已实际注册、启用且处于 active，`Persistent=true`。最后测试结束时间及准确执行时间见 [任务清单](cleanup.json) 和 [systemd 查询记录](logs/cleanup-timer.txt)。执行时间为 **2026-10-20 17:26:07 Asia/Hong_Kong（UTC+08:00）**，即 09:26:07 UTC。
+测试进程、浏览器及本次两个容器已经停止，测试监听端口已释放。任务 `qch-cert-a978-cleanup.timer` 已实际注册、启用且处于 active，`Persistent=true`。最后测试结束时间及准确执行时间见 [任务清单](cleanup.json) 和 [systemd 查询记录](logs/cleanup-timer.txt)。执行时间为 **2026-10-20 17:54:05 Asia/Hong_Kong（UTC+08:00）**，即 09:54:05 UTC。
 
 root 所有的执行器与清单保存在 `/var/lib/qch-certificate-a978`，独立于分支和工作区。清理前同时校验两个容器的完整 ID 与本任务标签，只删除本次数据库 / Agent 容器及其匿名卷、独立预览目录、原始截图目录和 `/tmp/qch-cert-tools`。不删除现有镜像、其他容器、真实用户数据或仓库。此目录内的报告、脱敏日志和截图长期保留；外部 TXT / 挑战在验证结束时已即时清理。
 

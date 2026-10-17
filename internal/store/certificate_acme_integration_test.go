@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -285,5 +286,110 @@ func TestCertificateDNSResponseLossRecoveryPreservesExistingRecords(t *testing.T
 	challenge.CreatePending = true
 	if err := db.recoverDNSCreate(ctx, client, &challenge); err == nil || challenge.Record.ID != "" {
 		t.Fatal("ambiguous response claimed another writer's record")
+	}
+}
+
+func TestCertificateCancellationDuringValidationDoesNotDelayCleanup(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_certificate_cancel", false)
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "unused CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, startedStatus := range []string{"queued", "canceling"} {
+		t.Run(startedStatus, func(t *testing.T) {
+			item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "cancel during validation", Domains: []string{"cancel.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			orders, err := db.CertificateOrders(owner, item.ID)
+			if err != nil || len(orders) != 1 {
+				t.Fatalf("order missing: %v", err)
+			}
+			id := orders[0].ID
+			if err := db.ContinueCertificateOrder(owner, item.ID, id, true); err != nil {
+				t.Fatal(err)
+			}
+			// Interleave cancellation with recording a failure from an operation
+			// that already started. No external CA is needed to test scheduling.
+			if err := db.recordCertificateOrderFailure(ctx, id, "dns-manual", startedStatus, 6, errors.New("validation interrupted")); err != nil {
+				t.Fatal(err)
+			}
+			var status string
+			var immediatelyDue, backedOff bool
+			if err := db.pool.QueryRow(ctx, `SELECT status,next_attempt<=now(),next_attempt>now()+interval '63 minutes' FROM certificate_orders WHERE id=$1`, id).Scan(&status, &immediatelyDue, &backedOff); err != nil {
+				t.Fatal(err)
+			}
+			if status != "canceling" || immediatelyDue != (startedStatus == "queued") || backedOff != (startedStatus == "canceling") {
+				t.Fatalf("incorrect cancellation schedule: status=%s due=%v backoff=%v", status, immediatelyDue, backedOff)
+			}
+			if startedStatus == "queued" {
+				if err := db.RunCertificateMaintenance(ctx); err != nil {
+					t.Fatal(err)
+				}
+				orders, err = db.CertificateOrders(owner, item.ID)
+				if err != nil || orders[0].Status != "canceled" {
+					t.Fatalf("next maintenance did not clean the canceled order: %+v %v", orders, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCertificateFinishedOrderSchedulesImmediateCleanup(t *testing.T) {
+	for _, reason := range []struct {
+		name    string
+		attempt int
+		cause   error
+	}{
+		{"invalid authorization", 0, fmt.Errorf("validation rejected: %w", errCertificateOrderInvalid)},
+		{"retry limit reached", 7, errors.New("validation repeatedly timed out")},
+	} {
+		t.Run(reason.name, func(t *testing.T) {
+			testCertificateFinishedOrderCleanup(t, reason.attempt, reason.cause)
+		})
+	}
+}
+
+func testCertificateFinishedOrderCleanup(t *testing.T, attempt int, cause error) {
+	t.Helper()
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_certificate_invalid", false)
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "unused CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "invalid order", Domains: []string{"invalid.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil || len(orders) != 1 {
+		t.Fatalf("order missing: %v", err)
+	}
+	id := orders[0].ID
+	if _, err := db.pool.Exec(ctx, `INSERT INTO certificate_dns_leases(name,value,order_id) VALUES('fixture.invalid.example.test','proof',$1)`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.recordCertificateOrderFailure(ctx, id, "dns-manual", "queued", attempt, cause); err != nil {
+		t.Fatal(err)
+	}
+	var status, stage string
+	var due bool
+	if err := db.pool.QueryRow(ctx, `SELECT status,stage,next_attempt<=now() FROM certificate_orders WHERE id=$1`, id).Scan(&status, &stage, &due); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || stage != "cleanup" || !due {
+		t.Fatalf("invalid CA order was retried: %s %s due=%v", status, stage, due)
+	}
+	if err := db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var leases int
+	if err := db.pool.QueryRow(ctx, `SELECT stage,(SELECT count(*) FROM certificate_dns_leases WHERE order_id=$1) FROM certificate_orders WHERE id=$1`, id).Scan(&stage, &leases); err != nil {
+		t.Fatal(err)
+	}
+	if stage != "complete" || leases != 0 {
+		t.Fatalf("terminal order cleanup was not completed: stage=%s leases=%d", stage, leases)
 	}
 }

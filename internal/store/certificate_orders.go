@@ -35,6 +35,8 @@ type certificateOrderState struct {
 	Cleanup    bool                        `json:"cleanup"`
 }
 
+var errCertificateOrderInvalid = errors.New("ACME 订单已失效")
+
 func (s *Store) CreateACMECertificate(ctx context.Context, item core.Certificate) (core.Certificate, error) {
 	if item.Method != "dns-api" && item.Method != "dns-manual" && item.Method != "http-01" {
 		return item, ErrInvalid
@@ -362,6 +364,30 @@ func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certifica
 func checkHTTPChallenge(ctx context.Context, domain, token, value string) error {
 	return checkHTTPChallengeWith(ctx, domain, token, value, net.DefaultResolver.LookupIPAddr, (&net.Dialer{Timeout: 5 * time.Second}).DialContext)
 }
+
+// Challenge snapshots arrive on the Agent's authenticated polling channel. Keep
+// this order's routes alive while the first snapshot and listener become ready.
+func waitHTTPChallenge(ctx context.Context, check func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := check(ctx)
+		if err == nil || errors.Is(err, ErrForbidden) || errors.Is(err, context.Canceled) {
+			return err
+		}
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("%v: %w", err, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
 func checkHTTPChallengeWith(ctx context.Context, domain, token, value string, lookup func(context.Context, string) ([]net.IPAddr, error), dial func(context.Context, string, string) (net.Conn, error)) error {
 	addresses, err := lookup(ctx, domain)
 	if err != nil || len(addresses) == 0 {
@@ -435,7 +461,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		}
 	}
 	if order.Status == acme.StatusInvalid {
-		return errors.New("ACME 订单已失效，请重新申请")
+		return fmt.Errorf("%w，请重新申请", errCertificateOrderInvalid)
 	}
 	if len(state.Challenges) == 0 {
 		for _, authURL := range order.AuthzURLs {
@@ -446,6 +472,10 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			domain := auth.Identifier.Value
 			if auth.Wildcard {
 				domain = "*." + strings.TrimPrefix(domain, "*.")
+			}
+			switch auth.Status {
+			case acme.StatusInvalid, acme.StatusExpired, acme.StatusDeactivated, acme.StatusRevoked:
+				return fmt.Errorf("%w: 域名 %s 授权失效，请重新申请", errCertificateOrderInvalid, domain)
 			}
 			typ := "dns-01"
 			if item.Method == "http-01" {
@@ -578,8 +608,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 				return errors.New("ACME 域名授权状态读取失败")
 			}
 			c.Public.Status = auth.Status
-			if auth.Status == acme.StatusInvalid {
-				return fmt.Errorf("域名验证失败: %s；请检查 DNS 或公网挑战入口后重新申请", c.Public.Domain)
+			switch auth.Status {
+			case acme.StatusInvalid, acme.StatusExpired, acme.StatusDeactivated, acme.StatusRevoked:
+				return fmt.Errorf("%w: 域名 %s 验证失败；请检查 DNS 或公网挑战入口后重新申请", errCertificateOrderInvalid, c.Public.Domain)
 			}
 		}
 		if c.Public.Status == acme.StatusValid {
@@ -589,10 +620,15 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			return errors.New("订单已取消")
 		}
 		if item.Method == "http-01" {
-			if err = s.CheckCertificateHTTPPermission(ctx, item.AgentID, c.Public.Domain); err != nil {
-				return err
-			}
-			if err = checkHTTPChallenge(ctx, c.Public.Domain, c.Public.Token, c.Public.Value); err != nil {
+			if err = waitHTTPChallenge(ctx, func(probeCtx context.Context) error {
+				if s.certificateOrderCanceled(probeCtx, id) {
+					return context.Canceled
+				}
+				if err := s.CheckCertificateHTTPPermission(probeCtx, item.AgentID, c.Public.Domain); err != nil {
+					return err
+				}
+				return checkHTTPChallenge(probeCtx, c.Public.Domain, c.Public.Token, c.Public.Value)
+			}); err != nil {
 				return fmt.Errorf("域名 %s: %w", c.Public.Domain, err)
 			}
 		} else {
@@ -615,6 +651,10 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	}
 	order, err = client.WaitOrder(ctx, state.URL)
 	if err != nil {
+		var orderError *acme.OrderError
+		if errors.As(err, &orderError) && orderError.Status == acme.StatusInvalid {
+			return fmt.Errorf("%w，请检查所有域名入口后重新申请", errCertificateOrderInvalid)
+		}
 		return errors.New("CA 验证尚未完成或失败，请检查所有域名入口")
 	}
 	for i := range state.Challenges {

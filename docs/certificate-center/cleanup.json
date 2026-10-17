@@ -1,8 +1,8 @@
 {
   "task": "certificate-center-a978",
-  "test_end_utc": "2026-10-17T09:26:07+00:00",
-  "execute_utc": "2026-10-20T09:26:07+00:00",
-  "execute_hong_kong": "2026-10-20T17:26:07+08:00",
+  "test_end_utc": "2026-10-17T09:54:05+00:00",
+  "execute_utc": "2026-10-20T09:54:05+00:00",
+  "execute_hong_kong": "2026-10-20T17:54:05+08:00",
   "units": [
     "qch-cert-a978-preview.service",
     "qch-cert-a978-relay.service",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
@@ -125,18 +126,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET attempt=attempt+1,updated_at=now() WHERE id=$1`, job.id)
 			err = s.processCertificateOrder(runCtx, item, job.id, status, state)
 			if err != nil {
-				retry := time.Duration(1<<min(attempt, 6)) * time.Minute
-				nextStatus := "queued"
-				stage := "retry"
-				if item.Method == "dns-manual" {
-					nextStatus = "waiting_dns"
-					stage = "waiting_dns"
-				}
-				if attempt >= 7 {
-					nextStatus = "failed"
-					stage = "cleanup"
-				}
-				_, _ = s.pool.Exec(context.WithoutCancel(ctx), `UPDATE certificate_orders SET status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=$3,error=$4,next_attempt=now()+$5::interval,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, job.id, nextStatus, stage, truncate(err.Error(), 1000), intervalString(retry))
+				_ = s.recordCertificateOrderFailure(context.WithoutCancel(ctx), job.id, item.Method, status, attempt, err)
 				_, _ = s.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM certificate_http_challenges WHERE order_id=$1`, job.id)
 			}
 		}()
@@ -145,4 +135,20 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 		return err
 	}
 	return rekeyErr
+}
+
+func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, startedStatus string, attempt int, cause error) error {
+	retry := time.Duration(1<<min(attempt, 6)) * time.Minute
+	status, stage := "queued", "retry"
+	if method == "dns-manual" {
+		status, stage = "waiting_dns", "waiting_dns"
+	}
+	terminal := errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
+	if attempt >= 7 || terminal {
+		status, stage = "failed", "cleanup"
+	}
+	// A cancellation received during validation must not inherit its long retry
+	// delay. Once cleanup itself fails, retain backoff to protect the provider.
+	_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=$3,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(cause.Error(), 1000), intervalString(retry), startedStatus, terminal)
+	return err
 }
