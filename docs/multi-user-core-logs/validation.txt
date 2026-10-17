@@ -1,0 +1,80 @@
+project-checks-final.txt
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/core 0.030s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/hostmetrics 0.025s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/cnip 0.018s
+[checks-1] # pass 1
+[checks-1] # pass 2
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/configschema 0.010s
+[go-tests-1-of-4] pass github.com/qimaoww/qcontrolhub/cmd/control-plane 0.315s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub 0.004s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/architecture 0.016s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/internal/netpolicy 0.049s
+[go-tests-3-of-4] pass github.com/qimaoww/qcontrolhub/cmd/agent 0.377s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/geoip 5.232s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/githubfetch 2.114s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/authn 1.704s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/notify 0.060s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/frontend 0.063s
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/komari 0.004s
+[checks-1] # pass 12
+[checks-1] # pass 11
+[checks-1] # pass 7
+[checks-1] # pass 8
+[go-tests-4-of-4] pass github.com/qimaoww/qcontrolhub/internal/serverconfig 0.373s
+[checks-1] # pass 4
+[checks-1] # pass 4
+[checks-1] go vet ./...
+[go-tests-1-of-4] pass github.com/qimaoww/qcontrolhub/internal/api 210.787s
+[go-tests-2-of-4] pass github.com/qimaoww/qcontrolhub/internal/agent 231.609s
+[go-tests-1-of-4] pass github.com/qimaoww/qcontrolhub/internal/store 129.179s
+
+browser-checks-all.txt
+        PASS logs {"loaded":8000,"domRows":200,"initialMs":179,"expandedMs":42,"pageMs":9,"filterMs":11,"switchAckMs":8,"previewRenderMs":33,"cachedSwitchMs":31,"longPageMs":11}
+--- PASS: TestAgentBrowserRuntimeSmoke (372.49s)
+ok  	github.com/qimaoww/qcontrolhub/frontend	372.497s
+--- PASS: TestCoreFirstInstallBrowserSessions (15.98s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/desktop (3.92s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/mobile (4.03s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/desktop (4.10s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/mobile (3.93s)
+ok  	github.com/qimaoww/qcontrolhub/internal/api	16.203s
+--- PASS: TestMultiUserBrowserSessions (6.76s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (3.37s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (3.39s)
+ok  	github.com/qimaoww/qcontrolhub/internal/api	6.981s
+--- PASS: TestCoreLogsBrowserSessions (26.48s)
+    --- PASS: TestCoreLogsBrowserSessions/desktop (13.23s)
+    --- PASS: TestCoreLogsBrowserSessions/mobile (13.25s)
+ok  	github.com/qimaoww/qcontrolhub/internal/api	26.707s
+
+live-systemd.txt
+    core_logs_instances_live_linux_test.go:163: systemd: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: systemd: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: systemd: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: systemd: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+--- PASS: TestSharedCoreLogLiveLifecycle (81.23s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/mihomo (20.30s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/xray (20.00s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/sing-box (19.98s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/ss-rust (19.98s)
+PASS
+
+live-openrc.txt
+    core_logs_instances_live_linux_test.go:163: openrc: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: openrc: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: openrc: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+    core_logs_instances_live_linux_test.go:163: openrc: two instances, dynamic discovery, startup, restart, rotation, pending reconnect batch, failure isolation, recovery, deletion
+--- PASS: TestSharedCoreLogLiveLifecycle (60.03s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/mihomo (15.03s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/xray (14.97s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/sing-box (15.00s)
+    --- PASS: TestSharedCoreLogLiveLifecycle/ss-rust (14.99s)
+PASS
+
+PostgreSQL instance index EXPLAIN regression (50,000 foreign instance rows)
+    core_log_isolation_test.go:205: Sort -> Append -> Result -> Index Scan on panel_users_pkey -> Nested Loop -> Nested Loop -> Index Scan on agents_owner_idx -> Index Scan on panel_users_pkey -> Function Scan -> Subquery Scan -> Result -> Index Scan on panel_users_pkey -> Nested Loop -> Nested Loop -> Nested Loop -> Bitmap Heap Scan on agent_shares -> Bitmap Index Scan on agent_shares_user_id_agent_id_key -> Index Scan on agent_shared_instance_ownership_pkey -> Index Scan on panel_users_pkey -> Index Scan on agents_pkey -> Nested Loop -> Function Scan -> Limit -> Sort -> Nested Loop -> Nested Loop -> CTE Scan -> Function Scan -> Limit -> Merge Append -> Index Only Scan on core_logs_p20261016_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261017_agent_id_engine_instance_id_node_owner__idx -> Index Only Scan on core_logs_p20261018_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261019_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261020_engine_id_agent_id_level_message_logged_idx
+
+Concurrent main schema upgrade follow-up:
+Schema policy: v74 -> v75, schemaSQL changed=true
+Real PostgreSQL: TestCoreLogIdentityMigrationFromPreviousSchemas (v73 and v74),
+all TestTaskConstraints cases, refreshed indexes, conservative history and repeat startup: PASS (5.400s).

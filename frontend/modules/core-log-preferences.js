@@ -24,6 +24,7 @@ function normalizedFilters(value, engines) {
     agentIDPattern.test(source.agent_id)
   )
     filters.agent_id = source.agent_id;
+  if (source.instance_id === "main" || /^shr_[0-9a-f]{16}$/.test(source.instance_id || "")) filters.instance_id = source.instance_id;
   if (engines.includes(source.engine)) filters.engine = source.engine;
   if (levelValues.has(source.level)) filters.level = source.level;
   if (typeof source.q === "string" && source.q.trim())

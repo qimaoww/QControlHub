@@ -41,6 +41,15 @@ export function createCoreLogDOM(ctx) {
         }
       }
       reconcileView(current, template.content.firstElementChild, { preserveViewState: selector !== ".core-log-stream" });
+      if (selector === ".core-log-filters") {
+        // The options and saved selection belong to the verified scope. A
+        // native select auto-selects its first option while sources load;
+        // generic dirty-control preservation must not retain that placeholder.
+        for (const fresh of template.content.querySelectorAll("select")) {
+          const select = current.querySelector(`select[name="${fresh.name}"]`);
+          if (select && select.value !== fresh.value) select.value = fresh.value;
+        }
+      }
       if (anchor?.row.isConnected) scroller.scrollTo({ top: scroller.scrollTop + anchor.row.getBoundingClientRect().top - anchor.rect.top, behavior: "instant" });
       if (oldKeys && !scroller?.scrollTop) {
         [...current.querySelectorAll(".core-log-row")].filter(row => !oldKeys.has(row.dataset.refreshKey)).slice(0, 3)
@@ -57,6 +66,11 @@ export function createCoreLogDOM(ctx) {
         reconcileView(current, template.content.firstElementChild);
       }
     }
+    const online = (ctx.state.data.coreLogAgents || []).filter(agent => agent.status === "online").length;
+    const sync = document.querySelector("[data-sync-state]");
+    sync?.classList.toggle("inactive", !online);
+    const label = document.querySelector("[data-sync-label]");
+    if (label) label.textContent = online ? `${online} 个节点在线` : "等待节点连接";
     syncSelectionMotion(workspace);
   };
 }

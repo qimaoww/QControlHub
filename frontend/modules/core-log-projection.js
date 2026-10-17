@@ -6,7 +6,7 @@ export function reuseCoreLogEntries(previous, fresh) {
   if (previous === fresh) return previous;
   if (!previous?.length) return fresh;
   const byID = new Map(previous.map(entry => [entry.id, entry]));
-  const fields = ["agent_id", "engine", "level", "message", "logged_at", "received_at"];
+  const fields = ["agent_id", "instance_id", "service", "owner_id", "engine", "level", "message", "logged_at", "received_at"];
   let unchanged = fresh.length === previous.length;
   const entries = fresh.map((entry, index) => {
     const old = byID.get(entry.id);

@@ -15,11 +15,13 @@ import (
 const coreLogRetention = 7 * 24 * time.Hour
 
 type CoreLogQuery struct {
-	AgentID string
-	Engine  core.Engine
-	Level   string
-	Search  string
-	Before  int64
+	AgentID    string
+	InstanceID string
+	UserID     string
+	Engine     core.Engine
+	Level      string
+	Search     string
+	Before     int64
 	// Limit bounds each engine independently within the selected node scope.
 	Limit int
 }
@@ -53,9 +55,9 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	defer tx.Rollback(ctx)
 	// Serialize uploads with revocation so an already authenticated request
 	// cannot recreate logs after the deletion worker has drained them.
-	var minimumLevel string
+	var minimumLevel, nodeOwner string
 	if err := tx.QueryRow(ctx, `SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
-		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID).Scan(&minimumLevel); err != nil {
+		,agents.owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID).Scan(&minimumLevel, &nodeOwner); err != nil {
 		return fmt.Errorf("read core log minimum level: %w", mapError(err))
 	}
 	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)
@@ -78,6 +80,34 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		}
 		return tx.Commit(ctx)
 	}
+	// Only shared batches need the single ownership lookup. Main/legacy batches
+	// retain their existing round-trip budget.
+	shared := false
+	for _, entry := range entries {
+		shared = shared || (entry.InstanceID != "" && entry.InstanceID != "main")
+	}
+	owners := map[string]string{}
+	if shared {
+		sourceRows, err := tx.Query(ctx, `SELECT o.engine,o.share_id,o.owner_id FROM agent_shared_instance_ownership o
+ JOIN agent_shares sh ON sh.id=o.share_id AND sh.agent_id=o.agent_id AND sh.user_id=o.owner_id
+ WHERE o.agent_id=$1`, agentID)
+		if err != nil {
+			return err
+		}
+		for sourceRows.Next() {
+			var engine, instance, owner string
+			if err := sourceRows.Scan(&engine, &instance, &owner); err != nil {
+				sourceRows.Close()
+				return err
+			}
+			owners[engine+"/"+instance] = owner
+		}
+		sourceRows.Close()
+		if err := sourceRows.Err(); err != nil {
+			return err
+		}
+	}
+	instances, services, ownerIDs, nodeOwners := []string{}, []string{}, []string{}, []string{}
 	indexes := make([]int32, 0, len(entries))
 	engines := make([]string, 0, len(entries))
 	levels := make([]string, 0, len(entries))
@@ -88,8 +118,31 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		if !coreLogLevelAtLeast(entry.Level, minimumLevel) {
 			continue
 		}
+		entry.OwnerID = nodeOwner
+		entry.NodeOwnerID = nodeOwner
+		if entry.InstanceID != "" {
+			instance, valid := core.CoreLogInstance(entry.Engine, entry.Service)
+			if !valid || instance != entry.InstanceID {
+				continue
+			}
+			if instance != "main" {
+				owner, known := owners[string(entry.Engine)+"/"+instance]
+				if !known {
+					continue
+				}
+				entry.OwnerID = owner
+			}
+		} else {
+			entry.Service = ""
+		} // Legacy data is node-scoped and never recipient-scoped.
+		instances = append(instances, entry.InstanceID)
+		services = append(services, entry.Service)
+		ownerIDs = append(ownerIDs, entry.OwnerID)
+		nodeOwners = append(nodeOwners, nodeOwner)
 		entry.ReceivedAt = receivedAt
-		accepted = append(accepted, entry)
+		if entry.InstanceID == "" || entry.InstanceID == "main" {
+			accepted = append(accepted, entry)
+		}
 		indexes = append(indexes, int32(index))
 		engines = append(engines, string(entry.Engine))
 		levels = append(levels, entry.Level)
@@ -100,11 +153,11 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	// transaction, but pay only one remote round trip for the entire batch.
 	if len(indexes) > 0 {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO core_logs (batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at)
-			SELECT $1,entry_index,$2,engine,level,message,logged_at,$3
-			FROM unnest($4::integer[],$5::text[],$6::text[],$7::text[],$8::timestamptz[])
-			AS entries(entry_index,engine,level,message,logged_at)`,
-			batch.ID, agentID, receivedAt, indexes, engines, levels, messages, loggedAt); err != nil {
+			INSERT INTO core_logs (batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at,instance_id,service,owner_id,node_owner_id)
+			SELECT $1,entry_index,$2,engine,level,message,logged_at,$3,instance,service,owner_id,node_owner_id
+			FROM unnest($4::integer[],$5::text[],$6::text[],$7::text[],$8::timestamptz[],$9::text[],$10::text[],$11::text[],$12::text[])
+			AS entries(entry_index,engine,level,message,logged_at,instance,service,owner_id,node_owner_id)`,
+			batch.ID, agentID, receivedAt, indexes, engines, levels, messages, loggedAt, instances, services, ownerIDs, nodeOwners); err != nil {
 			return mapError(err)
 		}
 	}
@@ -153,6 +206,9 @@ func coreLogWindowStatement(query CoreLogQuery, engines []string) (string, []any
 }
 
 func scopedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, engines []string) (string, []any) {
+	if _, scoped := requestConfigScope(ctx); scoped {
+		return authorizedCoreLogWindowStatement(ctx, query, engines)
+	}
 	// Bound each engine's indexed scan before merging the results. A busy
 	// engine must not consume the other engines' slots, and we should not rank
 	// the entire retained log history just to display a small recent window.
@@ -172,7 +228,14 @@ func scopedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, engin
 		args = append(args, query.Before)
 		where += fmt.Sprintf(" AND id<$%d", len(args))
 	}
-	where += agentAdministrationClause(ctx, "core_logs.agent_id", &args)
+	if query.InstanceID != "" {
+		args = append(args, query.InstanceID)
+		where += fmt.Sprintf(" AND instance_id=$%d", len(args))
+	}
+	if query.UserID != "" {
+		args = append(args, query.UserID)
+		where += fmt.Sprintf(" AND owner_id=$%d", len(args))
+	}
 	return fmt.Sprintf(coreLogWindowSQL, where), args
 }
 
@@ -186,10 +249,10 @@ func scopedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, engin
 // scope can use an index-only scan. Falling back to heap fetches turns a bounded
 // window into hundreds of random page reads per request.
 const coreLogWindowSQL = `
-		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at
+		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at,logs.instance_id,logs.service,logs.owner_id
 		FROM unnest($1::text[]) AS selected(engine)
 		CROSS JOIN LATERAL (
-			SELECT id,agent_id,engine,level,message,logged_at,received_at
+			SELECT id,agent_id,engine,level,message,logged_at,received_at,instance_id,service,owner_id
 			FROM core_logs
 			WHERE %s
 			ORDER BY id DESC LIMIT $2
@@ -197,9 +260,22 @@ const coreLogWindowSQL = `
 		ORDER BY logs.id DESC`
 
 func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.CoreLogEntry, error) {
-	if query.AgentID != "" {
-		if err := requireAgentAdministration(ctx, s.pool, query.AgentID); err != nil {
+	if _, scoped := requestConfigScope(ctx); scoped && (query.AgentID != "" || query.InstanceID != "" || query.UserID != "") {
+		args := []any{}
+		resources := coreLogResourcesSQL(ctx, &args)
+		where := "true"
+		for _, filter := range []struct{ column, value string }{{"agent_id", query.AgentID}, {"instance_id", query.InstanceID}, {"owner_id", query.UserID}} {
+			if filter.value != "" {
+				args = append(args, filter.value)
+				where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
+			}
+		}
+		var allowed bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+resources+`) resource WHERE `+where+`)`, args...).Scan(&allowed); err != nil {
 			return nil, err
+		}
+		if !allowed {
+			return nil, ErrNotFound
 		}
 	}
 	if query.Limit == 0 {
@@ -227,7 +303,7 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	result := make([]core.CoreLogEntry, 0, query.Limit*len(engines))
 	for rows.Next() {
 		var entry core.CoreLogEntry
-		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Engine, &entry.Level, &entry.Message, &entry.LoggedAt, &entry.ReceivedAt); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Engine, &entry.Level, &entry.Message, &entry.LoggedAt, &entry.ReceivedAt, &entry.InstanceID, &entry.Service, &entry.OwnerID); err != nil {
 			return nil, err
 		}
 		entry.Message = sanitizeCoreLogMessage(entry.Message)

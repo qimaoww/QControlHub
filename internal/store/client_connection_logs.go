@@ -100,7 +100,7 @@ func (s *Store) BackfillClientConnectionLogs(ctx context.Context) (bool, error) 
 		return true, tx.Commit(ctx)
 	}
 	rows, err := tx.Query(ctx, `SELECT id,agent_id,engine,message,logged_at,received_at FROM core_logs
- WHERE id>$1 AND id<=$2 ORDER BY id LIMIT 1000`, lastID, upperID)
+ WHERE id>$1 AND id<=$2 AND instance_id IN ('','main') ORDER BY id LIMIT 1000`, lastID, upperID)
 	if err != nil {
 		return false, err
 	}

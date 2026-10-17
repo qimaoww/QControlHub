@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +27,8 @@ func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 	if source.kind == "systemd-fallback" {
 		if err := truncateSystemdFallbackCoreLog(context.Background(), source); err != nil {
 			slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+		} else {
+			collector.recordFileTruncate(source)
 		}
 		return
 	}
@@ -33,6 +36,8 @@ func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 	if rotateCount == 0 {
 		if err := os.Truncate(source.path, 0); err != nil {
 			slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+		} else {
+			collector.recordFileTruncate(source)
 		}
 		return
 	}
@@ -75,6 +80,16 @@ func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 	}
 	if err := os.Truncate(source.path, 0); err != nil {
 		slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+	} else {
+		collector.recordFileTruncate(source)
+	}
+}
+
+func (collector *CoreLogCollector) recordFileTruncate(source coreLogFileSource) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	if run := collector.activeFiles[coreLogFileSourceKey(source)]; run != nil {
+		run.truncated.Store(true)
 	}
 }
 
@@ -103,7 +118,11 @@ func (collector *CoreLogCollector) appendFileEntry(source coreLogFileSource, lin
 	} else if source.engine == core.EngineShadowsocksRust {
 		level = ssRustLogLevel(message, level)
 	}
-	collector.append(core.CoreLogEntry{Engine: source.engine, Level: level, Message: message, LoggedAt: time.Now().UTC()})
+	service := core.CoreLogService(source.engine, "main", "systemd")
+	if source.kind == "openrc" {
+		service = strings.TrimSuffix(filepath.Base(source.path), ".log")
+	}
+	collector.append(core.CoreLogEntry{Engine: source.engine, InstanceID: "main", Service: service, Level: level, Message: message, LoggedAt: time.Now().UTC()})
 }
 
 func truncateSystemdFallbackCoreLog(ctx context.Context, source coreLogFileSource) error {

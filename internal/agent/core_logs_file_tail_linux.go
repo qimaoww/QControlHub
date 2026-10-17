@@ -172,6 +172,16 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	bytesSinceValidation := int64(0)
 	nextValidation := time.Now().Add(coreLogRevalidateEvery)
 	for ctx.Err() == nil {
+		// A fast restart can refill a copytruncated file to its previous size
+		// before the next stat. Track our rotations explicitly so the new prefix
+		// is still read even when size never appears smaller than the cursor.
+		if run != nil && run.truncated.Swap(false) {
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			offset = 0
+			partial = nil
+		}
 		read, readErr := file.Read(buffer)
 		if read > 0 {
 			if err := collector.publishFileBlock(ctx, file, source, run, trusted,

@@ -13,15 +13,20 @@ const (
 )
 
 // CoreLogEntry is one line emitted by a managed proxy core. AgentID and ID are
-// assigned by the control plane; Agents only submit the remaining fields.
+// assigned by the control plane, as are OwnerID and NodeOwnerID. Agents submit
+// the validated engine/service/instance identity and content.
 type CoreLogEntry struct {
-	ID         int64     `json:"id,omitempty"`
-	AgentID    string    `json:"agent_id,omitempty"`
-	Engine     Engine    `json:"engine"`
-	Level      string    `json:"level"`
-	Message    string    `json:"message"`
-	LoggedAt   time.Time `json:"logged_at"`
-	ReceivedAt time.Time `json:"received_at,omitempty"`
+	ID          int64     `json:"id,omitempty"`
+	AgentID     string    `json:"agent_id,omitempty"`
+	InstanceID  string    `json:"instance_id,omitempty"`
+	Service     string    `json:"service,omitempty"`
+	OwnerID     string    `json:"owner_id,omitempty"`
+	NodeOwnerID string    `json:"-"`
+	Engine      Engine    `json:"engine"`
+	Level       string    `json:"level"`
+	Message     string    `json:"message"`
+	LoggedAt    time.Time `json:"logged_at"`
+	ReceivedAt  time.Time `json:"received_at,omitempty"`
 }
 
 type CoreLogBatch struct {

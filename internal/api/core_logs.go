@@ -15,13 +15,16 @@ import (
 func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 	values := request.URL.Query()
 	query := store.CoreLogQuery{
-		AgentID: strings.TrimSpace(values.Get("agent_id")),
-		Level:   strings.TrimSpace(values.Get("level")),
-		Search:  strings.TrimSpace(values.Get("q")),
-		Limit:   1000,
+		AgentID:    strings.TrimSpace(values.Get("agent_id")),
+		InstanceID: strings.TrimSpace(values.Get("instance_id")),
+		UserID:     strings.TrimSpace(values.Get("user_id")),
+		Level:      strings.TrimSpace(values.Get("level")),
+		Search:     strings.TrimSpace(values.Get("q")),
+		Limit:      1000,
 	}
-	if query.AgentID != "" && !validAgentID(query.AgentID) {
-		writeError(w, http.StatusBadRequest, "invalid agent_id filter")
+	validUser := query.UserID == "" || (strings.HasPrefix(query.UserID, "usr_") && validAgentID("agt_"+strings.TrimPrefix(query.UserID, "usr_")))
+	if (query.InstanceID != "" && query.InstanceID != "main" && !core.ValidAgentShareID(query.InstanceID)) || !validUser || (query.AgentID != "" && !validAgentID(query.AgentID)) {
+		writeError(w, http.StatusBadRequest, "invalid log resource filter")
 		return
 	}
 	if raw := strings.TrimSpace(values.Get("engine")); raw != "" {
@@ -68,9 +71,11 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	payload = append(payload, '\n')
-	digest := sha256.Sum256(payload)
+	digest := sha256.Sum256(append([]byte(request.URL.RawQuery+"\x00"+request.Header.Get("Authorization")+request.Header.Get("Cookie")+"\x00"), payload...))
 	etag := `W/"` + hex.EncodeToString(digest[:]) + `"`
 	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Vary", "Cookie, Authorization")
 	if coreLogETagMatches(request.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -90,4 +95,14 @@ func coreLogETagMatches(condition, etag string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) listCoreLogSources(w http.ResponseWriter, r *http.Request) {
+	sources, err := s.store.ListCoreLogSources(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, sources)
 }
