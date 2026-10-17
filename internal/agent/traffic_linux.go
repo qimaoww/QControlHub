@@ -336,6 +336,22 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		if quota := record.Policy.SharedQuota; quota != nil {
 			key := instanceKey{quota.ID, record.Policy.Engine}
 			if !authorized[key][record.Policy.Port] {
+				// A settled deployment may retire a port while keeping this
+				// allocation active on its replacement. Independently verify
+				// the protected local mapping before treating removal as safe.
+				if len(authorized[key]) > 0 && manager.sharedSource != nil {
+					snapshot, err := manager.sharedSource(ctx, key.engine, key.shareID)
+					oldPresent, newPresent := false, false
+					if err == nil && snapshot.Plan.Source == "nft-dual" {
+						for _, port := range snapshot.Plan.Ports {
+							oldPresent = oldPresent || port.Port == record.Policy.Port
+							newPresent = newPresent || authorized[key][port.Port]
+						}
+						if !oldPresent && newPresent {
+							continue
+						}
+					}
+				}
 				if toStop[key] == "" {
 					toStop[key] = "原有监听端口已收回，实例已停止；请核对已分配端口后重新部署"
 				}

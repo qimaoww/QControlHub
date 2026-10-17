@@ -42,6 +42,13 @@ func prepareMarkedAccounting(record *trafficRecord, snapshot nativeAccountingSna
 		record.LifetimeReceivedBytes, record.LifetimeSentBytes = pendingRX, pendingTX
 		return nil
 	}
+	// A verified replacement configuration no longer contains the old listener,
+	// or does not yet contain a newly reserved listener. Keep the installed nft
+	// generation: it is the evidence for final packets on the retired port.
+	// Never grant this fallback after a source/configuration verification error.
+	if record.Policy.SharedQuota != nil && snapshot.Plan.Source == "nft-dual" {
+		return nil
+	}
 	return errors.New("listener has no independent marked outbound")
 }
 

@@ -57,6 +57,11 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 // Only the authenticated allocation selects this root-owned configuration and
 // service. An engine name alone must never select another user's counters.
 func (e *Executor) sharedAccounting(ctx context.Context, engine core.Engine, shareID string) (nativeAccountingSnapshot, error) {
+	lock := e.sharedAccountingLock(engine, shareID)
+	if !lock.TryRLock() {
+		return nativeAccountingSnapshot{}, errSharedAccountingTransition
+	}
+	defer lock.RUnlock()
 	var result nativeAccountingSnapshot
 	e.specsMu.RLock()
 	base, ok := e.Specs[engine]

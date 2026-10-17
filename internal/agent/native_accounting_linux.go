@@ -12,6 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var errSharedAccountingTransition = errors.New("shared instance deployment is in progress")
+
 type nativeAccountingSnapshot struct {
 	Plan              serverconfig.AccountingPlan
 	Counters          map[string]uint64

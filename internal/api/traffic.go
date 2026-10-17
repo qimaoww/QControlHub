@@ -130,10 +130,9 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 		}
 		return
 	}
-	// Reconnects also follow metadata edits. Only a saved
-	// configuration change may prune stale discovered monitors, otherwise a
-	// non-destructive sync would delete them as soon as the Agent reconnects.
-	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, connectedAgentID == "")
+	// Reconnect and save refreshes use confirmed applied revisions. Retirement
+	// happens only after a settled deployment result.
+	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, false)
 	if err != nil {
 		// Listener accounting is best-effort and must never make configuration
 		// management or an authenticated Agent session unavailable.
@@ -157,7 +156,7 @@ func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID
 		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)
 		return
 	}
-	changed, err := s.store.ReconcileAgentPortTrafficEndpoints(ctx, agentID, trafficEndpointsFromConfigs(configs), true)
+	changed, err := s.store.ReconcileAgentPortTrafficEndpoints(ctx, agentID, trafficEndpointsFromConfigs(configs), false)
 	if err != nil {
 		slog.Warn("reconcile saved node traffic endpoints", "agent_id", agentID, "error", err)
 		return
@@ -168,63 +167,45 @@ func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID
 }
 
 func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
-	configs, err := s.store.ListAgentConfigs(request.Context())
+	endpoints, err := s.store.AppliedTrafficEndpoints(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, trafficEndpointsFromConfigs(configs))
+	writeJSON(w, http.StatusOK, endpoints)
 }
 
 func (s *Server) syncPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
 	var input struct {
+		Snapshot   string                      `json:"snapshot"`
 		Selections []core.TrafficSyncSelection `json:"selections"`
 	}
 	if err := decodeJSON(w, request, &input, 512<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	endpoints := trafficEndpointsFromConfigs(configs)
-	changedAgents, err := s.store.SyncSelectedPortTrafficEndpoints(request.Context(), endpoints, input.Selections)
+	changed, err := s.store.SyncPortTrafficSnapshot(request.Context(), input.Snapshot, input.Selections)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	for _, agentID := range changedAgents {
-		s.refreshAgentTrafficPolicies(agentID)
+	for _, id := range changed {
+		s.refreshAgentTrafficPolicies(id)
 	}
-	s.recordAudit(request, "traffic_endpoints.synced", "", "selected ports: "+strconv.Itoa(len(input.Selections))+", changed agents: "+strconv.Itoa(len(changedAgents)))
+	s.recordAudit(request, "traffic_endpoints.synced", "", "selected ports: "+strconv.Itoa(len(input.Selections))+", changed agents: "+strconv.Itoa(len(changed)))
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"endpoints":      endpoints,
-		"changed_agents": changedAgents,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"changed_agents": changed})
 }
 
 func (s *Server) previewPortTrafficSync(w http.ResponseWriter, request *http.Request) {
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	policies, err := s.store.ListPortTrafficPolicies(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	candidates, err := store.TrafficSyncCandidates(trafficEndpointsFromConfigs(configs), policies)
+	preview, err := s.store.PreviewPortTrafficSync(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoint {

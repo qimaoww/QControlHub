@@ -204,5 +204,10 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
+	if status == core.TaskSucceeded && (action == core.ActionDeploy || action == core.ActionImportExisting) {
+		if err := s.finishDeployedTrafficTx(ctx, tx, agentID, engine, shareID, configID, configVersion, result.TrafficSettled); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }

@@ -30,8 +30,14 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 		if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM agent_share_ports WHERE share_id=$1`, access.Shares[0].ID).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("failed request partially reserved ports: %d %v", count, err)
 		}
-		if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 0 {
-			t.Fatalf("failed request created accounting: %+v %v", policies, err)
+		policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, policy := range policies {
+			if policy.SharedQuota != nil {
+				t.Fatalf("failed request created shared accounting: %+v", policy)
+			}
 		}
 	}
 	checkDenied()

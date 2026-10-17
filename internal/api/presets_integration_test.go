@@ -116,8 +116,8 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 				}
 				select {
 				case <-updates:
+					t.Fatal("saved/queued configuration changed running monitoring before deployment confirmation")
 				default:
-					t.Fatal("changed monitoring policies were not pushed to the existing connection")
 				}
 				policies, err := db.AgentPortTrafficPolicies(ctx, other.ID)
 				if err != nil || len(policies) != 1 || policies[0].Port != endpoint.Port {

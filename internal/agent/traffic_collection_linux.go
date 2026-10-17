@@ -74,6 +74,14 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		shared := record.Policy.SharedQuota != nil
 		key := sourceKey{record.Policy.Engine, sharedQuotaID(record.Policy.SharedQuota)}
 		snapshot, sourceErr := snapshots[key], sourceErrors[key]
+		if shared && errors.Is(sourceErr, errSharedAccountingTransition) {
+			// Existing nft rules keep protecting the allocation while its
+			// configuration and deployment digest are committed atomically.
+			// Retain every baseline; the next sample includes the full tail.
+			next := *record
+			desired[id] = &next
+			continue
+		}
 		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
 		nativeAllowed := hasSource && nativeAccountingScopeAllowed(record.Policy, snapshot)
 		// A transient source failure must freeze an established native baseline,
@@ -121,6 +129,11 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				if snapshot.Plan.Source == "nft-dual" {
 					err = prepareMarkedAccounting(record, snapshot)
 					if err == nil {
+						if shared && (record.Accounting == nil || record.Accounting.Source != "nft-dual") {
+							// A reserved future listener is only firewall protection.
+							// Its bytes cannot be attributed to the deployed instance.
+							receivedDelta, sentDelta = 0, 0
+						}
 						if shared && previousEpoch != record.CounterEpoch &&
 							(previousRecord.Accounting == nil || previousRecord.Accounting.Source == "listener") {
 							// A restored checkpoint has no in-memory collection time.
@@ -142,7 +155,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 							// Target counters start at zero; no historical exit is estimated.
 							record.Accounting.ClientReceived = saturatedTrafficAdd(record.Accounting.ClientReceived, receivedDelta)
 							record.Accounting.ClientSent = saturatedTrafficAdd(record.Accounting.ClientSent, sentDelta)
-						} else {
+						} else if record.Accounting != nil {
 							receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, previousEpoch != record.CounterEpoch)
 						}
 					}

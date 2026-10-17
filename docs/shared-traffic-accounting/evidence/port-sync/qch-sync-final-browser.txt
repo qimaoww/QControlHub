@@ -1,0 +1,7 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=2
+browser timing {"mode":"traffic-layout","startupMs":151.97571200000002,"testMs":13153.541636,"cleanupMs":26.33775500000047,"passed":true,"elapsedMs":13331.865115}
+agents browser runtime smoke passed
+browser timing {"mode":"traffic-layout-mobile","startupMs":155.367987,"testMs":13207.887057,"cleanupMs":40.581601999998384,"passed":true,"elapsedMs":13403.849595}
+agents browser runtime smoke passed
+browser suite elapsed=13.458s
+agents browser runtime smoke passed

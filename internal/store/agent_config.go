@@ -47,7 +47,20 @@ func (s *Store) AgentConfigsForMonitoring(ctx context.Context, agentID string) (
 	if !scopeForConfig(ctx).Admin {
 		return nil, ErrForbidden
 	}
-	return s.listAgentConfigs(ctx, agentID, true)
+	configurations, err := s.trafficConfigurations(ctx, s.pool, true)
+	if err != nil {
+		return nil, err
+	}
+	result := []core.Config{}
+	for _, item := range configurations {
+		if (agentID == "" || item.Config.AgentID == agentID) && item.ShareID == "" && !item.Uncertain && item.AppliedVersion > 0 {
+			config := item.Config
+			config.Content = item.AppliedContent
+			config.Version = item.AppliedVersion
+			result = append(result, config)
+		}
+	}
+	return result, nil
 }
 
 // AgentConfigs filters before fetching or decrypting configuration bodies.

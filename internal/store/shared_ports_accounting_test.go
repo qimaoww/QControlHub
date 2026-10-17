@@ -153,7 +153,7 @@ func TestUnrestrictedSharedPortsAdoptExactRunningSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 0 {
+	if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 1 || policies[0].SharedQuota != nil {
 		t.Fatalf("pending invitation adopted a running service: %+v %v", policies, err)
 	}
 	acceptSharedTestInvitations(t, db, ctx, user.ID, access)

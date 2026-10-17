@@ -190,3 +190,90 @@ func TestSharedSourceMigrationDoesNotRebillAcknowledgedCheckpointOverlap(t *test
 		t.Fatalf("rebilled checkpoint overlap: %+v", r)
 	}
 }
+
+// A port reserved before deployment is not an attribution failure. After a
+// replacement, old nft counters remain trustworthy for the final settlement.
+func TestSharedPortReplacementSettlesOldCountersWithoutStoppingInstance(t *testing.T) {
+	m, b, policies, now := sharedTrafficFixture(t)
+	ctx := context.Background()
+	active := policies[0].Port
+	m.sharedSource = func(_ context.Context, e core.Engine, share string) (nativeAccountingSnapshot, error) {
+		plan := serverconfig.AccountingPlan{Source: "nft-dual"}
+		if share == policies[0].SharedQuota.ID {
+			plan.Ports = []serverconfig.AccountingPort{{Port: active, Inbound: "stable-protocol", Outbounds: []string{"exit"}, Mark: 0x51430000 | uint32(active)}}
+		} else {
+			plan.Ports = []serverconfig.AccountingPort{{Port: policies[2].Port, Mark: 0x51430000 | uint32(policies[2].Port)}}
+		}
+		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: "verified"}, nil
+	}
+	stopped := 0
+	m.haltShare = func(context.Context, core.Engine, string) error { stopped++; return nil }
+	if err := m.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 0 {
+		t.Fatal("reserved future listener stopped the running instance")
+	}
+	future := m.records[policies[1].ID]
+	b.counters[trafficCounterName(future, "in", "tcp")] = 999
+	*now = now.Add(time.Second)
+	m.collect(ctx, false)
+	if m.Snapshot()[1].UsedBytes != 0 || m.Snapshot()[1].ShareUsedBytes != 0 {
+		t.Fatal("undeployed port charged unrelated traffic")
+	}
+	old := m.records[policies[0].ID]
+	epoch := old.CounterEpoch
+	b.counters[trafficCounterName(old, "in", "tcp")] = 10
+	b.counters[trafficCounterName(old, "targetin", "tcp")] = 20
+	*now = now.Add(time.Second)
+	m.collect(ctx, false)
+	active = policies[1].Port
+	b.counters[trafficCounterName(old, "in", "tcp")] = 15
+	b.counters[trafficCounterName(old, "targetin", "tcp")] = 27
+	*now = now.Add(time.Second)
+	snapshot, settled := m.settledSnapshot(ctx, core.Task{Engine: policies[0].Engine, SharedTrafficID: policies[0].SharedQuota.ID})
+	if !settled || stopped != 0 || old.CounterEpoch != epoch || snapshot[0].UsedBytes != 42 || !snapshot[0].EnforcementAvailable {
+		t.Fatalf("replacement lost final traffic or stopped service: stopped=%d settled=%v snapshot=%+v", stopped, settled, snapshot)
+	}
+	*now = now.Add(time.Second)
+	m.collect(ctx, false)
+	if m.Snapshot()[0].UsedBytes != 42 {
+		t.Fatal("old tail billed twice")
+	}
+	if err := m.SetPolicies(ctx, policies[1:], "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 0 || m.records[policies[0].ID] != nil {
+		t.Fatal("retiring a verified old port stopped the replacement instance")
+	}
+	// Removing a listener still present in the protected config is a real
+	// revocation, and must retain the established protective stop behavior.
+	if err := m.SetPolicies(ctx, policies[2:], "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	if stopped == 0 {
+		t.Fatal("live listener revocation did not stop its allocation")
+	}
+}
+
+func TestSharedAccountingDoesNotReadAnUncommittedDeployment(t *testing.T) {
+	e := &Executor{Specs: DefaultSpecs()}
+	share := "shr_0000000000000001"
+	lock := e.sharedAccountingLock(core.EngineSingBox, share)
+	lock.Lock()
+	_, err := e.sharedAccounting(context.Background(), core.EngineSingBox, share)
+	if !errors.Is(err, errSharedAccountingTransition) {
+		lock.Unlock()
+		t.Fatalf("uncommitted source was read: %v", err)
+	}
+	if !e.sharedAccountingLock(core.EngineSingBox, "shr_0000000000000002").TryLock() {
+		lock.Unlock()
+		t.Fatal("another user's deployment shares the lock")
+	}
+	e.sharedAccountingLock(core.EngineSingBox, "shr_0000000000000002").Unlock()
+	lock.Unlock()
+	_, err = e.sharedAccounting(context.Background(), core.EngineSingBox, share)
+	if errors.Is(err, errSharedAccountingTransition) {
+		t.Fatal("sampling did not resume after deployment")
+	}
+}

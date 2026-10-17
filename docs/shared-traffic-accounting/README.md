@@ -1,6 +1,6 @@
 # Shared-instance received/sent undercount fix
 
-Investigation baseline: `55e2d4ca4a85d3d23b026072cdb616144f81c462`. The final branch is rebased onto main `dae30aaa` with one bug-fix commit.
+Investigation baseline: `55e2d4ca4a85d3d23b026072cdb616144f81c462`. The branch is based on main `dae30aaa`. The port-sync addition uses the original accounting fix `0ae34ba4ae90492998bce5f59cd61cdb75f3d618` as its before baseline, in the same PR.
 
 ## Root cause and focused fix
 
@@ -12,7 +12,7 @@ The agreed quota rule is **measured client leg + target leg, received + sent**, 
 
 Shared quota is now incremented from the same accepted deltas as period/history statistics, in the existing transaction. Raw `ShareUsedBytes` cannot charge rejected, duplicate, late or failed samples. PostgreSQL timestamp precision is normalized before deduplication. Existing epoch baselines and per-policy acknowledgements prevent checkpoint replay or listener-to-dual migration from charging already acknowledged bytes again. Connection reply marks include policy/epoch identity to avoid old-port replies entering the next allocation.
 
-There are no new pages, node-card summaries, audit tables, database migrations or historical repair commands. The existing traffic status renderer only stops incorrectly labeling a verified dual source as listener-only. Existing totals are retained; missing historical target traffic is not estimated. Calendar usage and allocation cumulative usage keep their existing lifecycles.
+There are no new pages, node-card summaries, audit tables, database migrations or historical repair commands. The existing traffic status renderer stops incorrectly labeling a verified dual source as listener-only. The requested port-sync dialog changes are described below. Existing totals are retained; missing historical target traffic is not estimated. Calendar usage and allocation cumulative usage keep their existing lifecycles.
 
 ## Real VLESS TLS WS evidence
 
@@ -43,8 +43,58 @@ Focused regressions cover missing exits, same-core allocation isolation, duplica
 
 Physical host reboot, a second live shared host, every protocol permutation and post-upgrade production Caddy traffic were not tested. The production Caddy before-fix observation and disposable native TLS WS after-fix test are distinct evidence. Existing Mihomo non-global-target socket-mark limits remain unchanged.
 
+## Port-sync addition: saved versus deployed listening ports
+
+### Reproduced causes and changes
+
+The previous endpoints/sync API parsed the saved workspace, while shared runtime ownership tracked another, actually deployed revision. It had no scan version or allocation identity. Save-triggered reconciliation could prune the running monitor prematurely. A new reserved port with no current listener was also treated as an attribution failure. A regression run against the prior collector reproduces the protective stop: [baseline failure](evidence/port-sync/baseline-regression.txt).
+
+Real replacement deployment exposed two further races: the collector could read a newly written configuration with the previous deployment digest, stopping the service during restart ([failed test deployment](evidence/port-sync/deployment-race-before.txt)); after successful deployment, retiring an old monitor could be interpreted as revoking the whole allocation and stop its new listener. The read-only cgroup warnings in that disposable OpenRC log are a fixture limitation; the conflicting protective stop/restart is the defect.
+
+Discovery now joins the authenticated configuration workspace to confirmed base/shared instance ownership and its exact `config_revisions` version. Each endpoint includes node, config/version, allocation, engine, protocol/tag and port. Existing supported-core parsers remain in use. Saved changes appear separately as **pending deployment**, with selection disabled. Confirmed running endpoints continue counting until successful deployment and final settlement. Uncertain deployment never becomes a selectable replacement. Missing legacy deployment evidence is not guessed from the saved workspace.
+
+The preview returns a configuration/version snapshot. Submit locks the affected resource scope, rebuilds candidates, checks that snapshot, and validates actual owner, grant, engine and reserved ports in the same transaction. Stale, undeployed, foreign or conflicting selections are rejected; byte counter updates do not invalidate a scan. Repeating an accepted selection is a no-op. The node owner can inspect allocations but cannot submit a recipient's independent deployment through this action.
+
+Each shared instance now has its own deployment/sampling lock. A sample during its transition retains baselines and waits for the next valid snapshot; another user's collector continues independently. Reserved future ports cannot bill unrelated traffic. Old verified nft counters can settle their tail after a listener disappears. On successful, settled deployment, old policies are disabled without deleting their history, counter lineage or allocation cumulative usage. Policies for ports still present in that instance remain active. A retired policy is removed without stopping the replacement only after its protected local mapping independently confirms an authorized replacement; actual revocation keeps the existing stop protection. Failed deployment preserves the existing accounting relationship. Port reservations remain under the existing explicit owner release workflow.
+
+No schema change or historical rewrite is required. Existing daily records, policy IDs and shared used totals survive upgrade and replacement. Upgrade panel and Agent together; an older Agent without confirmed final settlement does not trigger automatic old-monitor retirement.
+
+### Real node measurements after replacement
+
+The same enrolled OpenRC node ran two ordinary users' independent sing-box 1.14.3 VLESS TLS WS instances. User A changed **25101 → 25103 → 25104** through normal authenticated save/validate/deploy tasks. Port 25102 and user B's port 25201 were retained. The test rejected 25104 before deployment, rejected an open dialog's stale snapshot after deployment, accepted the final revision v6, and repeated sync twice without any counter or quota change. The old port performed a SHA256-verified 1 MiB upload before replacement, and its history remained queryable. [Transition receipt](evidence/port-sync/port-transition.json).
+
+A fresh independent capture then measured a 4 MiB upload and 2 MiB download on the deployed port 25104:
+
+| Layer / direction | Received bytes | Sent bytes |
+|---|---:|---:|
+| Client-facing listener | 4,255,098 | 2,149,753 |
+| Target-facing exit | 2,138,151 | 4,235,210 |
+| Independent IP capture total | 6,393,249 | 6,384,963 |
+| Agent and accepted period increment | 6,393,249 | 6,384,963 |
+
+**Shared cumulative increment: 12,778,212 B**, exactly the accepted sum. Capture difference: **0 B** in either direction, 3,150 packets, zero drops. Measured network total exceeds twice the application bodies by **1.55210%**, from TLS/WebSocket and IP/TCP overhead. User B and retired ports 25101/25103 grew **0 B**. See [measurement and transfer hashes](evidence/port-sync/new-port-measurements.json), [capture receipt](evidence/port-sync/capture.txt) and [capture hash](evidence/port-sync/receipt.json).
+
+Actual Agent and panel restarts preserved counters and shared cumulative values exactly; reconnect still discovered deployed v6/25104. Subsequent simultaneous 1 MiB uploads by A and B added 2,134,468 B and 2,134,518 B respectively, each equal to that user's quota increment. [Reconnect/concurrency receipt](evidence/port-sync/reconnect-concurrency.json).
+
+### Regression results and screenshot comparison
+
+Full PostgreSQL store **158.605 s**, API **222.042 s**, Agent **241.901 s** and server configuration **0.345 s** suites passed. The additional owner-scope regression passed in **0.936 s**. Desktop/mobile traffic browser tests passed in **13.458 s**; module, format, generated-style, installer and `go vet` gates passed. [Store](evidence/port-sync/qch-sync-final-store.txt), [API](evidence/port-sync/qch-sync-final-api.txt), [Agent](evidence/port-sync/qch-sync-final-agent.txt), [browser](evidence/port-sync/qch-sync-final-browser.txt).
+
+Database and API regressions cover A→B→C revisions, save without deploy, failed deployment, stale candidates, two users on the same core, unauthorized/conflicting ports, repeat sync and retained old history. Agent regressions reproduce future-port false stops, final old counter settlement, safe retirement, actual revocation and the deployment-digest race. Existing parser tests cover supported core/port forms and TCP/UDP. The new real port-change test covers sing-box native VLESS TLS WS; a live change on every other core, physical host reboot and production rollout remain unverified.
+
+The comparison below uses **the same recorded real test API responses**, account A, light theme, saved v3/deployed v2 and identical background counters in each frontend. They are browser UI replays, not additional live traffic measurements. The after view clearly marks the changed port pending and keeps the deployed ports. The owner views use the live authenticated test API after deployment. [Screenshot provenance](evidence/port-sync/receipt.json).
+
+| View | Before (`0ae34ba4`) | After |
+|---|---|---|
+| Desktop, 1440 × 1000 | ![Before desktop](evidence/port-sync/before-desktop.png) | ![After desktop](evidence/port-sync/after-desktop.png) |
+| Mobile, 390 × 844 | ![Before mobile](evidence/port-sync/before-mobile.png) | ![After mobile](evidence/port-sync/after-mobile.png) |
+
+| Owner desktop | Owner mobile |
+|---|---|
+| ![Owner desktop](evidence/port-sync/owner-desktop.png) | ![Owner mobile](evidence/port-sync/owner-mobile.png) |
+
 ## Cleanup
 
 Both environments are stopped after verification. `qch-shared-traffic-d074-probe-cleanup.timer` is persistent and scheduled for **2026-10-20 23:27:38 UTC+08:00** (**15:27:38 UTC**), 72 hours after the probe ended. It removes only the marked temporary probe directory/binary after scope/hash checks; existing production services, configurations, rules and user data are excluded. [Receipt](evidence/remote-cleanup.json).
 
-`qch-shared-traffic-d074-cleanup.timer` removes only the seven stopped ID/label-verified test containers, their dedicated network and marked temporary directory. Its final execution is **2026-10-21 00:38:23 UTC+08:00**, exactly 72 hours after the recorded final test end. Exact resource IDs are in the [local registration receipt](evidence/local-cleanup.json). Reports, sanitized evidence, earlier screenshots and cleanup receipts are preserved outside the removed directory. No global prune or firewall flush is used.
+`qch-shared-traffic-d074-cleanup.timer` removes only the seven stopped ID/label-verified test containers, their dedicated network and marked temporary directory. After the port-sync addition, its final execution is **2026-10-21 01:35:31 UTC+08:00** (**2026-10-20 17:35:31 UTC**), exactly 72 hours after the final test end at **2026-10-18 01:35:31 UTC+08:00**. The registered scope includes the new port-change configurations, test accounts/database and replacement binaries. All seven containers and the browser were stopped before registration, and the scope check passed. Exact resource IDs are in the [local registration receipt](evidence/local-cleanup.json). Reports, sanitized evidence, earlier screenshots and cleanup receipts are preserved outside the removed directory. No global prune or firewall flush is used.
