@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 77
+const currentSchemaVersion = 78
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -886,6 +886,16 @@ CREATE TABLE IF NOT EXISTS panel_certificates (
  next_attempt timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS panel_certificates_owner ON panel_certificates(owner_id);
+CREATE TABLE IF NOT EXISTS managed_certificate_sources (
+ id text PRIMARY KEY, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, config_id text NOT NULL, task_id text NOT NULL,
+ engine text NOT NULL, share_id text NOT NULL DEFAULT '', domain text NOT NULL,
+ certificate_id text REFERENCES panel_certificates(id) ON DELETE SET NULL,
+ present boolean NOT NULL DEFAULT true, status text NOT NULL DEFAULT 'pending',
+ error text NOT NULL DEFAULT '', last_synced timestamptz, last_requested timestamptz,
+ UNIQUE(agent_id,owner_id,config_id,domain)
+);
+CREATE INDEX IF NOT EXISTS managed_certificate_sources_owner ON managed_certificate_sources(owner_id);
 CREATE TABLE IF NOT EXISTS certificate_versions (
  certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
  version integer NOT NULL, secret text NOT NULL, metadata jsonb NOT NULL,

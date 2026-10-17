@@ -1,0 +1,28 @@
+### Result
+{"liveStates":16}
+### Ran Playwright code
+```js
+await (async page => {
+ page.on('dialog',async d=>await d.accept());
+ await page.goto('http://127.0.0.1:36479/#certificates');await page.reload();
+ await page.locator('[data-cert-create]').waitFor();
+ await page.emulateMedia({reducedMotion:'reduce'});
+ for(const [label,width,height] of [['desktop',1440,1000],['mobile',375,812]]){
+  await page.setViewportSize({width,height});
+  for(const theme of ['light','dark']){
+   await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
+   await page.locator('[data-cert-detail="crt_06f62c43338915a5"]').click();
+   await page.locator('dialog[open] [data-cert-share]').waitFor();
+   await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/shared-http-issued-${label}-${theme}.png`});await page.keyboard.press('Escape');
+   await page.locator('[data-cert-detail="crt_10e0ed07f69aa48a"]').click();await page.locator('.cert-source-status').waitFor();
+   await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/caddy-import-${label}-${theme}.png`});
+   await page.getByText('证书版本历史 · 2',{exact:true}).click();
+   await page.getByText('证书版本历史 · 2',{exact:true}).scrollIntoViewIfNeeded();
+   await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/caddy-version-target-${label}-${theme}.png`});await page.keyboard.press('Escape');
+   await page.locator('[data-cert-sources]').first().click();await page.locator('.cert-source-record').waitFor();
+   await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/caddy-source-${label}-${theme}.png`});await page.keyboard.press('Escape');
+  }
+ }
+ return {liveStates:16};
+})(page);
+```

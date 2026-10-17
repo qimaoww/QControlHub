@@ -113,6 +113,13 @@ func (s *Store) RenewCertificate(ctx context.Context, id string) error {
 	if !item.Owned {
 		return ErrForbidden
 	}
+	if item.Method == "http-01" {
+		for _, domain := range item.Domains {
+			if err = s.CheckCertificateHTTPPermission(ctx, item.AgentID, domain); err != nil {
+				return err
+			}
+		}
+	}
 	if item.Source != "acme" {
 		return fmt.Errorf("%w: 导入与自签证书请使用替换入口", ErrInvalid)
 	}
@@ -188,25 +195,36 @@ func (s *Store) ContinueCertificateOrder(ctx context.Context, id, orderID string
 	return nil
 }
 func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, domain string) error {
-	var allowed, capable, online bool
-	err := s.pool.QueryRow(ctx, `SELECT (a.owner_id=$2 OR (EXISTS(SELECT 1 FROM certificate_http_grants g JOIN agent_shares sh ON sh.agent_id=g.agent_id AND sh.user_id=g.user_id WHERE g.agent_id=a.id AND g.user_id=$2 AND g.domain=$3 AND sh.enabled AND sh.status='accepted'))),a.features ? $4,COALESCE(a.last_seen>now()-interval '1 minute',false) FROM agents a WHERE a.id=$1 AND a.revoked_at IS NULL`, agentID, certificateActor(ctx), domain, core.AgentFeatureCertificates).Scan(&allowed, &capable, &online)
+	names, err := certificates.Domains([]string{domain})
+	if err != nil || strings.HasPrefix(names[0], "*.") {
+		return fmt.Errorf("%w: HTTP-01 不支持此域名，请使用 DNS-01", ErrInvalid)
+	}
+	nodes, err := s.CertificateHTTPNodes(ctx)
 	if err != nil {
-		return mapError(err)
+		return err
 	}
-	if !allowed {
-		return fmt.Errorf("%w: 此域名的节点 HTTP-01 公网入口未授权", ErrForbidden)
+	for _, n := range nodes {
+		if n.ID != agentID {
+			continue
+		}
+		if !n.Available {
+			return fmt.Errorf("%w: %s", ErrForbidden, n.Reason)
+		}
+		if n.Owned {
+			return nil
+		}
+		for _, d := range n.Domains {
+			if d == names[0] {
+				return nil
+			}
+		}
+		return fmt.Errorf("%w: 域名 %s 不在节点授权范围内", ErrForbidden, names[0])
 	}
-	if !capable {
-		return fmt.Errorf("%w: 请升级验证节点 Agent 以支持证书中心", ErrConflict)
-	}
-	if !online {
-		return fmt.Errorf("%w: HTTP-01 验证节点离线，恢复连接后重试", ErrConflict)
-	}
-	return certificateUserActive(ctx, s.pool, certificateActor(ctx))
+	return fmt.Errorf("%w: 无节点 HTTP-01 认证权限", ErrForbidden)
 }
 func (s *Store) SetCertificateHTTPGrant(ctx context.Context, grant core.HTTPChallengeGrant, remove bool) error {
 	names, err := certificates.Domains([]string{grant.Domain})
-	if err != nil || strings.HasPrefix(grant.Domain, "*.") {
+	if err != nil || strings.HasPrefix(names[0], "*.") {
 		return ErrInvalid
 	}
 	grant.Domain = names[0]
@@ -249,6 +267,17 @@ func (s *Store) SetCertificateHTTPGrant(ctx context.Context, grant core.HTTPChal
 	}
 	if err != nil {
 		return mapError(err)
+	}
+	if remove {
+		if _, err = tx.Exec(ctx, `DELETE FROM certificate_http_challenges h USING certificate_orders o WHERE h.order_id=o.id AND h.agent_id=$1 AND h.domain=$2 AND o.owner_id=$3`, grant.AgentID, grant.Domain, grant.UserID); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(ctx, `UPDATE agents SET sharing_revision=sharing_revision+1 WHERE id=$1`, grant.AgentID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE panel_users SET agent_access_revision=agent_access_revision+1 WHERE id=$1`, grant.UserID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -430,6 +459,13 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	}
 	if err := certificateUserActive(ctx, s.pool, item.OwnerID); err != nil {
 		return err
+	}
+	if item.Method == "http-01" {
+		for _, domain := range item.Domains {
+			if err := s.CheckCertificateHTTPPermission(ctx, item.AgentID, domain); err != nil {
+				return err
+			}
+		}
 	}
 	var account certificates.ACMEAccount
 	accountMeta, err := s.CertificateAccountSecret(ctx, item.AccountID, "acme", &account)

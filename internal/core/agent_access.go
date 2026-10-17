@@ -17,6 +17,7 @@ const (
 // AgentShare is a durable per-user allocation. Access requires both Enabled
 // and recipient acceptance. Revocation or reinvitation never resets usage.
 type AgentShare struct {
+	HTTPDomains        []string         `json:"http_domains"`
 	ID                 string           `json:"id"`
 	UserID             string           `json:"user_id"`
 	Username           string           `json:"username,omitempty"`
@@ -53,21 +54,23 @@ type AgentSharingRequest struct {
 }
 
 type AgentSharingRecipient struct {
-	Username   string   `json:"username"`
-	Engines    []Engine `json:"engines"`
-	LimitBytes uint64   `json:"limit_bytes"`
-	Ports      []int    `json:"ports"` // Empty is unallocated; [0] permits any available port.
-	Enabled    *bool    `json:"enabled,omitempty"`
-	Reinvite   bool     `json:"reinvite,omitempty"`
+	HTTPDomains *[]string `json:"http_domains,omitempty"`
+	Username    string    `json:"username"`
+	Engines     []Engine  `json:"engines"`
+	LimitBytes  uint64    `json:"limit_bytes"`
+	Ports       []int     `json:"ports"` // Empty is unallocated; [0] permits any available port.
+	Enabled     *bool     `json:"enabled,omitempty"`
+	Reinvite    bool      `json:"reinvite,omitempty"`
 }
 
 type AgentShareRequest struct {
-	AgentID    string   `json:"agent_id"`
-	Engines    []Engine `json:"engines"`
-	LimitBytes uint64   `json:"limit_bytes"`
-	Ports      []int    `json:"ports"` // Empty is unallocated; [0] permits any available port.
-	Enabled    *bool    `json:"enabled,omitempty"`
-	Reinvite   bool     `json:"reinvite,omitempty"`
+	HTTPDomains *[]string `json:"http_domains,omitempty"`
+	AgentID     string    `json:"agent_id"`
+	Engines     []Engine  `json:"engines"`
+	LimitBytes  uint64    `json:"limit_bytes"`
+	Ports       []int     `json:"ports"` // Empty is unallocated; [0] permits any available port.
+	Enabled     *bool     `json:"enabled,omitempty"`
+	Reinvite    bool      `json:"reinvite,omitempty"`
 }
 
 type AgentShareResponseRequest struct {

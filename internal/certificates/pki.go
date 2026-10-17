@@ -220,3 +220,31 @@ func SelfSigned(domains []string, kind string, days int) (Pair, error) {
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
 	return Pair{string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), keyPEM}, err
 }
+
+// Environment describes verifiable trust, not a hostname/issuer-name guess.
+// Trust follows the panel trust store; this does not claim production issuance.
+func Environment(pair Pair) (string, error) {
+	kp, err := tls.X509KeyPair([]byte(pair.Certificate), []byte(pair.PrivateKey))
+	if err != nil {
+		return "", err
+	}
+	leaf, err := x509.ParseCertificate(kp.Certificate[0])
+	if err != nil {
+		return "", err
+	}
+	if leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) == nil {
+		return "self-signed", nil
+	}
+	pool := x509.NewCertPool()
+	for _, der := range kp.Certificate[1:] {
+		c, e := x509.ParseCertificate(der)
+		if e != nil {
+			return "", e
+		}
+		pool.AddCert(c)
+	}
+	if _, err = leaf.Verify(x509.VerifyOptions{Intermediates: pool}); err == nil {
+		return "system-trusted", nil
+	}
+	return "untrusted", nil
+}

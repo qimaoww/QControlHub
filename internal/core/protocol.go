@@ -28,18 +28,20 @@ type SharedInstanceStatus struct {
 }
 
 const (
-	WireHello                 = "hello"
-	WireCertificateChallenges = "certificate_challenges"
-	WirePublicIPProbe         = "public_ip_probe"
-	WireAgentPolicy           = "agent_policy"
-	WireHeartbeat             = "heartbeat"
-	WireMetrics               = "metrics"
-	WireTask                  = "task"
-	WireResult                = "result"
-	WireResultAck             = "result_ack"
-	WireCoreLogs              = "core_logs"
-	WireCoreLogsAck           = "core_logs_ack"
-	WireError                 = "error"
+	WireHello                     = "hello"
+	WireManagedCertificateSources = "managed_certificate_sources"
+	WireManagedCertificateReport  = "managed_certificate_report"
+	WireCertificateChallenges     = "certificate_challenges"
+	WirePublicIPProbe             = "public_ip_probe"
+	WireAgentPolicy               = "agent_policy"
+	WireHeartbeat                 = "heartbeat"
+	WireMetrics                   = "metrics"
+	WireTask                      = "task"
+	WireResult                    = "result"
+	WireResultAck                 = "result_ack"
+	WireCoreLogs                  = "core_logs"
+	WireCoreLogsAck               = "core_logs_ack"
+	WireError                     = "error"
 )
 
 type TaskResultEnvelope struct {
@@ -48,15 +50,17 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
-	CertificateChallenges []HTTPChallenge     `json:"certificate_challenges,omitempty"`
-	Type                  string              `json:"type"`
-	Heartbeat             *HeartbeatRequest   `json:"heartbeat,omitempty"`
-	Metrics               *HostMetrics        `json:"metrics,omitempty"`
-	TrafficUsage          []PortTrafficUsage  `json:"traffic_usage,omitempty"`
-	Task                  *Task               `json:"task,omitempty"`
-	Result                *TaskResultEnvelope `json:"result,omitempty"`
-	CoreLogs              *CoreLogBatch       `json:"core_logs,omitempty"`
-	TrafficPolicies       []PortTrafficPolicy `json:"traffic_policies,omitempty"`
+	ManagedCertificateSources []ManagedCertificateSource `json:"managed_certificate_sources,omitempty"`
+	ManagedCertificateReport  *ManagedCertificateReport  `json:"managed_certificate_report,omitempty"`
+	CertificateChallenges     []HTTPChallenge            `json:"certificate_challenges,omitempty"`
+	Type                      string                     `json:"type"`
+	Heartbeat                 *HeartbeatRequest          `json:"heartbeat,omitempty"`
+	Metrics                   *HostMetrics               `json:"metrics,omitempty"`
+	TrafficUsage              []PortTrafficUsage         `json:"traffic_usage,omitempty"`
+	Task                      *Task                      `json:"task,omitempty"`
+	Result                    *TaskResultEnvelope        `json:"result,omitempty"`
+	CoreLogs                  *CoreLogBatch              `json:"core_logs,omitempty"`
+	TrafficPolicies           []PortTrafficPolicy        `json:"traffic_policies,omitempty"`
 	// Preserve verified local enforcement until the initial heartbeat arrives.
 	TrafficPoliciesPending bool                 `json:"traffic_policies_pending,omitempty"`
 	PublicIPProbe          *PublicIPProbeConfig `json:"public_ip_probe,omitempty"`

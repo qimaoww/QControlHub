@@ -165,15 +165,52 @@ func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error
 		}
 		// Account identifiers and validation infrastructure belong to the owner.
 		if !item.Owned {
-			item.AccountID = ""
-			item.DNSAccountID = ""
-			item.AgentID = ""
-			item.Error = ""
+			redactCertificateOwnerMetadata(&item)
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	sources, err := s.ManagedCertificateSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].Source == "caddy" && out[i].Owned {
+			out[i].SyncStatus = "unverified"
+			out[i].SyncError = "来源节点或部署关系已移除；保留现有证书，停止导入新版本"
+		}
+		for _, src := range sources {
+			if out[i].ID == src.CertificateID && out[i].Source == "caddy" {
+				out[i].SyncStatus = src.Status
+				out[i].SyncError = src.Error
+				out[i].LastSynced = src.LastSynced
+				out[i].SourceAgent = src.AgentName
+			}
+		}
+	}
+	for i := range out {
+		if out[i].AgentID != "" && out[i].Owned {
+			_ = s.pool.QueryRow(ctx, `SELECT name FROM agents WHERE id=$1`, out[i].AgentID).Scan(&out[i].AgentName)
+		}
+	}
+	return out, nil
 }
+
+func redactCertificateOwnerMetadata(item *core.Certificate) {
+	item.AccountID = ""
+	item.DNSAccountID = ""
+	item.AgentID = ""
+	item.AgentName = ""
+	item.SourceID = ""
+	item.SourceConfig = ""
+	item.SourceAgent = ""
+	item.SyncError = ""
+	item.Error = ""
+}
+
 func (s *Store) GetCertificate(ctx context.Context, id string) (core.Certificate, error) {
 	items, err := s.ListCertificates(ctx)
 	if err != nil {
@@ -262,6 +299,16 @@ func (s *Store) SaveCertificatePair(ctx context.Context, id, name, source string
 	item.Status = "issued"
 	item.Error = ""
 	if id != "" {
+		if _, err = tx.Exec(ctx, `UPDATE managed_certificate_sources SET status='detached' WHERE certificate_id=$1`, item.ID); err != nil {
+			return item, err
+		}
+		item.SourceID = ""
+		item.SourceAgent = ""
+		item.SourceConfig = ""
+		item.RenewalManager = ""
+		item.LastSynced = nil
+		item.SyncStatus = ""
+		item.SyncError = ""
 		item.Source = source
 		item.AutoRenew = false
 	}
@@ -286,7 +333,7 @@ func (s *Store) CertificateBindings(ctx context.Context, id string) ([]core.Cert
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT b.config_id,c.agent_id,b.owner_id,c.engine,b.version,b.task_id,CASE WHEN b.version<p.version AND b.status='synced' THEN 'pending' ELSE b.status END,CASE WHEN b.enabled AND b.config_version<>c.version THEN '当前配置有未部署修改；请确认后手动部署最新配置和证书' ELSE b.error END, (p.owner_id=b.owner_id OR EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=p.id AND g.user_id=b.owner_id)) FROM certificate_bindings b JOIN configs c ON c.id=b.config_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE b.certificate_id=$1 AND c.deleted_at IS NULL AND ($2 OR b.owner_id=$3)`, id, item.Owned, certificateActor(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT b.config_id,c.agent_id,b.owner_id,c.engine,b.version,b.task_id,a.name,c.name,COALESCE(u.username,'资源所有者'),CASE WHEN b.version<p.version AND b.status='synced' THEN 'pending' ELSE b.status END,CASE WHEN b.enabled AND b.config_version<>c.version THEN '当前配置有未部署修改；请确认后手动部署最新配置和证书' ELSE b.error END, (p.owner_id=b.owner_id OR EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=p.id AND g.user_id=b.owner_id)) FROM certificate_bindings b JOIN configs c ON c.id=b.config_id JOIN agents a ON a.id=c.agent_id LEFT JOIN panel_users u ON u.id=b.owner_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE b.certificate_id=$1 AND c.deleted_at IS NULL AND ($2 OR b.owner_id=$3)`, id, item.Owned, certificateActor(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +341,7 @@ func (s *Store) CertificateBindings(ctx context.Context, id string) ([]core.Cert
 	out := []core.CertificateBinding{}
 	for rows.Next() {
 		b := core.CertificateBinding{CertificateID: id}
-		if err := rows.Scan(&b.ConfigID, &b.AgentID, &b.OwnerID, &b.Engine, &b.Version, &b.TaskID, &b.Status, &b.Error, &b.Authorized); err != nil {
+		if err := rows.Scan(&b.ConfigID, &b.AgentID, &b.OwnerID, &b.Engine, &b.Version, &b.TaskID, &b.AgentName, &b.ConfigName, &b.Username, &b.Status, &b.Error, &b.Authorized); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -380,6 +427,9 @@ func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
 	if _, err = tx.Exec(ctx, `DELETE FROM certificate_bindings WHERE certificate_id=$1`, id); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, `UPDATE managed_certificate_sources SET status='deleted',error='' WHERE certificate_id=$1`, id); err != nil {
+		return err
+	}
 	_, err = tx.Exec(ctx, `DELETE FROM panel_certificates WHERE id=$1`, id)
 	if err != nil {
 		return err
@@ -402,7 +452,8 @@ func (s *Store) SetCertificateAutoRenew(ctx context.Context, id string, enabled 
 }
 
 func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]core.Certificate, error) {
-	if _, err := s.GetCertificate(ctx, id); err != nil {
+	item, err := s.GetCertificate(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT metadata FROM certificate_versions WHERE certificate_id=$1 ORDER BY version DESC LIMIT 100`, id)
@@ -423,6 +474,9 @@ func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]cor
 		c.AccountID = ""
 		c.DNSAccountID = ""
 		c.AgentID = ""
+		if !item.Owned {
+			redactCertificateOwnerMetadata(&c)
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()

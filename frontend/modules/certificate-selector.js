@@ -10,6 +10,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   const select = document.createElement("select"); select.name = "panel_certificate_id";select.setAttribute("aria-label","证书来源");
   const local = new Option("节点已有证书 / 原有 TLS 方式", ""); select.add(local);
   label.append(select); field.append(label);
+  const summary = document.createElement("p"); summary.className="settings-hint cert-domains";summary.dataset.panelCertificateSummary="1";summary.setAttribute("role","status");field.append(summary);
   let sniLabel;
   if (!form.elements.namedItem("tls_server_name")) { sniLabel=document.createElement("label");sniLabel.textContent="TLS SNI / 证书域名";const sni=document.createElement("input");sni.name="tls_server_name";sni.value=plan?.tls_server_name||"";sni.placeholder="例如 edge.example.com";sniLabel.append(sni);field.append(sniLabel); }
   const target = form.querySelector("[data-native-certificate]") || form.querySelector("[data-native-tls]");
@@ -24,7 +25,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     const group = document.createElement("optgroup"); group.label = owned ? "我的证书" : "授权给我的证书";
     for (const cert of items.filter(item => item.owned === owned)) {
       const expired = !cert.not_after || Date.parse(cert.not_after) <= Date.now();
-      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · v${cert.version}${expired ? " · 不可用" : ""}`, cert.id);
+      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · ${{caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"} · v${cert.version}${expired ? " · 不可用" : " · 可用"}`, cert.id);
       option.disabled = expired; group.append(option);
     }
     select.append(group);
@@ -32,6 +33,9 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   select.value = selected;
   const update = () => {
     const active = Boolean(select.value);
+    const cert=items.find(item=>item.id===select.value);
+    summary.hidden=!cert;summary.textContent=cert?`${cert.name} · ${cert.domains.join(" · ")} · 来源：${{caddy:"Caddy 托管",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · 有效期至 ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"}`:"";
+    const sni=form.elements.namedItem("tls_server_name");if(active&&cert?.domains.length===1&&!cert.domains[0].startsWith("*.")&&sni&&!sni.value)sni.value=cert.domains[0];
     const mode = form.elements.namedItem("tls_mode");
     if (active && mode) { mode.value = "native"; mode.dispatchEvent(new Event("change", { bubbles: true })); }
     const tls = form.elements.namedItem("tls_enabled");

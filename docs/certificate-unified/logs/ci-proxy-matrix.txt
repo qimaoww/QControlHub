@@ -1,0 +1,100 @@
+=== RUN   TestManagedTLSIssuerFallbackLive
+=== RUN   TestManagedTLSIssuerFallbackLive/timeout_false
+=== RUN   TestManagedTLSIssuerFallbackLive/timeout_true
+--- PASS: TestManagedTLSIssuerFallbackLive (1.99s)
+    --- PASS: TestManagedTLSIssuerFallbackLive/timeout_false (0.47s)
+    --- PASS: TestManagedTLSIssuerFallbackLive/timeout_true (1.52s)
+=== RUN   TestManagedTLSProxyLiveMatrix
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/h2
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/h2/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vmess/h2/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/h2
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/h2/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/vless/h2/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/h2
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/h2/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/caddy/trojan/h2/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/ws
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/ws/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/ws/udp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade/tcp
+=== RUN   TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade/udp
+--- PASS: TestManagedTLSProxyLiveMatrix (4.37s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/ws (0.29s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/ws/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/ws/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade (0.31s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/httpupgrade/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/h2 (0.30s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/h2/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vmess/h2/udp (0.08s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/ws (0.32s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/ws/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/ws/udp (0.08s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade (0.32s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/httpupgrade/udp (0.08s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/h2 (0.33s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/h2/tcp (0.09s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/vless/h2/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/ws (0.31s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/ws/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/ws/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade (0.31s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/httpupgrade/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/h2 (0.32s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/h2/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/caddy/trojan/h2/udp (0.07s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/ws (0.25s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/ws/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/ws/udp (0.08s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade (0.26s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vmess/httpupgrade/udp (0.09s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/ws (0.25s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/ws/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/ws/udp (0.08s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade (0.27s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade/tcp (0.08s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/vless/httpupgrade/udp (0.09s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/ws (0.28s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/ws/tcp (0.09s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/ws/udp (0.09s)
+    --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade (0.25s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade/tcp (0.07s)
+        --- PASS: TestManagedTLSProxyLiveMatrix/nginx/trojan/httpupgrade/udp (0.07s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	6.677s

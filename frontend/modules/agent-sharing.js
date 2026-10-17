@@ -13,6 +13,7 @@ export function createAgentSharing(ctx, interactions) {
     username: row.querySelector('[name="username"]').value,
     enabled: row.querySelector('[name="enabled"]').checked,
     engines: [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value),
+    http_domains_text: row.querySelector('[name="http_domains"]').value,
     ports_text: row.querySelector('[name="ports"]').value,
     limit_gib: row.querySelector('[name="limit_gib"]').value,
     reinvite: row.dataset.reinvite === "true",
@@ -27,6 +28,7 @@ export function createAgentSharing(ctx, interactions) {
       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
     </div>
     ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
+    <label class="settings-field cert-share-domains"><span>HTTP-01 公网认证 · 允许域名</span><textarea name="http_domains" rows="2" placeholder="auth.example.com&#10;api.example.com">${esc(share.http_domains_text ?? (share.http_domains || []).join("\n"))}</textarea><small>每行一个精确域名；留空不授予认证权限。接受共享且启用后生效。协议部署仍按上方内核与端口权限单独检查。</small></label>
     <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
   </div>`;
   const close = () => {
@@ -145,6 +147,7 @@ export function createAgentSharing(ctx, interactions) {
           engines: selectedSharedEngines(controls[index]),
           ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
           reinvite: row.reinvite,
+          http_domains: row.http_domains_text.split(/[\n,，]+/).map(v=>v.trim()).filter(Boolean),
         }));
         capture();
         const submitted = data.agentSharingDrafts.get(agent.id);

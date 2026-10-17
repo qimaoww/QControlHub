@@ -1,0 +1,24 @@
+### Result
+{"historyVersions":2,"screenshots":4}
+### Ran Playwright code
+```js
+await (async rootPage=>{
+ const page=await rootPage.context().newPage();
+ try{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.goto('http://127.0.0.1:36479/#certificates');
+  await page.locator('[data-cert-detail="crt_10e0ed07f69aa48a"]').click();await page.locator('.cert-source-status').waitFor();
+  const history=page.locator('details').filter({has:page.getByText('证书版本历史 · 2',{exact:true})});
+  await history.locator('summary').click();await history.locator('.cert-record').last().waitFor();
+  for(const [label,width,height]of[['desktop',1440,1000],['mobile',375,812]]){
+   await page.setViewportSize({width,height});
+   for(const theme of['light','dark']){
+    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
+    await history.locator('.cert-record').last().scrollIntoViewIfNeeded();
+    await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/caddy-history-${label}-${theme}.png`});
+   }
+  }
+  return {historyVersions:await history.locator('.cert-record').count(),screenshots:4};
+ }finally{await page.close();}
+})(page);
+```

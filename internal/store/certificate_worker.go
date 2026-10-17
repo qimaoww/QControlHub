@@ -143,7 +143,7 @@ func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, s
 	if method == "dns-manual" {
 		status, stage = "waiting_dns", "waiting_dns"
 	}
-	terminal := errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
+	terminal := errors.Is(cause, ErrForbidden) || errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
 	if attempt >= 7 || terminal {
 		status, stage = "failed", "cleanup"
 	}
