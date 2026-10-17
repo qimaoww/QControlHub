@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -367,6 +368,12 @@ func (s *Store) SyncPortTrafficSnapshot(ctx context.Context, snapshot string, se
 func (s *Store) finishDeployedTrafficTx(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine, shareID, configID string, version int, settled bool) error {
 	var content string
 	if err := tx.QueryRow(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version=$2`, configID, version).Scan(&content); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Archives can be deleted while an already leased deployment runs.
+			// Still acknowledge its result, but retain all existing accounting
+			// policies when the exact revision is no longer available.
+			return nil
+		}
 		return err
 	}
 	content, err := s.decryptContent(content)

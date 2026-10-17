@@ -11,6 +11,57 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestTrafficDeploymentAcknowledgesDeletedArchive(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent, _ := enrollTaskTestAgent(t, ctx, db)
+	config, err := db.CreateConfig(ctx, core.Config{
+		Name: "deleted during deployment", Engine: core.EngineMihomo, Content: sharedEngineConfigs()[0].Content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := func() core.Task {
+		t.Helper()
+		task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := db.ClaimTask(ctx, agent.ID)
+		if err != nil || lease == nil || lease.ID != task.ID {
+			t.Fatalf("claim: %+v %v", lease, err)
+		}
+		return *lease
+	}
+	first := claim()
+	if err = db.CompleteTask(ctx, agent.ID, first.ID, core.TaskResultRequest{LeaseID: first.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("initial deployment not monitored: %+v %v", before, err)
+	}
+	config.Content = strings.ReplaceAll(config.Content, "21001", "21002")
+	config, err = db.UpdateConfig(ctx, config.ID, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := claim()
+	if err = db.DeleteConfig(ctx, config.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.CompleteTask(ctx, agent.ID, lease.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+		t.Fatalf("deleted archive prevented deployment acknowledgement: %v", err)
+	}
+	completed, err := db.GetTaskState(ctx, lease.ID)
+	if err != nil || completed.Status != core.TaskSucceeded {
+		t.Fatalf("deployment result not retained: %+v %v", completed, err)
+	}
+	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].ID != before[0].ID || policies[0].Port != 21001 || !policies[0].MonitoringEnabled {
+		t.Fatalf("missing revision changed accounting policies: %+v %v", policies, err)
+	}
+}
+
 func TestSharedTrafficSyncUsesAppliedRevisionAndRejectsStaleSelection(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	_, owner := sharedTestUser(t, db, ctx, "sync-owner")
