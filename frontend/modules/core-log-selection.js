@@ -25,6 +25,8 @@ export function createCoreLogSelection({ state, engines, storage = accountStorag
     const filters = { ...(state.data.coreLogFilters || {}) };
     const params = new URLSearchParams();
     if (filters.agent_id) params.set("agent_id", filters.agent_id);
+    if (filters.instance_id) params.set("instance_id", filters.instance_id);
+    if (filters.user_id) params.set("user_id", filters.user_id);
     params.set("limit", String(filters.limit || 1000));
     return { filters, params };
   };

@@ -89,7 +89,7 @@ function contextMarkup(title) {
     return `<a class="context-primary ${selected ? "" : "active"}" href="#system-bbr">全部节点</a><div class="context-section-label"><span>系统 BBR</span><b>${agents.length}</b></div><nav class="context-list" aria-label="系统 BBR 节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#system-bbr-agent-${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("system-bbr-v1") ? "系统 TCP 参数" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "core-logs") {
-    const agents = orderNodesBySavedOrder(state.data.agents || []);
+    const agents = orderNodesBySavedOrder(state.data.coreLogAgents || []);
     const selected = state.data.coreLogFilters?.agent_id || "";
     return `<a class="context-primary ${selected ? "" : "active"}" href="#core-logs" data-core-log-agent="">全部节点日志</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="内核日志节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#core-logs" data-core-log-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("core-logs-v1") ? "集中日志已启用" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }

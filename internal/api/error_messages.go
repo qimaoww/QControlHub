@@ -271,6 +271,7 @@ var errorMessages = map[string]string{
 	"invalid task status filter":                                        "任务状态筛选条件无效，请重新选择。",
 	"invalid task action filter":                                        "任务操作筛选条件无效，请重新选择。",
 	"invalid agent_id filter":                                           "节点筛选条件无效，请重新选择。",
+	"invalid log resource filter":                                       "日志节点、用户或实例筛选条件无效，请重新选择。",
 	"invalid engine filter":                                             "内核筛选条件无效，请重新选择。",
 	"invalid level filter":                                              "日志级别筛选条件无效，请重新选择。",
 	"before must be a positive integer":                                 "日志分页标识必须是正整数。",

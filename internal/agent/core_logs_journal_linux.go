@@ -16,6 +16,8 @@ import (
 
 func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLogJournalSource) {
 	resume := ""
+	recoverySince := time.Now().UTC()
+	source.recoverySince = &recoverySince
 	for ctx.Err() == nil {
 		nextResume, err := collector.follow(ctx, source, resume)
 		if nextResume != "" {
@@ -60,10 +62,18 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 	// The separately captured tail position makes this readiness declaration
 	// safe: records written after that cursor (or the bounded timestamp used for
 	// an empty journal) remain readable while journalctl completes its startup.
-	for _, engine := range source.unitEngines {
-		collector.setSourceStatus(engine, "journal", "active", "")
+	if source.setStatus != nil {
+		source.setStatus("active", "")
+	} else {
+		for _, engine := range source.unitEngines {
+			collector.setSourceStatus(engine, "journal", "active", "")
+		}
 	}
 	lastResume := resume
+	recoverySince := time.Now().UTC()
+	if source.recoverySince != nil {
+		recoverySince = *source.recoverySince
+	}
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 16<<10), 256<<10)
 	for scanner.Scan() {
@@ -72,6 +82,18 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 			lastResume = "--after-cursor=" + cursor
 		}
 		if ok {
+			recoverySince = entry.LoggedAt
+			if source.recoverySince != nil {
+				*source.recoverySince = recoverySince
+			}
+			if source.setStatus != nil && entry.InstanceID != "main" {
+				collector.instancesMu.Lock()
+				child := collector.instances[string(entry.Engine)+"/"+entry.InstanceID]
+				collector.instancesMu.Unlock()
+				if child != nil {
+					child.collector.setSourceStatus(entry.Engine, "journal", "active", "")
+				}
+			}
 			collector.appendJournal(entry, cursor)
 		}
 	}
@@ -85,6 +107,13 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 	}
 	if waitErr != nil {
 		message := strings.TrimSpace(output.String())
+		if strings.HasPrefix(resume, "--after-cursor=") && strings.Contains(message, "Failed to seek to cursor") {
+			// Journal vacuum can retire the saved cursor while readers restart.
+			// Resume at the last observed timestamp, including one second of
+			// overlap; the existing per-source cursor set removes duplicates.
+			recoverySince = recoverySince.Add(-time.Second)
+			lastResume = fmt.Sprintf("--since=@%d.%06d", recoverySince.Unix(), recoverySince.Nanosecond()/int(time.Microsecond))
+		}
 		if message != "" {
 			return lastResume, errors.New(message)
 		}
@@ -106,10 +135,16 @@ func captureJournalPosition(ctx context.Context, source coreLogJournalSource) (s
 	command.Stderr = stderr
 	if err := command.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
-		if message != "" {
-			return "", errors.New(message)
+		var exit *exec.ExitError
+		empty := errors.As(err, &exit) && exit.ExitCode() == 1 && message == "" && strings.TrimSpace(stdout.String()) == ""
+		if !empty {
+			if message != "" {
+				return "", errors.New(message)
+			}
+			return "", err
 		}
-		return "", err
+		// journalctl --quiet exits 1 for an empty/expired namespace. The
+		// timestamp fixed before this probe still arms a no-history reader.
 	}
 	if stdout.Truncated() || stderr.Truncated() {
 		return "", errors.New("journal cursor response exceeded the output limit")

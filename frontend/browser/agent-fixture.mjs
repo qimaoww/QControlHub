@@ -460,6 +460,7 @@ window.fetch = async (input, options = {}) => {
     }
     return json(mode === "empty" ? [] : testAPI.agents);
   }
+  if (method === "GET" && path === "/core-log-sources") return json(testAPI.agents.flatMap(agent => ["mihomo", "xray", "sing-box", "ss-rust"].map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"",username:"主实例",features:agent.features,status:agent.status === "offline" ? "offline" : (agent.features || []).includes("core-logs-v1") ? agent.runtime?.[engine]?.core_log_status || "pending" : "unsupported",grant_revision:"fixture"}))));
   if (method === "GET" && path === "/core-logs" && (mode.startsWith("logs") || mode.startsWith("motion"))) {
     const limit = Number(url.searchParams.get("limit") || 1000);
     const agent = url.searchParams.get("agent_id") || "alpha";

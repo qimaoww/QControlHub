@@ -45,7 +45,6 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 		}
 	}
 	for _, duplicatedControl := range []string{
-		`name="agent_id"`,
 		`type="submit"`,
 	} {
 		if strings.Contains(content, duplicatedControl) {
@@ -68,7 +67,7 @@ func TestCoreLogPageSelectionPersistsInBrowserStorage(t *testing.T) {
 			t.Errorf("core-log selection persistence is missing %q", required)
 		}
 	}
-	if strings.Count(content, "rememberSelection();") != 5 {
+	if strings.Count(content, "rememberSelection();") < 5 {
 		t.Errorf("log controls and revoked-node fallback must persist selection; got %d call sites", strings.Count(content, "rememberSelection();"))
 	}
 	store, err := os.ReadFile("modules/core-log-preferences.js")

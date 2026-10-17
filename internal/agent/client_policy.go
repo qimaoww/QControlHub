@@ -44,6 +44,15 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	metrics.BBR = c.bbr.Collect(ctx)
 	sharedInstances := c.executor.SharedInstanceStatuses(ctx)
+	if c.logs != nil {
+		logStates := c.logs.InstanceStatuses()
+		for i := range sharedInstances {
+			if state, ok := logStates[string(sharedInstances[i].Engine)+"/"+sharedInstances[i].ShareID]; ok {
+				sharedInstances[i].CoreLogStatus = state.CoreLogStatus
+				sharedInstances[i].CoreLogError = state.CoreLogError
+			}
+		}
+	}
 	// An inactive instance can release its reserved ports only after the
 	// counter sample includes traffic received before the service stopped.
 	if c.traffic != nil {
@@ -106,6 +115,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureIndependentEgress,
 		core.AgentFeatureCoreLogs,
 		core.AgentFeatureCoreLogStatus,
+		core.AgentFeatureCoreLogInstances,
 		core.AgentFeatureMihomoDevelopmentSource,
 		core.AgentFeatureManagedPublicIPProbe,
 		core.AgentFeatureManagedPolicy,

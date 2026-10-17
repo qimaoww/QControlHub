@@ -33,6 +33,12 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		return fmt.Errorf("%w: too many shared instance statuses", ErrInvalid)
 	}
 	for _, instance := range heartbeat.SharedInstances {
+		if instance.CoreLogStatus != "" && instance.CoreLogStatus != "active" && instance.CoreLogStatus != "waiting" && instance.CoreLogStatus != "failed" && instance.CoreLogStatus != "pending" {
+			return fmt.Errorf("%w: invalid instance log status", ErrInvalid)
+		}
+		if len(instance.CoreLogError) > 100 {
+			return fmt.Errorf("%w: invalid instance log error", ErrInvalid)
+		}
 		if !instance.Engine.Valid() || !core.ValidAgentShareID(instance.ShareID) ||
 			(instance.Status != "active" && instance.Status != "inactive" && instance.Status != "failed" && instance.Status != "unknown") {
 			return fmt.Errorf("%w: invalid shared instance status", ErrInvalid)
@@ -105,6 +111,27 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	for _, usage := range heartbeat.TrafficUsage {
 		if usage.ShareID != "" && usage.EnforcementAvailable {
 			reportedPolicies[usage.ShareID] = append(reportedPolicies[usage.ShareID], usage.PolicyID)
+		}
+	}
+	engines, instances, statuses, logErrors := []string{}, []string{}, []string{}, []string{}
+	for _, instance := range heartbeat.SharedInstances {
+		if instance.CoreLogStatus != "" {
+			engines = append(engines, string(instance.Engine))
+			instances = append(instances, instance.ShareID)
+			statuses = append(statuses, instance.CoreLogStatus)
+			logErrors = append(logErrors, instance.CoreLogError)
+		}
+	}
+	if len(instances) > 0 {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO core_log_source_states(agent_id,engine,instance_id,status,error)
+ SELECT $1,r.engine,r.instance,r.status,r.error FROM (
+ SELECT DISTINCT ON(engine,instance) engine,instance,status,error
+ FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY r(engine,instance,status,error,ordinal)
+ ORDER BY engine,instance,ordinal DESC) r
+ JOIN agent_shared_instance_ownership o ON o.agent_id=$1 AND o.engine=r.engine AND o.share_id=r.instance
+ JOIN agent_shares sh ON sh.id=o.share_id AND sh.agent_id=o.agent_id AND sh.user_id=o.owner_id
+ ON CONFLICT(agent_id,engine,instance_id) DO UPDATE SET status=EXCLUDED.status,error=EXCLUDED.error,updated_at=now()`, id, engines, instances, statuses, logErrors); err != nil {
+			return err
 		}
 	}
 	for _, instance := range heartbeat.SharedInstances {

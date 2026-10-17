@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 73
+const currentSchemaVersion = 74
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -83,13 +83,27 @@ CREATE TABLE IF NOT EXISTS core_logs (
     UNIQUE (batch_id,entry_index,received_at)
 ) PARTITION BY RANGE (received_at);
 
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS instance_id text NOT NULL DEFAULT '';
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS service text NOT NULL DEFAULT '';
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+-- Historical rows lack an ownership snapshot, including formerly unassigned
+-- nodes. This sentinel must never match an actual current node owner.
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS node_owner_id text NOT NULL DEFAULT 'unverified';
+CREATE INDEX IF NOT EXISTS core_logs_instance_recent_idx ON core_logs(agent_id,engine,instance_id,node_owner_id,owner_id,id DESC)
+ INCLUDE(level,message,logged_at,received_at,service);
+CREATE TABLE IF NOT EXISTS core_log_source_states (
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ engine text NOT NULL, instance_id text NOT NULL, status text NOT NULL, error text NOT NULL DEFAULT '',
+ updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(agent_id,engine,instance_id)
+);
+
 -- Node windows require (agent_id,engine,id); fleet windows require (engine,id).
 -- The node index cannot supply fleet recency order, especially for a quiet
 -- engine: it otherwise scans/sorts history or reads the primary-key heap.
 CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
-    INCLUDE (level,message,logged_at,received_at);
+    INCLUDE (level,message,logged_at,received_at,instance_id,service,owner_id,node_owner_id);
 CREATE INDEX IF NOT EXISTS core_logs_engine_covering_idx ON core_logs(engine,id DESC)
-    INCLUDE (agent_id,level,message,logged_at,received_at);
+    INCLUDE (agent_id,level,message,logged_at,received_at,instance_id,service,owner_id,node_owner_id);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 

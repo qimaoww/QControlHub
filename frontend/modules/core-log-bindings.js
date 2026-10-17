@@ -7,7 +7,7 @@ export function createCoreLogBindings({ state }, { renderCoreLogs, rememberSelec
     document.querySelectorAll("[data-core-log-page-index]").forEach((button) => {
       bindEvent(button, "click", () => {
         state.data.coreLogPage = Number(button.dataset.coreLogPageIndex);
-        renderCoreLogs(state.data.coreLogEntries || [], state.data.agents || [], state.data.coreLogFilters || filters);
+        renderCoreLogs(state.data.coreLogEntries || [], state.data.coreLogAgents || [], state.data.coreLogFilters || filters);
         document.querySelector(".core-log-result-toolbar")?.scrollIntoView({ block: "nearest" });
       });
     });
@@ -21,10 +21,17 @@ export function createCoreLogBindings({ state }, { renderCoreLogs, rememberSelec
       rememberSelection();
       renderCoreLogs(
         state.data.coreLogEntries || [],
-        state.data.agents || [],
+        state.data.coreLogAgents || [],
         state.data.coreLogFilters,
       );
     };
+    for (const field of ["agent_id", "instance_id"]) {
+      bindEvent(document.querySelector(`#core-log-filters select[name="${field}"]`), "change", async event => {
+        state.data.coreLogFilters = { ...state.data.coreLogFilters, [field]: event.currentTarget.value };
+        rememberSelection();
+        await coreLogs({ scopeChange: true });
+      });
+    }
     document.querySelectorAll("[data-core-log-engine]").forEach((button) => {
       bindEvent(button, "click", () => renderLocalFilters({ engine: button.value }));
     });

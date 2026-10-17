@@ -37,6 +37,18 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 	base := openPerformanceStore(t)
 	agentID, usages := seedPerformanceAgent(t, base, 64)
 	ctx := context.Background()
+	for i, name := range []string{"budget-log-a", "budget-log-b"} {
+		user, _ := sharedTestUser(t, base, ctx, name)
+		share := fmt.Sprintf("shr_%016x", i+1)
+		if _, err := base.pool.Exec(ctx, `INSERT INTO agent_shares(id,agent_id,user_id,status,engines) VALUES($1,$2,$3,'accepted',ARRAY['mihomo','xray','sing-box','ss-rust'])`, share, agentID, user.ID); err != nil {
+			t.Fatal(err)
+		}
+		for _, engine := range core.AllEngines() {
+			if _, err := base.pool.Exec(ctx, `INSERT INTO agent_shared_instance_ownership(agent_id,engine,share_id,owner_id,config_id,config_version,updated_at) VALUES($1,$2,$3,$4,'budget',1,now())`, agentID, engine, share, user.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	trace := &queryBudget{}
 	config := base.pool.Config()
 	config.ConnConfig.Tracer = trace
@@ -58,6 +70,17 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 	}{
 		{"logs32", 6, 0, func() error {
 			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000001", Entries: entries})
+		}},
+		// Shared rows replace the main client-connection status write with one
+		// source ownership lookup; eight sources still take six round trips.
+		{"shared logs32 across eight sources", 6, 0, func() error {
+			shared := make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)
+			for i := range shared {
+				engine := core.AllEngines()[i%4]
+				instance := fmt.Sprintf("shr_%016x", i/4%2+1)
+				shared[i] = core.CoreLogEntry{Engine: engine, InstanceID: instance, Service: core.CoreLogService(engine, instance, "systemd"), Level: "warning", Message: "shared budget"}
+			}
+			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000003", Entries: shared})
 		}},
 		// Connection indexing adds a single set-based write for the whole batch,
 		// regardless of the number of source tuples.

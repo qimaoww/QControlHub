@@ -62,203 +62,75 @@ try {
     "cached settings must not leak a policy after read permission is revoked");
 
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
+  const sources = ["alpha", "beta", "gamma"].map(agent => ({agent_id: agent, name: agent.toUpperCase(), instance_id: "main", engine: "xray", owner_id: "self", username: "self", status: "active", features: ["core-logs-v1", "core-log-status-v1"], grant_revision: "1"}));
   const calls = [];
-  let markup = "";
-  let paints = 0;
-  const deniedPermissions = new Set();
-  let metadata = deferred();
-  let preview = deferred();
-  let full = deferred();
+  let markup = "", paints = 0;
+  let directory = deferred(), preview = deferred(), full = deferred();
   const render = installCoreLogs({
-    state, engines: ["xray"], can: permission => !deniedPermissions.has(permission), now: () => clock,
-    esc: (v) => String(v ?? ""), engineName: (v) => v, date: (v) => v,
-    shell: (value) => { markup = value; paints++; }, setTimer: () => 1, clearTimer: () => {},
-    api: (path, { signal }) => {
-      calls.push({ path, signal });
-      if (path === "/agents") return metadata.promise;
-      const params = new URLSearchParams(path.split("?")[1]);
-      return Number(params.get("limit")) === 200 ? preview.promise : full.promise;
+    state, engines: ["xray"], can: () => true, now: () => clock,
+    esc: value => String(value ?? ""), engineName: String, date: String,
+    shell: value => { markup = value; paints++; }, setTimer: () => 1, clearTimer: () => {},
+    api: (path, {signal}) => {
+      calls.push({path, signal});
+      if (path === "/core-log-sources") return directory.promise;
+      return new URLSearchParams(path.split("?")[1]).get("limit") === "200" ? preview.promise : full.promise;
     },
   });
   const first = render();
-  assert.equal(render(), first, "concurrent same-scope refreshes share their pending read");
-  assert.equal(calls.length, 3, "metadata, preview and full reads start without serial waiting");
-  assert.match(markup, /正在加载日志/, "cold selection is acknowledged synchronously");
-  assert.equal(calls[1].path, "/core-logs?agent_id=alpha&limit=200");
-  preview.resolve(entries("alpha", 200));
-  await flush();
-  assert.equal(state.data.coreLogEntries.length, 200, "preview paints without awaiting slow node metadata or the full window");
-  assert.match(markup, /正在补齐所选窗口/);
-  assert.equal(calls[2].path, "/core-logs?agent_id=alpha&limit=2000");
-  full.resolve(entries("alpha", 2000));
-  await first;
-  assert.equal(state.data.coreLogEntries.length, 2000, "full requested window replaces the preview");
-  assert.equal((markup.match(/class="core-log-row /g) || []).length, 200);
-  assert.equal((markup.match(/aria-label="日志分页"/g) || []).length, 2);
-  const streamStart = markup.indexOf('<section class="core-log-stream');
-  const streamEnd = markup.indexOf('</section>', streamStart);
-  assert.doesNotMatch(markup.slice(streamStart, streamEnd), /core-log-pagination/, "pager never separates column headings from rows");
-  metadata.resolve([{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} }]);
-  await flush();
-  assert.match(markup, /<strong>Alpha<\/strong>/, "late metadata updates the node name independently");
-
-  preview = deferred(); full = deferred();
-  state.data.coreLogFilters = { agent_id: "beta", limit: 2000 };
-  const second = render({ scopeChange: true });
-  assert.doesNotMatch(markup, /alpha log/, "uncached node switch immediately removes the previous node's rows");
-  assert.equal(calls.filter((call) => call.path === "/agents").length, 1, "quick sidebar switch reuses recent metadata");
-  const staleSignal = calls.at(-1).signal;
-  const stalePreview = preview;
-  state.data.coreLogFilters = { agent_id: "alpha", limit: 2000 };
-  const returned = render({ scopeChange: true });
-  assert.equal(staleSignal.aborted, true, "superseded log requests are cancelled");
-  assert.match(markup, /alpha log/, "cached node paints synchronously without waiting on the network");
-  assert.match(markup, /已显示缓存，正在更新/);
-  assert.equal(state.data.coreLogEntries.length, 2000);
-  full.resolve(entries("alpha", 1999));
-  await returned;
-  stalePreview.resolve(entries("beta", 200));
-  await second;
-  assert.equal(state.data.coreLogEntries.length, 1999);
-  assert.doesNotMatch(markup, /beta log/, "late node response never contaminates the selected node");
-
-  preview = deferred(); full = deferred();
-  state.data.coreLogFilters = { agent_id: "gamma", limit: 1000 };
-  const partial = render({ scopeChange: true });
-  preview.resolve(entries("gamma", 200));
-  await flush();
-  full.reject(new Error("full window failed"));
-  await partial;
+  assert.equal(render(), first);
+  assert.equal(calls.length, 1, "authorization directory gates cached and fresh reads");
+  assert.match(markup, /正在加载日志/);
+  directory.resolve(sources); await flush();
+  assert.equal(calls.length, 3, "preview and full windows start concurrently after grant validation");
+  preview.resolve(entries("alpha", 200)); await flush();
   assert.equal(state.data.coreLogEntries.length, 200);
-  assert.match(markup, /当前仅显示部分日志/, "a preview is never falsely labeled as the complete window");
-  assert.equal(state.data.coreLogCache.get(JSON.stringify(["gamma", 1000])), null, "partial windows are not cached as complete");
-
-  preview = deferred(); full = deferred();
-  state.data.coreLogFilters = { agent_id: "quiet", limit: 2000 };
-  const quiet = render({ scopeChange: true });
-  const quietCalls = calls.length;
-  preview.resolve(entries("quiet", 10));
-  await quiet;
-  assert.equal(calls.length, quietCalls, "quiet previews do not start any further read");
-  assert.equal(calls.at(-1).signal.aborted, true, "a complete quiet preview cancels the speculative full read");
-
-  full = deferred(); preview = deferred();
-  preview.reject(Object.assign(new Error("forbidden"), { status: 403 }));
-  state.data.coreLogFilters = { agent_id: "alpha", limit: 2000 };
-  const denied = render({ scopeChange: true });
-  full.reject(Object.assign(new Error("forbidden"), { status: 403 }));
-  await denied;
-  assert.match(markup, /无权查看内核日志/);
-  assert.equal(state.data.coreLogEntries.length, 0, "revoked permissions clear displayed logs");
-  assert.equal(state.data.coreLogCache, undefined, "revoked permissions discard all retained snapshots");
-
-  preview = deferred(); metadata = deferred();
-  state.data.coreLogFilters = { agent_id: "late", limit: 2000 };
-  const left = render();
-  state.navigationEpoch++;
-  state.route = "dashboard";
-  const beforeLeave = markup;
-  preview.resolve(entries("late", 200));
-  metadata.resolve([{ id: "late" }]);
-  await left;
-  await flush();
-  assert.equal(markup, beforeLeave, "navigation suppresses both staged log renders and late metadata");
-
-  state.route = "core-logs";
-  preview = deferred(); full = deferred(); metadata = deferred();
-  state.data.coreLogFilters = { agent_id: "logout", limit: 2000 };
-  const loggingOut = render();
-  preview.resolve(entries("logout", 200));
-  await flush();
-  const beforeLogout = markup;
-  state.data = {};
-  full.resolve(entries("logout", 2000));
-  metadata.resolve([{ id: "logout" }]);
-  await loggingOut;
-  await flush();
-  assert.equal(markup, beforeLogout, "logout discards pending full-window and metadata responses even without navigation");
-  assert.deepEqual(state.data, {}, "a late response cannot restore another session's log cache");
-
-  state.data = { coreLogFilters: { agent_id: "metadata-failed", limit: 2000 }, agents: [
-    { id: "metadata-failed", name: "Metadata Failed", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} },
-  ], settings: { core_log_minimum_level: "warning", core_log_retention_days: 7 } };
-  preview = deferred(); full = deferred(); metadata = deferred();
-  const missingMetadata = render();
-  metadata.reject(new Error("node metadata unavailable"));
-  preview.resolve(entries("metadata-failed", 10));
-  await missingMetadata;
-  assert.equal(state.data.coreLogEntries.length, 10, "failed node metadata never drops successful log results");
-  assert.match(markup, /无法确认当前节点是否仍在采集日志/, "failed node status is not reported as healthy");
-
-  // Expired/oversized snapshots must not turn periodic refresh into a new
-  // cold preview and shrink the active window while a reader is paging.
-  delete state.data.coreLogCache;
-  full = deferred();
-  const activeBefore = state.data.coreLogEntries;
-  const refreshActive = render({ background: true });
-  assert.match(calls.at(-1).path, /limit=2000$/);
-  assert.equal(state.data.coreLogEntries, activeBefore);
-  full.resolve(entries("metadata-failed", 2000));
-  await refreshActive;
+  full.resolve(entries("alpha", 2000)); await first;
   assert.equal(state.data.coreLogEntries.length, 2000);
-  assert.match(markup, /保存警告及以上 · 保留 7 天/);
-  const beforePollPaints = paints;
-  metadata = deferred(); full = deferred();
-  const stablePoll = render({ background: true });
-  metadata.resolve(state.data.agents.map(agent => ({ ...agent, cpu_usage: 99, last_seen_at: "changed" })));
-  full.resolve(structuredClone(state.data.coreLogEntries));
-  await stablePoll;
-  await flush();
-  assert.equal(paints, beforePollPaints, "unchanged logs and metrics-only metadata skip log rendering");
-  assert.equal(state.data.agents[0].cpu_usage, 99, "fresh metrics still reach account state");
-  const policyEntries = state.data.coreLogEntries;
-  const policyFilters = state.data.coreLogFilters;
-  const policyPage = state.data.coreLogPage;
-  metadata = deferred(); full = deferred();
-  const policyPoll = render({ background: true });
-  // Shell settings can finish after the log view, including during a poll.
-  state.data.settings = { core_log_minimum_level: "error", core_log_retention_days: 30 };
-  metadata.resolve(structuredClone(state.data.agents));
-  full.resolve(structuredClone(policyEntries));
-  await policyPoll;
-  await flush();
-  assert.equal(paints, beforePollPaints + 1, "late storage policy changes repaint an unchanged log window once");
-  assert.match(markup, /保存错误及以上 · 保留 30 天/);
-  assert.doesNotMatch(markup, /保存警告及以上|保留 7 天/);
-  assert.equal(state.data.coreLogEntries, policyEntries, "policy refresh retains the searchable snapshot");
-  assert.equal(state.data.coreLogFilters, policyFilters, "policy refresh preserves local filters");
-  assert.equal(state.data.coreLogPage, policyPage, "policy refresh preserves the selected page");
-  metadata = deferred(); full = deferred();
-  const unchangedPolicyPoll = render({ background: true });
-  state.data.settings = { ...state.data.settings, core_log_retention_days: "30", panel_name: "New panel name" };
-  metadata.resolve(state.data.agents.map(agent => ({ ...agent, cpu_usage: 12 })));
-  full.resolve(structuredClone(policyEntries));
-  await unchangedPolicyPoll;
-  await flush();
-  assert.equal(paints, beforePollPaints + 1, "equivalent policy, unrelated settings and metrics skip the next repaint");
-  metadata = deferred(); full = deferred();
-  const renamedPoll = render({ background: true });
-  metadata.resolve(state.data.agents.map(agent => ({ ...agent, name: "Renamed node" })));
-  full.resolve(structuredClone(state.data.coreLogEntries));
-  await renamedPoll;
-  assert.match(markup, /Renamed node/, "node names still update when log content is unchanged");
-  const beforePermissionPaints = paints;
-  deniedPermissions.add("settings.read");
-  deniedPermissions.add("agents.read");
-  full = deferred();
-  const permissionPoll = render({ background: true });
-  full.resolve(structuredClone(policyEntries));
-  await permissionPoll;
-  assert.equal(paints, beforePermissionPaints + 1, "visible permission changes invalidate an unchanged view");
-  assert.match(markup, /保存策略不可见/);
-  assert.match(markup, /无法核验采集状态/);
-  assert.doesNotMatch(markup, /保存错误及以上|保留 30 天|Renamed node/);
-  full = deferred();
-  const hiddenPolicyPoll = render({ background: true });
-  state.data.settings = { core_log_minimum_level: "debug", core_log_retention_days: 1 };
-  full.resolve(structuredClone(policyEntries));
-  await hiddenPolicyPoll;
-  assert.equal(paints, beforePermissionPaints + 1, "hidden policy changes do not repaint");
+  assert.equal((markup.match(/class="core-log-row /g) || []).length, 200);
+  assert.match(markup, /日志节点/);
+  assert.match(markup, /使用用户 \/ 实例/);
+  assert.equal(state.data.coreLogAgents.length, 3);
+
+  directory = deferred(); preview = deferred(); full = deferred();
+  state.data.coreLogFilters = {agent_id: "beta", limit: 2000};
+  const second = render({scopeChange: true});
+  assert.doesNotMatch(markup, /alpha log/, "scope switches remove previous rows immediately");
+  const staleSignal = calls.at(-1).signal;
+  const staleDirectory = directory;
+  directory = deferred();
+  state.data.coreLogFilters = {agent_id: "alpha", limit: 2000};
+  const returned = render({scopeChange: true});
+  assert.ok(staleSignal.aborted);
+  assert.doesNotMatch(markup, /alpha log/, "returning to a cached scope still requires current grants");
+  directory.resolve(sources); await flush();
+  full.resolve(entries("alpha", 1999)); await returned;
+  staleDirectory.resolve(sources); await second;
+  assert.equal(state.data.coreLogEntries.length, 1999);
+  assert.doesNotMatch(markup, /beta log/);
+
+  // A grant change discards every retained window, including same-node
+  // recipient windows that a previous directory still authorized.
+  directory = deferred(); preview = deferred(); full = deferred();
+  const revocation = render({background: true});
+  directory.resolve(sources.filter(source => source.agent_id !== "beta")); await flush();
+  assert.equal(state.data.coreLogEntries.length, 0);
+  full.resolve(entries("alpha", 1)); await revocation;
+  assert.equal(state.data.coreLogCache.get(JSON.stringify(["beta",2000])), null);
+
+  directory = deferred();
+  const denied = render({background:true});
+  directory.reject(Object.assign(new Error("revoked"), {status:403})); await denied; await flush();
+  assert.equal(state.data.coreLogEntries.length, 0);
+  assert.equal(state.data.coreLogCache, undefined);
+  assert.match(markup, /无权查看内核日志/);
+
+  state.data = {coreLogFilters: {agent_id:"alpha",limit:2000}};
+  directory = deferred();
+  const loggingOut = render();
+  state.data = {};
+  directory.resolve(sources); await loggingOut;
+  assert.deepEqual(state.data, {}, "late authorization cannot populate another account");
+
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;

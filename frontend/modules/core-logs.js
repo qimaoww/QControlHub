@@ -1,9 +1,9 @@
+import { coreLogScopeKey, normalizeCoreLogScope, coreLogSourceAgents } from "./core-log-scope.js";
 import { updateFeedback } from "./presence-motion.js";
 import { readCoreLogWindow } from "./core-log-read.js";
 import { createCoreLogSelection } from "./core-log-selection.js";
 import { createCoreLogView } from "./core-log-view.js";
 import { createCoreLogBindings } from "./core-log-bindings.js";
-import { coreLogAgentPresentation } from "./core-log-source-status.js";
 import { storagePolicyName } from "./core-log-model.js";
 export { filterCoreLogEntries, coreLogFilterCounts } from "./core-log-model.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
@@ -56,7 +56,7 @@ export function installCoreLogs(ctx) {
     ]);
   };
   function renderCoreLogs(entries, agents, filters) {
-    view(entries, can("agents.read") ? agents : [], filters);
+    view(entries, agents, filters);
     state.data.coreLogViewPresentation = viewPresentation();
     bind(filters);
   }
@@ -72,7 +72,7 @@ export function installCoreLogs(ctx) {
       routeSignal = state.routeSignal;
       routeSignal?.addEventListener("abort", () => { refresh.invalidate(); poller.stop(); pending = null; }, { once: true });
     }
-    const key = JSON.stringify([state.data.coreLogFilters.agent_id || "", Number(state.data.coreLogFilters.limit || 1000)]);
+    const key = coreLogScopeKey(state.data.coreLogFilters);
     if (pending?.key === key && pending.data === state.data && pending.epoch === state.navigationEpoch)
       return pending.promise;
     const request = { key, data: state.data, epoch: state.navigationEpoch };
@@ -84,18 +84,18 @@ export function installCoreLogs(ctx) {
   async function loadCoreLogs({ background = false, scopeChange = false } = {}) {
     restoreSelection();
     poller.stop();
-    const { filters, params } = query();
+    let { filters, params } = query();
     const data = state.data;
     const epoch = state.navigationEpoch;
-    const key = JSON.stringify([filters.agent_id || "", Number(filters.limit || 1000)]);
-    const cache = data.coreLogCache ||= createCoreLogCache({ now });
-    const cached = cache.get(key);
+    const key = coreLogScopeKey(filters);
+    let cache = data.coreLogCache ||= createCoreLogCache({ now });
+    let cached = cache.get(key);
     const changed = data.coreLogDataScope !== key;
     if (changed) failures = 0;
-    const related = changed && !cached ? cache.preview(key) : null;
+    const related = null;
     let rendered = false;
     let previewed = false;
-    let agents = can("agents.read") ? (data.agents || []).filter((agent) => agent.can_manage !== false) : [];
+    let agents = data.coreLogAgents || [];
     const current = (signal) => !signal.aborted && state.data === data &&
       state.navigationEpoch === epoch && state.route === "core-logs";
     const paint = (entries, phase) => {
@@ -106,35 +106,44 @@ export function installCoreLogs(ctx) {
     // The selected sidebar item/header must change before waiting on the WAN.
     // Never show the previous node's rows under the new node's name.
     if (!background && changed)
-      paint(cached || related?.entries || [], cached || related?.complete ? "cached" : related ? "preview" : "loading");
+      paint([], "loading");
     try {
       const applied = await refresh.run(
         async (signal) => {
-          // Node metadata is not a dependency of log delivery. Reuse it for
-          // quick sidebar switches; polling still revalidates live status.
-          if (can("agents.read") && (!scopeChange || !data.coreLogAgentsAt || now() - data.coreLogAgentsAt >= 10_000)) {
-            void api("/agents", { signal }).then((freshAgents) => {
-              if (!current(signal)) return;
-              const previousPresentation = coreLogAgentPresentation(agents);
-              agents = freshAgents.filter((agent) => agent.can_manage !== false);
-              data.agents = agents;
-              data.coreLogAgentsAt = now();
-              if (previousPresentation !== coreLogAgentPresentation(agents))
-                paint(data.coreLogEntries || [], data.coreLogPhase);
-            }).catch(() => {
-              // A failed metadata read must not discard successfully read logs.
-              if (!current(signal)) return;
-              const previousPresentation = coreLogAgentPresentation(agents);
-              agents = agents.map((agent) => ({ ...agent, status: "unknown" }));
-              data.agents = agents;
-              data.coreLogAgentsAt = 0;
-              if (previousPresentation !== coreLogAgentPresentation(agents))
-                paint(data.coreLogEntries || [], data.coreLogPhase);
-            });
+          // Revalidate grants before using any cached window, on every poll.
+          let sources;
+          try { sources = await api("/core-log-sources", { signal }); }
+          catch (error) {
+            if (current(signal)) { delete data.coreLogCache; data.coreLogSources = []; data.coreLogAgents = []; agents = []; paint([], "failed"); }
+            throw error;
           }
+          if (!current(signal)) return [];
+          const signature = JSON.stringify(sources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
+          const accessChanged = data.coreLogAccessSignature !== signature;
+          if (accessChanged) {
+            delete data.coreLogCache;
+            cache = data.coreLogCache = createCoreLogCache({ now });
+            cached = null;
+            data.coreLogEntries = [];
+            data.coreLogs = [];
+          }
+          data.coreLogAccessSignature = signature;
+          data.coreLogSources = sources;
+          agents = coreLogSourceAgents(sources);
+          data.coreLogAgents = agents;
+          data.coreLogFilters = normalizeCoreLogScope(data.coreLogFilters, sources);
+          rememberSelection();
+          if (coreLogScopeKey(data.coreLogFilters) !== key) {
+            queueMicrotask(() => coreLogs({ scopeChange: true }));
+            return [];
+          }
+          // Never retain another resource's rows while options or grants change.
+          const previous = accessChanged ? [] : changed ? cached : data.coreLogEntries;
+          if (changed || accessChanged || JSON.stringify(sources) !== data.coreLogSourcePresentation) paint(previous || [], changed && cached ? "cached" : "loading");
+          data.coreLogSourcePresentation = JSON.stringify(sources);
           return readCoreLogWindow(api, params, {
             signal, engines,
-            previous: changed ? cached : data.coreLogEntries,
+            previous,
             preview: changed && !cached && !related && Number(filters.limit || 1000) > 200,
             onPreview(entries) {
               if (!current(signal)) return;
@@ -144,7 +153,7 @@ export function installCoreLogs(ctx) {
           });
         },
         (entries) => {
-          if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs") return;
+          if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "core-logs" || coreLogScopeKey(data.coreLogFilters) !== key) return;
           failures = 0;
           cache.set(key, entries);
           if (!background || entries !== data.coreLogEntries || data.coreLogPhase !== "ready" ||
@@ -162,7 +171,7 @@ export function installCoreLogs(ctx) {
         delete data.coreLogCache;
         data.coreLogEntries = [];
         data.coreLogs = [];
-        data.coreLogFilters = { ...data.coreLogFilters, agent_id: "" };
+        data.coreLogFilters = { ...data.coreLogFilters, agent_id: "", instance_id: "", user_id: "" };
         rememberSelection();
         return coreLogs({ scopeChange: true });
       }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,7 @@ type EngineSpec struct {
 }
 
 type Executor struct {
+	coreLogReady             func(context.Context, core.Engine, EngineSpec) error
 	Specs                    map[core.Engine]EngineSpec
 	ExistingSpecs            map[core.Engine]EngineSpec
 	ExistingDiscoveryIssues  map[core.Engine]string
@@ -197,6 +199,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
 			return "", fmt.Errorf("prepare shared core service: %w", err)
+		}
+		if e.coreLogReady != nil {
+			if err := e.coreLogReady(parent, task.Engine, spec); err != nil {
+				slog.Warn("shared core log collector is unavailable", "engine", task.Engine, "share_id", task.SharedTrafficID, "error", err)
+			}
 		}
 		if task.Action == core.ActionInstall {
 			if _, err := exec.LookPath(spec.Binary); err == nil {

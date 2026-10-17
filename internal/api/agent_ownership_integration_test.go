@@ -158,7 +158,7 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 	} {
 		bob.call(operation.method, "/agents/"+own.ID+operation.path, operation.body, http.StatusForbidden, nil)
 	}
-	bob.call("GET", "/core-logs?agent_id="+own.ID, nil, http.StatusForbidden, nil)
+	bob.call("GET", "/core-logs?agent_id="+own.ID, nil, http.StatusNotFound, nil)
 	bob.call("POST", "/tasks", core.TaskRequest{AgentID: own.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusForbidden, nil)
 	request.Revision, request.Shares = sharing.Revision, nil
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusOK, nil)

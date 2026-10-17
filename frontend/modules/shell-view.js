@@ -70,7 +70,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
-  const overview = state.data.overview || {};
+  const overview = state.route === "core-logs" ? { agents_online: (state.data.coreLogAgents || []).filter(agent => agent.status === "online").length } : state.data.overview || {};
   const panelName = state.data.settings?.panel_name || "QControlHub";
   const roleName = { admin: "管理员", user: "用户", operator: "用户", auditor: "用户", readonly: "用户" }[
     state.session.role

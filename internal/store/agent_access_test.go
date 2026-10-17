@@ -306,12 +306,16 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 		func() error { return db.SetAgentClientAddress(alice, agent.ID, "foreign.example") },
 		func() error { return db.SetAgentEngineCapability(alice, agent.ID, core.EngineMihomo, false) },
 		func() error { _, err := db.EnrollmentCommandForAgent(alice, agent.ID); return err },
-		func() error { _, err := db.ListCoreLogs(alice, CoreLogQuery{AgentID: agent.ID}); return err },
 		func() error { _, err := db.AgentConfigsForMonitoring(alice, agent.ID); return err },
 	} {
 		if err := check(); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("shared user reached a host-wide operation: %v", err)
 		}
+	}
+	// Logs have an independent resource grant; an accepted share without a
+	// deployed instance cannot expose the owner's main-service history.
+	if _, err := db.ListCoreLogs(alice, CoreLogQuery{AgentID: agent.ID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("share without instance exposed host logs: %v", err)
 	}
 	if _, err := db.CreateEnrollmentToken(alice, core.EnrollmentTokenRequest{Name: "my-own-node"}); err != nil {
 		t.Fatalf("personal enrollment denied: %v", err)

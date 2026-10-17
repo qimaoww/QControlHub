@@ -12,9 +12,11 @@ type HeartbeatRequest struct {
 }
 
 type SharedInstanceStatus struct {
-	Engine  Engine `json:"engine"`
-	ShareID string `json:"share_id"`
-	Status  string `json:"status"`
+	Engine        Engine `json:"engine"`
+	ShareID       string `json:"share_id"`
+	Status        string `json:"status"`
+	CoreLogStatus string `json:"core_log_status,omitempty"`
+	CoreLogError  string `json:"core_log_error,omitempty"`
 }
 
 const (

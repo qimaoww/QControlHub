@@ -29,7 +29,8 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 	ambiguous := make(map[string]bool)
 	for _, specs := range specSets {
 		for engine, spec := range specs {
-			if !managedOpenRCCoreServiceName(spec.Service) {
+			instance, known := core.CoreLogInstance(engine, spec.Service)
+			if !managedOpenRCCoreServiceName(spec.Service) && (!known || instance == "main") {
 				continue
 			}
 			path := filepath.Join(openRCCoreLogRoot, spec.Service+".log")
