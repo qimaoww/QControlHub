@@ -71,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfigFiles)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfigFiles)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/state", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigState)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.saveServerInbound)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigField)))

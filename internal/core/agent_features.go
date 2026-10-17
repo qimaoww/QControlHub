@@ -76,3 +76,7 @@ const AgentFeatureSharedCoreInstances = "shared-core-instances-v1"
 // starting or rewriting the host service. Manual install and private validate
 // or deploy tasks retain their share identity throughout preparation.
 const AgentFeatureSharedCorePrepare = "shared-core-prepare-v1"
+
+// Scoped lifecycle commands and version-bound, observed instance state. Never
+// send these commands to an older Agent: it would target the host service.
+const AgentFeatureSharedCoreLifecycle = "shared-core-lifecycle-v1"

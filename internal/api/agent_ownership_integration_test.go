@@ -67,7 +67,7 @@ func ownedConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store
 	var token core.EnrollmentTokenCreated
 	client.call("POST", "/enrollment-tokens", map[string]string{"name": name}, http.StatusCreated, &token)
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: name, OS: "linux", Arch: "amd64",
-		Capabilities: engines, Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
+		Capabilities: engines, Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCoreLifecycle},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 		bob.call(operation.method, "/agents/"+own.ID+operation.path, operation.body, http.StatusForbidden, nil)
 	}
 	bob.call("GET", "/core-logs?agent_id="+own.ID, nil, http.StatusNotFound, nil)
-	bob.call("POST", "/tasks", core.TaskRequest{AgentID: own.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusForbidden, nil)
+	bob.call("POST", "/tasks", core.TaskRequest{AgentID: own.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusConflict, nil)
 	request.Revision, request.Shares = sharing.Revision, nil
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusOK, nil)
 	bob.call("GET", "/agents/"+own.ID+"/configs", nil, http.StatusNotFound, nil)
@@ -205,10 +205,10 @@ func TestSharedProfilePreferencesDoNotTransferWithPorts(t *testing.T) {
 			t.Fatal("profile preferences leaked through host labels")
 		}
 	}
-	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionReadManagedConfig}, http.StatusForbidden, nil)
-	alice.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusForbidden, nil)
+	// Bob's independent deployment cannot take over Alice's base file/cache.
+	alice.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusOK, nil)
 	// Stop, settle and release the reservation before reusing the same port.
-	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop}, http.StatusCreated, &task)
+	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop}, http.StatusCreated, &task)
 	completeConfigScopeAPITask(t, ctx, db, task)
 	var sharing core.AgentSharing
 	alice.call("GET", "/agents/"+agent.ID+"/sharing", nil, http.StatusOK, &sharing)

@@ -51,6 +51,9 @@ type clientAccessEntry struct {
 	Profiles        []clientAccessProfile       `json:"profiles"`
 	AddressOptions  []clientAccessAddressOption `json:"address_options,omitempty"`
 	AddressMode     string                      `json:"address_mode"`
+	ConfigVersion   int                         `json:"config_version"`
+	InstanceID      string                      `json:"instance_id,omitempty"`
+	ServiceStatus   string                      `json:"service_status"`
 }
 
 type clientAccessDataSource interface {
@@ -160,6 +163,16 @@ func (s *Server) clientAccessEntries(ctx context.Context, outboundEngine ...core
 				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				AddressRequired: true, Profiles: []clientAccessProfile{}, AddressMode: clientAddressMode,
 			})
+		}
+		if len(entries) > 0 {
+			entry := &entries[len(entries)-1]
+			if entry.AgentID == agent.ID && entry.Engine == deployment.Engine {
+				entry.ConfigVersion = deployment.ConfigVersion
+				entry.ServiceStatus = agent.Runtime[deployment.Engine].ServiceStatus
+				if instance := agent.Runtime[deployment.Engine].Instance; instance != nil {
+					entry.InstanceID = instance.ID
+				}
+			}
 		}
 	}
 	sort.SliceStable(entries, func(i, j int) bool {

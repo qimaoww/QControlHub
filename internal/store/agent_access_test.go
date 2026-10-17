@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,7 @@ func sharedTestUser(t *testing.T, db *Store, ctx context.Context, name string) (
 func sharedTestAgent(t *testing.T, db *Store, ctx context.Context) core.Agent {
 	t.Helper()
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
-	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features='["shared-traffic-v1","shared-engines-v1","independent-egress-v1"]' WHERE id=$1`, agent.ID); err != nil {
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET last_seen=now(),features='["shared-traffic-v1","shared-engines-v1","independent-egress-v1","shared-core-instances-v1","shared-core-lifecycle-v1"]' WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	return agent
@@ -117,8 +118,8 @@ func TestAgentIsolationCoversListsAndDirectStoreCalls(t *testing.T) {
 	if overview, err := db.Overview(alice); err != nil || overview.Agents != 1 || overview.NodeConfigs != 1 || overview.TasksPending != 0 {
 		t.Fatalf("overview leaks revoked scope: %+v %v", overview, err)
 	}
-	if _, err := db.CreateTask(alice, core.TaskRequest{AgentID: allowed.ID, Engine: core.EngineMihomo, Action: core.ActionStop}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("isolated user changed a shared host service: %v", err)
+	if _, err := db.CreateTask(alice, core.TaskRequest{AgentID: allowed.ID, Engine: core.EngineMihomo, Action: core.ActionStop}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("an uncreated instance must require deployment: %v", err)
 	}
 	if _, err := db.SetUserAgentAccess(alice, user.ID, core.AgentAccessRequest{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("isolated user removed own isolation: %v", err)
@@ -147,24 +148,35 @@ func TestSharedTrafficCumulativeQuotaAndPortOwnership(t *testing.T) {
 	}
 	bobRequest := request
 	bobRequest.ConfigID = bobConfig.ID
-	if _, err := db.CreateTask(bob, bobRequest); !errors.Is(err, ErrConflict) {
-		t.Fatalf("concurrent foreign deployment replaced a pending core: %v", err)
+	queuedBob, err := db.CreateTask(bob, bobRequest)
+	if err != nil || !queuedBob.SharedInstance || queuedBob.SharedTrafficID == task.SharedTrafficID {
+		t.Fatalf("independent recipient could not queue its own deployment: %+v %v", queuedBob, err)
+	}
+	if err := db.CancelTask(bob, queuedBob.ID); err != nil {
+		t.Fatal(err)
 	}
 	claimed, err := db.ClaimTask(ctx, agent.ID)
 	if err != nil || claimed == nil || claimed.SharedTrafficID != task.SharedTrafficID {
 		t.Fatalf("shared claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateTask(bob, bobRequest); !errors.Is(err, ErrConflict) {
-		t.Fatalf("foreign deployment replaced a running core: %v", err)
+	queuedBob, err = db.CreateTask(bob, bobRequest)
+	if err != nil || !queuedBob.SharedInstance {
+		t.Fatalf("independent recipient was blocked by another running instance: %+v %v", queuedBob, err)
+	}
+	if err := db.CancelTask(bob, queuedBob.ID); err != nil {
+		t.Fatal(err)
 	}
 	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 2 {
+	if err != nil || len(policies) != 3 {
 		t.Fatalf("shared monitor count: %+v %v", policies, err)
 	}
-	if rows, err := db.ListPortTrafficPolicies(bob); err != nil || len(rows) != 0 {
+	// A canceled, never-executed deployment retains its own accounting row;
+	// cumulative ledgers cannot be recycled by canceling work.
+	policies = slices.DeleteFunc(policies, func(p core.PortTrafficPolicy) bool { return p.ShareID != task.SharedTrafficID })
+	if rows, err := db.ListPortTrafficPolicies(bob); err != nil || len(rows) != 1 || rows[0].Port != 21003 {
 		t.Fatalf("shared traffic leaked another user's port: %+v %v", rows, err)
 	}
 	clock := time.Now().UTC().Add(time.Second)
@@ -352,7 +364,7 @@ func TestSharedUserCanSaveAndValidateWhileAnotherConfigRuns(t *testing.T) {
 	if err != nil || lease == nil || lease.ID != deployed.ID {
 		t.Fatalf("claim owner deployment: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, deployed.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, deployed.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	draft := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "recipient inbound",
@@ -370,9 +382,9 @@ func TestSharedUserCanSaveAndValidateWhileAnotherConfigRuns(t *testing.T) {
 	if runningOwner != scopeForConfig(owner).OwnerID || runningConfig != owned.ID {
 		t.Fatalf("validation changed the running user's configuration: owner=%s config=%s", runningOwner, runningConfig)
 	}
-	if _, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: saved.Engine,
-		ConfigID: saved.ID, Action: core.ActionDeploy}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("shared user replaced a different user's running configuration: %v", err)
+	if task, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: saved.Engine,
+		ConfigID: saved.ID, Action: core.ActionDeploy}); err != nil || !task.SharedInstance {
+		t.Fatalf("shared deployment must target its independent instance: %+v %v", task, err)
 	}
 	current, err := db.AgentConfig(recipient, agent.ID, core.EngineMihomo)
 	if err != nil || current.ID != saved.ID || current.Version != 1 {
@@ -408,7 +420,7 @@ func TestSharedXrayDeploymentKeepsOwnerInstanceRunning(t *testing.T) {
 	if err != nil || ownerLease == nil || ownerLease.ID != ownerTask.ID {
 		t.Fatalf("claim owner deployment: %+v %v", ownerLease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	privateConfig := core.Config{AgentID: agent.ID, Engine: core.EngineXray, Name: "recipient",
@@ -422,7 +434,7 @@ func TestSharedXrayDeploymentKeepsOwnerInstanceRunning(t *testing.T) {
 	if err != nil || privateLease == nil || privateLease.ID != privateTask.ID || !privateLease.SharedInstance {
 		t.Fatalf("claim shared deployment: %+v %v", privateLease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, privateTask.ID, core.TaskResultRequest{LeaseID: privateLease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, privateTask.ID, core.TaskResultRequest{LeaseID: privateLease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	var ownerConfigID, privateConfigID string
@@ -471,7 +483,7 @@ func TestEverySharedEngineUsesAnIndependentInstance(t *testing.T) {
 			if err != nil || ownerLease == nil || ownerLease.ID != ownerTask.ID {
 				t.Fatalf("claim owner deployment: %+v %v", ownerLease, err)
 			}
-			if err := db.CompleteTask(ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
+			if err := completeSharedTestTask(db, ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
 				t.Fatal(err)
 			}
 			candidate.AgentID, candidate.Name = agent.ID, "recipient"
@@ -484,7 +496,7 @@ func TestEverySharedEngineUsesAnIndependentInstance(t *testing.T) {
 			if err != nil || lease == nil || lease.ID != task.ID || !lease.SharedInstance {
 				t.Fatalf("claim shared deployment: %+v %v", lease, err)
 			}
-			if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+			if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 				t.Fatal(err)
 			}
 			var baseID, sharedID string
@@ -622,20 +634,24 @@ func TestSharedTrafficUncertainDeploymentAndSettledRelease(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Error: "uncertain partial execution"}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Error: "uncertain partial execution"}); err != nil {
 		t.Fatal(err)
 	}
 	request := core.TaskRequest{AgentID: agent.ID, Engine: foreign.Engine, ConfigID: foreign.ID, Action: core.ActionDeploy}
-	if _, err := db.CreateTask(bob, request); !errors.Is(err, ErrConflict) {
-		t.Fatalf("lost/failed result allowed another tenant to replace the core: %v", err)
+	otherTask, err := db.CreateTask(bob, request)
+	if err != nil || !otherTask.SharedInstance || otherTask.SharedTrafficID == task.SharedTrafficID {
+		t.Fatalf("another recipient must retain its own instance: %+v %v", otherTask, err)
+	}
+	if err := db.CancelTask(bob, otherTask.ID); err != nil {
+		t.Fatal(err)
 	}
 	for _, action := range []core.Action{core.ActionStart, core.ActionRestart} {
-		if _, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: action}); !errors.Is(err, ErrConflict) {
+		if _, err := db.CreateTask(alice, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: action}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("uncertain deployment allowed a raw %s: %v", action, err)
 		}
 	}
 	for _, settled := range []bool{false, true} {
-		stop, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop})
+		stop, err := db.CreateTask(alice, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -643,7 +659,7 @@ func TestSharedTrafficUncertainDeploymentAndSettledRelease(t *testing.T) {
 		if err != nil || claimed == nil {
 			t.Fatalf("claim stop: %+v %v", claimed, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, stop.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: settled}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, stop.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: settled}); err != nil {
 			t.Fatal(err)
 		}
 		_, err = db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
@@ -651,7 +667,7 @@ func TestSharedTrafficUncertainDeploymentAndSettledRelease(t *testing.T) {
 		if !settled && !errors.Is(err, ErrConflict) || settled && err != nil {
 			t.Fatalf("port release settled=%v: %v", settled, err)
 		}
-		if _, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStart}); !errors.Is(err, ErrConflict) {
+		if _, err := db.CreateTask(alice, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStart}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("stopping an uncertain config allowed starting it without rebinding billing: %v", err)
 		}
 	}
@@ -664,7 +680,7 @@ func TestSharedTrafficCapabilityEnableRequiresDeployment(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	user, alice := sharedTestUser(t, db, ctx, "shared-capability")
 	agent := sharedTestAgent(t, db, ctx)
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCoreLifecycle},
 		Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +694,7 @@ func TestSharedTrafficCapabilityEnableRequiresDeployment(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, deploy.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, deploy.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	change, err := db.ChangeAgentEngineCapability(ctx, agent.ID, config.Engine, false)
@@ -689,7 +705,7 @@ func TestSharedTrafficCapabilityEnableRequiresDeployment(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim stop: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, change.TaskID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, change.TaskID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
 		t.Fatal(err)
 	}
 	change, err = db.ChangeAgentEngineCapability(ctx, agent.ID, config.Engine, true)
@@ -735,7 +751,7 @@ func TestAgentIsolationAdoptsOnlyKnownAllocatedDeployments(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.pool.Exec(ctx, `WITH changed AS (UPDATE agents SET owner_id='' WHERE id=$1)

@@ -48,6 +48,10 @@ func validateXrayXHTTPCapabilities(ctx context.Context, binary, content string) 
 }
 
 func checkXHTTPListenerPorts(spec EngineSpec, content string) error {
+	return checkXrayListenerPorts(spec, content, false)
+}
+
+func checkXrayListenerPorts(spec EngineSpec, content string, allListeners bool) error {
 	type inbound struct {
 		Listen string `json:"listen"`
 		Port   int    `json:"port"`
@@ -66,7 +70,7 @@ func checkXHTTPListenerPorts(spec EngineSpec, content string) error {
 	for _, ib := range next.Inbounds {
 		hasXHTTP = hasXHTTP || ib.Stream.Network == "xhttp"
 	}
-	if !hasXHTTP {
+	if !hasXHTTP && !allListeners {
 		return nil
 	}
 	if data, err := os.ReadFile(spec.ConfigPath); err == nil {
@@ -86,7 +90,7 @@ func checkXHTTPListenerPorts(spec EngineSpec, content string) error {
 		}
 		listener, err := net.Listen("tcp", address)
 		if err != nil {
-			return fmt.Errorf("XHTTP 监听预检 %s：%w；请检查地址是否属于节点、IPv6 支持及端口占用", address, err)
+			return fmt.Errorf("Xray 监听预检 %s：%w；请检查地址是否属于节点、IPv6 支持及端口占用", address, err)
 		}
 		listener.Close()
 	}

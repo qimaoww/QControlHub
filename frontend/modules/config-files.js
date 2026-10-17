@@ -165,6 +165,17 @@ export function bindConfigFiles(form, engine, notify) {
   if (!form || !["xray","sing-box"].includes(engine)) return null;
   const editor = form.querySelector("[data-code-editor]"), input = form.querySelector("[data-code-input]");
   if (!editor || !input) return null;
+  // Reconciliation preserves the visible fragment's value, which is not the
+  // complete configuration. Rebinding from that fragment would silently lose
+  // every other inbound tab. Keep real edits, otherwise use the fresh full
+  // server baseline supplied by the rendered textarea.
+  const previous = editor.configFileController;
+  const selectedInbound = previous?.selectedInbound();
+  if (previous) {
+    input.value = previous.dirty() ? previous.content() : input.defaultValue;
+    editor.querySelector(".config-file-buttons")?.remove();
+    editor.querySelector(".config-file-navigation")?.remove();
+  }
   let files;
   try { files = splitConfigFiles(engine,input.value); } catch { return null; }
   const originals = files.map(file => file.content), readOnly = input.readOnly;
@@ -301,5 +312,6 @@ export function bindConfigFiles(form, engine, notify) {
   const reset = editor.querySelector("[data-code-reset]");
   if (reset) reset.textContent = "恢复当前文件";
   editor.configFileController = controller;
+  if (selectedInbound) controller.selectInbound(selectedInbound.tag, selectedInbound.port);
   return controller;
 }

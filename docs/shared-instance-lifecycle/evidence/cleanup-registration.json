@@ -1,0 +1,67 @@
+{
+  "scope": "shared-instance-4b5d",
+  "workspace": "/root/.codex/worktrees/4b5d/qcontrolhub",
+  "task_directory": "/root/.codex/worktrees/4b5d/qcontrolhub/.preview/shared-instance-4b5d",
+  "test_ended_at_utc": "2026-10-17T11:23:01+00:00",
+  "execute_at_utc": "2026-10-20T11:23:01+00:00",
+  "host_units": [
+    "qch-shared-4b5d-control.service",
+    "qch-shared-4b5d-web.service",
+    "qch-shared-4b5d-probe.service"
+  ],
+  "containers": [
+    {
+      "id": "9d31c4f8ebbc0f7e2b5dbb1aec782bff48aa08d908967aa3461c505bac394a9d",
+      "name": "qch-shared-4b5d-private-bob"
+    },
+    {
+      "id": "fcc0fbcea1d84e5562a84ea29935eecfbe52d5f14c03449689f35e68f6b12897",
+      "name": "qch-shared-4b5d-private-bob-initial"
+    },
+    {
+      "id": "db090c1345cac4387830e7727094f7361c7d8d135ff5b06caec76d9960d8ad5e",
+      "name": "qch-shared-4b5d-private-alice"
+    },
+    {
+      "id": "adfac7a06a4ce6fd791ad021c10adc0e1bed6470915956627ae0c25bb3ce1d17",
+      "name": "qch-shared-4b5d-node"
+    },
+    {
+      "id": "9cd854ad057f585011859ca9c48dc24c056fde9a5c7ee35ee679007e64661ffe",
+      "name": "qch-shared-4b5d-db"
+    }
+  ],
+  "browser_sessions": [
+    "shared-alice-desktop",
+    "shared-alice-mobile",
+    "shared-bob-desktop",
+    "shared-bob-mobile",
+    "shared-owner-desktop",
+    "shared-owner-mobile"
+  ],
+  "browser_profiles": [],
+  "registered": true,
+  "timer_id": "qch-shared-4b5d-cleanup.timer",
+  "service_id": "qch-shared-4b5d-cleanup.service",
+  "persistent": true,
+  "runner_directory": "/var/lib/qcontrolhub-test-cleanup/shared-instance-4b5d",
+  "execute_at_asia_shanghai": "2026-10-20T19:23:01+08:00",
+  "test_ended_at_asia_shanghai": "2026-10-17T19:23:01+08:00",
+  "systemd_next_elapse": "Tue 2026-10-20 19:23:01 CST",
+  "dry_run_passed": true,
+  "early_execution_refused": true,
+  "processes_and_browsers_stopped": true,
+  "released_host_ports": [
+    38179,
+    38180,
+    38181,
+    38184
+  ],
+  "preserved": [
+    "docs/shared-instance-lifecycle screenshots, video, reports and sanitized logs",
+    "pre-existing container images and kernel cache",
+    "default Docker bridge",
+    "all resources outside the five recorded exact container identities and task directory"
+  ],
+  "retry_on_failure": "5 minutes; an unavailable Docker daemon does not remove retained fixture files"
+}

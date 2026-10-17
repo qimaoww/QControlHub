@@ -99,7 +99,7 @@ func TestSharedPortModesAPI(t *testing.T) {
 				t.Fatalf("unsafe release changed port mode: %+v", after)
 			}
 			var stop core.Task
-			owner.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop}, http.StatusCreated, &stop)
+			recipient.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop}, http.StatusCreated, &stop)
 			completeConfigScopeAPITask(t, ctx, db, stop)
 			if after := save(nil, http.StatusOK); len(after.Ports) != 0 {
 				t.Fatalf("settled clear did not persist an unallocated scope: %+v", after)

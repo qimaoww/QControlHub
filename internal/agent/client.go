@@ -46,11 +46,12 @@ type credentials struct {
 }
 
 type completedTask struct {
-	Success     bool                  `json:"success"`
-	Output      string                `json:"output,omitempty"`
-	Error       string                `json:"error,omitempty"`
-	CompletedAt time.Time             `json:"completed_at"`
-	IPQuality   *core.IPQualityResult `json:"ip_quality,omitempty"`
+	InstanceStatus *core.SharedInstanceStatus `json:"instance_status,omitempty"`
+	Success        bool                       `json:"success"`
+	Output         string                     `json:"output,omitempty"`
+	Error          string                     `json:"error,omitempty"`
+	CompletedAt    time.Time                  `json:"completed_at"`
+	IPQuality      *core.IPQualityResult      `json:"ip_quality,omitempty"`
 }
 
 type Client struct {

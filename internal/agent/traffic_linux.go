@@ -57,6 +57,7 @@ type trafficState struct {
 type TrafficManager struct {
 	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
 	haltShared       func(context.Context, core.Engine) error
+	haltReason       string // Set under mu before invoking the stop callbacks.
 	haltLegacyShared func(context.Context, core.Engine, []int) error
 	haltShare        func(context.Context, core.Engine, string) error
 	mu               sync.Mutex
@@ -292,7 +293,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		engine  core.Engine
 	}
 	authorized := map[instanceKey]map[int]bool{}
-	toStop := map[instanceKey]struct{}{}
+	toStop := map[instanceKey]string{}
 	legacyStopPorts := map[core.Engine][]int{}
 	addLegacyPort := func(engine core.Engine, port int) {
 		if !slices.Contains(legacyStopPorts[engine], port) {
@@ -309,7 +310,10 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				}
 				authorized[key][record.Policy.Port] = true
 			} else {
-				toStop[key] = struct{}{}
+				toStop[key] = "共享授权已失效或内核权限已收回，请联系节点所有者"
+				if quota.LimitBytes > 0 && quota.UsedBytes >= quota.LimitBytes {
+					toStop[key] = "共享额度已耗尽，实例已停止；请联系节点所有者调整额度"
+				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
 			}
 		}
@@ -318,7 +322,9 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		if quota := record.Policy.SharedQuota; quota != nil {
 			key := instanceKey{quota.ID, record.Policy.Engine}
 			if !authorized[key][record.Policy.Port] {
-				toStop[key] = struct{}{}
+				if toStop[key] == "" {
+					toStop[key] = "原有监听端口已收回，实例已停止；请核对已分配端口后重新部署"
+				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
 			}
 		}
@@ -326,7 +332,8 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 	// Stop removed, revoked, or exhausted instances while the old nftables
 	// rules still protect their listener ports.
 	if manager.haltShare != nil {
-		for instance := range toStop {
+		for instance, reason := range toStop {
+			manager.haltReason = reason
 			if err := manager.haltShare(ctx, instance.engine, instance.shareID); err != nil {
 				manager.awaitingPolicies = true
 				manager.recoverSharedEngines(next)
@@ -363,6 +370,7 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	manager.haltReason = "Agent 身份或节点授权已失效，共享实例已停止"
 	engines := make(map[core.Engine]bool)
 	for _, engine := range manager.recoveryEngines {
 		engines[engine] = true

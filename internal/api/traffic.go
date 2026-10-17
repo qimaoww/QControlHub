@@ -49,6 +49,20 @@ func trafficPoliciesForSession(policies []core.PortTrafficPolicy, heartbeatVerif
 	return prepared
 }
 
+func trafficPolicyHello(policies []core.PortTrafficPolicy, verified bool) core.WireMessage {
+	return core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, verified),
+		TrafficPoliciesPending: !verified && hasSharedTrafficPolicies(policies)}
+}
+
+func hasSharedTrafficPolicies(policies []core.PortTrafficPolicy) bool {
+	for _, policy := range policies {
+		if policy.SharedQuota != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Request) {
 	monthValue := strings.TrimSpace(request.URL.Query().Get("month"))
 	if monthValue == "" {

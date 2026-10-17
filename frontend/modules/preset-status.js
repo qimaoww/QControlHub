@@ -105,7 +105,7 @@ function watchPresetOperation(operation) {
       : `配置已保存，任务${latest.status === "canceled" ? "已取消" : "失败"}：${latest.error || "请查看执行记录"}`;
     if (operation.reload) operation.message += " 请重新加载配置后继续编辑。";
     operation.tone = latest.status === "succeeded" ? "success" : "error";
-    if (task.install_if_missing) {
+    if (task.install_if_missing || intent === "deploy") {
       onRuntimeChange(agentId, engine);
     }
     renderPresetStatus();

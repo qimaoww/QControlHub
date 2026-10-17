@@ -230,7 +230,7 @@ func TestDeletedAgentCannotCompleteRunningTask(t *testing.T) {
 	if err := db.DeleteAgent(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: running.LeaseID, Success: true}); !errors.Is(err, ErrNotFound) {
+	if err := completeSharedTestTask(db, ctx, agent.ID, running.ID, core.TaskResultRequest{LeaseID: running.LeaseID, Success: true}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("accepted a late result from revoked identity: %v", err)
 	}
 	if _, err := db.AgentConfig(ctx, agent.ID, core.EngineMihomo); !errors.Is(err, ErrNotFound) {

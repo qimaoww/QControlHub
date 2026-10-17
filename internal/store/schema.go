@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 76
+const currentSchemaVersion = 77
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -511,6 +511,15 @@ CREATE TABLE IF NOT EXISTS agent_shared_instance_ownership (
 	updated_at timestamptz NOT NULL,
 	PRIMARY KEY (agent_id,engine,share_id)
 );
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS service_status text NOT NULL DEFAULT 'unknown';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS status_reason text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS observed_at timestamptz;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS sampled_at timestamptz;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS last_task_id text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS applied_task_id text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS deployed_at timestamptz;
+CREATE INDEX IF NOT EXISTS shared_instances_owner_idx ON agent_shared_instance_ownership(owner_id,agent_id,engine);
+CREATE INDEX IF NOT EXISTS tasks_instance_recent_idx ON tasks(agent_id,engine,shared_traffic_id,created_at DESC) WHERE shared_instance;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS config_uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_settled boolean NOT NULL DEFAULT false;
@@ -521,17 +530,17 @@ SELECT latest.agent_id,latest.engine,COALESCE(c.owner_id,deployed.owner_id,lates
 	latest.status<>'succeeded',
 	EXISTS(
 		SELECT 1 FROM tasks failed WHERE failed.agent_id=latest.agent_id AND failed.engine=latest.engine
-			AND failed.action IN ('deploy','import-existing') AND failed.status<>'succeeded'
+			AND NOT failed.shared_instance AND failed.action IN ('deploy','import-existing') AND failed.status<>'succeeded'
 			AND failed.started_at IS NOT NULL AND failed.started_at>COALESCE(deployed.finished_at,'-infinity'::timestamptz)),
 	COALESCE(latest.finished_at,latest.started_at,latest.created_at)
 FROM (SELECT DISTINCT ON(agent_id,engine) *
-	FROM tasks WHERE action IN ('deploy','import-existing','start','restart','stop','uninstall')
+	FROM tasks WHERE NOT shared_instance AND action IN ('deploy','import-existing','start','restart','stop','uninstall')
 		AND (started_at IS NOT NULL OR status='succeeded')
 	ORDER BY agent_id,engine,COALESCE(started_at,finished_at,created_at) DESC,created_at DESC,id DESC) latest
 LEFT JOIN LATERAL (
 	SELECT owner_id,config_id,config_version,finished_at FROM tasks
 	WHERE agent_id=latest.agent_id AND engine=latest.engine AND action IN ('deploy','import-existing')
-		AND status='succeeded' AND config_id IS NOT NULL AND finished_at IS NOT NULL
+		AND NOT shared_instance AND status='succeeded' AND config_id IS NOT NULL AND finished_at IS NOT NULL
 	ORDER BY finished_at DESC,id DESC LIMIT 1
 ) deployed ON true
 LEFT JOIN configs c ON c.id=COALESCE(deployed.config_id,latest.config_id)

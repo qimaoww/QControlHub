@@ -54,7 +54,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err
 	}
-	if request.Action != core.ActionInstall && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
+	sharedRecipient, err := sharedInstanceRecipient(ctx, tx, request.AgentID)
+	if err != nil {
+		return core.Task{}, err
+	}
+	if request.Action != core.ActionInstall && request.Action != core.ActionDeploy && request.Action != core.ActionValidate &&
+		!(sharedRecipient && request.Action.SharedInstanceOperation()) && request.Action != core.ActionStatus {
 		if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
 			return core.Task{}, err
 		}
@@ -139,7 +144,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
 		return core.Task{}, err
 	}
-	if request.Action == core.ActionReadConfig || request.Action == core.ActionReadManagedConfig || request.Action == core.ActionImportExisting {
+	if (!sharedRecipient && (request.Action == core.ActionReadConfig || request.Action == core.ActionReadManagedConfig)) || request.Action == core.ActionImportExisting {
 		if err := requireHostConfigRead(ctx, tx, request.AgentID, request.Engine); err != nil {
 			return core.Task{}, err
 		}
@@ -211,7 +216,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, fmt.Errorf("%w: remove enabled shared allocations and stop shared core instances before uninstalling this core", ErrConflict)
 		}
 	}
-	if request.Action == core.ActionStart || request.Action == core.ActionRestart {
+	if !sharedRecipient && (request.Action == core.ActionStart || request.Action == core.ActionRestart) {
 		if err := requireSafeEngineStart(ctx, tx, request.AgentID, request.Engine); err != nil {
 			return core.Task{}, err
 		}
@@ -222,7 +227,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
 	}
-	if readCacheMaxAge > 0 {
+	if readCacheMaxAge > 0 && !sharedRecipient {
 		// Cache reuse is a task-creation optimization, never an authorization or
 		// validation shortcut. The Agent lock also serializes it with dispatch
 		// and snapshot invalidation.
@@ -245,6 +250,21 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	if task.TCPSettings == nil {
 		task.TCPSettings = core.TCPSettings{}
+	}
+	if sharedRecipient && task.Action.SharedInstanceOperation() {
+		if err := s.prepareSharedInstanceOperationTx(ctx, tx, &task, features); err != nil {
+			return core.Task{}, err
+		}
+		if readCacheMaxAge > 0 {
+			recent, err := s.recentReadTask(ctx, tx, request.AgentID, request.Engine, request.Action, readCacheMaxAge)
+			if err == nil {
+				recent.Reused = true
+				return recent, nil
+			}
+			if !errors.Is(err, ErrNotFound) {
+				return core.Task{}, err
+			}
+		}
 	}
 	if task.Action == core.ActionInstall {
 		if err := prepareCoreInstallScopeTx(ctx, tx, &task, features); err != nil {
@@ -371,7 +391,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 		}
 
-	} else {
+	} else if !task.SharedInstance {
 		task.ConfigID = ""
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
@@ -404,7 +424,17 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if !errors.Is(existingErr, pgx.ErrNoRows) {
 		return core.Task{}, existingErr
 	}
-	var err error
+	if task.SharedInstance && (task.Action.ChangesInstance() || task.Action == core.ActionInstall) {
+		var busy bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE agent_id=$1 AND engine=$2
+			AND shared_traffic_id=$3 AND shared_instance AND status IN ('pending','running')
+			AND action IN ('deploy','start','stop','restart','install'))`, task.AgentID, task.Engine, task.SharedTrafficID).Scan(&busy); err != nil {
+			return core.Task{}, err
+		}
+		if busy {
+			return core.Task{}, fmt.Errorf("%w: 本人实例已有部署或启停任务，请等待完成后再操作", ErrConflict)
+		}
+	}
 	task.ID, err = core.NewID("tsk")
 	if err != nil {
 		return core.Task{}, err

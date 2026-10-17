@@ -36,7 +36,7 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 		if err != nil || lease == nil || lease.ID != task.ID {
 			t.Fatalf("claim %s: %+v %v", saved.Engine, lease, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,7 +59,7 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 	if err != nil || lease == nil || lease.ID != task.ID {
 		t.Fatalf("claim changed port: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
@@ -136,7 +136,7 @@ func TestUnrestrictedSharedPortsAdoptExactRunningSnapshot(t *testing.T) {
 	if err != nil || lease == nil {
 		t.Fatalf("claim: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	config.Content = strings.ReplaceAll(config.Content, "21001", "21002")

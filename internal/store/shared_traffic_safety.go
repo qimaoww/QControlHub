@@ -27,5 +27,7 @@ func unsafeEngineStartSQL(agent, engine string) string {
 		LEFT JOIN panel_users u ON u.id=state.owner_id
 		WHERE state.agent_id=` + agent + ` AND state.engine=` + engine + `
 		AND (state.config_uncertain OR COALESCE(u.disabled OR (u.role='user' AND a.owner_id<>u.id),false)))
-		OR EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=` + agent + ` AND p.engine=` + engine + ` AND p.share_id IS NOT NULL)`
+		OR EXISTS(SELECT 1 FROM port_traffic_policies p JOIN agents a ON a.id=p.agent_id
+			WHERE p.agent_id=` + agent + ` AND p.engine=` + engine + ` AND p.share_id IS NOT NULL
+			AND NOT a.features ? 'shared-core-instances-v1')`
 }

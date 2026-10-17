@@ -34,6 +34,63 @@ func sharedTrafficFixture(t *testing.T) (*TrafficManager, *fakeTrafficBackend, [
 	return manager, backend, policies, &now
 }
 
+type canceledTrafficSample struct {
+	*fakeTrafficBackend
+	cancel context.CancelFunc
+	stage  string
+}
+
+func (backend *canceledTrafficSample) Counters(ctx context.Context) (map[string]uint64, bool, error) {
+	if backend.stage == "counters" {
+		backend.stage = ""
+		backend.cancel()
+		return nil, false, ctx.Err()
+	}
+	return backend.fakeTrafficBackend.Counters(ctx)
+}
+
+func (backend *canceledTrafficSample) Replace(ctx context.Context, script string) error {
+	if backend.stage == "rules" {
+		backend.stage = ""
+		backend.cancel()
+		return ctx.Err()
+	}
+	return backend.fakeTrafficBackend.Replace(ctx, script)
+}
+
+func TestSharedTrafficCancellationRechecksRulesWithoutStoppingHealthyInstances(t *testing.T) {
+	for _, stage := range []string{"before", "counters", "rules"} {
+		t.Run(stage, func(t *testing.T) {
+			manager, backend, policies, now := sharedTrafficFixture(t)
+			if err := manager.SetPolicies(context.Background(), policies, "agt_shared"); err != nil {
+				t.Fatal(err)
+			}
+			stopped := 0
+			manager.haltShared = func(context.Context, core.Engine) error { stopped++; return nil }
+			record := manager.records[policies[0].ID]
+			backend.counters[trafficCounterName(record, "in", "tcp")] = 25
+			*now = now.Add(time.Second)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			manager.backend = &canceledTrafficSample{fakeTrafficBackend: backend, cancel: cancel, stage: stage}
+			if stage == "before" {
+				cancel()
+			}
+			manager.collect(ctx, stage == "rules")
+			if stopped != 0 || !manager.Snapshot()[0].EnforcementAvailable || manager.records[policies[0].ID].ShareUsedBytes != 25 {
+				t.Fatalf("canceled request stopped healthy instances or lost bytes: stopped=%d snapshot=%+v", stopped, manager.Snapshot())
+			}
+			// The independent recheck must still stop instances when nftables
+			// really fails; cancellation is never permission to skip protection.
+			backend.err = errors.New("actual nftables failure")
+			manager.collect(ctx, false)
+			if stopped != 2 || manager.Snapshot()[0].EnforcementAvailable {
+				t.Fatalf("cancellation hid a real accounting failure: stopped=%d snapshot=%+v", stopped, manager.Snapshot())
+			}
+		})
+	}
+}
+
 func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing.T) {
 	manager, backend, policies, now := sharedTrafficFixture(t)
 	ctx := context.Background()

@@ -26,9 +26,16 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
   const tools = document.createElement("nav");
   tools.className = "config-workspace-tools";
   tools.setAttribute("aria-label", "配置工具");
-  tools.innerHTML = `<button class="button" type="button" data-config-refresh>${sourceMode === "personal" ? "刷新配置" : agent.runtime?.[engine]?.installed ? "重新读取" : "刷新配置"}</button>
+  const shared = agent.can_manage === false;
+  const sharedDeploy = shared && can("agent-config.write") && can("tasks.execute") && sourceMode === "personal" &&
+    agent.runtime?.[engine]?.installed && !agent.runtime[engine].existing_config_unsupported_reason;
+  tools.innerHTML = `${sharedDeploy ? '<button class="button primary" type="submit" form="live-config-form" data-live-intent="deploy">保存并部署</button>' : `<button class="button" type="button" data-config-refresh>${sourceMode === "personal" ? "刷新配置" : agent.runtime?.[engine]?.installed ? "重新读取" : "刷新配置"}</button>`}
     <details class="config-tools-menu"><summary class="button" aria-haspopup="menu">更多 <span aria-hidden="true">▾</span></summary>
       <div class="config-inbound-menu-items" role="menu" aria-label="配置工具">
+        ${sharedDeploy ? '<button type="button" role="menuitem" data-config-refresh>刷新配置</button>' : ""}
+        ${shared ? `<a role="menuitem" href="#settings-node-${encodeURIComponent(agent.id)}">实例管理 ↗</a>` : ""}
+        ${shared && can("tasks.execute") && can("agent-config.read") ? '<button type="button" role="menuitem" data-instance-read>读取实例文件</button>' : ""}
+        ${shared && can("core-logs.read") ? `<a role="menuitem" href="#core-logs?agent=${encodeURIComponent(agent.id)}&instance=${encodeURIComponent(agent.runtime?.[engine]?.instance?.id || "")}&engine=${encodeURIComponent(engine)}">实例日志 ↗</a>` : ""}
         <button type="button" role="menuitem" data-inbound-action="advanced">高级字段</button>
         ${can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="history">版本历史</button>' : ""}
         ${can("deployments.read") && can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="diff">配置差异</button>' : ""}

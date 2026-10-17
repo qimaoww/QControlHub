@@ -114,7 +114,7 @@ func TestSharedCorePreparationSerializesUsersAndKeepsSnapshots(t *testing.T) {
 	if next, err := db.ClaimTask(ctx, agent.ID); err != nil || next != nil {
 		t.Fatalf("concurrent install: %+v %v", next, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, at.ID, core.TaskResultRequest{LeaseID: first.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, at.ID, core.TaskResultRequest{LeaseID: first.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	second, err := db.ClaimTask(ctx, agent.ID)

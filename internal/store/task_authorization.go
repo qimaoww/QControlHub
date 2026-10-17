@@ -65,7 +65,7 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 // A host read is authorized against the configuration present when it runs,
 // not merely when it was queued. The Agent lock and single running lease
 // serialize this check with deployment ownership changes.
-const unauthorizedHostConfigTaskSQL = `(t.action IN ('read-config','read-managed-config')
+const unauthorizedHostConfigTaskSQL = `NOT t.shared_instance AND (t.action IN ('read-config','read-managed-config')
 		OR (t.action='import-existing' AND t.status='pending'))
 	AND EXISTS(SELECT 1 FROM panel_users reader WHERE reader.id=t.owner_id AND reader.role<>'admin')
 	AND (NOT EXISTS(SELECT 1 FROM agents a WHERE a.id=t.agent_id AND a.owner_id=t.owner_id)

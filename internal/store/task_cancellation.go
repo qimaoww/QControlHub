@@ -53,6 +53,10 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	if err := s.pool.QueryRow(ctx, `SELECT capability_transition FROM tasks WHERE id=$1`, id).Scan(&transition); err != nil {
 		return core.Task{}, err
 	}
+	shareID, err := sharedTaskRetryOwner(ctx, s.pool, previous)
+	if err != nil {
+		return core.Task{}, err
+	}
 	if transition {
 		change, err := s.ChangeAgentEngineCapability(ctx, previous.AgentID, previous.Engine, previous.Action == core.ActionStart)
 		if err != nil {
@@ -64,7 +68,11 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		return s.GetTask(ctx, change.TaskID)
 	}
 	expectedVersion := 0
-	if previous.ConfigID != "" {
+	configID := previous.ConfigID
+	if previous.Action.SharedInstanceOperation() {
+		configID = ""
+	}
+	if configID != "" {
 		// A retry preserves the reviewed intent. A changed draft requires an
 		// explicit new deployment or edited retry, including ordinary tasks.
 		if previous.ConfigVersion < 1 {
@@ -72,10 +80,46 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		}
 		expectedVersion = previous.ConfigVersion
 	}
-	return s.CreateTask(ctx, core.TaskRequest{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.Task{}, err
+	}
+	defer tx.Rollback(ctx)
+	task, err := s.createTaskTx(ctx, tx, core.TaskRequest{
 		InstallIfMissing: previous.InstallIfMissing, ExpectedConfigVersion: expectedVersion,
 		TCPSettings: previous.TCPSettings,
 		AgentID:     previous.AgentID, Action: previous.Action, Engine: previous.Engine,
-		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
-	})
+		ConfigID: configID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
+	}, 0)
+	if err != nil {
+		return core.Task{}, err
+	}
+	if previous.SharedInstance && (!task.SharedInstance || task.SharedTrafficID != shareID) {
+		return core.Task{}, fmt.Errorf("%w: 共享实例已变化，请从本人配置重新提交操作", ErrConflict)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.Task{}, err
+	}
+	if !task.Reused {
+		s.signalTaskReady(task.AgentID)
+	}
+	return task, nil
+}
+
+// Lifecycle retries retain the recipient's authority. Configuration retries
+// also support administrators through the existing configuration-owner checks;
+// their immutable config ID and the original share must still match creation.
+func sharedTaskRetryOwner(ctx context.Context, executor storeExecutor, task core.Task) (string, error) {
+	if !task.SharedInstance {
+		return "", nil
+	}
+	var ownerID, shareID string
+	if err := executor.QueryRow(ctx, `SELECT owner_id,shared_traffic_id FROM tasks WHERE id=$1`, task.ID).Scan(&ownerID, &shareID); err != nil {
+		return "", err
+	}
+	configuration := task.Action == core.ActionDeploy || task.Action == core.ActionValidate
+	if scope := scopeForConfig(ctx); scope.Admin && !configuration || !scope.Admin && scope.OwnerID != ownerID {
+		return "", fmt.Errorf("%w: 共享实例任务需要由所属用户在本人工作区重试", ErrForbidden)
+	}
+	return shareID, nil
 }

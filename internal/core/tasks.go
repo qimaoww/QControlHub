@@ -53,6 +53,18 @@ func (a Action) AgentLevel() bool {
 
 func (a Action) RequiresAgentManagement() bool { return a.SystemBBR() || a == ActionIPQuality }
 
+func (a Action) SharedInstanceOperation() bool {
+	switch a {
+	case ActionStart, ActionStop, ActionRestart, ActionStatus, ActionReadConfig, ActionReadManagedConfig:
+		return true
+	}
+	return false
+}
+
+func (a Action) ChangesInstance() bool {
+	return a == ActionDeploy || a == ActionStart || a == ActionStop || a == ActionRestart
+}
+
 type TaskStatus string
 
 // CapabilityTransition exposes the last service action behind each node switch.
@@ -113,10 +125,11 @@ type TaskRequest struct {
 }
 
 type TaskResultRequest struct {
-	LeaseID        string           `json:"lease_id"`
-	Success        bool             `json:"success"`
-	Output         string           `json:"output,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	TrafficSettled bool             `json:"traffic_settled,omitempty"`
-	IPQuality      *IPQualityResult `json:"ip_quality,omitempty"`
+	InstanceStatus *SharedInstanceStatus `json:"instance_status,omitempty"`
+	LeaseID        string                `json:"lease_id"`
+	Success        bool                  `json:"success"`
+	Output         string                `json:"output,omitempty"`
+	Error          string                `json:"error,omitempty"`
+	TrafficSettled bool                  `json:"traffic_settled,omitempty"`
+	IPQuality      *IPQualityResult      `json:"ip_quality,omitempty"`
 }

@@ -19,11 +19,12 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			ELSE 'Agent sharing authorization changed; submit a new task' END,
 		finished_at=now(),config_content=NULL,lease_id=NULL
 		WHERE t.agent_id=$1 AND t.status IN ('pending','running') AND (
-			(t.status='pending' AND t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
+			(t.status='pending' AND NOT t.shared_instance AND t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
 			OR (`+unauthorizedTaskPrincipalSQL+`)
 			OR (`+unauthorizedHostConfigTaskSQL+`)
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
 			OR (t.shared_instance AND (NOT $4::boolean OR ((t.install_if_missing OR t.action='install') AND NOT $6::boolean)))
+			OR (t.shared_instance AND t.action IN ('start','stop','restart','status','read-config','read-managed-config') AND NOT $7::boolean)
 			OR (t.action='uninstall' AND (NOT $5::boolean
 				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.agent_id=t.agent_id
 					AND s.enabled AND t.engine=ANY(s.engines))
@@ -39,13 +40,13 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
 					WHERE s.id=t.shared_traffic_id AND NOT u.disabled AND s.enabled AND s.status='accepted'
 						AND s.agent_id=t.agent_id AND t.engine=ANY(s.engines)
-						AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)
+						AND (t.action IN ('stop','status','read-config','read-managed-config') OR s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)
 				)
 			))
 		)`,
 		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress),
 		containsFeature(features, core.AgentFeatureSharedCoreInstances), containsFeature(features, core.AgentFeatureCoreUninstall),
-		containsFeature(features, core.AgentFeatureSharedCorePrepare))
+		containsFeature(features, core.AgentFeatureSharedCorePrepare), containsFeature(features, core.AgentFeatureSharedCoreLifecycle))
 	return err
 }
 
@@ -59,13 +60,15 @@ const unauthorizedTaskPrincipalSQL = `(t.owner_id<>'' AND NOT starts_with(t.owne
 		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp','ip-quality') AND NOT u.permissions ? 'agents.manage')
 		 OR (a.owner_id<>u.id AND
 			((t.install_if_missing AND NOT t.shared_instance)
-			 OR (t.action NOT IN ('deploy','validate','status') AND NOT (t.action='install' AND t.shared_instance
+			 OR (t.action NOT IN ('deploy','validate') AND NOT (t.shared_instance AND t.shared_traffic_id<>''
+				AND t.action IN ('start','stop','restart','status','read-config','read-managed-config')) AND NOT (t.action='install' AND t.shared_instance
 				AND t.shared_traffic_id<>'' AND t.core_version='stable' AND COALESCE(t.core_source,'')=''))
 			 OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
+			 OR (t.action='deploy' AND NOT t.shared_instance)
 			 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id
 				AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines)
 				AND (t.shared_traffic_id='' OR s.id=t.shared_traffic_id))))))))
 	OR EXISTS(SELECT 1 FROM configs c JOIN panel_users u ON u.id=c.owner_id JOIN agents a ON a.id=t.agent_id
 		WHERE c.id=t.config_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND
-			(t.shared_traffic_id='' OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id
+			(t.shared_traffic_id='' OR t.action='deploy' AND NOT t.shared_instance OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id
 				AND s.user_id=u.id AND s.agent_id=t.agent_id AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines))))))`

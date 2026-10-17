@@ -6,6 +6,7 @@ import { regionAvatarMarkup } from "./regions.js";
 import { agentBatchBarMarkup } from "./agent-batch-view.js";
 import { orderedNodeList } from "./node-order.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
+import { sharedInstancePresentation, sharedAllocationText } from "./shared-instance-state.js";
 
 function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">使用第三方镜像需先升级 Agent。</p>`}</fieldset>`;
@@ -116,20 +117,21 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
           const installReason = coreInstallBlockReason(agent, engine, permission, {
             pending: Boolean(state.data.coreInstallTasks?.[key]),
           });
-          const serviceState = existingBlocked
+          const instanceState = sharedInstancePresentation(agent, engine);
+          const serviceState = instanceState?.label || (existingBlocked
             ? "检测到但不可迁移"
             : !capabilityEnabled
             ? "能力已关闭"
             : installed
             ? serviceStatusName(runtime.service_status)
-            : "未安装";
-          const serviceTone = existingBlocked
+            : "未安装");
+          const serviceTone = instanceState?.tone || (existingBlocked
             ? "warn"
             : !capabilityEnabled
             ? "muted"
             : installed
             ? statusTone(runtime.service_status)
-            : "muted";
+            : "muted");
           const optionalImportChip = !can("agent-config.read") || agent.can_manage === false
             ? ""
             : existingBlocked
@@ -148,8 +150,8 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
               return `<article class="service-card core-runtime-row service-${esc(engine)}" data-runtime-structure="full" data-core-installed="${installed ? 1 : 0}" data-existing-pending="0" data-existing-unsupported="">
                 <div class="core-runtime-summary">
                   <div class="core-runtime-name"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></div>
-                  <div class="core-runtime-version"><small>当前版本</small><strong data-core-version="${esc(engine)}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong><small class="core-install-hint" data-core-install-block ${installReason ? "" : "hidden"}>${esc(installReason)}</small></div>
-                  <div class="core-runtime-actions">${!installed ? `<button class="button small primary" type="button" data-open-version-form ${installReason ? `disabled title="${esc(installReason)}"` : ""}>安装</button>` : ""}${can("agent-config.read") ? `<button class="button small" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置</button>` : ""}</div>
+                  <div class="core-runtime-version"><small data-instance-version="${esc(engine)}" title="${esc(runtime.instance?.observed_at ? `实例状态更新于 ${date(runtime.instance.observed_at)}` : "等待实例状态上报")}">${esc(instanceState.version)}</small><strong data-core-version="${esc(engine)}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong><small class="core-install-hint" data-instance-reason="${esc(engine)}" ${instanceState.reason ? "" : "hidden"}>${esc(instanceState.reason)}</small></div>
+                  <div class="core-runtime-actions">${!installed ? `<button class="button small primary" type="button" data-open-version-form ${installReason ? `disabled title="${esc(installReason)}"` : ""}>安装</button>` : ""}${can("agent-config.read") ? `<button class="button small primary" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">我的配置</button>` : ""}${installed ? `<div class="core-action-group" aria-label="${esc(engineName(engine))} 本人实例操作">${["status", "start", "restart", "stop"].map(action => `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status, agent, engine) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`).join("")}</div>` : ""}</div>
                 </div>
                 ${!installed ? `<details class="core-version-panel version-drawer"><summary><b>安装 ${esc(engineName(engine))}</b><span>收起</span></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label></div></fieldset><button class="button small" type="submit" ${installReason ? `disabled title="${esc(installReason)}"` : ""}>安装内核</button><small data-core-install-hint>${esc(installReason || "受控准备缺少的稳定版内核；已有版本直接复用，不启停宿主服务。")}</small><small data-core-install-status role="status" aria-live="polite" ${state.data.coreInstallFeedback?.[key] ? "" : "hidden"}>${esc(state.data.coreInstallFeedback?.[key] || "")}</small></form></div></details>` : ""}
               </article>`;
@@ -158,7 +160,7 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
               ? ["status", "start", "restart", "stop"]
                   .map(
                     (action) =>
-                      `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${existingBlocked || !capabilityEnabled || (action !== "status" && !can("operator")) || serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status, agent) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`,
+                      `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${existingBlocked || !capabilityEnabled || (action !== "status" && !can("operator")) || serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status, agent, engine) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`,
                   )
                   .join("")
               : "";
@@ -204,7 +206,7 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
           <nav class="node-settings-tabs" role="tablist" aria-label="节点设置分区">${tabButton("cores", "内核", `${installedCount}/${managedEngines.length}`)}${tabButton("metrics", "监控")}${tabButton("agent", "Agent")}</nav>
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}>
-              <header class="node-panel-heading"><div><h3>${isShared ? "已分配内核" : "内核管理"}</h3>${isShared ? "<small>使用独立配置</small>" : ""}</div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div>
+              <header class="node-panel-heading"><div><h3>${isShared ? "已分配内核" : "内核管理"}</h3>${isShared ? `<small>${esc(sharedAllocationText(agent, bytes))}</small>` : ""}</div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div>
             </section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
           <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3></div><span data-agent-version>${esc(agent.version || "未知")}</span></header>
@@ -230,33 +232,34 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
             const existingUnsupportedReason = String(
               runtime.existing_config_unsupported_reason || "",
             );
-            const serviceState = existingUnsupportedReason
+            const instanceState = sharedInstancePresentation(agent, engine);
+            const serviceState = instanceState?.label || (existingUnsupportedReason
                 ? "检测到但不可迁移"
                 : installed
                   ? serviceStatusName(runtime.service_status)
-                  : "未安装";
+                  : "未安装");
             const tone =
               existingUnsupportedReason
                 ? "warn"
                 : installed
                   ? statusTone(runtime.service_status)
-                  : "muted";
-            return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
+                : "muted";
+            return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${instanceState?.tone || tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
           })
           .join("");
         const cardTag = batchMode ? "article" : "a";
         const cardInteraction = batchMode
           ? `data-node-batch-card`
-          : `href="#settings-node-${esc(agent.id)}"`;
+          : isShared && can("agent-config.read") ? `href="#live-config?agent=${esc(agent.id)}&engine=${esc((agent.capabilities || []).find(engine => agent.runtime?.[engine]?.instance?.saved_version) || agent.capabilities?.[0] || "xray")}"` : `href="#settings-node-${esc(agent.id)}"`;
         const batchSelect = batchMode
           ? `<label class="node-card-select" title="选择 ${esc(agent.name)}"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span aria-hidden="true"></span></label>`
           : "";
         return `<${cardTag} class="node-card ${batchMode ? "batch-selecting" : ""}" ${cardInteraction} data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
-              <header class="node-card-head">${regionAvatarMarkup(agent, esc, can("agents.manage"))}<div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state">${sharedBadge}${agentPresenceMarkup(agent.status, { tracked: true })}<small data-agent-heartbeat title="${esc(agent.last_seen ? `上次心跳：${date(agent.last_seen)}` : "尚未收到心跳")}">${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : cardMoveGrip("nodes", "", esc(agent.name))}</header>
+              <header class="node-card-head">${regionAvatarMarkup(agent, esc, can("agents.manage"))}<div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${isShared ? esc(sharedAllocationText(agent, bytes)) : `${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}`}</small></div><span class="node-card-state">${sharedBadge}${agentPresenceMarkup(agent.status, { tracked: true })}<small data-agent-heartbeat title="${esc(agent.last_seen ? `上次心跳：${date(agent.last_seen)}` : "尚未收到心跳")}">${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : cardMoveGrip("nodes", "", esc(agent.name))}</header>
               <div class="node-card-ips" aria-label="公网地址">${addressRows.map(cardIPRow).join("")}<small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></div>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-card-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong>${komariNetworkMarkup(agent) || `<small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small>`}</div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
-              <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span>${batchMode ? "" : `<span class="node-card-open">${isShared ? "查看节点" : "管理节点"} <i aria-hidden="true">→</i></span>`}</footer>
+              <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span>${batchMode ? "" : `<span class="node-card-open">${isShared ? "我的配置" : "管理节点"} <i aria-hidden="true">→</i></span>`}</footer>
             </${cardTag}>`;
       }
       return `<section class="preset-node-workspace workspace-panel machine-body" id="preset-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" aria-label="选中节点的内核预设"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section></section>`;

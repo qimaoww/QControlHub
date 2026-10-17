@@ -13,6 +13,9 @@ export function createPermissionChecker(state) {
     if (capability === "certificates.read") return Boolean(state.session);
     if (capability === "agent-access.read") return Boolean(state.session);
     if (capability === "users.manage") return false;
+	if (capability === "instance.manage") return Boolean(agent?.can_manage === false &&
+	  agent.shared_allocation?.enabled && agent.shared_allocation.status === "accepted" &&
+	  agent.features?.includes("shared-core-lifecycle-v1") && can("tasks.execute"));
     if (agent && ["host.manage", "operator", "agents.manage", "traffic.manage", "enrollment.manage"].includes(capability) && (agent.can_manage === false || (role === "user" && agent.can_manage !== true))) return false;
     if (capability === "host.manage") return can("tasks.execute");
     if (capability === "system-bbr.read") return can("agents.read");

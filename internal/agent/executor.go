@@ -43,6 +43,7 @@ type Executor struct {
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex
+	sharedStateMu            sync.Mutex
 	accountingConfigs        map[core.Engine]nativeAccountingConfigEntry
 	completedMigrations      map[core.Engine]completedCoreMigration
 	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
@@ -176,7 +177,10 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return "", errors.New("shared installation only prepares a missing stable core; version changes require the owner")
 	}
 	if task.SharedInstance {
-		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.Action == core.ActionValidate && task.InstallIfMissing)) ||
+		if task.Action.SharedInstanceOperation() && (task.CoreVersion != "" || task.CoreSource != "" || task.InstallIfMissing) {
+			return "", errors.New("instance lifecycle tasks cannot install or switch a shared binary")
+		}
+		if (task.Action != core.ActionInstall && task.Action != core.ActionDeploy && task.Action != core.ActionValidate && !task.Action.SharedInstanceOperation()) ||
 			!core.ValidAgentShareID(task.SharedTrafficID) {
 			return "", errors.New("invalid shared core deployment task")
 		}
@@ -194,11 +198,17 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return "", err
 		}
-		if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
-			return "", fmt.Errorf("prepare shared core configuration: %w", err)
+		hasExisting = false
+		if task.Action.ChangesInstance() {
+			defer func() { e.recordSharedOperation(spec, task, resultErr) }()
 		}
-		if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
-			return "", fmt.Errorf("prepare shared core service: %w", err)
+		if task.Action != core.ActionStatus && task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig && task.Action != core.ActionStop {
+			if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
+				return "", fmt.Errorf("prepare shared core configuration: %w", err)
+			}
+			if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
+				return "", fmt.Errorf("prepare shared core service: %w", err)
+			}
 		}
 		if e.coreLogReady != nil {
 			if err := e.coreLogReady(parent, task.Engine, spec); err != nil {
@@ -323,7 +333,17 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return report.String() + "\n" + value, tlsPhaseError("配置生成及校验", err)
 	case core.ActionDeploy:
 		if task.Engine == core.EngineXray {
-			if err := checkXHTTPListenerPorts(spec, task.ConfigContent); err != nil {
+			preflight := task.ConfigContent
+			if task.SharedInstance {
+				// Shared runtime removes the host's reserved statistics listener.
+				// Probe new public listeners before touching the running instance.
+				content, prepareErr := serverconfig.SharedInstanceRuntimeContent(task.Engine, preflight)
+				if prepareErr != nil {
+					return "", prepareErr
+				}
+				preflight = content
+			}
+			if err := checkXrayListenerPorts(spec, preflight, task.SharedInstance); err != nil {
 				return "", err
 			}
 		}
@@ -380,13 +400,26 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return validation, err
 		}
-		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
+		applyAction := core.ActionRestart
+		if task.SharedInstance {
+			endpoints, endpointErr := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
+			if endpointErr != nil {
+				return validation, endpointErr
+			}
+			if len(endpoints) == 0 {
+				applyAction = core.ActionStop
+			}
+		}
+		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, applyAction)
 		err = tlsPhaseError("服务应用", err)
 		if err == nil {
 			err = e.executeTLSFrontend(ctx, spec, task, false)
 		}
 		if err == nil {
 			err = tlsPhaseError("TLS与协议就绪检查", waitPanelCertificateListeners(ctx, task))
+		}
+		if err == nil && task.SharedInstance {
+			err = e.commitSharedDeployment(spec, task)
 		}
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if accountingWarning != "" {
@@ -413,8 +446,16 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			}
 			return output, fmt.Errorf("configuration deployment failed; previous configuration was restored with its service state: %w", err)
 		}
+		if applyAction == core.ActionStop {
+			return output + "\n[阶段:提交成功状态] 空协议配置已应用；本人实例已停止，所有入站已移除", nil
+		}
 		return output + "\n[阶段:提交成功状态] 服务 active；TLS 与代理链路就绪（如配置托管 TLS）；部署已提交", nil
 	case core.ActionStart, core.ActionRestart:
+		if task.SharedInstance {
+			if err := e.verifySharedStart(ctx, spec, task); err != nil {
+				return "", err
+			}
+		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}

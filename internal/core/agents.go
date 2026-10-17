@@ -5,13 +5,32 @@ import (
 )
 
 type RuntimeState struct {
-	Installed                       bool   `json:"installed"`
-	Version                         string `json:"version,omitempty"`
-	ServiceStatus                   string `json:"service_status,omitempty"`
-	ExistingConfigAvailable         bool   `json:"existing_config_available,omitempty"`
-	ExistingConfigUnsupportedReason string `json:"existing_config_unsupported_reason,omitempty"`
-	CoreLogStatus                   string `json:"core_log_status,omitempty"`
-	CoreLogError                    string `json:"core_log_error,omitempty"`
+	Instance                        *SharedInstanceRuntime `json:"instance,omitempty"`
+	Installed                       bool                   `json:"installed"`
+	Version                         string                 `json:"version,omitempty"`
+	ServiceStatus                   string                 `json:"service_status,omitempty"`
+	ExistingConfigAvailable         bool                   `json:"existing_config_available,omitempty"`
+	ExistingConfigUnsupportedReason string                 `json:"existing_config_unsupported_reason,omitempty"`
+	CoreLogStatus                   string                 `json:"core_log_status,omitempty"`
+	CoreLogError                    string                 `json:"core_log_error,omitempty"`
+}
+
+// Configuration metadata is projected without reading or decrypting bodies.
+// An allocated identity can exist before its service or configuration exists.
+type SharedInstanceRuntime struct {
+	ID               string     `json:"id"`
+	Created          bool       `json:"created"`
+	SavedConfigID    string     `json:"saved_config_id,omitempty"`
+	SavedVersion     int        `json:"saved_version,omitempty"`
+	DeployedConfigID string     `json:"deployed_config_id,omitempty"`
+	DeployedVersion  int        `json:"deployed_version,omitempty"`
+	DeployedAt       *time.Time `json:"deployed_at,omitempty"`
+	ObservedAt       *time.Time `json:"observed_at,omitempty"`
+	ConfigUncertain  bool       `json:"config_uncertain"`
+	Reason           string     `json:"reason,omitempty"`
+	Restriction      string     `json:"restriction,omitempty"`
+	UpgradeRequired  bool       `json:"upgrade_required"`
+	Operation        *Task      `json:"operation,omitempty"`
 }
 
 type Agent struct {
@@ -19,6 +38,7 @@ type Agent struct {
 	OwnerID                    string                          `json:"-"`
 	CanManage                  bool                            `json:"can_manage"`
 	SharedEngines              []Engine                        `json:"shared_engines,omitempty"`
+	SharedAllocation           *AgentShare                     `json:"shared_allocation,omitempty"`
 	Name                       string                          `json:"name"`
 	Version                    string                          `json:"version,omitempty"`
 	OS                         string                          `json:"os"`

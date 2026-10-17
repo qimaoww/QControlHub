@@ -123,7 +123,7 @@ func enrollConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Stor
 		t.Fatal(err)
 	}
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "shared-host", OS: "linux", Arch: "amd64",
-		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
+		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCoreLifecycle},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 	if err != nil {
 		t.Fatal(err)
@@ -175,9 +175,19 @@ func completeConfigScopeAPITask(t *testing.T, ctx context.Context, db *store.Sto
 	if err != nil || claimed == nil || claimed.ID != task.ID {
 		t.Fatalf("claim: %+v %v, want %s", claimed, err, task.ID)
 	}
-	if err := db.CompleteTask(ctx, task.AgentID, task.ID, core.TaskResultRequest{
-		LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true,
-	}); err != nil {
+	result := core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}
+	if claimed.SharedInstance && (claimed.Action.ChangesInstance() || claimed.Action == core.ActionStatus) {
+		status, applied := "active", ""
+		if claimed.Action == core.ActionStop {
+			status = "inactive"
+		}
+		if claimed.Action == core.ActionDeploy {
+			applied = claimed.ID
+		}
+		result.InstanceStatus = &core.SharedInstanceStatus{Engine: claimed.Engine, ShareID: claimed.SharedTrafficID,
+			ConfigID: claimed.ConfigID, ConfigVersion: claimed.ConfigVersion, TaskID: claimed.ID, AppliedTaskID: applied, Status: status, ObservedAt: time.Now().UTC()}
+	}
+	if err := db.CompleteTask(ctx, task.AgentID, task.ID, result); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -259,10 +269,13 @@ func TestAuthenticatedUsersCannotSelectForeignConfigurations(t *testing.T) {
 	}
 	bob.call("DELETE", "/tasks/"+task.ID, nil, http.StatusNotFound, nil)
 	bob.call("POST", "/tasks/"+task.ID+"/retry", nil, http.StatusNotFound, nil)
-	for _, action := range []core.Action{core.ActionReadConfig, core.ActionReadManagedConfig, core.ActionImportExisting} {
-		alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: own.Engine, Action: action}, http.StatusForbidden, nil)
+	for _, action := range []core.Action{core.ActionReadConfig, core.ActionReadManagedConfig} {
+		alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: own.Engine, Action: action}, http.StatusConflict, nil)
 	}
-	alice.call("GET", "/tasks/"+task.ID+"/config-snapshot", nil, http.StatusForbidden, nil)
+	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: own.Engine, Action: core.ActionImportExisting}, http.StatusForbidden, nil)
+	// Validation has no read snapshot. Instance reads are authorized separately
+	// and must not require permission to administer the host.
+	alice.call("GET", "/tasks/"+task.ID+"/config-snapshot", nil, http.StatusNotFound, nil)
 	admin.call("GET", "/configs/"+archive.ID+"/revisions/1", nil, http.StatusOK, nil)
 	var overview core.Overview
 	bob.call("GET", "/overview", nil, http.StatusOK, &overview)
@@ -291,7 +304,7 @@ func TestAuthenticatedUsersCannotSelectForeignConfigurations(t *testing.T) {
 	}
 }
 
-func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
+func TestSubStoreSyncFormatsAndIndependentDeploymentIsolation(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
 	grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 21001)
@@ -373,26 +386,22 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 		t.Fatal("another user's remote group appeared as importable")
 	}
 	bob.call("POST", "/substore-sync/targets/import", subStoreImportTargetRequest{SubscriptionName: target.SubscriptionName}, http.StatusConflict, nil)
-	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: other.Engine, Action: core.ActionDeploy, ConfigID: other.ID}, http.StatusConflict, nil)
-	var stop core.Task
-	admin.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: other.Engine, Action: core.ActionStop}, http.StatusCreated, &stop)
-	completeConfigScopeAPITask(t, ctx, db, stop)
 	deploy(bob, other)
 	alice.call("GET", "/substore-sync", nil, http.StatusOK, &resource)
-	if len(resource.Profiles) != 1 || resource.Profiles[0].Available || resource.Profiles[0].ConfigID != own.ID {
+	if len(resource.Profiles) != 1 || !resource.Profiles[0].Available || resource.Profiles[0].ConfigID != own.ID {
 		t.Fatal("stale selection rebound to another user's same-named inbound")
 	}
-	alice.call("POST", "/substore-sync/run", subStoreRunRequest{TargetID: target.ID}, http.StatusConflict, nil)
+	alice.call("POST", "/substore-sync/run", subStoreRunRequest{TargetID: target.ID}, http.StatusOK, nil)
 	var access []clientAccessEntry
 	alice.call("GET", "/client-access", nil, http.StatusOK, &access)
-	if len(access) != 0 {
-		t.Fatal("replaced deployment exposed the new owner's credentials")
+	if len(access) != 1 || access[0].ConfigID != own.ID {
+		t.Fatal("independent deployment replaced the other user's client configuration")
 	}
 	// Even the administrator must not silently rebind a target's pinned config.
 	admin.call("POST", "/substore-sync/run", subStoreRunRequest{TargetID: target.ID}, http.StatusNotFound, nil)
 	mu.Lock()
 	defer mu.Unlock()
-	if mutations != 3 {
+	if mutations != 4 {
 		t.Fatalf("blocked requests mutated the remote subscription: %d writes", mutations)
 	}
 }
