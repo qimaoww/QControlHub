@@ -12,7 +12,7 @@
 | HTTP-01 授权 | 节点所有者为已接受共享的用户授予精确域名；部署共享不自动授予公网入口管理权。 |
 | 异步执行 | 使用资源所有者身份；领取、签发和同步时重新检查账号状态与授权。 |
 
-撤销授权会阻止待执行分发及后续同步，保留已部署文件，避免中断业务。授权界面列出该用户的绑定目标，撤销确认说明影响。切换账号会销毁证书弹窗、表单及账号缓存。普通列表、订单、任务历史和错误响应不返回私钥或 DNS 凭据；下载仅提供公共证书链。
+撤销授权会阻止待执行分发及后续同步，保留已部署文件，避免中断业务。授权界面列出该用户的绑定目标，撤销确认说明影响。切换账号会销毁证书弹窗、表单、域名筛选及账号缓存。普通列表、订单、任务历史和错误响应不返回私钥或 DNS 凭据；下载仅提供公共证书链。
 
 **支持范围**
 
@@ -57,7 +57,7 @@ location /.well-known/acme-challenge/ {
 | 项目检查 | `make check`、`make build`、schema 75 → 76 检查及最终模块 / 样式 / 格式检查通过。[记录](logs/project-checks.txt) |
 | 普通用户完整浏览器流程 | cert-alice 创建 ACME 账号 → 双 SAN 真实本地 DNS 验证 → v1 加密保存 → Trojan 选择证书 → 真实签名 Agent → 非 root Mihomo v1.19.32 → CA 及主机名验证的 TLS 1.3 → 浏览器续期 v2 → 自动同步 → 运行叶指纹更新。[记录](logs/ordinary-user-browser-deployment.txt) |
 | 自动续期 / 重启 | 本地真实 CA、DNS API 契约服务：持久订单 / 账号恢复、无人登录自动续期 v2、精确 TXT 清理、取消及加密轮换。[记录](logs/local-acme.txt) |
-| 多用户对抗 | API / PostgreSQL 验证管理员不可读取他人私有资源、伪造归属拒绝、证书 / 实例双权限、撤销阻断旧任务、已绑定删除冲突、历史无私钥；桌面 / 手机真实浏览器验证账号隔离、普通用户保存账号 / 自签 / 授权、共享实例选择、切回本地路径恢复。[浏览器记录](logs/browser-forms.txt) |
+| 多用户对抗 | API / PostgreSQL 验证管理员不可读取他人私有资源、伪造归属拒绝、证书 / 实例双权限、撤销阻断旧任务、已绑定删除冲突、历史无私钥；桌面 / 手机真实浏览器验证账号隔离、普通用户保存账号 / 自签 / 授权、共享实例选择、切回本地路径恢复，以及同一浏览器退出 / 换账号后的筛选词和账号清理。[浏览器记录](logs/browser-forms.txt) |
 | 共享 HTTP 权限 | 精确域名授权、非所有者拒绝、无关授权不可见；真实 UI 授权与普通用户节点选择。[服务端](logs/http-grants.txt)、[浏览器](logs/http-sharing-browser.txt) |
 | 现有 Nginx 认证 | 两 SAN 实际 HTTP-01 验证、业务页面保留、挑战清理；本地回环端口替代公网 80。[记录](logs/nginx-http01.txt) |
 | 部署 / 回滚 | 实际 Mihomo 监听端口冲突，恢复旧配置、服务与证书；修正后部署成功。[记录](logs/live-rollback.txt) |
@@ -88,7 +88,7 @@ location /.well-known/acme-challenge/ {
 
 **72 小时清理**
 
-测试进程、浏览器及本次两个容器已经停止，测试监听端口已释放。任务 `qch-cert-a978-cleanup.timer` 已实际注册、启用且处于 active，`Persistent=true`。最后测试结束时间及准确执行时间见 [任务清单](cleanup.json) 和 [systemd 查询记录](logs/cleanup-timer.txt)。执行时间为 **2026-10-20 17:08:21 Asia/Hong_Kong（UTC+08:00）**，即 09:08:21 UTC。
+测试进程、浏览器及本次两个容器已经停止，测试监听端口已释放。任务 `qch-cert-a978-cleanup.timer` 已实际注册、启用且处于 active，`Persistent=true`。最后测试结束时间及准确执行时间见 [任务清单](cleanup.json) 和 [systemd 查询记录](logs/cleanup-timer.txt)。执行时间为 **2026-10-20 17:26:07 Asia/Hong_Kong（UTC+08:00）**，即 09:26:07 UTC。
 
 root 所有的执行器与清单保存在 `/var/lib/qch-certificate-a978`，独立于分支和工作区。清理前同时校验两个容器的完整 ID 与本任务标签，只删除本次数据库 / Agent 容器及其匿名卷、独立预览目录、原始截图目录和 `/tmp/qch-cert-tools`。不删除现有镜像、其他容器、真实用户数据或仓库。此目录内的报告、脱敏日志和截图长期保留；外部 TXT / 挑战在验证结束时已即时清理。
 

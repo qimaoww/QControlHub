@@ -53,7 +53,7 @@ export function installCertificates(ctx) {
  // Poll only the read view. Account/navigation invalidation also closes any
  // secret form and releases its in-memory input values.
  let poll;
- const dispose=()=>{clearInterval(poll);close();items=[];accounts=[];agents=[];httpGrants=[];};
+ const dispose=()=>{clearInterval(poll);close();items=[];accounts=[];agents=[];httpGrants=[];accountData=null;Object.assign(filters,{search:"",source:"",expiry:"",status:""});};
  return async()=>{dispose();await page();const session=state.data;const signal=state.routeSignal;signal?.addEventListener("abort",dispose,{once:true});poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;try{const id=dialog?.dataset.certDetailId;if(id){const data=await api(`/certificates/${id}`);if(session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector(".config-inbound-heading h2").textContent=rendered.title;content.innerHTML=rendered.body;content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog&&items.some(i=>["queued","running","validating","canceling"].includes(i.status)))await page()}catch{/* Keep the existing view; explicit refresh reports errors. */}},4000)};
 
 }

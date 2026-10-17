@@ -152,6 +152,20 @@ try {
   record(`${mode}: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed`);
   await screenshot(b,'certificate-selector');
 
+  // Reuse the same document and installed route module across real logins.
+  await click(a,'[data-cert-close]');
+  await set(a,'[data-cert-search]','alice-private.example.test');
+  await wait(a,"document.querySelector('[data-cert-search]')?.value==='alice-private.example.test'");
+  await click(a,'#logout');await wait(a,"!!document.querySelector('#login-form')");
+  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-dialog').length"),0);
+  const switched=await login(a,'bob');await open(a);
+  assert.equal(await evaluate(a,"document.querySelector('[data-cert-search]').value"),'');
+  await wait(a,`!!document.querySelector('[data-cert-detail="${cert.id}"]')`);
+  await click(a,'[data-cert-accounts]');await wait(a,"!!document.querySelector('[data-cert-new-dns]')");
+  assert.equal(await evaluate(a,"document.querySelector('.cert-dialog').textContent.includes('Alice DNS')"),false);
+  assert.deepEqual(await api(a,switched,'GET','/certificate-accounts'),[]);
+  record(`${mode}: same-browser logout/login clears private filters, dialogs and credential-account state`);
+
 } finally {
   clearTimeout(timer);
   socket?.close();
