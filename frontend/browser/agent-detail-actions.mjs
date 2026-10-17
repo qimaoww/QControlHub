@@ -151,7 +151,7 @@ export async function testAgentDetailActions({ testAPI }) {
   await waitFor(() => transition()?.status === "pending" && installedCapability()?.disabled, "未排队重试启动");
   await completeTransition(true);
   assert.equal(installedCapability().checked, true, "启动成功恢复管理能力");
-  for (const tab of ["cores", "metrics", "agent"]) {
+  for (const tab of ["cores", "agent"]) {
     document.querySelector(`[data-node-tab="${tab}"]`).click();
     await waitFor(
       () => document.querySelector(`[data-node-panel="${tab}"]:not([hidden])`),

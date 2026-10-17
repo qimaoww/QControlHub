@@ -175,12 +175,9 @@ const ownedUsableDeploymentsSQL = `
 		FROM tasks t JOIN configs c ON c.id=t.config_id
 		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
 			AND t.finished_at IS NOT NULL
-			AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
+			AND (t.shared_instance OR NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
 				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
-				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
-			AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
-				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
-				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
+				AND state.owner_id<>$1 AND (state.running OR state.uncertain)))
 	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
 
 // Probe the existing (agent_id,engine,finished_at) partial index once per
@@ -194,6 +191,7 @@ const latestDeploymentsSQL = `
 		SELECT task.engine,task.config_id,task.config_version,task.finished_at
 		FROM tasks task
 		WHERE task.agent_id=agent.id AND task.engine=selected.engine
+		  AND NOT task.shared_instance
 		  AND task.action IN ('deploy','import-existing') AND task.status='succeeded' AND task.finished_at IS NOT NULL
 		ORDER BY task.finished_at DESC LIMIT 1
 	) latest`

@@ -40,19 +40,32 @@ async function submitTask(payload, onError) {
   function bindCoreActions() {
   document.querySelectorAll("[data-task-action]").forEach((button) => {
     button.onclick = async () => {
-      if (
-        button.dataset.taskAction === "stop" &&
-        !(await confirmAction(
-          `确定停止 ${engineName(button.dataset.taskEngine)} 服务？现有连接会立即中断，需再次启动才能恢复。`,
-          "停止服务",
-        ))
-      )
-        return;
-      await submitTask({
-        agent_id: button.dataset.taskAgent,
-        engine: button.dataset.taskEngine,
-        action: button.dataset.taskAction,
-      });
+      if (button.disabled || button.dataset?.actionBusy === "1") return;
+      if (button.dataset) button.dataset.actionBusy = "1";
+      button.setAttribute?.("aria-busy", "true");
+      try {
+        if (
+          button.dataset.taskAction === "stop" &&
+          !(await confirmAction(
+            `确定停止 ${engineName(button.dataset.taskEngine)} 服务？现有连接会立即中断，需再次启动才能恢复。`,
+            "停止服务",
+          ))
+        )
+          return;
+        const agent = state.data.agents?.find((item) => item.id === button.dataset.taskAgent);
+        if (agent && agent.status !== "online") {
+          notify("节点或内核状态已变化，请刷新后重试", "error");
+          return;
+        }
+        await submitTask({
+          agent_id: button.dataset.taskAgent,
+          engine: button.dataset.taskEngine,
+          action: button.dataset.taskAction,
+        });
+      } finally {
+        if (button.dataset) delete button.dataset.actionBusy;
+        button.removeAttribute?.("aria-busy");
+      }
     };
   });
   document.querySelectorAll("[data-core-uninstall]").forEach((button) => {
@@ -142,6 +155,7 @@ async function submitTask(payload, onError) {
   document.querySelectorAll(".core-version-form").forEach((form) => {
     form.onsubmit = async (event) => {
       event.preventDefault();
+      if (form.dataset?.versionBusy === "1") return;
       const values = new FormData(form);
       const channel = values.get("release_channel");
       const engine = form.dataset.versionEngine;
@@ -161,7 +175,7 @@ async function submitTask(payload, onError) {
           : payload.core_source === "official"
             ? "来源：MetaCubeX/mihomo 官方（默认）。"
             : "";
-      if (form.dataset.installBusy) return;
+      if (form.dataset.installBusy || form.dataset?.versionBusy === "1") return;
       const agentID = form.dataset.versionAgent;
       const key = `${agentID}|${engine}`;
       const agent = state.data.agents?.find(item => item.id === agentID);
@@ -169,8 +183,12 @@ async function submitTask(payload, onError) {
       if (reason) { installFeedback(agentID, engine, reason); return; }
       const sessionData = state.data;
       form.dataset.installBusy = "1";
-      const submit = form.querySelector("button[type=submit]");
-      if (submit) submit.disabled = true;
+      form.dataset.versionBusy = "1";
+      const submit = form.querySelector?.("button[type=submit]");
+      if (submit) {
+        submit.disabled = true;
+        submit.setAttribute?.("aria-busy", "true");
+      }
       try {
         const confirmation = agent.can_manage === false
           ? "确定准备缺少的稳定版内核？已有版本会直接复用，不会启停宿主服务。安装后可配置并部署您的独立实例。"
@@ -187,6 +205,8 @@ async function submitTask(payload, onError) {
         }
       } finally {
         delete form.dataset.installBusy;
+        delete form.dataset.versionBusy;
+        if (submit) submit.removeAttribute?.("aria-busy");
         if (submit?.isConnected) submit.disabled = Boolean(state.data.coreInstallTasks?.[key]) || Boolean(coreInstallBlockReason(agent, engine, can));
       }
     };

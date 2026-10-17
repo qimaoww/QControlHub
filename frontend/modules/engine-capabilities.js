@@ -1,8 +1,25 @@
+import { describeEngineCapability, describeShareEngineRuntime } from "./status-controls.js";
+
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const names = { mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" };
+const defaultEsc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+})[char]);
 
 export function sharedEngineNames(selected = []) {
   return engines.filter(engine => selected.includes(engine)).map(engine => names[engine]).join(" / ") || "未分配";
+}
+
+export function sharedEngineRuntimeBadges(share = {}, agent = null, esc = defaultEsc) {
+  const runtimeMap = share?.engine_runtime;
+  if (!runtimeMap || typeof runtimeMap !== "object") return "";
+  const selected = engines.filter((engine) => (share?.engines || []).includes(engine) && runtimeMap[engine]);
+  if (!selected.length) return "";
+  return `<div class="share-engine-runtime-strip" data-share-engine-runtime aria-label="分配内核实例状态">${selected.map((engine) => {
+    const info = describeShareEngineRuntime(engine, runtimeMap[engine], { agent });
+    if (!info) return "";
+    return `<span class="share-engine-runtime-chip ${info.tone}" data-share-engine="${esc(engine)}" data-share-engine-state="${esc(info.state)}" title="${esc(`${names[engine]} · ${info.statusLabel}${info.configVersion ? ` · 配置 v${info.configVersion}` : ""}`)}"><i aria-hidden="true"></i><b>${esc(names[engine])}</b><span>${esc(info.statusLabel)}</span>${info.configVersion ? `<code>v${info.configVersion}</code>` : ""}</span>`;
+  }).join("")}</div>`;
 }
 
 export function sharedEngineChoices(selected = [], supported = []) {
@@ -13,21 +30,18 @@ export function sharedEngineChoices(selected = [], supported = []) {
 }
 
 export function engineCapabilityToggles(selected, { supported = engines, writable = true, node = false, transitions = {} } = {}) {
-  return `<div class="core-capability-list" role="group" aria-label="${node ? "节点内核能力" : "新 Agent 默认内核能力"}">${engines.map((engine) => {
-    const available = supported.includes(engine);
-    const checked = selected.includes(engine);
-    const transition = transitions[engine];
-    const pending = ["pending", "running"].includes(transition?.status);
-    const failed = ["failed", "canceled"].includes(transition?.status);
-    const hint = pending
-      ? `${transition.enabled ? "启动成功后开启能力" : "停止成功后关闭能力"}；离线节点上线后执行`
-      : failed
-        ? "上次启停失败或取消；可重试，详情见任务页"
-        : !available ? "请调整 Agent 安装配置后重新注册"
-        : "";
+  return `<div class="core-capability-list" role="group" aria-label="${node ? "节点内核开关" : "新 Agent 默认内核"}">${engines.map((engine) => {
+    const info = describeEngineCapability(engine, {
+      selected,
+      supported,
+      writable,
+      node,
+      transitions,
+      engineLabel: names[engine],
+    });
     const hintID = `${node ? "node" : "default"}-capability-${engine}-hint`;
-    const status = pending ? (transition.enabled ? "等待启动" : "等待停止") : failed ? "未变更" : !available ? "不支持" : "";
-    return `<label class="core-capability-row ${pending ? "is-pending" : failed ? "is-failed" : ""}"><span class="core-capability-copy"><b>${names[engine]}</b>${hint ? `<small id="${hintID}">${hint}</small>` : ""}</span><span class="core-capability-state" aria-hidden="true">${status || `<span class="when-enabled">${node ? "已开启" : "默认开启"}</span><span class="when-disabled">${node ? "已关闭" : "默认关闭"}</span>`}</span><input class="core-capability-switch" type="checkbox" role="switch" aria-label="${names[engine]}" ${hint ? `aria-describedby="${hintID}"` : ""} name="default_agent_engines" value="${engine}" ${node ? `data-engine-capability="${engine}"` : ""} ${checked ? "checked" : ""} ${pending || !writable || (!available && !checked) ? "disabled" : ""}></label>`;
+    const titleAttr = info.disabledReason ? ` title="${info.disabledReason}" data-disabled-reason="${info.disabledReason}"` : "";
+    return `<label class="core-capability-row ${info.pending ? "is-pending" : info.failed ? "is-failed" : ""}" data-capability-engine="${engine}" data-capability-state="${info.state}"${titleAttr}><span class="core-capability-copy"><b>${names[engine]}</b>${info.hint ? `<small id="${hintID}">${info.hint}</small>` : ""}</span><span class="core-capability-state" aria-hidden="true">${info.statusText || `<span class="when-enabled">${info.enabledLabel}</span><span class="when-disabled">${info.disabledLabel}</span>`}</span><input class="core-capability-switch" type="checkbox" role="switch" aria-label="${names[engine]}" ${info.hint ? `aria-describedby="${hintID}"` : ""}${titleAttr} name="default_agent_engines" value="${engine}" ${node ? `data-engine-capability="${engine}"` : ""} ${info.checked ? "checked" : ""} ${info.disabled ? "disabled" : ""}></label>`;
   }).join("")}</div>`;
 }
 

@@ -39,6 +39,13 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 		case c.runtimeRefresh <- struct{}{}:
 		default:
 		}
+	case core.ActionStatus:
+		if task.SharedInstance {
+			select {
+			case c.runtimeRefresh <- struct{}{}:
+			default:
+			}
+		}
 	}
 	if task.InstallIfMissing && task.Action == core.ActionValidate {
 		select {
@@ -132,6 +139,11 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			// Keep the strict stable-only shape before bypassing the port gate.
 			if !validSharedCoreInstallTask(task) {
 				executionErr = errors.New("invalid shared core installation task")
+			}
+		} else if task.SharedTrafficID != "" && task.Action == core.ActionStatus && task.SharedInstance {
+			// Status inspects the recipient's private shared instance without a config payload.
+			if !core.ValidAgentShareID(task.SharedTrafficID) {
+				executionErr = errors.New("invalid shared traffic identity")
 			}
 		} else if task.SharedTrafficID != "" {
 			endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
@@ -331,7 +343,8 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
-	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID)) {
+	if task.SharedInstance && ((task.Action != core.ActionInstall && task.Action != core.ActionDeploy && task.Action != core.ActionStatus && !(task.InstallIfMissing && task.Action == core.ActionValidate)) || !core.ValidAgentShareID(task.SharedTrafficID) ||
+		(task.Action == core.ActionStatus && (task.InstallIfMissing || task.ConfigID != "" || task.ConfigContent != "" || task.ConfigVersion != 0 || task.CoreVersion != "" || task.CoreSource != ""))) {
 		return false
 	}
 	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {
