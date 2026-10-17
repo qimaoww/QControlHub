@@ -73,3 +73,8 @@ PASS
 
 PostgreSQL instance index EXPLAIN regression (50,000 foreign instance rows)
     core_log_isolation_test.go:205: Sort -> Append -> Result -> Index Scan on panel_users_pkey -> Nested Loop -> Nested Loop -> Index Scan on agents_owner_idx -> Index Scan on panel_users_pkey -> Function Scan -> Subquery Scan -> Result -> Index Scan on panel_users_pkey -> Nested Loop -> Nested Loop -> Nested Loop -> Bitmap Heap Scan on agent_shares -> Bitmap Index Scan on agent_shares_user_id_agent_id_key -> Index Scan on agent_shared_instance_ownership_pkey -> Index Scan on panel_users_pkey -> Index Scan on agents_pkey -> Nested Loop -> Function Scan -> Limit -> Sort -> Nested Loop -> Nested Loop -> CTE Scan -> Function Scan -> Limit -> Merge Append -> Index Only Scan on core_logs_p20261016_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261017_agent_id_engine_instance_id_node_owner__idx -> Index Only Scan on core_logs_p20261018_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261019_engine_id_agent_id_level_message_logged_idx -> Index Only Scan on core_logs_p20261020_engine_id_agent_id_level_message_logged_idx
+
+Concurrent main schema upgrade follow-up:
+Schema policy: v74 -> v75, schemaSQL changed=true
+Real PostgreSQL: TestCoreLogIdentityMigrationFromPreviousSchemas (v73 and v74),
+all TestTaskConstraints cases, refreshed indexes, conservative history and repeat startup: PASS (5.400s).

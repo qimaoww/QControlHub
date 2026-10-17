@@ -160,7 +160,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 	}
-	if appliedVersion >= 49 && appliedVersion < 74 {
+	if appliedVersion >= 49 && appliedVersion < 75 {
 		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_covering_idx; DROP INDEX IF EXISTS core_logs_engine_covering_idx`); err != nil {
 			return fmt.Errorf("refresh core log covering indexes: %w", err)
 		}

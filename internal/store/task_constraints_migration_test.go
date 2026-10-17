@@ -298,8 +298,8 @@ func TestTaskConstraintsConcurrentMigrationSerializes(t *testing.T) {
 	}
 	assertTaskConstraintSet(t, db, ctx)
 	var count int
-	if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM qcontrolhub_schema_migrations WHERE version=74`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("v74 entries=%d %v", count, err)
+	if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM qcontrolhub_schema_migrations WHERE version=$1`, currentSchemaVersion).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("current schema entries=%d %v", count, err)
 	}
 }
 
