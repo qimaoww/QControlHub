@@ -53,7 +53,7 @@ def main():
         print("Removed task container " + identity, flush=True)
     for value in manifest["paths"]:
         path = pathlib.Path(value)
-        if path not in ALLOWED_PATHS or path.is_symlink():
+        if path not in ALLOWED_PATHS or path.is_symlink() or path.resolve() != path:
             raise RuntimeError("unexpected cleanup path")
         if path.exists():
             shutil.rmtree(path)
