@@ -365,6 +365,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 				}
 			}
 		}
+		if task.ConfigContent != "" && (task.Action == core.ActionDeploy || task.Action == core.ActionValidate) {
+			if err := s.bindTaskCertificatesTx(ctx, tx, task, configOwnerID, features); err != nil {
+				return core.Task{}, err
+			}
+		}
+
 	} else {
 		task.ConfigID = ""
 	}

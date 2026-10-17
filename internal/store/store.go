@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +16,12 @@ import (
 )
 
 type Store struct {
-	pool       *pgxpool.Pool
-	cryptor    *configCryptor
-	taskWakeMu sync.Mutex
-	taskWakes  map[string]chan struct{}
+	certificateResolver *net.Resolver
+	certificateDNSHTTP  *http.Client
+	pool                *pgxpool.Pool
+	cryptor             *configCryptor
+	taskWakeMu          sync.Mutex
+	taskWakes           map[string]chan struct{}
 }
 
 type storeExecutor interface {

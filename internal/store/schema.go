@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 75
+const currentSchemaVersion = 76
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -863,5 +863,64 @@ CREATE TABLE IF NOT EXISTS client_connection_locations (
  country varchar(200) NOT NULL DEFAULT '',
  province varchar(100) NOT NULL DEFAULT '',
  retry_after timestamptz NOT NULL
+);
+
+-- Certificate resources use strict ownership even for panel administrators.
+CREATE TABLE IF NOT EXISTS certificate_accounts (
+ id text PRIMARY KEY, owner_id text NOT NULL, kind text NOT NULL CHECK(kind IN ('acme','dns')),
+ metadata jsonb NOT NULL, secret text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS certificate_accounts_owner ON certificate_accounts(owner_id,kind);
+CREATE TABLE IF NOT EXISTS panel_certificates (
+ id text PRIMARY KEY, owner_id text NOT NULL, metadata jsonb NOT NULL,
+ version integer NOT NULL DEFAULT 0, auto_renew boolean NOT NULL DEFAULT false,
+ next_attempt timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS panel_certificates_owner ON panel_certificates(owner_id);
+CREATE TABLE IF NOT EXISTS certificate_versions (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ version integer NOT NULL, secret text NOT NULL, metadata jsonb NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(certificate_id,version)
+);
+CREATE TABLE IF NOT EXISTS certificate_grants (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ user_id text NOT NULL REFERENCES panel_users(id) ON DELETE CASCADE,
+ PRIMARY KEY(certificate_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_orders (
+ id text PRIMARY KEY, certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, status text NOT NULL, stage text NOT NULL DEFAULT 'queued',
+ secret text NOT NULL, error text NOT NULL DEFAULT '', attempt integer NOT NULL DEFAULT 0,
+ next_attempt timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS certificate_active_order ON certificate_orders(certificate_id)
+ WHERE status IN ('queued','running','waiting_dns','validating','canceling');
+CREATE INDEX IF NOT EXISTS certificate_orders_due ON certificate_orders(next_attempt) WHERE status IN ('queued','running','validating','canceling');
+CREATE TABLE IF NOT EXISTS certificate_http_grants (
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ user_id text NOT NULL REFERENCES panel_users(id) ON DELETE CASCADE, domain text NOT NULL,
+ PRIMARY KEY(agent_id,domain)
+);
+CREATE TABLE IF NOT EXISTS certificate_http_challenges (
+ order_id text NOT NULL REFERENCES certificate_orders(id) ON DELETE CASCADE,
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ domain text NOT NULL, token text NOT NULL, value text NOT NULL, expires_at timestamptz NOT NULL,
+ PRIMARY KEY(order_id,domain,token), UNIQUE(agent_id,domain,token)
+);
+CREATE TABLE IF NOT EXISTS certificate_bindings (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id),
+ config_id text NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, version integer NOT NULL DEFAULT 0, config_version integer NOT NULL DEFAULT 0, enabled boolean NOT NULL DEFAULT false, task_id text NOT NULL DEFAULT '',
+ status text NOT NULL DEFAULT 'pending', error text NOT NULL DEFAULT '', retry_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(certificate_id,config_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_task_versions (
+ task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ certificate_id text NOT NULL REFERENCES panel_certificates(id), version integer NOT NULL,
+ PRIMARY KEY(task_id,certificate_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_dns_leases (
+ name text NOT NULL, value text NOT NULL, order_id text NOT NULL REFERENCES certificate_orders(id) ON DELETE CASCADE,
+ PRIMARY KEY(name,value)
 );
 `

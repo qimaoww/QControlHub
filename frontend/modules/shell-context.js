@@ -13,6 +13,8 @@ function contextMarkup(title) {
     const selected = state.data.ipQualityAgent || "";
     return `<div class="context-section-label"><span>选择节点</span><b>${nodes.length}</b></div><nav class="context-list" aria-label="IP 质量检测节点">${nodes.map((node) => `<a class="${selected === node.id ? "active" : ""}" href="#ip-quality" data-ip-quality-agent="${esc(node.id)}"><i class="status-dot ${esc(node.dot)}"></i><span><strong>${esc(node.name)}</strong><small>${esc(node.note)}</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
+  if (state.route === "certificates")
+    return `<nav class="context-menu" aria-label="证书管理目录"><a class="active" href="#certificates"><span>01</span>证书中心</a><a href="#live-config"><span>02</span>协议配置与绑定</a><a href="#tasks"><span>03</span>部署任务</a></nav>`;
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")

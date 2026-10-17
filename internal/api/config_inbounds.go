@@ -106,6 +106,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
 		return
 	}
+	if input.Operation != "delete" && input.Input.PanelCertificateID != "" {
+		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, &input.Input); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
 	// Validate local parameters before any DNS/TLS I/O. Invalid credentials
 	// should fail immediately rather than waiting for the camouflage target.
 	var generated string

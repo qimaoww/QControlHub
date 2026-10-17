@@ -173,6 +173,10 @@ const routeModules = createRouteModuleLoader({
       api, state, can, esc, date, shell, notify, confirmAction,
     });
   },
+  async certificates() {
+    const { installCertificates } = await import("./modules/certificates.js");
+    return installCertificates({api,state,esc,date,shell,notify,confirmAction});
+  },
   async settings() {
     const { installSettings } = await import("./modules/settings.js");
     return installSettings({

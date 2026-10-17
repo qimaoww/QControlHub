@@ -164,6 +164,7 @@ export function readServerPlanInput(form, protocol) {
     tls_alpn: values.get("tls_alpn") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
     tls_enabled: tlsEnabled,
+    panel_certificate_id: values.get("panel_certificate_id") || "",
     certificate_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("certificate_path") || "" : "",
     private_key_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("private_key_path") || "" : "",
     reality_enabled: values.get("reality_enabled") === "1",

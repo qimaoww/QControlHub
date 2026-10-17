@@ -8,6 +8,7 @@ import (
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.certificateRoutes(mux)
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.readiness)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)

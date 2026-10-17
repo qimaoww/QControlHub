@@ -21,6 +21,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
+    ["certificates", "证书", dockIcons.shield || dockIcons.fileCode],
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["ip-quality", "IP 质量", dockIcons.gauge, true],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
@@ -32,6 +33,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];
   const linkPermissions = {
+    certificates: "certificates.read",
     dashboard: "overview.read",
     "ip-quality": "agents.read",
     agents: "agents.read",
@@ -51,6 +53,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   // Workflow groups: overview | node operations | client delivery | observability | accounts.
   const navGroups = {
+    certificates: "nodes",
     dashboard: "overview",
     "node-settings": "nodes",
     "live-config": "nodes",
@@ -122,6 +125,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["core-logs", "日志"],
     ["tasks", "任务"],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : `共享与额度${pendingShares ? ` · ${pendingShares}` : ""}`],
+    ["certificates", "证书中心"],
     ["settings", "设置"],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));

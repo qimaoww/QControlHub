@@ -155,6 +155,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go janitor(ctx, dataStore)
+	go certificateMaintenance(ctx, dataStore)
 	go cleanDeletedAgents(ctx, dataStore)
 	go backfillClientConnectionLogs(ctx, dataStore)
 	go apiServer.MonitorAgentPresence(ctx)
