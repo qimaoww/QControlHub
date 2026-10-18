@@ -60,6 +60,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     const call = { path, method, search: url.search, at: performance.now() };
     fixture.calls.push(call);
     if (path === "/auth/session" || path === "/auth/login") return json(fixture.session || session);
+    if (path === "/preferences/node-order") return json({ ids: (fixture.agents || agents).map(agent => agent.id), revision: 1 });
     if (path === "/agent-access") return json({ isolated: false, shares: [] });
     if (path === "/overview") { await shellReady; return json({ agents: 3, agents_online: 2 }); }
     if (path === "/settings") { await shellReady; return json({ panel_name: "QControlHub", ui_font_scale: 100, time_display: "absolute" }); }

@@ -173,7 +173,7 @@ func (s *Server) sessionResponse(value apiSession) map[string]any {
 	}
 	return map[string]any{"role": value.Role, "user_id": value.UserID, "workspace_id": value.ConfigOwnerID,
 		"username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt,
-		"auth_type": authType, "token_admin_available": s.tokenAdministratorAvailable()}
+		"preference_id": store.NodeOrderAccount(value.ConfigOwnerID), "auth_type": authType, "token_admin_available": s.tokenAdministratorAvailable()}
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {

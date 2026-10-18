@@ -325,6 +325,19 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (path === "/preferences/node-order") {
+    testAPI.nodeOrder ||= JSON.parse(accountStorage.getItem("qch:test:node-order") || "null") || { ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "null") || testAPI.agents.map(agent => agent.id), revision: 1 };
+    if (method === "PUT") {
+      assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "browser-test-csrf");
+      if (testAPI.failNodeOrder) return json({ error: "fixture save failed" }, 503);
+      const input = JSON.parse(options.body), selected = new Set(input.ids), ids = [...input.ids];
+      testAPI.nodeOrder = { ids: testAPI.nodeOrder.ids.map(id => selected.has(id) ? ids.shift() : id), revision: testAPI.nodeOrder.revision + 1 };
+    }
+    // Mock persistence survives this fixture's document reload; real database
+    // durability and isolated devices are covered by the account-order suite.
+    accountStorage.setItem("qch:test:node-order", JSON.stringify(testAPI.nodeOrder));
+    return json(testAPI.nodeOrder);
+  }
   if (mode === "tasks-preview") {
     if (method === "GET" && path === "/tasks") return json(testAPI.previewTasks);
     if (method === "GET" && path.endsWith("/retry-editor")) return json({ task: testAPI.previewTasks[0], config: testAPI.retryConfig });

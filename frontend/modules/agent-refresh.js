@@ -1,3 +1,4 @@
+import { orderNodesBySavedOrder } from "./node-order.js";
 import { coreInstallBlockReason } from "./core-install-state.js";
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
@@ -395,6 +396,19 @@ async function pollAgentMetrics() {
         }
         cardInteractions.defer(() => {
           items.forEach(updateAgentMetrics);
+          // A remote save or a recovered ambiguous write can change the order
+          // without changing fleet membership. Reconcile only after all gesture
+          // and save gates release, using the latest account order at paint time.
+          const grid = document.querySelector(".node-card-grid");
+          if (grid) {
+            const cards = [...grid.querySelectorAll(".node-card")];
+            const sorted = orderNodesBySavedOrder(cards.map(card => ({ id: card.dataset.agentNode, card }))).map(item => item.card);
+            if (sorted.some((card, index) => card !== cards[index])) {
+              const focus = grid.contains(document.activeElement) ? document.activeElement : null;
+              sorted.forEach(card => grid.append(card));
+              focus?.focus({ preventScroll: true });
+            }
+          }
           const online = items.filter((item) => item.status === "online").length;
           const count = document.querySelector("[data-online-count]");
           if (count) {

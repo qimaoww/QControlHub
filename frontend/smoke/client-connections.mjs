@@ -108,8 +108,8 @@ try {
     await installClientConnections({ state: { data: {}, navigationEpoch: 1, route: "client-connections" }, esc, engineName: String, date: String, shell: () => {},
       api: async path => { migratedPaths.push(path); return { records: [], sources: ["node-a", "node-b"].map(agent_id => ({ agent_id, agent_name: agent_id })) }; },
     })();
-    assert.equal(migratedPaths.length, 2, "legacy order reruns the query after visible nodes are known");
-    assert.deepEqual(new URL(migratedPaths[1], "http://test").searchParams.getAll("node_order"), ["node-b", "node-a"]);
+    assert.equal(migratedPaths.length, 1, "unattributed global cache must not restart pagination");
+    assert.deepEqual(new URL(migratedPaths[0], "http://test").searchParams.getAll("node_order"), []);
   } finally {
     setStorageAccount(null);
     if (oldStorage) Object.defineProperty(globalThis, "localStorage", oldStorage);

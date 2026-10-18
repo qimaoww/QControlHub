@@ -7,14 +7,16 @@ import { createCardMoveScroll } from "./card-move-scroll.js";
 const directions = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 const threshold = 6;
 
-// Order persistence is synchronous, like the existing account-scoped browser
-// preferences. Each gesture commits once before releasing the refresh gate.
-export function bindCardMove({ grid, selector, gripSelector, cardInteractions, save, notify }) {
+// A gesture may save synchronously or asynchronously. Pending saves retain a
+// refresh gate independently of landing animation and subsequent gestures.
+export function bindCardMove({ grid, selector, gripSelector, cardInteractions, save, restore, notify }) {
   const listeners = new AbortController();
   const cards = () => [...grid.querySelectorAll(selector)];
   const grips = () => [...grid.querySelectorAll(gripSelector)];
   const status = grid.parentElement.querySelector("[data-card-order-status]");
   let drag = null, landing = null, disposed = false, pointerClick = null;
+  let operation = 0, confirmed = cards();
+  const pending = new Set();
   const say = (message, error = false) => {
     if (disposed) return;
     if (status) {
@@ -123,15 +125,40 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
       say("位置未改变");
       return;
     }
+    const serial = ++operation;
+    const release = cardInteractions.begin();
+    pending.add(release);
+    const place = list => list.forEach(card => grid.append(card));
+    const success = result => {
+      if (result !== true) throw new Error("order was not saved");
+      confirmed = next;
+      if (!disposed && serial === operation) say(`已保存 · 第 ${previous.drop + 1} 位 / ${next.length}`);
+    };
+    const failure = error => {
+      if (disposed || serial !== operation) return;
+      if (drag) cancel(false);
+      if (error?.orderUnconfirmed) { say("顺序未确认，请刷新后重试。", true); return; }
+      const from = paint();
+      stopMotion();
+      place(restore?.(cards()) ?? confirmed);
+      restoreFocus(previous.grip);
+      animateNodeCardDrop(cards(), from, { resize: true });
+      say("顺序保存失败，已恢复原位，请重试。", true);
+    };
+    const done = () => { pending.delete(release); release(); };
     try {
-      if (save(next) !== true) throw new Error("order was not saved");
+      const result = save(next);
       // Move just this card, preserving DOM identities, drafts and disclosures.
       const target = next[next.indexOf(previous.card) + 1];
       if (target) target.before(previous.card); else grid.append(previous.card);
-      say(`已保存 · 第 ${previous.drop + 1} 位 / ${next.length}`);
-    } catch {
-      say("顺序保存失败，已恢复原位。请检查浏览器存储后重试。", true);
-    }
+      if (result && typeof result.then === "function") {
+        say("正在保存顺序…");
+        Promise.resolve(result).then(success).catch(failure).finally(done);
+      } else {
+        try { success(result); } catch { failure(); }
+        done();
+      }
+    } catch { failure(); done(); }
   };
   const finish = () => {
     const previous = drag;
@@ -247,5 +274,6 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
     disposed = true;
     listeners.abort(); removed.disconnect(); scroll.stop();
     cancel(false); stopMotion();
+    pending.forEach(release => release()); pending.clear();
   };
 }

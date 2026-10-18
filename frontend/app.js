@@ -1,3 +1,4 @@
+import { refreshNodeOrder } from "./modules/node-order.js";
 import { departWorkspace, restoreWorkspace } from "./modules/workspace-motion.js";
 import { cancelMotion } from "./modules/motion.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
@@ -277,6 +278,8 @@ async function renderOnce() {
       renderLogin();
       return;
     }
+    await refreshNodeOrder();
+    if (renderSignal.aborted) return;
     if (state.session.role !== "admin") {
       const access = await api("/agent-access");
       if (renderSignal.aborted) return;
