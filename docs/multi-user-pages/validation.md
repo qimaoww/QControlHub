@@ -52,3 +52,9 @@ GitHub CI 由 PR 触发；Debian、Alpine、升级沙箱、真实服务权限、
 [审查记录](review.md) 包含两项已修复发现。新增证书撤权用例在修复前真实浏览器断言失败（旧详情在 404 后仍保留）；修复后多用户/证书完整门禁退出 0（33.792s），桌面及手机均覆盖失权详情清理、列表刷新和 Escape 关闭后的延迟响应。
 
 补充检查：[多用户/证书门禁](evidence/logs/review-multiuser.log)、[non-browser 全检查](evidence/logs/review-non-browser.log)、[最终模块回归](evidence/logs/review-module.log)。原完整 Go/85 项矩阵/四内核结果未被这次针对性重跑替代；生产 Go 未修改。新增录屏及原图见 [索引](evidence/index.md#审查补充证书授权撤销)。
+
+## 远端 CI 断言补齐
+
+`39152073275` 的 Debian Go 前端包失败：`TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers` 仍查找旧的 installed 二态标志字符串。本地完整 Go 命令的前端包在后续未知态代码修改之前已经执行，未再次执行该包，导致这条契约断言漏更新；此前“当轮退出 0”不代表后续代码仍满足该断言。
+
+已同步三态标志，并保留完整卡片不预提交结构标志、紧凑卡片才更新标志的既定约束；生产代码未因此修改。修复后完整 `./frontend` Go 包（仅排除已另跑的原生浏览器矩阵）以及 `make fmt-check` 退出 0，见 [日志](evidence/logs/ci-contract-followup.log)。最新提交重新触发全部远端 CI，合并前以新提交结果为准。

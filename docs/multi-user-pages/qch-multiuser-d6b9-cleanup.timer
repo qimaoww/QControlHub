@@ -2,7 +2,7 @@
 Description=Clean up QControlHub multiuser-d6b9 validation 72 hours after testing
 
 [Timer]
-OnCalendar=2026-10-21 17:58:27 UTC
+OnCalendar=2026-10-21 18:11:43 UTC
 Persistent=true
 AccuracySec=1s
 Unit=qch-multiuser-d6b9-cleanup.service

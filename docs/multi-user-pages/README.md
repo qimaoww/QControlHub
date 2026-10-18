@@ -99,4 +99,4 @@
 
 本次测试进程、浏览器会话和监听端口在本地验证结束后停止。仅本次带 `qch.test.scope=multiuser-d6b9` 标签且完整容器 ID 匹配的 PostgreSQL、隔离 systemd 节点，以及本工作树 `.preview/multiuser-d6b9`，保留至测试结束 72 小时后删除；测试账号/数据随专用数据库删除。
 
-清理任务 `qch-multiuser-d6b9-cleanup.timer` 已启用，计划 **2026-10-22 01:58:27 Asia/Shanghai**（2026-10-21 17:58:27 UTC）执行，距本地测试结束恰好 72 小时。持久任务、范围、dry-run 和端口释放结果登记在 [清理登记](cleanup-registration.json)。[清理脚本](cleanup.py) 默认仅预览，验证 72 小时间隔与资源身份；systemd timer 使用 `Persistent=true`，失败由服务重试。截图、录屏、报告和脱敏日志位于本目录，保留不删。
+清理任务 `qch-multiuser-d6b9-cleanup.timer` 已启用，计划 **2026-10-22 02:11:43 Asia/Shanghai**（2026-10-21 18:11:43 UTC）执行，距本地测试结束恰好 72 小时。持久任务、范围、dry-run 和端口释放结果登记在 [清理登记](cleanup-registration.json)。[清理脚本](cleanup.py) 默认仅预览，验证 72 小时间隔与资源身份；systemd timer 使用 `Persistent=true`，失败由服务重试。截图、录屏、报告和脱敏日志位于本目录，保留不删。

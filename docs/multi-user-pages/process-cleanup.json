@@ -7,6 +7,6 @@
   "owned_browser_or_server_processes": [],
   "browser_contexts": "All direct Playwright contexts closed in finally; named CLI session closed and profile deletion checked.",
   "containers": "Both recorded validation containers stopped; data retained for 72 hours.",
-  "last_verified_at_utc": "2026-10-18T17:58:27+00:00",
+  "last_verified_at_utc": "2026-10-18T18:11:43+00:00",
   "review_followup": "Fixture server and database stopped again; all certificate video contexts and regression browser processes closed."
 }

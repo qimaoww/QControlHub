@@ -1,6 +1,6 @@
 {
   "baseline_commit": "8834b33d2fad0539f935b14976e2892ddbd38a71",
-  "source_diff_sha256": "9975cb8a275cf3d7ac527c36f9c067c5ffe48ef720b8a3fe1569dad8b315d1c5",
+  "source_diff_sha256": "a5821f24b1c8c988449765274fc6439f7137981b96c1109a74a82e1f053b52c9",
   "source_diff_command": "git diff 8834b33d2fad0539f935b14976e2892ddbd38a71 -- frontend internal",
   "screenshots": 48,
   "videos": 13,

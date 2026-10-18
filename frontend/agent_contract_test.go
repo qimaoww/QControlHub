@@ -188,11 +188,13 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	for _, required := range []string{
 		`requestAgentStructureRefresh();`,
 		`card?.dataset.runtimeStructure === "full"`,
-		`card.dataset.coreInstalled !== (installed ? "1" : "0")`,
+		`const installedKnown = typeof runtime.installed === "boolean";`,
+		`const installedMarker = installedKnown ? installed ? "1" : "0" : "unknown";`,
+		`card.dataset.coreInstalled !== installedMarker`,
 		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
 		`card.dataset.existingUnsupported !== existingUnsupportedReason`,
 		`card.dataset.runtimeStructure !== "full"`,
-		`card.dataset.coreInstalled = installed ? "1" : "0"`,
+		`card.dataset.coreInstalled = installedMarker`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("updateAgentMetrics structural comparison is missing %q", required)

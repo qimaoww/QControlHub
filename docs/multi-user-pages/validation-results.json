@@ -55,5 +55,22 @@
       "node frontend/module_smoke.mjs exited 0 after both fixes"
     ],
     "review": "review.md"
+  },
+  "ci_contract_followup": {
+    "failed_run": 39152073275,
+    "failure": "TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers retained old binary installed markers",
+    "changed_file": "frontend/agent_contract_test.go",
+    "local_commands": [
+      {
+        "command": "go test -count=1 -skip '^TestAgentBrowserRuntimeSmoke$' ./frontend",
+        "exit_code": 0
+      },
+      {
+        "command": "make fmt-check",
+        "exit_code": 0
+      }
+    ],
+    "log": "evidence/logs/ci-contract-followup.log",
+    "production_code_changed": false
   }
 }
