@@ -171,7 +171,11 @@ if (mode.startsWith("users-layout")) {
 }
 if (mode === "shared-node" || mode === "shared-node-mobile") {
   testAPI.agents = [
-    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false },
+    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false,
+      features:[...(populatedAgents[0].features || []), "shared-core-lifecycle-v1"],
+      shared_allocation:{enabled:true, status:"accepted", ports:[21001,21002], used_bytes:0, limit_bytes:0},
+      runtime:{mihomo:{installed:true, service_status:"active", instance:{id:"instance-alpha-recipient", created:true,
+        saved_config_id:"cfg-recipient", saved_version:2, deployed_config_id:"cfg-recipient", deployed_version:1}}} },
     populatedAgents[1],
   ];
 }

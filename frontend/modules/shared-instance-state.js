@@ -1,4 +1,20 @@
 // All recipient surfaces consume the same permission-scoped server snapshot.
+// The configuration selector describes saved/applied files. Runtime status and
+// lifecycle actions remain in node management.
+export function sharedConfigPresentation(agent, engine) {
+  if (agent?.can_manage !== false) return null;
+  const runtime = agent.runtime?.[engine] || {};
+  const instance = runtime.instance;
+  if (!runtime.installed) return { label: "未安装", tone: "uninstalled" };
+  if (!instance || instance.config_uncertain) return { label: "配置待核实", tone: "unknown" };
+  const saved = instance.saved_version;
+  const deployed = instance.deployed_version;
+  if (saved && (saved !== deployed || instance.saved_config_id !== instance.deployed_config_id))
+    return { label: `v${saved} 待部署`, tone: "pending" };
+  if (deployed) return { label: `已部署 v${deployed}`, tone: "running" };
+  return { label: "尚未配置", tone: "uninstalled" };
+}
+
 export function sharedInstancePresentation(agent, engine) {
   const runtime = agent?.runtime?.[engine] || {};
   const instance = runtime.instance;

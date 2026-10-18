@@ -1,0 +1,50 @@
+[
+  {
+    "phase": "before",
+    "device": "desktop",
+    "card": "#live-config?agent=alpha&engine=xray",
+    "footer": "我的配置\n→"
+  },
+  {
+    "phase": "before",
+    "device": "desktop",
+    "status": "Xray",
+    "overflow": false
+  },
+  {
+    "phase": "before",
+    "device": "mobile",
+    "card": "#live-config?agent=alpha&engine=xray",
+    "footer": "我的配置\n→"
+  },
+  {
+    "phase": "before",
+    "device": "mobile",
+    "status": "Xray",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "device": "desktop",
+    "card": "#settings-node-alpha",
+    "footer": "查看节点\n→"
+  },
+  {
+    "phase": "after",
+    "device": "desktop",
+    "status": "Xray\nv2 待部署",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "device": "mobile",
+    "card": "#settings-node-alpha",
+    "footer": "查看节点\n→"
+  },
+  {
+    "phase": "after",
+    "device": "mobile",
+    "status": "Xray\nv2 待部署",
+    "overflow": false
+  }
+]
