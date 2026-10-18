@@ -17,12 +17,9 @@ export function clientAccessExport(item, format) {
   }
   const profile = item.profile || {};
   const value = String(profile.uri || "");
-  const native = value && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/URI|URL/i.test(profile.format || "");
-  return {
-    value: native ? "" : value,
-    format: profile.format || "URL",
-    error: profile.uri_error || (native ? "此协议不支持 URL，请使用其他显示格式或查看参数详情。" : value ? "" : "暂无可用 URL"),
-  };
+  const isURL = /^(?:ss|vless|vmess|trojan|hysteria2|tuic|socks5|anytls):\/\/[^\r\n]+$/i.test(value);
+  const error = profile.uri_error || (isURL ? "" : value ? "请在参数详情中使用原生配置。" : "暂无可用 URL");
+  return { value: error ? "" : value, format: profile.format || "URL", error };
 }
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
   const agentIDs = new Set((agents || []).map((agent) => agent.id));

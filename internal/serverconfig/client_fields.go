@@ -23,19 +23,25 @@ func clientTransport(value string) string {
 }
 
 func addTransportQuery(query url.Values, input Input) {
-	if input.TransportHost != "" {
+	if input.TransportHost != "" && (input.Transport == "websocket" || input.Transport == "xhttp" || input.Transport == "http" || input.Transport == "httpupgrade") {
 		query.Set("host", input.TransportHost)
 	}
-	if input.TLSALPN != "" {
+	if input.TLSALPN != "" && (input.TLSEnabled || input.RealityEnabled) {
 		query.Set("alpn", input.TLSALPN)
 	}
 	switch input.Transport {
 	case "http", "httpupgrade", "websocket":
-		query.Set("path", input.TransportPath)
+		if input.TransportPath != "" {
+			query.Set("path", input.TransportPath)
+		}
 	case "grpc":
-		query.Set("serviceName", input.TransportPath)
+		if input.TransportPath != "" {
+			query.Set("serviceName", input.TransportPath)
+		}
 	case "xhttp":
-		query.Set("path", input.TransportPath)
+		if input.TransportPath != "" {
+			query.Set("path", input.TransportPath)
+		}
 		query.Set("mode", xhttpMode(input.XHTTPMode))
 	}
 }

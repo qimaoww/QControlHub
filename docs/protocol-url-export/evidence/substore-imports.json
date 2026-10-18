@@ -1,0 +1,952 @@
+{
+  "before": [
+    {
+      "case": "ss",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "ss",
+          "skip-cert-verify": false,
+          "udp": true,
+          "server": "edge.example.test",
+          "port": 24443,
+          "cipher": "aes-256-gcm",
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "ss2022",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "ss",
+          "skip-cert-verify": false,
+          "udp": true,
+          "server": "2001:db8::10",
+          "port": 24444,
+          "cipher": "2022-blake3-aes-256-gcm",
+          "password": "MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-reality",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "reality": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "192.0.2.10",
+          "port": 24445,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "cover.example.test",
+          "flow": "xtls-rprx-vision",
+          "client-fingerprint": "chrome",
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "reality-opts": {
+            "public-key": "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw",
+            "short-id": "0123456789abcdef"
+          },
+          "network": "tcp",
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-websocket",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "path": false,
+        "host": true
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24446,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "ws",
+          "ws-opts": {
+            "headers": {
+              "Host": "http.example.test"
+            },
+            "path": "/relay++%2F?token=@:#/=&other=+"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vmess-websocket",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "path": true,
+        "host": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "vmess",
+          "server": "edge.example.test",
+          "port": 24447,
+          "cipher": "auto",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alterId": 0,
+          "tls": true,
+          "sni": "tls.example.test",
+          "network": "ws",
+          "ws-opts": {
+            "path": "/relay +%2F?token=@:#/=&other=+",
+            "headers": {
+              "Host": "http.example.test"
+            }
+          },
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-grpc",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "serviceName": false
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24448,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "grpc",
+          "grpc-opts": {
+            "headers": {
+              "Host": "http.example.test"
+            },
+            "grpc-service-name": "/relay++%2F?token=@:#/=&other=+",
+            "_grpc-type": "gun"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vmess-grpc",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "serviceName": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "vmess",
+          "server": "edge.example.test",
+          "port": 24449,
+          "cipher": "auto",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alterId": 0,
+          "tls": true,
+          "sni": "tls.example.test",
+          "network": "grpc",
+          "grpc-opts": {
+            "grpc-service-name": "/relay +%2F?token=@:#/=&other=+",
+            "_grpc-type": "none"
+          },
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-xhttp",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "xhttp": false
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24450,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "xhttp",
+          "xhttp-opts": {
+            "host": "http.example.test",
+            "path": "/relay++%2F?token=@:#/=&other=+",
+            "mode": "packet-up"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "trojan",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "trojan",
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "server": "edge.example.test",
+          "port": 24451,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "sni": "tls.example.test",
+          "network": "tcp",
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "hysteria2",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "hysteria2",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "192.0.2.10",
+          "port": 24452,
+          "password": "test-hysteria+&=password",
+          "sni": "tls.example.test",
+          "skip-cert-verify": false,
+          "tfo": false,
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "tuic",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "password": false,
+        "sni": true,
+        "alpn": true
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "tuic",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24453,
+          "password": "test 密码🚀 @:/?#&=+/",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alpn": [
+            "h3"
+          ],
+          "congestion-controller": "bbr",
+          "sni": "tls.example.test",
+          "udp-relay-mode": "native",
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "socks5",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "username": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "socks5",
+          "tls": false,
+          "server": "192.0.2.10",
+          "port": 24454,
+          "username": "test+&=user",
+          "password": "test-socks+&=password",
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "anytls",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": false,
+        "sni": true
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "anytls",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "edge.example.test",
+          "port": 24455,
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "password": "test 密码🚀 @:/?#&=+/",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "xhttp-native",
+      "status": "native format required"
+    },
+    {
+      "case": "http-native",
+      "status": "native format required"
+    },
+    {
+      "case": "ws-native",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "path": false
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "vmess",
+          "server": "edge.example.test",
+          "port": 24458,
+          "cipher": "auto",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alterId": 0,
+          "tls": true,
+          "sni": "tls.example.test",
+          "network": "ws",
+          "ws-opts": {
+            "path": "/relay%2F?token=test",
+            "headers": {
+              "Host": "tls.example.test"
+            },
+            "max-early-data": 2048,
+            "early-data-header-name": "Sec-WebSocket-Protocol"
+          },
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "hysteria2-native",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "hysteria2",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "192.0.2.10",
+          "port": 24459,
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "sni": "tls.example.test",
+          "skip-cert-verify": false,
+          "tfo": false,
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "socks5-native",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "username": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "socks5",
+          "tls": false,
+          "server": "2001:db8::10",
+          "port": 24460,
+          "username": "user+%2F@:/?#&=",
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "udp": true,
+          "id": 0
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "case": "ss",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "ss",
+          "skip-cert-verify": false,
+          "udp": true,
+          "server": "edge.example.test",
+          "port": 24443,
+          "cipher": "aes-256-gcm",
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "ss2022",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "ss",
+          "skip-cert-verify": false,
+          "udp": true,
+          "server": "2001:db8::10",
+          "port": 24444,
+          "cipher": "2022-blake3-aes-256-gcm",
+          "password": "MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-reality",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "reality": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "192.0.2.10",
+          "port": 24445,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "cover.example.test",
+          "flow": "xtls-rprx-vision",
+          "client-fingerprint": "chrome",
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "reality-opts": {
+            "public-key": "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw",
+            "short-id": "0123456789abcdef"
+          },
+          "network": "tcp",
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-websocket",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "path": true,
+        "host": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24446,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "ws",
+          "ws-opts": {
+            "headers": {
+              "Host": "http.example.test"
+            },
+            "path": "/relay +%2F?token=@:#/=&other=+"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vmess-websocket",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "path": true,
+        "host": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "vmess",
+          "server": "edge.example.test",
+          "port": 24447,
+          "cipher": "auto",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alterId": 0,
+          "tls": true,
+          "sni": "tls.example.test",
+          "network": "ws",
+          "ws-opts": {
+            "path": "/relay +%2F?token=@:#/=&other=+",
+            "headers": {
+              "Host": "http.example.test"
+            }
+          },
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-grpc",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "serviceName": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24448,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "grpc",
+          "grpc-opts": {
+            "grpc-service-name": "/relay +%2F?token=@:#/=&other=+",
+            "_grpc-type": "gun"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vmess-grpc",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "serviceName": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "vmess",
+          "server": "edge.example.test",
+          "port": 24449,
+          "cipher": "auto",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alterId": 0,
+          "tls": true,
+          "sni": "tls.example.test",
+          "network": "grpc",
+          "grpc-opts": {
+            "grpc-service-name": "/relay +%2F?token=@:#/=&other=+",
+            "_grpc-type": "none"
+          },
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "vless-xhttp",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true,
+        "xhttp": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "vless",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24450,
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "network": "xhttp",
+          "xhttp-opts": {
+            "host": "http.example.test",
+            "path": "/relay +%2F?token=@:#/=&other=+",
+            "mode": "packet-up"
+          },
+          "encryption": "none",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "trojan",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "trojan",
+          "password": "test 密码🚀 @:/?#&=+%2F",
+          "server": "edge.example.test",
+          "port": 24451,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "sni": "tls.example.test",
+          "network": "tcp",
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "hysteria2",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "sni": true,
+        "alpn": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "type": "hysteria2",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "192.0.2.10",
+          "port": 24452,
+          "password": "test-hysteria+&=password",
+          "sni": "tls.example.test",
+          "skip-cert-verify": false,
+          "tfo": false,
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "tuic",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "password": false,
+        "sni": true,
+        "alpn": true
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "tuic",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "2001:db8::10",
+          "port": 24453,
+          "password": "test 密码🚀 @:/?#&=+/",
+          "uuid": "123e4567-e89b-42d3-a456-426614174000",
+          "alpn": [
+            "h3"
+          ],
+          "congestion-controller": "bbr",
+          "sni": "tls.example.test",
+          "udp-relay-mode": "native",
+          "udp": true,
+          "tls": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "socks5",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": true,
+        "username": true
+      },
+      "pass": true,
+      "nodes": [
+        {
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "type": "socks5",
+          "tls": false,
+          "server": "192.0.2.10",
+          "port": 24454,
+          "username": "test+&=user",
+          "password": "test-socks+&=password",
+          "udp": true,
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "anytls",
+      "checks": {
+        "name": true,
+        "server": true,
+        "port": true,
+        "credential": false,
+        "sni": true
+      },
+      "pass": false,
+      "nodes": [
+        {
+          "type": "anytls",
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "server": "edge.example.test",
+          "port": 24455,
+          "udp": true,
+          "tls": true,
+          "sni": "tls.example.test",
+          "skip-cert-verify": false,
+          "_h2": false,
+          "packet-encoding": "xudp",
+          "password": "test 密码🚀 @:/?#&=+/",
+          "id": 0
+        }
+      ]
+    },
+    {
+      "case": "xhttp-native",
+      "status": "native format required"
+    },
+    {
+      "case": "http-native",
+      "status": "native format required"
+    },
+    {
+      "case": "ws-native",
+      "status": "native format required"
+    },
+    {
+      "case": "hysteria2-native",
+      "status": "native format required"
+    },
+    {
+      "case": "socks5-native",
+      "status": "native format required"
+    }
+  ]
+}

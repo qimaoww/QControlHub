@@ -1,0 +1,96 @@
+=== RUN   TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats
+=== RUN   TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats/TCP
+=== RUN   TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats/UDP
+--- PASS: TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats (0.00s)
+    --- PASS: TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats/TCP (0.00s)
+    --- PASS: TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats/UDP (0.00s)
+=== RUN   TestClientOutboundChoicesUseAuthorizedDeployedRevision
+2026/10/18 22:20:33 INFO waiting for PostgreSQL migration lock backend_pid=2539
+2026/10/18 22:20:33 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:33 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=183.385361ms
+--- PASS: TestClientOutboundChoicesUseAuthorizedDeployedRevision (1.33s)
+=== RUN   TestClientProfileNamesAreScopedToDeployedPorts
+2026/10/18 22:20:35 INFO waiting for PostgreSQL migration lock backend_pid=2544
+2026/10/18 22:20:35 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:35 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=184.32701ms
+--- PASS: TestClientProfileNamesAreScopedToDeployedPorts (0.51s)
+=== RUN   TestClientProfileDisplayParametersAreScopedToDeployedPorts
+2026/10/18 22:20:35 INFO waiting for PostgreSQL migration lock backend_pid=2548
+2026/10/18 22:20:35 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:35 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=197.890934ms
+--- PASS: TestClientProfileDisplayParametersAreScopedToDeployedPorts (0.46s)
+=== RUN   TestSubStoreSyncFormatsAndIndependentDeploymentIsolation
+2026/10/18 22:20:36 INFO waiting for PostgreSQL migration lock backend_pid=2553
+2026/10/18 22:20:36 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:36 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=197.55328ms
+--- PASS: TestSubStoreSyncFormatsAndIndependentDeploymentIsolation (1.42s)
+=== RUN   TestSharedInstanceAPIScopesStateReadsVersionsAndForgedTargets
+2026/10/18 22:20:37 INFO waiting for PostgreSQL migration lock backend_pid=2555
+2026/10/18 22:20:37 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:37 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=189.15613ms
+--- PASS: TestSharedInstanceAPIScopesStateReadsVersionsAndForgedTargets (1.43s)
+=== RUN   TestSubStoreMutationsShareDatabaseLock
+2026/10/18 22:20:38 INFO waiting for PostgreSQL migration lock backend_pid=2561
+2026/10/18 22:20:38 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:39 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=204.583516ms
+--- PASS: TestSubStoreMutationsShareDatabaseLock (1.28s)
+=== RUN   TestSubStoreConcurrentRelinkCannotOverwriteAnotherUsersClaim
+2026/10/18 22:20:40 INFO waiting for PostgreSQL migration lock backend_pid=2572
+2026/10/18 22:20:40 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:40 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=189.471786ms
+--- PASS: TestSubStoreConcurrentRelinkCannotOverwriteAnotherUsersClaim (1.26s)
+=== RUN   TestSubStoreIndependentBackendsDoNotBlockAPIWrites
+2026/10/18 22:20:41 INFO waiting for PostgreSQL migration lock backend_pid=2578
+2026/10/18 22:20:41 INFO applying PostgreSQL schema migration from_version=0 to_version=79 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 22:20:41 INFO PostgreSQL schema migration committed from_version=0 to_version=79 elapsed=188.723973ms
+--- PASS: TestSubStoreIndependentBackendsDoNotBlockAPIWrites (1.26s)
+=== RUN   TestNormalizeSubStoreEndpoint
+=== PAUSE TestNormalizeSubStoreEndpoint
+=== RUN   TestRenameSubStoreNode
+=== PAUSE TestRenameSubStoreNode
+=== RUN   TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+=== PAUSE TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+=== RUN   TestSubStoreNodesForAddressMode
+=== PAUSE TestSubStoreNodesForAddressMode
+=== RUN   TestSubStoreMihomoFormatKeepsAddressModesAndDoesNotMutateURLProfiles
+=== PAUSE TestSubStoreMihomoFormatKeepsAddressModesAndDoesNotMutateURLProfiles
+=== RUN   TestSubStoreFormatSwitchReplacesManagedNodesAndKeepsManualNodes
+=== PAUSE TestSubStoreFormatSwitchReplacesManagedNodesAndKeepsManualNodes
+=== RUN   TestSubStoreRemoteTargetHelpers
+=== PAUSE TestSubStoreRemoteTargetHelpers
+=== RUN   TestSubStoreSubscriptionCreateUpdateAndOwnership
+=== PAUSE TestSubStoreSubscriptionCreateUpdateAndOwnership
+=== RUN   TestMergeSubStoreContentByNodeName
+=== PAUSE TestMergeSubStoreContentByNodeName
+=== RUN   TestUpsertSubStoreSubscriptionRejectsInvalidMode
+=== PAUSE TestUpsertSubStoreSubscriptionRejectsInvalidMode
+=== RUN   TestSubStoreRequestDoesNotLeakEndpointCredential
+=== PAUSE TestSubStoreRequestDoesNotLeakEndpointCredential
+=== RUN   TestSubStoreClientValuePreservesPercentPasswords
+--- PASS: TestSubStoreClientValuePreservesPercentPasswords (0.00s)
+=== RUN   TestSubStoreHysteriaALPNUsesNativeMap
+--- PASS: TestSubStoreHysteriaALPNUsesNativeMap (0.00s)
+=== CONT  TestNormalizeSubStoreEndpoint
+=== CONT  TestSubStoreRemoteTargetHelpers
+=== CONT  TestSubStoreMihomoFormatKeepsAddressModesAndDoesNotMutateURLProfiles
+--- PASS: TestNormalizeSubStoreEndpoint (0.00s)
+=== CONT  TestRenameSubStoreNode
+=== CONT  TestUpsertSubStoreSubscriptionRejectsInvalidMode
+=== CONT  TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+=== CONT  TestSubStoreSubscriptionCreateUpdateAndOwnership
+=== CONT  TestSubStoreFormatSwitchReplacesManagedNodesAndKeepsManualNodes
+--- PASS: TestSubStoreRemoteTargetHelpers (0.00s)
+--- PASS: TestUpsertSubStoreSubscriptionRejectsInvalidMode (0.00s)
+--- PASS: TestRenameSubStoreNode (0.00s)
+=== CONT  TestSubStoreRequestDoesNotLeakEndpointCredential
+--- PASS: TestSubStoreRequestDoesNotLeakEndpointCredential (0.00s)
+=== CONT  TestMergeSubStoreContentByNodeName
+--- PASS: TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync (0.00s)
+--- PASS: TestMergeSubStoreContentByNodeName (0.00s)
+--- PASS: TestSubStoreFormatSwitchReplacesManagedNodesAndKeepsManualNodes (0.00s)
+=== CONT  TestSubStoreNodesForAddressMode
+--- PASS: TestSubStoreNodesForAddressMode (0.00s)
+--- PASS: TestSubStoreMihomoFormatKeepsAddressModesAndDoesNotMutateURLProfiles (0.00s)
+--- PASS: TestSubStoreSubscriptionCreateUpdateAndOwnership (0.00s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	9.184s

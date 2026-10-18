@@ -19,6 +19,12 @@ assert.equal(clientAccessExport(exportSample, "mihomo").value, exportSample.miho
 assert.equal(clientAccessExport({ ...exportSample, mihomo_error: "unsupported" }, "mihomo").value, "");
 assert.ok(clientAccessExport({ profile: exportSample.profile }, "mihomo").error);
 assert.ok(clientAccessExport({ profile: { format: "Mihomo Mieru YAML", uri: "{type: mieru}" } }, "url").error);
+// Content determines URL availability; labels such as "JSON URI" do not.
+for (const value of ['{"outbounds":[]}', 'socks5 = socks5, host, 1080', 'name: example\ntype: ss']) {
+  assert.equal(clientAccessExport({ profile: { format: "URL", uri: value } }, "url").value, "");
+}
+assert.equal(clientAccessExport({ profile: { format: "VMess v2 JSON URI", uri: "vmess://eyJ2IjoiMiJ9" } }, "url").error, "");
+assert.equal(clientAccessExport({ profile: { uri: "vless://uuid@host:443#name", uri_error: "使用 JSON" } }, "url").value, "");
 const accessEntries = [
   {
     agent_id: "alpha",
@@ -144,6 +150,25 @@ assert.equal(
   "legacy",
 );
 assert.equal(legacyCopyRestored, true);
+// A rejected modern clipboard still uses the unmasked legacy selection.
+let temporaryRemoved = false;
+let temporarySelected = false;
+const masked = { value: "trojan://p%2B%25%23@[2001:db8::1]:24443#%E9%A6%99%E6%B8%AF", type: "password" };
+const temporary = { focus: noop, select: () => { temporarySelected = true; }, remove: () => { temporaryRemoved = true; } };
+assert.equal(await copyClientValue(masked, {
+  navigatorObject: { clipboard: { writeText: async () => { throw new Error("denied"); } } },
+  documentObject: { activeElement: null, createElement: () => temporary, body: { append: noop }, execCommand: () => temporarySelected && temporary.value === masked.value },
+}), "legacy");
+assert.equal(temporaryRemoved, true);
+assert.equal(masked.type, "password");
+// A modal makes controls outside its subtree inert, including copy helpers.
+let modalCopyParent = false;
+masked.closest = () => ({ append: () => { modalCopyParent = true; } });
+assert.equal(await copyClientValue(masked, {
+  navigatorObject: {},
+  documentObject: { activeElement: null, createElement: () => temporary, body: { append: () => { throw new Error("inert outside modal"); } }, execCommand: () => modalCopyParent },
+}), "legacy");
+assert.equal(modalCopyParent, true);
 const accessState = {
   route: "client-access",
   data: { accessAgent: "beta", accessEngine: "", accessQuery: "" },

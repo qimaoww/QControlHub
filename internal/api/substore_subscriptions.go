@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func ownedSubStoreSubscription(subscriptions []map[string]any, integrationID string) map[string]any {
@@ -216,15 +216,7 @@ func subStoreNodeName(rawValue string) string {
 	if _, nameNode, ok := subStoreMihomoNode(rawValue); ok {
 		return strings.TrimSpace(nameNode.Value)
 	}
-	fragment := strings.LastIndexByte(rawValue, '#')
-	if fragment < 0 || fragment == len(rawValue)-1 {
-		return ""
-	}
-	name := strings.TrimSpace(rawValue[fragment+1:])
-	if decoded, err := url.PathUnescape(name); err == nil {
-		name = strings.TrimSpace(decoded)
-	}
-	return name
+	return strings.TrimSpace(serverconfig.ClientURLName(rawValue))
 }
 
 func subStoreManagedNames(value any) []string {

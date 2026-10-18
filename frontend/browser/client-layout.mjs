@@ -97,7 +97,7 @@ export async function testClientLayoutRuntime({ testAPI }) {
   yaml.parentElement.querySelector("[data-secret-visibility]").click();
   assert.equal(yaml.type, "password", "YAML must be maskable again");
   selectFormat("url");
-  assert.equal(count("textarea.client-share-yaml"), 0, "switching back must restore URL values");
+  assert.equal(count(".client-profile-row > .client-export-control textarea.client-share-yaml"), 0, "switching back must restore URL values");
   query('[data-filter-engine=""]').click();
   query('#client-search [name="q"]').value = "LAX-02-v6";
   query('#client-search button[type="submit"]').click();

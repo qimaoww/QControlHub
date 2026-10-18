@@ -1,0 +1,40 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+
+	"github.com/metacubex/mihomo/common/convert"
+)
+
+// Run inside an official Mihomo v1.19.32 source checkout.
+func main() {
+	raw, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	var samples []struct {
+		Name    string `json:"name"`
+		Profile struct {
+			URI string `json:"uri"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(raw, &samples); err != nil {
+		panic(err)
+	}
+	results := map[string]any{}
+	for _, sample := range samples {
+		if !strings.Contains(sample.Profile.URI, "://") || strings.ContainsAny(sample.Profile.URI, "\r\n") {
+			continue
+		}
+		nodes, err := convert.ConvertsV2Ray([]byte(sample.Profile.URI))
+		if err != nil {
+			panic(sample.Name + ": " + err.Error())
+		}
+		results[sample.Name] = nodes
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(results); err != nil {
+		panic(err)
+	}
+}

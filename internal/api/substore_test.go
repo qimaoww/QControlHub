@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"gopkg.in/yaml.v3"
 )
 
 func TestNormalizeSubStoreEndpoint(t *testing.T) {
@@ -48,11 +50,11 @@ func TestRenameSubStoreNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasSuffix(got, "#东京 A · 专线") || strings.Contains(got, "old-name") || strings.Contains(got, "%E4%B8%9C") {
+		if subStoreNodeName(got) != "东京 A · 专线" || strings.Contains(got, "old-name") || !strings.Contains(got, "%E4%B8%9C") {
 			t.Fatalf("renamed URI = %q", got)
 		}
 	}
-	for _, name := range []string{"", "bad\nname", "bad#name"} {
+	for _, name := range []string{"", "bad\nname"} {
 		if _, err := renameSubStoreNode("vless://example-id@node.example:443", name); err == nil {
 			t.Errorf("invalid node name %q unexpectedly succeeded", name)
 		}
@@ -111,12 +113,12 @@ func TestSubStoreNodesForAddressMode(t *testing.T) {
 	}
 	selection.AddressMode = core.SubStoreAddressModeBoth
 	nodes, err = subStoreNodesForSelection(profile, selection)
-	if err != nil || len(nodes) != 2 || !strings.HasSuffix(nodes[0], "#Tokyo") || !strings.HasSuffix(nodes[1], "#Tokyo v6") {
+	if err != nil || len(nodes) != 2 || !strings.HasSuffix(nodes[0], "#Tokyo") || !strings.HasSuffix(nodes[1], "#Tokyo%20v6") {
 		t.Fatalf("dual-stack Sub-Store nodes = %v, %v", nodes, err)
 	}
 	selection.AddressMode = core.SubStoreAddressModeIPv6
 	nodes, err = subStoreNodesForSelection(profile, selection)
-	if err != nil || len(nodes) != 1 || !strings.HasSuffix(nodes[0], "#Tokyo v6") {
+	if err != nil || len(nodes) != 1 || !strings.HasSuffix(nodes[0], "#Tokyo%20v6") {
 		t.Fatalf("IPv6 Sub-Store node = %v, %v", nodes, err)
 	}
 	if got := subStoreIPv6NodeName(strings.Repeat("x", 100)); len([]rune(got)) != 100 || !strings.HasSuffix(got, " v6") {
@@ -375,5 +377,49 @@ func writeSubStoreTestEnvelope(t *testing.T, writer http.ResponseWriter, status 
 	}
 	if err := json.NewEncoder(writer).Encode(payload); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSubStoreClientValuePreservesPercentPasswords(t *testing.T) {
+	for _, protocol := range []string{serverconfig.ProtocolTUIC, serverconfig.ProtocolAnyTLS} {
+		for _, password := range []string{"fixture-literal%2F +@:/?#&=", "fixture-literal%invalid", "fixture-plain+@:/?#&="} {
+			input := serverconfig.Input{Protocol: protocol, Tag: "test", Port: 24443, Transport: "raw", TLSEnabled: true, Credential: password}
+			if protocol == serverconfig.ProtocolTUIC {
+				input.Credential = "123e4567-e89b-42d3-a456-426614174000"
+				input.SecondaryCredential = password
+			}
+			profile, err := serverconfig.BuildClientProfile(input, "2001:db8::10", "tls.example.test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			value := subStoreClientValue(profile)
+			if strings.Contains(password, "%") {
+				if value != profile.Mihomo || !strings.HasPrefix(value, "{") {
+					t.Fatal("percent password must use existing native map for Sub-Store")
+				}
+				var proxy map[string]any
+				if err := yaml.Unmarshal([]byte(value), &proxy); err != nil || proxy["password"] != password {
+					t.Fatal("native map changed password")
+				}
+			} else if value != profile.URI {
+				t.Fatal("ordinary passwords must retain URL format")
+			}
+			renamed, err := renameSubStoreNode(value, "香港 🚀 #+%2F")
+			if err != nil || subStoreNodeName(renamed) != "香港 🚀 #+%2F" {
+				t.Fatalf("native/URL name changed: %s %v", renamed, err)
+			}
+		}
+	}
+}
+
+func TestSubStoreHysteriaALPNUsesNativeMap(t *testing.T) {
+	input := serverconfig.Input{Protocol: serverconfig.ProtocolHy2, Tag: "hy2", Port: 24443, Transport: "raw", Credential: "test-hysteria-password", TLSEnabled: true, TLSALPN: "h3,h2"}
+	profile, err := serverconfig.BuildClientProfile(input, "edge.example.test", "tls.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := subStoreClientValue(profile)
+	if value != profile.Mihomo || !strings.Contains(value, "h2") {
+		t.Fatal("Sub-Store Hysteria ALPN would be lost")
 	}
 }
