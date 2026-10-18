@@ -1,0 +1,32 @@
+=== RUN   TestCertificateBrowserSessions
+=== RUN   TestCertificateBrowserSessions/desktop
+2026/10/18 16:28:08 INFO waiting for PostgreSQL migration lock backend_pid=36
+2026/10/18 16:28:08 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 16:28:08 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=88.591321ms
+2026/10/18 16:28:10 ERROR HTTP request failed request_id=req_a6b26b9d71e56b53 error="context canceled"
+2026/10/18 16:28:10 ERROR HTTP request failed request_id=req_22fee4cb4c5a280e error="context canceled"
+2026/10/18 16:28:11 ERROR HTTP request failed request_id=req_5211c83c5210c31c error="context canceled"
+    certificates_browser_integration_test.go:46: desktop: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        desktop: same-browser logout/login clears private filters, dialogs and credential-account state
+        
+=== RUN   TestCertificateBrowserSessions/mobile
+2026/10/18 16:28:11 INFO waiting for PostgreSQL migration lock backend_pid=46
+2026/10/18 16:28:12 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 16:28:12 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=81.214557ms
+2026/10/18 16:28:13 ERROR HTTP request failed request_id=req_1b4edcc111b4c1a9 error="context canceled"
+2026/10/18 16:28:14 ERROR HTTP request failed request_id=req_9fc3719b4e5f2e44 error="context canceled"
+2026/10/18 16:28:15 ERROR HTTP request failed request_id=req_6d763344ee4269eb error="context canceled"
+    certificates_browser_integration_test.go:46: mobile: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        mobile: same-browser logout/login clears private filters, dialogs and credential-account state
+        
+--- PASS: TestCertificateBrowserSessions (7.33s)
+    --- PASS: TestCertificateBrowserSessions/desktop (3.64s)
+    --- PASS: TestCertificateBrowserSessions/mobile (3.69s)
+=== RUN   TestCertificateOrdinaryUserIsolationSharingAndDeployment
+2026/10/18 16:28:15 INFO waiting for PostgreSQL migration lock backend_pid=58
+2026/10/18 16:28:15 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/18 16:28:15 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=80.599066ms
+    certificates_integration_test.go:110: Real ordinary-user password/CSRF sessions: create -> share -> select -> shared-instance task -> version replacement -> revoke queued deployment; no secret in history
+--- PASS: TestCertificateOrdinaryUserIsolationSharingAndDeployment (1.06s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	8.610s

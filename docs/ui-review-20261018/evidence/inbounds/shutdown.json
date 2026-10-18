@@ -1,0 +1,57 @@
+{
+  "servers": [
+    {
+      "pid": 3664078,
+      "args": [
+        "node",
+        "docs/ui-review-20261018/capture/server.mjs",
+        "output/playwright/ui-review-20261018/round5/before",
+        "41767"
+      ],
+      "signal": "SIGTERM"
+    },
+    {
+      "pid": 3664079,
+      "args": [
+        "node",
+        "docs/ui-review-20261018/capture/server.mjs",
+        ".",
+        "45231"
+      ],
+      "signal": "SIGTERM"
+    }
+  ],
+  "test_completed_at": "2026-10-18T09:31:06+00:00",
+  "browsers_closed": [
+    "ui-review-20261018",
+    "ui-review-mobile"
+  ],
+  "browser_close_exit_codes": [
+    0,
+    0
+  ],
+  "database": {
+    "id": "fde5294e10fee20d0604b325ea9d6cdcfa4e60b66e6b586af3badb9edbc4d1e1",
+    "name": "/qch-ui-review-20261018-db",
+    "status": "exited"
+  },
+  "ports_checked": [
+    41959,
+    42135,
+    32832,
+    34393,
+    43973,
+    33345,
+    32831,
+    38481,
+    44611,
+    39511,
+    40409,
+    32833,
+    41767,
+    45231,
+    32834
+  ],
+  "listening_task_ports": [],
+  "unrelated_resources": "untouched"
+}

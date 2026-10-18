@@ -1,0 +1,6 @@
+### Result
+{"text":"-----BEGIN CERTIFICATE-----\nfixture-file\n-----END CERTIFICATE-----","filename":"certificate-chain.pem","touch":1}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.waitForFunction(()=>document.querySelector("[data-cert-file-name=certificate]").textContent==="certificate-chain.pem");return {text:await page.locator("[name=certificate]").inputValue(),filename:await page.locator("[data-cert-file-name=certificate]").textContent(),touch:await page.evaluate(()=>navigator.maxTouchPoints)}})(page);
+```

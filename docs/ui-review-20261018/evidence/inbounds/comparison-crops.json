@@ -1,0 +1,58 @@
+[
+  {
+    "source": "before-mobile-light-modal-reality.png",
+    "crop": [
+      0,
+      0,
+      390,
+      844
+    ],
+    "position": [
+      24,
+      130
+    ],
+    "scale": 1
+  },
+  {
+    "source": "after-mobile-light-modal-reality.png",
+    "crop": [
+      0,
+      0,
+      390,
+      844
+    ],
+    "position": [
+      434,
+      130
+    ],
+    "scale": 1
+  },
+  {
+    "source": "before-mobile-dark-modal-xhttp-help.png",
+    "crop": [
+      0,
+      0,
+      390,
+      844
+    ],
+    "position": [
+      24,
+      1064
+    ],
+    "scale": 1
+  },
+  {
+    "source": "after-mobile-dark-modal-xhttp-help.png",
+    "crop": [
+      0,
+      0,
+      390,
+      844
+    ],
+    "position": [
+      434,
+      1064
+    ],
+    "scale": 1
+  }
+]

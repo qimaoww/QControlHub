@@ -1,0 +1,71 @@
+node frontend/module_smoke.mjs
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+shared instance state smoke checks passed
+Core install operation permissions and state reasons passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Node order migration and direct-sidebar smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+traffic selection and ordering module smoke passed
+Core log conditional transport smoke passed
+Preset reads, render tree and task monitor smoke passed
+Core log staged loading/cache smoke passed
+Chinese error messages smoke tests passed
+Config file split/merge smoke passed
+Core log selection persistence smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Archive defaults reuse all four canonical examples; draft baselines and forms are independent
+Remaining route factories are inert and preserve their public APIs
+Task retry rendering handles omitted historical revisions and operation permissions
+IP quality model, rendering, request races and mutation guards passed
+node scripts/generate-styles.mjs --check
+node --test .github/scripts/generate-styles.test.mjs
+TAP version 13
+# Subtest: the distributed stylesheet is the byte-exact ordered concatenation
+ok 1 - the distributed stylesheet is the byte-exact ordered concatenation
+  ---
+  duration_ms: 86.322711
+  type: 'test'
+  ...
+# Subtest: every style source is listed once, and no listed source can disappear
+ok 2 - every style source is listed once, and no listed source can disappear
+  ---
+  duration_ms: 4.022599
+  type: 'test'
+  ...
+# Subtest: source slices cannot cut a rule, conditional group, string, or comment
+ok 3 - source slices cannot cut a rule, conditional group, string, or comment
+  ---
+  duration_ms: 0.438853
+  type: 'test'
+  ...
+# Subtest: changing cascade order or a source byte makes the generated check fail
+ok 4 - changing cascade order or a source byte makes the generated check fail
+  ---
+  duration_ms: 2.342545
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 148.639104

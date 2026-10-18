@@ -1,0 +1,33 @@
+{
+  "head": "26a63ff1a975c93f824c13d75961504fe3eb5fc5",
+  "saved_at": "2026-10-18T08:54:44.805496+00:00",
+  "baseline": "output/playwright/ui-review-20261018/round5/before/frontend",
+  "note": "在本轮移除安全分区绿条前保存，包含此前四轮整改。",
+  "main": "26a63ff1a975c93f824c13d75961504fe3eb5fc5",
+  "before_frontend_tree_sha256": "a1370600ac307925059507aee4a264dd6cea08d90b9b671a1578af7e11347266",
+  "after_frontend_tree_sha256": "617d081e1bb9968fac6627d0dde043727223f0ff82b8f469096ab575b2b3d729",
+  "before_patch_sha256": "f38ebcd04dbbccb6eef079629b2d0d059406e3bf1cdac11eaf79238b7a384389",
+  "viewports": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "tablet": [
+      820,
+      1180
+    ]
+  },
+  "touch_devices": [
+    "mobile",
+    "tablet"
+  ],
+  "fixture_time": "2026-10-18T05:00:00Z",
+  "account_data": "Same existing per-page browser fixture and catalog entries in each matched pair.",
+  "tree_hash_algorithm": "SHA-256 over sorted relative UTF-8 path + NUL + file bytes + NUL for all frontend files",
+  "turn_patch_sha256": "d1a5b14b31d8f0ba5876af884290bbc00aea327d5771726cdb7ea4480d3f8486",
+  "production_patch_sha256": "126349b687a18df1a379b59587e5b4fe77e7316dadae89ea6e21639c54c13d8b"
+}

@@ -17,7 +17,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     dialog.className = "traffic-edit-dialog traffic-sync-dialog";
     dialog.dataset.trafficSyncDialog = "";
     dialog.setAttribute("aria-labelledby", "traffic-sync-title");
-    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2><p>核对已生效端口与待部署变更</p></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><p class="traffic-sync-help">按确认生效的配置同步。待部署端口不会提前计量；旧端口保留历史和共享累计，端口预留由节点所有者管理。</p><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry>重新扫描</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>同步所选</button></footer></form>`;
+    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry>重新扫描</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>同步所选</button></footer></form>`;
     document.body.append(dialog);
     const list = dialog.querySelector("[data-sync-list]");
     const errorBox = dialog.querySelector("[data-sync-error]");
@@ -37,7 +37,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       const available = candidates.filter(candidate => !candidate.blocked_reason).length;
       if (all) { all.checked = available > 0 && count === available; all.indeterminate = count > 0 && count < available; all.disabled = loading || saving || !available; }
     };
-    const showError = (message) => { errorBox.className = "alert error"; updateFeedback(errorBox, message); };
+    const showError = (message) => { errorBox.className = "alert error notice-message"; updateFeedback(errorBox, message); };
     const cleanup = () => {
       if (closed) return;
       closed = true;
@@ -63,7 +63,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       candidates = []; snapshot = "";
       retry.disabled = true;
       setVisible(errorBox, false);
-      updateFeedback(list, "正在扫描配置与部署版本…");
+      updateFeedback(list, "正在扫描端口…");
       updateSelection();
       try {
         const resource = await api("/traffic-endpoints/sync", { signal: controller.signal });
@@ -103,7 +103,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
         closeRetiringDialog(dialog);
         cleanup();
         const refreshed = await traffic();
-        if (isCurrent()) notify(`所选 ${chosen.length} 项已核验并同步${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
+        if (isCurrent()) notify(`已同步 ${chosen.length} 项${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
       } catch (error) {
         if (closed || !isCurrent()) cleanup();
         else {

@@ -1,0 +1,107 @@
+[
+  {
+    "file": "320-traffic-cards.css",
+    "selector": ".traffic-control-panel>.traffic-filters select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "310-traffic-history.css",
+    "selector": ".traffic-filters select,.traffic-filters input",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "310-traffic-history.css",
+    "selector": ".traffic-form-grid input,.traffic-form-grid select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "360-substore-targets.css",
+    "selector": ".substore-remote-import select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "360-substore-targets.css",
+    "selector": ".client-address-picker select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "360-substore-targets.css",
+    "selector": ".substore-node-settings-row input,.substore-node-settings-row select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "530-config-file-drafts.css",
+    "selector": ".config-outbound-presets :is(input,select)",
+    "action": "retain input rule"
+  },
+  {
+    "file": "530-config-file-drafts.css",
+    "selector": ".config-outbound-studio .field-mutation select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "530-config-file-drafts.css",
+    "selector": ".live-config-workspace .code-file-meta select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "490-config-field-studio.css",
+    "selector": ".config-field-studio .field-mutation select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "370-client-dialogs.css",
+    "selector": ".client-display-form-grid input,.client-display-form-grid select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "240-agent-operations.css",
+    "selector": ".user-create-fields input,.user-create-fields select,.panel-user-row input,.panel-user-row select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "270-core-logs.css",
+    "selector": ".core-log-filters input,.core-log-filters select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "160-agent-services.css",
+    "selector": ".batch-toolbar select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "500-system-tcp.css",
+    "selector": ".bbr-field>input,.bbr-field>select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "200-config-workbench.css",
+    "selector": ".template-card>footer select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "260-traffic-base.css",
+    "selector": ".traffic-form-grid input,.traffic-form-grid select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "170-config-selectors.css",
+    "selector": ".page-agent-config .config-mutation select",
+    "action": "remove local size/font/padding override"
+  },
+  {
+    "file": "515-client-connections.css",
+    "selector": ".connection-filters input,.connection-filters select,.connection-advanced input,.connection-advanced select",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "280-agent-cards.css",
+    "selector": ".node-batch-bar .batch-controls select,.node-batch-bar .batch-controls input",
+    "action": "select uses shared control metrics; other controls retain original rule"
+  },
+  {
+    "file": "530-config-file-drafts.css",
+    "selector": "@media(max-width:600px) .config-outbound-presets :is(input,select)",
+    "action": "retain input rule; select follows shared 13px scale and coarse-pointer 16px minimum"
+  }
+]

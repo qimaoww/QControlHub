@@ -1,0 +1,734 @@
+[
+  {
+    "device": "desktop",
+    "theme": "dark",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "dark",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "device": "desktop",
+    "theme": "light",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "light",
+        "coarse": false,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "device": "mobile",
+    "theme": "dark",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "device": "mobile",
+    "theme": "light",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "theme": "dark",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "dark",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "theme": "light",
+    "results": [
+      {
+        "name": "reference-user-list",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "reference-allocation",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "audit-core-logs",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-configuration",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "audit-shared-node",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": []
+      },
+      {
+        "name": "inspect-http-help",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-import-actions",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-challenge",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-versions",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-http-grants",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-zerossl",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      },
+      {
+        "name": "inspect-dns-provider",
+        "theme": "light",
+        "coarse": true,
+        "overflow": false,
+        "dialogs": [
+          {
+            "overflow": false
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -35,7 +35,7 @@
 .connection-filter-panel[open]>summary{border-bottom:1px solid var(--line);background:var(--surface-2)}
 .connection-filters{display:grid;grid-template-columns:minmax(160px,.75fr) minmax(190px,1.4fr) minmax(150px,.8fr);gap:12px;padding:12px 18px}
 .connection-filters label,.connection-advanced label{display:grid;gap:5px;min-width:0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));font-weight:650}
-.connection-filters input,.connection-filters select,.connection-advanced input,.connection-advanced select{width:100%;min-width:0;height:38px;font-size:calc(11px * var(--ui-font-scale))}
+.connection-filters input,.connection-advanced input{width:100%;min-width:0;height:38px;font-size:calc(11px * var(--ui-font-scale))}
 .connection-filter-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 18px;border-top:1px solid var(--line)}
 .connection-query-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .connection-query-actions .button{min-height:36px}

@@ -1,0 +1,128 @@
+{
+  "modules": [
+    {
+      "file": "frontend/modules/agent-batch-view.js",
+      "select_templates": 3
+    },
+    {
+      "file": "frontend/modules/certificate-forms.js",
+      "select_templates": 9
+    },
+    {
+      "file": "frontend/modules/certificate-view.js",
+      "select_templates": 3
+    },
+    {
+      "file": "frontend/modules/certificates.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/client-access-results.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/client-access-view.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/client-connection-filters.js",
+      "select_templates": 2
+    },
+    {
+      "file": "frontend/modules/config-archive.js",
+      "select_templates": 5
+    },
+    {
+      "file": "frontend/modules/config-fields.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/config-outbounds.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/core-log-view.js",
+      "select_templates": 3
+    },
+    {
+      "file": "frontend/modules/outbound-presets.js",
+      "select_templates": 8
+    },
+    {
+      "file": "frontend/modules/preset-view.js",
+      "select_templates": 5
+    },
+    {
+      "file": "frontend/modules/server-plan-form.js",
+      "select_templates": 3
+    },
+    {
+      "file": "frontend/modules/server-plan-managed-tls.js",
+      "select_templates": 2
+    },
+    {
+      "file": "frontend/modules/server-plan-mieru.js",
+      "select_templates": 5
+    },
+    {
+      "file": "frontend/modules/server-plan-xhttp.js",
+      "select_templates": 2
+    },
+    {
+      "file": "frontend/modules/settings-view.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/substore-view.js",
+      "select_templates": 2
+    },
+    {
+      "file": "frontend/modules/system-bbr-view.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/task-view.js",
+      "select_templates": 4
+    },
+    {
+      "file": "frontend/modules/traffic-form-view.js",
+      "select_templates": 5
+    },
+    {
+      "file": "frontend/modules/traffic-view.js",
+      "select_templates": 3
+    },
+    {
+      "file": "frontend/modules/user-account-editor.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/user-allocation-view.js",
+      "select_templates": 1
+    },
+    {
+      "file": "frontend/modules/user-view.js",
+      "select_templates": 1
+    }
+  ],
+  "module_count": 26,
+  "template_count": 74,
+  "dynamic_selects": [
+    {
+      "file": "frontend/modules/config-inbounds.js",
+      "count": 2
+    },
+    {
+      "file": "frontend/modules/certificate-selector.js",
+      "count": 1
+    }
+  ],
+  "datalist": [
+    {
+      "file": "frontend/modules/preset-view.js",
+      "id": "reality-presets"
+    }
+  ],
+  "summary": "26 modules / 74 select templates + 3 dynamic select constructors in 2 modules + 1 Reality datalist; globally delegated handler covers current and future mounted instances",
+  "total_module_count": 28
+}

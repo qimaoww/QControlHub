@@ -1,3 +1,4 @@
+import { preserveSelectMenuAttribute } from "./select-menu.js";
 import { captureListMotion, finishListMotion } from "./list-motion.js";
 import { enterSurface } from "./motion.js";
 
@@ -113,6 +114,7 @@ function syncAttributes(current, fresh, metrics) {
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
+    if (preserveSelectMenuAttribute(current, attribute.name)) return;
     if (attribute.name === "data-motion-title") {
       if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
       else current.removeAttribute(attribute.name);
@@ -138,6 +140,7 @@ function syncAttributes(current, fresh, metrics) {
     }
   });
   [...fresh.attributes].forEach((attribute) => {
+    if (preserveSelectMenuAttribute(current, attribute.name)) return;
     if (["data-motion-title", "data-motion-description", "data-motion-invalid"].includes(attribute.name)) return;
     if (current.getAttribute("data-motion-description") != null && attribute.name === "aria-description") return;
     if (current.getAttribute("data-motion-invalid") != null && ["aria-invalid", "aria-errormessage"].includes(attribute.name)) return;

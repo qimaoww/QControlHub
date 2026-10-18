@@ -1,0 +1,30 @@
+[
+  {
+    "stage": "before",
+    "device": "desktop",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "before",
+    "device": "desktop",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "desktop",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "desktop",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  }
+]

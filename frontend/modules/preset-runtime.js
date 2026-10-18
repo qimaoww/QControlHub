@@ -33,3 +33,18 @@ export function renderPresetIdentity(markup, options, forwarding = "") {
     'href="#target" data-builder-step="target"><b>02</b><strong>目标</strong>');
   return markup;
 }
+
+// Use the same labelled fields as settings and allocation dialogs.
+export function preparePresetFields(root) {
+  for (const label of root.querySelectorAll("label")) {
+    if (!label.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')) continue;
+    label.classList.add("settings-field");
+    for (const node of [...label.childNodes]) {
+      if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
+      const title = document.createElement("span");
+      title.textContent = node.textContent;
+      node.replaceWith(title);
+    }
+  }
+  root.querySelectorAll("[data-secret-visibility]").forEach(button => button.classList.add("button"));
+}

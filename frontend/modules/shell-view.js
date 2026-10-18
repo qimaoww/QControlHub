@@ -1,3 +1,4 @@
+import { installSelectMenus } from "./select-menu.js";
 import { installInteractionFeedback } from "./interaction-feedback.js";
 import { enterWorkspace, captureDockMotion, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
 import { cancelMotion, syncSelectionMotion } from "./motion.js";
@@ -190,6 +191,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   syncSelectionMotion(renderedMain, { animate: !routeChanged && !viewChanged });
   observeFeedback(app);
   installInteractionFeedback();
+  installSelectMenus();
   document.querySelector("#logout").onclick = async () => {
     try {
       await api("/auth/logout", { method: "POST" });

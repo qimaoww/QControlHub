@@ -1,0 +1,41 @@
+node --test frontend/module_policy_test.mjs
+TAP version 13
+# frontend/module_policy_test.mjs: 182 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 34.680859
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 39.964385
+node --test frontend/smoke_policy_test.mjs
+TAP version 13
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 1 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 5.679436
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 2 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 3.554971
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 47.853954

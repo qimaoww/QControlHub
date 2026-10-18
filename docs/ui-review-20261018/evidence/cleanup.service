@@ -1,0 +1,8 @@
+[Unit]
+Description=Clean task-owned QControlHub UI review resources
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /var/lib/qch-ui-review-7d05-20261018/cleanup.py /var/lib/qch-ui-review-7d05-20261018/manifest.json
+Restart=on-failure
+RestartSec=1h

@@ -34,7 +34,7 @@
 .field-inheritance code{color:var(--ink-2);white-space:pre-wrap}
 .config-field-studio .field-mutation{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:14px 0 10px;padding:0;border:0;background:none}
 .config-field-studio .field-mutation>label{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:calc(10px * var(--ui-font-scale))}
-.config-field-studio .field-mutation select{width:auto;min-width:122px;height:32px;min-height:32px;font-size:calc(10px * var(--ui-font-scale))}
+.config-field-studio .field-mutation select{width:auto;min-width:122px}
 .field-value-state{color:var(--muted);font-size:calc(9px * var(--ui-font-scale))}
 .field-value-label{min-width:0;display:grid;gap:6px;color:var(--ink-2);font-size:calc(10px * var(--ui-font-scale));font-weight:600}
 .config-field-studio .field-canvas form textarea,.config-source-studio textarea{width:100%;min-height:128px;margin:0;border-color:var(--code-line);border-radius:7px;padding:12px;background:var(--code-canvas);color:var(--code-ink);caret-color:var(--code-caret);font:calc(11px * var(--ui-font-scale))/1.7 "SFMono-Regular",Consolas,monospace;resize:vertical;tab-size:2}

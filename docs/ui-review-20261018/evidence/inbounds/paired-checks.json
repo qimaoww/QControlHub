@@ -1,0 +1,1397 @@
+{
+  "pairs": 174,
+  "checks": [
+    {
+      "state": "xray-reality",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-reality",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-reality",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-reality",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-reality",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-reality",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-tls",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-xhttp",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "xray-split",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-reality",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "singbox-managed",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-mieru",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-snell",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "mihomo-sudoku",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "ssrust",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "port-forward",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-reality",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "embedded-managed",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "desktop",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "desktop",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "mobile",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "mobile",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "tablet",
+      "theme": "dark",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-listen",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-identity",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-reality",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-advanced",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-tls",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-xhttp-help",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-split",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-managed-advanced",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-mieru",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-snell",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-sudoku",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-ssrust",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-forward",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    },
+    {
+      "state": "modal-wireguard",
+      "device": "tablet",
+      "theme": "light",
+      "same_payload": true,
+      "no_document_overflow": true,
+      "no_field_overflow": true
+    }
+  ]
+}
