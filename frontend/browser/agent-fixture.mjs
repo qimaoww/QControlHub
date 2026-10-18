@@ -350,14 +350,14 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
-    if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
-    if (path === "/traffic-endpoints") return json(testAPI.trafficEndpoints || []);
+    if (path === "/traffic-policies") return json((testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy })));
+    if (path === "/traffic-endpoints") return json([...(testAPI.trafficPolicies || []).filter(p => p.deployment_confirmed !== false), ...(testAPI.trafficEndpoints || [])].map(endpoint => ({ is_current_user: true, ...endpoint })));
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;
         if (testAPI.trafficPreviewUnauthorized) return json({ error: "session expired" }, 401);
         if (testAPI.trafficPreviewFailure) return json({ error: "preview unavailable" }, 500);
-        return json({ snapshot: "scan-version-1", candidates: testAPI.trafficCandidates });
+        return json({ snapshot: "scan-version-1", candidates: testAPI.trafficCandidates.map(candidate => ({ is_current_user: true, ...candidate })) });
       }
       const body = JSON.parse(options.body);
       testAPI.trafficSnapshot = body.snapshot;

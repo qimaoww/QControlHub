@@ -3,9 +3,24 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 81
+const currentSchemaVersion = 82
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS traffic_batch_requests (
+ account_id text NOT NULL,
+ request_id text NOT NULL,
+ payload_hash text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(account_id,request_id)
+);
+CREATE TABLE IF NOT EXISTS traffic_batch_results (
+ account_id text NOT NULL,
+ request_id text NOT NULL,
+ policy_id text NOT NULL,
+ result jsonb NOT NULL,
+ PRIMARY KEY(account_id,request_id,policy_id),
+ FOREIGN KEY(account_id,request_id) REFERENCES traffic_batch_requests(account_id,request_id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS account_node_orders (
  account_id text PRIMARY KEY,
  node_ids text[] NOT NULL DEFAULT '{}',
@@ -551,6 +566,20 @@ LEFT JOIN LATERAL (
 ) deployed ON true
 LEFT JOIN configs c ON c.id=COALESCE(deployed.config_id,latest.config_id)
 ON CONFLICT(agent_id,engine) DO NOTHING;
+-- A lifecycle attempt can be uncertain while the previous applied revision is
+-- still the traffic baseline. Never infer confirmation from a claimed task.
+ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_config_confirmed boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS traffic_config_confirmed boolean NOT NULL DEFAULT false;
+UPDATE agent_engine_ownership state SET traffic_config_confirmed=true
+WHERE NOT traffic_config_confirmed AND config_id<>'' AND config_version>0 AND
+ (NOT config_uncertain OR EXISTS(SELECT 1 FROM tasks t WHERE t.agent_id=state.agent_id AND t.engine=state.engine
+  AND NOT t.shared_instance AND t.config_id=state.config_id AND t.config_version=state.config_version
+  AND t.action IN ('deploy','import-existing') AND t.status='succeeded' AND t.finished_at IS NOT NULL));
+UPDATE agent_shared_instance_ownership state SET traffic_config_confirmed=true
+WHERE NOT traffic_config_confirmed AND config_id<>'' AND config_version>0 AND
+ (NOT config_uncertain OR applied_task_id<>'' OR EXISTS(SELECT 1 FROM tasks t WHERE t.agent_id=state.agent_id AND t.engine=state.engine
+  AND t.shared_instance AND t.shared_traffic_id=state.share_id AND t.config_id=state.config_id AND t.config_version=state.config_version
+  AND t.action='deploy' AND t.status='succeeded' AND t.finished_at IS NOT NULL));
 CREATE INDEX IF NOT EXISTS tasks_owner_created_idx ON tasks(owner_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

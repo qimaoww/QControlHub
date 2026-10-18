@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) {
@@ -22,7 +23,9 @@ func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) 
 		}
 	}
 	admin.call("PUT", "/users/"+alice.userID, map[string]any{"permissions": []string{"traffic.read", "traffic.manage"}}, http.StatusOK, nil)
+	aliceID := alice.userID
 	alice, _ = managementLogin(t, alice.handler, "alice", "config scope password fixture", http.StatusOK)
+	alice.userID = aliceID
 	alice.call("GET", "/agents", nil, http.StatusForbidden, nil)
 	var page struct {
 		Agents []struct {
@@ -55,6 +58,26 @@ func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) 
 	alice.call("POST", "/traffic-policies", policy, http.StatusForbidden, nil)
 	// Existing integrations continue receiving an array, not the page envelope.
 	var legacy []core.PortTrafficPolicy
+	alice.call("GET", "/traffic-policies", nil, http.StatusOK, &legacy)
+	if len(legacy) != 0 {
+		t.Fatalf("undeployed policy visible: %+v", legacy)
+	}
+	scoped := store.WithConfigScope(ctx, alice.userID, false)
+	c, err := db.SaveAgentConfig(scoped, core.Config{AgentID: own.ID, Engine: core.EngineMihomo, Name: "traffic-only account", Content: "listeners: [{name: own, type: http, port: 21011}]\n"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture maintenance deploys Alice's configuration; her session retains
+	// only traffic permissions throughout every HTTP assertion.
+	task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: own.ID, Engine: c.Engine, ConfigID: c.ID, ExpectedConfigVersion: c.Version, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeConfigScopeAPITask(t, ctx, db, task)
+	alice.call("GET", "/traffic-policies?view=page", nil, http.StatusOK, &page)
+	if len(page.Policies) != 1 || !page.Policies[0].IsCurrentUser || page.Policies[0].OwnerID != alice.userID || !page.Policies[0].DeploymentConfirmed {
+		t.Fatalf("traffic-only account lost ownership metadata: %+v", page.Policies)
+	}
 	alice.call("GET", "/traffic-policies", nil, http.StatusOK, &legacy)
 	if len(legacy) != 1 || legacy[0].AgentID != own.ID {
 		t.Fatalf("legacy traffic response: %+v", legacy)

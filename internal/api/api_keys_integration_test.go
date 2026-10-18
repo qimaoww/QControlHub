@@ -116,7 +116,7 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 		for _, path := range []string{"/overview", "/agents", "/deployments", "/configs", "/tasks", "/core-log-sources", "/core-logs", "/audit", "/settings/deployment"} {
 			call(secret, "GET", path, nil, "", "", 200)
 		}
-		for _, route := range []struct{ method, path string }{{"POST", "/tasks"}, {"POST", "/settings/check-update"}, {"POST", "/settings/api-keys"}, {"GET", "/settings/api-keys"}, {"GET", "/users"}, {"GET", "/tasks/tsk_0000000000000000/retry-editor"}, {"GET", "/traffic-endpoints/sync"}, {"PUT", "/preferences/node-order"}, {"DELETE", "/configs/cfg_fixture"}} {
+		for _, route := range []struct{ method, path string }{{"POST", "/tasks"}, {"POST", "/settings/check-update"}, {"POST", "/settings/api-keys"}, {"GET", "/settings/api-keys"}, {"GET", "/users"}, {"GET", "/tasks/tsk_0000000000000000/retry-editor"}, {"GET", "/traffic-endpoints/sync"}, {"POST", "/traffic-policies/batch"}, {"PUT", "/preferences/node-order"}, {"DELETE", "/configs/cfg_fixture"}} {
 			call(secret, route.method, route.path, nil, "", "", 403)
 		}
 		call(secret, "GET", "/auth/session", nil, "", "", 401)

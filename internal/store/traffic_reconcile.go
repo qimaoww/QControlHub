@@ -124,7 +124,7 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	}
 	valid := map[string]bool{}
 	for _, c := range configurations {
-		if !c.Uncertain && c.AppliedVersion > 0 && c.ShareID == "" {
+		if c.AppliedVersion > 0 && c.AppliedContent != "" && c.ShareID == "" {
 			for _, ep := range configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID) {
 				valid[fmt.Sprintf("%s:%s:%d:%d:%s", ep.AgentID, ep.ConfigID, ep.ConfigVersion, ep.Port, ep.Name)] = true
 			}

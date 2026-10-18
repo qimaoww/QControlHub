@@ -105,7 +105,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 	for _, agentID := range changed {
 		s.refreshAgentTrafficPolicies(agentID)
 	}
-	policies, err := s.store.ListPortTrafficPolicies(request.Context())
+	policies, err := s.store.CurrentPortTrafficPolicies(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return

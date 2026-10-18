@@ -23,6 +23,8 @@ type trafficConfiguration struct {
 	ShareID        string
 	Uncertain      bool
 	AppliedContent string
+	Ownership      core.TrafficOwnership
+	ServiceStatus  string
 }
 
 type TrafficSyncPreview struct {
@@ -35,39 +37,48 @@ func (s *Store) trafficConfigurations(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, allOwners bool) ([]trafficConfiguration, error) {
 	args := []any{}
-	where := agentEngineAccessClause(ctx, "c.agent_id", "c.engine", &args)
+	where := agentEngineAccessClause(ctx, "a.id", "c.engine", &args)
 	if !allOwners {
-		if scope, scoped := requestConfigScope(ctx); scoped {
+		if scope, scoped := requestConfigScope(ctx); scoped && !scope.Admin {
 			args = append(args, scope.OwnerID)
 			where += fmt.Sprintf(" AND (c.owner_id=$%[1]d OR a.owner_id=$%[1]d)", len(args))
 		}
 	}
-	rows, err := q.Query(ctx, `SELECT c.id,c.agent_id,c.name,c.engine,c.content,c.version,c.updated_at,c.owner_id,
-  COALESCE(state.config_version,0),COALESCE(state.share_id,''),COALESCE(state.uncertain,false),
-  COALESCE(r.content,CASE WHEN c.version=state.config_version THEN c.content ELSE '' END)
- FROM configs c JOIN agents a ON a.id=c.agent_id
+	rows, err := q.Query(ctx, `SELECT c.id,a.id,c.name,c.engine,c.content,c.version,c.updated_at,c.owner_id,
+  COALESCE(state.config_version,0),COALESCE(state.share_id,''),COALESCE(state.uncertain,false),COALESCE(state.service_status,'unknown'),
+  COALESCE(r.content,CASE WHEN c.version=state.config_version THEN c.content ELSE '' END),
+ COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),CASE WHEN c.owner_id='' THEN '管理员' WHEN starts_with(c.owner_id,'token_') THEN '令牌用户' ELSE '已删除用户' END)
+ FROM configs c
+ JOIN LATERAL (
+  SELECT c.agent_id AS agent_id WHERE c.agent_id<>''
+  UNION SELECT base.agent_id FROM agent_engine_ownership base WHERE base.config_id=c.id AND base.engine=c.engine AND base.owner_id=c.owner_id
+  UNION SELECT sh.agent_id FROM agent_shared_instance_ownership sh WHERE sh.config_id=c.id AND sh.engine=c.engine AND sh.owner_id=c.owner_id
+ ) target ON true
+ JOIN agents a ON a.id=target.agent_id LEFT JOIN panel_users u ON u.id=c.owner_id
  LEFT JOIN LATERAL (
-  SELECT sh.config_version,sh.share_id,sh.uncertain OR sh.config_uncertain AS uncertain
+  SELECT CASE WHEN sh.traffic_config_confirmed THEN sh.config_version ELSE 0 END AS config_version,sh.share_id,sh.uncertain OR sh.config_uncertain AS uncertain,sh.service_status
   FROM agent_shared_instance_ownership sh JOIN agent_shares grant_ ON grant_.id=sh.share_id
-  WHERE sh.agent_id=c.agent_id AND sh.engine=c.engine AND sh.owner_id=c.owner_id AND sh.config_id=c.id
+  WHERE sh.agent_id=a.id AND sh.engine=c.engine AND sh.owner_id=c.owner_id AND sh.config_id=c.id
     AND grant_.user_id=c.owner_id AND grant_.enabled AND grant_.status='accepted' AND sh.engine=ANY(grant_.engines)
   UNION ALL
-  SELECT base.config_version,'' AS share_id,base.uncertain OR base.config_uncertain AS uncertain
-  FROM agent_engine_ownership base WHERE base.agent_id=c.agent_id AND base.engine=c.engine
+  SELECT CASE WHEN base.traffic_config_confirmed THEN base.config_version ELSE 0 END AS config_version,'' AS share_id,base.uncertain OR base.config_uncertain AS uncertain,CASE WHEN base.uncertain THEN 'unknown' WHEN base.running THEN 'active' ELSE 'inactive' END AS service_status
+  FROM agent_engine_ownership base WHERE base.agent_id=a.id AND base.engine=c.engine
     AND base.owner_id=c.owner_id AND base.config_id=c.id
  ) state ON true
  LEFT JOIN config_revisions r ON r.config_id=c.id AND r.version=state.config_version
- WHERE c.deleted_at IS NULL AND a.revoked_at IS NULL`+where+` ORDER BY c.agent_id,c.engine,c.owner_id,state.share_id`, args...)
+ WHERE c.deleted_at IS NULL AND a.revoked_at IS NULL`+where+` ORDER BY a.id,c.engine,c.owner_id,state.share_id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	var result []trafficConfiguration
 	for rows.Next() {
 		var item trafficConfiguration
-		if err = rows.Scan(&item.Config.ID, &item.Config.AgentID, &item.Config.Name, &item.Config.Engine, &item.Config.Content, &item.Config.Version, &item.Config.UpdatedAt, &item.Config.OwnerID, &item.AppliedVersion, &item.ShareID, &item.Uncertain, &item.AppliedContent); err != nil {
+		if err = rows.Scan(&item.Config.ID, &item.Config.AgentID, &item.Config.Name, &item.Config.Engine, &item.Config.Content, &item.Config.Version, &item.Config.UpdatedAt, &item.Config.OwnerID, &item.AppliedVersion, &item.ShareID, &item.Uncertain, &item.ServiceStatus, &item.AppliedContent, &item.Ownership.OwnerName); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		item.Ownership.OwnerID = item.Config.OwnerID
+		item.Ownership.IsCurrentUser = item.Config.OwnerID == scopeForConfig(ctx).OwnerID
 		result = append(result, item)
 	}
 	rows.Close()
@@ -96,6 +107,7 @@ func configurationTrafficEndpoints(config core.Config, content string, version i
 		endpoints[i].ConfigVersion = version
 		endpoints[i].ConfigUpdatedAt = config.UpdatedAt
 		endpoints[i].ShareID = shareID
+		endpoints[i].OwnerID = config.OwnerID
 	}
 	return endpoints
 }
@@ -107,8 +119,8 @@ func (s *Store) AppliedTrafficEndpoints(ctx context.Context) ([]core.PortTraffic
 	}
 	result := make([]core.PortTrafficEndpoint, 0)
 	for _, c := range configurations {
-		if !c.Uncertain && c.AppliedVersion > 0 {
-			result = append(result, configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID)...)
+		if c.AppliedVersion > 0 && c.AppliedContent != "" {
+			result = append(result, c.endpoints(c.AppliedContent, c.AppliedVersion)...)
 		}
 	}
 	return result, nil
@@ -158,8 +170,8 @@ func (s *Store) trafficSyncPreviewTx(ctx context.Context, tx pgx.Tx) (TrafficSyn
 	covered := map[string]bool{}
 	for _, c := range configurations {
 		identities = append(identities, []any{c.Config.ID, c.Config.Version, c.Config.UpdatedAt, c.AppliedVersion, c.ShareID, c.Uncertain})
-		active := configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID)
-		draft := configurationTrafficEndpoints(c.Config, c.Config.Content, c.Config.Version, c.ShareID)
+		active := c.endpoints(c.AppliedContent, c.AppliedVersion)
+		draft := c.endpoints(c.Config.Content, c.Config.Version)
 		if c.AppliedVersion == 0 {
 			active = nil
 		}
@@ -188,11 +200,12 @@ func (s *Store) trafficSyncPreviewTx(ctx context.Context, tx pgx.Tx) (TrafficSyn
 					previousUpdated = p.UpdatedAt
 				}
 			}
+			if c.AppliedContent != "" {
+				result.Endpoints = append(result.Endpoints, ep)
+			}
 			if c.Uncertain || c.AppliedContent == "" {
 				candidate.DeploymentStatus = "uncertain"
 				candidate.BlockedReason = "部署状态尚未确认，请等待 Agent 确认后重新扫描"
-			} else {
-				result.Endpoints = append(result.Endpoints, ep)
 			}
 			result.Candidates = append(result.Candidates, candidate)
 		}
@@ -223,7 +236,13 @@ func (s *Store) trafficSyncPreviewTx(ctx context.Context, tx pgx.Tx) (TrafficSyn
 		if covered[key] {
 			continue
 		}
-		candidate := core.TrafficSyncCandidate{PortTrafficEndpoint: core.PortTrafficEndpoint{AgentID: p.AgentID, Name: p.Name, Engine: p.Engine, Port: p.Port, Protocol: p.Protocol, ShareID: p.ShareID}, Kind: "removed", DeploymentStatus: "retained", BlockedReason: "已不在确认生效配置中；保留历史，端口预留由节点所有者管理"}
+		for _, c := range configurations {
+			if c.Config.ID == p.ConfigID || p.ShareID != "" && c.ShareID == p.ShareID && c.Config.Engine == p.Engine {
+				p.TrafficOwnership = c.Ownership
+				break
+			}
+		}
+		candidate := core.TrafficSyncCandidate{PortTrafficEndpoint: core.PortTrafficEndpoint{TrafficOwnership: p.TrafficOwnership, AgentID: p.AgentID, Name: p.Name, Engine: p.Engine, Port: p.Port, Protocol: p.Protocol, ShareID: p.ShareID, ConfigID: p.ConfigID, ConfigVersion: p.ConfigVersion}, Kind: "removed", DeploymentStatus: "retained", BlockedReason: "已不在确认生效配置中；保留历史，端口预留由节点所有者管理"}
 		result.Candidates = append(result.Candidates, candidate)
 	}
 	sort.SliceStable(result.Candidates, func(i, j int) bool {
@@ -366,6 +385,15 @@ func (s *Store) SyncPortTrafficSnapshot(ctx context.Context, snapshot string, se
 // remains authorized through the original allocation. Reservations are retained
 // until an explicit settled release; no automatic sync reallocates a port.
 func (s *Store) finishDeployedTrafficTx(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine, shareID, configID string, version int, settled bool) error {
+	if _, err := tx.Exec(ctx, `UPDATE agent_engine_ownership SET traffic_config_confirmed=true
+ WHERE agent_id=$1 AND engine=$2 AND $3='' AND config_id=$4 AND config_version=$5 AND NOT config_uncertain;
+ `, agentID, engine, shareID, configID, version); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_shared_instance_ownership SET traffic_config_confirmed=true
+ WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND config_id=$4 AND config_version=$5 AND NOT config_uncertain`, agentID, engine, shareID, configID, version); err != nil {
+		return err
+	}
 	var content string
 	if err := tx.QueryRow(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version=$2`, configID, version).Scan(&content); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -491,7 +519,8 @@ func (s *Store) applyDeployedTrafficTx(ctx context.Context, tx pgx.Tx, agentID s
 
 // RepairAppliedTrafficPolicies corrects old residue after upgrade/reconnect.
 // Locks prevent a previously read discovery snapshot from undoing a deployment.
-// Unknown or missing revisions are preserved; only confirmed evidence retires.
+// Current monitors require a confirmed listener. Retirement only disables
+// collection; retained usage, history, quota and shared protection stay intact.
 func (s *Store) RepairAppliedTrafficPolicies(ctx context.Context, agentID string) ([]string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -513,11 +542,58 @@ func (s *Store) RepairAppliedTrafficPolicies(ctx context.Context, agentID string
 		return nil, err
 	}
 	changedAgents := map[string]bool{}
+	active := map[string][]core.PortTrafficEndpoint{}
+	for _, c := range configs {
+		if c.AppliedVersion > 0 && c.AppliedContent != "" {
+			for _, ep := range c.endpoints(c.AppliedContent, c.AppliedVersion) {
+				key := trafficPortKey(ep.AgentID, ep.Port)
+				active[key] = append(active[key], ep)
+			}
+		}
+	}
+	policyArgs := []any{agentID}
+	policyWhere := trafficAccessClause(ctx, "port_traffic_policies.agent_id", "port_traffic_policies.id", &policyArgs)
+	residue, err := tx.Query(ctx, `SELECT id,agent_id,port,engine,config_id FROM port_traffic_policies WHERE monitoring_enabled AND share_id IS NULL AND ($1='' OR agent_id=$1)`+policyWhere+` ORDER BY id FOR UPDATE`, policyArgs...)
+	if err != nil {
+		return nil, err
+	}
+	type stalePolicy struct {
+		id, agent, config string
+		port              int
+		engine            core.Engine
+	}
+	var stale []stalePolicy
+	for residue.Next() {
+		var p stalePolicy
+		if err := residue.Scan(&p.id, &p.agent, &p.port, &p.engine, &p.config); err != nil {
+			residue.Close()
+			return nil, err
+		}
+		confirmed := false
+		for _, ep := range active[trafficPortKey(p.agent, p.port)] {
+			// A previous revision of this configuration can still be rebound by
+			// the repair below. Another engine or instance is never evidence.
+			confirmed = confirmed || p.engine == ep.Engine && ep.ShareID == "" && (p.config == "" || p.config == ep.ConfigID)
+		}
+		if !confirmed {
+			stale = append(stale, p)
+		}
+	}
+	residue.Close()
+	if err := residue.Err(); err != nil {
+		return nil, err
+	}
+	for _, p := range stale {
+		if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false,receive_bps=0,send_bps=0,blocked=false,reset_generation=reset_generation+1,updated_at=now() WHERE id=$1`, p.id); err != nil {
+			return nil, err
+		}
+		changedAgents[p.agent] = true
+	}
 	for _, c := range configs {
 		if agentID != "" && c.Config.AgentID != agentID || c.Uncertain || c.AppliedVersion == 0 || c.AppliedContent == "" {
 			continue
 		}
-		endpoints := configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID)
+		endpoints := c.endpoints(c.AppliedContent, c.AppliedVersion)
 		ports := []int{}
 		for _, ep := range endpoints {
 			ports = append(ports, ep.Port)
