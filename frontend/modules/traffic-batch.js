@@ -1,4 +1,4 @@
-import { trafficBatchActions, trafficBatchState, trafficBatchQuotaMarkup } from "./traffic-batch-view.js";
+import { trafficBatchActions, trafficBatchState, trafficBatchQuotaMarkup, clearTrafficBatchResults } from "./traffic-batch-view.js";
 import { gibibyte } from "./traffic-model.js";
 import { bindDialogBackdrop } from "./popup.js";
 
@@ -18,14 +18,14 @@ export function createTrafficBatch({ api, state, notify, confirmAction }, { rend
       document.querySelectorAll("[data-traffic-batch-toggle], [data-traffic-batch-close], [data-traffic-selection-clear], [data-traffic-batch-action], [data-traffic-batch-retry], [data-traffic-filter], [data-traffic-filter-reset]").forEach(control => { control.disabled = batch.busy || control.matches("[data-traffic-selection-clear]") && !batch.selected.length || control.matches("[data-traffic-filter-reset]") && !Object.entries(state.data.trafficFilters || {}).some(([key,value]) => value && (key !== "user_scope" || value === "all")); });
       const submit = document.querySelector("[data-traffic-batch-submit]"); if (submit) { submit.disabled = batch.busy || !batch.selected.length; submit.textContent = batch.busy ? "处理中…" : "执行"; }
     };
-    const setMode = enabled => { if (batch.busy) return; cancelCardDrag(); batch.mode = enabled; batch.selected = []; batch.results = []; render(); };
+    const setMode = enabled => { if (batch.busy) return; cancelCardDrag(); batch.mode = enabled; batch.selected = []; clearTrafficBatchResults(batch); render(); };
     document.querySelectorAll("[data-traffic-batch-toggle]").forEach(button => { button.onclick = () => setMode(!batch.mode); });
     const form = document.querySelector("[data-traffic-batch-form]");
     if (!form) return;
     form.querySelector("[data-traffic-batch-close]").onclick = () => setMode(false);
     form.querySelector("[data-traffic-selection-clear]").onclick = () => { batch.selected = []; update(); };
     form.querySelector("[data-traffic-select-all]").onchange = event => { batch.selected = event.target.checked ? [...eligibleIDs] : []; update(); };
-    form.querySelector("[data-traffic-batch-action]").onchange = event => { batch.action = event.target.value; render(); };
+    form.querySelector("[data-traffic-batch-action]").onchange = event => { batch.action = event.target.value; clearTrafficBatchResults(batch); render(); };
     form.querySelectorAll("[data-traffic-choice]").forEach(input => { input.onchange = () => { batch.selected = batch.selected.filter(id => id !== input.dataset.trafficChoice); if (input.checked && eligibleIDs.has(input.dataset.trafficChoice)) batch.selected.push(input.dataset.trafficChoice); update(); }; });
     const bar = form.querySelector(".node-batch-bar");
     if (globalThis.ResizeObserver) { resizeObserver = new ResizeObserver(() => form.style.setProperty("--batch-bar-height", `${Math.ceil(bar.getBoundingClientRect().height)}px`)); resizeObserver.observe(bar); }

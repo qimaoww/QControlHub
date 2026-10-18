@@ -13,6 +13,12 @@ var diagnosticLegacyRealityPath = regexp.MustCompile(`(read certificate/key /var
 // configuration is unavailable (journal output or diagnostics from old Agents).
 func RedactDiagnostic(value string) string {
 	value = diagnosticPrivatePEM.ReplaceAllString(value, "[redacted private PEM]")
+	value = diagnosticAssignments.ReplaceAllString(value, "${1}[redacted]")
+	value = diagnosticBearer.ReplaceAllString(value, "Bearer [redacted]")
+	value = diagnosticAPIKey.ReplaceAllString(value, "[redacted]")
+	value = diagnosticUUID.ReplaceAllString(value, "[redacted UUID]")
+	value = diagnosticURLCredentials.ReplaceAllString(value, "${1}[redacted]@")
+	value = diagnosticURLSecret.ReplaceAllString(value, "${1}[redacted]")
 	value = diagnosticKeyAssignment.ReplaceAllString(value, "${1}[redacted]")
 	return diagnosticLegacyRealityPath.ReplaceAllString(value, "${1}[redacted]${2}")
 }

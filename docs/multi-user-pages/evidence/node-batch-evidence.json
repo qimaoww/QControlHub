@@ -1,0 +1,66 @@
+[
+  {
+    "scenario": "one owned node plus one shared node must not expose an empty host batch operation",
+    "phase": "before",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "light",
+    "account": "alice",
+    "route": "node-settings",
+    "button_visible": true,
+    "path": "screenshots/before-node-batch-desktop-light.png",
+    "video": "videos/before-node-batch-desktop.webm",
+    "result": "batch entry exists although there is only one manageable host"
+  },
+  {
+    "scenario": "one owned node plus one shared node must not expose an empty host batch operation",
+    "phase": "after",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "light",
+    "account": "alice",
+    "route": "node-settings",
+    "button_visible": false,
+    "path": "screenshots/after-node-batch-desktop-light.png",
+    "video": "videos/after-node-batch-desktop.webm",
+    "result": "entry uses the manageable-host count and is absent"
+  },
+  {
+    "scenario": "one owned node plus one shared node must not expose an empty host batch operation",
+    "phase": "before",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "light",
+    "account": "alice",
+    "route": "node-settings",
+    "button_visible": true,
+    "path": "screenshots/before-node-batch-mobile-light.png",
+    "video": "videos/before-node-batch-mobile.webm",
+    "result": "batch entry exists although there is only one manageable host"
+  },
+  {
+    "scenario": "one owned node plus one shared node must not expose an empty host batch operation",
+    "phase": "after",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "light",
+    "account": "alice",
+    "route": "node-settings",
+    "button_visible": false,
+    "path": "screenshots/after-node-batch-mobile-light.png",
+    "video": "videos/after-node-batch-mobile.webm",
+    "result": "entry uses the manageable-host count and is absent"
+  }
+]

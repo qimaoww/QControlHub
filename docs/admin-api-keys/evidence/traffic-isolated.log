@@ -1,0 +1,7 @@
+=== RUN   TestTrafficUsageUpdatesStayHeapOnly
+2026/10/19 01:55:54 INFO waiting for PostgreSQL migration lock backend_pid=2320
+2026/10/19 01:55:54 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 01:55:55 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=229.919855ms
+--- PASS: TestTrafficUsageUpdatesStayHeapOnly (1.12s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/store	1.336s

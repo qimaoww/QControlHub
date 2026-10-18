@@ -1,4 +1,4 @@
-import { trafficBatchBarMarkup, trafficBatchState } from "./traffic-batch-view.js";
+import { trafficBatchBarMarkup, trafficBatchState, clearTrafficBatchResults } from "./traffic-batch-view.js";
 import { cardMoveGrip, cardMoveHelp } from "./card-move-view.js";
 import { orderedNodeList } from "./node-order.js";
 import { gibibyte, dateInputValue, cycleName, protocolName, policyStatusKey, policyStatus, eligibleAgents, mergeTrafficPorts, orderTrafficItems, trafficCardIdentity, trafficRateForDisplay, trafficInUserScope, trafficPolicyEditable } from "./traffic-model.js";
@@ -21,7 +21,10 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
     const items = mergeTrafficPorts(policies, endpoints).filter(item => trafficInUserScope(item.policy || item.endpoint, currentFilters));
     const batch = trafficBatchState(state);
     const filterKey = JSON.stringify([currentFilters.user_scope || "current", currentFilters.agent_id || "", currentFilters.engine || "", currentFilters.endpoint_key || "", currentFilters.status || ""]);
-    if (batch.filterKey && batch.filterKey !== filterKey) batch.selected = [];
+    if (batch.filterKey && batch.filterKey !== filterKey) {
+      batch.selected = [];
+      clearTrafficBatchResults(batch);
+    }
     batch.filterKey = filterKey;
     if (currentFilters.endpoint_key && !items.some((item) => item.key === currentFilters.endpoint_key)) currentFilters.endpoint_key = "";
     if (currentFilters.engine && !items.some((item) => (item.policy || item.endpoint).engine === currentFilters.engine)) currentFilters.engine = "";

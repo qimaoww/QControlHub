@@ -1,0 +1,20 @@
+Command: make multi-user-browser-check
+Final exit code: 0
+Summary only; credentials and routine HTTP logs omitted.
+
+    certificates_browser_integration_test.go:46: desktop: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        desktop: revoked certificate detail and list disappear without navigation or manual refresh
+        desktop: Escape closes a certificate form and invalidates its delayed real resource response
+        desktop: same-browser logout/login clears private filters, dialogs and credential-account state
+    certificates_browser_integration_test.go:46: mobile: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        mobile: revoked certificate detail and list disappear without navigation or manual refresh
+        mobile: Escape closes a certificate form and invalidates its delayed real resource response
+        mobile: same-browser logout/login clears private filters, dialogs and credential-account state
+--- PASS: TestCertificateBrowserSessions (18.23s)
+    --- PASS: TestCertificateBrowserSessions/desktop (9.24s)
+    --- PASS: TestCertificateBrowserSessions/mobile (8.99s)
+--- PASS: TestMultiUserBrowserSessions (14.38s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (7.20s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (7.18s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	32.833s

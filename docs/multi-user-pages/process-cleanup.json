@@ -1,0 +1,12 @@
+{
+  "ports_released": [
+    18539,
+    18540,
+    55539
+  ],
+  "owned_browser_or_server_processes": [],
+  "browser_contexts": "All direct Playwright contexts closed in finally; named CLI session closed and profile deletion checked.",
+  "containers": "Both recorded validation containers stopped; data retained for 72 hours.",
+  "last_verified_at_utc": "2026-10-18T18:17:55+00:00",
+  "review_followup": "Final batch page capture fixture and database stopped, all browser contexts closed, and all three recorded ports verified released."
+}

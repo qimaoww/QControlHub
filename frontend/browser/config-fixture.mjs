@@ -154,7 +154,7 @@ export async function createConfigFixture(engine, options = {}) {
   };
   const pages = installConfigPages({state, api, optionalAPI:api, engines:[engine], esc, engineName:value=>value,
     conciseVersion:(_engine, version)=>version, date:String, ago:()=> "刚刚", bytes:String,
-    can:permission=>!options.readonly && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute") &&
+    can:permission=>(!options.readonly || ["agents.read", "agent-config.read", "configs.read"].includes(permission)) && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute") &&
       !(options.noPeerRead && permission === "client-access.read"),
     confirmAction:async(message, title)=>{test.confirmations.push({message, title}); return test.confirm;}, notify:message=>test.notices.push(message),
     renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors:()=>{},

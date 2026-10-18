@@ -3,6 +3,12 @@ import { dateInputValue } from "./traffic-model.js";
 export const trafficBatchState = state => state.data.trafficBatch ||= { mode: false, selected: [], action: "delete", busy: false, results: [] };
 export const trafficBatchActions = { delete: "删除流量记录", reset: "清零当前周期", quota: "设置配额", "remove-quota": "取消配额" };
 
+export function clearTrafficBatchResults(batch) {
+  batch.results = [];
+  batch.last = null;
+  batch.uncertainRequest = null;
+}
+
 export function trafficBatchBarMarkup(batch, esc) {
   const success = batch.results.filter(item => item.status === "succeeded").length;
   const failed = batch.results.filter(item => item.status === "failed").length;

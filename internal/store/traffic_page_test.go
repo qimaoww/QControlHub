@@ -10,6 +10,44 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestTrafficSchemaUpgradeFromMain81PreservesAPIKeys(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	admin := WithConfigScope(ctx, "", true)
+	key, secret, err := db.CreateAPIKey(admin, "environment", "environment", core.APIKeyInput{Name: "main81", Permissions: []core.Permission{core.PermissionTrafficRead}}, core.AuditLogEntry{Actor: "migration-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Main's schema 81 contains API keys but none of this PR's additions.
+	if _, err = db.pool.Exec(ctx, `DROP TABLE traffic_batch_results, traffic_batch_requests;
+ ALTER TABLE agent_engine_ownership DROP COLUMN traffic_config_confirmed;
+ ALTER TABLE agent_shared_instance_ownership DROP COLUMN traffic_config_confirmed;
+ DELETE FROM qcontrolhub_schema_migrations WHERE version>81;
+ INSERT INTO qcontrolhub_schema_migrations(version) VALUES(81) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err = db.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil || version != 82 {
+		t.Fatalf("migration version %d: %v", version, err)
+	}
+	for _, query := range []string{
+		`SELECT traffic_config_confirmed FROM agent_engine_ownership LIMIT 0`,
+		`SELECT traffic_config_confirmed FROM agent_shared_instance_ownership LIMIT 0`,
+		`SELECT * FROM traffic_batch_requests LIMIT 0`,
+		`SELECT * FROM traffic_batch_results LIMIT 0`,
+	} {
+		if _, err = db.pool.Exec(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retained, err := db.APIKeyForAuthentication(ctx, secret)
+	if err != nil || retained.ID != key.ID || retained.Revision != key.Revision || retained.RevokedAt != nil {
+		t.Fatalf("API key changed during upgrade: %+v %v", retained, err)
+	}
+}
+
 func TestTrafficPageConfirmedLifecycle(t *testing.T) {
 	db, ctx, url := isolatedConfigScopeStore(t)
 	_, owner := sharedTestUser(t, db, ctx, "traffic-owner")

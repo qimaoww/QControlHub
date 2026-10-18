@@ -255,7 +255,7 @@ try {
   };
   const renderTraffic = installTraffic({
     state: trafficState,
-    can: () => false,
+    can: permission => permission === "agents.read",
     esc: (value) => String(value ?? ""),
     engineName: (value) => value,
     bytes: (value) => `${value || 0} B`,

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ type apiSession struct {
 	ConfigOwnerID string
 	Username      string
 	Permissions   []core.Permission
+	EnvironmentID string
 	AuthRevision  int64
 }
 
@@ -80,6 +82,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	userID := ""
 	configOwnerID := ""
 	var authRevision int64
+	var environmentID string
 	var loginLookupErr error
 	if username != "" && secret != "" && s.store != nil {
 		user, hash, lookupErr := s.store.UserForLogin(request.Context(), strings.ToLower(username))
@@ -105,6 +108,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 		if principal, found := s.principalForToken(strings.TrimSpace(secret)); found {
 			role, ok, permissions = principal.Role, true, principal.Permissions
 			configOwnerID = principal.ConfigOwnerID
+			environmentID = environmentCreatorID(sha256.Sum256([]byte(strings.TrimSpace(secret))))
 		}
 	}
 	if ok && loginLookupErr != nil {
@@ -135,7 +139,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	expires := now.Add(s.sessionTTL)
 	s.sessionsMu.Lock()
 	s.pruneSessionsLocked(now)
-	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, ConfigOwnerID: configOwnerID, Username: username, Permissions: append([]core.Permission(nil), permissions...), AuthRevision: authRevision}
+	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, ConfigOwnerID: configOwnerID, Username: username, Permissions: append([]core.Permission(nil), permissions...), AuthRevision: authRevision, EnvironmentID: environmentID}
 	s.sessionsMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cookieName(), Value: token, Path: "/", Expires: expires,
@@ -152,6 +156,10 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) session(w http.ResponseWriter, request *http.Request) {
+	if _, legacy := s.principalForToken(bearerToken(request)); !legacy && strings.HasPrefix(bearerToken(request), "qch_key_") {
+		writeError(w, 401, "API Key 不能用于浏览器登录")
+		return
+	}
 	var valid bool
 	request, valid = s.validateSession(w, request)
 	if !valid {
@@ -193,6 +201,9 @@ func (s *Server) sessionForRequest(request *http.Request) (apiSession, bool) {
 	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
 		return value, true
 	}
+	if bearerToken(request) != "" {
+		return apiSession{}, false
+	}
 	cookie, err := request.Cookie(s.cookieName())
 	if err != nil || cookie.Value == "" {
 		return apiSession{}, false
@@ -207,9 +218,17 @@ func (s *Server) sessionForRequest(request *http.Request) (apiSession, bool) {
 
 func (s *Server) validateSession(w http.ResponseWriter, request *http.Request) (*http.Request, bool) {
 	if bearerToken(request) != "" {
-		return request, true
+		return s.authenticateAPIKey(w, request)
 	}
 	value, ok := s.sessionForRequest(request)
+	// Optional on reads for compatibility with API clients. The browser sends
+	// this on every request so an old tab cannot render a new cookie's account.
+	if ok && request.Header.Get(csrfHeader) != "" &&
+		(request.Method == http.MethodGet || request.Method == http.MethodHead) &&
+		!constantEqual(request.Header.Get(csrfHeader), value.CSRF) {
+		writeError(w, http.StatusUnauthorized, "session changed")
+		return request, false
+	}
 	if !ok || value.UserID == "" || s.store == nil {
 		return request, true // The normal authentication path handles no cookie.
 	}
@@ -236,6 +255,9 @@ func (s *Server) pruneSessionsLocked(now time.Time) {
 }
 
 func (s *Server) sessionRole(request *http.Request) (core.Role, bool) {
+	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
+		return value.Role, true
+	}
 	if token := bearerToken(request); token != "" {
 		return s.roleForToken(token)
 	}
@@ -244,6 +266,9 @@ func (s *Server) sessionRole(request *http.Request) (core.Role, bool) {
 }
 
 func (s *Server) sessionPermissions(request *http.Request) ([]core.Permission, bool) {
+	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
+		return value.Permissions, true
+	}
 	if token := bearerToken(request); token != "" {
 		principal, ok := s.principalForToken(token)
 		return principal.Permissions, ok
@@ -253,6 +278,9 @@ func (s *Server) sessionPermissions(request *http.Request) ([]core.Permission, b
 }
 
 func (s *Server) sessionUserID(request *http.Request) string {
+	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
+		return value.UserID
+	}
 	if bearerToken(request) != "" {
 		return ""
 	}
@@ -264,6 +292,9 @@ func (s *Server) sessionUserID(request *http.Request) string {
 }
 
 func (s *Server) configOwnerID(request *http.Request) string {
+	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
+		return value.ConfigOwnerID
+	}
 	if token := bearerToken(request); token != "" {
 		principal, _ := s.principalForToken(token)
 		if principal.ConfigOwnerID == "" && principal.Role != core.RoleAdmin {
@@ -366,6 +397,9 @@ func (s *Server) auditEntry(request *http.Request, action, target, detail string
 		actor = "api"
 	}
 	remoteIP := authn.ClientIP(request, s.trustedProxies)
+	if k, ok := requestAPIKey(request); ok {
+		actor = "key:" + k.ID
+	}
 	return core.AuditLogEntry{Actor: actor, Action: action, Target: target, Detail: detail, RemoteIP: remoteIP}
 }
 

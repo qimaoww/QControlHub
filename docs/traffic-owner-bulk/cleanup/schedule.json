@@ -2,10 +2,10 @@
   "task_id": "traffic-owner-bulk-20261019",
   "registry_id": "qch-traffic-owner-bulk-20261019",
   "status": "scheduled",
-  "tested_until": "2026-10-18T18:25:28+00:00",
-  "not_before": "2026-10-21T18:26:00+00:00",
+  "tested_until": "2026-10-18T19:21:29.024597+00:00",
+  "not_before": "2026-10-21T19:22:00+00:00",
   "timezone": "Asia/Shanghai",
-  "scheduled_local": "2026-10-22T02:26:00+08:00",
+  "scheduled_local": "2026-10-22T03:22:00+08:00",
   "container_id": "4e720665bb8854e9cae2897f4fc460e8ee367f2aa79404c9565f26e53803b2fd",
   "container_name": "qch-traffic-owner-bulk-20261019-db",
   "volume": {

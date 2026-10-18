@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-10-18T19:21:29.024597+00:00",
+  "container_running": false,
+  "ports_released": {
+    "55591": true,
+    "55592": true
+  },
+  "browsers": "complete browser harness exited successfully and cleans up its process groups/profiles",
+  "cleanup_registry_id": "qch-traffic-owner-bulk-20261019",
+  "not_before": "2026-10-21T19:22:00+00:00"
+}

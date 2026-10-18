@@ -4,6 +4,7 @@ import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
 const initialAnchor = location.hash;
+const readPermissions = ["overview.read", "agents.read", "deployments.read", "client-access.read", "catalogs.read", "agent-config.read", "configs.read", "tasks.read", "settings.read", "audit.read", "metrics.read", "traffic.read", "templates.read", "core-logs.read"];
 const tcpRules = [
   { key: "net.ipv4.tcp_congestion_control", label: "拥塞控制算法", choices: ["bbr", "bbr2", "bbr3", "cubic", "reno"] },
   { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "fq_pie", "pfifo_fast", "sfq", "cake"] },
@@ -285,7 +286,7 @@ if (mode.startsWith("config-layout")) {
 if (mode === "uninstall-writeonly")
   setStorageAccount({ role: "user" });
 if (mode.startsWith("bbr")) {
-  setStorageAccount({ role: mode === "bbr-readonly" ? "readonly" : mode === "bbr-writeonly" ? "user" : "admin" });
+  setStorageAccount({ role: ["bbr-readonly", "bbr-writeonly"].includes(mode) ? "user" : "admin" });
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.tcpTasks = [];
   testAPI.tcpMutations = [];
@@ -406,7 +407,9 @@ window.fetch = async (input, options = {}) => {
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
       : mode.startsWith("shared-node")
       ? { role: "user", user_id: "recipient", permissions: ["agents.read", "agents.manage", "enrollment.manage", "agent-config.read", "agent-config.write", "configs.read", "tasks.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
-      : { role: mode === "readonly" || mode.endsWith("-readonly") ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+      : mode === "readonly" || mode.endsWith("-readonly")
+      ? { role: "user", permissions: readPermissions, csrf_token: "browser-test-csrf" }
+      : { role: "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
   if (method === "GET" && path === "/system-tcp/tasks") {
     const latest = new Map();

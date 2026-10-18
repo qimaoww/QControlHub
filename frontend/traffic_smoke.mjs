@@ -88,9 +88,16 @@ try {
   policies = [policy];
   await render({ background: true });
   assert.deepEqual(state.data.trafficBatch.selected, [policy.id], "refresh prunes removed targets and preserves valid selection");
+  state.data.trafficBatch.results = [{ id: policy.id, status: "failed" }];
+  state.data.trafficBatch.last = { request_id: "old-request", ids: [policy.id] };
+  state.data.trafficBatch.uncertainRequest = state.data.trafficBatch.last;
   state.data.trafficFilters = {};
   await render();
   assert.deepEqual(state.data.trafficBatch.selected, [], "scope changes clear selection");
+  assert.deepEqual(state.data.trafficBatch.results, [], "scope changes clear previous operation results");
+  assert.equal(state.data.trafficBatch.last, null);
+  assert.equal(state.data.trafficBatch.uncertainRequest, null, "scope changes cannot replay hidden targets after a lost response");
+  assert.ok(!markup.includes("data-traffic-batch-retry"));
   state.data.trafficBatch.mode = false;
   policies = [
     { ...policy, id: "policy-b", agent_id: "beta" },

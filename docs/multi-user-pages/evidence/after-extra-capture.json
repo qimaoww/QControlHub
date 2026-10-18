@@ -1,0 +1,162 @@
+[
+  {
+    "phase": "after",
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "light",
+    "interaction": "focus node select; ArrowDown; Enter",
+    "options": [
+      {
+        "id": "",
+        "name": "选择节点"
+      },
+      {
+        "id": "agt_d9807d351ba2363e",
+        "name": "task-reader owned fixture"
+      }
+    ],
+    "path": "screenshots/after-certificates-desktop-light.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "permission",
+    "user": "empty",
+    "route": "live-config",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "light",
+    "interaction": "open route",
+    "path": "screenshots/after-permission-desktop-light.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "dark",
+    "interaction": "focus node select; ArrowDown; Enter",
+    "options": [
+      {
+        "id": "",
+        "name": "选择节点"
+      },
+      {
+        "id": "agt_d9807d351ba2363e",
+        "name": "task-reader owned fixture"
+      }
+    ],
+    "path": "screenshots/after-certificates-desktop-dark.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "permission",
+    "user": "empty",
+    "route": "live-config",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "dark",
+    "interaction": "open route",
+    "path": "screenshots/after-permission-desktop-dark.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "light",
+    "interaction": "focus node select; ArrowDown; Enter",
+    "options": [
+      {
+        "id": "",
+        "name": "选择节点"
+      },
+      {
+        "id": "agt_d9807d351ba2363e",
+        "name": "task-reader owned fixture"
+      }
+    ],
+    "path": "screenshots/after-certificates-mobile-light.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "permission",
+    "user": "empty",
+    "route": "live-config",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "light",
+    "interaction": "open route",
+    "path": "screenshots/after-permission-mobile-light.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "dark",
+    "interaction": "focus node select; ArrowDown; Enter",
+    "options": [
+      {
+        "id": "",
+        "name": "选择节点"
+      },
+      {
+        "id": "agt_d9807d351ba2363e",
+        "name": "task-reader owned fixture"
+      }
+    ],
+    "path": "screenshots/after-certificates-mobile-dark.png",
+    "overflow": false
+  },
+  {
+    "phase": "after",
+    "name": "permission",
+    "user": "empty",
+    "route": "live-config",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "dark",
+    "interaction": "open route",
+    "path": "screenshots/after-permission-mobile-dark.png",
+    "overflow": false
+  }
+]
