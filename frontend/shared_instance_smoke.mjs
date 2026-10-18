@@ -4,6 +4,16 @@ import { sharedInstancePresentation, sharedConfigPresentation } from "./modules/
 const node = (runtime = {}, instance = {}, status = "online") => ({can_manage:false, status,
   runtime:{xray:{installed:true, service_status:"unknown", ...runtime, instance:{...instance}}}});
 assert.equal(sharedInstancePresentation({can_manage:true}, "xray"), null);
+for (const runtime of [undefined, {}, { installed: true }, { installed: undefined, instance: {} }]) {
+  const agent = { can_manage: false, status: "online", runtime: { xray: runtime } };
+  assert.equal(sharedInstancePresentation(agent, "xray").label, "状态未知");
+  assert.equal(sharedConfigPresentation(agent, "xray").label, "配置待核实");
+}
+assert.equal(sharedInstancePresentation(node({}, {}, "offline"), "xray").label, "离线 · 状态未知", "offline must not become no configuration");
+assert.equal(sharedInstancePresentation(node({}, {}, "unknown"), "xray").label, "状态未知");
+assert.equal(sharedInstancePresentation({ can_manage: false, status: "online", runtime: { xray: { installed: false } } }, "xray").label, "未安装");
+assert.equal(sharedInstancePresentation(node({}, { config_uncertain: true }), "xray").label, "状态未知");
+assert.equal(sharedInstancePresentation(node({installed:false}), "xray").label, "未安装");
 assert.match(sharedInstancePresentation(node(), "xray").label, /尚未配置/);
 assert.equal(sharedInstancePresentation(node({}, {saved_version:1}), "xray").label, "待部署");
 const running = node({service_status:"active"}, {created:true, saved_config_id:"cfg_a", saved_version:2, deployed_config_id:"cfg_a", deployed_version:1});

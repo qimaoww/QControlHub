@@ -80,7 +80,8 @@ export async function testConfigScopeRuntime(preview = false) {
   assert(document.querySelector('[data-live-intent="save"]') && document.querySelector('[data-live-intent="deploy"]'), "authorized user must have separate save and deploy controls");
   assert(document.body.textContent.includes("本人端口 21001"), "shared workspace must identify the recipient's allocated resources");
   assert(document.querySelector('a[href="#settings-node-shared"]')?.textContent.includes("实例管理"), "shared workspace lost its node management link");
-  assert(!document.querySelector("[data-task-action], [data-instance-version], .live-engine-status"), "shared runtime status or lifecycle controls leaked into the configuration page");
+  assert(!document.querySelector("[data-task-action], [data-instance-version]"), "shared runtime status or lifecycle controls leaked into the configuration page");
+  assert([...document.querySelectorAll(".live-engine-status")].every(badge => badge.textContent === "配置待核实"), "shared configuration badges must describe the unknown configuration, without borrowing host runtime status");
   const owned = await configFixture({ owned: true });
   assert(document.querySelector('[data-live-source="managed"]') && document.querySelector('[data-live-source="import"]'), "owner cannot explicitly read/import its host configuration");
   assert(!owned.records.calls.includes("/tasks") && !owned.records.tasks.length, "owner's personal editor auto-read a host snapshot");

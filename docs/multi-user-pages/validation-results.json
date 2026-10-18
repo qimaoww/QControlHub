@@ -1,0 +1,44 @@
+{
+  "recorded_at_utc": "2026-10-18T17:50:34.794692+00:00",
+  "native_browser_modes": 85,
+  "dock_browser_viewports": 6,
+  "local_results": [
+    {
+      "command": "make non-browser-checks",
+      "exit_code": 0,
+      "log": "evidence/logs/non-browser-checks.log"
+    },
+    {
+      "command": "make test",
+      "exit_code": 0,
+      "log": "evidence/logs/go-test.log"
+    },
+    {
+      "command": "make browser-checks",
+      "exit_code": 0,
+      "log": "evidence/logs/browser-checks.log"
+    },
+    {
+      "command": "TestSharedCoreLogLiveLifecycle (isolated systemd container, pinned upstream binaries)",
+      "exit_code": 0,
+      "log": "evidence/logs/core-log-live.log"
+    },
+    {
+      "command": "node frontend/module_smoke.mjs (after the final certificate polling guard)",
+      "exit_code": 0,
+      "log": "evidence/logs/final-module-check.log"
+    },
+    {
+      "command": "route audit with real account sessions and three viewports",
+      "exit_code": 0,
+      "cases": 228,
+      "results": "evidence/route-audit.json"
+    },
+    {
+      "command": "real HTTP delay, account-cookie replacement, idle share revocation recordings",
+      "exit_code": 0,
+      "results": "evidence/async-evidence.json"
+    }
+  ],
+  "remote_ci": "Triggered by the PR. Check the PR for the status of the pushed commit; no remote success is inferred from local execution."
+}

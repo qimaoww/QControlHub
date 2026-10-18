@@ -117,6 +117,47 @@ try {
   assert.equal(alice.role, "user"); assert.equal(bob.role, "user"); assert.equal(admin.role, "admin");
   assert.notEqual(alice.user_id, bob.user_id);
   record(`${mode}: three independent browser contexts, real password/cookie/CSRF identities`);
+  for (const [user, route, selector] of [["task-reader", "tasks", "[data-task-page]"], ["traffic-reader", "traffic", ".traffic-workspace"]]) {
+    const page = await createPage();
+    await login(page, user);
+    await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
+    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
+    assert.ok(await evaluate(page, "!document.querySelector('.workspace-main .alert.error')"));
+    assert.ok(await evaluate(page, "document.documentElement.scrollWidth <= innerWidth + 1"));
+    assert.equal(await evaluate(page, "document.querySelector('[data-sync-label]').textContent"), user === "traffic-reader" ? "1 个节点在线" : "节点状态未知");
+    await screenshot(page, user);
+    await evaluate(page, "location.hash='#certificates'");
+    await wait(page, "!!document.querySelector('[data-cert-accounts]')");
+    await evaluate(page, "document.querySelector('[data-cert-accounts]').click()");
+    await wait(page, "!!document.querySelector('dialog[open] [data-cert-http-grant]')");
+    const nodes = await evaluate(page, "[...document.querySelectorAll('dialog[open] select[name=agent_id] option')].map(option=>option.value).filter(Boolean)");
+    assert.deepEqual(nodes, [fixture.owned[user]], "certificate HTTP authorization must use the owned-node scope without agents.read");
+    await evaluate(page, "document.querySelector('[data-cert-close]').click()");
+    // Delay the real response rather than replacing its authorization/data.
+    await evaluate(page, `(() => { const original=window.fetch; window.__certificateRelease=null; window.__certificateWaiting=false; window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certificateWaiting=true;await new Promise(done=>window.__certificateRelease=done);}return response;};document.querySelector('[data-cert-accounts]').click();})()`);
+    await wait(page, "window.__certificateWaiting");
+    await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
+    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
+    await evaluate(page, "window.__certificateRelease()");
+    await delay(100);
+    assert.equal(await evaluate(page, "document.querySelectorAll('dialog[open]').length"), 0, "late certificate responses cannot reopen a dialog on another route");
+  }
+  record(`${mode}: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation`);
+  const noPermissions = await createPage();
+  await login(noPermissions, "no-permissions");
+  assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.dock-nav a[href=\"#live-config\"]').length"), 0);
+  await evaluate(noPermissions, "location.hash='#live-config'");
+  await wait(noPermissions, "document.querySelector('.workspace-main .alert.error')?.textContent.includes('无权查看配置')");
+  assert.ok(await evaluate(noPermissions, "!document.querySelector('.live-config-empty')"), "permission denial must not look like a resource-free account");
+  const stalePage = await createPage();
+  const staleSession = await login(stalePage, "alice");
+  // The cookie belongs to B after another tab logs in, while this page still
+  // holds A's session and preferences. Its next navigation must clear the UI.
+  await api(stalePage, staleSession, "POST", "/auth/login", { username: "bob", token: "config scope password fixture" });
+  await evaluate(stalePage, "location.hash='#client-access'");
+  await wait(stalePage, "!!document.querySelector('#login-form')");
+  assert.equal((await evaluate(stalePage, "fetch('/api/v1/auth/session').then(r=>r.json())")).user_id, bob.user_id);
+  record(`${mode}: replacement cookie cannot populate the old account's page; B's session remains valid`);
   for (const [page, session, user, other] of [[a, alice, "alice", "bob"], [b, bob, "bob", "alice"]]) {
     let agents = await api(page, session, "GET", "/agents");
     assert.deepEqual(agents.map(agent => agent.id), [fixture.owned[user]]);

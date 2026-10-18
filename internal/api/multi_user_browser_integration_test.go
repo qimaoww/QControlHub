@@ -25,7 +25,14 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
+			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}
+			for name, permission := range map[string]core.Permission{"task-reader": core.PermissionTasksRead, "traffic-reader": core.PermissionTrafficRead} {
+				var user core.User
+				admin.call("POST", "/users", core.UserRequest{Username: name, Role: core.RoleUser, Password: "config scope password fixture", Permissions: []core.Permission{permission}}, http.StatusCreated, &user)
+				agent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, user.ID, false), db)
+				owned[name] = agent.ID
+			}
 			for username, client := range map[string]configScopeAPIClient{"alice": alice, "bob": bob} {
 				token, err := db.CreateEnrollmentToken(store.WithConfigScope(ctx, client.userID, false), core.EnrollmentTokenRequest{Name: username + " node"})
 				if err != nil {

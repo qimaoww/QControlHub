@@ -1,0 +1,21 @@
+{
+  "scope": "multiuser-d6b9",
+  "dry_run": true,
+  "actions": [
+    {
+      "name": "qch-multiuser-d6b9-db",
+      "action": "remove recorded container and its anonymous volumes"
+    },
+    {
+      "name": "qch-multiuser-d6b9-node",
+      "action": "remove recorded container and its anonymous volumes"
+    },
+    {
+      "directory": "/root/.codex/worktrees/d6b9/qcontrolhub/.preview/multiuser-d6b9",
+      "action": "remove only this temporary fixture"
+    }
+  ],
+  "artifacts_retained": "/root/.codex/worktrees/d6b9/qcontrolhub/docs/multi-user-pages",
+  "completed": false,
+  "observed_at_utc": "2026-10-18T17:50:10.486720+00:00"
+}

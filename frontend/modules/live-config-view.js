@@ -6,6 +6,7 @@ import { agentPresenceMarkup } from "./agent-presence.js";
 import { sharedAllocationText, sharedConfigPresentation } from "./shared-instance-state.js";
 
 function liveEngineStatus(info = {}, online = true) {
+  if (typeof info.installed !== "boolean") return { label: "状态未知", tone: "unknown" };
   if (!info.installed)
     return { label: info.existing_config_available ? "待导入" : "未安装", tone: "uninstalled" };
   if (!online)
