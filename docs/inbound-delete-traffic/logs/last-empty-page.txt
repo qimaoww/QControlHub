@@ -1,0 +1,6 @@
+### Result
+{"endpoints":[],"cards":0,"choices":["全部端口"]}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByText("尚未读取到配置端口",{exact:true}).waitFor(); await page.screenshot({path:"output/playwright/inbound-delete/after-last-delete-empty.png"}); return await page.evaluate(async()=>({endpoints:await (await fetch("/api/v1/traffic-endpoints")).json(),cards:document.querySelectorAll(".traffic-policy-grid article").length,choices:[...document.querySelector("[data-traffic-filter=endpoint_key]").options].map(o=>o.textContent)})); })(page);
+```

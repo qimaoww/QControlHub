@@ -116,6 +116,27 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	if err := locked.Err(); err != nil {
 		return nil, err
 	}
+	// Recheck versioned discoveries after the node lock. An old save/reconnect
+	// response must never create a monitor from a superseded revision.
+	configurations, err := s.trafficConfigurations(ctx, tx, true)
+	if err != nil {
+		return nil, err
+	}
+	valid := map[string]bool{}
+	for _, c := range configurations {
+		if !c.Uncertain && c.AppliedVersion > 0 && c.ShareID == "" {
+			for _, ep := range configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID) {
+				valid[fmt.Sprintf("%s:%s:%d:%d:%s", ep.AgentID, ep.ConfigID, ep.ConfigVersion, ep.Port, ep.Name)] = true
+			}
+		}
+	}
+	verified := endpoints[:0]
+	for _, ep := range endpoints {
+		if ep.ConfigID == "" || valid[fmt.Sprintf("%s:%s:%d:%d:%s", ep.AgentID, ep.ConfigID, ep.ConfigVersion, ep.Port, ep.Name)] {
+			verified = append(verified, ep)
+		}
+	}
+	endpoints = verified
 	where := ""
 	var args []any
 	if agentID != "" {

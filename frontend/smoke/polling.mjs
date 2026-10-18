@@ -315,7 +315,7 @@ try {
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();
   await trafficPoll();
-  assert.equal(trafficRequests, 5, "background traffic polling reuses configured ports instead of reparsing every saved configuration");
+  assert.equal(trafficRequests, 6, "background traffic polling refreshes the applied port set after deployment");
   assert.equal(trafficRenders, 2);
   assert.equal(trafficTimers.size, 1, "traffic polling reschedules one timer");
 

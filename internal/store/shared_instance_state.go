@@ -45,10 +45,12 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 				SELECT 1 FROM tasks deployed WHERE deployed.id=$8 AND deployed.agent_id=state.agent_id
 				AND deployed.engine=state.engine AND deployed.shared_instance AND deployed.shared_traffic_id=state.share_id
 				AND deployed.config_id=$6 AND deployed.config_version=$7 AND deployed.action='deploy'
-				AND deployed.started_at IS NOT NULL AND deployed.status<>'canceled'))) AS identity_verified
+				AND deployed.started_at IS NOT NULL AND deployed.status<>'canceled'
+                AND (deployed.id=state.last_task_id OR state.last_task_id='' AND state.applied_task_id='')))) AS identity_verified
 		FROM agent_shared_instance_ownership state
 		WHERE state.agent_id=$1 AND state.engine=$2 AND state.share_id=$3
 		AND (state.sampled_at IS NULL OR state.sampled_at<=$10)
+        AND ($6='' OR state.config_id=$6 AND state.config_version=$7 OR $8<>'' AND $8=state.last_task_id)
 		AND (NOT $12::boolean OR state.last_task_id='' OR state.last_task_id=$9)
 		AND NOT EXISTS(SELECT 1 FROM tasks current WHERE current.agent_id=state.agent_id AND current.engine=state.engine
 			AND current.shared_instance AND current.shared_traffic_id=state.share_id AND current.status='running'

@@ -362,6 +362,7 @@ func chineseErrorMessage(status int, message string) string {
 		{"预设配置无法建立独立出口归属，未保存或部署：", "预设配置无法建立独立出口归属，未保存或部署："},
 		{"字段修改无法保持独立出口归属，未保存：", "字段修改无法保持独立出口归属，未保存："},
 		{"无法安全更新独立出口配置：", "无法安全更新独立出口配置："},
+		{"删除入站失败：", "删除入站失败："},
 		{"cannot verify previous accounting configuration: ", "无法验证原有统计配置："},
 		{"stored revision is invalid: ", "已保存的历史版本无效："},
 		{"rendered template is invalid: ", "模板生成的配置无效："},

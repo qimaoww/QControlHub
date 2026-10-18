@@ -37,6 +37,9 @@ func (cycle TrafficCycle) Valid() bool {
 // when QuotaEnabled is false; LimitBytes and AutoBlock only take effect after
 // an operator enables a quota.
 type PortTrafficPolicy struct {
+	ConfigID             string              `json:"config_id,omitempty"`
+	ConfigVersion        int                 `json:"config_version,omitempty"`
+	InboundTag           string              `json:"inbound_tag,omitempty"`
 	SharedQuota          *SharedTrafficQuota `json:"shared_quota,omitempty"`
 	ShareID              string              `json:"-"` // Durable binding, never supplied by a panel request.
 	ShareUsedBytes       uint64              `json:"-"`

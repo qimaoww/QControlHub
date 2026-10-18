@@ -63,8 +63,12 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 		t.Fatal(err)
 	}
 	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 5 {
+	if err != nil || len(policies) != 4 {
 		t.Fatalf("missing actual-port accounting: %+v %v", policies, err)
+	}
+	var retired bool
+	if err := db.pool.QueryRow(ctx, `SELECT NOT monitoring_enabled FROM port_traffic_policies WHERE agent_id=$1 AND port=21001`, agent.ID).Scan(&retired); err != nil || !retired {
+		t.Fatalf("old shared port must retain history without live monitoring: %v %v", retired, err)
 	}
 	now := time.Now().UTC().Add(time.Second)
 	usages := make([]core.PortTrafficUsage, 0, len(policies))
@@ -74,9 +78,9 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 		}
 		start, end, _ := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
 		usages = append(usages, core.PortTrafficUsage{PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration,
-			ReceivedBytes: 200, UsedBytes: 200, LifetimeReceivedBytes: 200, CounterEpoch: strings.Repeat("a", 32),
+			ReceivedBytes: 250, UsedBytes: 250, LifetimeReceivedBytes: 250, CounterEpoch: strings.Repeat("a", 32),
 			CollectedAt: now, PeriodStart: start, PeriodEnd: end, EnforcementAvailable: true,
-			ShareID: policy.SharedQuota.ID, ShareUsedBytes: 200})
+			ShareID: policy.SharedQuota.ID, ShareUsedBytes: 250})
 	}
 	for range 2 {
 		if err := db.UpdatePortTrafficUsage(ctx, agent.ID, usages, now); err != nil {

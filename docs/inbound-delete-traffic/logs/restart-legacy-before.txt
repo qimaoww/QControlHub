@@ -1,0 +1,8 @@
+SET
+UPDATE 1
+ port  | monitoring_enabled | used_bytes 
+-------+--------------------+------------
+ 21001 | t                  |          0
+ 21002 | t                  |      12345
+(2 rows)
+
