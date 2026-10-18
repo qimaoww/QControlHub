@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | VLESS WS/gRPC/XHTTP 中路径空格被导入成 `+` | `url.Values.Encode` 使用表单编码，部分分享 URL 导入器按 URI 解码 | 公共构造器统一编码组件，空格用 `%20`，原始 `+` 用 `%2B`，IPv6 用 `net.JoinHostPort` |
 | SS2022 userinfo 不符合 SIP002 | AEAD2022 仍整体 Base64 编码 `method:password` | AEAD2022 改为分别百分号编码，普通 SS 保留 Base64URL |
-| 同步改名无法改变 VMess 的导入名称，特殊名称可能破坏 fragment | 所有格式都直接追加 `#name`，VMess 的名称实际在 Base64 JSON 的 `ps` | 共用 URL 改名/取名函数；VMess 仅修改 `ps`，保留其他 JSON 字段、数值类型和未知扩展；其他 URL 原样保留连接部分 |
+| 同步改名无法改变 VMess 的导入名称，特殊名称可能破坏 fragment | 所有格式都直接追加 `#name`，VMess 的名称实际在 Base64 JSON 的 `ps` | 共用 URL 改名/取名函数；VMess 仅修改 `ps`，保留其他 JSON 字段、数值类型和未知扩展；其他 URL 原样保留连接部分；旧 VMess fragment 名称仅在同步组已管理元数据证明归属时迁移，保留手工条目 |
 | HTTP Host、SNI、传输路径混淆 | VMess WS 的空 Host 自动复制 SNI；TCP/gRPC 携带残留 HTTP 字段 | 分开导出，仅在对应传输导出有意义的字段；省略空参数，保留明确的安全参数 |
 | 原生配置被格式标签误判为 URL，或提示使用 JSON 却没有完整复制入口 | 格式标签参与内容判断，已有参数弹窗只显示字段/Xray 导出 | 按已支持 scheme 和单行内容识别 URL；在现有弹窗、密文控件和按钮中展示完整原生导出 |
 | 浏览器拒绝现代剪贴板时复制失败；旧复制方式不能复制密码框 | 现代剪贴板异常未回退，`execCommand` 直接选择密码框 | 回退到现有复制路径；临时只读 textarea 使用已有 `visually-hidden` 类，复制后移除并恢复焦点/选择 |
@@ -107,6 +107,8 @@ vless://123e4567-e89b-42d3-a456-426614174000@[2001:db8::10]:24446?alpn=h2%2Chttp
 | 最终 Go 回归 | 全部 `internal/serverconfig`；API `ClientProfile|ClientOutbound|SharedInstanceAPI|ConfigScope|SubStore` 通过，[配置](evidence/serverconfig-final.txt)、[API](evidence/integration-final.txt) |
 | 最终格式/前端模块检查 | `make fmt-check frontend-module-check` 通过，[日志](evidence/final-static.txt) |
 
+补充旧数据迁移回归：[legacy-sync-tests.txt](evidence/legacy-sync-tests.txt)，覆盖已有 VMess fragment 含 `@`、同步改名、删除旧受管条目与保留手工/未知归属条目；再次完整运行 `internal/serverconfig` 通过。
+
 远程必需 CI 以 PR 的 Checks 为准；本地完整 `make check` 的已有失败没有标记为通过，也未调整无关配置页。
 
 ## 官方规则与实现依据
@@ -125,4 +127,4 @@ vless://123e4567-e89b-42d3-a456-426614174000@[2001:db8::10]:24446?alpn=h2%2Chttp
 
 ## 清理登记
 
-本地测试结束于 **2026-10-18 22:32:33 Asia/Shanghai (UTC+08:00)**。所有本次测试进程、两个浏览器会话和测试 PostgreSQL 容器均已停止，端口 `32835/34683/42309/34129/34130/42269/46833` 已释放。已启用持久化 systemd 任务 **`qch-url-dff6-cleanup.timer`**，将在 **2026-10-21 22:32:33 Asia/Shanghai (UTC+08:00)**（测试结束后 72 小时）删除带有本次专属标签的 `qch-url-dff6-pg` 容器与 `/var/tmp/qch-protocol-url-20261018-dff6`。登记成功，`Persistent=true`；主机若届时关机，会在恢复后补执行。交付证据保留在本目录。
+本地测试结束于 **2026-10-18 22:42:08 Asia/Shanghai (UTC+08:00)**。所有本次测试进程、两个浏览器会话和测试 PostgreSQL 容器均已停止，端口 `32835/34683/42309/34129/34130/42269/46833` 已释放。已启用持久化 systemd 任务 **`qch-url-dff6-cleanup.timer`**，将在 **2026-10-21 22:42:08 Asia/Shanghai (UTC+08:00)**（测试结束后 72 小时）删除带有本次专属标签的 `qch-url-dff6-pg` 容器与 `/var/tmp/qch-protocol-url-20261018-dff6`。登记成功，`Persistent=true`；主机若届时关机，会在恢复后补执行。交付证据保留在本目录。

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -338,6 +339,27 @@ func TestUpsertSubStoreSubscriptionRejectsInvalidMode(t *testing.T) {
 	_, err := server.upsertSubStoreSubscription(context.Background(), core.SubStoreSyncSettings{}, core.SubStoreSyncTarget{SyncMode: "unknown"}, "vless://one@node:443#One")
 	if err == nil || !strings.Contains(err.Error(), "模式无效") {
 		t.Fatalf("invalid sync mode error = %v", err)
+	}
+}
+
+func TestMergeSubStoreLegacyVMessNamesRespectOwnership(t *testing.T) {
+	const legacyName = "旧同步 🚀 @ +"
+	uri := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"v":"2","ps":"deployed-tag","id":"123e4567-e89b-42d3-a456-426614174000","add":"edge.example.test","port":24443}`))
+	legacy := uri + "#" + legacyName
+	manual := uri + "#Manual"
+	desired, err := serverconfig.RenameClientURL(uri, "新名称 🚀 #+%2F")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, managed := range [][]string{{legacyName}, nil} {
+		merged, err := mergeSubStoreContentByName(legacy+"\n"+manual, desired, managed)
+		want := manual + "\n" + desired
+		if managed == nil {
+			want = legacy + "\n" + want
+		}
+		if err != nil || merged != want {
+			t.Fatalf("legacy VMess merge (managed %v): %q, %v; want %q", managed, merged, err, want)
+		}
 	}
 }
 

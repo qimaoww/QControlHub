@@ -70,7 +70,7 @@ func RenameClientURL(value, name string) (string, error) {
 	if strings.ContainsAny(value, "\r\n") {
 		return "", errors.New("客户端分享链接必须为单行")
 	}
-	if strings.HasPrefix(value, "vmess://") && !strings.Contains(value, "@") {
+	if strings.HasPrefix(value, "vmess://") && !strings.Contains(strings.SplitN(value, "#", 2)[0], "@") {
 		payload, err := vmessURLPayload(value)
 		if err != nil {
 			return "", err
@@ -94,7 +94,7 @@ func RenameClientURL(value, name string) (string, error) {
 // ClientURLName decodes exactly once. In particular '+' is a literal plus in
 // an RFC 3986 fragment, and VMess has no fragment in its JSON sharing format.
 func ClientURLName(value string) string {
-	if strings.HasPrefix(value, "vmess://") && !strings.Contains(value, "@") {
+	if strings.HasPrefix(value, "vmess://") && !strings.Contains(strings.SplitN(value, "#", 2)[0], "@") {
 		payload, err := vmessURLPayload(value)
 		if err != nil {
 			return ""

@@ -186,7 +186,10 @@ func TestRenameClientURLPreservesConnectionParameters(t *testing.T) {
 	payload := map[string]json.RawMessage{"v": json.RawMessage(`"2"`), "ps": json.RawMessage(`"old"`), "add": json.RawMessage(`"2001:db8::10"`), "id": json.RawMessage(`"uuid"`), "port": json.RawMessage(`24443`), "extra": json.RawMessage(`{"unknown":true}`)}
 	data, _ := json.Marshal(payload)
 	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
-		uri := "vmess://" + encoding.EncodeToString(data)
+		uri := "vmess://" + encoding.EncodeToString(data) + "#legacy@name"
+		if ClientURLName(uri) != "old" {
+			t.Fatal("legacy fragment changed VMess JSON name")
+		}
 		renamed, err = RenameClientURL(uri, name)
 		if err != nil || ClientURLName(renamed) != name || strings.Contains(renamed, "#") {
 			t.Fatalf("VMess name: %s %v", renamed, err)
