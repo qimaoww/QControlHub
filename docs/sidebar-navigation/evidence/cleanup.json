@@ -2,9 +2,9 @@
   "job_id": "qch-dock-navigation-cleanup-20261018",
   "registered": true,
   "mechanism": "enabled persistent systemd timer",
-  "test_finished_at_utc": "2026-10-17T16:53:40.749391+00:00",
-  "scheduled_at_utc": "2026-10-20T16:54:00+00:00",
-  "scheduled_at_local": "2026-10-21T00:54:00+08:00",
+  "test_finished_at_utc": "2026-10-18T03:49:29.294516+00:00",
+  "scheduled_at_utc": "2026-10-21T03:50:00+00:00",
+  "scheduled_at_local": "2026-10-21T11:50:00+08:00",
   "timezone": "Asia/Hong_Kong (UTC+08:00)",
   "scope": [
     "/tmp/qch-dock-navigation-20261018",
@@ -19,13 +19,18 @@
     "baseline fixture PID 2496564",
     "fixed fixture PID 2500601",
     "Playwright session qch-dock",
-    "all standalone regression browser/server children"
+    "all standalone regression browser/server children",
+    "corrective baseline and fixed fixtures on ports 40767 and 38713",
+    "Playwright session qch-dock-correction",
+    "corrective regression browser/server children"
   ],
   "released_ports": [
     45617,
-    33625
+    33625,
+    40767,
+    38713
   ],
   "production_resources_created": false,
   "fixture_data": "in-memory API fixture only; no database, account or container created",
-  "verified_systemd_state": "NextElapseUSecRealtime=Wed 2026-10-21 00:54:00 CST\nActiveState=active\nUnitFileState=enabled\n"
+  "verified_systemd_state": "NextElapseUSecRealtime=Wed 2026-10-21 11:50:00 CST\nActiveState=active\nUnitFileState=enabled\n"
 }
