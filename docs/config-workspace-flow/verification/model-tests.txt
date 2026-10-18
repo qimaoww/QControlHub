@@ -1,0 +1,103 @@
+=== RUN   TestGeneratedConfigurationsRoundTripIntoServerForm
+=== PAUSE TestGeneratedConfigurationsRoundTripIntoServerForm
+=== RUN   TestPresetInboundReferencesRenameAndDelete
+--- PASS: TestPresetInboundReferencesRenameAndDelete (0.00s)
+=== RUN   TestPresetInboundDNSReferencesFailClosedWhenAmbiguous
+--- PASS: TestPresetInboundDNSReferencesFailClosedWhenAmbiguous (0.00s)
+=== RUN   TestSingBoxEndpointConfigFilesKeepNativeOrderAndPrecision
+--- PASS: TestSingBoxEndpointConfigFilesKeepNativeOrderAndPrecision (0.00s)
+=== CONT  TestGeneratedConfigurationsRoundTripIntoServerForm
+--- PASS: TestGeneratedConfigurationsRoundTripIntoServerForm (0.00s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.005s
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch
+2026/10/19 04:08:25 INFO waiting for PostgreSQL migration lock backend_pid=144
+2026/10/19 04:08:25 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:25 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=110.641149ms
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/deploy_success
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/deploy_failure
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/lost_deployment_result
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/install_failure
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/import_failure
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/automatic_install_then_failed_validation
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/read-only_validation
+=== RUN   TestConfigReadCacheInvalidatesBeforeMutationDispatch/canceled_before_dispatch
+--- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch (0.47s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/deploy_success (0.06s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/deploy_failure (0.04s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/lost_deployment_result (0.04s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/install_failure (0.03s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/import_failure (0.03s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/automatic_install_then_failed_validation (0.03s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/read-only_validation (0.03s)
+    --- PASS: TestConfigReadCacheInvalidatesBeforeMutationDispatch/canceled_before_dispatch (0.03s)
+=== RUN   TestConfigReadCacheUsesCurrentScopeAndEligibility
+2026/10/19 04:08:25 INFO waiting for PostgreSQL migration lock backend_pid=149
+2026/10/19 04:08:25 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:25 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=130.29071ms
+=== RUN   TestConfigReadCacheUsesCurrentScopeAndEligibility/permission_revoked
+=== RUN   TestConfigReadCacheUsesCurrentScopeAndEligibility/account_disabled
+=== RUN   TestConfigReadCacheUsesCurrentScopeAndEligibility/managed_read_feature_removed
+--- PASS: TestConfigReadCacheUsesCurrentScopeAndEligibility (0.27s)
+    --- PASS: TestConfigReadCacheUsesCurrentScopeAndEligibility/permission_revoked (0.00s)
+    --- PASS: TestConfigReadCacheUsesCurrentScopeAndEligibility/account_disabled (0.00s)
+    --- PASS: TestConfigReadCacheUsesCurrentScopeAndEligibility/managed_read_feature_removed (0.00s)
+=== RUN   TestConfigReadCacheExpirationAndSourceIsolation
+2026/10/19 04:08:25 INFO waiting for PostgreSQL migration lock backend_pid=153
+2026/10/19 04:08:25 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:25 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=86.157914ms
+--- PASS: TestConfigReadCacheExpirationAndSourceIsolation (0.23s)
+=== RUN   TestSharedInstanceLifecycleKeepsAppliedRevisionAndOtherServices
+2026/10/19 04:08:26 INFO waiting for PostgreSQL migration lock backend_pid=156
+2026/10/19 04:08:26 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:26 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=85.033575ms
+--- PASS: TestSharedInstanceLifecycleKeepsAppliedRevisionAndOtherServices (0.29s)
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/revoke/running=false
+2026/10/19 04:08:26 INFO waiting for PostgreSQL migration lock backend_pid=162
+2026/10/19 04:08:26 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:26 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=90.133623ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/revoke/running=true
+2026/10/19 04:08:26 INFO waiting for PostgreSQL migration lock backend_pid=164
+2026/10/19 04:08:26 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:26 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=87.050974ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/disable-user/running=false
+2026/10/19 04:08:26 INFO waiting for PostgreSQL migration lock backend_pid=168
+2026/10/19 04:08:26 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:26 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=112.064449ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/disable-user/running=true
+2026/10/19 04:08:27 INFO waiting for PostgreSQL migration lock backend_pid=173
+2026/10/19 04:08:27 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:27 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=92.198864ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/withdraw-engine/running=false
+2026/10/19 04:08:27 INFO waiting for PostgreSQL migration lock backend_pid=176
+2026/10/19 04:08:27 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:27 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=87.92626ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/withdraw-engine/running=true
+2026/10/19 04:08:27 INFO waiting for PostgreSQL migration lock backend_pid=181
+2026/10/19 04:08:27 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:27 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=92.280793ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/downgrade-agent/running=false
+2026/10/19 04:08:27 INFO waiting for PostgreSQL migration lock backend_pid=186
+2026/10/19 04:08:27 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:27 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=85.205919ms
+=== RUN   TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/downgrade-agent/running=true
+2026/10/19 04:08:28 INFO waiting for PostgreSQL migration lock backend_pid=188
+2026/10/19 04:08:28 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:28 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=90.785365ms
+--- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease (1.87s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/revoke/running=false (0.23s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/revoke/running=true (0.23s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/disable-user/running=false (0.24s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/disable-user/running=true (0.23s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/withdraw-engine/running=false (0.22s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/withdraw-engine/running=true (0.24s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/downgrade-agent/running=false (0.24s)
+    --- PASS: TestSharedInstanceLifecycleRechecksAuthorizationAtEveryLease/downgrade-agent/running=true (0.24s)
+=== RUN   TestSharedInstanceRetryPreservesRecipientAndAllocation
+2026/10/19 04:08:28 INFO waiting for PostgreSQL migration lock backend_pid=194
+2026/10/19 04:08:28 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:08:28 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=104.278912ms
+--- PASS: TestSharedInstanceRetryPreservesRecipientAndAllocation (0.29s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/store	3.641s

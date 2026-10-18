@@ -183,4 +183,36 @@ await assert.rejects(submitLiveConfigChange({
 assert.equal(preflightMutationAttempted, false,
   "a changed Agent baseline must block both the config save and deploy task");
 
+// Each asynchronous boundary must recheck the immutable editing context.
+for (const boundary of ["preflight", "save"]) {
+  let current = true, persisted = null;
+  const calls = [];
+  await assert.rejects(submitLiveConfigChange({
+    api: async () => {
+      calls.push("save"); current = false;
+      return {id:"saved-in-original-account", version:2};
+    },
+    submitTask: async () => { calls.push("task"); return {id:"wrong-task"}; },
+    agent:{id:"original-node"}, engine:"xray", intent:"deploy", form:deployForm,
+    source:{content:"old"}, existingAvailable:false, savedConfig:null,
+    beforeDeploy:async () => { if (boundary === "preflight") current = false; },
+    isCurrent:() => current, onSavedConfig:value => { persisted = value; },
+  }), /配置上下文已变化/);
+  assert.deepEqual(calls, boundary === "save" ? ["save"] : [], "an abandoned editor enqueued work after a context change");
+  assert.equal(Boolean(persisted), boundary === "save", "partial success must report its persisted version");
+}
+
+for (const intent of ["deploy", "validate", "import"]) {
+  let current = true, tracked = false;
+  const task = async () => { current = false; return {id:"old-account-task"}; };
+  await assert.rejects(submitLiveConfigChange({
+    api:async path => path === "/tasks" ? task() : {id:"cfg", version:2},
+    submitTask:task, agent:{id:"original-node"}, engine:"xray", intent,
+    form:deployForm, source:{content:"old"}, existingAvailable:true,
+    savedConfig:{id:"cfg", version:1, content:"old"}, isCurrent:() => current,
+    onDeployTask:() => { tracked = true; },
+  }), /配置上下文已变化/);
+  assert.equal(tracked, false, "late task response populated the next account's deployment state");
+}
+
 }

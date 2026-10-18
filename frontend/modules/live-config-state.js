@@ -1,5 +1,11 @@
 // Snapshot compatibility, freshness and fail-closed deployment preflight.
 
+export function liveConfigSourceDirty() {
+  const editor = document.querySelector("#live-config-form [data-code-editor]");
+  const input = editor?.querySelector("[data-code-input]");
+  return editor?.configFileController?.dirty() ?? Boolean(input && !input.readOnly && input.value !== input.defaultValue);
+}
+
 export function liveConfigEditorState({
   existingAvailable,
   canOperate,
@@ -65,7 +71,12 @@ export async function submitLiveConfigChange({
   beforeDeploy,
   onDeployTask,
   onSavedConfig,
+  isCurrent = () => true,
 }) {
+  const assertCurrent = () => {
+    if (!isCurrent()) throw deployPreflightError("配置上下文已变化，已停止后续提交。请返回原配置核对保存结果。");
+  };
+  assertCurrent();
   const editor = liveConfigEditorState({
     existingAvailable,
     canOperate: true,
@@ -78,6 +89,7 @@ export async function submitLiveConfigChange({
   // must never persist a draft or enqueue a task until a fresh Agent read has
   // been compared with the exact baseline that the editor was opened from.
   if (intent === "deploy") await beforeDeploy?.();
+  assertCurrent();
   let saved = savedConfig;
   if (
     !existingAvailable ||
@@ -100,17 +112,20 @@ export async function submitLiveConfigChange({
     );
     onSavedConfig?.(saved);
   }
+  assertCurrent();
   if (intent === "save") return { saved, content: editor.content };
   if (intent === "deploy" || intent === "validate") {
     if (intent === "validate") {
-      await submitTask({
+      const task = await submitTask({
         agent_id: agent.id,
         engine,
         action: "validate",
         config_id: saved.id,
         expected_config_version: saved.version,
       });
-      return { saved, content: editor.content };
+      if (!task?.id) throw new Error("校验任务未创建");
+      assertCurrent();
+      return { saved, content: editor.content, task };
     }
     const task = await submitTask({
       agent_id: agent.id,
@@ -120,6 +135,7 @@ export async function submitLiveConfigChange({
       expected_config_version: saved.version,
     });
     if (!task?.id) throw new Error("部署任务未创建");
+    assertCurrent();
     onDeployTask?.(task.id);
     return { saved, content: editor.content, task };
   }
@@ -134,6 +150,8 @@ export async function submitLiveConfigChange({
     }),
   });
   if (!task?.id) throw new Error("迁移任务未创建");
+  assertCurrent();
+  onDeployTask?.(task.id);
   return { saved, content: editor.content, task };
 }
 
@@ -152,7 +170,7 @@ export function liveConfigSnapshotReusable(source, now = Date.now()) {
 export { deployPreflightError };
 
 export function liveSourceKey(agentId, engine, source = "managed") {
-  return source === "import"
-    ? `${agentId}|${engine}|import`
+  return source === "import" || source === "personal"
+    ? `${agentId}|${engine}|${source}`
     : `${agentId}|${engine}`;
 }

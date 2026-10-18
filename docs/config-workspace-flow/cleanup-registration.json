@@ -1,0 +1,26 @@
+{
+  "ports": {
+    "39835": "released",
+    "36299": "released",
+    "55593": "released"
+  },
+  "database_container_state": "exited",
+  "owned_servers_and_browser_daemon": "exited",
+  "timer": [
+    "NextElapseUSecRealtime=Thu 2026-10-22 04:17:16 CST",
+    "LastTriggerUSec=Mon 2026-10-19 04:15:09 CST",
+    "Id=qch-config-flow-7850-cleanup.timer",
+    "ActiveState=active",
+    "UnitFileState=enabled"
+  ],
+  "scope": "exact stopped container and anonymous volume; task output directory; two matching build binaries; empty original bin directory only",
+  "preserved": "docs/config-workspace-flow screenshots, recordings, report, verification logs; shared caches; cleanup audit in /var/lib/qch-config-flow-7850",
+  "service_not_executed": [
+    "Result=success",
+    "NRestarts=0",
+    "ExecMainExitTimestamp=",
+    "ExecMainStatus=0",
+    "ActiveState=inactive",
+    "SubState=dead"
+  ]
+}

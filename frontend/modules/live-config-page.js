@@ -1,6 +1,6 @@
 import { bindEvent } from "./refresh.js";
 import { diagnosticError } from "./errors.js";
-import { assertAgentConfigBaseline, deployPreflightError, liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveSourceKey } from "./live-config-state.js";
+import { assertAgentConfigBaseline, deployPreflightError, liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveConfigSourceDirty, liveSourceKey } from "./live-config-state.js";
 import { presetRoute } from "./preset-route.js";
 import { bindConfigFiles } from "./config-files.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
@@ -18,16 +18,13 @@ export function createLiveConfigPage(ctx, { presets, deployments, reader }) {
   const { requestCurrentConfigSnapshot, readCurrentConfig } = reader;
   const renderLiveConfigView = createLiveConfigView(ctx);
 let liveConfigRequest = 0;
+let editorRevision = 0;
 let liveAgentRuntimeScope;
 let liveAgentRuntimeLoaded = false;
 
 
 function configHasUnsavedChanges() {
-  const editor = document.querySelector("#live-config-form [data-code-editor]");
-  const input = editor?.querySelector("[data-code-input]");
-  const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
-    input && !input.readOnly && input.value !== input.defaultValue;
-  return presets.presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('#live-config-form[data-saving="1"], .config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
+  return presets.presetHasUnsavedChanges() || liveConfigSourceDirty() || Boolean(document.querySelector('#live-config-form[data-saving="1"], .config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
 }
 
 function maybeRerenderLiveConfig(agentId, engine) {
@@ -120,6 +117,7 @@ async function liveConfig(options = {}) {
   await reconcilePendingDeploy(agent.id, engine);
   const prefetched = prefetchWorkspace && selectedAgent === agent.id && selectedEngine === engine
     ? await prefetchWorkspace : null;
+  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   if (prefetched?.error) throw prefetched.error;
   const configWorkspace = targetedWorkspace || prefetched?.value || await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
@@ -207,10 +205,11 @@ async function liveConfig(options = {}) {
         content: source.content,
       }
     : null;
+  if (options.resetEditor) editorRevision++;
   const workspaceElement = renderLiveConfigView({
     agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
     sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
-    managedAvailable, emptyManaged, readAction,
+    managedAvailable, emptyManaged, readAction, editorRevision,
   });
   state.data.liveEngines = installedEngines;
   bindLiveConfigNavigation(ctx, { agent, engine, accountData, sourceMode, current, workspaceElement, liveConfig });
@@ -220,6 +219,16 @@ async function liveConfig(options = {}) {
   });
   const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify);
   bindCodeEditors();
+  const version = workspaceElement?.querySelector("[data-live-version]");
+  const input = workspaceElement?.querySelector("[data-code-input]");
+  if (version && input && !importSource) {
+    const updateVersion = () => {
+      version.textContent = liveConfigSourceDirty() ? `未保存修改${saved?.version ? ` · 基于 v${saved.version}` : ""}` :
+        saved?.version ? `${!privateWorkspace && !source?.saved && saved.content !== current?.content ? "节点快照 · " : ""}已保存 v${saved.version}` : "未保存";
+    };
+    bindEvent(input, "input", updateVersion, true);
+    updateVersion();
+  }
   const applyInboundMutation = async (result, chosen) => {
     if (accountData !== state.data) return;
     const key = `${agent.id}|${engine}`;
@@ -243,7 +252,7 @@ async function liveConfig(options = {}) {
     }
     state.data.liveSelectedInbound = chosen ? {agentId:agent.id, engine, ...chosen} : null;
     if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine) {
-      try { await liveConfig(); }
+      try { await liveConfig({resetEditor:true}); }
       catch (error) {
         if (accountData !== state.data) return;
         // The mutation is already durable. Do not report it as a failed save
@@ -271,14 +280,27 @@ async function liveConfig(options = {}) {
     sourceContent:current?.content, mountEditor:mountPresetEditor, beforeDeploy, onSaved:applyInboundMutation,
     onRefresh:async () => {
       liveAgentRuntimeLoaded = false;
-      delete state.data.liveSources[sourceKey];
-      await liveConfig({ preferCachedRead: false });
+      const previous = state.data.liveSources[sourceKey];
+      try {
+        if (!privateWorkspace && readAction) {
+          const isCurrent = () => accountData === state.data && workspaceElement.isConnected &&
+            runtimeScope === state.navigationEpoch && state.route === "live-config" &&
+            state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode;
+          const snapshot = await requestCurrentConfigSnapshot(agent, engine, readAction, {isCurrent});
+          if (!snapshot || !isCurrent()) return;
+          state.data.liveSources[sourceKey] = {...snapshot, agentContent:snapshot.content};
+        }
+        await liveConfig({ preferCachedRead: false, resetEditor:true });
+      } catch (error) {
+        if (accountData === state.data) state.data.liveSources[sourceKey] = previous;
+        throw error;
+      }
     },
   });
   renderPresetStatus();
   bindLiveConfigSubmit(ctx, {
     agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,
-    configFiles, beforeDeploy, workspaceElement, liveConfig, deployments,
+    configFiles, beforeDeploy, workspaceElement, liveConfig, deployments, sourceMode, status:presets.status,
   });
   bindSharedInstanceRead(ctx, {agent, engine, root:workspaceElement, requestSnapshot:requestCurrentConfigSnapshot});
   if (

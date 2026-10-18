@@ -1,4 +1,5 @@
 import { installConfigPages } from "../modules/configs.js";
+import { bindCodeEditors } from "../modules/code-editor.js";
 
 export const assert = (value, message) => { if (!value) throw new Error(message); };
 export const pause = () => new Promise(resolve => setTimeout(resolve, 30));
@@ -60,7 +61,7 @@ export async function createConfigFixture(engine, options = {}) {
   let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content()};
   let agentContent = saved ? options.drift ? saved.content + "\n# node-only" : saved.content : "";
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
-    session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
+    session:{role:options.shared || options.owner ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
   const workspace = () => ({agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
@@ -85,7 +86,8 @@ export async function createConfigFixture(engine, options = {}) {
           profiles:[{tag:"snell", protocol:"Snell", port:2444, outbound_error:"当前内核不支持此 Snell 入站"}]}];
     }
     if (path.endsWith("/workspace")) {
-      if (test.workspaceGate) await test.workspaceGate;
+      if (typeof test.workspaceGate === "function") await test.workspaceGate(path);
+      else if (test.workspaceGate) await test.workspaceGate;
       if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
       if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
       return workspace();
@@ -98,11 +100,27 @@ export async function createConfigFixture(engine, options = {}) {
     if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
     if (request.method === "POST" && path === "/tasks") {
+      if (options.source && ["deploy", "validate", "import-existing"].includes(body.action)) {
+        test.taskRequests ||= [];
+        test.taskRequests.push(body);
+        if (test.taskGate) await test.taskGate;
+        const task = {id:`source-task-${++test.serial}`, action:body.action, config_version:body.expected_config_version, status:test.taskStatus};
+        tasks.set(task.id, task);
+        return task;
+      }
       assert(body.action === "read-managed-config" || body.action === "read-config", "deploy preflight created a non-read task");
       test.readRequests.push(body);
       const task = {id:`read-${++test.serial}`, action:body.action, engine, status:"succeeded", snapshot:agentContent};
       tasks.set(task.id, task);
       return task;
+    }
+    if (options.source && request.method === "PUT") {
+      if (test.gate) await test.gate;
+      if (test.sourceFailure) throw Object.assign(new Error("fixture source save failed"), test.sourceFailure);
+      assert(body.version === (saved?.version || 0), "source save lost optimistic version");
+      test.writes.push({path, ...body});
+      saved = {...saved, ...body, id:"cfg", version:(saved?.version || 0)+1};
+      return saved;
     }
     if (request.method === "POST" && path.endsWith("/source")) {
       if (test.gate) await test.gate;
@@ -157,8 +175,11 @@ export async function createConfigFixture(engine, options = {}) {
     can:permission=>(!options.readonly || ["agents.read", "agent-config.read", "configs.read"].includes(permission)) && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute") &&
       !(options.noPeerRead && permission === "client-access.read"),
     confirmAction:async(message, title)=>{test.confirmations.push({message, title}); return test.confirm;}, notify:message=>test.notices.push(message),
-    renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors:()=>{},
-    submitTask:async()=>{throw new Error("inbounds must use atomic mutation, not a second task request");},
+    renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors:options.source ? bindCodeEditors : ()=>{},
+    submitTask:async body=>{
+      if (!options.source) throw new Error("inbounds must use atomic mutation, not a second task request");
+      return api("/tasks", {method:"POST", body:JSON.stringify(body)});
+    },
     shell:markup=>{
       document.body.className = "app-body page-live-config";
       document.body.innerHTML = `<main class="workspace-main" style="max-width:1280px;margin:auto">${markup}</main>`;

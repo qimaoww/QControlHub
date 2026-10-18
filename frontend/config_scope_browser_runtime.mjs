@@ -63,7 +63,7 @@ export async function testConfigScopeRuntime(preview = false) {
     return;
   }
   for (const options of [{}, { installed: false, saved: false }]) {
-    const { records } = await configFixture(options);
+    const { records, state } = await configFixture(options);
     const editor = document.querySelector("[data-code-input]");
     assert(editor && !editor.readOnly, "private workspace must be editable without task permission or an installed core");
     assert(!editor.value.includes("other-user-runtime-secret"), "private editor inherited the shared host snapshot");
@@ -75,6 +75,8 @@ export async function testConfigScopeRuntime(preview = false) {
     await waitFor(() => records.notifications.includes("已保存，尚未部署"), "personal save did not complete");
     assert(records.writes.length === 1 && records.tasks.length === 0, "save-only operation submitted a task");
     assert(records.writes[0].content.includes("saved-private-draft"), "personal save lost edited content");
+    assert(state.data.liveSources["shared|mihomo"].content.includes("other-user-runtime-secret") &&
+      state.data.liveSources["shared|mihomo|personal"].content.includes("saved-private-draft"), "personal save overwrote the separate host snapshot");
   }
   await configFixture({ executable: true });
   assert(document.querySelector('[data-live-intent="save"]') && document.querySelector('[data-live-intent="deploy"]'), "authorized user must have separate save and deploy controls");

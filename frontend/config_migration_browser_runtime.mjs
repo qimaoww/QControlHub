@@ -173,7 +173,7 @@ async function testConfigReadCacheRuntime() {
       const previousReads = test.reads.length;
       await waitFor(()=>document.querySelector("[data-config-refresh]"), "configuration refresh control is missing");
       document.querySelector("[data-config-refresh]").click();
-      await waitFor(()=>test.reads.length === previousReads + 1 && test.state.data.liveSources[key]?.taskId,
+      await waitFor(()=>test.reads.length === previousReads + 1 && test.state.data.liveSources[key]?.taskId === `read-${previousReads + 1}` && !document.querySelector('[data-config-refreshing]'),
         "explicit refresh did not finish");
       assert(test.reads.at(-1).prefer_cached === undefined && !test.state.data.liveSources[key].cached,
         "explicit refresh reused the display cache");
@@ -232,7 +232,7 @@ async function testSourceSaveRuntime() {
     assert(test.state.data.liveEngine === engine && test.state.data.liveConfigSource === "managed", "pending source save allowed target switching");
     assert(test.writes.length === 1 && !test.tasks.length, "source save submitted twice or created a task before persistence");
     release();
-    await waitFor(()=>document.querySelector(".live-config-version")?.textContent === "配置 v2", "source save did not load its saved revision");
+    await waitFor(()=>document.querySelector(".live-config-version")?.textContent === "已保存 v2", "source save did not load its saved revision");
     assert(test.writes.length === 1 && test.tasks.length === 1 && test.tasks[0].expected_config_version === 2, "source save lost exact-once revision/task submission");
     assert(!document.querySelector("[data-live-intent]").disabled, "source save did not unlock fresh controls");
     test.dispose();

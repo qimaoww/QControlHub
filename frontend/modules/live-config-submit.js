@@ -5,15 +5,20 @@ import { submitLiveConfigChange } from "./live-config-state.js";
 
 export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submitTask }, {
   agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,
-  configFiles, beforeDeploy, workspaceElement, liveConfig, deployments,
+  configFiles, beforeDeploy, workspaceElement, liveConfig, deployments, sourceMode, status: operationStatus,
 }) {
   const { recordPendingDeploy, monitorDeployTask } = deployments;
+  const root = workspaceElement || document.querySelector("#live-config-form");
+  const epoch = state.navigationEpoch;
+  const current = () => accountData === state.data && epoch === state.navigationEpoch &&
+    state.route === "live-config" && root?.isConnected &&
+    !root.dataset.configSwitching && !root.dataset.configRefreshing &&
+    state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode;
   let liveSaving = false, liveSaveUncertain = false;
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
       const formElement = event.currentTarget;
-      if (accountData !== state.data || liveSaving || liveSaveUncertain || !formElement.isConnected ||
-          state.data.liveAgent !== agent.id || state.data.liveEngine !== engine) return;
+      if (!current() || liveSaving || liveSaveUncertain) return;
       const form = new FormData(formElement);
       const intent = event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
       if (!["save", "import", "deploy", "validate"].includes(intent)) return;
@@ -49,7 +54,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           ))
         )
           return;
-        if (accountData !== state.data || !formElement.isConnected) return;
+        if (!current()) return;
         submitted = true;
         if (submitter) updateFeedback(submitter, "正在提交…");
         updateFeedback(status, "正在保存配置并提交任务…");
@@ -70,6 +75,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
             updateFeedback(status, "正在保存配置并提交任务…");
             if (submitter) updateFeedback(submitter, "正在提交…");
           } : null,
+          isCurrent: current,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
             recordPendingDeploy(taskId, agent.id, engine);
@@ -77,6 +83,14 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           },
         });
         if (accountData !== state.data) return;
+        const key = `${agent.id}|${engine}`;
+        const operation = operationStatus.saveOperation({
+          key, task: result.task, version: result.saved.version, intent: result.task?.action || intent, sourceMode,
+          message: intent === "save" ? `配置 v${result.saved.version} 已保存，尚未部署。` :
+            `配置 v${result.saved.version} 已保存，${intent === "import" ? "迁移" : intent === "deploy" ? "部署" : "校验"}任务已提交。`,
+          tone: intent === "save" ? "success" : "",
+        });
+        operationStatus.watchPresetOperation(operation);
         if (intent === "save") notify("已保存，尚未部署");
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
@@ -88,11 +102,11 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           cached: false,
         };
         if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && formElement.isConnected)
-          await liveConfig();
+          await liveConfig({resetEditor:true});
       } catch (error) {
         if (accountData !== state.data || !formElement.isConnected) return;
-        liveSaveUncertain = !error.deployPreflight && submitted &&
-          Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
+        liveSaveUncertain = Boolean(persisted) || !error.deployPreflight && submitted &&
+          Boolean(!error.status || error.status === 409 || error.status >= 500);
         const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
         updateFeedback(status, message);
         status.setAttribute("role", "alert");

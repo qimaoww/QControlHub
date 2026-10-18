@@ -1,0 +1,13 @@
+[Unit]
+Description=Clean resources for config-workspace-flow-7850 after 72 hours
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /var/lib/qch-config-flow-7850/cleanup.py
+WorkingDirectory=/var/lib/qch-config-flow-7850
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=300
+StandardOutput=append:/var/lib/qch-config-flow-7850/execution.txt
+StandardError=append:/var/lib/qch-config-flow-7850/execution.txt

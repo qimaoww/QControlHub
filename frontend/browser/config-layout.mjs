@@ -73,6 +73,27 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"second switch did not prompt");
       document.querySelector("[data-confirm-accept]").click();
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
+      const pendingNodes = new Map();
+      testAPI.configWorkspaceGate = path => {
+        const node = path.split("/")[2];
+        if (!pendingNodes.has(node)) {
+          let release;
+          const promise = new Promise(resolve=>{release=resolve;});
+          pendingNodes.set(node, {promise, release});
+        }
+        return pendingNodes.get(node).promise;
+      };
+      document.querySelector('[data-live-agent="bravo"]').click();
+      await waitFor(()=>pendingNodes.has("bravo"),"first node request did not start");
+      assert.ok(document.querySelector("#live-config-form").inert,"node switch left the previous editor active");
+      document.querySelector('[data-live-agent="delta"]').click();
+      await waitFor(()=>pendingNodes.has("delta"),"latest node request did not start");
+      pendingNodes.get("delta").release();
+      await waitFor(()=>document.querySelector('[data-refresh-key^="live-config-content-delta-xray-"] #live-config-form'),"latest node did not synchronize its core and configuration");
+      pendingNodes.get("bravo").release();
+      await new Promise(resolve=>setTimeout(resolve,60));
+      assert.ok(document.querySelector('[data-refresh-key^="live-config-content-delta-xray-"] #live-config-form'),"older node response replaced the latest selection");
+      delete testAPI.configWorkspaceGate;
     }
     assert.ok(document.documentElement.scrollWidth<=innerWidth,"manual page overflows viewport");
     const tools = document.querySelector(".config-workspace-tools").getBoundingClientRect();

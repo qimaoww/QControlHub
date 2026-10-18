@@ -161,7 +161,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	content := frontendSources(t, "modules/live-config-page.js", "modules/live-config-state.js",
 		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js")
 	for _, required := range []string{
-		`data-live-intent="import">手动导入并迁移`,
+		`data-live-intent="import">导入并迁移`,
 		`迁移任一步失败都会自动恢复原服务`,
 		`action: "import-existing"`,
 		`existing_config_unsupported_reason`,
@@ -173,9 +173,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`系统服务 · 只读快照`,
 		`read-managed-config`,
 		`prefer_cached: true`,
-		`liveConfig({ preferCachedRead: false })`,
-		`手动刷新及部署前核验会跳过缓存`,
-		`最近 600 秒内已校验的节点快照`,
+		`liveConfig({ preferCachedRead: false, resetEditor:true })`,
 		`liveConfigSnapshotReusable`,
 		`assertAgentConfigBaseline`,
 		`正在核验 Agent 当前配置`,

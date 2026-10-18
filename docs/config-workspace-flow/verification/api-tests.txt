@@ -1,0 +1,59 @@
+=== RUN   TestSharedProfilePreferencesDoNotTransferWithPorts
+2026/10/19 04:05:20 INFO waiting for PostgreSQL migration lock backend_pid=72
+2026/10/19 04:05:20 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:20 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=106.761213ms
+--- PASS: TestSharedProfilePreferencesDoNotTransferWithPorts (1.18s)
+=== RUN   TestInboundDeleteEvidence
+    inbound_delete_evidence_test.go:24: interactive deletion evidence
+--- SKIP: TestInboundDeleteEvidence (0.00s)
+=== RUN   TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL
+2026/10/19 04:05:21 INFO waiting for PostgreSQL migration lock backend_pid=74
+2026/10/19 04:05:21 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:21 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=107.142626ms
+=== RUN   TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/xray
+=== RUN   TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/sing-box
+=== RUN   TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/mihomo
+=== RUN   TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/ss-rust
+--- PASS: TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL (0.54s)
+    --- PASS: TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/xray (0.10s)
+    --- PASS: TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/sing-box (0.09s)
+    --- PASS: TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/mihomo (0.07s)
+    --- PASS: TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL/ss-rust (0.07s)
+=== RUN   TestAutomaticConfigReadCacheWindow
+--- PASS: TestAutomaticConfigReadCacheWindow (0.00s)
+=== RUN   TestSharedInstanceAPIScopesStateReadsVersionsAndForgedTargets
+2026/10/19 04:05:22 INFO waiting for PostgreSQL migration lock backend_pid=79
+2026/10/19 04:05:22 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:22 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=165.716593ms
+--- PASS: TestSharedInstanceAPIScopesStateReadsVersionsAndForgedTargets (1.29s)
+=== RUN   TestSharedInstanceOldAgentCannotFallBackToHostService
+2026/10/19 04:05:23 INFO waiting for PostgreSQL migration lock backend_pid=82
+2026/10/19 04:05:23 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:23 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=94.952436ms
+--- PASS: TestSharedInstanceOldAgentCannotFallBackToHostService (1.09s)
+=== RUN   TestSharedPortModesAPI
+=== RUN   TestSharedPortModesAPI/owner
+2026/10/19 04:05:24 INFO waiting for PostgreSQL migration lock backend_pid=86
+2026/10/19 04:05:24 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:24 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=120.982666ms
+=== RUN   TestSharedPortModesAPI/administrator
+2026/10/19 04:05:26 INFO waiting for PostgreSQL migration lock backend_pid=91
+2026/10/19 04:05:26 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:26 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=113.409316ms
+--- PASS: TestSharedPortModesAPI (2.54s)
+    --- PASS: TestSharedPortModesAPI/owner (1.35s)
+    --- PASS: TestSharedPortModesAPI/administrator (1.19s)
+=== RUN   TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry
+=== RUN   TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry/allocated
+2026/10/19 04:05:27 INFO waiting for PostgreSQL migration lock backend_pid=94
+2026/10/19 04:05:27 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:27 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=87.159164ms
+=== RUN   TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry/unrestricted
+2026/10/19 04:05:28 INFO waiting for PostgreSQL migration lock backend_pid=98
+2026/10/19 04:05:28 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:05:28 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=89.510674ms
+--- PASS: TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry (2.30s)
+    --- PASS: TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry/allocated (1.14s)
+    --- PASS: TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry/unrestricted (1.16s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	9.172s

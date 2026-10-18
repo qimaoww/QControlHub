@@ -3,6 +3,7 @@ import { testConfigOutboundsRuntime } from "./config-outbounds.mjs";
 import { testCommonConfigRuntime } from "./config-common.mjs";
 import { testWireGuardConfigRuntime } from "./config-wireguard.mjs";
 import { testPresetFieldLayoutRuntime } from "./preset-layout.mjs";
+import { testConfigWorkflowRuntime } from "./config-workflow.mjs";
 
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
@@ -20,6 +21,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     else if (params.has("modal")) window.inboundFixture.click("add");
     return;
   }
+  await testConfigWorkflowRuntime();
   await testWireGuardConfigRuntime();
   await testPresetFieldLayoutRuntime();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
@@ -283,8 +285,15 @@ export async function testConfigInboundsRuntime(preview = false) {
     document.querySelector("[data-preset-status]")?.textContent.includes("已保存且任务已提交，页面刷新失败"), "committed save was silently lost after parent refresh failed");
   assert(refreshFailure.writes.length === 1 && refreshFailure.notices.some(message=>message.includes("已保存且任务已提交")), "refresh failure misreported the durable mutation");
   refreshFailure.failRefresh = false;
+  const recoveryInput = document.querySelector('#live-config-form [data-code-input]');
+  recoveryInput.value += '\n';
+  recoveryInput.dispatchEvent(new Event('input', {bubbles:true}));
   document.querySelector("[data-preset-status] button").click();
-  await waitFor(()=>document.querySelector('.live-config-version')?.textContent === "配置 v2", "refresh recovery did not bind the saved revision");
+  await pause();
+  assert(recoveryInput.isConnected && recoveryInput.value.endsWith('\n') && refreshFailure.confirmations.at(-1)?.title === "重新加载配置", 'result recovery discarded a source draft without confirmation');
+  refreshFailure.confirm = true;
+  document.querySelector("[data-preset-status] button").click();
+  await waitFor(()=>document.querySelector('.live-config-version')?.textContent === "已保存 v2", "refresh recovery did not bind the saved revision");
   assert(refreshFailure.writes.length === 1, "reload repeated the inbound mutation");
   refreshFailure.dispose();
   await testCommonConfigRuntime();

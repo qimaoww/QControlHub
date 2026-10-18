@@ -1,0 +1,13 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=8
+browser timing {"mode":"config-inbounds-mobile","startupMs":165.510824,"testMs":19713.79297,"cleanupMs":36.625851000000694,"passed":true,"elapsedMs":19915.939499}
+browser timing {"mode":"config-inbounds","startupMs":161.734984,"testMs":19724.295209,"cleanupMs":32.40280899999925,"passed":true,"elapsedMs":19918.440358}
+browser timing {"mode":"config-layout","startupMs":122.4969119999987,"testMs":886.5991000000031,"cleanupMs":26.667789999999513,"passed":true,"elapsedMs":1035.7679609999977}
+browser timing {"mode":"config-migration","startupMs":134.7514979999978,"testMs":1296.7076730000008,"cleanupMs":55.04133099999672,"passed":true,"elapsedMs":1486.5055780000002}
+browser timing {"mode":"shared-node","startupMs":138.77500399999917,"testMs":747.5901389999999,"cleanupMs":57.875105999999505,"passed":true,"elapsedMs":944.2438419999999}
+browser timing {"mode":"config-scope","startupMs":158.8887079999986,"testMs":619.6545279999991,"cleanupMs":38.71043400000053,"passed":true,"elapsedMs":817.2595269999983}
+agents browser runtime smoke passed
+browser timing {"mode":"config-layout-mobile","startupMs":192.27872200000274,"testMs":1354.0230459999984,"cleanupMs":27.34927500000049,"passed":true,"elapsedMs":1573.6548430000003}
+browser timing {"mode":"shared-node-mobile","startupMs":130.62049599999955,"testMs":571.9997250000015,"cleanupMs":32.18657299999904,"passed":true,"elapsedMs":734.8132669999977}
+agents browser runtime smoke passed
+browser suite elapsed=23.768s
+agents browser runtime smoke passed

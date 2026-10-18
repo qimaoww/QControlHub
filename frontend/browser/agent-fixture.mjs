@@ -377,6 +377,7 @@ window.fetch = async (input, options = {}) => {
     if (path === "/access-controls") return json(testAPI.agents.flatMap(agent => ["xray","sing-box"].flatMap(engine => ["socks-in","http-in"].map((tag,i) => ({agent_id:agent.id,agent_name:agent.name,agent_status:agent.status,engine,tag,port:i?8080:1080,config_version:8,block_mainland_destination:!i,block_mainland_source:Boolean(i)})))));
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
+      await testAPI.configWorkspaceGate?.(path);
       const engine = path.split("/")[4];
       return json({config:{id:"cfg-layout",version:8,name:"节点实际配置",content:layoutConfig(engine)}});
     }

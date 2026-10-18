@@ -16,7 +16,7 @@ export function installConfigPages(ctx) {
   });
   const presets = createPresetEditor(ctx, {
     deployments,
-    renderLiveConfig: () => live.liveConfig(),
+    renderLiveConfig: options => live.liveConfig(options),
     onRuntimeChange(agentId, engine) {
       live.invalidateRuntime();
       live.maybeRerenderLiveConfig(agentId, engine);

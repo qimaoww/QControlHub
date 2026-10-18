@@ -1,0 +1,199 @@
+[
+  {
+    "phase": "before",
+    "device": "desktop",
+    "theme": "light",
+    "width": 1440,
+    "height": 1000,
+    "scrollWidth": 1440,
+    "buttons": [
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "before",
+    "device": "desktop",
+    "theme": "dark",
+    "width": 1440,
+    "height": 1000,
+    "scrollWidth": 1440,
+    "buttons": [
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "before",
+    "device": "mobile",
+    "theme": "light",
+    "width": 390,
+    "height": 844,
+    "scrollWidth": 390,
+    "buttons": [
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "before",
+    "device": "mobile",
+    "theme": "dark",
+    "width": 390,
+    "height": 844,
+    "scrollWidth": 390,
+    "buttons": [
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "after",
+    "device": "desktop",
+    "theme": "light",
+    "width": 1440,
+    "height": 1000,
+    "scrollWidth": 1440,
+    "buttons": [
+      "保存草稿",
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "after",
+    "device": "desktop",
+    "theme": "dark",
+    "width": 1440,
+    "height": 1000,
+    "scrollWidth": 1440,
+    "buttons": [
+      "保存草稿",
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "after",
+    "device": "mobile",
+    "theme": "light",
+    "width": 390,
+    "height": 844,
+    "scrollWidth": 390,
+    "buttons": [
+      "保存草稿",
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "phase": "after",
+    "device": "mobile",
+    "theme": "dark",
+    "width": 390,
+    "height": 844,
+    "scrollWidth": 390,
+    "buttons": [
+      "保存草稿",
+      "保存并校验",
+      "保存并部署"
+    ]
+  },
+  {
+    "name": "phone-small",
+    "width": 375,
+    "height": 812,
+    "dialog": {
+      "left": 8,
+      "right": 367,
+      "top": 83.546875,
+      "bottom": 728.4375
+    },
+    "scroll": false
+  },
+  {
+    "name": "phone-landscape",
+    "width": 844,
+    "height": 390,
+    "dialog": {
+      "left": 22,
+      "right": 822,
+      "top": 24,
+      "bottom": 366
+    },
+    "scroll": true
+  },
+  {
+    "name": "tablet-portrait",
+    "width": 820,
+    "height": 1180,
+    "dialog": {
+      "left": 16,
+      "right": 804,
+      "top": 336.046875,
+      "bottom": 843.9375
+    },
+    "scroll": false
+  },
+  {
+    "name": "tablet-landscape",
+    "width": 1180,
+    "height": 820,
+    "dialog": {
+      "left": 190,
+      "right": 990,
+      "top": 156.046875,
+      "bottom": 663.9375
+    },
+    "scroll": false
+  },
+  {
+    "workflow": "source and reused protocol form",
+    "writes": [
+      {
+        "path": "/agents/node/configs/xray/server-inbounds",
+        "intent": "validate"
+      },
+      {
+        "path": "/agents/node/configs/xray",
+        "version": 2
+      },
+      {
+        "path": "/agents/node/configs/xray",
+        "version": 3
+      },
+      {
+        "path": "/agents/node/configs/xray",
+        "version": 4
+      },
+      {
+        "path": "/agents/node/configs/xray",
+        "version": 5
+      }
+    ],
+    "tasks": [
+      {
+        "agent_id": "node",
+        "engine": "xray",
+        "action": "validate",
+        "config_id": "cfg",
+        "expected_config_version": 4
+      },
+      {
+        "agent_id": "node",
+        "engine": "xray",
+        "action": "deploy",
+        "config_id": "cfg",
+        "expected_config_version": 5
+      },
+      {
+        "agent_id": "node",
+        "engine": "xray",
+        "action": "deploy",
+        "config_id": "cfg",
+        "expected_config_version": 6
+      }
+    ],
+    "result": "配置 v6 部署成功。 查看执行记录 →"
+  }
+]

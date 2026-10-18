@@ -217,7 +217,7 @@ export function bindConfigFiles(form, engine, notify) {
       button.classList.toggle("active", selected === i);
       button.setAttribute("aria-pressed", String(selected === i));
     });
-    if (fileLabel) fileLabel.textContent = selected === "preview" ? "合并预览 · config.json" : files[selected].path;
+    if (fileLabel) fileLabel.textContent = selected === "preview" ? "完整配置 · config.json" : `源码片段 · ${files[selected].path}`;
   };
   editor.querySelector(".code-editor-toolbar").before(tabs);
   const navigation = document.createElement("div"); navigation.className = "config-file-navigation";

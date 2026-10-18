@@ -1,0 +1,59 @@
+{
+  "task": "config-workspace-flow-7850",
+  "finished_utc": "2026-10-18T20:17:16+00:00",
+  "due_utc": "2026-10-21T20:17:16+00:00",
+  "timezone": "Asia/Shanghai",
+  "due_local": "2026-10-22T04:17:16+08:00",
+  "container": {
+    "id": "e0df9baea2e8dc6c761d0c2b0a069e4594f816888022dc4c5bb2524bf40b86bb",
+    "mounts": [
+      {
+        "Type": "volume",
+        "Name": "01231338463d319266168a39852f73ce4e27a1d6f61e509973e2639e27970457",
+        "Source": "/var/lib/docker/volumes/01231338463d319266168a39852f73ce4e27a1d6f61e509973e2639e27970457/_data",
+        "Destination": "/var/lib/postgresql/data",
+        "Driver": "local",
+        "Mode": "",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  "volume": {
+    "Name": "01231338463d319266168a39852f73ce4e27a1d6f61e509973e2639e27970457",
+    "CreatedAt": "2026-10-19T04:05:05+08:00",
+    "Mountpoint": "/var/lib/docker/volumes/01231338463d319266168a39852f73ce4e27a1d6f61e509973e2639e27970457/_data",
+    "Driver": "local"
+  },
+  "paths": [
+    {
+      "path": "/root/.codex/worktrees/7850/qcontrolhub/output/playwright/config-workspace-flow",
+      "device": 66306,
+      "inode": 2651078,
+      "kind": "directory"
+    },
+    {
+      "path": "/root/.codex/worktrees/7850/qcontrolhub/bin/qcontrol-plane",
+      "device": 66306,
+      "inode": 14312242,
+      "kind": "file",
+      "sha256": "df6842844c21f30a337d7e049ca4c27182e38f9e8a4bd6802a5de6b06da6b142"
+    },
+    {
+      "path": "/root/.codex/worktrees/7850/qcontrolhub/bin/qagent",
+      "device": 66306,
+      "inode": 14312065,
+      "kind": "file",
+      "sha256": "9839eaf9b0465d0f6d107a4af7ca96da9bfb75dd4c7e8c4972ff0dcffe367554"
+    }
+  ],
+  "build_directory": {
+    "path": "/root/.codex/worktrees/7850/qcontrolhub/bin",
+    "device": 66306,
+    "inode": 2651100,
+    "kind": "directory"
+  },
+  "preserved": [
+    "/root/.codex/worktrees/7850/qcontrolhub/docs/config-workspace-flow"
+  ]
+}

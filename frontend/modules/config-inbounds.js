@@ -104,7 +104,8 @@ export function bindConfigInbounds(ctx) {
   if (!container) return;
   const data = state.data, epoch = state.navigationEpoch;
   const current = () => state.data === data && state.navigationEpoch === epoch && container.isConnected &&
-    state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine;
+    !container.dataset.configSwitching && !container.dataset.configRefreshing &&
+    state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode;
   const input = form?.querySelector("[data-code-input]");
   const baseline = input?.value;
   const target = () => files?.selectedInbound() || (!files && selection?.selectedInbound()) || null;
@@ -186,11 +187,20 @@ export function bindConfigInbounds(ctx) {
     state.data.accessEngine = engine;
   });
   bindEvent(tools.querySelector("[data-config-refresh]"), "click", async () => {
-    if (!current() || busy) return;
+    if (!current() || busy || dialog || form?.dataset.saving === "1") return;
     if (dirty() && !(await confirmAction("重新读取会放弃当前未保存的源码，确定继续？", "重新读取配置"))) return;
     if (!current()) return;
+    const controls = [...container.querySelectorAll("button, input, select, textarea")].map(element => [element, element.disabled]);
+    container.dataset.configRefreshing = "1";
+    container.setAttribute("aria-busy", "true");
+    controls.forEach(([element]) => { element.disabled = true; });
     try { await onRefresh(); }
-    catch (error) { if (current()) notify(`读取配置失败：${error.message}`, "error"); }
+    catch (error) { if (state.data === data && container.isConnected) notify(`读取配置失败，当前内容已保留：${error.message}`, "error"); }
+    finally {
+      delete container.dataset.configRefreshing;
+      container.removeAttribute("aria-busy");
+      controls.forEach(([element, disabled]) => { element.disabled = disabled; });
+    }
   });
 
   const mutationReady = () => {

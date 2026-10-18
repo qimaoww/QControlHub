@@ -1,0 +1,47 @@
+=== RUN   TestConfigRevisionAPIWithPostgreSQL
+2026/10/19 04:06:29 INFO waiting for PostgreSQL migration lock backend_pid=106
+2026/10/19 04:06:29 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:06:30 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=84.362118ms
+--- PASS: TestConfigRevisionAPIWithPostgreSQL (0.13s)
+=== RUN   TestAuthenticatedUsersCannotSelectForeignConfigurations
+2026/10/19 04:06:30 INFO waiting for PostgreSQL migration lock backend_pid=110
+2026/10/19 04:06:30 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:06:30 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=85.752425ms
+--- PASS: TestAuthenticatedUsersCannotSelectForeignConfigurations (1.11s)
+=== RUN   TestMultiUserBrowserSessions
+=== RUN   TestMultiUserBrowserSessions/desktop
+2026/10/19 04:06:31 INFO waiting for PostgreSQL migration lock backend_pid=114
+2026/10/19 04:06:31 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:06:31 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=84.382442ms
+    multi_user_browser_integration_test.go:87: desktop: three independent browser contexts, real password/cookie/CSRF identities
+        desktop: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        desktop: replacement cookie cannot populate the old account's page; B's session remains valid
+        desktop: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        desktop: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        desktop: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        desktop: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        desktop: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+=== RUN   TestMultiUserBrowserSessions/mobile
+2026/10/19 04:06:37 INFO waiting for PostgreSQL migration lock backend_pid=125
+2026/10/19 04:06:37 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:06:37 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=83.271266ms
+    multi_user_browser_integration_test.go:87: mobile: three independent browser contexts, real password/cookie/CSRF identities
+        mobile: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        mobile: replacement cookie cannot populate the old account's page; B's session remains valid
+        mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+--- PASS: TestMultiUserBrowserSessions (13.51s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (6.63s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (6.88s)
+=== RUN   TestConfigValidationAPIRequiresIndependentEgress
+2026/10/19 04:06:44 INFO waiting for PostgreSQL migration lock backend_pid=134
+2026/10/19 04:06:44 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 04:06:44 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=87.26416ms
+--- PASS: TestConfigValidationAPIRequiresIndependentEgress (1.01s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	16.026s

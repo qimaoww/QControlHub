@@ -1,0 +1,44 @@
+async page => {
+  const browser = page.context().browser();
+  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  const p = await context.newPage();
+  const origin = new URL(page.url()).origin;
+  const results = [];
+  try {
+    for (const [width,height] of [[390,844],[844,390],[820,1180],[1180,820]]) {
+      await p.setViewportSize({width,height});
+      await p.goto(`${origin}/agents-browser-smoke.html?mode=config-inbounds&preview=1`);
+      await p.waitForSelector('#live-config-form');
+      await p.locator('[data-inbound-action="add"]').tap();
+      await p.waitForSelector('dialog[open] #server-plan-form');
+      await p.locator('dialog [name="tag"]').fill('touch-retained-draft');
+      await p.locator('[data-inbound-close]').tap();
+      if (!(await p.locator('dialog[open] [name="tag"]').inputValue()).includes('touch-retained')) throw Error('touch close lost draft');
+      await p.evaluate(()=>window.inboundFixture.confirm=true);
+      await p.locator('[data-inbound-close]').tap();
+      await p.waitForSelector('dialog[open]', {state:'detached'});
+      const launcher = p.locator('.config-selection-actions summary:has([data-config-operation-label])');
+      await launcher.tap();
+      await p.getByRole('menuitem',{name:'修改通用配置项',exact:true}).tap();
+      await p.waitForSelector('dialog[open] #field-form');
+      await p.keyboard.press('Escape');
+      await p.waitForSelector('dialog[open]', {state:'detached'});
+      results.push(await p.evaluate(()=>({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,overflow:document.documentElement.scrollWidth>innerWidth})));
+      if (results.at(-1).overflow || !results.at(-1).touch) throw Error('touch viewport is not valid');
+      if (width === 390) {
+        await p.evaluate(()=>window.scrollTo(0,0));
+        const session = await context.newCDPSession(p);
+        await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:355,y:700}]});
+        for (let i=1;i<=8;i++) {
+          await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:355,y:700-i*55}]});
+          await p.waitForTimeout(25);
+        }
+        await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        await p.waitForTimeout(300);
+        results.at(-1).nativePan = await p.evaluate(()=>scrollY>0);
+        if (!results.at(-1).nativePan) throw Error('native touch scroll did not move');
+      }
+    }
+    return results;
+  } finally { await context.close(); }
+}

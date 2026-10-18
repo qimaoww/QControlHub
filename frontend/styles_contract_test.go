@@ -70,7 +70,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	for _, required := range []string{
 		"const liveConfigPhase = current",
 		"data-live-config-phase=\"${esc(liveConfigPhase)}\"",
-		"data-refresh-key=\"live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}\"",
+		"data-refresh-key=\"live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}-${saved?.version || 0}-${editorRevision}\"",
 	} {
 		if !strings.Contains(string(configs), required) {
 			t.Errorf("live configuration transition is missing %q", required)
