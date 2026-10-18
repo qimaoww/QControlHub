@@ -631,6 +631,8 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .core-log-status{flex-wrap:wrap}.core-log-status>span:last-child{flex-wrap:wrap}
 .core-log-filter-group>div{min-width:0}
 @media(max-width:480px){.core-log-result-toolbar{flex-wrap:wrap}.core-log-result-toolbar>.core-log-pagination{margin-left:auto}.core-log-pagination{gap:6px}}
+/* Counts and mixed-language engine names keep their full width when scaled. */
+.core-log-filter-group button{flex:1 0 auto;min-width:max-content}
 /* The initial stylesheet is a frozen repository baseline. All live motion
    overrides belong to this approved extension layer. */
 a,button,input,select,textarea,summary{transition:background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}

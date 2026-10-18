@@ -6,3 +6,5 @@
 .core-log-status{flex-wrap:wrap}.core-log-status>span:last-child{flex-wrap:wrap}
 .core-log-filter-group>div{min-width:0}
 @media(max-width:480px){.core-log-result-toolbar{flex-wrap:wrap}.core-log-result-toolbar>.core-log-pagination{margin-left:auto}.core-log-pagination{gap:6px}}
+/* Counts and mixed-language engine names keep their full width when scaled. */
+.core-log-filter-group button{flex:1 0 auto;min-width:max-content}
