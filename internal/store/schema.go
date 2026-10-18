@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 80
+const currentSchemaVersion = 81
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS account_node_orders (
@@ -952,4 +952,41 @@ CREATE TABLE IF NOT EXISTS certificate_dns_leases (
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_id text NOT NULL DEFAULT '';
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_version integer NOT NULL DEFAULT 0;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS inbound_tag text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS admin_api_keys (
+ id text PRIMARY KEY,
+ name varchar(100) NOT NULL,
+ prefix varchar(24) NOT NULL,
+ digest bytea NOT NULL UNIQUE CHECK(octet_length(digest)=32),
+ creator_type text NOT NULL CHECK(creator_type IN ('user','environment')),
+ creator_id text NOT NULL,
+ owner_id text NOT NULL,
+ permissions jsonb NOT NULL,
+ ip_allowlist jsonb NOT NULL DEFAULT '[]'::jsonb,
+ disabled boolean NOT NULL DEFAULT false,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz,
+ last_used_at timestamptz,
+ revoked_at timestamptz,
+ revision bigint NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS admin_api_keys_creator_idx ON admin_api_keys(creator_type,creator_id,created_at DESC);
+
+CREATE OR REPLACE FUNCTION revoke_admin_api_keys_for_user() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='DELETE' THEN
+  UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
+   WHERE creator_type='user' AND creator_id=OLD.id AND revoked_at IS NULL;
+  RETURN OLD;
+ END IF;
+ IF NEW.disabled OR NEW.role<>'admin' THEN
+  UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
+   WHERE creator_type='user' AND creator_id=NEW.id AND revoked_at IS NULL;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS panel_users_revoke_api_keys ON panel_users;
+CREATE TRIGGER panel_users_revoke_api_keys BEFORE UPDATE OR DELETE ON panel_users
+ FOR EACH ROW EXECUTE FUNCTION revoke_admin_api_keys_for_user();
 `

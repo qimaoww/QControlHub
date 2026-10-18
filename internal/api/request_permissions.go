@@ -15,5 +15,8 @@ func (s *Server) sessionAllows(request *http.Request, permission core.Permission
 	if !roleOK || !permissionsOK {
 		return false
 	}
+	if _, key := requestAPIKey(request); key {
+		return core.HasPermission(permissions, permission)
+	}
 	return role.Allows(permission) || core.HasPermission(permissions, permission)
 }

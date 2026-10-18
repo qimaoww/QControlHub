@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -28,6 +29,30 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 		if !valid {
 			return
 		}
+		if k, isKey := requestAPIKey(request); isKey {
+			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request)}
+			w = response
+			defer func() {
+				status := response.finish()
+				s.recordAudit(request, "api_key.request", k.ID, fmt.Sprintf("%s %s status=%d request_id=%s", request.Method, request.Pattern, status, w.Header().Get("X-Request-ID")))
+				if status >= 200 && status < 300 {
+					ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), 2*time.Second)
+					defer cancel()
+					_ = s.store.TouchAPIKey(ctx, k.ID)
+				}
+			}()
+			required, allowed := diagnosticRoutes[request.Pattern]
+			if !allowed {
+				writeError(w, 403, "API Key 不允许访问此接口")
+				return
+			}
+			for _, permission := range required {
+				if !s.sessionAllows(request, permission) {
+					writeError(w, 403, "API Key 未获此读取权限")
+					return
+				}
+			}
+		}
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
 		if !s.adminLimiter.Allow(key, now) {
@@ -42,13 +67,13 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 			return
 		}
 		s.adminLimiter.Success(key)
-		granted, permissionsOK := s.sessionPermissions(request)
+		_, permissionsOK := s.sessionPermissions(request)
 		if !permissionsOK {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
 		}
 		for _, permission := range permissions {
-			if !role.Allows(permission) && !core.HasPermission(granted, permission) {
+			if !s.sessionAllows(request, permission) {
 				writeError(w, http.StatusForbidden, "token role does not permit this operation")
 				return
 			}
@@ -218,6 +243,6 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w = compressed
 		}
 		next.ServeHTTP(w, request)
-		slog.Debug("http request", "method", request.Method, "path", request.URL.Path, "duration", time.Since(started))
+		slog.Debug("http request", "method", request.Method, "path", core.RedactDiagnostic(request.URL.Path), "duration", time.Since(started))
 	})
 }
