@@ -47,6 +47,9 @@ schema 79→80 为策略增加 `config_id/config_version/inbound_tag`。访问�
 - [同次录屏中的配置删除与部署页](evidence/traffic-auto-refresh-1.webm)
 - [数据库基准](logs/before-state.txt)、[修复后数据库](logs/after-state.txt)、[API 与页面集合](logs/after-api-page.txt)
 - [重启后修正旧残留](evidence/after-restart-repair.png)
+- [手动编辑原始路由并保存成功](evidence/manual-edit-success.png)；生成的统计副本仍受保护
+- [真实冲突的删除错误详情](evidence/after-real-conflict-error.png)、[手机错误详情](evidence/mobile-delete-error.png)
+- [手机删除最后一个入站](evidence/mobile-last-delete.png)、[端口集合为空](evidence/after-last-delete-empty.png)、[空集合 API 与页面](logs/last-empty-page.txt)
 - [手机流量页](evidence/mobile-traffic.png)、[手机同步候选](evidence/mobile-sync.png)、[平板](evidence/tablet-traffic.png)
 
 截图和视频来自真实 Chromium、HTTP API 和 PostgreSQL。部署任务由可重复 Go 测试夹具模拟确认，**不是生产节点真实删除、服务重启或网络计费录屏**。录屏的流量页没有导航或手动刷新；另一页执行删除，等待部署确认后由 2 秒轮询更新。
@@ -71,7 +74,7 @@ schema 79→80 为策略增加 `config_id/config_version/inbound_tag`。访问�
 ## 测试结果和限制
 
 - `make non-browser-checks`：通过。
-- 新增 API 8 子用例、Store 删除生命周期/共享实例隔离：已通过；最终全量仍在执行。
+- 新增 API 10 子用例、Store 删除生命周期/共享实例隔离：已通过；最终全量仍在执行。
 - `QCH_SING_BOX_BINARY=... go test ./internal/serverconfig -run '^TestSingBoxFinalInboundDeletion$'`：ordinary/shared 均通过，见 [真实内核日志](logs/live-core.log)。
 - `make test` 按仓库的 `-p 1` 串行要求运行，结果待补充。先前并行包/迁移试跑触发 PostgreSQL 集群 vacuum horizon 的 HOT 存储断言，单独测试通过；不修改或放宽该性能门槛。
 - GitHub 必需 CI 结果待补充。

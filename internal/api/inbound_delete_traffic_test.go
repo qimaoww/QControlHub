@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 
 func TestDeleteAndManualEditRecoverVerifiedAccounting(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
-		for _, operation := range []string{"delete", "source", "manual", "conflict"} {
+		for _, operation := range []string{"delete", "source", "manual", "conflict", "legacy"} {
 			t.Run(string(engine)+"/"+operation, func(t *testing.T) {
 				db, ctx, _, owner, _ := newConfigScopeAPIFixture(t)
 				agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "accounting-recovery", engine)
@@ -23,6 +24,24 @@ func TestDeleteAndManualEditRecoverVerifiedAccounting(t *testing.T) {
 				plan, err := serverconfig.PrepareAccounting(engine, content)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if operation == "legacy" {
+					var old map[string]any
+					if err := json.Unmarshal([]byte(plan.Content), &old); err != nil {
+						t.Fatal(err)
+					}
+					for _, raw := range old["outbounds"].([]any) {
+						out := raw.(map[string]any)
+						if tag, _ := out["tag"].(string); strings.HasPrefix(tag, "qch-trf-") {
+							delete(out, "routing_mark")
+							delete(out, "streamSettings")
+						}
+					}
+					data, err := json.MarshalIndent(old, "", "  ")
+					if err != nil {
+						t.Fatal(err)
+					}
+					plan.Content = string(data)
 				}
 				// Save the verifiable predecessor and a stale historical manual edit.
 				scoped := store.WithConfigScope(ctx, owner.userID, false)
