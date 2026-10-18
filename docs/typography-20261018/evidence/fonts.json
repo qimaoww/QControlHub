@@ -1,0 +1,56 @@
+{
+  "fonts": [
+    {
+      "selector": "h2",
+      "fonts": [
+        {
+          "familyName": "WenQuanYi Zen Hei",
+          "postScriptName": "WenQuanYiZenHei",
+          "isCustomFont": false,
+          "glyphCount": 2
+        },
+        {
+          "familyName": "DejaVu Sans",
+          "postScriptName": "DejaVuSans-Bold",
+          "isCustomFont": false,
+          "glyphCount": 8
+        }
+      ]
+    },
+    {
+      "selector": ".code-editor-input",
+      "fonts": []
+    },
+    {
+      "selector": ".code-gutter",
+      "fonts": [
+        {
+          "familyName": "Liberation Mono",
+          "postScriptName": "LiberationMono",
+          "isCustomFont": false,
+          "glyphCount": 29
+        }
+      ]
+    }
+  ],
+  "loadedFonts": [],
+  "fontRequests": [],
+  "monospaceWidths": [
+    [
+      "iiiiiiii",
+      62.41015625
+    ],
+    [
+      "WWWWWWWW",
+      62.41015625
+    ],
+    [
+      "12345678",
+      62.41015625
+    ],
+    [
+      "中文混排",
+      52
+    ]
+  ]
+}

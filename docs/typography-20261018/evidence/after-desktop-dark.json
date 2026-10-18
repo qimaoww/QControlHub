@@ -1,0 +1,1049 @@
+{
+  "stage": "after",
+  "device": "desktop",
+  "theme": "dark",
+  "results": [
+    {
+      "kind": "dashboard",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "运行总览",
+          "size": "24px",
+          "weight": "600",
+          "lineHeight": "32.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "面板主机",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "节点流量",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "节点状态",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "最近任务",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "主题",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "退出",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small panel-metrics-refresh",
+          "text": "",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "‹",
+          "size": "18px",
+          "weight": "600",
+          "lineHeight": "28.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "›",
+          "size": "18px",
+          "weight": "600",
+          "lineHeight": "28.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "1月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "2月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "3月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "4月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "5月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "6月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "7月",
+          "size": "12px",
+          "weight": "600",
+          "lineHeight": "19.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [],
+      "dialogs": []
+    },
+    {
+      "kind": "settings",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "默认内核能力",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "基础设置",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "任务与同步",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "数据与日志",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "事件通知",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "Komari 联动",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "CN IP 数据源",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "证书申请",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "部署状态",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "主题",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "退出",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "core-capability-switch",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "core-capability-switch",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "core-capability-switch",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "core-capability-switch",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "跟随浏览器Asia/ShanghaiUTC",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "绝对时间 + 相对时间仅绝对时间",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "小正常大",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "50 条100 条500 条",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [],
+      "dialogs": []
+    },
+    {
+      "kind": "connections",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "连接 IP",
+          "size": "24px",
+          "weight": "600",
+          "lineHeight": "32.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H3",
+          "classes": "",
+          "text": "客户端来源 IP",
+          "size": "16px",
+          "weight": "600",
+          "lineHeight": "21.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "主题",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "退出",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "刷新",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部MihomoXraysing-boxss-rust",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "仅公网包含非公网",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "今天",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "本月全部",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button primary small",
+          "text": "查询",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "上一页",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "下一页",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [],
+      "dialogs": []
+    },
+    {
+      "kind": "config-editor",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "香港 · HK-01",
+          "size": "18px",
+          "weight": "600",
+          "lineHeight": "24.3px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "button",
+          "text": "重新读取",
+          "size": "14px",
+          "weight": "500",
+          "lineHeight": "19.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "高级字段",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "版本历史",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "配置差异",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "live-engine-tab active",
+          "text": "mihomo正在运行",
+          "size": "14px",
+          "weight": "600",
+          "lineHeight": "19.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "config-file-button active",
+          "text": "公共配置完整配置源码",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "config-file-button",
+          "text": "firstss2022 · 21001",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "config-file-button",
+          "text": "secondss2022 · 21002",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button",
+          "text": "＋ 增加入站",
+          "size": "14px",
+          "weight": "500",
+          "lineHeight": "19.6px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "＋ 增加通用配置项",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "修改通用配置项",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "danger-text",
+          "text": "删除通用配置项",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [
+        {
+          "tag": "ASIDE",
+          "classes": "code-gutter",
+          "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19",
+          "size": "13px",
+          "weight": "400",
+          "lineHeight": "21.45px",
+          "family": "ui-monospace, SFMono-Regular, \"Cascadia Code\", Consolas, \"Liberation Mono\", \"Noto Sans Mono CJK SC\", \"PingFang SC\", \"Microsoft YaHei\", \"WenQuanYi Zen Hei Mono\", monospace",
+          "spacing": "normal"
+        },
+        {
+          "tag": "TEXTAREA",
+          "classes": "code-editor-input",
+          "text": "{\n  \"log-level\": \"info\",\n  \"mode\": \"rule\",\n  \"listeners\": [\n    {\n      \"name\": ",
+          "size": "13px",
+          "weight": "400",
+          "lineHeight": "21.45px",
+          "family": "ui-monospace, SFMono-Regular, \"Cascadia Code\", Consolas, \"Liberation Mono\", \"Noto Sans Mono CJK SC\", \"PingFang SC\", \"Microsoft YaHei\", \"WenQuanYi Zen Hei Mono\", monospace",
+          "spacing": "normal"
+        }
+      ],
+      "dialogs": []
+    },
+    {
+      "kind": "logs",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "内核日志",
+          "size": "24px",
+          "weight": "600",
+          "lineHeight": "32.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "主题",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "退出",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "19.5px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部授权节点ALPHABRAVOCHARLIEDELTA",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部授权实例主实例",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "全部4000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "Mihomo1000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "Xray1000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "sing-box1000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "SS Rust1000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "全部4000",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "信息0",
+          "size": "13px",
+          "weight": "600",
+          "lineHeight": "20.8px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [],
+      "dialogs": []
+    },
+    {
+      "kind": "certificates",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "scale": "100",
+      "overflow": 0,
+      "headings": [
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "证书中心",
+          "size": "24px",
+          "weight": "600",
+          "lineHeight": "32.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "H2",
+          "classes": "",
+          "text": "新增证书",
+          "size": "18px",
+          "weight": "600",
+          "lineHeight": "24.3px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "主题",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "",
+          "text": "退出",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "刷新",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "Caddy 同步",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "账号管理",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button primary small",
+          "text": "新增证书",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "INPUT",
+          "classes": "",
+          "text": "",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "22.4px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部来源Caddy 托管ACME导入自签",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部有效期30 天内到期已过期",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "SELECT",
+          "classes": "",
+          "text": "全部状态已签发等待处理等待 DNS验证中失败已取消已过期",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "normal",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "详情",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        },
+        {
+          "tag": "BUTTON",
+          "classes": "button small",
+          "text": "详情",
+          "size": "13px",
+          "weight": "500",
+          "lineHeight": "18.2px",
+          "family": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif",
+          "spacing": "normal"
+        }
+      ],
+      "code": [],
+      "dialogs": [
+        {
+          "client": 558,
+          "scroll": 558
+        }
+      ]
+    }
+  ]
+}

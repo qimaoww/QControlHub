@@ -1,0 +1,248 @@
+[
+  {
+    "view": "desktop",
+    "kind": "logs",
+    "requestedTheme": "light",
+    "requestedScale": 110,
+    "theme": "light",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "sing-box1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "SS Rust1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      }
+    ],
+    "code": null
+  },
+  {
+    "view": "desktop",
+    "kind": "logs",
+    "requestedTheme": "dark",
+    "requestedScale": 110,
+    "theme": "dark",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "sing-box1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "SS Rust1000",
+        "client": [
+          87,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      }
+    ],
+    "code": null
+  },
+  {
+    "view": "narrow",
+    "kind": "logs",
+    "requestedTheme": "light",
+    "requestedScale": 110,
+    "theme": "light",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          85,
+          44
+        ],
+        "scroll": [
+          90,
+          44
+        ]
+      }
+    ],
+    "code": null
+  },
+  {
+    "view": "narrow",
+    "kind": "logs",
+    "requestedTheme": "dark",
+    "requestedScale": 110,
+    "theme": "dark",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          85,
+          44
+        ],
+        "scroll": [
+          90,
+          44
+        ]
+      }
+    ],
+    "code": null
+  },
+  {
+    "view": "tablet-landscape",
+    "kind": "logs",
+    "requestedTheme": "light",
+    "requestedScale": 110,
+    "theme": "light",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "sing-box1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "SS Rust1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      }
+    ],
+    "code": null
+  },
+  {
+    "view": "tablet-landscape",
+    "kind": "logs",
+    "requestedTheme": "dark",
+    "requestedScale": 110,
+    "theme": "dark",
+    "scale": "110",
+    "pageOverflow": 0,
+    "overflow": [],
+    "clipped": [
+      {
+        "selector": "BUTTON",
+        "text": "Mihomo1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "sing-box1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          91,
+          32
+        ]
+      },
+      {
+        "selector": "BUTTON",
+        "text": "SS Rust1000",
+        "client": [
+          86,
+          32
+        ],
+        "scroll": [
+          90,
+          32
+        ]
+      }
+    ],
+    "code": null
+  }
+]

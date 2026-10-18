@@ -1,0 +1,8 @@
+### Result
+{"page":0,"actions":[{"text":"恢复原文","height":42,"line":"21.56px","width":160,"scroll":160},{"text":"格式化配置","height":42,"line":"21.56px","width":160,"scroll":160}]}
+### Ran Playwright code
+```js
+await (async page => {await page.goto("http://127.0.0.1:43711/?kind=config-editor&scale=110");await page.waitForSelector(".code-editor-input");await page.screenshot({path:"/root/.codex/worktrees/d8f3/qcontrolhub/docs/typography-20261018/evidence/editor-mobile-110.png"});return await page.evaluate(()=>({page:document.documentElement.scrollWidth-innerWidth,actions:[...document.querySelectorAll(".config-editor-actions .button")].map(e=>({text:e.textContent,height:e.clientHeight,line:getComputedStyle(e).lineHeight,width:e.clientWidth,scroll:e.scrollWidth}))}))})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:43711/?kind=config-editor&scale=110

@@ -1,0 +1,21 @@
+{
+  "local_test_end_utc": "2026-10-18T10:34:38+00:00",
+  "local_test_end_hong_kong": "2026-10-18T18:34:38+08:00",
+  "stopped_server_pids": [
+    3720030,
+    3723143
+  ],
+  "ports": [
+    {
+      "port": 34395,
+      "listening": false
+    },
+    {
+      "port": 43711,
+      "listening": false
+    }
+  ],
+  "remaining_task_browser_daemons": [],
+  "database_or_containers_created": false,
+  "process_detection": "Tokenized argv; excludes shell command text containing diagnostic patterns."
+}
