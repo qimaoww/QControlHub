@@ -80,7 +80,9 @@ export function bindAPIKeys({ api, state, esc, date, notify, confirmAction }) {
       event.preventDefault();
       const button = form.querySelector('[type="submit"]'); if (button.disabled) return;
       const data = new FormData(form);
-      const body = { name: data.get("name"), expires_at: data.get("expires_at") ? new Date(data.get("expires_at")).toISOString() : null, ip_allowlist: String(data.get("ip_allowlist")).split(/\r?\n/).map(s => s.trim()).filter(Boolean), permissions: data.getAll("permissions"), disabled: key?.disabled || false, revision: key?.revision || 0 };
+      const expiry = data.get("expires_at");
+      const expiresAt = expiry === localTime(key?.expires_at) ? key?.expires_at ?? null : expiry ? new Date(expiry).toISOString() : null;
+      const body = { name: data.get("name"), expires_at: expiresAt, ip_allowlist: String(data.get("ip_allowlist")).split(/\r?\n/).map(s => s.trim()).filter(Boolean), permissions: data.getAll("permissions"), disabled: key?.disabled || false, revision: key?.revision || 0 };
       button.disabled = true; setPending(true);
       try {
         const saved = await api(key ? `/settings/api-keys/${encodeURIComponent(key.id)}` : "/settings/api-keys", { method: key ? "PUT" : "POST", body: JSON.stringify(body) });

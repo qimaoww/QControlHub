@@ -129,6 +129,16 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 		call(secret, "GET", "/tasks", nil, "", "", 403)
 		k = update(k, input)
 	})
+	t.Run("redacted_logs_ignore_original_representation_validators", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/api/v1/core-logs", nil)
+		r.Header.Set("Authorization", "Bearer "+secret)
+		r.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 200 || w.Header().Get("ETag") != "" || !json.Valid(w.Body.Bytes()) {
+			t.Fatalf("unredacted validator affected Key representation: status=%d", w.Code)
+		}
+	})
 	t.Run("immediate_allowlist_and_proxy_chain", func(t *testing.T) {
 		withIP := input
 		withIP.IPAllowlist = []string{"192.168.5.77/24", "::ffff:192.168.5.99/120", "fd00:0:0::/48", "::1"}

@@ -62,3 +62,28 @@ func TestDiagnosticRedactionPreservesStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosticRedactionNativeCredentialsAndFieldNames(t *testing.T) {
+	for _, content := range []any{
+		map[string]any{"key": "dns", "type": "sudoku", "psk": "SNELL_VALUE", "users": map[string]any{"alice": "USER_VALUE", "11111111-2222-3333-4444-555555555555": "TUIC_VALUE"}, "decryption": "DECRYPTION_VALUE", "pre_shared_key": "WIREGUARD_VALUE", "headers": map[string]any{"Cookie": "session=COOKIE_VALUE"}, "authentication-timeout": 1000},
+		"key: dns\nlisteners:\n  - type: sudoku\n    key: SUDOKU_VALUE\n  - type: snell\n    psk: &ANCHOR_CREDENTIAL SNELL_VALUE\n  - type: hysteria2\n    users:\n      alice: USER_VALUE\n  - type: tuic\n    users:\n      11111111-2222-3333-4444-555555555555: TUIC_VALUE\n    authentication-timeout: 1000\n",
+		`{"key":"dns","listeners":[{"type":"sudoku","key":"SUDOKU_VALUE"},{"type":"snell","psk":"SNELL_VALUE"},{"type":"tuic","users":{"11111111-2222-3333-4444-555555555555":"TUIC_VALUE"},"authentication-timeout":1000}]}`,
+	} {
+		b, err := json.Marshal(RedactDiagnosticValue(content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range []string{"SUDOKU_VALUE", "SNELL_VALUE", "USER_VALUE", "TUIC_VALUE", "DECRYPTION_VALUE", "WIREGUARD_VALUE", "COOKIE_VALUE", "ANCHOR_CREDENTIAL", "11111111-2222-3333-4444-555555555555"} {
+			if strings.Contains(string(b), secret) {
+				t.Errorf("native credential leaked: %s", secret)
+			}
+		}
+		if !strings.Contains(string(b), "1000") {
+			t.Error("authentication timeout was removed")
+		}
+	}
+	field := RedactDiagnosticValue(map[string]any{"key": "dns", "fragment": "nameserver: [1.1.1.1]"}).(map[string]any)
+	if field["key"] != "dns" {
+		t.Error("field identifier was redacted")
+	}
+}

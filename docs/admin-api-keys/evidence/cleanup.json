@@ -1,14 +1,14 @@
 {
   "job_id": "qch-pr304-api-keys-cleanup.timer",
   "registered": true,
-  "test_finished_at_utc": "2026-10-18T18:11:52+00:00",
-  "execute_at_utc": "2026-10-21T18:11:52+00:00",
-  "execute_at_local": "2026-10-22T02:11:52+08:00",
-  "timezone": "Asia/Shanghai",
+  "test_finished_at_utc": "2026-10-18T18:53:13+00:00",
+  "execute_at_utc": "2026-10-21T18:53:13+00:00",
+  "execute_at_local": "2026-10-22T02:53:13+08:00",
+  "timezone": "Asia/Hong_Kong",
   "delay_hours": 72,
   "persistent": true,
   "systemd_state": [
-    "NextElapseUSecRealtime=Thu 2026-10-22 02:11:52 CST",
+    "NextElapseUSecRealtime=Thu 2026-10-22 02:53:13 CST",
     "ActiveState=active",
     "UnitFileState=enabled"
   ],

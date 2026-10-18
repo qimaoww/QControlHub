@@ -30,6 +30,10 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 			return
 		}
 		if k, isKey := requestAPIKey(request); isKey {
+			// Legacy handlers derive validators from their original payload.
+			// The Key receives a redacted representation without those validators.
+			request = request.Clone(request.Context())
+			request.Header.Del("If-None-Match")
 			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request)}
 			w = response
 			defer func() {
