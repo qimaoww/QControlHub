@@ -97,6 +97,14 @@ func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Request) {
+	changed, err := s.store.RepairAppliedTrafficPolicies(request.Context(), "")
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	for _, agentID := range changed {
+		s.refreshAgentTrafficPolicies(agentID)
+	}
 	policies, err := s.store.ListPortTrafficPolicies(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
@@ -120,6 +128,14 @@ func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) 
 }
 
 func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
+	changed, err := s.store.RepairAppliedTrafficPolicies(ctx, connectedAgentID)
+	if err != nil {
+		slog.Warn("repair applied traffic monitors", "error", err)
+		return
+	}
+	for _, agentID := range changed {
+		s.refreshAgentTrafficPolicies(agentID)
+	}
 	if connectedAgentID != "" {
 		configs, err := s.store.AgentConfigsForMonitoring(ctx, connectedAgentID)
 		if err == nil {
@@ -217,6 +233,7 @@ func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoi
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(config.Engine, config.Content) {
 			endpoint.AgentID = config.AgentID
+			endpoint.ConfigID = config.ID
 			endpoint.ConfigVersion = config.Version
 			endpoint.ConfigUpdatedAt = config.UpdatedAt
 			key := endpoint.AgentID + "\x00" + string(endpoint.Engine) + "\x00" + strconv.Itoa(endpoint.Port) + "\x00" + string(endpoint.Protocol) + "\x00" + endpoint.Name

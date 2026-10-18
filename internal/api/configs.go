@@ -1,10 +1,14 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func (s *Server) getAgentConfig(w http.ResponseWriter, request *http.Request) {
@@ -42,6 +46,27 @@ func (s *Server) putAgentConfig(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Request, input core.Config) {
+	current, err := s.store.AgentConfig(request.Context(), input.AgentID, input.Engine)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeStoreError(w, err)
+		return
+	}
+	if err == nil && current.Version != input.Version {
+		writeStoreError(w, store.ErrConflict)
+		return
+	}
+	if err == nil && (strings.Contains(current.Content, "qch-trf-") || strings.Contains(input.Content, "qch-trf-") || input.Engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark")) {
+		input.Content, err = s.accountingUpdateSource(request.Context(), current, input.Content)
+		if err == nil && len(serverconfig.DiscoverTrafficPorts(input.Engine, input.Content)) > 0 {
+			var plan serverconfig.AccountingPlan
+			plan, err = serverconfig.PlanPresetAccounting(input.Engine, input.Content)
+			input.Content = plan.Content
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	config, err := s.store.SaveAgentConfig(request.Context(), input, input.Version)
 	if err != nil {
 		writeStoreError(w, err)

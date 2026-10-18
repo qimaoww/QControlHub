@@ -1,3 +1,4 @@
+import { redactDiagnostic } from "./errors.js";
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
@@ -272,7 +273,7 @@ export function bindConfigInbounds(ctx) {
           updateFeedbackHTML(body, `<p>已部署 v${deployed.config_version} → 已保存 v${fresh.config.version}</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
         }
       } else if (kind === "delete") {
-        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><p role="alert" data-inbound-error></p><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
+        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
         const buttons = [...body.querySelectorAll("[data-delete-intent]")];
         buttons.forEach(button => {
           button.disabled = !writable() || fresh.agent?.status !== "online" || !fresh.agent?.runtime?.[engine]?.installed;
@@ -294,7 +295,8 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              updateFeedback(body.querySelector("[data-inbound-error]"), `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`);
+              const reason = error.status === 409 ? "配置版本已变化，请重新读取后重试。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
+              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>删除入站失败</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
               if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }

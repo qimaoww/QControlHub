@@ -144,7 +144,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			}
 		}
 		if task.Action == core.ActionDeploy {
-			return bindSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints)
+			return prepareSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints, false)
 		}
 		return nil
 	}

@@ -82,28 +82,34 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		Intent                string             `json:"intent"`
 		Input                 serverconfig.Input `json:"input"`
 	}
+	mutationError := func(message string) {
+		if input.Operation == "delete" && !strings.HasPrefix(message, "删除入站失败") {
+			message = "删除入站失败：" + message
+		}
+		writeError(w, http.StatusBadRequest, message)
+	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		mutationError(err.Error())
 		return
 	}
 	if input.Operation != "add" && input.Operation != "modify" && input.Operation != "delete" {
-		writeError(w, http.StatusBadRequest, "operation must be add, modify, or delete")
+		mutationError("operation must be add, modify, or delete")
 		return
 	}
 	if input.Intent != "validate" && input.Intent != "deploy" {
-		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
+		mutationError("intent must be validate or deploy")
 		return
 	}
 	if input.InstallIfMissing && input.Operation != "add" {
-		writeError(w, http.StatusBadRequest, "automatic installation is only supported when adding an inbound")
+		mutationError("automatic installation is only supported when adding an inbound")
 		return
 	}
 	if input.Operation == "add" && input.OriginalTag != "" {
-		writeError(w, http.StatusBadRequest, "新增入站不能携带原入站标识")
+		mutationError("新增入站不能携带原入站标识")
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {
-		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
+		mutationError("unknown server inbound protocol")
 		return
 	}
 	if input.Operation != "delete" && input.Input.PanelCertificateID != "" {
@@ -119,7 +125,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if input.Operation != "delete" {
 		generated, err = serverconfig.Generate(engine, input.Input)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 	}
@@ -148,9 +154,13 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		}
 	}
 	if currentErr == nil {
-		current.Content, err = serverconfig.PresetAccountingSource(engine, current.Content)
+		current.Content, err = s.presetAccountingSource(request.Context(), current)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "无法安全更新独立出口配置："+err.Error())
+			prefix := "无法安全更新独立出口配置："
+			if input.Operation == "delete" {
+				prefix = "删除入站失败："
+			}
+			mutationError(prefix + err.Error())
 			return
 		}
 		if input.Operation == "delete" {
@@ -161,18 +171,18 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
 		}
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 	} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 		content, err = serverconfig.MutateGenerated(engine, "{}", generated, "", "add")
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 	}
 	if engine == core.EngineShadowsocksRust && input.Operation != "delete" && input.Input.BlockMainlandDestination && len(serverconfig.DiscoverMainlandAccessPolicies(engine, content)) > 1 {
-		writeError(w, http.StatusBadRequest, "Shadowsocks Rust 的 ACL 由单个 ssserver 进程统一加载；多端口配置请拆分为单独进程后再启用目标限制")
+		mutationError("Shadowsocks Rust 的 ACL 由单个 ssserver 进程统一加载；多端口配置请拆分为单独进程后再启用目标限制")
 		return
 	}
 	if engine == core.EngineMihomo || engine == core.EngineXray || engine == core.EngineSingBox || engine == core.EngineShadowsocksRust {
@@ -180,7 +190,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			if engine != core.EngineShadowsocksRust {
 				content, err = serverconfig.RemoveMainlandAccessPolicy(engine, content, input.OriginalTag)
 				if err != nil {
-					writeError(w, http.StatusBadRequest, err.Error())
+					mutationError(err.Error())
 					return
 				}
 			}
@@ -192,7 +202,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				BlockMainlandSource:      input.Input.BlockMainlandSource,
 			}, nil)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
+				mutationError(err.Error())
 				return
 			}
 		}
@@ -204,7 +214,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		}
 		content, err = serverconfig.ReconcilePresetInboundReferences(engine, content, input.OriginalTag, next)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 	}
@@ -213,7 +223,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
 		plan, err := serverconfig.PlanPresetAccounting(engine, content)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "预设配置无法建立独立出口归属，未保存或部署："+err.Error())
+			mutationError("预设配置无法建立独立出口归属，未保存或部署：" + err.Error())
 			return
 		}
 		content = plan.Content
@@ -235,7 +245,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		}
 		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(input.Input, previous)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 	}
@@ -266,7 +276,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			}
 		}
 		if destination && len(entries) > 1 {
-			writeError(w, http.StatusBadRequest, "当前 SS Rust 已启用进程级目标限制，请先关闭目标限制或拆分进程后再新增端口")
+			mutationError("当前 SS Rust 已启用进程级目标限制，请先关闭目标限制或拆分进程后再新增端口")
 			return
 		}
 		desired = reconcileShadowsocksRustPolicies(entries, existingShadowsocksRustPolicies, agent.ID, input.ExpectedVersion+1,
@@ -277,12 +287,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if input.Input.RealityEnabled && input.Operation != "delete" {
 		target, err := serverconfig.ProbePlanRealityTarget(request.Context(), input.Input)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			mutationError(err.Error())
 			return
 		}
 		if input.Input.RealityMLDSA65Seed != "" {
 			if err := serverconfig.ValidateRealityMLDSATarget(target); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
+				mutationError(err.Error())
 				return
 			}
 		}

@@ -385,29 +385,158 @@ func (s *Store) finishDeployedTrafficTx(ctx context.Context, tx pgx.Tx, agentID 
 	for _, ep := range endpoints {
 		ports = append(ports, ep.Port)
 	}
-	if settled {
-		_, err = tx.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false,receive_bps=0,send_bps=0,blocked=false,updated_at=now()
-   WHERE agent_id=$1 AND engine=$2 AND COALESCE(share_id,'')=$3 AND monitoring_enabled AND NOT(port=ANY($4::int[]))
-     AND ($3<>'' OR discovered AND NOT quota_enabled)`, agentID, engine, shareID, ports)
+	_, err = s.applyDeployedTrafficTx(ctx, tx, agentID, engine, shareID, configID, version, endpoints, ports, true)
+	return err
+}
+
+// The Agent settles old counters before acknowledging deployment. Settlement
+// completeness does not determine whether the removed listener is still live.
+func (s *Store) applyDeployedTrafficTx(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine, shareID, configID string, version int, endpoints []core.PortTrafficEndpoint, ports []int, activate bool) (bool, error) {
+	var confirmed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$2 AND $3='' AND config_id=$4 AND config_version=$5 AND NOT uncertain AND NOT config_uncertain
+ UNION ALL SELECT 1 FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND config_id=$4 AND config_version=$5 AND NOT uncertain AND NOT config_uncertain)`, agentID, engine, shareID, configID, version).Scan(&confirmed); err != nil {
+		return false, err
+	}
+	if !confirmed {
+		return false, nil
+	}
+	// Older rows have no explicit config binding. Prove membership using only
+	// revisions of this configuration up to the confirmed applied revision.
+	historicalPorts := []int{}
+	var needsLegacyEvidence bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM port_traffic_policies WHERE agent_id=$1 AND engine=$2 AND COALESCE(share_id,'')=$3 AND monitoring_enabled AND config_id='' AND NOT(port=ANY($4::int[])))`, agentID, engine, shareID, ports).Scan(&needsLegacyEvidence); err != nil {
+		return false, err
+	}
+	if needsLegacyEvidence {
+		rows, err := tx.Query(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version<=$2`, configID, version)
 		if err != nil {
-			return err
+			return false, err
+		}
+		var revisions []string
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				rows.Close()
+				return false, err
+			}
+			revisions = append(revisions, value)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		for _, value := range revisions {
+			content, err := s.decryptContent(value)
+			if err != nil {
+				return false, err
+			}
+			for _, ep := range serverconfig.DiscoverTrafficPorts(engine, content) {
+				historicalPorts = append(historicalPorts, ep.Port)
+			}
 		}
 	}
-	if shareID != "" {
-		return nil
+	changed := false
+	result, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false,receive_bps=0,send_bps=0,blocked=false,
+ reset_generation=reset_generation+1,updated_at=now()
+ WHERE agent_id=$1 AND engine=$2 AND COALESCE(share_id,'')=$3 AND monitoring_enabled AND NOT(port=ANY($4::int[]))
+ AND (config_id=$5 OR config_id='' AND port=ANY($6::int[]))`, agentID, engine, shareID, ports, configID, historicalPorts)
+	if err != nil {
+		return false, err
 	}
+	changed = result.RowsAffected() > 0
 	for _, ep := range endpoints {
-		id, e := core.NewID("trf")
-		if e != nil {
-			return e
+		// Shared reservations meter both transports even when a listener currently
+		// exposes only TCP; retain the allocation's existing accounting contract.
+		if shareID != "" {
+			ep.Protocol = core.TrafficProtocolBoth
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO port_traffic_policies(id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,discovered,traffic_history_initialized,created_at,updated_at)
-   VALUES($1,$2,$3,$4,$5,$6,'monthly',$7,9223372036854775807,false,false,true,true,now(),now())
-   ON CONFLICT(agent_id,port) DO UPDATE SET monitoring_enabled=true,updated_at=now()
-   WHERE port_traffic_policies.share_id IS NULL AND NOT port_traffic_policies.monitoring_enabled AND port_traffic_policies.discovered`, id, agentID, ep.Name, engine, ep.Port, ep.Protocol, time.Date(time.Now().UTC().Year(), time.Now().UTC().Month(), 1, 0, 0, 0, 0, time.UTC))
-		if e != nil {
-			return mapError(e)
+		if activate && shareID == "" {
+			id, err := core.NewID("trf")
+			if err != nil {
+				return false, err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO port_traffic_policies(id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,discovered,traffic_history_initialized,created_at,updated_at)
+   VALUES($1,$2,$3,$4,$5,$6,'monthly',date_trunc('month',now()),9223372036854775807,false,false,true,true,now(),now()) ON CONFLICT(agent_id,port) DO NOTHING`, id, agentID, ep.Name, engine, ep.Port, ep.Protocol); err != nil {
+				return false, mapError(err)
+			}
+		}
+		// A changed identity starts a new reporting generation. Retain accepted
+		// bytes, daily history, quotas and allocation totals; clear raw baselines.
+		result, err = tx.Exec(ctx, `WITH desired AS (
+ SELECT id,(config_id<>'' AND (config_id<>$4 OR inbound_tag<>$6 OR protocol<>$7) OR NOT monitoring_enabled AND $8) AS changed
+ FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 AND engine=$9 AND COALESCE(share_id,'')=$3
+ AND (config_id<>$4 OR config_version<>$5 OR inbound_tag<>$6 OR protocol<>$7 OR NOT monitoring_enabled AND $8) FOR UPDATE)
+ UPDATE port_traffic_policies p SET
+ reset_generation=p.reset_generation+CASE WHEN d.changed THEN 1 ELSE 0 END,
+ reported_received_bytes=CASE WHEN d.changed THEN 0 ELSE p.reported_received_bytes END,
+ reported_sent_bytes=CASE WHEN d.changed THEN 0 ELSE p.reported_sent_bytes END,
+ reported_lifetime_received_bytes=CASE WHEN d.changed THEN 0 ELSE p.reported_lifetime_received_bytes END,
+ reported_lifetime_sent_bytes=CASE WHEN d.changed THEN 0 ELSE p.reported_lifetime_sent_bytes END,
+ counter_epoch=CASE WHEN d.changed THEN '' ELSE p.counter_epoch END,
+ accounting=CASE WHEN d.changed THEN NULL ELSE p.accounting END,
+ last_collected_at=CASE WHEN d.changed THEN NULL ELSE p.last_collected_at END,
+ last_reported_at=CASE WHEN d.changed THEN NULL ELSE p.last_reported_at END,
+ receive_bps=CASE WHEN d.changed THEN 0 ELSE p.receive_bps END,
+ send_bps=CASE WHEN d.changed THEN 0 ELSE p.send_bps END,
+ monitoring_enabled=p.monitoring_enabled OR $8,config_id=$4,config_version=$5,inbound_tag=$6,
+ name=CASE WHEN NOT p.metadata_managed AND NOT p.quota_enabled THEN $6 ELSE p.name END,protocol=$7,updated_at=now()
+ FROM desired d WHERE p.id=d.id`, agentID, ep.Port, shareID, configID, version, ep.Name, ep.Protocol, activate, engine)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || result.RowsAffected() > 0
+	}
+	return changed, nil
+}
+
+// RepairAppliedTrafficPolicies corrects old residue after upgrade/reconnect.
+// Locks prevent a previously read discovery snapshot from undoing a deployment.
+// Unknown or missing revisions are preserved; only confirmed evidence retires.
+func (s *Store) RepairAppliedTrafficPolicies(ctx context.Context, agentID string) ([]string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	args := []any{agentID}
+	where := agentAccessClause(ctx, "agents.id", &args)
+	rows, err := tx.Query(ctx, `SELECT id FROM agents WHERE revoked_at IS NULL AND ($1='' OR id=$1)`+where+` ORDER BY id FOR UPDATE`, args...)
+	if err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	configs, err := s.trafficConfigurations(ctx, tx, true)
+	if err != nil {
+		return nil, err
+	}
+	changedAgents := map[string]bool{}
+	for _, c := range configs {
+		if agentID != "" && c.Config.AgentID != agentID || c.Uncertain || c.AppliedVersion == 0 || c.AppliedContent == "" {
+			continue
+		}
+		endpoints := configurationTrafficEndpoints(c.Config, c.AppliedContent, c.AppliedVersion, c.ShareID)
+		ports := []int{}
+		for _, ep := range endpoints {
+			ports = append(ports, ep.Port)
+		}
+		changed, err := s.applyDeployedTrafficTx(ctx, tx, c.Config.AgentID, c.Config.Engine, c.ShareID, c.Config.ID, c.AppliedVersion, endpoints, ports, false)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			changedAgents[c.Config.AgentID] = true
 		}
 	}
-	return nil
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(changedAgents))
+	for id := range changedAgents {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

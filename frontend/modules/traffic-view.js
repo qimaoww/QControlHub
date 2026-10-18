@@ -18,6 +18,8 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
     }
     const agentByID = new Map(agents.map((agent) => [agent.id, agent]));
     const items = mergeTrafficPorts(policies, endpoints);
+    if (currentFilters.endpoint_key && !items.some((item) => item.key === currentFilters.endpoint_key)) currentFilters.endpoint_key = "";
+    if (currentFilters.engine && !items.some((item) => (item.policy || item.endpoint).engine === currentFilters.engine)) currentFilters.engine = "";
     const nodeOrder = orderedNodeList(agents, storage).map((agent) => agent.id);
     const orderedItems = orderTrafficItems(items, savedTrafficCardOrder(), nodeOrder);
     const filteredItems = orderedItems.filter((item) => {

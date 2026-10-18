@@ -107,6 +107,16 @@ try {
     "filtering must not overwrite the complete saved card order");
 
   state.data.trafficFilters = {};
+  assert.deepEqual(mergeTrafficPorts([{ ...policy, monitoring_enabled:false }], []), [], "retired quota/history is never rendered as a live card");
+  state.data.trafficFilters = { endpoint_key: "policy:policy-b" };
+  policies = [];
+  endpoints = [];
+  await render({ background: true });
+  assert.deepEqual(cardKeys(), [], "automatic refresh drops the cached configured port set, including the final port");
+  assert.deepEqual(state.data.trafficEndpoints, []);
+  assert.equal(state.data.trafficFilters.endpoint_key, "", "removed filter no longer hides other listeners");
+  policies = [ { ...policy, id: "policy-b", agent_id: "beta" }, policy, { ...policy, id: "policy-c", agent_id: "gamma" } ];
+  endpoints = [ { agent_id: "alpha", engine: "mihomo", port: 8443, protocol: "tcp" }, { agent_id: "beta", engine: "mihomo", port: 8443, protocol: "tcp" }, { agent_id: "missing", engine: "mihomo", port: 9443, protocol: "tcp" } ];
   orders.set(cardOrderKey, "invalid JSON");
   await render();
   assert.deepEqual(cardKeys(), ["beta:443", "beta:8443", "alpha:443", "alpha:8443", "gamma:443", "missing:9443"],

@@ -1,0 +1,12 @@
+SET
+ config_version | uncertain | config_uncertain 
+----------------+-----------+------------------
+              3 | f         | f
+(1 row)
+
+ port  | monitoring_enabled | quota_enabled | used_bytes | reset_generation |      config_id       | config_version | inbound_tag | receive_bps | send_bps 
+-------+--------------------+---------------+------------+------------------+----------------------+----------------+-------------+-------------+----------
+ 21001 | t                  | f             |          0 |                1 | cfg_29d512897189f741 |              3 | keep        |           0 |        0
+ 21002 | f                  | t             |      12345 |                2 | cfg_29d512897189f741 |              1 | remove      |           0 |        0
+(2 rows)
+

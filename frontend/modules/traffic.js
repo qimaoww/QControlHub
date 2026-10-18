@@ -71,9 +71,7 @@ export function installTraffic(ctx) {
         (signal) => Promise.all([
           api("/agents", { signal }),
           api("/traffic-policies", { signal }),
-          background && Array.isArray(state.data.trafficEndpoints)
-            ? Promise.resolve(state.data.trafficEndpoints)
-            : api("/traffic-endpoints", { signal }),
+          api("/traffic-endpoints", { signal }),
         ]),
         ([agents, policies, endpoints]) => renderTraffic(agents, policies, endpoints, resetCreate),
       );

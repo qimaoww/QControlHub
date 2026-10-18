@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 79
+const currentSchemaVersion = 80
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS account_node_orders (
@@ -948,4 +948,8 @@ CREATE TABLE IF NOT EXISTS certificate_dns_leases (
  name text NOT NULL, value text NOT NULL, order_id text NOT NULL REFERENCES certificate_orders(id) ON DELETE CASCADE,
  PRIMARY KEY(name,value)
 );
+-- Applied listener identity survives retirement independently of quota/history.
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_id text NOT NULL DEFAULT '';
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_version integer NOT NULL DEFAULT 0;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS inbound_tag text NOT NULL DEFAULT '';
 `
