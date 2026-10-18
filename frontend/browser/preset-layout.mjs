@@ -74,6 +74,29 @@ export async function testPresetFieldLayoutRuntime() {
         fixture.dispose();
       }
     }
+    // Optional Reality controls may start collapsed, but invalid values must
+    // still reveal the field and prevent a write through the normal submit.
+    const fixture = await createConfigFixture("xray", { protocol: "vless" });
+    try {
+      fixture.click("add");
+      await waitFor(() => document.querySelector("#server-plan-form"), "Reality add form did not open");
+      const protocol = document.querySelector("[data-preset-protocol]");
+      protocol.value = "vless";
+      protocol.dispatchEvent(new Event("change", { bubbles: true }));
+      await waitFor(() => document.querySelector('[name="reality_min_client_ver"]'), "Reality fields did not load");
+      const form = document.querySelector("#server-plan-form");
+      const minimum = form.elements.namedItem("reality_min_client_ver");
+      const advanced = minimum.closest("details");
+      assert(advanced && !advanced.open, "default Reality advanced fields are not collapsed");
+      minimum.value = "invalid";
+      minimum.dispatchEvent(new Event("input", { bubbles: true }));
+      form.querySelector("[data-plan-intent=validate]").click();
+      await waitFor(() => advanced.open && document.activeElement === minimum,
+        "invalid advanced Reality field was not revealed and focused");
+      assert(fixture.writes.length === 0, "invalid collapsed Reality value was submitted");
+    } finally {
+      fixture.dispose();
+    }
   } finally {
     if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
     else root.style.removeProperty("--ui-font-scale");

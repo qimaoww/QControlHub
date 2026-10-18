@@ -25,7 +25,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode === "archive-engines") {
+  if (mode.startsWith("select-menus")) {
+    const {testSelectMenusRuntime} = await import("./browser/select-menus.mjs");
+    await testSelectMenusRuntime();
+  } else if (mode === "archive-engines") {
     const { testArchiveEnginesRuntime } = await import("./browser/archive-engines.mjs");
     await testArchiveEnginesRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode.startsWith("connections")) {

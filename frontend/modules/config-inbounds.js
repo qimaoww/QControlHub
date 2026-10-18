@@ -5,6 +5,7 @@ import { syncSelectionMotion } from "./motion.js";
 import { updateFeedback, updateFeedbackHTML, setVisible } from "./presence-motion.js";
 import { bindDialogBackdrop, closePopup, closeRetiringDialog } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
+import { preparePresetFields } from "./preset-runtime.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
 // editor, inbound sidebar, engine selector or top-level page tabs.
@@ -58,6 +59,30 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
     const hidden = document.createElement("input");
     hidden.type = "hidden"; hidden.name = "operation"; hidden.value = host.kind;
     operation.replaceWith(hidden);
+    recipe.className = "settings-form";
+    const workbench = recipe.querySelector("[data-builder-workbench]");
+    if (workbench) {
+      workbench.className = "settings-form";
+      const tabs = workbench.querySelector(".builder-index");
+      tabs.classList.add("config-file-buttons");
+      for (const tab of tabs.querySelectorAll("[data-builder-step]")) {
+        tab.textContent = tab.querySelector("strong").textContent;
+        tab.className = "button";
+      }
+    }
+    recipe.querySelectorAll(".section-number").forEach(number => number.remove());
+    const minimum = recipe.querySelector('[name="reality_min_client_ver"]');
+    const seed = recipe.querySelector('[name="reality_mldsa65_seed"]');
+    if (minimum && seed && minimum.type !== "hidden" && seed.type !== "hidden") {
+      const panel = document.createElement("details");
+      panel.className = "preset-option-panel";
+      panel.innerHTML = "<summary><b>高级设置</b></summary>";
+      panel.open = minimum.value !== "0.0.0" || Boolean(seed.value);
+      const first = minimum.closest(".plan-fields"), second = seed.closest(".plan-fields");
+      first.before(panel);
+      panel.append(first, second);
+    }
+    preparePresetFields(recipe);
     content.append(recipe);
   } else if (host.kind.startsWith("common-")) {
     content.append(source.querySelector("#common-options"));
@@ -187,7 +212,7 @@ export function bindConfigInbounds(ctx) {
     let editor, confirming = false;
     dialog = document.createElement("dialog");
     const opened = dialog;
-    opened.className = `config-inbound-dialog${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
+    opened.className = `config-inbound-dialog${["add", "modify"].includes(kind) ? " config-outbound-dialog" : ""}${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
     opened.setAttribute("aria-labelledby", "config-inbound-title");
     const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异",
       "common-add":"增加通用配置项", "common-modify":"修改通用配置项", "common-delete":"删除通用配置项" };

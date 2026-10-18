@@ -2,21 +2,22 @@
 .config-file-buttons{display:flex;flex-wrap:wrap;gap:8px;padding:16px 18px;border-bottom:1px solid var(--line);background:var(--surface)}
 .config-file-button{display:flex;flex-direction:column;align-items:flex-start;gap:5px;flex:0 1 190px;min-width:0;max-width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-align:left;font:inherit;cursor:pointer}
 .config-file-button b,.config-file-button small{max-width:100%;overflow-wrap:anywhere}
-.config-file-button b{font-size:calc(12px * var(--ui-font-scale));line-height:1.5}
+.config-file-button b,.config-inbound-dialog .preset-option-panel>summary b{font-size:calc(12px * var(--ui-font-scale));line-height:1.5}
 .config-file-button small{font-size:calc(10px * var(--ui-font-scale));color:var(--muted);line-height:1.5}
 .config-file-button:hover{background:var(--surface-2);border-color:var(--accent)}
-.config-file-button.active{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.config-file-button.active,.config-inbound-menu-items [aria-selected=true]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
 .config-file-button.active small{color:var(--accent)}
 .config-file-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .config-inbound-menu{position:relative;align-self:center;margin-left:0}
 .config-inbound-menu>summary{list-style:none;gap:12px;cursor:pointer;min-height:40px}
 .config-inbound-menu>summary::-webkit-details-marker{display:none}
-.config-inbound-menu[open]>summary{border-color:var(--accent);color:var(--accent)}
+.config-inbound-menu[open]>summary,select[aria-expanded=true],input[aria-expanded=true]{border-color:var(--accent);color:var(--accent);anchor-name:--control-menu}
 .config-inbound-menu[open],.config-tools-menu[open]{z-index:21}
-.config-inbound-menu-items{position:absolute;top:calc(100% + 6px);right:0;z-index:20;width:200px;max-width:calc(100vw - 40px);padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-lift)}
-.config-inbound-menu-items button{display:block;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;font-size:calc(12px * var(--ui-font-scale));cursor:pointer}
+.config-inbound-menu-items{position:fixed;position-anchor:--control-menu;inset:auto;top:calc(100% + 6px);top:calc(anchor(bottom,100%) + 6px);right:0;right:anchor(right,0px);z-index:20;width:200px;width:max(200px,anchor-size(width,200px));max-width:calc(100vw - 40px);max-height:min(320px,calc(50dvh - 40px));overflow:auto;overscroll-behavior:contain;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;margin:0;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-lift)}
+.config-inbound-menu-items:not([popover]){position:absolute;right:0;left:auto}
+.config-inbound-menu-items button{display:block;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;font-size:calc(13px * var(--ui-font-scale));cursor:pointer}
 .config-inbound-menu-items button:hover:not(:disabled){background:var(--surface-2)}
-.config-inbound-menu-items button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:var(--surface-2)}
+.config-inbound-menu-items button:focus-visible,.config-inbound-menu-items button[data-active]{outline:2px solid var(--accent);outline-offset:-2px;background:var(--surface-2)}
 .config-inbound-menu-items button:disabled{opacity:.42;cursor:not-allowed}
 .config-inbound-menu-items .danger-text{color:var(--red)}
 .config-workspace-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px 18px;background:var(--surface);border-top:1px solid var(--line)}
@@ -29,15 +30,15 @@
 .config-inbound-heading p{margin:0;color:var(--muted);overflow-wrap:anywhere;font-size:calc(12px * var(--ui-font-scale))}
 .config-inbound-body{padding:18px;min-width:0}
 .config-inbound-body .inbound-editor-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:0 0 14px;margin:0;border:0;box-shadow:none}
-.inbound-editor-toolbar label{display:grid;gap:6px;min-width:0;color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
-.inbound-editor-toolbar select{width:min(420px,60vw)}
+.inbound-editor-toolbar label{flex:1;display:grid;gap:6px;min-width:0;color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+.inbound-editor-toolbar select{width:100%}
 .config-inbound-dialog .recipe-workspace{margin:0}
 .config-inbound-dialog .server-form{padding:0}
 .config-inbound-dialog .builder-layout{min-width:0}
-.config-inbound-dialog .builder-index{position:static}
+.config-inbound-dialog .builder-index{position:static;border-right:0}
 .config-inbound-dialog .builder-index a.active{background:var(--surface);color:var(--accent);box-shadow:inset 0 0 0 1px var(--line)}
 .config-inbound-dialog .builder-index a.active b{background:var(--accent);color:var(--on-accent)}
-.config-inbound-dialog .builder-actions{position:static;flex-wrap:wrap}
+.config-inbound-dialog .builder-actions{bottom:0;flex-wrap:wrap}
 .config-inbound-dialog .builder-actions>div{flex-wrap:wrap}
 .config-inbound-dialog .config-field-studio,.config-inbound-dialog .revision-timeline{margin:0 0 12px}
 .config-inbound-dialog .config-execution-callout{margin:0 0 14px}
@@ -45,10 +46,10 @@
 .config-common-dialog{width:min(800px,calc(100vw - 32px))}
 .config-common-studio .field-canvas{min-width:0}
 .config-outbound-dialog{width:min(800px,calc(100vw - 32px))}
-.config-outbound-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
-.config-outbound-dialog .config-inbound-heading{flex-shrink:0}
-.config-outbound-dialog .config-inbound-heading>div{min-width:0}
-.config-outbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.config-inbound-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.config-inbound-dialog .config-inbound-heading{flex-shrink:0}
+.config-inbound-dialog .config-inbound-heading>div{min-width:0}
+.config-inbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
 .config-outbound-dialog .config-outbound-studio{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .config-outbound-binding{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line);color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
 .config-outbound-binding>span{min-width:0;overflow-wrap:anywhere}
@@ -66,7 +67,7 @@
 .config-outbound-presets fieldset{min-width:0;margin:0;padding:0;border:0}
 .config-outbound-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
 .config-outbound-fields>label{display:grid;gap:6px;min-width:0;color:var(--ink-2);font-size:calc(11px * var(--ui-font-scale));font-weight:600}
-.config-outbound-presets :is(input,select){width:100%;min-width:0;min-height:36px;font-size:calc(12px * var(--ui-font-scale))}
+.config-outbound-presets input{width:100%;min-width:0;min-height:36px;font-size:calc(12px * var(--ui-font-scale))}
 .config-outbound-presets .field-editor-note{margin:10px 0;overflow-wrap:anywhere}
 .inbound-delete-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:20px}
 @media(max-width:600px){
@@ -77,16 +78,14 @@
   .config-inbound-dialog .builder-index{display:flex;gap:4px;border-right:0;border-bottom:1px solid var(--line);overflow-x:auto}
   .config-inbound-dialog .builder-index a{min-width:max-content;align-items:center}
   .config-inbound-dialog .plan-fields.three,.config-inbound-dialog .plan-fields.two{grid-template-columns:1fr}
-  .config-inbound-menu-items{right:auto;left:0}
   .config-inbound-menu:last-child .config-inbound-menu-items{left:auto;right:0}
   .config-inbound-menu>summary,.config-inbound-menu-items button{min-height:44px}
   .config-outbound-dialog .field-canvas{padding:14px}
   .config-outbound-studio .field-canvas form>footer>div{display:flex;flex-wrap:wrap;width:100%;gap:8px}
   .config-outbound-studio .field-canvas form>footer .button{flex:1;min-width:0;min-height:44px;white-space:normal}
   .config-outbound-studio .field-mutation{align-items:stretch;flex-direction:column}
-  .config-outbound-studio .field-mutation select{height:40px}
   .config-outbound-fields{grid-template-columns:minmax(0,1fr)}
-  .config-outbound-presets :is(input,select){min-height:44px;font-size:max(16px,calc(12px * var(--ui-font-scale)))}
+  .config-outbound-presets input{min-height:44px;font-size:max(16px,calc(12px * var(--ui-font-scale)))}
   .config-workspace-tools [data-config-refresh]{margin-left:0}
   .config-inbound-dialog .builder-actions{padding:10px}
   .config-inbound-dialog .builder-actions>div:last-child{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%}
@@ -105,7 +104,7 @@
 .live-config-details>.live-engine-loading{flex-basis:100%;font-size:calc(11px * var(--ui-font-scale))}
 .live-config-workspace .live-config-editor{display:block;min-width:0}
 .live-config-workspace .code-workspace{min-width:0;border:0;border-radius:0}
-.live-config-workspace .code-file-meta select{width:auto;min-width:210px;max-width:100%;font:calc(12px * var(--ui-font-scale)) ui-monospace,SFMono-Regular,Consolas,monospace;border-radius:6px}
+.live-config-workspace .code-file-meta select{width:auto;min-width:210px;max-width:100%}
 .live-config-workspace .code-file-meta b[hidden]{display:none}
 .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:clamp(320px,calc(100dvh - 450px),680px)}
 .live-config-workspace .code-editor-input{font-size:calc(13px * var(--ui-font-scale));line-height:1.75;padding:18px 20px}

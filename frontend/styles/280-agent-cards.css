@@ -75,8 +75,7 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .batch-operation-row{display:grid;grid-template-columns:minmax(0,1fr) 72px;align-items:end;gap:10px;min-width:0}
 .batch-operation-row>.button{width:100%;min-height:38px}
 .node-batch-bar .batch-controls{min-width:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));align-items:end;gap:8px}
-.node-batch-bar .batch-controls label{min-width:0;display:grid;gap:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:700}
-.node-batch-bar .batch-controls select,.node-batch-bar .batch-controls input{width:100%;min-width:0;height:38px;min-height:38px;padding:0 8px;font-size:calc(11px * var(--ui-font-scale))}
+.node-batch-bar .batch-controls label{min-width:0;display:grid;gap:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-batch-bar .batch-controls input{width:100%;min-width:0;height:38px;min-height:38px;padding:0 8px;font-size:calc(11px * var(--ui-font-scale))}
 .node-batch-bar [hidden]{display:none!important}
 .node-batch-close{width:32px;height:38px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:calc(22px * var(--ui-font-scale));line-height:1}
 .node-batch-close:hover{background:var(--surface-2);color:var(--ink)}

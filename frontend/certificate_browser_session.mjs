@@ -119,7 +119,7 @@ try {
   const set=async(page,selector,value)=>evaluate(page,`(() => {const field=document.querySelector(${JSON.stringify(selector)});field.value=${JSON.stringify(value)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   const open=async(page)=>{await evaluate(page,"location.hash='#certificates'");await wait(page,"!!document.querySelector('[data-cert-create]')")};
   await open(a);
-  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),1);
+  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),0);
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-card,.context-steps').length"),0);
   await click(a,"[data-cert-accounts]");await wait(a,"!!document.querySelector('[data-cert-new-dns]')");await click(a,"[data-cert-new-dns]");await wait(a,"!!document.querySelector('[data-cert-account-form]')");
   await set(a,'[name=name]','Alice DNS');await set(a,'[name=zone]','example.test');await set(a,'[name=token]','local-browser-fixture-token');
