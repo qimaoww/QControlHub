@@ -9,13 +9,13 @@
 .traffic-status-dialog{width:min(480px,calc(100vw - 32px));overflow-y:auto}
 .traffic-status-dialog>header{display:flex;align-items:flex-start;justify-content:space-between}
 .traffic-status-dialog>header>div{flex:1;min-width:0}
-.traffic-status-dialog>header h2{font-size:calc(16px * var(--ui-font-scale));overflow-wrap:anywhere}
+.traffic-status-dialog>header h2{overflow-wrap:anywhere}
 .traffic-status-dialog>header>button{flex:0 0 auto}
 .traffic-status-dialog .traffic-accounting-panel{padding:20px;border-bottom:0}
 .traffic-policy-card>footer{flex-wrap:wrap}
-.traffic-accounting-panel{padding:12px 14px;background:var(--surface);border-bottom:1px solid var(--line);font-size:calc(10px * var(--ui-font-scale));line-height:1.55}
+.traffic-accounting-panel{padding:12px 14px;background:var(--surface);border-bottom:1px solid var(--line);font-size:var(--text-caption);line-height:var(--leading-body)}
 .traffic-accounting-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.traffic-accounting-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-weight:700;white-space:nowrap}
+.traffic-accounting-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-weight:var(--weight-semibold);white-space:nowrap}
 .traffic-accounting-badge i{width:5px;height:5px;border-radius:50%;background:currentColor}
 .traffic-accounting-panel.ok .traffic-accounting-badge{background:var(--green-soft);color:var(--green)}
 .traffic-accounting-panel.bad .traffic-accounting-badge{background:var(--red-soft);color:var(--red)}
@@ -34,5 +34,5 @@
 .traffic-accounting-detail-body dl+p{margin-top:10px}
 .traffic-accounting-legs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .traffic-accounting-legs dt{color:var(--muted)}
-.traffic-accounting-legs dd{margin:2px 0 0;color:var(--ink);font-size:calc(12px * var(--ui-font-scale));font-weight:700}
+.traffic-accounting-legs dd{margin:2px 0 0;color:var(--ink);font-size:var(--text-small);font-weight:var(--weight-semibold)}
 @media(max-width:820px) and (pointer:coarse){.traffic-accounting-details>summary{min-height:44px}}

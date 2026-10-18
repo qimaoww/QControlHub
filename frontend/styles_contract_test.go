@@ -93,7 +93,8 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	// zoom keeps one fixed layout, the shared typography scale revision, and
 	// the approved global dropdown consolidation into existing control styles,
 	// and removal of the separate inbound security / switch decorations.
-	const expected = "409aa005afeb76c7f9832f408b7adc9c69a9b32645354e8f0c375fa3aee9c238"
+	// The approved shared type system now owns every UI font role and metric.
+	const expected = "c1ba68bb82bf897ee1e70e8cc5846f7483e3d65c1281675553eb093e6e2f2dd9"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}

@@ -1,0 +1,23 @@
+### Result
+[{"stage":"before","device":"desktop","theme":"light","overflow":0},{"stage":"after","device":"desktop","theme":"light","overflow":0},{"stage":"before","device":"desktop","theme":"dark","overflow":0},{"stage":"after","device":"desktop","theme":"dark","overflow":0},{"stage":"before","device":"mobile","theme":"light","overflow":0},{"stage":"after","device":"mobile","theme":"light","overflow":0},{"stage":"before","device":"mobile","theme":"dark","overflow":0},{"stage":"after","device":"mobile","theme":"dark","overflow":0}]
+### Ran Playwright code
+```js
+await (async page=>{
+ const result=[];
+ for(const [device,w,h]of[['desktop',1440,1000],['mobile',390,844]])for(const theme of['light','dark']){
+  await page.setViewportSize({width:w,height:h});
+  for(const [stage,port]of[['before',34395],['after',43711]]){
+   await page.goto(`http://127.0.0.1:${port}/?kind=login&theme=${theme}&scale=100`);
+   await page.waitForSelector('#login-form');
+   await page.locator('[name=username]').fill('typography-review');
+   await page.screenshot({path:`/root/.codex/worktrees/d8f3/qcontrolhub/docs/typography-20261018/evidence/${stage}-${device}-${theme}-login.png`});
+   result.push({stage,device,theme,overflow:await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)});
+  }
+ }
+ return result;
+}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:43711/?kind=login&theme=dark&scale=100#certificates
+- Page Title: 登录 · QControlHub

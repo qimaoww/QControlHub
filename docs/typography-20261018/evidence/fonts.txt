@@ -1,0 +1,21 @@
+### Result
+{"fonts":[{"selector":"h2","fonts":[{"familyName":"WenQuanYi Zen Hei","postScriptName":"WenQuanYiZenHei","isCustomFont":false,"glyphCount":2},{"familyName":"DejaVu Sans","postScriptName":"DejaVuSans-Bold","isCustomFont":false,"glyphCount":8}]},{"selector":".code-editor-input","fonts":[]},{"selector":".code-gutter","fonts":[{"familyName":"Liberation Mono","postScriptName":"LiberationMono","isCustomFont":false,"glyphCount":29}]}],"loadedFonts":[],"fontRequests":[],"monospaceWidths":[["iiiiiiii",62.41015625],["WWWWWWWW",62.41015625],["12345678",62.41015625],["中文混排",52]]}
+### Ran Playwright code
+```js
+await (async page=>{
+ await page.setViewportSize({width:1440,height:1000});
+ await page.goto('http://127.0.0.1:43711/?kind=config-editor');
+ await page.waitForSelector('.code-editor-input');
+ const cdp=await page.context().newCDPSession(page);
+ await cdp.send('DOM.enable');await cdp.send('CSS.enable');
+ const {root}=await cdp.send('DOM.getDocument');
+ const fonts=[];
+ for(const selector of ['h2','.code-editor-input','.code-gutter']){
+  const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector});
+  fonts.push({selector,...await cdp.send('CSS.getPlatformFontsForNode',{nodeId})});
+ }
+ const resources=await page.evaluate(async()=>{await document.fonts.ready;return{loadedFonts:[...document.fonts].map(f=>({family:f.family,status:f.status})),fontRequests:performance.getEntriesByType('resource').filter(r=>/\.(woff2?|ttf|otf)(?:\?|$)/.test(r.name)).map(r=>r.name),monospaceWidths:(()=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');const style=getComputedStyle(document.querySelector('.code-editor-input'));ctx.font=style.fontSize+' '+style.fontFamily;return ['iiiiiiii','WWWWWWWW','12345678','中文混排'].map(s=>[s,ctx.measureText(s).width]);})()};});
+ await cdp.detach();return{fonts,...resources};
+}
+)(page);
+```

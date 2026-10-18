@@ -1,0 +1,43 @@
+### Result
+{"stage":"after","device":"mobile","theme":"light","results":[{"kind":"logs","viewport":{"width":390,"height":844},"theme":"light","scale":"100","overflow":0,"headings":[{"tag":"H2","classes":"","text":"内核日志","size":"24px","weight":"600","lineHeight":"32.4px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"}],"controls":[{"tag":"BUTTON","classes":"","text":"切换主题","size":"14px","weight":"400","lineHeight":"22.4px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"退出登录","size":"14px","weight":"400","lineHeight":"22.4px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"","size":"13px","weight":"600","lineHeight":"19.5px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"SELECT","classes":"","text":"全部授权节点ALPHABRAVOCHARLIEDELTA","size":"16px","weight":"400","lineHeight":"normal","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"SELECT","classes":"","text":"全部授权实例主实例","size":"16px","weight":"400","lineHeight":"normal","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"全部4000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"Mihomo1000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"Xray1000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"sing-box1000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"SS Rust1000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"全部4000","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"},{"tag":"BUTTON","classes":"","text":"信息0","size":"13px","weight":"600","lineHeight":"20.8px","family":"Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"WenQuanYi Zen Hei\", sans-serif","spacing":"normal"}],"code":[],"dialogs":[]}]}
+### Ran Playwright code
+```js
+await (async page => {
+ const base='http://127.0.0.1:43711',stage='after',device='mobile',theme='light';
+ const root='/root/.codex/worktrees/d8f3/qcontrolhub/docs/typography-20261018/evidence', viewport=device==='mobile'?{width:390,height:844}:{width:1440,height:1000};
+ await page.setViewportSize(viewport);
+ await page.emulateMedia({colorScheme:theme,reducedMotion:'reduce'});
+ await page.addInitScript(()=>{
+  const NativeDate=Date,epoch=NativeDate.parse('2026-10-18T05:00:00Z');
+  window.Date=class extends NativeDate{constructor(...a){super(...(a.length?a:[epoch]));}static now(){return epoch;}};
+ });
+ const results=[];
+ for(const kind of ['logs']){
+  await page.goto(`${base}/?kind=${kind}&theme=${theme}&scale=100`);
+  await page.waitForSelector('html[data-review-ready="true"]');
+  await page.waitForSelector('.workspace-main');
+  if(kind==='dashboard')await page.waitForSelector('.ops-stats strong');
+  if(kind==='settings')await page.waitForSelector('[name=ui_font_scale]');
+  if(kind==='connections')await page.waitForSelector('.connection-table-scroll');
+  if(kind==='config-editor'){
+   
+   await page.waitForSelector('.code-editor-input');
+  }
+  if(kind==='logs')await page.waitForSelector('.core-log-row');
+  if(kind==='certificates'){
+   await page.locator('[data-cert-create]').click();
+   await page.waitForSelector('[data-cert-form]');
+  }
+  await page.waitForTimeout(300);
+  await page.screenshot({path:`${root}/${stage}-${device}-${theme}-${kind}.png`});
+  results.push(await page.evaluate(({kind,viewport})=>{
+   const styles=selector=>[...document.querySelectorAll(selector)].filter(e=>e.getClientRects().length).slice(0,12).map(e=>{
+    const c=getComputedStyle(e);return{tag:e.tagName,classes:e.className,text:e.textContent.slice(0,80),size:c.fontSize,weight:c.fontWeight,lineHeight:c.lineHeight,family:c.fontFamily,spacing:c.letterSpacing};
+   });
+   return{kind,viewport,theme:document.documentElement.dataset.theme,scale:document.documentElement.dataset.uiFontScale,overflow:document.documentElement.scrollWidth-innerWidth,headings:styles('h1,h2,h3'),controls:styles('input,select,textarea,button'),code:styles('.code-editor-input,.code-gutter'),dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>({client:d.clientWidth,scroll:d.scrollWidth}))};
+  },{kind,viewport}));
+ }
+ return{stage,device,theme,results};
+}
+)(page);
+```

@@ -188,6 +188,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeDisabled,
     "calendar interaction stopped automatic refresh");
   const refresh = async () => {
+    // The accepted-task preview can paint before its history read completes.
+    await waitFor(() => !document.querySelector("[data-ip-quality-refresh]")?.disabled, "refresh remained disabled");
     const before = fixture.calls.filter((call) => call.path === "/ip-quality").length;
     document.querySelector("[data-ip-quality-refresh]").click();
     await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality").length > before &&
