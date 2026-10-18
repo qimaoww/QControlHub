@@ -52,7 +52,7 @@
 .connection-table-scroll th,.connection-table-scroll td{text-align:left;padding:12px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
 .connection-table-scroll th:first-child,.connection-table-scroll td:first-child{padding-left:18px}
 .connection-table-scroll th:last-child,.connection-table-scroll td:last-child{padding-right:18px}
-.connection-table-scroll th{background:var(--surface-2);color:var(--muted);font-size:var(--text-caption);font-weight:var(--weight-semibold);white-space:nowrap}
+.connection-table-scroll th{background:var(--surface-2);color:var(--muted);font-size:var(--text-small);font-weight:var(--weight-semibold);white-space:nowrap}
 .connection-table-scroll th:nth-child(1){width:23%}.connection-table-scroll th:nth-child(2){width:14%}.connection-table-scroll th:nth-child(3){width:17%}.connection-table-scroll th:nth-child(4){width:12%}.connection-table-scroll th:nth-child(5){width:12%}.connection-table-scroll th:nth-child(6){width:22%}
 .connection-table-scroll tbody tr:hover{background:var(--surface-2)}
 .connection-table-scroll td{overflow-wrap:anywhere}

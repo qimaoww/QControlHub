@@ -191,8 +191,8 @@
   .live-config-workspace .config-file-buttons{flex-wrap:wrap;padding:10px 14px;gap:8px}
   .live-config-workspace .config-file-list{flex-basis:100%}
   .live-config-workspace .config-file-actions{flex:1 1 100%}
-  .live-config-workspace .config-editor-actions{flex-wrap:wrap;flex:1 1 auto}
-  .live-config-workspace .config-editor-actions>.button{flex:1;min-width:0;padding-inline:10px}
+  .live-config-workspace .config-editor-actions{flex-wrap:wrap;flex:1 1 auto;min-width:max-content}
+  .live-config-workspace .config-editor-actions>.button{flex:1;min-width:max-content;padding-inline:10px;white-space:nowrap}
   .live-config-workspace .config-file-actions>.button{flex:1;min-width:0;padding-inline:10px}
   .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:48dvh}
   .live-config-workspace .code-workspace>footer{padding:16px}
