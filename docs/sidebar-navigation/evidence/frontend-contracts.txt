@@ -1,1 +1,1 @@
-ok  	github.com/qimaoww/qcontrolhub/frontend	0.053s
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.062s

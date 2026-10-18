@@ -39,25 +39,25 @@ TAP version 13
 # Subtest: the distributed stylesheet is the byte-exact ordered concatenation
 ok 1 - the distributed stylesheet is the byte-exact ordered concatenation
   ---
-  duration_ms: 65.932864
+  duration_ms: 67.578002
   type: 'test'
   ...
 # Subtest: every style source is listed once, and no listed source can disappear
 ok 2 - every style source is listed once, and no listed source can disappear
   ---
-  duration_ms: 2.89726
+  duration_ms: 3.0195
   type: 'test'
   ...
 # Subtest: source slices cannot cut a rule, conditional group, string, or comment
 ok 3 - source slices cannot cut a rule, conditional group, string, or comment
   ---
-  duration_ms: 0.257317
+  duration_ms: 0.24753
   type: 'test'
   ...
 # Subtest: changing cascade order or a source byte makes the generated check fail
 ok 4 - changing cascade order or a source byte makes the generated check fail
   ---
-  duration_ms: 3.723011
+  duration_ms: 1.568964
   type: 'test'
   ...
 1..4
@@ -68,4 +68,4 @@ ok 4 - changing cascade order or a source byte makes the generated check fail
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 111.608267
+# duration_ms 117.415721

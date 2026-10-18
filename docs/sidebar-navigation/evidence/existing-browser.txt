@@ -1,13 +1,13 @@
 browser workers=2, CPUs=12, memory=20001MiB, modes=8
-browser timing {"mode":"motion-mobile","startupMs":124.62071900000001,"testMs":8525.237818000001,"cleanupMs":69.2232329999988,"passed":true,"elapsedMs":8719.099594000001}
-browser timing {"mode":"motion","startupMs":133.10127199999988,"testMs":8354.737427,"cleanupMs":49.05436499999996,"passed":true,"elapsedMs":8536.902982}
-browser timing {"mode":"motion-popup-mobile-reduced","startupMs":123.49137599999813,"testMs":4876.758923000001,"cleanupMs":24.093761000000086,"passed":true,"elapsedMs":5024.347869999998}
-browser timing {"mode":"shell-layout","startupMs":140.56315800000084,"testMs":1631.6917219999996,"cleanupMs":27.957531000000017,"passed":true,"elapsedMs":1800.224431999999}
-browser timing {"mode":"motion-mobile-reduced","startupMs":118.70209700000123,"testMs":1378.8443910000024,"cleanupMs":48.572800999998435,"passed":true,"elapsedMs":1546.124742}
-browser timing {"mode":"motion-reduced","startupMs":141.92851300000257,"testMs":1170.7330829999992,"cleanupMs":44.64947100000063,"passed":true,"elapsedMs":1357.3228280000003}
-browser timing {"mode":"shell-layout-mobile","startupMs":145.898204000001,"testMs":869.7055170000021,"cleanupMs":38.32044799999858,"passed":true,"elapsedMs":1053.9366769999979}
+browser timing {"mode":"motion-mobile","startupMs":148.404411,"testMs":8643.035166,"cleanupMs":41.85875400000077,"passed":true,"elapsedMs":8833.311579}
+browser timing {"mode":"motion","startupMs":145.1818800000001,"testMs":8419.261870999999,"cleanupMs":30.058023000001413,"passed":true,"elapsedMs":8594.511567000001}
+browser timing {"mode":"motion-popup-mobile-reduced","startupMs":138.8005970000013,"testMs":5146.1004619999985,"cleanupMs":28.182809000001726,"passed":true,"elapsedMs":5313.088083000002}
+browser timing {"mode":"shell-layout","startupMs":162.7759440000009,"testMs":1730.1287010000015,"cleanupMs":23.515031999999337,"passed":true,"elapsedMs":1916.4226589999998}
+browser timing {"mode":"motion-mobile-reduced","startupMs":120.67237899999964,"testMs":1412.515878000002,"cleanupMs":53.98510499999975,"passed":true,"elapsedMs":1587.1797289999995}
+browser timing {"mode":"motion-reduced","startupMs":137.71969900000113,"testMs":1391.8888679999982,"cleanupMs":26.03930499999842,"passed":true,"elapsedMs":1555.6527849999984}
+browser timing {"mode":"shell-layout-mobile","startupMs":154.4434349999974,"testMs":850.7335679999997,"cleanupMs":26.581082000000606,"passed":true,"elapsedMs":1031.7675139999992}
 agents browser runtime smoke passed
-browser timing {"mode":"motion-popup-mobile","startupMs":160.680156,"testMs":36099.15213,"cleanupMs":108.61926099999982,"passed":true,"elapsedMs":36368.467072}
+browser timing {"mode":"motion-popup-mobile","startupMs":138.47529400000002,"testMs":36467.492647,"cleanupMs":76.53266299999814,"passed":true,"elapsedMs":36682.512339999994}
 agents browser runtime smoke passed
-browser suite elapsed=36.422s
+browser suite elapsed=36.735s
 agents browser runtime smoke passed
