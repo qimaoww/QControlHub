@@ -1,3 +1,4 @@
+import { apiKeysSection } from "./settings-api-keys.js";
 import { engineCapabilityToggles } from "./engine-capabilities.js";
 export function createSettingsView({ esc, can, shell }) {
   const options = (selected, values) => values
@@ -65,6 +66,7 @@ export function createSettingsView({ esc, can, shell }) {
         ${section("settings-deployment", "09", "部署状态", "只读；密钥、数据库与可信代理在部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b></span><em>${esc(deployment.trusted_proxy_count)} 条网段</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code></dd></div></dl><p data-update-result>尚未检查 GHCR latest；不会自动升级。</p></div></div>`)}
         ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</b></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint"><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 只读</p>`}
       </form>
+      ${can("admin") ? apiKeysSection() : ""}
     </div>`, "系统设置");
 
     return { writable };

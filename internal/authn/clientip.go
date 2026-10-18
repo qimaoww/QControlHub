@@ -41,15 +41,21 @@ func ClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
 		remoteHost = request.RemoteAddr
 	}
 	remote := net.ParseIP(strings.Trim(remoteHost, "[]"))
-	if remote == nil || !ipTrusted(remote, trustedProxies) {
-		return remoteHost
+	if remote == nil {
+		return ""
 	}
-	forwarded := strings.Split(request.Header.Get("X-Forwarded-For"), ",")
+	if !ipTrusted(remote, trustedProxies) {
+		return remote.String()
+	}
+	if len(request.Header.Values("X-Forwarded-For")) == 0 {
+		return remote.String()
+	}
+	forwarded := strings.Split(strings.Join(request.Header.Values("X-Forwarded-For"), ","), ",")
 	chain := make([]net.IP, 0, len(forwarded)+1)
 	for _, value := range forwarded {
 		address := net.ParseIP(strings.TrimSpace(value))
 		if address == nil {
-			return remoteHost
+			return ""
 		}
 		chain = append(chain, address)
 	}
