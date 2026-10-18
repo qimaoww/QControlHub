@@ -1,0 +1,72 @@
+[
+  {
+    "stage": "after",
+    "device": "desktop",
+    "theme": "dark",
+    "actualTheme": "dark",
+    "overflow": false
+  },
+  {
+    "stage": "after",
+    "device": "desktop",
+    "theme": "light",
+    "actualTheme": "light",
+    "overflow": false
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "dark",
+    "actualTheme": "dark",
+    "overflow": false
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "light",
+    "actualTheme": "light",
+    "overflow": false
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "dark",
+    "actualTheme": "dark",
+    "overflow": false
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "light",
+    "actualTheme": "light",
+    "overflow": false
+  },
+  {
+    "stage": "before",
+    "device": "desktop",
+    "theme": "dark",
+    "actualTheme": "dark",
+    "overflow": false
+  },
+  {
+    "stage": "before",
+    "device": "desktop",
+    "theme": "light",
+    "actualTheme": "light",
+    "overflow": false
+  },
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "dark",
+    "actualTheme": "dark",
+    "overflow": false
+  },
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "light",
+    "actualTheme": "light",
+    "overflow": false
+  }
+]

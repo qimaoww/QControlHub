@@ -1,0 +1,7 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=2
+browser timing {"mode":"select-menus","startupMs":217.30001700000003,"testMs":1180.08598,"cleanupMs":73.2250019999999,"passed":true,"elapsedMs":1470.621646}
+agents browser runtime smoke passed
+browser timing {"mode":"select-menus-mobile","startupMs":228.662202,"testMs":1120.697383,"cleanupMs":68.15807900000004,"passed":true,"elapsedMs":1417.525443}
+agents browser runtime smoke passed
+browser suite elapsed=1.595s
+agents browser runtime smoke passed

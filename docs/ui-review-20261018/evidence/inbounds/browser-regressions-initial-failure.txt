@@ -1,0 +1,105 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=10
+browser timing {"mode":"motion-popup-mobile","startupMs":196.26151699999997,"testMs":36124.100942000005,"cleanupMs":53.10281199999736,"passed":true,"elapsedMs":36373.478525}
+browser timing {"mode":"motion-popup","startupMs":192.515544,"testMs":36443.612501999996,"cleanupMs":34.59285100000125,"passed":true,"elapsedMs":36670.729355}
+browser timing {"mode":"config-inbounds","startupMs":136.7955690000017,"testMs":8203.001233000003,"cleanupMs":23.720238999994763,"passed":false,"elapsedMs":8363.520957}
+file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:192
+  return new Error(
+         ^
+
+Error: Chrome config-inbounds smoke failed (http://127.0.0.1:46693/agents-browser-smoke.html?mode=config-inbounds#node-settings): Chrome config-inbounds smoke 未通过：Error: preset form did not open
+    at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)
+    at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)
+    at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)
+    at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5
+
+'failed' !== 'passed'
+
+Browser diagnostics: {"browser":{"exitCode":null,"signalCode":null},"cdp":{"state":"open","subscriptions":{"Runtime.enable":"enabled","Inspector.enable":"enabled"},"pendingRequests":[]},"page":{"url":"http://127.0.0.1:46693/agents-browser-smoke.html?mode=config-inbounds#node-settings","readyState":"complete","visibility":"visible","focused":true,"marker":"failed","routeCoverage":null,"result":"Error: preset form did not open\n    at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5","body":"Error: preset form did not open\n    at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5","activeElement":"<body class=\"app-body page-live-config\"><pre id=\"browser-smoke-result\">Error: preset form did not open\n    at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5</pre></body>","workspace":null,"busy":null,"gesture":null,"animations":[]},"runtimeExceptions":[],"consoleErrors":["Error: preset form did not open\n    at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5"]}
+Chrome stderr tail (last 8192 chars):
+
+DevTools listening on ws://127.0.0.1:34799/devtools/browser/8dcefba1-3c9f-4af7-8d2a-ed69860d64b0
+[3681923:3681962:1018/171037.395596:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+
+    at smokeFailure (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:192:10)
+    at runMode (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:626:11)
+    at async file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+  [cause]: AssertionError [ERR_ASSERTION]: Chrome config-inbounds smoke 未通过：Error: preset form did not open
+      at waitFor (http://127.0.0.1:46693/assets/browser/config-fixture.mjs:8:33)
+      at async testPresetFieldLayoutRuntime (http://127.0.0.1:46693/assets/browser/preset-layout.mjs:16:9)
+      at async testConfigInboundsRuntime (http://127.0.0.1:46693/assets/browser/config-inbounds.mjs:24:3)
+      at async http://127.0.0.1:46693/assets/agents_browser_runtime.mjs:58:5
+  
+  'failed' !== 'passed'
+  
+      at runMode (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:614:12)
+      at async file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'failed',
+    expected: 'passed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+}
+
+Node.js v22.23.2
+browser timing {"mode":"config-inbounds-mobile","startupMs":149.73460300000443,"testMs":8081.430042,"cleanupMs":38.538730000000214,"passed":false,"elapsedMs":8269.707713000003}
+file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:192
+  return new Error(
+         ^
+
+Error: Chrome config-inbounds-mobile smoke failed (http://127.0.0.1:36353/agents-browser-smoke.html?mode=config-inbounds-mobile#node-settings): Chrome config-inbounds-mobile smoke 未通过：Error: preset form did not open
+    at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)
+    at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)
+    at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)
+    at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5
+
+'failed' !== 'passed'
+
+Browser diagnostics: {"browser":{"exitCode":null,"signalCode":null},"cdp":{"state":"open","subscriptions":{"Runtime.enable":"enabled","Inspector.enable":"enabled"},"pendingRequests":[]},"page":{"url":"http://127.0.0.1:36353/agents-browser-smoke.html?mode=config-inbounds-mobile#node-settings","readyState":"complete","visibility":"visible","focused":false,"marker":"failed","routeCoverage":null,"result":"Error: preset form did not open\n    at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5","body":"Error: preset form did not open\n    at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5","activeElement":"<body class=\"app-body page-live-config\"><pre id=\"browser-smoke-result\">Error: preset form did not open\n    at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5</pre></body>","workspace":null,"busy":null,"gesture":null,"animations":[]},"runtimeExceptions":[],"consoleErrors":["Error: preset form did not open\n    at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)\n    at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)\n    at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)\n    at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5"]}
+Chrome stderr tail (last 8192 chars):
+
+DevTools listening on ws://127.0.0.1:39347/devtools/browser/8fbcb972-60c9-481c-812f-1719b0ed3a90
+[3682073:3682114:1018/171037.703074:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+
+    at smokeFailure (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:192:10)
+    at runMode (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:626:11)
+    at async file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+  [cause]: AssertionError [ERR_ASSERTION]: Chrome config-inbounds-mobile smoke 未通过：Error: preset form did not open
+      at waitFor (http://127.0.0.1:36353/assets/browser/config-fixture.mjs:8:33)
+      at async testPresetFieldLayoutRuntime (http://127.0.0.1:36353/assets/browser/preset-layout.mjs:16:9)
+      at async testConfigInboundsRuntime (http://127.0.0.1:36353/assets/browser/config-inbounds.mjs:24:3)
+      at async http://127.0.0.1:36353/assets/agents_browser_runtime.mjs:58:5
+  
+  'failed' !== 'passed'
+  
+      at runMode (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:614:12)
+      at async file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'failed',
+    expected: 'passed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+}
+
+Node.js v22.23.2
+browser suite elapsed=45.010s
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: browser workers failed: [{"code":1,"signal":null},{"code":1,"signal":null}]
+    at runBrowserWorkers (file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/browser_scheduler.mjs:63:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async file:///root/.codex/worktrees/7d05/qcontrolhub/frontend/agents_browser_smoke.mjs:656:5 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v22.23.2

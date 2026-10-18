@@ -1,0 +1,10 @@
+[Unit]
+Description=Clean UI review resources 72 hours after testing
+[Timer]
+OnCalendar=2026-10-21 09:38:28 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=qch-ui-review-7d05-20261018-cleanup.service
+[Install]
+WantedBy=timers.target

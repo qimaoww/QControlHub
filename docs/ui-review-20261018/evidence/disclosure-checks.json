@@ -1,0 +1,32 @@
+[
+  {
+    "device": "desktop",
+    "theme": "light",
+    "openAcrossPolling": true
+  },
+  {
+    "device": "desktop",
+    "theme": "dark",
+    "openAcrossPolling": true
+  },
+  {
+    "device": "mobile",
+    "theme": "light",
+    "openAcrossPolling": true
+  },
+  {
+    "device": "mobile",
+    "theme": "dark",
+    "openAcrossPolling": true
+  },
+  {
+    "device": "tablet",
+    "theme": "light",
+    "openAcrossPolling": true
+  },
+  {
+    "device": "tablet",
+    "theme": "dark",
+    "openAcrossPolling": true
+  }
+]
