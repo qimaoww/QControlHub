@@ -38,8 +38,8 @@
     "output/playwright/cli.config.json"
   ],
   "timer_unit": "[Unit]\nDescription=Clean protocol URL dff6 fixtures after 72 hours\n[Timer]\nOnCalendar=2026-10-21 14:42:08 UTC\nPersistent=true\nAccuracySec=1s\nUnit=qch-url-dff6-cleanup.service\n[Install]\nWantedBy=timers.target\n",
-  "service_unit": "[Unit]\nDescription=Remove protocol URL dff6 test resources only\n[Service]\nType=oneshot\nExecStart=/bin/sh /var/tmp/qch-protocol-url-20261018-dff6/cleanup.sh\n",
-  "cleanup_script": "#!/bin/sh\nset -eu\nif docker container inspect qch-url-dff6-pg >/dev/null 2>&1; then\n  test \"$(docker inspect -f '{{index .Config.Labels \"qcontrolhub.test\"}}' qch-url-dff6-pg)\" = protocol-url-dff6\n  docker rm -f qch-url-dff6-pg\nfi\nrm -rf -- /var/tmp/qch-protocol-url-20261018-dff6\n",
+  "service_unit": "[Unit]\nDescription=Remove protocol URL dff6 test resources only\nStartLimitIntervalSec=0\n[Service]\nType=oneshot\nExecStart=/bin/sh /var/tmp/qch-protocol-url-20261018-dff6/cleanup.sh\nRestart=on-failure\nRestartSec=15min\n",
+  "cleanup_script": "#!/bin/sh\nset -eu\n# A daemon failure must retry later, not look like an absent container.\ntest_container=$(docker container ls -a --filter 'name=^/qch-url-dff6-pg$' --format '{{.Names}}')\nif [ \"$test_container\" = qch-url-dff6-pg ]; then\n  test \"$(docker inspect -f '{{index .Config.Labels \"qcontrolhub.test\"}}' qch-url-dff6-pg)\" = protocol-url-dff6\n  docker rm -f qch-url-dff6-pg\nfi\nrm -rf -- /var/tmp/qch-protocol-url-20261018-dff6\n",
   "systemd_status": "NextElapseUSecRealtime=Wed 2026-10-21 22:42:08 CST\nPersistent=yes\nActiveState=active\nSubState=waiting\n",
   "temporary_browser_snapshots_moved_to_cleanup_directory": [
     ".playwright-cli/page-2026-10-18T14-00-31-235Z.yml",
@@ -68,5 +68,6 @@
     ".playwright-cli/page-2026-10-18T14-00-40-528Z.yml",
     ".playwright-cli/page-2026-10-18T14-27-56-619Z.yml",
     ".playwright-cli/page-2026-10-18T14-31-11-512Z.yml"
-  ]
+  ],
+  "failure_retry": "15 minutes; Docker daemon errors retain all resources and retry without starting Docker"
 }
