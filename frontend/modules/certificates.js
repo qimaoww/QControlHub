@@ -25,7 +25,7 @@ export function installCertificates(ctx) {
   dialog.innerHTML=`<header ${editor?"":'class="config-inbound-heading"'}><div${editor?"":' class="notice-message"'}><h2>${esc(content.title)}</h2></div><button class="${editor?"deploy-command-close":"config-access-close"}" type="button" data-cert-close aria-label="关闭证书弹窗">×</button></header>${editor?content.body:`<div class="config-inbound-body" data-cert-modal-content>${content.body}</div>`}`;
   document.body.append(dialog);bindDialogBackdrop(dialog,()=>close());dialog.showModal();
   const opened=dialog;trapFocus(opened);
-  opened.addEventListener("close",()=>{opened.remove();if(dialog===opened){dialog=null;certificateDraft=null;dialogReturnFocus?.focus?.({preventScroll:true});dialogReturnFocus=null;}});
+  opened.addEventListener("close",()=>{opened.remove();if(dialog===opened){modalRead++;dialog=null;certificateDraft=null;dialogReturnFocus?.focus?.({preventScroll:true});dialogReturnFocus=null;}});
   restore(dialog.querySelector("form"),saved);bind(dialog);
  }
 
@@ -105,7 +105,12 @@ export function installCertificates(ctx) {
   signal?.addEventListener("abort",dispose,{once:true});
   await page();
   if(signal?.aborted||session!==state.data||!current())return;
-  poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;try{const request=modalRead,id=dialog?.dataset.certDetailId;if(id){const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector("header h2").textContent=rendered.title;if(content.innerHTML===rendered.body)return;const focused=document.activeElement;const focusKey=focused?.getAttribute("data-cert-reload")||focused?.getAttribute("data-cert-copy");content.innerHTML=rendered.body;if(focusKey)[...content.querySelectorAll("button")].find(b=>b.dataset.certReload===focusKey||b.dataset.certCopy===focusKey)?.focus({preventScroll:true});content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog)await page(true)}catch{/* Keep the existing view; explicit refresh reports errors. */}},4000);
+  poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;const request=modalRead,id=dialog?.dataset.certDetailId;try{if(id){const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector("header h2").textContent=rendered.title;if(content.innerHTML===rendered.body)return;const focused=document.activeElement;const focusKey=focused?.getAttribute("data-cert-reload")||focused?.getAttribute("data-cert-copy");content.innerHTML=rendered.body;if(focusKey)[...content.querySelectorAll("button")].find(b=>b.dataset.certReload===focusKey||b.dataset.certCopy===focusKey)?.focus({preventScroll:true});content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog)await page(true)}catch(error){
+   if(id&&request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id&&[403,404].includes(error.status)){
+    close();await page(true).catch(()=>{});
+   }
+   // Transient failures retain the current view; lost access closes its detail.
+  }},4000);
  };
  return Object.assign(load,{dispose});
 

@@ -46,3 +46,9 @@ GitHub CI 由 PR 触发；Debian、Alpine、升级沙箱、真实服务权限、
 ## 未验证项目
 
 详见 [报告中的验证边界](README.md#验证边界与回滚)。公共 CA/DNS、真实远端 Sub-Store、多台物理设备、本次 UI 夹具到真实 Agent/代理客户端完整闭环均未实测；不以夹具任务结果代替真实执行结果。GitHub 的 Alpine/OpenRC、实际服务权限、镜像、TLS 及升级任务仅在对应 CI 真正完成后计为远端通过。
+
+## 合并前审查补充
+
+[审查记录](review.md) 包含两项已修复发现。新增证书撤权用例在修复前真实浏览器断言失败（旧详情在 404 后仍保留）；修复后多用户/证书完整门禁退出 0（33.792s），桌面及手机均覆盖失权详情清理、列表刷新和 Escape 关闭后的延迟响应。
+
+补充检查：[多用户/证书门禁](evidence/logs/review-multiuser.log)、[non-browser 全检查](evidence/logs/review-non-browser.log)、[最终模块回归](evidence/logs/review-module.log)。原完整 Go/85 项矩阵/四内核结果未被这次针对性重跑替代；生产 Go 未修改。新增录屏及原图见 [索引](evidence/index.md#审查补充证书授权撤销)。

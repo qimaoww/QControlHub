@@ -44,3 +44,14 @@
 | ![任务页修改前](screenshots/before-tasks-desktop-light.png) | ![任务页修改后](screenshots/after-tasks-desktop-light.png) |
 
 截图环境的任务结果是夹具；真实内核日志测试独立记录。分享停用录屏结束后，按现有规则由接收者重新接受再次启用的邀请，再进行最终同状态审计。
+
+## 审查补充：证书授权撤销
+
+同一 Bob 账号、Alice 所有的同一证书、浅色主题；所有者撤销授权 6 秒后拍摄。修改前 API 已拒绝而详情仍保留，修改后无需导航或手动刷新即关闭详情并移除列表项。
+
+| 视口 | 修改前 | 修改后 | 修改前录屏 | 修改后录屏 |
+| --- | --- | --- | --- | --- |
+| desktop | [原图](screenshots/before-certificate-revocation-desktop-light.png) | [原图](screenshots/after-certificate-revocation-desktop-light.png) | [录屏](videos/before-certificate-revocation-desktop.webm) | [录屏](videos/after-certificate-revocation-desktop.webm) |
+| mobile | [原图](screenshots/before-certificate-revocation-mobile-light.png) | [原图](screenshots/after-certificate-revocation-mobile-light.png) | [录屏](videos/before-certificate-revocation-mobile.webm) | [录屏](videos/after-certificate-revocation-mobile.webm) |
+
+审查同时验证 Escape 关闭已有表单后释放真实的延迟 HTTP 响应，表单不会重新弹出：[桌面](videos/after-certificate-escape-desktop.webm)、[手机](videos/after-certificate-escape-mobile.webm)。条件和结果分别见 [授权撤销](certificate-revocation-evidence.json)、[关闭与延迟响应](certificate-escape-evidence.json)。

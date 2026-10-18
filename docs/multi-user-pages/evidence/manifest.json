@@ -1,9 +1,9 @@
 {
   "baseline_commit": "8834b33d2fad0539f935b14976e2892ddbd38a71",
-  "source_diff_sha256": "1cb26a0f5fe0541b3cae89db6ac048446d10ebfdb92d5ec67d063d23945f9838",
+  "source_diff_sha256": "9975cb8a275cf3d7ac527c36f9c067c5ffe48ef720b8a3fe1569dad8b315d1c5",
   "source_diff_command": "git diff 8834b33d2fad0539f935b14976e2892ddbd38a71 -- frontend internal",
-  "screenshots": 44,
-  "videos": 7,
+  "screenshots": 48,
+  "videos": 13,
   "captured_from": "real Chromium, isolated PostgreSQL fixture and real API/password/cookie sessions",
   "themes": [
     "light",
@@ -24,6 +24,16 @@
     ]
   },
   "files": [
+    {
+      "file": "screenshots/after-certificate-revocation-desktop-light.png",
+      "sha256": "015e806fe88b66d2c3ec2c452ea6b01746e7ae7bc69f2ca9e59cdc904f95ac7a",
+      "captured_at_utc": "2026-10-18T17:55:58.914739+00:00"
+    },
+    {
+      "file": "screenshots/after-certificate-revocation-mobile-light.png",
+      "sha256": "ee857b4db58b8e51bef14c9c80748e60e3e0b410e392adedc49b142ac6dbdd02",
+      "captured_at_utc": "2026-10-18T17:56:15.486646+00:00"
+    },
     {
       "file": "screenshots/after-certificates-desktop-dark.png",
       "sha256": "fec859ae7bd68d81ef25f16fd8143ea07b40d021ef75e96b0e8bdbfeae22b427",
@@ -133,6 +143,16 @@
       "file": "screenshots/after-traffic-mobile-light.png",
       "sha256": "ceafab2d481497420052e3a79089bca296dc3f98b069e9115997dc7022184848",
       "captured_at_utc": "2026-10-18T17:42:57.116466+00:00"
+    },
+    {
+      "file": "screenshots/before-certificate-revocation-desktop-light.png",
+      "sha256": "c8a6ac372ac9feb3b13cd0706204df43d697103929b2442a35f88c45cd10abf5",
+      "captured_at_utc": "2026-10-18T17:55:50.018788+00:00"
+    },
+    {
+      "file": "screenshots/before-certificate-revocation-mobile-light.png",
+      "sha256": "2172449c6b8ffa8de60f909aef30e0249efb461484971e68521bb918227d50bc",
+      "captured_at_utc": "2026-10-18T17:56:07.342692+00:00"
     },
     {
       "file": "screenshots/before-certificates-desktop-dark.png",
@@ -245,14 +265,39 @@
       "captured_at_utc": "2026-10-18T17:22:16.361578+00:00"
     },
     {
-      "file": "videos/before-session-desktop.webm",
-      "sha256": "1da4a24f08b5246e420e9a0091df55883d701b6ce82577376fe031cd692e07fe",
-      "captured_at_utc": "2026-10-18T17:43:14.080219+00:00"
+      "file": "videos/after-certificate-delay-desktop.webm",
+      "sha256": "86bd291945417757b1f657036afbf195d694a9c82da884a7ab9b4c09acd4c867",
+      "captured_at_utc": "2026-10-18T17:43:19.872134+00:00"
     },
     {
-      "file": "videos/before-session-mobile.webm",
-      "sha256": "945262ba29b7e8e43788a74168e0c2e5bd6a6a866f47e92c000d87b33114d2b5",
-      "captured_at_utc": "2026-10-18T17:43:22.916090+00:00"
+      "file": "videos/after-certificate-delay-mobile.webm",
+      "sha256": "ad01ae68132419a1dc2d4ab067c70f2b47ce2c9d5f5be60626f36904840792b7",
+      "captured_at_utc": "2026-10-18T17:43:27.840018+00:00"
+    },
+    {
+      "file": "videos/after-certificate-escape-desktop.webm",
+      "sha256": "1926cac06a45dac63a5e15b9e053451082b1176b66aca1a83ee27acbd5054a5b",
+      "captured_at_utc": "2026-10-18T17:57:44.854088+00:00"
+    },
+    {
+      "file": "videos/after-certificate-escape-mobile.webm",
+      "sha256": "70fa2863300cbf82d4996a4da8c807a2f482b1490f1cfc5662e9986781aceed5",
+      "captured_at_utc": "2026-10-18T17:57:47.330071+00:00"
+    },
+    {
+      "file": "videos/after-certificate-revocation-desktop.webm",
+      "sha256": "0ea5d161256b8a0649d89132a44e5f44157c2d23a77acd3006bb4a7c32649441",
+      "captured_at_utc": "2026-10-18T17:55:59.882734+00:00"
+    },
+    {
+      "file": "videos/after-certificate-revocation-mobile.webm",
+      "sha256": "31558b258b18fa2498bbece45f08e84795e6610dd0a5017a40a8159cc5964778",
+      "captured_at_utc": "2026-10-18T17:56:16.258641+00:00"
+    },
+    {
+      "file": "videos/after-idle-revocation-desktop.webm",
+      "sha256": "8851dc79b9d24de85ec83cb7c2285338bd315bd83da7df9171eb91c737e29e16",
+      "captured_at_utc": "2026-10-18T17:43:40.611832+00:00"
     },
     {
       "file": "videos/after-session-desktop.webm",
@@ -265,19 +310,24 @@
       "captured_at_utc": "2026-10-18T17:43:25.912046+00:00"
     },
     {
-      "file": "videos/after-certificate-delay-desktop.webm",
-      "sha256": "86bd291945417757b1f657036afbf195d694a9c82da884a7ab9b4c09acd4c867",
-      "captured_at_utc": "2026-10-18T17:43:19.872134+00:00"
+      "file": "videos/before-certificate-revocation-desktop.webm",
+      "sha256": "8d2f6bf6aaadc976121f09a8739bac1c1c133f277fe9509d1a142c20f5263aa6",
+      "captured_at_utc": "2026-10-18T17:55:51.350781+00:00"
     },
     {
-      "file": "videos/after-certificate-delay-mobile.webm",
-      "sha256": "ad01ae68132419a1dc2d4ab067c70f2b47ce2c9d5f5be60626f36904840792b7",
-      "captured_at_utc": "2026-10-18T17:43:27.840018+00:00"
+      "file": "videos/before-certificate-revocation-mobile.webm",
+      "sha256": "ccfdba1fcf5bee85c29f808ab7700f1245220a6862bc91a12269927c7805907e",
+      "captured_at_utc": "2026-10-18T17:56:08.102688+00:00"
     },
     {
-      "file": "videos/after-idle-revocation-desktop.webm",
-      "sha256": "8851dc79b9d24de85ec83cb7c2285338bd315bd83da7df9171eb91c737e29e16",
-      "captured_at_utc": "2026-10-18T17:43:40.611832+00:00"
+      "file": "videos/before-session-desktop.webm",
+      "sha256": "1da4a24f08b5246e420e9a0091df55883d701b6ce82577376fe031cd692e07fe",
+      "captured_at_utc": "2026-10-18T17:43:14.080219+00:00"
+    },
+    {
+      "file": "videos/before-session-mobile.webm",
+      "sha256": "945262ba29b7e8e43788a74168e0c2e5bd6a6a866f47e92c000d87b33114d2b5",
+      "captured_at_utc": "2026-10-18T17:43:22.916090+00:00"
     }
   ]
 }

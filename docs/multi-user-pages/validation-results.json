@@ -40,5 +40,20 @@
       "results": "evidence/async-evidence.json"
     }
   ],
-  "remote_ci": "Triggered by the PR. Check the PR for the status of the pushed commit; no remote success is inferred from local execution."
+  "remote_ci": "Triggered by the PR. Check the PR for the status of the pushed commit; no remote success is inferred from local execution.",
+  "review_followup": {
+    "command": "make multi-user-browser-check",
+    "exit_code": 0,
+    "duration_seconds": 33.792,
+    "coverage": [
+      "certificate revocation while detail remains open",
+      "Escape during a delayed real resource response",
+      "all prior multi-user and certificate desktop/mobile cases"
+    ],
+    "additional_checks": [
+      "make non-browser-checks exited 0 after revocation fix",
+      "node frontend/module_smoke.mjs exited 0 after both fixes"
+    ],
+    "review": "review.md"
+  }
 }
