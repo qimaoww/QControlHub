@@ -153,6 +153,14 @@ func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.Por
 	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
+	result, err := resetPortTrafficPolicyTx(ctx, tx, id)
+	if err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	return result, tx.Commit(ctx)
+}
+
+func resetPortTrafficPolicyTx(ctx context.Context, tx pgx.Tx, id string) (core.PortTrafficPolicy, error) {
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET reset_generation=reset_generation+1,received_bytes=0,sent_bytes=0,
 			last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,accounting=NULL,
@@ -165,7 +173,7 @@ func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.Por
 	if err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
-	return policy, tx.Commit(ctx)
+	return policy, nil
 }
 
 func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string, error) {
@@ -177,9 +185,17 @@ func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string,
 	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
 		return "", err
 	}
+	result, err := deletePortTrafficPolicyTx(ctx, tx, id)
+	if err != nil {
+		return "", err
+	}
+	return result, tx.Commit(ctx)
+}
+
+func deletePortTrafficPolicyTx(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	var agentID string
 	var discovered bool
-	err = tx.QueryRow(ctx, `SELECT agent_id,discovered FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID, &discovered)
+	err := tx.QueryRow(ctx, `SELECT agent_id,discovered FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID, &discovered)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -194,9 +210,6 @@ func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", err
-	}
 	return agentID, nil
 }
 
@@ -209,6 +222,14 @@ func (s *Store) DeletePortTrafficMonitoring(ctx context.Context, id string) (str
 	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
 		return "", err
 	}
+	result, err := deletePortTrafficMonitoringTx(ctx, tx, id)
+	if err != nil {
+		return "", err
+	}
+	return result, tx.Commit(ctx)
+}
+
+func deletePortTrafficMonitoringTx(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	var agentID string
 	if err := tx.QueryRow(ctx, `SELECT agent_id FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID); errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
@@ -229,9 +250,6 @@ func (s *Store) DeletePortTrafficMonitoring(ctx context.Context, id string) (str
 		received_bytes=0,sent_bytes=0,reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,
 		period_start=NULL,period_end=NULL,enforcement_available=false,enforcement_error='',last_reported_at=NULL,
 		reset_generation=reset_generation+1,updated_at=now() WHERE id=$1`, id); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return agentID, nil

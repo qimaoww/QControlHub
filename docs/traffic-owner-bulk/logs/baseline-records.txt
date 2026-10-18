@@ -1,0 +1,9 @@
+       agent_id       | port  | monitoring_enabled |       share_id       |      config_id       | config_version
+----------------------+-------+--------------------+----------------------+----------------------+----------------
+ agt_2e2775b0dfc538e9 | 21001 | t                  |                      | cfg_18c937ed5c0c0d68 |              1
+ agt_2e2775b0dfc538e9 | 21002 | t                  |                      | cfg_18c937ed5c0c0d68 |              1
+ agt_2e2775b0dfc538e9 | 21003 | t                  |                      |                      |              0
+ agt_2e2775b0dfc538e9 | 22001 | t                  | shr_107ca2d5244eda8e | cfg_497a9e941c10f4b7 |              1
+ agt_2e2775b0dfc538e9 | 22011 | t                  | shr_5a4d902ffa93b9fe | cfg_7dfc65b7b054b0ab |              1
+ agt_b52b4715fb129ead | 21101 | t                  |                      | cfg_42688843d029fcf4 |              1
+(6 rows)

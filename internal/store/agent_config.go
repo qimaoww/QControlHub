@@ -53,7 +53,7 @@ func (s *Store) AgentConfigsForMonitoring(ctx context.Context, agentID string) (
 	}
 	result := []core.Config{}
 	for _, item := range configurations {
-		if (agentID == "" || item.Config.AgentID == agentID) && item.ShareID == "" && !item.Uncertain && item.AppliedVersion > 0 {
+		if (agentID == "" || item.Config.AgentID == agentID) && item.ShareID == "" && item.AppliedVersion > 0 && item.AppliedContent != "" {
 			config := item.Config
 			config.Content = item.AppliedContent
 			config.Version = item.AppliedVersion

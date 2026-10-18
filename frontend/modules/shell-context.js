@@ -1,4 +1,4 @@
-import { mergeTrafficPorts } from "./traffic-model.js";
+import { mergeTrafficPorts, trafficInUserScope } from "./traffic-model.js";
 import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 import { installedEngineCount } from "./agent-service-state.js";
@@ -97,7 +97,7 @@ function contextMarkup(title) {
   }
   if (state.route === "traffic") {
     const agents = orderNodesBySavedOrder(state.data.agents || []);
-    const items = mergeTrafficPorts(state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
+    const items = mergeTrafficPorts(state.data.trafficPolicies || [], state.data.trafficEndpoints || []).filter(item => trafficInUserScope(item.policy || item.endpoint, state.data.trafficFilters));
     const policies = items.filter((item) => item.policy).map((item) => item.policy);
     const endpoints = items.filter((item) => item.endpoint).map((item) => item.endpoint);
     const selected = state.data.trafficFilters?.agent_id || "";

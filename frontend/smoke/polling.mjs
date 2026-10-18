@@ -272,8 +272,8 @@ try {
         return [{ id: "alpha", name: "Alpha", status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
       if (path === "/traffic-policies")
         return [
-          { id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true, quota_enabled: true },
-          { id: "policy-b", agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", cycle: "monthly", cycle_anchor: "2026-08-01T00:00:00Z", used_bytes: 20, limit_bytes: Number.MAX_SAFE_INTEGER, received_bytes: 12, sent_bytes: 8, receive_bps: 2, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: false, quota_enabled: false, discovered: true },
+          { deployment_confirmed: true, is_current_user: true, id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true, quota_enabled: true },
+          { deployment_confirmed: true, is_current_user: true, id: "policy-b", agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", cycle: "monthly", cycle_anchor: "2026-08-01T00:00:00Z", used_bytes: 20, limit_bytes: Number.MAX_SAFE_INTEGER, received_bytes: 12, sent_bytes: 8, receive_bps: 2, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: false, quota_enabled: false, discovered: true },
         ];
       if (path === "/traffic-endpoints")
         return [
@@ -321,7 +321,7 @@ try {
 
   assert.deepEqual(
     mergeTrafficPorts(
-      [{ id: "policy-a", agent_id: "alpha", port: 443 }],
+      [{ deployment_confirmed: true, is_current_user: true, id: "policy-a", agent_id: "alpha", engine: "xray", port: 443 }],
       [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }, { agent_id: "alpha", engine: "xray", port: 8443, protocol: "udp" }, { agent_id: "alpha", engine: "sing-box", port: 8443, protocol: "tcp" }],
     ).map((item) => item.kind),
     ["policy", "endpoint"],
@@ -329,7 +329,7 @@ try {
   );
   assert.deepEqual(
     mergeTrafficPorts(
-      [{ id: "policy-hidden", agent_id: "alpha", port: 443, monitoring_enabled: false }],
+      [{ deployment_confirmed: true, is_current_user: true, id: "policy-hidden", agent_id: "alpha", engine: "xray", port: 443, monitoring_enabled: false }],
       [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }],
     ),
     [],

@@ -35,7 +35,7 @@ try {
     querySelector: selector => selector === "[data-traffic-sync]" ? button : null,
     querySelectorAll: () => [],
   };
-  const policy = { id: "policy-a", agent_id: "alpha", name: "Monitor", engine: "mihomo", port: 443, protocol: "tcp", quota_enabled: false };
+  const policy = { id: "policy-a", agent_id: "alpha", name: "Monitor", engine: "mihomo", port: 443, protocol: "tcp", quota_enabled: false, deployment_confirmed: true, is_current_user: true };
   const agents = ["alpha", "beta", "gamma", "empty"].map(id => ({
     id, name: id, status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"],
   }));
@@ -58,7 +58,7 @@ try {
     api: async path => {
       if (path === "/agents") return agents;
       if (path === "/traffic-policies") return policies;
-      if (path === "/traffic-endpoints") return endpoints;
+      if (path === "/traffic-endpoints") return [...endpoints.map(endpoint => ({ ...endpoint, is_current_user: true })), ...policies.filter(policy => policy.deployment_confirmed).map(policy => ({ ...policy }))];
       assert.fail(`render must be read-only: ${path}`);
     },
   });
@@ -71,6 +71,27 @@ try {
   assert.equal(button.disabled, false);
   assert.deepEqual(mergeTrafficPorts([{...policy, monitoring_enabled: false}], [policy]), [], "deleted ports remain hidden until explicitly restored");
 
+  assert.deepEqual(mergeTrafficPorts([{ ...policy, deployment_confirmed: false }], []), [], "a policy alone never proves deployment");
+  assert.deepEqual(mergeTrafficPorts([policy], []), [], "a stale policy cannot outlive its confirmed endpoint");
+  assert.deepEqual(mergeTrafficPorts([{ ...policy, config_id: "old", config_version: 1 }], [{ ...policy, config_id: "new", config_version: 1 }]).map(item => item.kind), ["endpoint"], "a different instance never inherits an old policy");
+  policies = [policy, { ...policy, id: "foreign", agent_id: "beta", is_current_user: false, used_bytes: 700, limit_bytes: 900, quota_enabled: true }];
+  await render();
+  assert.deepEqual(cardKeys(), ["alpha:443"], "default scope hides another user's port even on a visible node");
+  assert.ok(!markup.includes('policy:foreign'), "foreign ports do not enter selector options");
+  state.data.trafficFilters = { user_scope: "all" };
+  await render();
+  assert.deepEqual(cardKeys(), ["alpha:443", "beta:443"], "all scope retains the authorized inventory");
+  assert.ok(markup.includes("所属用户"), "all scope identifies port ownership");
+  state.data.trafficBatch = { mode: true, selected: [policy.id, "foreign"], results: [], action: "reset" };
+  await render();
+  assert.ok(!markup.includes('data-card-move-grip'), "batch selection suppresses drag grips");
+  policies = [policy];
+  await render({ background: true });
+  assert.deepEqual(state.data.trafficBatch.selected, [policy.id], "refresh prunes removed targets and preserves valid selection");
+  state.data.trafficFilters = {};
+  await render();
+  assert.deepEqual(state.data.trafficBatch.selected, [], "scope changes clear selection");
+  state.data.trafficBatch.mode = false;
   policies = [
     { ...policy, id: "policy-b", agent_id: "beta" },
     policy,

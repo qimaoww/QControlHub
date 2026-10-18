@@ -60,6 +60,7 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 		running=$4 IN ('active','activating','reloading'),uncertain=$4='unknown',service_status=$4,status_reason=$5,
 		config_id=CASE WHEN obs.identity_verified THEN $6 ELSE state.config_id END,
 		config_version=CASE WHEN obs.identity_verified THEN $7 ELSE state.config_version END,
+        traffic_config_confirmed=state.traffic_config_confirmed OR obs.identity_verified,
 		config_uncertain=CASE WHEN obs.identity_verified THEN false
 			WHEN $12::boolean AND state.config_id<>'' THEN true ELSE state.config_uncertain END,
 		applied_task_id=CASE WHEN obs.identity_verified AND $8<>'' THEN $8 ELSE state.applied_task_id END,

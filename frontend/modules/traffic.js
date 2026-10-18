@@ -1,3 +1,4 @@
+import { createTrafficBatch } from "./traffic-batch.js";
 import { updateFeedback } from "./presence-motion.js";
 import { createTrafficFormView } from "./traffic-form-view.js";
 import { createTrafficOrder } from "./traffic-order.js";
@@ -40,7 +41,8 @@ export function installTraffic(ctx) {
   const view = createTrafficView(ctx, { filters, storage, ...order, ...fields });
   const sync = createTrafficSyncDialog(ctx, { traffic });
   const bindTrafficForms = createTrafficForms(ctx, { filters, renderTraffic, traffic, sync, ...fields });
-  const bind = createTrafficBindings(ctx, { bindTrafficForms, ...cards });
+  const batch = createTrafficBatch(ctx, { renderTraffic, traffic, cancelCardDrag: cards.cancel });
+  const bind = createTrafficBindings(ctx, { bindTrafficForms, bindTrafficBatch: batch.bind, ...cards });
   function renderTraffic(agents, policies, endpoints, resetCreate = false) {
     if (cardInteractions.activeCount()) {
       pendingTrafficRender = [agents, policies, endpoints, resetCreate];
@@ -97,6 +99,7 @@ export function installTraffic(ctx) {
     cardInteractions.cancel();
     pendingTrafficRender = null;
     cards.cancel();
+    batch.cancel();
   };
   return traffic;
 }

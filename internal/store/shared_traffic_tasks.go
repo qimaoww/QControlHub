@@ -180,7 +180,7 @@ func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership
 			(agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain,traffic_settled,updated_at)
-			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),COALESCE(t.config_id,''),COALESCE(t.config_version,0),
+			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),'',0,
 				true,true,t.action IN ('deploy','import-existing'),false,now()
 			FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
 			ON CONFLICT(agent_id,engine) DO UPDATE SET uncertain=true,

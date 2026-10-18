@@ -57,8 +57,12 @@ export function trafficRateForDisplay(
 }
 
 export function mergeTrafficPorts(policies = [], endpoints = []) {
-  const monitored = new Set(policies.map(trafficPortIdentity));
-  const visiblePolicies = policies.filter((policy) => policy.monitoring_enabled !== false);
+  const confirmed = policies.filter(policy => policy.deployment_confirmed === true && endpoints.some(endpoint =>
+    endpoint.agent_id === policy.agent_id && endpoint.engine === policy.engine && endpoint.port === policy.port &&
+    (!policy.config_id || policy.config_id === endpoint.config_id && policy.config_version === endpoint.config_version) &&
+    policy.owner_id === endpoint.owner_id));
+  const monitored = new Set(confirmed.map(trafficPortIdentity));
+  const visiblePolicies = confirmed.filter((policy) => policy.monitoring_enabled !== false);
   const discovered = new Map();
   for (const endpoint of endpoints) {
     const identity = trafficPortIdentity(endpoint);
@@ -86,6 +90,9 @@ export const quotaInputValue = (value) => {
   };
 
 export const policyStatusKey = (policy, agent) => {
+    if (agent?.status === "offline") return "offline";
+    if (policy.service_status === "inactive") return "stopped";
+    if (policy.service_status === "unknown") return "waiting";
     if (!(agent?.features || []).includes("port-traffic-v1")) return "waiting";
     if (policy.blocked) return "blocked";
     if (!policy.last_reported_at) return "waiting";
@@ -94,6 +101,9 @@ export const policyStatusKey = (policy, agent) => {
     return "active";
   };
 export const policyStatus = (policy, agent) => {
+    if (agent?.status === "offline") return ["节点离线", "warn"];
+    if (policy.service_status === "inactive") return ["服务已停止", "neutral"];
+    if (policy.service_status === "unknown") return ["部署待确认", "warn"];
     if (!(agent?.features || []).includes("port-traffic-v1")) return ["需升级 Agent", "warn"];
     if (policy.shared_quota?.revoked) return ["已撤销授权", "bad"];
     if (policy.blocked) return ["已超额封禁", "bad"];
@@ -106,3 +116,8 @@ export const policyStatus = (policy, agent) => {
 export const eligibleAgents = (agents) => agents.filter((agent) =>
     agent.can_manage !== false && (agent.features || []).includes("port-traffic-v1") && (agent.capabilities || []).length,
   );
+
+// Ownership is computed by the server from the authenticated principal. Node
+// ownership must never decide which user's port enters this scope.
+export const trafficInUserScope = (value, filters = {}) => filters.user_scope === "all" || value.is_current_user === true;
+export const trafficPolicyEditable = (policy, agent, can) => can("traffic.manage", agent) && agent?.can_manage !== false && !policy.shared_quota;

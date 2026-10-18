@@ -1,4 +1,4 @@
-import { protocolName } from "./traffic-model.js";
+import { protocolName, trafficInUserScope, policyStatusKey, trafficEndpointKey } from "./traffic-model.js";
 import { bindDialogBackdrop, closeRetiringDialog } from "./popup.js";
 import { updateFeedback, setVisible, updateFeedbackHTML } from "./presence-motion.js";
 export function createTrafficSyncDialog({ api, state, esc, engineName, notify }, { traffic }) {
@@ -68,11 +68,20 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       try {
         const resource = await api("/traffic-endpoints/sync", { signal: controller.signal });
         if (closed || !isCurrent()) { cleanup(); return; }
-        candidates = resource.candidates || [];
+        const filters = state.data.trafficFilters || {};
+        const policies = state.data.trafficPolicies || [];
+        const selected = policies.find(p => `policy:${p.id}` === filters.endpoint_key) || state.data.trafficEndpoints?.find(ep => trafficEndpointKey(ep) === filters.endpoint_key);
+        candidates = (resource.candidates || []).filter(candidate => {
+          if (!trafficInUserScope(candidate, filters) || filters.agent_id && candidate.agent_id !== filters.agent_id || filters.engine && candidate.engine !== filters.engine) return false;
+          if (filters.endpoint_key && (!selected || candidate.agent_id !== selected.agent_id || candidate.engine !== selected.engine || candidate.port !== selected.port || candidate.config_id && selected.config_id && candidate.config_id !== selected.config_id)) return false;
+          const policy = policies.find(p => p.agent_id === candidate.agent_id && p.engine === candidate.engine && p.port === candidate.port);
+          const agent = state.data.agents?.find(a => a.id === candidate.agent_id);
+          return !filters.status || (policy ? policyStatusKey(policy, agent) : "waiting") === filters.status;
+        });
         snapshot = resource.snapshot || "";
         const agentNames = new Map((state.data.agents || []).map(agent => [agent.id, agent.name]));
         const labels = { new: "新增", changed: "修改", removed: "移除 · 历史保留", unchanged: "保持不变", deleted: "已删除 · 可恢复" };
-        updateFeedbackHTML(list, candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选可同步项 · ${candidates.filter(candidate => !candidate.blocked_reason).length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" ${candidate.blocked_reason ? "disabled" : ""} aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${esc(labels[candidate.kind] || "同步")}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")} · ${candidate.previous_port ? `${Number(candidate.previous_port)} → ` : ""}${Number(candidate.port)}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · ${esc(protocolName(candidate.protocol))}</small><small>${candidate.share_id ? `实例 ${esc(candidate.share_id)}` : "节点基础实例"} · ${candidate.config_version ? `配置 v${Number(candidate.config_version)} · ` : ""}${candidate.deployment_status === "pending" ? "待部署" : candidate.deployment_status === "uncertain" ? "部署未确认" : candidate.deployment_status === "retained" ? "旧端口" : "已部署"}</small>${candidate.blocked_reason ? `<small>${esc(candidate.blocked_reason)}</small>` : ""}</span><span class="status-label ${candidate.blocked_reason ? "warn" : "muted"}">${esc(labels[candidate.kind] || "未监控 · 可添加")}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>');
+        updateFeedbackHTML(list, candidates.length ? `<label class="traffic-sync-all"><input type="checkbox" data-sync-all>全选可同步项 · ${candidates.filter(candidate => !candidate.blocked_reason).length} 个端口</label><div class="traffic-sync-list">${candidates.map((candidate, index) => `<label class="traffic-sync-row"><input type="checkbox" data-sync-choice="${index}" ${candidate.blocked_reason ? "disabled" : ""} aria-label="${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} :${Number(candidate.port)} ${esc(labels[candidate.kind] || "同步")}"><span class="traffic-sync-source"><strong>${esc(candidate.name || "未命名端口")} · ${candidate.previous_port ? `${Number(candidate.previous_port)} → ` : ""}${Number(candidate.port)}</strong><small>${esc(agentNames.get(candidate.agent_id) || candidate.agent_id)} · ${esc(engineName(candidate.engine))} · ${esc(protocolName(candidate.protocol))}${filters.user_scope === "all" ? ` · ${esc(candidate.owner_name || "未知用户")}` : ""}</small><small>${candidate.share_id ? `实例 ${esc(candidate.share_id)}` : "节点基础实例"} · ${candidate.config_version ? `配置 v${Number(candidate.config_version)} · ` : ""}${candidate.deployment_status === "pending" ? "待部署" : candidate.deployment_status === "uncertain" ? "部署未确认" : candidate.deployment_status === "retained" ? "旧端口" : "已部署"}</small>${candidate.blocked_reason ? `<small>${esc(candidate.blocked_reason)}</small>` : ""}</span><span class="status-label ${candidate.blocked_reason ? "warn" : "muted"}">${esc(labels[candidate.kind] || "未监控 · 可添加")}</span></label>`).join("")}</div>` : '<div class="empty compact"><strong>暂无需要同步的端口</strong></div>');
         const all = list.querySelector("[data-sync-all]");
         if (all) all.onchange = () => { list.querySelectorAll("[data-sync-choice]:not(:disabled)").forEach(input => { input.checked = all.checked; }); updateSelection(); };
         list.querySelectorAll("[data-sync-choice]").forEach(input => { input.onchange = updateSelection; });
