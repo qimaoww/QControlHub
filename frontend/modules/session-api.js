@@ -59,7 +59,9 @@ async function sendAPI(path, options = {}) {
     !["GET", "HEAD", "OPTIONS"].includes(method)
   )
     headers["X-QControlHub-CSRF"] = session.csrf_token;
-  const routeSignal = ["GET", "HEAD", "OPTIONS"].includes(method)
+  // Account ordering is shared across routes. A navigation must not cancel a
+  // background read that the next page is about to reuse, or a save readback.
+  const routeSignal = path !== "/preferences/node-order" && ["GET", "HEAD", "OPTIONS"].includes(method)
     ? state.routeSignal
     : null;
   const request = combineAbortSignals(options.signal, routeSignal);

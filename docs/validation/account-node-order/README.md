@@ -56,6 +56,9 @@ Local Go package results: [local-go-results.json](local-go-results.json).
 - Repository non-browser checks and full PostgreSQL Go shards: PASS on this host.
 - Focused browser regressions: PASS for IP quality, desktop/mobile card moves,
   client node ordering, connections, and traffic layout.
+- Merge review found and fixed navigation canceling an account-order poll reused
+  by the next page. The session API regression verifies both callers complete
+  across navigation while the existing stale-account checks remain enforced.
 - Final full browser matrix and hosted CI: exact final-head outcomes are recorded
   in [PR #301](https://github.com/qimaoww/QControlHub/pull/301).
 

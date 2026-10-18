@@ -30,8 +30,10 @@ wins over all later `initialize` requests, including another device's migration.
 
 The shared module keeps a confirmed order and a read/write queue for the current
 account lifetime. Navigation loads server order before rendering. Fleet polling
-refreshes order in parallel, preserving roster authorization/removal timing. Client
-exports refresh their order before rendering; client IP manual refresh reloads
+refreshes order in parallel, preserving roster authorization/removal timing.
+Account-order reads and save readbacks survive route changes; account changes
+still invalidate their responses. Client exports refresh their order before
+rendering; client IP manual refresh reloads
 order before constructing its order-sensitive cursor query. Cached filter switches
 remain immediate. Changed order resets incompatible client IP pagination cursors.
 
