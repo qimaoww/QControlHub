@@ -1,4 +1,4 @@
-import { migrateLegacyNodeOrder } from "./node-order.js";
+import { configureNodeOrder, refreshNodeOrder } from "./node-order.js";
 import { setStorageAccount } from "./account-storage.js";
 import { createScopedAPI } from "./requests.js";
 import { createPanelReads } from "./panel-reads.js";
@@ -25,6 +25,7 @@ function combineAbortSignals(...values) {
 // The login callback runs only after a request; construction is inert.
 export function createSessionAPI({ state, renderLogin }) {
 const scopedAPI = createScopedAPI(sendAPI);
+configureNodeOrder(sendAPI);
 const api = (path, options) => scopedAPI.request(path, options);
 
 // The shell renders on every navigation, but its overview counters and panel
@@ -63,6 +64,11 @@ async function sendAPI(path, options = {}) {
     : null;
   const request = combineAbortSignals(options.signal, routeSignal);
   try {
+    // Roster reads must keep their independent permission/removal lifecycle.
+    // Navigation already loads order before rendering; polls refresh it in
+    // parallel without holding up revocation when another page read fails.
+    if (path === "/agents" && method === "GET" && session) void refreshNodeOrder()?.catch(() => {});
+    if (path === "/client-access" && method === "GET" && session) await refreshNodeOrder();
     const result = await requestJSON(`/api/v1${path}`, {
       ...options,
       signal: request.signal,
@@ -78,8 +84,6 @@ async function sendAPI(path, options = {}) {
         renderLogin(message);
       },
     });
-    if (path === "/agents" && method === "GET" && session && state.session === session && Array.isArray(result))
-      migrateLegacyNodeOrder(result);
     return result;
   } finally {
     request.release();

@@ -195,8 +195,9 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
       const beforeFailure = ids(), persisted = accountStorage.getItem(orderKey);
       const nativeSet = Storage.prototype.setItem;
       let writeAttempts = 0;
+      if (type === "nodes") testAPI.failNodeOrder = true;
       Storage.prototype.setItem = function(key, value) {
-        if (key.startsWith(orderKey)) { writeAttempts++; throw new DOMException("fixture quota exceeded", "QuotaExceededError"); }
+        if (type === "traffic" && key.startsWith(orderKey)) { writeAttempts++; throw new DOMException("fixture quota exceeded", "QuotaExceededError"); }
         return nativeSet.call(this, key, value);
       };
       try {
@@ -208,11 +209,11 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
         });
         equalOrder(ids(), beforeFailure, "failed persistence must restore the last saved DOM order");
         assert.equal(accountStorage.getItem(orderKey), persisted);
-        assert.equal(writeAttempts, 1, "failed drop must attempt exactly one write");
+        if (type === "traffic") assert.equal(writeAttempts, 1, "failed drop must attempt exactly one write");
         assert.ok(grid.parentElement.querySelector('[data-phase="error"]')?.textContent.includes("已恢复原位"), "storage failure needs explicit recovery feedback");
         assert.ok(document.querySelector('[data-spa-notice][role="alert"]'), "failed saves use the existing error surface");
         document.querySelector('[data-spa-notice] .notice-close').click();
-      } finally { Storage.prototype.setItem = nativeSet; }
+      } finally { Storage.prototype.setItem = nativeSet; testAPI.failNodeOrder = false; }
       key(grip, "ArrowLeft"); await settled();
       equalOrder(ids(), originalIds, "moving after a failure must remain reliable");
 

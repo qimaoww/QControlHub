@@ -3,9 +3,15 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 78
+const currentSchemaVersion = 79
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS account_node_orders (
+ account_id text PRIMARY KEY,
+ node_ids text[] NOT NULL DEFAULT '{}',
+ revision bigint NOT NULL CHECK (revision > 0)
+);
+
 CREATE TABLE IF NOT EXISTS agents (
     id text PRIMARY KEY,
     name varchar(100) NOT NULL,

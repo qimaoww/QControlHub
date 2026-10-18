@@ -1,6 +1,6 @@
 import { bindEvent } from "./refresh.js";
 import { bindCardMove } from "./card-move.js";
-import { saveNodeOrder } from "./node-order.js";
+import { saveNodeOrder, orderNodesBySavedOrder } from "./node-order.js";
 import { openRegionPicker } from "./regions.js";
 
 export function createAgentCardInteractions({ api, state, esc, notify }, { can, cardInteractions, loadRegionDisplay, loadKomariDisplay }) {
@@ -11,6 +11,7 @@ export function createAgentCardInteractions({ api, state, esc, notify }, { can, 
     cancelCardDrag = bindCardMove({
       grid, selector: ".node-card", gripSelector: ".node-card-grip", cardInteractions, notify,
       save: cards => saveNodeOrder(cards.map(card => card.dataset.agentNode)),
+      restore: cards => orderNodesBySavedOrder(cards.map(card => ({ id: card.dataset.agentNode, card }))).map(item => item.card),
     });
   }
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { createSessionAPI } from "./modules/session-api.js";
 import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
-import { nodeCardOrderKey, savedNodeOrder } from "./modules/node-order.js";
+import { nodeCardOrderKey, savedNodeOrder, refreshNodeOrder } from "./modules/node-order.js";
 
 const deferred = () => {
   let resolve, reject;
@@ -27,6 +27,7 @@ try {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     value: (url, options) => {
+      if (url.endsWith("/preferences/node-order")) return Response.json({ ids: ["node-a", "node-b"], revision: 1 });
       calls.push({ url, options });
       return respond(url, options);
     },
@@ -62,6 +63,7 @@ try {
       return response.promise;
     };
     const read = api("/agents", { signal: caller.signal });
+    await flush();
     const combined = calls.at(-1).options.signal;
     assert.notEqual(combined, route.signal);
     assert.notEqual(combined, caller.signal);
@@ -107,7 +109,8 @@ try {
   storage.set(nodeCardOrderKey, JSON.stringify(["hidden", "node-b", "node-a"]));
   respond = () => Response.json([{ id: "node-a" }, { id: "node-b" }]);
   await api("/agents");
-  assert.deepEqual(savedNodeOrder(), ["node-b", "node-a"], "transport migrates only the current account-visible fleet");
+  await refreshNodeOrder();
+  assert.deepEqual(savedNodeOrder(), ["node-a", "node-b"], "server order takes precedence over unattributed browser cache");
 
   // A superseded response must neither log out the new account nor migrate
   // node IDs into its storage, including a switch while JSON is being decoded.

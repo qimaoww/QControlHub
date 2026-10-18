@@ -38,8 +38,10 @@ scroll writes explicitly use instant behavior so the page's default smooth
 scrolling cannot delay or repeatedly restart them.
 
 The dragged original card occupies the selected slot using temporary CSS order;
-neighbours yield using the existing 420ms reorder animation. The DOM order stays
-committed until a save succeeds. Release uses the final pointer position and the
+neighbours yield using the existing 420ms reorder animation. The DOM follows the released preview while an asynchronous save is pending.
+The refresh gate stays held until the server confirms the order. Failed saves
+restore the last confirmed account order; an unavailable readback keeps an
+explicitly unconfirmed, retryable state. Release uses the final pointer position and the
 same preview order. Landing/return animation starts at the ghost's last painted
 bounds, with scale-correct translation. Starting another drag interrupts landing
 without releasing the refresh gate between gestures. Hover/entrance transforms
