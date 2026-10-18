@@ -1,0 +1,5 @@
+Command: go test -count=1 -skip '^TestAgentBrowserRuntimeSmoke$' ./frontend
+Final exit code: 0
+Summary only; credentials and routine HTTP logs omitted.
+
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.061s

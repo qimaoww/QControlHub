@@ -58,3 +58,9 @@ GitHub CI 由 PR 触发；Debian、Alpine、升级沙箱、真实服务权限、
 `39152073275` 的 Debian Go 前端包失败：`TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers` 仍查找旧的 installed 二态标志字符串。本地完整 Go 命令的前端包在后续未知态代码修改之前已经执行，未再次执行该包，导致这条契约断言漏更新；此前“当轮退出 0”不代表后续代码仍满足该断言。
 
 已同步三态标志，并保留完整卡片不预提交结构标志、紧凑卡片才更新标志的既定约束；生产代码未因此修改。修复后完整 `./frontend` Go 包（仅排除已另跑的原生浏览器矩阵）以及 `make fmt-check` 退出 0，见 [日志](evidence/logs/ci-contract-followup.log)。最新提交重新触发全部远端 CI，合并前以新提交结果为准。
+
+## 批量入口回归补充
+
+真实 A/B 账号各自只有一个自有节点和一个共享节点。新增入口范围断言在修复前失败；改用可管理节点数量后，完整多用户/证书门禁退出 0（32.833s），同时保留证书撤权、Escape 延迟响应、切换账号、工作区/任务隔离回归。最终 non-browser 检查及完整前端 Go 包的结果见补充日志；最新提交再次运行全部远端 CI。
+
+最终补充日志：[多用户/证书门禁](evidence/logs/batch-multiuser.log)、[non-browser 全检查](evidence/logs/batch-non-browser.log)、[完整前端 Go 包](evidence/logs/batch-frontend-go.log)，均退出 0。

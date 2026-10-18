@@ -72,5 +72,26 @@
     ],
     "log": "evidence/logs/ci-contract-followup.log",
     "production_code_changed": false
+  },
+  "final_batch_followup": {
+    "production_change": "Batch entry counts only nodes permitted by can(host.manage, agent)",
+    "local_commands": [
+      {
+        "command": "make multi-user-browser-check",
+        "exit_code": 0,
+        "duration_seconds": 32.833
+      },
+      {
+        "command": "make non-browser-checks",
+        "exit_code": 0
+      },
+      {
+        "command": "go test -count=1 -skip '^TestAgentBrowserRuntimeSmoke$' ./frontend",
+        "exit_code": 0
+      }
+    ],
+    "evidence": "evidence/node-batch-evidence.json",
+    "screenshots": 52,
+    "videos": 17
   }
 }

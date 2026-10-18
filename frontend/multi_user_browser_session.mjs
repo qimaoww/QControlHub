@@ -168,6 +168,10 @@ try {
     await api(page, session, "POST", `/agent-access/${share.id}/response`, { revision: share.invitation_revision, decision: "accept" });
     agents = await api(page, session, "GET", "/agents");
     assert.ok(agents.some(agent => agent.id === fixture.shared && !agent.can_manage));
+    await evaluate(page, "location.hash='#node-settings'");
+    await wait(page, "document.querySelectorAll('[data-agent-node]').length===2");
+    assert.equal(await evaluate(page, "document.querySelectorAll('[data-node-batch-toggle]').length"), 0,
+      "one owned node plus a shared instance must not expose a host batch entry");
   }
   record(`${mode}: owned nodes isolated; pending shares denied, accepted shares visible without host management`);
   const archiveInput = { name: "private archive", engine: "mihomo", content: "mixed-port: 22001\n" };

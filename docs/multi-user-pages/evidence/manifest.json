@@ -1,9 +1,9 @@
 {
   "baseline_commit": "8834b33d2fad0539f935b14976e2892ddbd38a71",
-  "source_diff_sha256": "a5821f24b1c8c988449765274fc6439f7137981b96c1109a74a82e1f053b52c9",
+  "source_diff_sha256": "71485eadaab788c1f355dd4855363f977fd44234b17f2d1a873b66e40fa26031",
   "source_diff_command": "git diff 8834b33d2fad0539f935b14976e2892ddbd38a71 -- frontend internal",
-  "screenshots": 48,
-  "videos": 13,
+  "screenshots": 52,
+  "videos": 17,
   "captured_from": "real Chromium, isolated PostgreSQL fixture and real API/password/cookie sessions",
   "themes": [
     "light",
@@ -73,6 +73,16 @@
       "file": "screenshots/after-instance-mobile-light.png",
       "sha256": "c34235b6d3ee16277bcf7a75d79ffa6fa74e54a35bf535f4e509fa2ea73936b9",
       "captured_at_utc": "2026-10-18T17:42:59.024439+00:00"
+    },
+    {
+      "file": "screenshots/after-node-batch-desktop-light.png",
+      "sha256": "3dcf139509656ac69690a7a4cff31123abd1ff7cb90f2cce2d595dca5714b271",
+      "captured_at_utc": "2026-10-18T18:16:39.658902+00:00"
+    },
+    {
+      "file": "screenshots/after-node-batch-mobile-light.png",
+      "sha256": "3c91885df076941272994a83085cf082442094796ef020a74efdfa774f818dc8",
+      "captured_at_utc": "2026-10-18T18:16:43.802855+00:00"
     },
     {
       "file": "screenshots/after-permission-desktop-dark.png",
@@ -195,6 +205,16 @@
       "captured_at_utc": "2026-10-18T17:22:18.261554+00:00"
     },
     {
+      "file": "screenshots/before-node-batch-desktop-light.png",
+      "sha256": "9fe59623b87fb8bd5110cd9c38b9589f2196244b14f8e6df27149ee9452effa2",
+      "captured_at_utc": "2026-10-18T18:16:38.038920+00:00"
+    },
+    {
+      "file": "screenshots/before-node-batch-mobile-light.png",
+      "sha256": "f034a15b3e0553030c18e1f4372e80897cd905dc21d5c5ce79c41a02bb82b3b6",
+      "captured_at_utc": "2026-10-18T18:16:42.334871+00:00"
+    },
+    {
       "file": "screenshots/before-permission-desktop-dark.png",
       "sha256": "449b234e7432ec415ebe784b1ae1bf2ed0e012866c116db087446d4c125a39ba",
       "captured_at_utc": "2026-10-18T17:33:38.020506+00:00"
@@ -300,6 +320,16 @@
       "captured_at_utc": "2026-10-18T17:43:40.611832+00:00"
     },
     {
+      "file": "videos/after-node-batch-desktop.webm",
+      "sha256": "232825cfca2f5cfaf771094e28b4d2526e960fc33961562968e5bbc5e13b48c4",
+      "captured_at_utc": "2026-10-18T18:16:40.150896+00:00"
+    },
+    {
+      "file": "videos/after-node-batch-mobile.webm",
+      "sha256": "e96cedd36cfdec6b4f66a89cc40f9e1d1a7b2ddcecc359587629f22583fc261a",
+      "captured_at_utc": "2026-10-18T18:16:43.918853+00:00"
+    },
+    {
       "file": "videos/after-session-desktop.webm",
       "sha256": "012dc5aad587d88ddb9f52110f0d870dbf5bc2350874e9ca2a2dabde2b61056e",
       "captured_at_utc": "2026-10-18T17:43:17.596168+00:00"
@@ -318,6 +348,16 @@
       "file": "videos/before-certificate-revocation-mobile.webm",
       "sha256": "ccfdba1fcf5bee85c29f808ab7700f1245220a6862bc91a12269927c7805907e",
       "captured_at_utc": "2026-10-18T17:56:08.102688+00:00"
+    },
+    {
+      "file": "videos/before-node-batch-desktop.webm",
+      "sha256": "e1219d87ea0eafdad03ecadad929ec5e2afa0c5a90ee4aebb0664a7e4b26020b",
+      "captured_at_utc": "2026-10-18T18:16:38.286917+00:00"
+    },
+    {
+      "file": "videos/before-node-batch-mobile.webm",
+      "sha256": "9541c6185078c25425949e6beab792b139c6a7fd8544828b34f1bad8effefcd3",
+      "captured_at_utc": "2026-10-18T18:16:42.438870+00:00"
     },
     {
       "file": "videos/before-session-desktop.webm",

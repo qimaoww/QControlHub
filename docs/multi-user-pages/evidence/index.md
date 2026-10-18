@@ -55,3 +55,14 @@
 | mobile | [原图](screenshots/before-certificate-revocation-mobile-light.png) | [原图](screenshots/after-certificate-revocation-mobile-light.png) | [录屏](videos/before-certificate-revocation-mobile.webm) | [录屏](videos/after-certificate-revocation-mobile.webm) |
 
 审查同时验证 Escape 关闭已有表单后释放真实的延迟 HTTP 响应，表单不会重新弹出：[桌面](videos/after-certificate-escape-desktop.webm)、[手机](videos/after-certificate-escape-mobile.webm)。条件和结果分别见 [授权撤销](certificate-revocation-evidence.json)、[关闭与延迟响应](certificate-escape-evidence.json)。
+
+## 审查补充：批量操作资源范围
+
+Alice 同时可见一个自有节点和一个共享节点。修改前按可见总数显示宿主批量入口，进入后没有批量操作；修改后仅计算可管理节点，不再显示这个空入口。主题、视口、账号和两节点数据一致；手机实际按钮可见性在 JSON 中如实记录。
+
+| 视口 | 修改前 | 修改后 | 修改前录屏 | 修改后录屏 |
+| --- | --- | --- | --- | --- |
+| desktop | [原图](screenshots/before-node-batch-desktop-light.png) | [原图](screenshots/after-node-batch-desktop-light.png) | [录屏](videos/before-node-batch-desktop.webm) | [录屏](videos/after-node-batch-desktop.webm) |
+| mobile | [原图](screenshots/before-node-batch-mobile-light.png) | [原图](screenshots/after-node-batch-mobile-light.png) | [录屏](videos/before-node-batch-mobile.webm) | [录屏](videos/after-node-batch-mobile.webm) |
+
+见 [逐项结果](node-batch-evidence.json)。
