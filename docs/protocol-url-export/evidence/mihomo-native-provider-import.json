@@ -1,0 +1,556 @@
+{
+  "providers": {
+    "anytls": {
+      "name": "anytls",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "e6f4c3f5-0d04-4bc3-a74f-e528d00a2e62",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "anytls",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "AnyTLS",
+          "udp": true,
+          "uot": true,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "default": {
+      "name": "default",
+      "type": "Proxy",
+      "vehicleType": "Compatible",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "da756586-f6a4-444b-9008-4a56685336f4",
+          "interface": "",
+          "mptcp": false,
+          "name": "DIRECT",
+          "provider-name": "",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Direct",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        },
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "a2d547b9-c4fb-49f5-aba7-55a82d44b1d5",
+          "interface": "",
+          "mptcp": false,
+          "name": "REJECT",
+          "provider-name": "",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Reject",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        },
+        {
+          "alive": true,
+          "all": [
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&=",
+            "香港 🚀 + %2F @:/?#&="
+          ],
+          "dialer-proxy": "",
+          "emptyFallback": "COMPATIBLE",
+          "extra": {},
+          "hidden": false,
+          "history": [],
+          "icon": "",
+          "interface": "",
+          "mptcp": false,
+          "name": "Native imports",
+          "now": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "",
+          "routing-mark": 0,
+          "smux": false,
+          "testUrl": "",
+          "tfo": false,
+          "type": "Selector",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "0001-01-01T00:00:00Z"
+    },
+    "hysteria2": {
+      "name": "hysteria2",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "9428bb55-6816-4edd-9b0f-3e738a4f05af",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "hysteria2",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Hysteria2",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "hysteria2-native": {
+      "name": "hysteria2-native",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "7901c985-3d8d-4ebe-bd6f-29c8cff39812",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "hysteria2-native",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Hysteria2",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "socks5": {
+      "name": "socks5",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "c1f8d37c-e810-4348-9d0e-c4afb8efc83a",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "socks5",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Socks5",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "socks5-native": {
+      "name": "socks5-native",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "5cb8fdb8-9a11-4aa9-b268-e1dff4c29c1b",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "socks5-native",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Socks5",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "ss": {
+      "name": "ss",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "174f9f20-0ec8-4618-8159-80ee00960b47",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "ss",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Shadowsocks",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.762926577+08:00"
+    },
+    "ss2022": {
+      "name": "ss2022",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "a1816e01-adcd-46db-b3f8-6404d791cda3",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "ss2022",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Shadowsocks",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.762926577+08:00"
+    },
+    "trojan": {
+      "name": "trojan",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "be657ccc-45ac-44f9-af60-285e811de7d4",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "trojan",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Trojan",
+          "udp": true,
+          "uot": true,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "tuic": {
+      "name": "tuic",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "e2a17e6e-ec6c-4c10-909f-c00b9eb9044c",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "tuic",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Tuic",
+          "udp": true,
+          "uot": false,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "vless-grpc": {
+      "name": "vless-grpc",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "a7b64ae0-3463-46d2-b648-4d3c122a8af3",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vless-grpc",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vless",
+          "udp": true,
+          "uot": true,
+          "xudp": true
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "vless-reality": {
+      "name": "vless-reality",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "12d8fc1a-2e5c-4d06-bf74-4e14b7101514",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vless-reality",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vless",
+          "udp": true,
+          "uot": true,
+          "xudp": true
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.762926577+08:00"
+    },
+    "vless-websocket": {
+      "name": "vless-websocket",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "34e3a9ba-b88e-4a1e-949e-e4897b104ba9",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vless-websocket",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vless",
+          "udp": true,
+          "uot": true,
+          "xudp": true
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.762926577+08:00"
+    },
+    "vless-xhttp": {
+      "name": "vless-xhttp",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "1ef3f171-823c-4fa2-a54b-2758bbed585b",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vless-xhttp",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vless",
+          "udp": true,
+          "uot": true,
+          "xudp": true
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "vmess-grpc": {
+      "name": "vmess-grpc",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "ce0be4c1-1075-4e2f-9697-5c74a2f1ee99",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vmess-grpc",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vmess",
+          "udp": true,
+          "uot": true,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    },
+    "vmess-websocket": {
+      "name": "vmess-websocket",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "8ef4ffd1-4d9e-454a-9786-f8d542a05a3b",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "vmess-websocket",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vmess",
+          "udp": true,
+          "uot": true,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.762926577+08:00"
+    },
+    "ws-native": {
+      "name": "ws-native",
+      "type": "Proxy",
+      "vehicleType": "File",
+      "proxies": [
+        {
+          "alive": true,
+          "dialer-proxy": "",
+          "extra": {},
+          "history": [],
+          "id": "4adad149-b3c2-4b22-b01f-ebeddfab935c",
+          "interface": "",
+          "mptcp": false,
+          "name": "香港 🚀 + %2F @:/?#&=",
+          "provider-name": "ws-native",
+          "routing-mark": 0,
+          "smux": false,
+          "tfo": false,
+          "type": "Vmess",
+          "udp": true,
+          "uot": true,
+          "xudp": false
+        }
+      ],
+      "testUrl": "",
+      "expectedStatus": "*",
+      "updatedAt": "2026-10-18T22:18:02.766926518+08:00"
+    }
+  },
+  "expected_test_providers": [
+    "ss",
+    "ss2022",
+    "vless-reality",
+    "vless-websocket",
+    "vmess-websocket",
+    "vless-grpc",
+    "vmess-grpc",
+    "vless-xhttp",
+    "trojan",
+    "hysteria2",
+    "tuic",
+    "socks5",
+    "anytls",
+    "ws-native",
+    "hysteria2-native",
+    "socks5-native"
+  ]
+}
