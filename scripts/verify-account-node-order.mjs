@@ -88,6 +88,28 @@ try {
  equal(await ids(),confirmed,'save failure rollback');equal((await server()).ids,confirmed,'failure database');await page.unroute('**/api/v1/preferences/node-order');
  await page.locator('.node-card-grip').first().press('ArrowRight');await saved();
  return {test:'delay, rapid keyboard commits, polling, save failure and retry',writes,ids:await ids()};`));
+ results.push(run("qch-order-device-a", `
+ const confirmed=await ids();
+ await page.route('**/api/v1/preferences/node-order',route=>route.request().method()==='PUT'?route.fulfill({status:503,contentType:'application/json',body:'{"error":"fixture save failure"}'}):route.abort('failed'));
+ await page.locator('.node-card-grip').first().press('ArrowRight');
+ await page.waitForFunction(()=>document.querySelector('[data-card-order-status]')?.textContent.includes('顺序未确认'));
+ equal(await ids(),[confirmed[1],confirmed[0],...confirmed.slice(2)],'unconfirmed attempt remains retryable');
+ await page.unroute('**/api/v1/preferences/node-order');
+ await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll('.node-card-grid>.node-card')].map(c=>c.dataset.agentNode))===JSON.stringify(expected),confirmed);
+ equal((await server()).ids,confirmed,'poll recovers authoritative order');
+ let reached=false,release;
+ await page.route('**/api/v1/preferences/node-order',async route=>{
+  if(route.request().method()!=='PUT'){await route.continue();return;}
+  const response=await route.fetch();reached=true;await new Promise(resolve=>{release=resolve;});await route.fulfill({response});
+ });
+ await page.locator('.node-card-grip').first().press('ArrowRight');
+ while(!reached)await page.waitForTimeout(20);
+ await page.getByRole('button',{name:'退出登录',exact:true}).click();await page.waitForSelector('#login-form');await login('order-bob');
+ const bob=await ids();release();await page.waitForTimeout(250);equal(await ids(),bob,'old account response must not overwrite Bob');
+ await page.unroute('**/api/v1/preferences/node-order');
+ await page.getByRole('button',{name:'退出登录',exact:true}).click();await page.waitForSelector('#login-form');await login('order-alice');
+ equal(await ids(),[confirmed[1],confirmed[0],...confirmed.slice(2)],'committed old save restored on Alice login');
+ return {test:'unconfirmed failure recovery and delayed old-account response after switch',ids:await ids()};`));
  open("qch-order-mobile", address, true);run("qch-order-mobile", "await login('order-alice');");
  cli("qch-order-mobile", "video-start", resolve(output,"sorting-mobile.webm"), "--size=390x844", "--fps=30");
  results.push(run("qch-order-mobile", `

@@ -63,7 +63,7 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
     quota.value = "";
     if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
-    accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha", "delta", "charlie"]));
+    testAPI.nodeOrder = { ids: ["bravo", "alpha", "delta", "charlie"], revision: testAPI.nodeOrder.revision + 1 };
     await waitFor(() => cardNodes() === "bravo,alpha,delta,charlie", "polling did not apply the updated node order");
     assert.equal(cardNodes(), sidebarNodes(), "polling must keep cards and the sidebar in the same node order");
     accountStorage.setItem("qcontrolhub:traffic-card-order", JSON.stringify(["charlie:8445", "alpha:8443"]));

@@ -26,10 +26,13 @@ initial 01,02,03,04 order. There are no screenshot layout/style overrides.
 | Same-browser Alice/Bob switch | PASS; independent orders restored; Bob can save shared nodes |
 | 800ms delayed writes and rapid keyboard submissions | PASS; final DOM and DB agreed |
 | HTTP 503 save failure and retry | PASS; confirmed order restored; next save succeeded |
+| Write and readback failure | PASS; explicit unconfirmed state, then automatic authoritative recovery |
+| Delayed old-account response after switching | PASS; Bob remained signed in with his own order |
 | 390x844 mobile native touch input | PASS; DOM and DB agreed |
 | Actual panel process restart and fresh login | PASS; final account order restored |
 
 Exact IDs and outcomes: [browser-results.json](browser-results.json).
+Local Go package results: [local-go-results.json](local-go-results.json).
 
 ## Screenshots and recordings
 
@@ -51,7 +54,10 @@ Exact IDs and outcomes: [browser-results.json](browser-results.json).
   IDs, missing revisions, partial slots, concurrent migration and normal writes,
   new/deleted nodes, heartbeat state, and revoked sharing.
 - Repository non-browser checks and full PostgreSQL Go shards: PASS on this host.
-- Final browser matrix and hosted CI: results are recorded in the PR when complete.
+- Focused browser regressions: PASS for IP quality, desktop/mobile card moves,
+  client node ordering, connections, and traffic layout.
+- Final full browser matrix and hosted CI: exact final-head outcomes are recorded
+  in [PR #301](https://github.com/qimaoww/QControlHub/pull/301).
 
 The two-device test uses independent Chromium browser environments on one host.
 Physical remote devices, real iOS Safari and Android hardware were not tested.
@@ -63,6 +69,8 @@ core-permission and historical-upgrade CI jobs.
 Screenshots, MP4 recordings, this report and sanitized test summaries are retained
 in this directory. Temporary binaries, baseline source, seeded accounts/database,
 and test services are isolated under task `qch-account-order-20261018`. A persistent
-systemd cleanup timer will remove only these resources 72 hours after local test
-completion. The final manifest records the exact timer, UTC and Asia/Hong_Kong
-execution time, container identity, paths, and stopped services.
+systemd cleanup timer removes only these resources 72 hours after local test
+completion. [PR #301](https://github.com/qimaoww/QControlHub/pull/301) records the
+registration result, timer ID, exact UTC and Asia/Hong_Kong execution time,
+container identity, paths and stopped services. The host retains the manifest and
+identity checks in `/var/lib/qch-test-cleanup/qch-account-order-20261018/`.
