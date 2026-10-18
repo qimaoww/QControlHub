@@ -10,7 +10,8 @@
 - [8 个浏览器模式](evidence/merge-review/browser-regressions.txt)：预设、配置入站、下拉框、原用户分配页，各含桌面 / 手机，全部通过，28.542 秒；各工作进程均完成清理。
 - [模块与样式生成器](evidence/merge-review/modules-styles.txt)：通过。
 - [前端 Go 合约](evidence/merge-review/frontend-contracts.txt)：通过。
-- `git diff --check`：通过。
+- [模块与浏览器 smoke 组织策略检查](evidence/merge-review/module-policy.txt)：通过。
+- 生产文件 `git diff --check origin/main...HEAD -- frontend`：通过。
 - 前几轮真实截图、59 预设 / 6 种设备主题参数对照，以及 PostgreSQL / 密码 / CSRF 集成记录继续保留：[总报告](README.md)、[下拉框](dropdowns.md)、[入站弹窗](inbounds.md)。本轮没有重复无关的后端与实际节点测试。
 
 ## 合并门槛与限制
