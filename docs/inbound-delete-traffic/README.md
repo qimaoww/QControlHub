@@ -74,12 +74,16 @@ schema 79→80 为策略增加 `config_id/config_version/inbound_tag`。访问�
 ## 测试结果和限制
 
 - `make non-browser-checks`：通过。
-- 新增 API 10 子用例、Store 删除生命周期/共享实例隔离：已通过；最终全量仍在执行。
+- 新增 API 10 子用例、Store 删除生命周期/共享实例隔离：通过。历史升级与端口变更组合用例也通过。
 - `QCH_SING_BOX_BINARY=... go test ./internal/serverconfig -run '^TestSingBoxFinalInboundDeletion$'`：ordinary/shared 均通过，见 [真实内核日志](logs/live-core.log)。
-- `make test` 按仓库的 `-p 1` 串行要求运行，结果待补充。先前并行包/迁移试跑触发 PostgreSQL 集群 vacuum horizon 的 HOT 存储断言，单独测试通过；不修改或放宽该性能门槛。
-- GitHub 必需 CI 结果待补充。
+- `make test` 按仓库的 `-p 1` 串行要求执行；最终全量结果及当前提交的必需 CI 状态记录在 [PR #303 的 Validation](https://github.com/qimaoww/QControlHub/pull/303)。先前并行包/迁移试跑触发 PostgreSQL 集群 vacuum horizon 的 HOT 存储断言，串行 Store 全套通过；不修改或放宽该性能门槛。
+- [非浏览器检查日志](logs/checks-final.log)、[流量模块检查](logs/traffic-final.log)、[新增 API 10 子用例](logs/final-accounting.log)。GitHub CI 提供 Debian、Alpine、升级沙箱、真实内核权限及镜像构建日志。
 - 未在生产执行删除/部署；未对生产计费流量做端到端注入。浏览器使用模拟任务结果；实际服务部署/回滚依赖仓库 Agent 回归与真实内核检查，不把夹具当作现场部署证据。
 
 ## 清理
 
-测试结束后停止测试 API、关闭本次浏览器、停止 PostgreSQL 并释放端口。72 小时后的持久清理任务标识、时间、范围及登记结果将在测试结束时补充。证据及脱敏报告独立保留。
+任务 `qch-inbound-delete-20261019` 已登记为 `/etc/cron.d/qch-inbound-delete-20261019`，由已启用且运行中的 `cron.service` 持久执行。登记后的分钟触发记录已在 system journal 中确认；到期前脚本退出且不删除资源。最终测试结束时间、72 小时后的执行时间及停止端口确认见 [PR #303 的 Validation](https://github.com/qimaoww/QControlHub/pull/303)。时区：Asia/Shanghai（UTC+08:00），按 UTC 时间戳校验到期，下一分钟执行，失败继续重试。
+
+[清理脚本](cleanup/cleanup.py)仅允许本次测试容器完整 ID `9b83bbd1d8b3a472effb7498f8e36c54dcc8e8c87748b11fb62d17522d41c1aa`、其匿名数据卷，以及带本次随机归属标记的两个目录：`/tmp/qch-inbound-delete-20261019` 和本工作树的 `output/playwright/inbound-delete`。容器名、数据卷或目录归属不符则拒绝删除。Docker 不可用时重试，不误记完成。
+
+测试结束即停止测试 API、关闭本次浏览器、停止 PostgreSQL 并释放端口；数据保留至清理时。提交在 `docs/inbound-delete-traffic` 的截图、录屏、报告和脱敏日志不在清理范围内。完成回执保留在 `/var/lib/qcontrolhub-task-cleanup/qch-inbound-delete-20261019/receipt.json`，清理完成后自动移除该 cron 条目。
