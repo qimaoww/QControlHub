@@ -61,8 +61,8 @@ dialog[open] footer{transition-delay:110ms}
 }
 
 /* Shared authored tips replace native title bubbles and validity popups. */
-.interaction-tooltip{position:fixed;inset:auto;margin:0;max-width:min(360px,calc(100vw - 16px));padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lift);font:500 calc(12px * var(--ui-font-scale,1))/1.5 var(--font-body,system-ui);overflow-wrap:anywhere;pointer-events:none;opacity:0;translate:0 6px;scale:.97;transition:opacity var(--motion-exit) var(--motion-ease-out),translate var(--motion-exit) var(--motion-ease-out),scale var(--motion-exit) var(--motion-ease-out)}
+.interaction-tooltip{position:fixed;inset:auto;margin:0;max-width:min(360px,calc(100vw - 16px));padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lift);font:var(--weight-medium) var(--text-small)/var(--leading-caption) var(--font-body);overflow-wrap:anywhere;pointer-events:none;opacity:0;translate:0 6px;scale:.97;transition:opacity var(--motion-exit) var(--motion-ease-out),translate var(--motion-exit) var(--motion-ease-out),scale var(--motion-exit) var(--motion-ease-out)}
 .interaction-tooltip[data-open]{opacity:1;translate:0 0;scale:1}
 .interaction-tooltip::backdrop{background:transparent;pointer-events:none}
-.interaction-validation{display:block;color:var(--red);font-size:calc(12px * var(--ui-font-scale,1));line-height:1.5;margin-top:6px;overflow-wrap:anywhere}
+.interaction-validation{display:block;color:var(--red);font-size:var(--text-small);line-height:var(--leading-caption);margin-top:6px;overflow-wrap:anywhere}
 :is(input,select,textarea)[data-motion-invalid]{border-color:var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 14%,transparent)}

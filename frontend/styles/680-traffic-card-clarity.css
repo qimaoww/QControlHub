@@ -17,7 +17,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   -webkit-line-clamp: unset;
-  font-size: calc(14px * var(--ui-font-scale));
+  font-size: var(--text-body);
 }
 
 .traffic-workspace .traffic-card-node {
@@ -37,8 +37,8 @@
 
 .traffic-workspace .traffic-card-port code {
   color: var(--accent);
-  font-family: inherit;
-  font-size: calc(18px * var(--ui-font-scale));
+  font-family:inherit;
+  font-size: var(--text-section);
   overflow-wrap: normal;
   white-space: nowrap;
 }
@@ -57,7 +57,7 @@
   flex: 0 1 auto;
   overflow: hidden;
   color: var(--muted);
-  font-weight: 600;
+  font-weight:var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
   -webkit-line-clamp: unset;
@@ -73,7 +73,7 @@
 }
 
 .traffic-workspace .traffic-card-quota>div strong {
-  font-size: calc(23px * var(--ui-font-scale));
+  font-size: var(--text-page);
 }
 
 .traffic-workspace .traffic-card-transfer {
@@ -89,7 +89,7 @@
 .traffic-workspace .traffic-card-transfer>div>i {
   width: 26px;
   height: 26px;
-  font-size: calc(13px * var(--ui-font-scale));
+  font-size: var(--text-body);
 }
 
 .traffic-workspace .traffic-policy-card>footer {
@@ -104,7 +104,7 @@
   }
 
   .traffic-workspace .traffic-card-port code {
-    font-size: calc(17px * var(--ui-font-scale));
+    font-size: var(--text-section);
   }
 
   .traffic-workspace .traffic-policy-card:not(.traffic-configured-port)>footer {

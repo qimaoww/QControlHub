@@ -3,11 +3,11 @@
 .agent-invitation-dialog>header{grid-template-columns:minmax(0,1fr) 34px;flex-shrink:0}
 .agent-invitation-dialog>header>div{min-width:0;overflow-wrap:anywhere}
 .agent-invitation-dialog .traffic-edit-body{display:grid;gap:22px;min-height:0;padding:24px;overscroll-behavior:contain}
-.agent-invitation-node>span,.agent-invitation-terms dt,.agent-invitation-terms small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
-.agent-invitation-node h3{margin-top:7px;font-size:calc(21px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
+.agent-invitation-node>span,.agent-invitation-terms dt,.agent-invitation-terms small{color:var(--muted);font-size:var(--text-small)}
+.agent-invitation-node h3{margin-top:7px;overflow-wrap:anywhere}
 .agent-invitation-terms{display:grid;gap:16px;margin:0}
 .agent-invitation-terms>div{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:baseline;gap:14px}
-.agent-invitation-terms dd{margin:0;font-size:calc(14px * var(--ui-font-scale));overflow-wrap:anywhere}
+.agent-invitation-terms dd{margin:0;font-size:var(--text-body);overflow-wrap:anywhere}
 .agent-invitation-terms small{display:block;margin-top:5px}
 .agent-invitation-dialog>footer{display:flex;justify-content:flex-end;gap:10px;flex-shrink:0;padding:16px 24px;border-top:1px solid var(--line);background:var(--surface)}
 .agent-invitation-dialog>footer>.button{min-width:88px}
