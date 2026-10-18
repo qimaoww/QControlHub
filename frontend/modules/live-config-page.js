@@ -49,6 +49,10 @@ function maybeRerenderLiveConfig(agentId, engine) {
 async function liveConfig(options = {}) {
   const preferCachedRead = options.preferCachedRead !== false;
   const request = ++liveConfigRequest;
+  if (!can("agent-config.read")) {
+    shell('<section class="section"><div class="alert error" role="alert">当前账号无权查看配置。</div></section>', "配置");
+    return;
+  }
   const privateAccount = Boolean(state.session && state.session.role !== "admin");
   const accountData = state.data;
   const runtimeScope = state.navigationEpoch;

@@ -5,6 +5,7 @@ export function sharedConfigPresentation(agent, engine) {
   if (agent?.can_manage !== false) return null;
   const runtime = agent.runtime?.[engine] || {};
   const instance = runtime.instance;
+  if (typeof runtime.installed !== "boolean") return { label: "配置待核实", tone: "unknown" };
   if (!runtime.installed) return { label: "未安装", tone: "uninstalled" };
   if (!instance || instance.config_uncertain) return { label: "配置待核实", tone: "unknown" };
   const saved = instance.saved_version;
@@ -23,10 +24,12 @@ export function sharedInstancePresentation(agent, engine) {
   const operation = instance?.operation;
   const busy = ["pending", "running"].includes(operation?.status);
   const running = agent.status === "online" && ["active", "running", "reloading"].includes(runtime.service_status);
-  if (!runtime.installed) label = "未安装";
+  if (agent.status === "offline") { label = "离线 · 状态未知"; tone = "warn"; }
+  else if (agent.status !== "online") label = "状态未知";
+  else if (runtime.installed === false) label = "未安装";
+  else if (runtime.installed !== true || !instance || instance.config_uncertain) label = "状态未知";
   else if (!instance?.saved_version && !instance?.deployed_version) label = "已安装 · 尚未配置";
   else if (!instance?.deployed_version && !instance?.created) { label = "待部署"; tone = "warn"; }
-  else if (agent.status !== "online") { label = "离线 · 状态未知"; tone = "warn"; }
   else if (running) { label = "正在运行"; tone = "ok"; }
   else if (runtime.service_status === "inactive") label = "已停止";
   else if (runtime.service_status === "failed") { label = "启动失败"; tone = "bad"; }
@@ -35,7 +38,7 @@ export function sharedInstancePresentation(agent, engine) {
   const deployed = instance?.deployed_version;
   const saved = instance?.saved_version;
   const drift = saved && (instance.saved_config_id !== instance.deployed_config_id || saved !== deployed);
-  const version = deployed ? `${instance.config_uncertain ? "运行版本待核实 · 上次部署" : running ? "运行" : "已部署"} v${deployed}${drift ? ` · v${saved} 待部署` : ""}` : saved ? `v${saved} 已保存，尚未部署` : "尚未保存配置";
+  const version = deployed ? `${instance.config_uncertain ? "运行版本待核实 · 上次部署" : running ? "运行" : "已部署"} v${deployed}${drift ? ` · v${saved} 待部署` : ""}` : saved ? `v${saved} 已保存，尚未部署` : !instance || instance.config_uncertain ? "配置待核实" : "尚未保存配置";
   const reason = [instance?.upgrade_required ? "请联系所有者升级 Agent 后操作本人实例" : "",
     instance?.restriction, instance?.config_uncertain ? "实际配置版本尚未核实，请重新部署" : "",
     operation?.status === "failed" ? `上次${operation.action === "deploy" ? "部署" : "操作"}失败：${operation.error || "请查看日志"}` : instance?.reason].filter(Boolean).join("；");

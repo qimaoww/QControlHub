@@ -68,11 +68,20 @@ export function installTraffic(ctx) {
     poller.stop();
     try {
       const applied = await refresh.run(
-        (signal) => Promise.all([
-          api("/agents", { signal }),
-          api("/traffic-policies", { signal }),
-          api("/traffic-endpoints", { signal }),
-        ]),
+        async (signal) => {
+          if (!ctx.can("agents.read")) {
+            const [page, endpoints] = await Promise.all([
+              api("/traffic-policies?view=page", { signal }),
+              api("/traffic-endpoints", { signal }),
+            ]);
+            return [page.agents, page.policies, endpoints];
+          }
+          return Promise.all([
+            api("/agents", { signal }),
+            api("/traffic-policies", { signal }),
+            api("/traffic-endpoints", { signal }),
+          ]);
+        },
         ([agents, policies, endpoints]) => renderTraffic(agents, policies, endpoints, resetCreate),
       );
       if (applied) poller.start();

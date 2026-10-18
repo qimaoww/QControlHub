@@ -1,0 +1,33 @@
+{
+  "scope": "multiuser-d6b9",
+  "workspace": "/root/.codex/worktrees/d6b9/qcontrolhub",
+  "test_directory": "/root/.codex/worktrees/d6b9/qcontrolhub/.preview/multiuser-d6b9",
+  "testing_ended_at_utc": "2026-10-18T18:17:55+00:00",
+  "execute_at_utc": "2026-10-21T18:17:55+00:00",
+  "containers": [
+    {
+      "name": "qch-multiuser-d6b9-db",
+      "id": "9adbaa338bf8a049a16b32608b0f6d61b6aecc50c12585b2b0a57981eafa092c"
+    },
+    {
+      "name": "qch-multiuser-d6b9-node",
+      "id": "e75a101bc8bfa6ef41ae1b35ff0917440a23e335aa3e17b90af7afddbd55f744"
+    }
+  ],
+  "timer_id": "qch-multiuser-d6b9-cleanup.timer",
+  "service_id": "qch-multiuser-d6b9-cleanup.service",
+  "host": "debian-cmcc",
+  "registered_at_utc": "2026-10-18T18:17:55.691578+00:00",
+  "testing_ended_at_local": "2026-10-19T02:17:55+08:00",
+  "execute_at_local": "2026-10-22T02:17:55+08:00",
+  "display_timezone": "Asia/Shanghai",
+  "scheduler_next_due": "Thu 2026-10-22 02:17:55 CST",
+  "status": "enabled and active; dry-run passed; early execution correctly refused",
+  "persistence": "systemd timer Persistent=true; root service retries failures every 300 seconds; runner and manifest persist outside the Git worktree",
+  "runner_directory": "/var/lib/qch-validation/multiuser-d6b9",
+  "artifacts_retained": "docs/multi-user-pages (screenshots, videos, reports, sanitized logs); raw output/playwright/multiuser-d6b9 capture artifacts",
+  "process_cleanup": "process-cleanup.json",
+  "scope_exclusions": "No other containers, users, databases, images, caches, or worktrees are selected.",
+  "previous_execute_at_utc": "2026-10-21T18:11:43+00:00",
+  "retention_extension_reason": "Final resource-aware batch-entry regression, complete frontend Go package, non-browser gate, and before/after captures completed; restart the 72-hour retention after this local completion."
+}

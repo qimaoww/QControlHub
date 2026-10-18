@@ -221,6 +221,14 @@ func (s *Server) validateSession(w http.ResponseWriter, request *http.Request) (
 		return s.authenticateAPIKey(w, request)
 	}
 	value, ok := s.sessionForRequest(request)
+	// Optional on reads for compatibility with API clients. The browser sends
+	// this on every request so an old tab cannot render a new cookie's account.
+	if ok && request.Header.Get(csrfHeader) != "" &&
+		(request.Method == http.MethodGet || request.Method == http.MethodHead) &&
+		!constantEqual(request.Header.Get(csrfHeader), value.CSRF) {
+		writeError(w, http.StatusUnauthorized, "session changed")
+		return request, false
+	}
 	if !ok || value.UserID == "" || s.store == nil {
 		return request, true // The normal authentication path handles no cookie.
 	}

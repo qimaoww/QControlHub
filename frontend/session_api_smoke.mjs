@@ -43,7 +43,7 @@ try {
     assert.equal(url, "/api/v1/settings");
     assert.equal(options.credentials, "same-origin");
     assert.equal(options.headers.Accept, "application/json");
-    assert.equal(options.headers["X-QControlHub-CSRF"], undefined);
+    assert.equal(options.headers["X-QControlHub-CSRF"], state.session.csrf_token, "reads must be bound to the page's account, even after another tab replaces its cookie");
     assert.equal(options.headers["Content-Type"], undefined);
     assert.equal(options.signal, state.routeSignal);
   }
