@@ -27,14 +27,20 @@ const assertSharedStatusOrder = (root) => {
   };
   await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");
   assert.equal(document.querySelectorAll(".node-card .agent-shared-badge").length, 1, "自有和共享节点没有明确区分");
-  assertSharedStatusOrder(document.querySelector('.node-card[data-agent-node="alpha"]'));
+  const sharedCard = document.querySelector('.node-card[data-agent-node="alpha"]');
+  assertSharedStatusOrder(sharedCard);
+  assert.equal(sharedCard.getAttribute("href"), "#settings-node-alpha", "共享节点卡片绕过了节点管理");
+  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点 →");
   assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
-  location.hash = "#settings-node-alpha";
+  sharedCard.click();
   await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
   assertSharedStatusOrder(document.querySelector(".node-operations-workspace"));
   assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
   assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
   assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
+  assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="restart"]').disabled, false, "节点管理未保留本人实例重启");
+  assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="stop"]').disabled, false, "节点管理未保留本人实例停止");
+  assert.equal(document.querySelector('[data-instance-version="mihomo"]').textContent, "运行 v1 · v2 待部署");
   assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-core-uninstall], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
   if (mode === "shared-node-mobile") {
     for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {

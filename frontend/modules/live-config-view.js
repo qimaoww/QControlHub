@@ -3,7 +3,7 @@ import { updateFeedback } from "./presence-motion.js";
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
-import { sharedAllocationText } from "./shared-instance-state.js";
+import { sharedAllocationText, sharedConfigPresentation } from "./shared-instance-state.js";
 
 function liveEngineStatus(info = {}, online = true) {
   if (!info.installed)
@@ -75,8 +75,8 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
     const info = agent.runtime?.[item] || {};
     const active = item === engine;
-    const { label, tone } = liveEngineStatus(info, agent.status === "online");
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))}${agent.can_manage === false ? "" : ` · ${label}`}" title="${agent.can_manage === false ? esc(engineName(item)) : label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span>${agent.can_manage === false ? "" : `<small class="live-engine-status ${tone}">${label}</small>`}</button>`;
+    const { label, tone } = sharedConfigPresentation(agent, item) || liveEngineStatus(info, agent.status === "online");
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${esc(label)}" title="${esc(label)}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${esc(label)}</small></button>`;
   }).join("")}</nav>`;
   const details = `<div class="live-config-details" role="group" aria-label="当前配置状态">
     ${agentPresenceMarkup(agent.status, { nodeLabel: true })}

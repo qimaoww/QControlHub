@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { sharedInstancePresentation } from "./modules/shared-instance-state.js";
+import { sharedInstancePresentation, sharedConfigPresentation } from "./modules/shared-instance-state.js";
 
 const node = (runtime = {}, instance = {}, status = "online") => ({can_manage:false, status,
   runtime:{xray:{installed:true, service_status:"unknown", ...runtime, instance:{...instance}}}});
@@ -22,4 +22,21 @@ const queued = structuredClone(running);
 queued.runtime.xray.instance.operation = {status:"pending",action:"stop"};
 assert.equal(sharedInstancePresentation(queued,"xray").label,"停止排队中");
 assert.equal(sharedInstancePresentation(queued,"xray").busy,true);
+assert.equal(sharedConfigPresentation({can_manage:true}, "xray"), null);
+assert.equal(sharedConfigPresentation(node({installed:false}), "xray").label, "未安装");
+assert.equal(sharedConfigPresentation(node(), "xray").label, "尚未配置");
+assert.equal(sharedConfigPresentation({can_manage:false, runtime:{xray:{installed:true}}}, "xray").label, "配置待核实");
+const configStates = [
+  [{saved_version:1, saved_config_id:"a"}, "v1 待部署"],
+  [{saved_version:1, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "已部署 v1"],
+  [{saved_version:2, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "v2 待部署"],
+  [{saved_version:1, saved_config_id:"b", deployed_version:1, deployed_config_id:"a"}, "v1 待部署"],
+  [{deployed_version:1, deployed_config_id:"a"}, "已部署 v1"],
+  [{deployed_version:1, config_uncertain:true}, "配置待核实"],
+];
+for (const [instance, label] of configStates) {
+  for (const service_status of ["active", "inactive", "failed", "unknown"])
+    assert.equal(sharedConfigPresentation(node({service_status}, instance), "xray").label, label);
+  assert.equal(sharedConfigPresentation(node({}, instance, "offline"), "xray").label, label);
+}
 console.log("shared instance state smoke checks passed");
