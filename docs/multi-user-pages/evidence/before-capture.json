@@ -1,0 +1,226 @@
+[
+  {
+    "name": "tasks",
+    "user": "task-reader",
+    "route": "tasks",
+    "device": "desktop",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-tasks-desktop-light.png"
+  },
+  {
+    "name": "traffic",
+    "user": "traffic-reader",
+    "route": "traffic",
+    "device": "desktop",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-traffic-desktop-light.png"
+  },
+  {
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "desktop",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "证书中心 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-certificates-desktop-light.png"
+  },
+  {
+    "name": "instance",
+    "user": "alice",
+    "route": "settings-node-agt_9f092dc73a225718",
+    "device": "desktop",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "节点设置 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-instance-desktop-light.png"
+  },
+  {
+    "name": "tasks",
+    "user": "task-reader",
+    "route": "tasks",
+    "device": "desktop",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-tasks-desktop-dark.png"
+  },
+  {
+    "name": "traffic",
+    "user": "traffic-reader",
+    "route": "traffic",
+    "device": "desktop",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-traffic-desktop-dark.png"
+  },
+  {
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "desktop",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "证书中心 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-certificates-desktop-dark.png"
+  },
+  {
+    "name": "instance",
+    "user": "alice",
+    "route": "settings-node-agt_9f092dc73a225718",
+    "device": "desktop",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "title": "节点设置 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-instance-desktop-dark.png"
+  },
+  {
+    "name": "tasks",
+    "user": "task-reader",
+    "route": "tasks",
+    "device": "mobile",
+    "theme": "light",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-tasks-mobile-light.png"
+  },
+  {
+    "name": "traffic",
+    "user": "traffic-reader",
+    "route": "traffic",
+    "device": "mobile",
+    "theme": "light",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-traffic-mobile-light.png"
+  },
+  {
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "mobile",
+    "theme": "light",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "证书中心 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-certificates-mobile-light.png"
+  },
+  {
+    "name": "instance",
+    "user": "alice",
+    "route": "settings-node-agt_9f092dc73a225718",
+    "device": "mobile",
+    "theme": "light",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "节点设置 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-instance-mobile-light.png"
+  },
+  {
+    "name": "tasks",
+    "user": "task-reader",
+    "route": "tasks",
+    "device": "mobile",
+    "theme": "dark",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-tasks-mobile-dark.png"
+  },
+  {
+    "name": "traffic",
+    "user": "traffic-reader",
+    "route": "traffic",
+    "device": "mobile",
+    "theme": "dark",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "错误 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-traffic-mobile-dark.png"
+  },
+  {
+    "name": "certificates",
+    "user": "task-reader",
+    "route": "certificates",
+    "device": "mobile",
+    "theme": "dark",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "证书中心 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-certificates-mobile-dark.png"
+  },
+  {
+    "name": "instance",
+    "user": "alice",
+    "route": "settings-node-agt_9f092dc73a225718",
+    "device": "mobile",
+    "theme": "dark",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "title": "节点设置 · QControlHub",
+    "overflow": false,
+    "path": "screenshots/before-instance-mobile-dark.png"
+  }
+]

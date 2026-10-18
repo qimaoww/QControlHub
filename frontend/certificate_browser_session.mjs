@@ -153,6 +153,30 @@ try {
   record(`${mode}: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed`);
   await screenshot(b,'certificate-selector');
 
+  // An already-open recipient detail must lose its stale content when the
+  // owner revokes access; the read poll must distinguish 404 from outages.
+  const c=await createPage(), recipient=await login(c,'bob');
+  await open(c);await click(c,`[data-cert-detail="${cert.id}"]`);
+  await wait(c,`!!document.querySelector('.cert-dialog[data-cert-detail-id="${cert.id}"]')`);
+  await api(a,alice,'DELETE',`/certificates/${cert.id}/grants`,{username:'bob'},204);
+  await wait(c,`!document.querySelector('.cert-dialog') && !document.querySelector('[data-cert-detail="${cert.id}"]')`);
+  await api(c,recipient,'GET',`/certificates/${cert.id}`,undefined,404);
+  await api(a,alice,'POST',`/certificates/${cert.id}/grants`,{username:'bob'},204);
+  record(`${mode}: revoked certificate detail and list disappear without navigation or manual refresh`);
+
+  await click(c,'[data-cert-create]');await wait(c,"!!document.querySelector('[data-cert-form]')");
+  await evaluate(c,`(() => {
+    const original=window.fetch;window.__certRestoreFetch=()=>{window.fetch=original};
+    const gate=new Promise(resolve=>{window.__certRelease=resolve});
+    window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certBlocked=true;await gate}return response};
+  })()`);
+  await set(c,'[name=source]','self-signed');await wait(c,'window.__certBlocked');
+  for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27},c);
+  await wait(c,"!document.querySelector('.cert-dialog')");
+  await evaluate(c,'window.__certRestoreFetch();window.__certRelease()');await delay(500);
+  assert.equal(await evaluate(c,"document.querySelectorAll('.cert-dialog').length"),0);
+  record(`${mode}: Escape closes a certificate form and invalidates its delayed real resource response`);
+
   // Reuse the same document and installed route module across real logins.
   await click(a,'[data-cert-close]');
   await set(a,'[data-cert-search]','alice-private.example.test');

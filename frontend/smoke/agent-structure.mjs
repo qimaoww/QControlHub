@@ -232,6 +232,7 @@ try {
   delete structureCards["sing-box"].dataset.runtimeStructure;
   delete structureCards["sing-box"].dataset.existingPending;
   delete structureCards["sing-box"].dataset.existingUnsupported;
+  delete structureCards.xray.dataset.runtimeStructure;
   await pollAgentMetrics();
   clearTimeout(structureState.agentPollTimer);
   await flushMicrotasks();
@@ -250,7 +251,7 @@ try {
   assert.equal(structureStates["sing-box"].className, "engine-state muted");
   assert.equal(
     structureInstalledSummary.textContent,
-    "linux / amd64 · 尚未安装内核",
+    "linux / amd64 · 安装状态未知",
   );
 
   structurePayload = () => [
@@ -302,8 +303,20 @@ try {
   assert.equal(structureStates["sing-box"].className, "engine-state muted");
   assert.equal(
     structureInstalledSummary.textContent,
-    "linux / amd64 · 尚未安装内核",
+    "linux / amd64 · 安装状态未知",
   );
+
+  // A heartbeat can omit runtime while the node remains visible. Neither a
+  // prior running chip nor a known uninstalled chip may become the fallback.
+  structurePayload = () => [{ id: "alpha", status: "online", metrics: {},
+    os: "linux", arch: "amd64", capabilities: ["sing-box", "xray"], runtime: {} }];
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureServices["sing-box"].textContent, "状态未知");
+  assert.equal(structureServices.xray.textContent, "状态未知");
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "unknown");
+  assert.equal(structureInstalledSummary.textContent, "linux / amd64 · 安装状态未知");
 
   // A newly enrolled Agent has no existing card to patch. The fleet poll must
   // request one structural render so it appears without a browser refresh.

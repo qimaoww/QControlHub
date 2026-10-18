@@ -105,6 +105,7 @@ try {
       {
         state: taskState,
         actions: [],
+        can: permission => ["agents.read", "settings.read"].includes(permission),
         api: async (path) => {
           taskCalls.push(path);
           if (path === "/agents" || path.startsWith("/tasks?")) return [];

@@ -54,10 +54,9 @@ async function sendAPI(path, options = {}) {
     ...(options.body ? { "Content-Type": "application/json" } : {}),
     ...(options.headers || {}),
   };
-  if (
-    session?.csrf_token &&
-    !["GET", "HEAD", "OPTIONS"].includes(method)
-  )
+  // Bind reads as well as writes to the page's session. A different tab can
+  // replace the shared cookie without changing this page's in-memory account.
+  if (session?.csrf_token)
     headers["X-QControlHub-CSRF"] = session.csrf_token;
   // Account ordering is shared across routes. A navigation must not cancel a
   // background read that the next page is about to reuse, or a save readback.

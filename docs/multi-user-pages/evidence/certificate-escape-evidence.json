@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "Escape closes a form while a real certificate resource response is delayed",
+    "device": "desktop",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "theme": "light",
+    "account": "bob",
+    "video": "videos/after-certificate-escape-desktop.webm",
+    "result": "delayed response does not reopen the dismissed form"
+  },
+  {
+    "scenario": "Escape closes a form while a real certificate resource response is delayed",
+    "device": "mobile",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "theme": "light",
+    "account": "bob",
+    "video": "videos/after-certificate-escape-mobile.webm",
+    "result": "delayed response does not reopen the dismissed form"
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "scenario": "cookie replacement in old Alice page",
+    "device": "desktop",
+    "phase": "before",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "path": "screenshots/before-session-desktop-light.png",
+    "video": "videos/before-session-desktop.webm",
+    "result": "Bob client configuration rendered in Alice page"
+  },
+  {
+    "scenario": "cookie replacement in old Alice page",
+    "device": "desktop",
+    "phase": "after",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "path": "screenshots/after-session-desktop-light.png",
+    "video": "videos/after-session-desktop.webm",
+    "result": "login required; newer Bob session remains valid"
+  },
+  {
+    "scenario": "real certificate resource response delayed until task navigation completed",
+    "device": "desktop",
+    "result": "no stale certificate dialog",
+    "video": "videos/after-certificate-delay-desktop.webm"
+  },
+  {
+    "scenario": "cookie replacement in old Alice page",
+    "device": "mobile",
+    "phase": "before",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "path": "screenshots/before-session-mobile-light.png",
+    "video": "videos/before-session-mobile.webm",
+    "result": "Bob client configuration rendered in Alice page"
+  },
+  {
+    "scenario": "cookie replacement in old Alice page",
+    "device": "mobile",
+    "phase": "after",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "path": "screenshots/after-session-mobile-light.png",
+    "video": "videos/after-session-mobile.webm",
+    "result": "login required; newer Bob session remains valid"
+  },
+  {
+    "scenario": "real certificate resource response delayed until task navigation completed",
+    "device": "mobile",
+    "result": "no stale certificate dialog",
+    "video": "videos/after-certificate-delay-mobile.webm"
+  },
+  {
+    "scenario": "idle editor observes disabled share without user refresh",
+    "latencyMs": 11542,
+    "deniedStatus": 404,
+    "video": "videos/after-idle-revocation-desktop.webm"
+  }
+]

@@ -198,9 +198,12 @@ function updateAgentMetrics(item) {
     "upload-total",
     metrics.network_available ? bytes(metrics.network_tx_bytes) : "—",
   );
-  Object.entries(item.runtime || {}).forEach(([engine, runtime]) => {
+  [...new Set([...(item.capabilities || []), ...Object.keys(item.runtime || {})])].forEach(engine => {
+    const runtime = item.runtime?.[engine] || {};
     const card = root.querySelector(`.service-${CSS.escape(engine)}`);
     const installed = Boolean(runtime.installed);
+    const installedKnown = typeof runtime.installed === "boolean";
+    const installedMarker = installedKnown ? installed ? "1" : "0" : "unknown";
     const capabilityEnabled = (item.capabilities || []).includes(engine);
     const existingPending = Boolean(runtime.existing_config_available);
     const existingUnsupportedReason = String(
@@ -212,7 +215,7 @@ function updateAgentMetrics(item) {
     // instead of leaving the DOM permanently stale.
     if (
       card?.dataset.runtimeStructure === "full" &&
-      (card.dataset.coreInstalled !== (installed ? "1" : "0") ||
+      (card.dataset.coreInstalled !== installedMarker ||
         card.dataset.existingPending !== (existingPending ? "1" : "0") ||
         card.dataset.existingUnsupported !== existingUnsupportedReason)
     ) {
@@ -220,14 +223,14 @@ function updateAgentMetrics(item) {
       return;
     }
     if (card && card.dataset.runtimeStructure !== "full")
-      card.dataset.coreInstalled = installed ? "1" : "0";
+      card.dataset.coreInstalled = installedMarker;
     const version = root.querySelector(
       `[data-core-version="${CSS.escape(engine)}"]`,
     );
     if (version)
       version.textContent = runtime.installed
         ? conciseVersion(engine, runtime.version)
-        : "尚未安装";
+        : installedKnown ? "尚未安装" : "安装状态未知";
     const service = root.querySelector(
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
@@ -239,10 +242,10 @@ function updateAgentMetrics(item) {
         : !capabilityEnabled
         ? "能力已关闭"
         : installed
-        ? serviceStatusName(runtime.service_status)
-        : "未安装");
+        ? online ? serviceStatusName(runtime.service_status) : "状态未知"
+        : installedKnown ? "未安装" : "状态未知");
       service.closest(".engine-state").className =
-        `engine-state ${instanceState?.tone || (existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed ? statusTone(runtime.service_status) : "muted")}`;
+        `engine-state ${instanceState?.tone || (existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed && online ? statusTone(runtime.service_status) : "muted")}`;
       service
         .closest(".service-card")
         ?.querySelectorAll("[data-service-action]")
@@ -263,10 +266,11 @@ function updateAgentMetrics(item) {
     const installedCount = (item.capabilities || []).filter(
       (engine) => item.runtime?.[engine]?.installed,
     ).length;
+    const installationUnknown = (item.capabilities || []).some(engine => typeof item.runtime?.[engine]?.installed !== "boolean");
     installedSummary.textContent = item.can_manage === false ? sharedAllocationText(item, bytes) : `${item.os || ""} / ${item.arch || ""} · ${
       installedCount
         ? `${installedCount}/${(item.capabilities || []).length} 内核已安装`
-        : "尚未安装内核"
+        : installationUnknown ? "安装状态未知" : "尚未安装内核"
     }`;
   }
   root.querySelectorAll(".core-version-form button[type=submit]").forEach(

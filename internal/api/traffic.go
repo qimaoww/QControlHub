@@ -111,6 +111,35 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if request.URL.Query().Get("view") == "page" {
+		// Traffic visibility is independent of agents.read. Supply only the
+		// node metadata needed to display and manage this authorized scope.
+		agents, err := s.store.ListAgents(request.Context())
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		type trafficAgent struct {
+			ID           string        `json:"id"`
+			Name         string        `json:"name"`
+			Status       string        `json:"status"`
+			CanManage    bool          `json:"can_manage"`
+			Capabilities []core.Engine `json:"capabilities"`
+			Features     []string      `json:"features"`
+		}
+		sources := make([]trafficAgent, 0, len(agents))
+		for _, agent := range agents {
+			features := []string{}
+			for _, feature := range agent.Features {
+				if feature == "port-traffic-v1" {
+					features = append(features, feature)
+				}
+			}
+			sources = append(sources, trafficAgent{agent.ID, agent.Name, agent.Status, agent.CanManage, agent.Capabilities, features})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"policies": policies, "agents": sources})
+		return
+	}
 	writeJSON(w, http.StatusOK, policies)
 }
 
