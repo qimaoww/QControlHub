@@ -44,7 +44,7 @@
   "frontend/styles/420-motion-workspaces.css",
   "frontend/styles/430-log-pagination.css",
   "frontend/styles/440-motion-controls.css",
-  "frontend/styles/450-typography.css",
+  "frontend/styles/445-workspace-polish.css",
   "frontend/styles/460-regions.css",
   "frontend/styles/470-settings-copy.css",
   "frontend/styles/480-config-restrictions.css",
@@ -74,5 +74,7 @@
   "frontend/styles/690-agent-presence.css",
   "frontend/styles/700-shell-dock-rail.css",
   "frontend/styles/710-motion-choreography.css",
-  "frontend/styles/720-card-movement.css"
+  "frontend/styles/720-card-movement.css",
+  "frontend/styles/730-api-keys.css",
+  "frontend/styles/450-typography.css"
 ]

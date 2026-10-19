@@ -8,6 +8,8 @@ import (
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.certificateRoutes(mux)
+	s.apiKeyRoutes(mux)
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.readiness)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -17,6 +19,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/panel-metrics", s.requirePermission(core.PermissionPanelMetricsRead, http.HandlerFunc(s.getPanelMetrics)))
+	mux.Handle("GET /api/v1/preferences/node-order", s.requireAllPermissions(nil, http.HandlerFunc(s.getNodeOrder)))
+	mux.Handle("PUT /api/v1/preferences/node-order", s.requireAllPermissions(nil, http.HandlerFunc(s.putNodeOrder)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/ip-quality/{id}/archives/{family}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getIPQualityArchive)))
 	mux.Handle("GET /api/v1/ip-quality", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.ipQualityHistory)))
@@ -41,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
 	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.runSubStoreSync)))
 	mux.Handle("GET /api/v1/client-connections", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listClientConnections)))
+	mux.Handle("GET /api/v1/core-log-sources", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogSources)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("GET /api/v1/access-controls", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listMainlandAccessPolicies)))
 	mux.Handle("PUT /api/v1/access-controls", s.requireAllPermissions(
@@ -69,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfigFiles)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfigFiles)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/state", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigState)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.saveServerInbound)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigField)))
@@ -118,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/traffic-endpoints/sync", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.syncPortTrafficEndpoints)))
 	mux.Handle("GET /api/v1/traffic-endpoints/sync", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.previewPortTrafficSync)))
 	mux.Handle("GET /api/v1/traffic-usage", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficUsage)))
+	mux.Handle("POST /api/v1/traffic-policies/batch", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.batchPortTraffic)))
 	mux.Handle("POST /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.createPortTrafficPolicy)))
 	mux.Handle("PUT /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.updatePortTrafficPolicy)))
 	mux.Handle("POST /api/v1/traffic-policies/{id}/reset", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.resetPortTrafficPolicy)))

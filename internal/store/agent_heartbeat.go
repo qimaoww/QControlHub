@@ -33,9 +33,14 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		return fmt.Errorf("%w: too many shared instance statuses", ErrInvalid)
 	}
 	for _, instance := range heartbeat.SharedInstances {
-		if !instance.Engine.Valid() || !core.ValidAgentShareID(instance.ShareID) ||
-			(instance.Status != "active" && instance.Status != "inactive" && instance.Status != "failed" && instance.Status != "unknown") {
-			return fmt.Errorf("%w: invalid shared instance status", ErrInvalid)
+		if instance.CoreLogStatus != "" && instance.CoreLogStatus != "active" && instance.CoreLogStatus != "waiting" && instance.CoreLogStatus != "failed" && instance.CoreLogStatus != "pending" {
+			return fmt.Errorf("%w: invalid instance log status", ErrInvalid)
+		}
+		if len(instance.CoreLogError) > 100 {
+			return fmt.Errorf("%w: invalid instance log error", ErrInvalid)
+		}
+		if err := validateSharedInstanceStatus(instance); err != nil {
+			return err
 		}
 	}
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
@@ -107,22 +112,44 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 			reportedPolicies[usage.ShareID] = append(reportedPolicies[usage.ShareID], usage.PolicyID)
 		}
 	}
+	engines, instances, statuses, logErrors := []string{}, []string{}, []string{}, []string{}
 	for _, instance := range heartbeat.SharedInstances {
-		if instance.Status == "unknown" {
-			continue
+		if instance.CoreLogStatus != "" {
+			engines = append(engines, string(instance.Engine))
+			instances = append(instances, instance.ShareID)
+			statuses = append(statuses, instance.CoreLogStatus)
+			logErrors = append(logErrors, instance.CoreLogError)
 		}
-		active := instance.Status == "active"
-		if _, err := s.pool.Exec(ctx, `UPDATE agent_shared_instance_ownership SET running=$4,
-			uncertain=CASE WHEN $4 THEN uncertain ELSE false END,
-			config_uncertain=CASE WHEN $4 THEN config_uncertain ELSE false END,
-			traffic_settled=NOT $4 AND COALESCE(cardinality($5::text[])>0,false)
-				AND EXISTS(SELECT 1 FROM port_traffic_policies p
-				WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled)
-				AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p
-					WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled
-					AND NOT(p.id=ANY($5::text[]))),updated_at=now()
-			WHERE agent_id=$1 AND engine=$2 AND share_id=$3`,
-			id, instance.Engine, instance.ShareID, active, reportedPolicies[instance.ShareID]); err != nil {
+	}
+	if len(instances) > 0 {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO core_log_source_states(agent_id,engine,instance_id,status,error)
+ SELECT $1,r.engine,r.instance,r.status,r.error FROM (
+ SELECT DISTINCT ON(engine,instance) engine,instance,status,error
+ FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY r(engine,instance,status,error,ordinal)
+ ORDER BY engine,instance,ordinal DESC) r
+ JOIN agent_shared_instance_ownership o ON o.agent_id=$1 AND o.engine=r.engine AND o.share_id=r.instance
+ JOIN agent_shares sh ON sh.id=o.share_id AND sh.agent_id=o.agent_id AND sh.user_id=o.owner_id
+ ON CONFLICT(agent_id,engine,instance_id) DO UPDATE SET status=EXCLUDED.status,error=EXCLUDED.error,updated_at=now()`, id, engines, instances, statuses, logErrors); err != nil {
+			return err
+		}
+	}
+	if len(heartbeat.SharedInstances) > 0 {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&locked); err != nil {
+			return mapError(err)
+		}
+		for _, instance := range heartbeat.SharedInstances {
+			if err := recordSharedInstanceObservationTx(ctx, tx, id, instance,
+				containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreLifecycle), receivedAt, false, reportedPolicies[instance.ShareID]); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 	}

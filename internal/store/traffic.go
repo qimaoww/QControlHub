@@ -9,9 +9,12 @@ import (
 const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,monitoring_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
        enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting,metadata_managed,
-	   COALESCE(share_id,''),share_used_bytes,
+	   config_id,config_version,inbound_tag,COALESCE(share_id,''),share_used_bytes,
 	   (SELECT jsonb_build_object('id',share.id,'limit_bytes',share.limit_bytes,
 			'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,'engines',share.engines,
+            'counter_epoch',port_traffic_policies.counter_epoch,
+            'lifetime_received_bytes',port_traffic_policies.reported_lifetime_received_bytes,
+            'lifetime_sent_bytes',port_traffic_policies.reported_lifetime_sent_bytes,
 			'revoked',shared_user.disabled OR NOT share.enabled OR share.status<>'accepted'
 				OR NOT EXISTS(SELECT 1 FROM agents shared_agent WHERE shared_agent.id=share.agent_id
 					AND shared_agent.features ? 'shared-engines-v1' AND shared_agent.features ? 'shared-traffic-v1'
@@ -33,7 +36,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
 		&policy.LastCollectedAt, &policy.Accounting,
 		&policy.MetadataManaged,
-		&policy.ShareID, &policy.ShareUsedBytes, &policy.SharedQuota,
+		&policy.ConfigID, &policy.ConfigVersion, &policy.InboundTag, &policy.ShareID, &policy.ShareUsedBytes, &policy.SharedQuota,
 	)
 	return policy, err
 }

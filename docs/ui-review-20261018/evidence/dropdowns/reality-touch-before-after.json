@@ -1,0 +1,58 @@
+[
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "before",
+    "device": "tablet",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "before",
+    "device": "tablet",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "light",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "dark",
+    "realitySuggestions": true,
+    "freeTextAllowed": true
+  }
+]

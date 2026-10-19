@@ -1,7 +1,7 @@
 import { trafficCardIdentity } from "./traffic-model.js";
 import { bindDialogBackdrop } from "./popup.js";
-export function createTrafficBindings({ state }, { bindTrafficForms, enableTrafficCardDrag }) {
-  return ({ selectableAgents, filteredItems, orderedItems }, endpoints, resetCreate) => {
+export function createTrafficBindings({ state }, { bindTrafficForms, enableTrafficCardDrag, bindTrafficBatch }) {
+  return ({ selectableAgents, filteredItems, orderedItems, eligibleIDs }, endpoints, resetCreate) => {
     bindTrafficForms(selectableAgents, endpoints);
     document.querySelectorAll("[data-traffic-status-open]").forEach(button => {
       button.onclick = () => document.querySelector(`[data-traffic-status-dialog="${CSS.escape(button.dataset.trafficStatusOpen)}"]`)?.showModal();
@@ -11,7 +11,8 @@ export function createTrafficBindings({ state }, { bindTrafficForms, enableTraff
       bindDialogBackdrop(dialog);
     });
     const cardGrid = document.querySelector(".traffic-policy-grid");
-    if (cardGrid && filteredItems.length) {
+    bindTrafficBatch({ eligibleIDs });
+    if (cardGrid && filteredItems.length && !state.data.trafficBatch?.mode) {
       enableTrafficCardDrag(cardGrid, orderedItems.map(trafficCardIdentity));
     }
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();

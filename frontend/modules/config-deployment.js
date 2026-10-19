@@ -27,13 +27,10 @@ function clearPendingDeploy(agentId, engine, expectedTaskID) {
 
 function handleDeployTerminal(result, taskID, agentId, engine) {
   if (result.status === "succeeded") {
-    // Every successful deploy changes the node file — always invalidate,
-    // even if this task is no longer the latest pending record. This is
-    // idempotent (deleting a non-existent key is a no-op).
     invalidateLiveSnapshot(agentId, engine);
-    maybeRerenderLiveConfig(agentId, engine);
-    // Clean up pending only if this is still the tracked task.
-    clearPendingDeploy(agentId, engine, taskID);
+    // A successful earlier task can change the file, so retire its read
+    // cache. Only the currently tracked operation may refresh the editor.
+    if (clearPendingDeploy(agentId, engine, taskID)) maybeRerenderLiveConfig(agentId, engine);
   } else {
     // Failed/canceled: notify and clear only if still current pending.
     if (clearPendingDeploy(agentId, engine, taskID)) {

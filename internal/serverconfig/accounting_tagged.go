@@ -161,6 +161,14 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	// Generated fallback rules are not user bindings and must not change the
 	// accounting source merely because an existing plan is compiled again.
 	marked := forceMarks
+	// Retain a previously verified marked plan when importing a shared runtime.
+	// The exact generated clones are checked below; edited marks still fail.
+	for _, raw := range priorClones {
+		clone := mapValue(raw)
+		if xray && mapValue(mapValue(clone["streamSettings"])["sockopt"])["mark"] != nil || !xray && clone["routing_mark"] != nil {
+			marked = true
+		}
+	}
 	for _, raw := range routeRules {
 		rule := mapValue(raw)
 		target := byTag[stringValue(rule[targetKey])]

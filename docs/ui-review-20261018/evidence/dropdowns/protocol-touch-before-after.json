@@ -1,0 +1,118 @@
+[
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "light",
+    "options": 16,
+    "groups": 0,
+    "menu": null
+  },
+  {
+    "stage": "before",
+    "device": "mobile",
+    "theme": "dark",
+    "options": 16,
+    "groups": 0,
+    "menu": null
+  },
+  {
+    "stage": "before",
+    "device": "tablet",
+    "theme": "light",
+    "options": 16,
+    "groups": 0,
+    "menu": null
+  },
+  {
+    "stage": "before",
+    "device": "tablet",
+    "theme": "dark",
+    "options": 16,
+    "groups": 0,
+    "menu": null
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "light",
+    "options": 16,
+    "groups": 0,
+    "menu": {
+      "height": 318,
+      "total": 749,
+      "bounds": {
+        "x": 21,
+        "y": 290.40625,
+        "width": 234,
+        "height": 320,
+        "top": 290.40625,
+        "right": 255,
+        "bottom": 610.40625,
+        "left": 21
+      }
+    }
+  },
+  {
+    "stage": "after",
+    "device": "mobile",
+    "theme": "dark",
+    "options": 16,
+    "groups": 0,
+    "menu": {
+      "height": 318,
+      "total": 749,
+      "bounds": {
+        "x": 21,
+        "y": 290.40625,
+        "width": 234,
+        "height": 320,
+        "top": 290.40625,
+        "right": 255,
+        "bottom": 610.40625,
+        "left": 21
+      }
+    }
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "light",
+    "options": 16,
+    "groups": 0,
+    "menu": {
+      "height": 318,
+      "total": 716,
+      "bounds": {
+        "x": 39,
+        "y": 458.40625,
+        "width": 420,
+        "height": 320,
+        "top": 458.40625,
+        "right": 459,
+        "bottom": 778.40625,
+        "left": 39
+      }
+    }
+  },
+  {
+    "stage": "after",
+    "device": "tablet",
+    "theme": "dark",
+    "options": 16,
+    "groups": 0,
+    "menu": {
+      "height": 318,
+      "total": 716,
+      "bounds": {
+        "x": 39,
+        "y": 458.40625,
+        "width": 420,
+        "height": 320,
+        "top": 458.40625,
+        "right": 459,
+        "bottom": 778.40625,
+        "left": 39
+      }
+    }
+  }
+]

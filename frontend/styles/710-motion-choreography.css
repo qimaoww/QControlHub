@@ -19,13 +19,14 @@
   .app-dock:is(:hover,:has(:focus-visible)){transition-delay:35ms}
   .app-dock .dock-label{transition-duration:var(--motion-feedback),var(--motion-base)}
   .app-dock:is(:hover,:has(:focus-visible)) :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{transition-delay:65ms}
-  .dock-active-indicator:not([hidden]){display:block;position:absolute;top:0;left:var(--dock-rail-pad);right:var(--dock-rail-pad);border-radius:10px;background:linear-gradient(125deg,var(--accent),color-mix(in srgb,var(--accent) 78%,var(--accent-2)));box-shadow:0 6px 24px -9px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.25);pointer-events:none}
+  .app-dock :is(.dock-nav a,.dock-tools a)[aria-current="page"]>.dock-active-indicator{display:block;position:absolute;inset:0;z-index:-1;border-radius:10px;background:linear-gradient(125deg,var(--accent),color-mix(in srgb,var(--accent) 78%,var(--accent-2)));box-shadow:0 6px 24px -9px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.25);pointer-events:none}
   .app-dock .dock-nav a.active,.app-dock .dock-tools .dock-settings.active{background:transparent;box-shadow:none}
   .app-dock .dock-nav a.active::before,.app-dock .dock-tools .dock-settings.active::before{opacity:0}
+  .app-dock :is(.dock-nav a,.dock-tools .dock-settings){isolation:isolate}
   .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button){z-index:1}
 }
 @media(max-width:820px) and (pointer:fine){
-  :is(.page-live-config,.page-client-connections) .dock-active-indicator{display:none}
+  :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a>.dock-active-indicator{display:none}
   :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a.active{background:var(--accent)}
 }
 /* Floating content grows from its launcher; native details owns the complete
@@ -60,8 +61,8 @@ dialog[open] footer{transition-delay:110ms}
 }
 
 /* Shared authored tips replace native title bubbles and validity popups. */
-.interaction-tooltip{position:fixed;inset:auto;margin:0;max-width:min(360px,calc(100vw - 16px));padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lift);font:500 calc(12px * var(--ui-font-scale,1))/1.5 var(--font-body,system-ui);overflow-wrap:anywhere;pointer-events:none;opacity:0;translate:0 6px;scale:.97;transition:opacity var(--motion-exit) var(--motion-ease-out),translate var(--motion-exit) var(--motion-ease-out),scale var(--motion-exit) var(--motion-ease-out)}
+.interaction-tooltip{position:fixed;inset:auto;margin:0;max-width:min(360px,calc(100vw - 16px));padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lift);font:var(--weight-medium) var(--text-small)/var(--leading-caption) var(--font-body);overflow-wrap:anywhere;pointer-events:none;opacity:0;translate:0 6px;scale:.97;transition:opacity var(--motion-exit) var(--motion-ease-out),translate var(--motion-exit) var(--motion-ease-out),scale var(--motion-exit) var(--motion-ease-out)}
 .interaction-tooltip[data-open]{opacity:1;translate:0 0;scale:1}
 .interaction-tooltip::backdrop{background:transparent;pointer-events:none}
-.interaction-validation{display:block;color:var(--red);font-size:calc(12px * var(--ui-font-scale,1));line-height:1.5;margin-top:6px;overflow-wrap:anywhere}
+.interaction-validation{display:block;color:var(--red);font-size:var(--text-small);line-height:var(--leading-caption);margin-top:6px;overflow-wrap:anywhere}
 :is(input,select,textarea)[data-motion-invalid]{border-color:var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 14%,transparent)}

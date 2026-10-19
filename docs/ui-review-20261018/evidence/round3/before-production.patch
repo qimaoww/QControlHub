@@ -1,0 +1,645 @@
+diff --git a/frontend/app.css b/frontend/app.css
+index af9a139b..f91ff8f1 100644
+--- a/frontend/app.css
++++ b/frontend/app.css
+@@ -1377,7 +1377,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
+ @media(max-width:360px){.bbr-preset{flex-wrap:wrap}.bbr-preset>.button{width:100%}}
+ 
+ .traffic-policy-list-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+-.traffic-sync-dialog{width:min(720px,calc(100% - 28px))}.traffic-sync-dialog .traffic-edit-body{display:grid;gap:14px;max-height:65vh;overflow:auto}.traffic-sync-help{color:var(--muted);font-size:calc(12px * var(--ui-font-scale));line-height:1.7}.traffic-sync-dialog .traffic-sync-all{display:flex;align-items:center;gap:12px;padding-bottom:12px;font-size:calc(12px * var(--ui-font-scale));color:var(--muted);cursor:pointer}.traffic-sync-list{display:grid;border:1px solid var(--line);border-radius:8px;overflow:hidden}.traffic-sync-dialog .traffic-sync-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;background:var(--surface);cursor:pointer}.traffic-sync-row+.traffic-sync-row{border-top:1px solid var(--line)}.traffic-sync-row:has(input:checked){background:var(--surface-2)}.traffic-sync-dialog input[type=checkbox]{width:16px;height:16px;min-width:16px;accent-color:var(--accent)}.traffic-sync-source{display:grid;gap:5px;min-width:0}.traffic-sync-source strong{font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-source small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-dialog [data-sync-count]{display:block;margin-right:auto;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}.traffic-sync-dialog>form>footer{display:flex;flex-wrap:wrap}@media(max-width:540px){.traffic-sync-dialog .traffic-sync-row{grid-template-columns:16px minmax(0,1fr)}.traffic-sync-row>.status-label{grid-column:2}.traffic-sync-dialog [data-sync-count]{flex-basis:100%}.traffic-sync-dialog>form>footer>.button{flex:1}}
++.traffic-sync-dialog{width:min(720px,calc(100% - 28px))}.traffic-sync-dialog .traffic-edit-body{display:grid;gap:14px;max-height:65vh;overflow:auto}.traffic-sync-dialog .traffic-sync-all{display:flex;align-items:center;gap:12px;padding-bottom:12px;font-size:calc(12px * var(--ui-font-scale));color:var(--muted);cursor:pointer}.traffic-sync-list{display:grid;border:1px solid var(--line);border-radius:8px;overflow:hidden}.traffic-sync-dialog .traffic-sync-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;background:var(--surface);cursor:pointer}.traffic-sync-row+.traffic-sync-row{border-top:1px solid var(--line)}.traffic-sync-row:has(input:checked){background:var(--surface-2)}.traffic-sync-dialog input[type=checkbox]{width:16px;height:16px;min-width:16px;accent-color:var(--accent)}.traffic-sync-source{display:grid;gap:5px;min-width:0}.traffic-sync-source strong{font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-source small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-dialog [data-sync-count]{display:block;margin-right:auto;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}.traffic-sync-dialog>form>footer{display:flex;flex-wrap:wrap}@media(max-width:540px){.traffic-sync-dialog .traffic-sync-row{grid-template-columns:16px minmax(0,1fr)}.traffic-sync-row>.status-label{grid-column:2}.traffic-sync-dialog [data-sync-count]{flex-basis:100%}.traffic-sync-dialog>form>footer>.button{flex:1}}
+ .node-capability-settings{margin-top:12px;padding:11px 12px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+ .node-capability-settings>header{display:grid;gap:3px}.node-capability-settings>header b{font-size:calc(10px * var(--ui-font-scale))}.node-capability-settings>header small,.node-capability-note{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)));line-height:1.6}.node-capability-note{margin:0;padding-top:8px;border-top:1px solid var(--line)}
+ .core-capability-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px;padding:4px 20px 16px}.node-capability-settings .core-capability-list{padding:4px 0}
+@@ -2331,115 +2331,3 @@ body.card-moving :is(.node-card,.traffic-policy-card,.node-card-grip){cursor:gra
+   .node-card-grip{position:relative}
+   .node-card-grip::before{content:"";position:absolute;inset:-8px -8px -8px -12px}
+ }
+-/* Certificate views use the existing allocation list, form and config dialog. */
+-.cert-center{display:grid;gap:14px}
+-.cert-toolbar{flex-wrap:wrap;justify-content:flex-start}
+-.cert-toolbar label{min-width:0}
+-.cert-toolbar input,.cert-toolbar select{width:100%;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-toolbar .cert-search{flex:1;min-width:180px}
+-.cert-toolbar>.user-allocation-tools{margin-left:auto}
+-.cert-center .user-allocation-node>strong{font-size:calc(13px * var(--ui-font-scale));overflow-wrap:anywhere}
+-.cert-center .user-allocation-node>small{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+-.cert-center .user-allocation-terms{grid-template-columns:repeat(3,minmax(0,1fr))}
+-.cert-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+-.cert-domains,.cert-wrap{overflow-wrap:anywhere}
+-.cert-wrap{word-break:break-all}
+-.cert-error{color:var(--red);overflow-wrap:anywhere}
+-.cert-empty-line{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+-.cert-dialog>.config-inbound-heading{flex-shrink:0}
+-.cert-dialog>.config-inbound-body{overflow:auto;overscroll-behavior:contain}
+-.cert-form{gap:14px}
+-.cert-form :is(input:not([type=checkbox]),select,textarea){width:100%}
+-.cert-form textarea{padding:10px 11px;resize:vertical;font-family:inherit;font-weight:400;line-height:1.6}
+-.cert-form :is([name=certificate],[name=private_key]){font-family:monospace;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-form label>small{font-weight:400;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+-.cert-form label.cert-check{flex-direction:row;align-items:center;gap:8px}
+-.cert-check input{width:16px;height:16px;flex-shrink:0}
+-.cert-form>footer{justify-content:flex-end;padding-top:14px;border-top:1px solid var(--line)}
+-.cert-form>[data-cert-form-error]:empty{display:none}
+-.cert-detail{display:grid;gap:16px;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-detail h3,.cert-dialog [data-cert-modal-content]>h3{margin:0 0 12px;font-size:calc(13px * var(--ui-font-scale))}
+-.cert-detail section{padding-top:14px;border-top:1px solid var(--line);min-width:0}
+-.cert-detail-meta{display:grid;gap:8px;margin:0}
+-.cert-detail-meta>div{display:flex;justify-content:space-between;gap:16px}
+-.cert-detail-meta dt{color:var(--muted);flex-shrink:0}
+-.cert-detail-meta dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0}
+-.cert-record{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);min-width:0;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-record>div{min-width:0}
+-.cert-record strong,.cert-record small{display:block;overflow-wrap:anywhere}
+-.cert-record small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));margin-top:4px}
+-.cert-order{padding:14px 0;border-bottom:1px solid var(--line);display:grid;gap:12px;min-width:0}
+-.cert-order>header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+-.cert-challenge{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+-.cert-challenge>dl{flex-basis:100%;display:grid;gap:8px;margin:0;min-width:0}
+-.cert-challenge dt{color:var(--muted)}
+-.cert-challenge dd{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0;min-width:0}
+-.cert-challenge code{overflow-wrap:anywhere;word-break:break-all;flex:1;min-width:100px}
+-.cert-detail summary,.cert-help summary{cursor:pointer;color:var(--muted);min-height:32px}
+-@media(max-width:700px){
+- .cert-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+- .cert-toolbar .cert-search,.cert-toolbar>.user-allocation-tools{grid-column:1/-1;min-width:0;margin:0}
+- .cert-center .user-allocation-terms{grid-template-columns:repeat(2,minmax(0,1fr))}
+- .cert-detail-meta>div{flex-direction:column;gap:2px}
+- .cert-detail-meta dd{text-align:left}
+- .cert-record{flex-wrap:wrap;align-items:flex-start}
+-}
+-@media(max-width:820px) and (pointer:coarse){
+- .cert-center .button,.cert-dialog .button,.cert-toolbar :is(input,select),.cert-form :is(input:not([type=checkbox]),select){min-height:44px}
+- .cert-form :is(input:not([type=checkbox]),select,textarea){font-size:max(16px,calc(12px * var(--ui-font-scale)))}
+-}
+-/* Certificate dialogs live under body, outside .server-form/.settings-workspace.
+-   Explicitly share semantic control tokens so every portalled surface is themed. */
+-.cert-hero{margin:0;align-items:center}
+-.cert-hero h2{margin:4px 0;font-size:calc(24px * var(--ui-font-scale));letter-spacing:-.5px}
+-.cert-hero p:last-child{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-summary{display:grid;grid-template-columns:auto auto;align-items:baseline;gap:2px 10px;text-align:right;font-size:calc(11px * var(--ui-font-scale));color:var(--muted)}
+-.cert-summary strong{font-size:calc(20px * var(--ui-font-scale));color:var(--ink)}
+-.cert-dialog.config-inbound-dialog{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 40px);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow)}
+-.cert-dialog::backdrop{background:color-mix(in srgb,var(--dock) 65%,transparent);backdrop-filter:blur(3px)}
+-.cert-dialog .config-inbound-heading{background:var(--surface);border-bottom:1px solid var(--line);padding:18px 22px}
+-.cert-dialog .config-inbound-heading h2{font-size:calc(18px * var(--ui-font-scale));line-height:1.4;overflow-wrap:anywhere}
+-.cert-dialog>.config-inbound-body{padding:22px;scroll-padding:16px;min-height:0}
+-.cert-dialog [data-cert-modal-content]>section{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+-.cert-form,.cert-dialog .stack-form{display:grid;gap:16px}
+-.cert-form label,.cert-dialog .stack-form label,.cert-share-domains{display:grid;gap:7px;font-size:calc(12px * var(--ui-font-scale));font-weight:600;color:var(--ink-2);min-width:0}
+-.cert-form :is(input:not([type=checkbox]),select,textarea),.cert-dialog .stack-form :is(input:not([type=checkbox]),select,textarea),.cert-share-domains textarea,.cert-toolbar :is(input,select){min-width:0;max-width:100%;border:1px solid var(--line-2);border-radius:var(--radius-control);padding:10px 12px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:calc(13px * var(--ui-font-scale));line-height:1.5;box-shadow:none}
+-.cert-form :is(input:not([type=checkbox]),select),.cert-dialog .stack-form :is(input:not([type=checkbox]),select){min-height:42px}
+-.cert-form :is(input,textarea)::placeholder{color:var(--muted);opacity:1}
+-.cert-form :is(input,select,textarea):hover:not(:disabled){border-color:var(--accent)}
+-.cert-form :is(input,select,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-color:var(--accent);background:var(--surface)}
+-.cert-dialog :is(select,option){color-scheme:inherit;background-color:var(--surface);color:var(--ink)}
+-.cert-dialog :is(input,select,textarea):disabled{cursor:not-allowed;color:var(--muted);background:var(--surface-3)}
+-.cert-check input{accent-color:var(--accent);margin:0}
+-.cert-form input[type=file]{padding:7px;font-size:calc(11px * var(--ui-font-scale));font-weight:400}
+-.cert-form input[type=file]::file-selector-button{margin-right:10px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);color:var(--ink);padding:6px 10px;cursor:pointer;font:inherit}
+-.cert-form>footer{position:sticky;bottom:-22px;margin:0 -22px -22px;padding:16px 22px;background:var(--surface);z-index:1}
+-.cert-dialog .cert-actions{margin-block:10px}
+-.cert-dialog .cert-actions .danger{color:var(--red);border-color:var(--red)}
+-.cert-dialog .cert-help p{padding:10px 12px;font-weight:400;font-size:calc(12px * var(--ui-font-scale));color:var(--ink-2);overflow-wrap:anywhere}
+-.cert-node-scope{padding:10px 12px;background:var(--accent-soft);border-radius:8px;color:var(--ink-2);overflow-wrap:anywhere}
+-.cert-source-status{padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+-.cert-source-record{display:grid;gap:10px;min-width:0}
+-.cert-empty{display:grid;gap:8px;padding:40px 20px;text-align:center}
+-.cert-empty strong{color:var(--ink);font-size:calc(15px * var(--ui-font-scale))}
+-.cert-empty p{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-share-domains{margin:12px 0}
+-.cert-share-domains textarea{resize:vertical;min-height:76px;font-weight:400}
+-.cert-share-domains small{font-weight:400;color:var(--muted)}
+-@media(max-width:700px){
+- .cert-hero{gap:12px}.cert-hero h2{font-size:calc(21px * var(--ui-font-scale))}
+- .cert-summary{display:none}
+- .cert-toolbar>.user-allocation-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+- .cert-toolbar .button{min-height:42px}
+- .cert-dialog.config-inbound-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:12px}
+- .cert-dialog .config-inbound-heading{padding:14px 16px}
+- .cert-dialog>.config-inbound-body{padding:16px}
+- .cert-form>footer{bottom:-16px;margin:0 -16px -16px;padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+- .cert-dialog .cert-actions .button{flex:1;min-height:44px}
+- .cert-form :is(input:not([type=checkbox]),select,textarea){font-size:max(16px,calc(13px * var(--ui-font-scale)))}
+- .cert-record .cert-actions{width:100%}
+-}
+-@media(prefers-reduced-motion:reduce){.cert-dialog,.cert-dialog *{scroll-behavior:auto;transition:none;animation:none}}
+-
+-body:has(.cert-dialog[open]){overflow:hidden}
+diff --git a/frontend/certificate_browser_session.mjs b/frontend/certificate_browser_session.mjs
+index 314111ea..0bfd1291 100644
+--- a/frontend/certificate_browser_session.mjs
++++ b/frontend/certificate_browser_session.mjs
+@@ -119,7 +119,7 @@ try {
+   const set=async(page,selector,value)=>evaluate(page,`(() => {const field=document.querySelector(${JSON.stringify(selector)});field.value=${JSON.stringify(value)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+   const open=async(page)=>{await evaluate(page,"location.hash='#certificates'");await wait(page,"!!document.querySelector('[data-cert-create]')")};
+   await open(a);
+-  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),1);
++  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),0);
+   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-card,.context-steps').length"),0);
+   await click(a,"[data-cert-accounts]");await wait(a,"!!document.querySelector('[data-cert-new-dns]')");await click(a,"[data-cert-new-dns]");await wait(a,"!!document.querySelector('[data-cert-account-form]')");
+   await set(a,'[name=name]','Alice DNS');await set(a,'[name=zone]','example.test');await set(a,'[name=token]','local-browser-fixture-token');
+diff --git a/frontend/modules/agent-sharing.js b/frontend/modules/agent-sharing.js
+index e3854114..4817b051 100644
+--- a/frontend/modules/agent-sharing.js
++++ b/frontend/modules/agent-sharing.js
+@@ -28,7 +28,7 @@ export function createAgentSharing(ctx, interactions) {
+       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
+     </div>
+     ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
+-    <label class="settings-field cert-share-domains"><span>HTTP-01 公网认证 · 允许域名</span><textarea name="http_domains" rows="2" placeholder="auth.example.com&#10;api.example.com">${esc(share.http_domains_text ?? (share.http_domains || []).join("\n"))}</textarea><small>每行一个精确域名；留空不授予认证权限。接受共享且启用后生效。协议部署仍按上方内核与端口权限单独检查。</small></label>
++    <label class="settings-field plan-fields one"><span>HTTP-01 允许域名</span><textarea name="http_domains" rows="2" placeholder="auth.example.com&#10;api.example.com">${esc(share.http_domains_text ?? (share.http_domains || []).join("\n"))}</textarea><small>每行一个完整域名；留空不授权，接受共享后生效。</small></label>
+     <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
+   </div>`;
+   const close = () => {
+diff --git a/frontend/modules/certificate-forms.js b/frontend/modules/certificate-forms.js
+index 8e00ee8e..e91d54e6 100644
+--- a/frontend/modules/certificate-forms.js
++++ b/frontend/modules/certificate-forms.js
+@@ -1,15 +1,15 @@
+ export function certificateForm({esc,accounts,agents,httpGrants,httpNodes=[],source="acme",method="dns-api",replaceID=""}) {
+  const options = (items) => items.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("");
+- return `<h2>${replaceID?"替换证书版本":"新增证书"}</h2><form class="stack-form cert-form" data-cert-form ${replaceID?`data-replace="${replaceID}"`:""}>
+- ${replaceID?"":`<label>证书名称<input name="name" required maxlength="100" placeholder="例如：生产环境通配证书"></label><label>证书来源<select name="source" data-cert-form-source>${[["acme","ACME 申请"],["import","导入已有证书"],["self-signed","自签证书"]].map(([v,n])=>`<option value="${v}" ${v===source?"selected":""}>${n}</option>`).join("")}</select></label>`}
+- ${source!=="import"&&!replaceID?`<label>域名 / SAN<textarea name="domains" required rows="3" placeholder="example.com&#10;*.example.com"></textarea><small>每行一个域名；泛域名使用 DNS 验证。</small></label><label>密钥算法<select name="key_type"><option value="ecdsa256">ECDSA P-256</option><option value="ecdsa384">ECDSA P-384</option><option value="rsa2048">RSA 2048</option><option value="rsa4096">RSA 4096</option></select></label>`:""}
+- ${source==="acme"&&!replaceID?`<label>签发账号<select name="account_id" required><option value="">请选择我的 ACME 账号</option>${options(accounts.filter(a=>a.kind==="acme"))}</select></label><label>验证方式<select name="method" data-cert-form-method>${[["dns-api","DNS API 自动验证"],["dns-manual","手动 DNS 验证"],["http-01","已有节点 HTTP-01"]].map(([v,n])=>`<option value="${v}" ${v===method?"selected":""}>${n}</option>`).join("")}</select></label>
+- ${method==="dns-api"?`<label>DNS 服务商账号<select name="dns_account_id" required><option value="">请选择我的 DNS 账号</option>${options(accounts.filter(a=>a.kind==="dns"))}</select></label>`:method==="dns-manual"?'<aside class="settings-hint">需手动添加 TXT 记录；续期也需要人工配合。</aside>':`<label>HTTP-01 验证节点<select name="agent_id" required><option value="">选择有认证权限的节点</option>${httpNodes.map(n=>`<option value="${esc(n.id)}" ${n.available?"":"disabled"}>${esc(n.name)} · ${n.available?(n.owned?"所有者认证权限":"已授权 · "+n.domains.join(", ")):esc(n.reason)}</option>`).join("")}</select></label><p class="cert-node-scope settings-hint" data-cert-node-scope></p><small class="muted-text">HTTP-01 认证权限与协议部署权限分别检查。域名须解析到验证节点，公开 IPv4 / IPv6 的 80 端口均可达。</small>${httpNodes.some(n=>!n.available)?`<details class="cert-help preset-option-panel"><summary>不可用节点与处理方式</summary>${httpNodes.filter(n=>!n.available).map(n=>`<p><strong>${esc(n.name)}</strong> · ${esc(n.reason)}</p>`).join("")}</details>`:""}<details class="preset-option-panel cert-help"><summary>公网入口检查与已有网站接入</summary><p>项目托管 Caddy / Nginx 自动接入挑战路由；端口空闲时 Agent 临时监听。外部网站需由所有者将 /.well-known/acme-challenge/ 转发至节点 127.0.0.1:9080 并保留 Host。提交后逐个检查 A / AAAA 与令牌响应，通过后才通知 CA；证书可部署到其他获准节点。</p></details>`}
+- ${method!=="dns-manual"?'<label class="cert-check"><input type="checkbox" name="auto_renew" checked>到期前 30 天自动续期</label>':""}<p><button class="button small" type="button" data-cert-open-accounts>管理签发账号</button></p>`:""}
+- ${source==="self-signed"&&!replaceID?'<label>有效天数<input type="number" name="days" value="90" min="1" max="825" required></label><aside class="settings-hint">自签证书需在客户端手动信任。</aside>':""}
+- ${source==="import"||replaceID?`<label>PEM 证书链<textarea name="certificate" rows="6" required spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><input type="file" data-cert-file="certificate" accept=".pem,.crt,.cer"><small>叶证书在前，随后依次填写中间证书。</small></label><label>PEM 私钥<textarea name="private_key" rows="6" required spellcheck="false" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea><input type="file" data-cert-file="private_key" accept=".pem,.key"></label><p class="muted-text">替换后保留授权和绑定，并同步新版本。</p>`:""}
+- <p class="alert error" data-cert-form-error role="alert"></p><footer class="cert-actions"><button type="button" class="button" data-cert-close>取消</button><button class="button primary">${replaceID?"校验并替换":source==="import"?"校验并导入":source==="self-signed"?"创建自签证书":"提交申请"}</button></footer></form>`;
++ return `<h2>${replaceID?"替换证书版本":"新增证书"}</h2><form data-cert-form ${replaceID?`data-replace="${replaceID}"`:""}><div class="traffic-edit-body" data-cert-modal-content>
++ ${replaceID?"":`<label class="settings-field"><span>证书名称</span><input name="name" required maxlength="100" placeholder="例如：生产环境通配证书"></label><label class="settings-field"><span>证书来源</span><select name="source" data-cert-form-source>${[["acme","ACME 申请"],["import","导入已有证书"],["self-signed","自签证书"]].map(([v,n])=>`<option value="${v}" ${v===source?"selected":""}>${n}</option>`).join("")}</select></label>`}
++ ${source!=="import"&&!replaceID?`<label class="settings-field"><span>域名 / SAN</span><textarea name="domains" required rows="3" placeholder="example.com&#10;*.example.com"></textarea><small>每行一个域名；泛域名使用 DNS 验证。</small></label><label class="settings-field"><span>密钥算法</span><select name="key_type"><option value="ecdsa256">ECDSA P-256</option><option value="ecdsa384">ECDSA P-384</option><option value="rsa2048">RSA 2048</option><option value="rsa4096">RSA 4096</option></select></label>`:""}
++ ${source==="acme"&&!replaceID?`<label class="settings-field"><span>签发账号</span><select name="account_id" required><option value="">请选择我的 ACME 账号</option>${options(accounts.filter(a=>a.kind==="acme"))}</select></label><label class="settings-field"><span>验证方式</span><select name="method" data-cert-form-method>${[["dns-api","DNS API 自动验证"],["dns-manual","手动 DNS 验证"],["http-01","已有节点 HTTP-01"]].map(([v,n])=>`<option value="${v}" ${v===method?"selected":""}>${n}</option>`).join("")}</select></label>
++ ${method==="dns-api"?`<label class="settings-field"><span>DNS 服务商账号</span><select name="dns_account_id" required><option value="">请选择我的 DNS 账号</option>${options(accounts.filter(a=>a.kind==="dns"))}</select></label>`:method==="dns-manual"?'<aside class="settings-hint">申请和续期均需手动添加 TXT 记录。</aside>':`<label class="settings-field"><span>HTTP-01 验证节点</span><select name="agent_id" required><option value="">选择验证节点</option>${httpNodes.map(n=>`<option value="${esc(n.id)}" ${n.available?"":"disabled"}>${esc(n.name)} · ${n.available?(n.owned?"自有节点":"已授权 · "+n.domains.join(", ")):esc(n.reason)}</option>`).join("")}</select></label><p class="settings-hint" data-cert-node-scope></p><p class="settings-hint">域名须解析到验证节点，所有公开 IPv4 / IPv6 的 80 端口均可达。</p>${httpNodes.some(n=>!n.available)?`<details class="user-owned-nodes"><summary><span>不可用节点与处理方式</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><ul>${httpNodes.filter(n=>!n.available).map(n=>`<li>${esc(n.name)} · ${esc(n.reason)}</li>`).join("")}</ul></details>`:""}<details class="user-owned-nodes"><summary><span>外部网站接入</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><ul><li>使用外部网站时，将 /.well-known/acme-challenge/ 转发到节点 127.0.0.1:9080，并保留 Host。</li></ul></details>`}
++ ${method!=="dns-manual"?'<div class="user-quota-options"><label><input type="checkbox" name="auto_renew" checked>到期前 30 天自动续期</label></div>':""}<div class="user-allocation-tools"><button class="button small" type="button" data-cert-open-accounts>管理签发账号</button></div>`:""}
++ ${source==="self-signed"&&!replaceID?'<label class="settings-field"><span>有效天数</span><input type="number" name="days" value="90" min="1" max="825" required></label><aside class="settings-hint">自签证书需在客户端手动信任。</aside>':""}
++ ${source==="import"||replaceID?`<label class="settings-field"><span>PEM 证书链</span><textarea name="certificate" rows="6" required spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>叶证书在前，随后依次填写中间证书。</small></label><div class="user-allocation-tools"><button type="button" class="button small" data-cert-pick-file="certificate">导入证书文件</button><input type="file" data-cert-file="certificate" accept=".pem,.crt,.cer" hidden><span class="settings-hint" data-cert-file-name="certificate"></span></div><label class="settings-field"><span>PEM 私钥</span><textarea name="private_key" rows="6" required spellcheck="false" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label><div class="user-allocation-tools"><button type="button" class="button small" data-cert-pick-file="private_key">导入私钥文件</button><input type="file" data-cert-file="private_key" accept=".pem,.key" hidden><span class="settings-hint" data-cert-file-name="private_key"></span></div>${replaceID?'<p class="settings-hint">替换后同步至已绑定实例。</p>':""}`:""}
++ <p class="alert error notice-message" data-cert-form-error role="alert" hidden></p></div><footer><button type="button" class="button" data-cert-close>取消</button><button class="button primary">${replaceID?"校验并替换":source==="import"?"校验并导入":source==="self-signed"?"创建自签证书":"提交申请"}</button></footer></form>`;
+ }
+ export function certificateAccountForm(esc,kind="acme",provider="cloudflare",ca="letsencrypt-staging") {
+- return `<h2>${kind==="acme"?"新增 ACME 账号":"新增 DNS 服务商账号"}</h2><form class="stack-form cert-form" data-cert-account-form><label>账号类型<select name="kind" data-cert-account-kind><option value="acme" ${kind==="acme"?"selected":""}>ACME 签发账号</option><option value="dns" ${kind==="dns"?"selected":""}>DNS 服务商账号</option></select></label><label>名称<input name="name" required maxlength="100"></label>${kind==="acme"?`<label>签发机构<select name="ca" data-cert-account-ca>${[["letsencrypt-staging","Let’s Encrypt · 测试环境（默认）"],["letsencrypt","Let’s Encrypt · 正式环境"],["zerossl","ZeroSSL · 需要 EAB"]].map(([v,n])=>`<option value="${v}" ${ca===v?"selected":""}>${n}</option>`).join("")}</select></label><label>联系邮箱<input type="email" name="email" required maxlength="254"></label>${ca==="zerossl"?'<label>EAB Key ID<input name="eab_id" required autocomplete="off"></label><label>EAB HMAC Key<input type="password" name="eab_key" required autocomplete="off"></label><p class="muted-text">EAB 可在 ZeroSSL 的 Developer 页面生成。</p>':""}<label class="cert-check"><input type="checkbox" name="accept_terms" required>我已阅读并同意签发机构的服务条款</label><p><a href="${ca==="zerossl"?"https://zerossl.com/terms/":"https://letsencrypt.org/repository/"}" target="_blank" rel="noopener noreferrer">查看 CA 服务条款</a></p>`:`<label>服务商<select name="provider" data-cert-account-provider><option value="cloudflare" ${provider==="cloudflare"?"selected":""}>Cloudflare</option><option value="alidns" ${provider==="alidns"?"selected":""}>阿里云 DNS</option><option value="dnspod" ${provider==="dnspod"?"selected":""}>腾讯云 DNSPod</option></select></label><label>DNS 托管主域名<input name="zone" required placeholder="example.com"></label>${(provider==="cloudflare"?[["token","API Token"]]:provider==="alidns"?[["access_key_id","AccessKey ID"],["access_key_secret","AccessKey Secret"]]:[["secret_id","Secret ID"],["secret_key","Secret Key"]]).map(([v,n])=>`<label>${esc(n)}<input type="password" name="${v}" required autocomplete="off"></label>`).join("")}<details class="preset-option-panel cert-help"><summary>所需 API 权限</summary><p>${provider==="cloudflare"?"需要指定区域的 Zone:Read 和 DNS:Edit。":provider==="alidns"?"需要 DescribeDomainRecords、AddDomainRecord、DeleteDomainRecord，限制到目标域名。":"需要 DNSPod DescribeDomain、DescribeRecordList、CreateRecord、DeleteRecord，限制到目标域名。"}</p></details>`}<p class="alert error" data-cert-form-error role="alert"></p><footer class="cert-actions"><button type="button" class="button" data-cert-close>取消</button><button class="button primary">${kind==="acme"?"注册并保存":"加密保存"}</button></footer></form>`;
++ return `<h2>${kind==="acme"?"新增 ACME 账号":"新增 DNS 服务商账号"}</h2><form data-cert-account-form><div class="traffic-edit-body" data-cert-modal-content><label class="settings-field"><span>账号类型</span><select name="kind" data-cert-account-kind><option value="acme" ${kind==="acme"?"selected":""}>ACME 签发账号</option><option value="dns" ${kind==="dns"?"selected":""}>DNS 服务商账号</option></select></label><label class="settings-field"><span>名称</span><input name="name" required maxlength="100"></label>${kind==="acme"?`<label class="settings-field"><span>签发机构</span><select name="ca" data-cert-account-ca>${[["letsencrypt-staging","Let’s Encrypt · 测试环境（默认）"],["letsencrypt","Let’s Encrypt · 正式环境"],["zerossl","ZeroSSL · 需要 EAB"]].map(([v,n])=>`<option value="${v}" ${ca===v?"selected":""}>${n}</option>`).join("")}</select></label><label class="settings-field"><span>联系邮箱</span><input type="email" name="email" required maxlength="254"></label>${ca==="zerossl"?'<label class="settings-field"><span>EAB Key ID</span><input name="eab_id" required autocomplete="off"></label><label class="settings-field"><span>EAB HMAC Key</span><input type="password" name="eab_key" required autocomplete="off"></label><p class="settings-hint">EAB 可在 ZeroSSL 的 Developer 页面生成。</p>':""}<div class="agent-share-meta"><div class="user-quota-options"><label><input type="checkbox" name="accept_terms" required>同意签发机构的服务条款</label></div><a class="button small" href="${ca==="zerossl"?"https://zerossl.com/terms/":"https://letsencrypt.org/repository/"}" target="_blank" rel="noopener noreferrer">查看条款</a></div>`:`<label class="settings-field"><span>服务商</span><select name="provider" data-cert-account-provider><option value="cloudflare" ${provider==="cloudflare"?"selected":""}>Cloudflare</option><option value="alidns" ${provider==="alidns"?"selected":""}>阿里云 DNS</option><option value="dnspod" ${provider==="dnspod"?"selected":""}>腾讯云 DNSPod</option></select></label><label class="settings-field"><span>DNS 托管主域名</span><input name="zone" required placeholder="example.com"></label>${(provider==="cloudflare"?[["token","API Token"]]:provider==="alidns"?[["access_key_id","AccessKey ID"],["access_key_secret","AccessKey Secret"]]:[["secret_id","Secret ID"],["secret_key","Secret Key"]]).map(([v,n])=>`<label class="settings-field"><span>${esc(n)}</span><input type="password" name="${v}" required autocomplete="off"></label>`).join("")}<details class="user-owned-nodes"><summary><span>所需 API 权限</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><ul><li>${provider==="cloudflare"?"需要指定区域的 Zone:Read 和 DNS:Edit。":provider==="alidns"?"需要 DescribeDomainRecords、AddDomainRecord、DeleteDomainRecord，限制到目标域名。":"需要 DNSPod DescribeDomain、DescribeRecordList、CreateRecord、DeleteRecord，限制到目标域名。"}</li></ul></details>`}<p class="alert error notice-message" data-cert-form-error role="alert" hidden></p></div><footer><button type="button" class="button" data-cert-close>取消</button><button class="button primary">${kind==="acme"?"注册并保存":"保存"}</button></footer></form>`;
+ }
+diff --git a/frontend/modules/certificate-selector.js b/frontend/modules/certificate-selector.js
+index 38ecb093..d0cfbe20 100644
+--- a/frontend/modules/certificate-selector.js
++++ b/frontend/modules/certificate-selector.js
+@@ -10,7 +10,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
+   const select = document.createElement("select"); select.name = "panel_certificate_id";select.setAttribute("aria-label","证书来源");
+   const local = new Option("节点已有证书 / 原有 TLS 方式", ""); select.add(local);
+   label.append(select); field.append(label);
+-  const summary = document.createElement("p"); summary.className="settings-hint cert-domains";summary.dataset.panelCertificateSummary="1";summary.setAttribute("role","status");field.append(summary);
++  const summary = document.createElement("p"); summary.className="settings-hint";summary.dataset.panelCertificateSummary="1";summary.setAttribute("role","status");field.append(summary);
+   let sniLabel;
+   if (!form.elements.namedItem("tls_server_name")) { sniLabel=document.createElement("label");sniLabel.textContent="TLS SNI / 证书域名";const sni=document.createElement("input");sni.name="tls_server_name";sni.value=plan?.tls_server_name||"";sni.placeholder="例如 edge.example.com";sniLabel.append(sni);field.append(sniLabel); }
+   const target = form.querySelector("[data-native-certificate]") || form.querySelector("[data-native-tls]");
+@@ -34,7 +34,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
+   const update = () => {
+     const active = Boolean(select.value);
+     const cert=items.find(item=>item.id===select.value);
+-    summary.hidden=!cert;summary.textContent=cert?`${cert.name} · ${cert.domains.join(" · ")} · 来源：${{caddy:"Caddy 托管",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · 有效期至 ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"}`:"";
++    summary.hidden=!cert;summary.textContent=cert?`${cert.domains.join(" · ")} · v${cert.version}`:"";
+     const sni=form.elements.namedItem("tls_server_name");if(active&&cert?.domains.length===1&&!cert.domains[0].startsWith("*.")&&sni&&!sni.value)sni.value=cert.domains[0];
+     const mode = form.elements.namedItem("tls_mode");
+     if (active && mode) { mode.value = "native"; mode.dispatchEvent(new Event("change", { bubbles: true })); }
+@@ -49,7 +49,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
+       control.readOnly = active;
+       control.closest("label").hidden = active;
+     }
+-    for (const note of form.querySelectorAll("p[data-native-certificate]")) { note.hidden = active; note.style.display = active ? "none" : ""; }
++    for (const note of form.querySelectorAll("p[data-native-certificate]")) { note.hidden = active; }
+     if (sniLabel) sniLabel.hidden = !active;
+     managed = active;
+   };
+diff --git a/frontend/modules/certificate-view.js b/frontend/modules/certificate-view.js
+index 6ee8f340..049bad70 100644
+--- a/frontend/modules/certificate-view.js
++++ b/frontend/modules/certificate-view.js
+@@ -8,40 +8,57 @@ export function createCertificateView({ esc, date }) {
+   const expiry = item => !item.not_after ? "尚未签发" : Date.parse(item.not_after) <= Date.now() ? "已过期" : `${Math.ceil((Date.parse(item.not_after)-Date.now())/86400000)} 天后到期`;
+   function page(items, filters, encryptionReady) {
+     const visible = items.filter(item => `${item.name} ${item.domains.join(" ")}`.toLowerCase().includes(filters.search.toLowerCase()) && (!filters.status||item.status===filters.status) && (!filters.source || item.source===filters.source) && (!filters.expiry || (item.not_after && Date.parse(item.not_after)-Date.now()<Number(filters.expiry)*86400000)));
+-    return `<section class="settings-workspace cert-center"><header class="settings-hero cert-hero"><div><p class="eyebrow">TLS / CERTIFICATES</p><h2>证书中心</h2><p>统一管理签发、授权与跨节点部署</p></div><div class="cert-summary"><strong>${items.length}</strong><span>可用资源</span><strong>${items.filter(i=>i.not_after&&Date.parse(i.not_after)-Date.now()<30*86400000).length}</strong><span>即将到期</span></div></header>
+-      <div class="users-toolbar cert-toolbar">
+-        <label class="cert-search"><span class="visually-hidden">搜索名称或域名</span><input data-cert-search type="search" placeholder="搜索名称或域名" value="${esc(filters.search)}"></label>
+-        <label><span class="visually-hidden">来源筛选</span><select data-cert-source><option value="">全部来源</option>${Object.entries(source).map(([key,name])=>`<option value="${key}" ${filters.source===key?"selected":""}>${name}</option>`).join("")}</select></label>
+-        <label><span class="visually-hidden">到期筛选</span><select data-cert-expiry><option value="">全部有效期</option><option value="30" ${filters.expiry==="30"?"selected":""}>30 天内到期</option><option value="0" ${filters.expiry==="0"?"selected":""}>已过期</option></select></label>
+-        <label><span class="visually-hidden">状态筛选</span><select data-cert-status><option value="">全部状态</option>${["issued","queued","waiting_dns","validating","failed","canceled","expired"].map(key=>`<option value="${key}" ${filters.status===key?"selected":""}>${esc(statusNames[key])}</option>`).join("")}</select></label>
+-        <div class="user-allocation-tools"><button class="button small" data-cert-refresh>刷新</button><button class="button small" data-cert-sources>Caddy 同步</button><button class="button small" data-cert-accounts>账号管理</button><button class="button primary small" data-cert-create ${encryptionReady?"":"disabled"}>新增证书</button></div>
++    return `<section class="settings-workspace users-workspace user-admin-workspace core-log-workspace cert-center"><header class="users-toolbar"><div class="users-title"><h2>证书中心</h2></div><div class="users-toolbar-actions"><button class="button small" data-cert-refresh>刷新</button><button class="button small" data-cert-sources>Caddy 同步</button><button class="button small" data-cert-accounts>账号管理</button><button class="button primary small" data-cert-create ${encryptionReady?"":"disabled"}>新增证书</button></div></header>
++      <div class="core-log-filters">
++        <label class="core-log-search"><span class="visually-hidden">搜索名称或域名</span><input data-cert-search type="search" placeholder="搜索名称或域名" value="${esc(filters.search)}"></label>
++        <label class="core-log-search"><span class="visually-hidden">来源筛选</span><select data-cert-source><option value="">全部来源</option>${Object.entries(source).map(([key,name])=>`<option value="${key}" ${filters.source===key?"selected":""}>${name}</option>`).join("")}</select></label>
++        <label class="core-log-search"><span class="visually-hidden">到期筛选</span><select data-cert-expiry><option value="">全部有效期</option><option value="30" ${filters.expiry==="30"?"selected":""}>30 天内到期</option><option value="0" ${filters.expiry==="0"?"selected":""}>已过期</option></select></label>
++        <label class="core-log-search"><span class="visually-hidden">状态筛选</span><select data-cert-status><option value="">全部状态</option>${["issued","queued","waiting_dns","validating","failed","canceled","expired"].map(key=>`<option value="${key}" ${filters.status===key?"selected":""}>${esc(statusNames[key])}</option>`).join("")}</select></label>
+       </div>
+-      ${encryptionReady?"":'<p class="alert error" role="alert">未配置加密密钥，请配置 QCH_CONFIG_ENCRYPTION_KEY。</p>'}
++      ${encryptionReady?"":'<p class="alert error notice-message" role="alert">未配置加密密钥，请配置 QCH_CONFIG_ENCRYPTION_KEY。</p>'}
+       <div class="settings-section user-allocation-panel">${visible.map(item=>`<article class="user-allocation-row">
+-        <div class="user-allocation-node"><strong>${esc(item.name)}</strong>${badge(item.status)}<small>${item.owned?"我的证书":"授权给我的证书"} · v${item.version}</small></div>
++        <div class="user-allocation-node"><strong>${esc(item.name)}</strong>${badge(item.status)}<span class="settings-hint">${item.owned?"我的证书":"授权给我的证书"} · v${item.version}</span></div>
+         <dl class="user-allocation-terms"><div><dt>域名</dt><dd>${item.domains.map(domain=>esc(domain)).join("<br>")}</dd></div><div><dt>证书</dt><dd>${esc(source[item.source]||item.source)} · ${esc(item.key_type.toUpperCase())}<small>${esc(ca[item.ca]||source[item.source])}</small></dd></div><div><dt>有效期</dt><dd>${esc(expiry(item))}<small>${item.not_after?esc(date(item.not_after)):""}</small></dd></div><div><dt>续期管理方</dt><dd>${item.source==="caddy"?"Caddy · "+(statusNames[item.sync_status]||item.sync_status):item.auto_renew?"已启用":item.method==="dns-manual"?"需要人工 DNS 配合":"未启用"}</dd></div><div><dt>实例同步</dt><dd>${item.binding_count||0} 个绑定${item.pending_count?` · ${item.pending_count} 个待处理`:""}</dd></div></dl>
+         <div class="user-allocation-row-actions"><button class="button small" data-cert-detail="${esc(item.id)}">详情</button></div>
+-      </article>`).join("")||`<div class="user-share-empty cert-empty"><strong>${items.length?"没有匹配的证书":"还没有证书"}</strong><p>${items.length?"调整搜索或筛选条件后重试。":"新增申请、导入已有证书，或查看 Caddy 自动同步。"}</p></div>`}</div>
++      </article>`).join("")||`<div class="user-share-empty"><strong>${items.length?"没有匹配的证书":"还没有证书"}</strong><p>${items.length?"调整搜索或筛选条件后重试。":"新增证书或查看 Caddy 同步。"}</p></div>`}</div>
+     </section>`;
+   }
+ 
++  // Match the existing settings sections, allocation metadata and sharing rows.
++  const terms = rows => `<div><dl class="user-allocation-terms">${rows.map(([name,value])=>`<div><dt>${name}</dt><dd>${value}</dd></div>`).join("")}</dl></div>`;
++  const panel = (title,body,actions="") => `<section class="settings-section user-allocation-panel"><header class="user-allocation-head"><div class="user-allocation-title"><h3>${title}</h3></div>${actions?`<div class="user-allocation-tools">${actions}</div>`:""}</header><div class="settings-subsection settings-form">${body}</div></section>`;
++  const disclosure = (title,body) => `<details class="user-owned-nodes"><summary><span>${title}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><ul><li>${body}</li></ul></details>`;
+   function detail({certificate:item,orders,bindings,grants,versions=[]}) {
+     const active = orders.find(order=>["queued","running","waiting_dns","validating","canceling"].includes(order.status));
+-    return `<div class="cert-detail"><header><h2>${esc(item.name)}</h2><p class="settings-hint cert-domains">${esc(item.domains.join(" · "))}</p></header><dl class="cert-detail-meta"><div><dt>来源 / 验证</dt><dd>${esc(source[item.source])} / ${esc(method[item.method]||"上传或本地生成")}</dd></div><div><dt>机构 / 密钥</dt><dd>${esc(ca[item.ca]||source[item.source])} / ${esc(item.key_type)}</dd></div><div><dt>有效期</dt><dd>${item.not_before?esc(date(item.not_before)):"—"} → ${item.not_after?esc(date(item.not_after)):"—"}</dd></div><div><dt>当前版本</dt><dd>v${item.version} · ${esc(expiry(item))}</dd></div>${item.agent_id?`<div><dt>HTTP-01 验证节点</dt><dd>${esc(item.agent_name||"验证节点")}</dd></div>`:""}</dl><details><summary>SHA-256 指纹</summary><code class="cert-wrap">${esc(item.fingerprint||"待签发")}</code></details>
+-      ${item.source==="caddy"?`<section class="cert-source-status"><h3>Caddy 来源与续期同步</h3><dl class="cert-detail-meta"><div><dt>来源节点</dt><dd>${esc(item.source_agent||"—")}</dd></div><div><dt>续期管理方</dt><dd>Caddy 自动续期</dd></div><div><dt>面板同步</dt><dd>${badge(item.sync_status||"pending")}</dd></div><div><dt>最近成功同步</dt><dd>${item.last_synced?esc(date(item.last_synced)):"尚未同步"}</dd></div><div><dt>信任来源</dt><dd>${esc({"system-trusted":"受面板信任库认可的 CA","self-signed":"自签来源",untrusted:"未受信任 / 测试 CA"}[item.environment]||"待核验")}</dd></div></dl>${item.sync_error?`<p class="cert-error" role="status">${esc(item.sync_error)}</p>`:""}<p class="settings-hint">Caddy 保持原证书的续期责任。面板接收新版本，再向仍有有效授权的绑定实例同步；不会重复创建 ACME 续期订单。</p><button class="button small" data-cert-sources>管理来源同步</button></section>`:""}
+-      ${item.source==="self-signed"?'<aside class="settings-hint">自签证书需在客户端手动信任。</aside>':""}
+-      ${item.version?`<a class="button" href="/api/v1/certificates/${item.id}/public-chain" download>下载公共证书链</a>`:""}
+-      ${item.owned?`<div class="cert-actions"><button class="button" data-cert-replace="${item.id}">替换版本</button>${item.source==="acme"?`<button class="button" data-cert-renew="${item.id}" ${active?"disabled":""}>申请续期</button><button class="button" data-cert-auto="${item.id}" data-enabled="${!item.auto_renew}" ${item.method==="dns-manual"?"disabled":""}>${item.auto_renew?"关闭":"开启"}自动续期</button>`:""}<button class="button" data-cert-share="${item.id}">使用授权</button><button class="button" data-cert-delete="${item.id}" ${bindings.length||active?"disabled":""}>删除证书</button></div>`:""}
+-      <section><h3>实例绑定与同步</h3><p class="muted-text">${item.owned?"":""}在协议配置中更换证书并部署，即可解绑。</p>${bindings.map(b=>`<div class="cert-record"><div><strong>${esc(b.agent_name||"绑定节点")} / ${esc(b.engine)}</strong><small>${esc(b.config_name||"协议配置")} · ${esc(b.username||"资源所有者")} · v${b.version} · ${b.authorized?"授权有效":"授权已撤销，保留当前部署，停止同步"}</small>${b.error?`<p class="cert-error">${esc(b.error)}</p>`:""}</div>${badge(b.status)}</div>`).join("")||'<p class="cert-empty-line">暂无绑定</p>'}</section>
+-      ${item.owned?`<section><h3>申请与续期记录</h3>${orders.map(order=>`<article class="cert-order"><header><strong>${esc(date(order.created_at))}</strong>${badge(order.status)}</header><p class="muted-text">阶段：${esc(stages[order.stage]||order.stage)} · 第 ${order.attempt} 次执行</p>${order.error?`<p role="status" class="cert-error">${esc(order.error)}</p>`:""}${order.challenges.map(c=>`<div class="cert-challenge"><strong>${esc(c.domain)}</strong>${badge(c.status==="pending"?"awaiting_challenge":c.status)}${c.status==="valid"&&!c.value?`<small>CA 授权仍有效</small>`:c.type==="dns-01"?`<dl><div><dt>名称 · TXT</dt><dd><code>${esc(c.name)}</code><button class="button small" data-cert-copy="${esc(c.name)}">复制名称</button></dd></div><div><dt>记录值</dt><dd><code>${esc(c.value)}</code><button class="button small" data-cert-copy="${esc(c.value)}">复制值</button></dd></div></dl>`:`<small>公网 80 端口 · /.well-known/acme-challenge/</small>`}</div>`).join("")}${order.status==="waiting_dns"?`<aside class="settings-hint">添加以上 TXT 记录后继续验证。完成后可删除本订单的记录。</aside><button class="button primary" data-cert-continue="${item.id}" data-order="${order.id}">检查记录并继续验证</button>`:""}${["queued","running","waiting_dns","validating"].includes(order.status)?`<button class="button" data-cert-cancel="${item.id}" data-order="${order.id}">取消订单并清理</button>`:""}${["succeeded","canceled","failed"].includes(order.status)&&item.method==="dns-manual"?'<p class="muted-text">验证已结束，可删除本订单列出的手动 TXT 值。</p>':""}</article>`).join("")||'<p class="cert-empty-line">暂无 ACME 订单</p>'}</section>`:""}
+-      <details><summary>证书版本历史 · ${versions.length}</summary>${versions.map(v=>`<div class="cert-record"><div><strong>v${v.version} · ${v.not_after?esc(date(v.not_after)):"—"}</strong><code class="cert-wrap">${esc(v.fingerprint)}</code></div></div>`).join("")}</details>
+-      <button class="button" data-cert-reload="${item.id}">刷新详情</button></div>`;
++    return `<h2>${esc(item.name)}</h2><div class="settings-form">
++      ${panel("证书信息",terms([
++        ["域名",esc(item.domains.join(" · "))],
++        ["来源 / 验证",`${esc(source[item.source])} / ${esc(method[item.method]||"上传或本地生成")}`],
++        ["机构 / 密钥",`${esc(ca[item.ca]||source[item.source])} / ${esc(item.key_type)}`],
++        ["生效时间",item.not_before?esc(date(item.not_before)):"—"],
++        ["到期时间",item.not_after?esc(date(item.not_after)):"—"],
++        ["当前版本",`v${item.version} · ${esc(expiry(item))}`],
++        ...(item.agent_id?[["HTTP-01 验证节点",esc(item.agent_name||"验证节点")]]:[])
++      ])+disclosure("SHA-256 指纹",`<code>${esc(item.fingerprint||"待签发")}</code>`)+
++      (item.source==="self-signed"?'<p class="settings-hint">自签证书需在客户端手动信任。</p>':""))}
++      <div class="user-allocation-tools">${item.version?`<a class="button small" href="/api/v1/certificates/${item.id}/public-chain" download>下载公共证书链</a>`:""}${item.owned?`<button class="button small" data-cert-replace="${item.id}">替换版本</button>${item.source==="acme"?`<button class="button small" data-cert-renew="${item.id}" ${active?"disabled":""}>申请续期</button><button class="button small" data-cert-auto="${item.id}" data-enabled="${!item.auto_renew}" ${item.method==="dns-manual"?"disabled":""}>${item.auto_renew?"关闭":"开启"}自动续期</button>`:""}<button class="button small" data-cert-share="${item.id}">使用授权</button><button class="button small danger-button" data-cert-delete="${item.id}" ${bindings.length||active?"disabled":""}>删除证书</button>`:""}</div>
++      ${item.source==="caddy"?panel("Caddy 来源与续期同步",terms([
++        ["来源节点",esc(item.source_agent||"—")],
++        ["续期管理方","Caddy 自动续期"],
++        ["面板同步",badge(item.sync_status||"pending")],
++        ["最近成功同步",item.last_synced?esc(date(item.last_synced)):"尚未同步"],
++        ["信任来源",esc({"system-trusted":"受信任 CA","self-signed":"自签来源",untrusted:"未受信任 / 测试 CA"}[item.environment]||"待核验")]
++      ])+(item.sync_error?`<p class="alert error notice-message" role="status">${esc(item.sync_error)}</p>`:""),'<button class="button small" data-cert-sources>管理来源同步</button>'):""}
++      ${panel("实例绑定与同步",(bindings.length?'<p class="settings-hint">更换证书并部署后解绑。</p>':"")+bindings.map(b=>`<div class="agent-share-recipient"><div class="agent-share-recipient-head"><div class="user-allocation-node"><strong>${esc(b.agent_name||"绑定节点")} / ${esc(b.engine)}</strong><span class="agent-share-usage">${esc(b.config_name||"协议配置")} · ${esc(b.username||"资源所有者")} · v${b.version} · ${b.authorized?"授权有效":"授权已撤销 · 停止同步"}</span></div>${badge(b.status)}</div>${b.error?`<p class="alert error notice-message">${esc(b.error)}</p>`:""}</div>`).join("")||( '<p class="settings-hint">暂无绑定</p>'))}
++      ${item.owned?panel("申请与续期记录",orders.map(order=>`<article class="agent-share-recipient"><div class="agent-share-meta"><strong class="agent-share-usage">${esc(date(order.created_at))}</strong>${badge(order.status)}</div><p class="settings-hint">${esc(stages[order.stage]||order.stage)} · 第 ${order.attempt} 次执行</p>${order.error?`<p role="status" class="alert error notice-message">${esc(order.error)}</p>`:""}${order.challenges.map(c=>`<div class="settings-form"><div class="user-allocation-tools"><strong class="agent-share-usage">${esc(c.domain)}</strong>${badge(c.status==="pending"?"awaiting_challenge":c.status)}</div>${c.status==="valid"&&!c.value?`<p class="settings-hint">CA 授权仍有效</p>`:c.type==="dns-01"?`<div class="settings-field"><span>名称 · TXT</span><code class="notice-message">${esc(c.name)}</code><div class="user-allocation-tools"><button class="button small" data-cert-copy="${esc(c.name)}">复制名称</button></div></div><div class="settings-field"><span>记录值</span><code class="notice-message">${esc(c.value)}</code><div class="user-allocation-tools"><button class="button small" data-cert-copy="${esc(c.value)}">复制值</button></div></div>`:`<p class="settings-hint">公网 80 端口 · /.well-known/acme-challenge/</p>`}</div>`).join("")}${order.status==="waiting_dns"?'<p class="settings-hint">添加以上 TXT 记录后继续验证。</p>':""}<div class="user-allocation-tools">${order.status==="waiting_dns"?`<button class="button primary small" data-cert-continue="${item.id}" data-order="${order.id}">继续验证</button>`:""}${["queued","running","waiting_dns","validating"].includes(order.status)?`<button class="button small" data-cert-cancel="${item.id}" data-order="${order.id}">取消申请</button>`:""}</div>${["succeeded","canceled","failed"].includes(order.status)&&item.method==="dns-manual"?'<p class="settings-hint">可删除本次验证的 TXT 记录。</p>':""}</article>`).join("")||'<p class="settings-hint">暂无 ACME 订单</p>'):""}
++      ${disclosure(`证书版本历史 · ${versions.length}`,versions.map(v=>`<div class="settings-field"><span>v${v.version} · ${v.not_after?esc(date(v.not_after)):"—"}</span><code class="notice-message">${esc(v.fingerprint)}</code></div>`).join("")||"暂无版本")}
++      <div class="user-allocation-tools"><button class="button small" data-cert-reload="${item.id}">刷新详情</button></div></div>`;
+   }
+   function sharing(item,grants,bindings) {
+-    return `<h2>使用授权</h2><div class="cert-detail"><div>
+-      <form data-cert-grant-form="${item.id}" class="agent-share-recipient"><div class="agent-share-recipient-head"><label class="settings-field"><span>用户账号</span><input name="username" required autocomplete="off"></label><button class="button primary small">授权</button></div><p class="alert error" data-cert-form-error role="alert" hidden></p></form>
+-      ${grants.map(g=>`<div class="agent-share-recipient"><div class="agent-share-recipient-head"><div class="settings-field"><strong>${esc(g.username)}</strong><small class="agent-share-usage">${bindings.filter(b=>b.owner_id===g.user_id).map(b=>`${esc(b.agent_name||"绑定节点")} / ${esc(b.engine)}`).join("<br>")||"未绑定实例"}</small></div><button class="button small" data-cert-revoke="${item.id}" data-username="${esc(g.username)}">撤销</button></div></div>`).join("")||'<p class="cert-empty-line">暂无授权</p>'}
+-    </div></div>`;
++    return `<h2>使用授权</h2><div class="settings-form">
++      <form data-cert-grant-form="${item.id}" class="agent-share-recipient"><div class="agent-share-recipient-head"><label class="settings-field"><span>用户账号</span><input name="username" required autocomplete="off"></label><button class="button primary small">授权</button></div><p class="alert error notice-message" data-cert-form-error role="alert" hidden></p></form>
++      <div>${grants.map(g=>`<div class="agent-share-recipient"><div class="agent-share-recipient-head"><div class="user-allocation-node"><strong>${esc(g.username)}</strong><span class="agent-share-usage">${bindings.filter(b=>b.owner_id===g.user_id).map(b=>`${esc(b.agent_name||"绑定节点")} / ${esc(b.engine)}`).join("<br>")||"未绑定实例"}</span></div><button class="button small danger-button" data-cert-revoke="${item.id}" data-username="${esc(g.username)}">撤销</button></div></div>`).join("")||'<p class="settings-hint">暂无授权</p>'}</div>
++    </div>`;
+   }
+-  return {page,detail,sharing,badge};
++  return {page,detail,sharing,badge,panel,terms};
+ }
+diff --git a/frontend/modules/certificates.js b/frontend/modules/certificates.js
+index 1aa3e2ae..984f97bc 100644
+--- a/frontend/modules/certificates.js
++++ b/frontend/modules/certificates.js
+@@ -12,25 +12,50 @@ export function installCertificates(ctx) {
+  const filters={search:"",source:"",expiry:"",status:""};
+  const current=()=>state.route==="certificates"&&state.data===accountData;
+  function close(preserveDraft=false){if(!preserveDraft)certificateDraft=null;const previous=dialog;dialog=null;previous?.close();previous?.remove();if(!preserveDraft){dialogReturnFocus?.focus?.({preventScroll:true});dialogReturnFocus=null;}}
+- function modalContent(html){const content=document.createElement("div");content.innerHTML=html;const heading=content.querySelector("h2");const title=heading?.textContent||"证书";heading?.remove();return{title,body:content.innerHTML};}
+- function modal(html){const trigger=dialog?dialogReturnFocus:document.activeElement;close(true);dialogReturnFocus=trigger;const content=modalContent(html);dialog=document.createElement("dialog");dialog.className="config-inbound-dialog config-common-dialog cert-dialog";dialog.setAttribute("aria-label",content.title);dialog.innerHTML=`<header class="config-inbound-heading"><div><h2>${esc(content.title)}</h2></div><button class="config-access-close" type="button" data-cert-close aria-label="关闭证书弹窗">×</button></header><div class="config-inbound-body" data-cert-modal-content>${content.body}</div>`;document.body.append(dialog);bindDialogBackdrop(dialog,()=>close());dialog.showModal();const opened=dialog;trapFocus(opened);opened.addEventListener("close",()=>{opened.remove();if(dialog===opened){dialog=null;certificateDraft=null;dialogReturnFocus?.focus?.({preventScroll:true});dialogReturnFocus=null;}});bind(dialog);}
++ function modalContent(html){const content=document.createElement("div");content.innerHTML=html;const heading=content.querySelector("h2");const title=heading?.textContent||"证书";heading?.remove();return{title,body:content.innerHTML,editor:Boolean(content.querySelector(":scope > form[data-cert-form], :scope > form[data-cert-account-form]"))};}
++ function modal(html,saved={}) {
++  const trigger=dialog?dialogReturnFocus:document.activeElement;
++  close(true);dialogReturnFocus=trigger;
++  const content=modalContent(html);
++  const editor=content.editor;
++  dialog=document.createElement("dialog");
++  dialog.className=editor?"traffic-edit-dialog user-allocation-dialog cert-dialog":"config-inbound-dialog config-common-dialog config-outbound-dialog cert-dialog";
++  dialog.setAttribute("aria-label",content.title);
++  dialog.innerHTML=`<header ${editor?"":'class="config-inbound-heading"'}><div><h2>${esc(content.title)}</h2></div><button class="${editor?"deploy-command-close":"config-access-close"}" type="button" data-cert-close aria-label="关闭证书弹窗">×</button></header>${editor?content.body:`<div class="config-inbound-body" data-cert-modal-content>${content.body}</div>`}`;
++  document.body.append(dialog);bindDialogBackdrop(dialog,()=>close());dialog.showModal();
++  const opened=dialog;trapFocus(opened);
++  opened.addEventListener("close",()=>{opened.remove();if(dialog===opened){dialog=null;certificateDraft=null;dialogReturnFocus?.focus?.({preventScroll:true});dialogReturnFocus=null;}});
++  restore(dialog.querySelector("form"),saved);bind(dialog);
++ }
++
+ 
+  function trapFocus(opened){opened.addEventListener("keydown",event=>{if(event.key!=="Tab"||event.defaultPrevented)return;const controls=[...opened.querySelectorAll('button,input:not([type="hidden"]),select,textarea,a[href],summary,[tabindex]')].filter(e=>!e.disabled&&e.tabIndex>=0&&e.getClientRects().length&&!e.closest('[inert]'));const first=controls[0],last=controls.at(-1);if(!first){event.preventDefault();return}if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}})}
+ 
+  async function resources(){const data=state.data;const result=await Promise.all([api("/certificate-accounts"),api("/agents").catch(()=>[]),api("/certificate-http-grants"),api("/certificate-http-nodes")]);if(data!==state.data)return false;[accounts,agents,httpGrants,httpNodes]=result;if(!Array.isArray(agents))agents=agents.items||[];return true;}
+  async function detail(id){const session=state.data;const data=await api(`/certificates/${id}`);if(session===state.data&&current()){modal(view.detail(data));dialog.dataset.certDetailId=id;}}
+  async function share(id){const session=state.data;const data=await api(`/certificates/${id}`);if(session===state.data&&current())modal(view.sharing(data.certificate,data.grants,data.bindings));}
+- async function create(source="acme",method="dns-api",replaceID="",saved={}){if(!await resources()||!current())return;modal(certificateForm({esc,accounts,agents,httpGrants,httpNodes,source,method,replaceID}));restore(dialog.querySelector("form"),saved);}
++ async function create(source="acme",method="dns-api",replaceID="",saved={}){if(!await resources()||!current())return;modal(certificateForm({esc,accounts,agents,httpGrants,httpNodes,source,method,replaceID}),saved);}
+  function restore(form,saved){for(const [name,value]of Object.entries(saved)){const input=form?.elements.namedItem(name);if(!input||input.type==="file")continue;if(input.type==="checkbox")input.checked=value===true;else input.value=value;}}
+  function read(form){const value=Object.fromEntries(new FormData(form));for(const input of form.querySelectorAll('[type="checkbox"]'))value[input.name]=input.checked;return value;}
+- function accountForm(kind="acme",provider="cloudflare",ca="letsencrypt-staging",saved={}){modal(certificateAccountForm(esc,kind,provider,ca));restore(dialog.querySelector("form"),saved);}
+- async function accountsPage(){if(!await resources()||!current())return;modal(`<h2>账号管理</h2>${certificateDraft?'<button class="button small" data-cert-return-draft>返回证书申请（保留填写）</button>':""}<div class="cert-actions"><button class="button primary" data-cert-new-account>新增 ACME 账号</button><button class="button" data-cert-new-dns>新增 DNS 账号</button></div><section>${accounts.map(a=>`<div class="cert-record"><div><strong>${esc(a.name)}</strong><small>${esc(a.kind==="acme"?`${a.ca} · ${a.email}`:a.provider)}</small></div><div class="cert-actions">${a.kind==="dns"?`<button class="button small" data-cert-update-account="${a.id}">更新凭据</button><button class="button small" data-cert-check-account="${a.id}">连接检查</button>`:""}<button class="button small" data-cert-delete-account="${a.id}">删除</button></div></div>`).join("")||'<p class="cert-empty-line">尚无账号</p>'}</section><section><h3>共享节点 HTTP-01 认证授权</h3><p class="settings-hint">节点所有者也可在<a href="#node-settings">节点共享设置</a>中一次配置允许域名。接受共享后即可使用；协议部署权限单独校验。</p><form class="stack-form cert-form" data-cert-http-grant><label>验证节点<select name="agent_id" required><option value="">选择节点</option>${agents.filter(a=>httpNodes.some(n=>n.id===a.id&&n.owned)).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>接收用户的账号名<input name="username" required autocomplete="off"></label><label>域名<input name="domain" required placeholder="auth.example.com"></label><button class="button">添加授权</button><p class="alert error" data-cert-form-error role="alert"></p></form>${httpGrants.map((g,index)=>`<div class="cert-record"><div><strong>${esc(g.domain)}</strong><small>${esc(agents.find(a=>a.id===g.agent_id)?.name||"节点不可用")} · ${esc(g.username||"共享用户")}</small></div>${agents.some(a=>a.id===g.agent_id&&httpNodes.some(n=>n.id===a.id&&n.owned))?`<button class="button small" data-cert-http-revoke="${index}">撤销</button>`:""}</div>`).join("")}</section>`);}
+- async function sourcePage(){const session=state.data;managedSources=await api("/certificate-managed-sources");if(session!==state.data||!current())return;modal(`<h2>Caddy 自动同步</h2><div class="cert-detail"><p class="settings-hint">Caddy 负责签发与续期，面板自动导入并向有效绑定实例分发新版本。暂停或解除关联仅停止面板同步。</p>${managedSources.map(s=>`<section class="cert-source-record"><div class="cert-record"><div><strong>${esc(s.domain)}</strong><small>${esc(s.agent_name)} · ${esc(s.engine)}</small></div>${view.badge(s.status)}</div><p class="muted-text">最近成功同步：${s.last_synced?esc(ctx.date(s.last_synced)):"尚未同步"}</p>${s.error?`<p class="cert-error" role="status">${esc(s.error)}</p>`:""}<div class="cert-actions">${s.certificate_id?`<button class="button small" data-cert-detail="${esc(s.certificate_id)}">查看证书</button>`:""}${s.status!=="deleted"?`<button class="button small" data-cert-source-action="${s.status==="paused"||s.status==="detached"?"resume":"pause"}" data-source="${esc(s.id)}">${s.status==="paused"||s.status==="detached"?"恢复同步":"暂停同步"}</button><button class="button small danger" data-cert-source-action="detach" data-source="${esc(s.id)}">解除来源关联</button>`:'<small>已删除；保留来源抑制记录，避免自动重建。</small>'}</div></section>`).join("")||'<p class="cert-empty-line">尚未发现已确认的托管 Caddy 部署。部署成功并升级 Agent 后自动检查；无需手动上传私钥。</p>'}<button class="button" data-cert-sources>重新检查状态</button></div>`);}
++ function accountForm(kind="acme",provider="cloudflare",ca="letsencrypt-staging",saved={}){modal(certificateAccountForm(esc,kind,provider,ca),saved);}
++ async function accountsPage(){
++  if(!await resources()||!current())return;
++  modal(`<h2>账号管理</h2><div class="settings-form">${certificateDraft?'<div class="user-allocation-tools"><button class="button small" data-cert-return-draft>返回证书申请</button></div>':""}
++   ${view.panel("签发与 DNS 账号",accounts.map(a=>`<div class="agent-share-recipient"><div class="agent-share-recipient-head"><div class="user-allocation-node"><strong>${esc(a.name)}</strong><span class="agent-share-usage">${esc(a.kind==="acme"?`${a.ca} · ${a.email}`:a.provider)}</span></div><button class="button small danger-button" data-cert-delete-account="${a.id}">删除</button></div>${a.kind==="dns"?`<div class="user-allocation-tools"><button class="button small" data-cert-update-account="${a.id}">更新凭据</button><button class="button small" data-cert-check-account="${a.id}">连接检查</button></div>`:""}</div>`).join("")||'<p class="settings-hint">尚无账号</p>','<button class="button primary small" data-cert-new-account>新增 ACME 账号</button><button class="button small" data-cert-new-dns>新增 DNS 账号</button>')}
++   ${view.panel("共享节点 HTTP-01 授权",`<p class="settings-hint">也可在<a href="#node-settings">节点共享设置</a>中配置允许域名。</p><form class="settings-form" data-cert-http-grant><div class="agent-share-fields"><label class="settings-field"><span>验证节点</span><select name="agent_id" required><option value="">选择节点</option>${agents.filter(a=>httpNodes.some(n=>n.id===a.id&&n.owned)).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label class="settings-field"><span>接收用户的账号名</span><input name="username" required autocomplete="off"></label></div><label class="settings-field"><span>域名</span><input name="domain" required placeholder="auth.example.com"></label><div class="user-allocation-tools"><button class="button primary small">添加授权</button></div><p class="alert error notice-message" data-cert-form-error role="alert" hidden></p></form><div>${httpGrants.map((g,index)=>`<div class="agent-share-recipient"><div class="agent-share-recipient-head"><div class="user-allocation-node"><strong>${esc(g.domain)}</strong><span class="agent-share-usage">${esc(agents.find(a=>a.id===g.agent_id)?.name||"节点不可用")} · ${esc(g.username||"共享用户")}</span></div>${agents.some(a=>a.id===g.agent_id&&httpNodes.some(n=>n.id===a.id&&n.owned))?`<button class="button small danger-button" data-cert-http-revoke="${index}">撤销</button>`:""}</div></div>`).join("")}</div>`)}
++  </div>`);
++ }
++ async function sourcePage(){
++  const session=state.data;managedSources=await api("/certificate-managed-sources");if(session!==state.data||!current())return;
++  modal(`<h2>Caddy 自动同步</h2><div class="settings-form"><p class="settings-hint">Caddy 自动续期，面板同步新版本。</p>${managedSources.map(s=>view.panel(esc(s.domain),view.terms([
++   ["来源节点",esc(s.agent_name)], ["内核",esc(s.engine)], ["状态",view.badge(s.status)], ["最近成功同步",s.last_synced?esc(ctx.date(s.last_synced)):"尚未同步"]
++  ])+(s.error?`<p class="alert error notice-message" role="status">${esc(s.error)}</p>`:"")+`<div class="user-allocation-tools">${s.certificate_id?`<button class="button small" data-cert-detail="${esc(s.certificate_id)}">查看证书</button>`:""}${s.status!=="deleted"?`<button class="button small" data-cert-source-action="${s.status==="paused"||s.status==="detached"?"resume":"pause"}" data-source="${esc(s.id)}">${s.status==="paused"||s.status==="detached"?"恢复同步":"暂停同步"}</button><button class="button small danger-button" data-cert-source-action="detach" data-source="${esc(s.id)}">解除来源关联</button>`:'<span class="settings-hint">已停止自动导入</span>'}</div>`)).join("")||'<p class="user-share-empty">暂无 Caddy 来源，部署后自动同步。</p>'}<div class="user-allocation-tools"><button class="button small" data-cert-sources>重新检查状态</button></div></div>`);
++ }
+  async function submit(form,work){const button=form.querySelector('button:not([type="button"])');const error=form.querySelector("[data-cert-form-error]");if(button?.disabled)return;form.setAttribute("aria-busy","true");if(button)button.disabled=true;if(error){error.textContent="";error.hidden=true;}try{await work();if(!current())return;notify("操作已完成");}catch(e){if(error&&form.isConnected){error.textContent=e.message;error.hidden=false;error.tabIndex=-1;error.focus();}else if(current())notify(e.message,"error");}finally{if(button)button.disabled=false;form.removeAttribute("aria-busy");}}
+  function bind(root){
+   root.querySelectorAll("[data-cert-close]").forEach(b=>b.onclick=()=>close());
+   root.querySelectorAll("[data-cert-sources]").forEach(b=>b.onclick=()=>sourcePage().catch(e=>notify(e.message,"error")));
+-  root.querySelectorAll("[data-cert-source-action]").forEach(b=>b.onclick=async()=>{const action=b.dataset.certSourceAction;if(action==="detach"&&!await confirmAction("停止面板自动导入和版本同步，保留当前证书、授权与绑定。可在来源管理中恢复。","解除来源关联"))return;b.disabled=true;try{await api(`/certificate-managed-sources/${b.dataset.source}`,{method:"PUT",body:{action}});await sourcePage()}catch(e){notify(e.message,"error");b.disabled=false}});
++  root.querySelectorAll("[data-cert-source-action]").forEach(b=>b.onclick=async()=>{const action=b.dataset.certSourceAction;if(action==="detach"&&!await confirmAction("停止自动导入和版本同步？现有证书和绑定保留，可恢复同步。","解除来源关联"))return;b.disabled=true;try{await api(`/certificate-managed-sources/${b.dataset.source}`,{method:"PUT",body:{action}});await sourcePage()}catch(e){notify(e.message,"error");b.disabled=false}});
+   root.querySelectorAll("[data-cert-create]").forEach(b=>b.onclick=()=>create().catch(e=>notify(e.message,"error")));
+   root.querySelectorAll("[data-cert-accounts],[data-cert-open-accounts]").forEach(b=>b.onclick=()=>{if(b.hasAttribute("data-cert-open-accounts"))certificateDraft=read(b.closest("form"));accountsPage().catch(e=>notify(e.message,"error"))});
+   root.querySelectorAll("[data-cert-return-draft]").forEach(b=>b.onclick=()=>create(certificateDraft.source,certificateDraft.method,"",certificateDraft));
+@@ -41,20 +66,21 @@ export function installCertificates(ctx) {
+   root.querySelectorAll("[data-cert-refresh]").forEach(b=>b.onclick=()=>page().catch(e=>notify(e.message,"error")));
+   root.querySelectorAll("[data-cert-new-account]").forEach(b=>b.onclick=()=>accountForm());
+   root.querySelectorAll("[data-cert-new-dns]").forEach(b=>b.onclick=()=>accountForm("dns"));
+-  for(const [attribute,action]of [["certRenew","renew"],["certAuto","auto-renew"],["certDelete",""]])root.querySelectorAll(`[data-${attribute.replace(/[A-Z]/g,c=>"-"+c.toLowerCase())}]`).forEach(b=>b.onclick=async()=>{if(action===""&&!await confirmAction("证书版本将删除；请确认已处理所有实例绑定。","删除证书",{title:"删除证书？"}))return;b.disabled=true;try{const id=b.dataset[attribute];await api(`/certificates/${id}${action?"/"+action:""}`,{method:action===""?"DELETE":action==="auto-renew"?"PUT":"POST",...(action==="auto-renew"?{body:{enabled:b.dataset.enabled==="true"}}:{})});close();await page();if(action==="renew")await detail(id);}catch(e){notify(e.message,"error");b.disabled=false;}});
++  for(const [attribute,action]of [["certRenew","renew"],["certAuto","auto-renew"],["certDelete",""]])root.querySelectorAll(`[data-${attribute.replace(/[A-Z]/g,c=>"-"+c.toLowerCase())}]`).forEach(b=>b.onclick=async()=>{if(action===""&&!await confirmAction("删除此证书及其版本？","删除证书",{title:"删除证书？"}))return;b.disabled=true;try{const id=b.dataset[attribute];await api(`/certificates/${id}${action?"/"+action:""}`,{method:action===""?"DELETE":action==="auto-renew"?"PUT":"POST",...(action==="auto-renew"?{body:{enabled:b.dataset.enabled==="true"}}:{})});close();await page();if(action==="renew")await detail(id);}catch(e){notify(e.message,"error");b.disabled=false;}});
+   root.querySelectorAll("[data-cert-continue],[data-cert-cancel]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{const id=b.dataset.certContinue||b.dataset.certCancel;await api(`/certificates/${id}/orders/${b.dataset.order}${b.dataset.certContinue?"/continue":""}`,{method:b.dataset.certContinue?"POST":"DELETE"});await detail(id);}catch(e){notify(e.message,"error");b.disabled=false;}});
+-  root.querySelectorAll("[data-cert-revoke]").forEach(b=>b.onclick=async()=>{if(!await confirmAction("现有部署保留以维持业务，停止待执行分发和后续同步。受影响实例已列在用户下方，请协调替换并部署。","撤销授权",{title:"撤销使用授权？"}))return;try{await api(`/certificates/${b.dataset.certRevoke}/grants`,{method:"DELETE",body:{username:b.dataset.username}});await share(b.dataset.certRevoke);}catch(e){notify(e.message,"error")}});
++  root.querySelectorAll("[data-cert-revoke]").forEach(b=>b.onclick=async()=>{if(!await confirmAction("撤销后停止分发和同步，现有部署保留。","撤销授权",{title:"撤销使用授权？"}))return;try{await api(`/certificates/${b.dataset.certRevoke}/grants`,{method:"DELETE",body:{username:b.dataset.username}});await share(b.dataset.certRevoke);}catch(e){notify(e.message,"error")}});
+   const grant=root.querySelector("[data-cert-grant-form]");if(grant)grant.onsubmit=e=>{e.preventDefault();submit(grant,async()=>{await api(`/certificates/${grant.dataset.certGrantForm}/grants`,{method:"POST",body:read(grant)});await share(grant.dataset.certGrantForm)})};
+   root.querySelectorAll("[data-cert-update-account]").forEach(b=>b.onclick=()=>{const a=accounts.find(a=>a.id===b.dataset.certUpdateAccount);accountForm("dns",a.provider,"",{name:a.name});const f=dialog.querySelector("form");f.dataset.update=a.id;f.elements.kind.disabled=true;f.elements.provider.disabled=true;dialog.querySelector("h2").textContent="更新 DNS 凭据";});
+-  root.querySelectorAll("[data-cert-check-account]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api(`/certificate-accounts/${b.dataset.certCheckAccount}/check`,{method:"POST"});notify("DNS 读取连接检查成功；写入权限在签发时检查")}catch(e){notify(e.message,"error")}finally{b.disabled=false}});
++  root.querySelectorAll("[data-cert-check-account]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api(`/certificate-accounts/${b.dataset.certCheckAccount}/check`,{method:"POST"});notify("DNS 读取连接正常")}catch(e){notify(e.message,"error")}finally{b.disabled=false}});
+   root.querySelectorAll("[data-cert-delete-account]").forEach(b=>b.onclick=async()=>{try{await api(`/certificate-accounts/${b.dataset.certDeleteAccount}`,{method:"DELETE"});await accountsPage()}catch(e){notify(e.message,"error")}});
+   root.querySelectorAll("[data-cert-http-revoke]").forEach(b=>b.onclick=async()=>{try{await api("/certificate-http-grants",{method:"DELETE",body:httpGrants[Number(b.dataset.certHttpRevoke)]});await accountsPage()}catch(e){notify(e.message,"error")}});
+   const httpForm=root.querySelector("[data-cert-http-grant]");if(httpForm)httpForm.onsubmit=e=>{e.preventDefault();submit(httpForm,async()=>{await api("/certificate-http-grants",{method:"POST",body:read(httpForm)});await accountsPage()})};
+   const form=root.querySelector("[data-cert-form]");if(form){
+    for(const control of form.querySelectorAll("[data-cert-form-source],[data-cert-form-method]"))control.onchange=()=>{const data={...(certificateDraft||{}),...read(form)};certificateDraft=data;create(data.source,data.method||"dns-api","",data)};
+-   const nodes=form.querySelector('[name="agent_id"]');if(nodes){const update=()=>{const node=httpNodes.find(n=>n.id===nodes.value);const text=form.querySelector('[data-cert-node-scope]');text.textContent=node?(node.owned?"可认证本节点上的域名；需通过公网预检查。":"允许域名："+node.domains.join(" · ")):"请选择可用节点。不可用原因显示在选项与下方列表。"};nodes.onchange=update;update();}
++   const nodes=form.querySelector('[name="agent_id"]');if(nodes){const update=()=>{const node=httpNodes.find(n=>n.id===nodes.value);const text=form.querySelector('[data-cert-node-scope]');text.textContent=node?(node.owned?"自有节点":"允许域名："+node.domains.join(" · ")):""};nodes.onchange=update;update();}
+    const methodControl=form.elements.namedItem("method");const domainsControl=form.elements.namedItem("domains");if(methodControl?.value==="http-01"&&domainsControl){const validate=()=>domainsControl.setCustomValidity(domainsControl.value.split(/[\n,，]+/).some(v=>v.trim().startsWith("*."))?"HTTP-01 不支持泛域名，请选择 DNS API 或手动 DNS。":"");domainsControl.addEventListener("input",validate);validate();}
+-   form.querySelectorAll("[data-cert-file]").forEach(input=>input.onchange=async()=>{const file=input.files[0];if(!file)return;if(file.size>256*1024){form.querySelector("[data-cert-form-error]").textContent="文件不得超过 256 KiB";return};form.elements.namedItem(input.dataset.certFile).value=await file.text()});
++   form.querySelectorAll("[data-cert-pick-file]").forEach(button=>button.onclick=()=>form.querySelector(`[data-cert-file="${button.dataset.certPickFile}"]`).click());
++   form.querySelectorAll("[data-cert-file]").forEach(input=>input.onchange=async()=>{const file=input.files[0];if(!file)return;if(file.size>256*1024){const error=form.querySelector("[data-cert-form-error]");error.hidden=false;error.textContent="文件不得超过 256 KiB";return};form.elements.namedItem(input.dataset.certFile).value=await file.text();form.querySelector(`[data-cert-file-name="${input.dataset.certFile}"]`).textContent=file.name;});
+    form.onsubmit=e=>{e.preventDefault();submit(form,async()=>{const data=read(form);const payload=form.dataset.replace?{certificate:data.certificate,private_key:data.private_key}:{name:data.name,source:data.source,...(data.source==="import"?{certificate:data.certificate,private_key:data.private_key}:{domains:data.domains.split(/[\n,，]+/).map(v=>v.trim()).filter(Boolean),key_type:data.key_type,...(data.source==="self-signed"?{days:Number(data.days)}:{method:data.method,account_id:data.account_id,dns_account_id:data.dns_account_id||"",agent_id:data.agent_id||"",auto_renew:Boolean(data.auto_renew)})})};const cert=await api(form.dataset.replace?`/certificates/${form.dataset.replace}/replace`:"/certificates",{method:"POST",body:payload});close();await page();await detail(cert.id)})};
+   }
+   const account=root.querySelector("[data-cert-account-form]");if(account){for(const control of account.querySelectorAll("[data-cert-account-kind],[data-cert-account-provider],[data-cert-account-ca]"))control.onchange=()=>{const data=read(account);accountForm(data.kind,data.provider||"cloudflare",data.ca||"letsencrypt-staging",data)};account.onsubmit=e=>{e.preventDefault();submit(account,async()=>{const data=read(account);await api(account.dataset.update?`/certificate-accounts/${account.dataset.update}/credentials`:"/certificate-accounts",{method:account.dataset.update?"PUT":"POST",body:{name:data.name,kind:data.kind,...(data.kind==="acme"?{ca:data.ca,email:data.email,eab_id:data.eab_id||"",eab_key:data.eab_key||"",accept_terms:data.accept_terms}:{provider:data.provider,credentials:{zone:data.zone,...Object.fromEntries(["token","access_key_id","access_key_secret","secret_id","secret_key"].filter(k=>data[k]).map(k=>[k,data[k]]))}})}});await accountsPage()})}}
+@@ -65,6 +91,6 @@ export function installCertificates(ctx) {
+  // secret form and releases its in-memory input values.
+  let poll;
+  const dispose=()=>{clearInterval(poll);close();items=[];accounts=[];agents=[];httpGrants=[];httpNodes=[];managedSources=[];certificateDraft=null;lastPageMarkup="";accountData=null;Object.assign(filters,{search:"",source:"",expiry:"",status:""});};
+- return async()=>{dispose();await page();const session=state.data;const signal=state.routeSignal;signal?.addEventListener("abort",dispose,{once:true});poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;try{const id=dialog?.dataset.certDetailId;if(id){const data=await api(`/certificates/${id}`);if(session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector(".config-inbound-heading h2").textContent=rendered.title;if(content.innerHTML===rendered.body)return;const focused=document.activeElement;const focusKey=focused?.getAttribute("data-cert-reload")||focused?.getAttribute("data-cert-copy");content.innerHTML=rendered.body;if(focusKey)[...content.querySelectorAll("button")].find(b=>b.dataset.certReload===focusKey||b.dataset.certCopy===focusKey)?.focus({preventScroll:true});content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog&&items.some(i=>i.source==="caddy"||["queued","running","validating","canceling"].includes(i.status)))await page(true)}catch{/* Keep the existing view; explicit refresh reports errors. */}},4000)};
++ return async()=>{dispose();await page();const session=state.data;const signal=state.routeSignal;signal?.addEventListener("abort",dispose,{once:true});poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;try{const id=dialog?.dataset.certDetailId;if(id){const data=await api(`/certificates/${id}`);if(session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector("header h2").textContent=rendered.title;if(content.innerHTML===rendered.body)return;const focused=document.activeElement;const focusKey=focused?.getAttribute("data-cert-reload")||focused?.getAttribute("data-cert-copy");content.innerHTML=rendered.body;if(focusKey)[...content.querySelectorAll("button")].find(b=>b.dataset.certReload===focusKey||b.dataset.certCopy===focusKey)?.focus({preventScroll:true});content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog&&items.some(i=>i.source==="caddy"||["queued","running","validating","canceling"].includes(i.status)))await page(true)}catch{/* Keep the existing view; explicit refresh reports errors. */}},4000)};
+ 
+ }
+diff --git a/frontend/modules/server-plan-managed-tls.js b/frontend/modules/server-plan-managed-tls.js
+index 18c11e4b..6fab8e3a 100644
+--- a/frontend/modules/server-plan-managed-tls.js
++++ b/frontend/modules/server-plan-managed-tls.js
+@@ -7,7 +7,7 @@ export function managedTLSPlanFields(protocol, plan, esc) {
+       <header><strong>域名接入</strong></header>
+       <div class="plan-fields two">
+         <label><span data-tls-domain-label>域名</span><input name="tls_server_name" value="${esc(plan.tls_server_name || "")}" placeholder="例如 proxy.example.com" autocomplete="off"><small data-managed-tls-hint></small></label>
+-        <label data-managed-tls>公网 HTTPS 端口<input name="tls_public_port" type="number" min="1" max="65535" value="${Number(plan.tls_public_port || 443)}"><small>客户端连接此端口，默认 443，可自定义。</small></label>
++        <label data-managed-tls>公网 HTTPS 端口<input name="tls_public_port" type="number" min="1" max="65535" value="${Number(plan.tls_public_port || 443)}"></label>
+       </div>
+       <p class="tls-help" data-managed-tls-route></p>
+     </section>
+@@ -32,17 +32,17 @@ export function managedTLSPlanFields(protocol, plan, esc) {
+           </div>
+           <div class="plan-fields two">
+             <label>传输<select name="transport"><option value="${esc(plan.transport)}">${plan.transport === "http" ? "HTTP / H2" : plan.transport === "httpupgrade" ? "HTTPUpgrade" : "WebSocket"}</option></select></label>
+-            <label data-transport-path>路径<input name="transport_path" value="${esc(plan.transport_path)}"><small>已自动生成，反代与客户端使用相同路径。</small></label>
+-            <label data-transport-host>HTTP Host<input name="transport_host" value="${esc(plan.transport_host || "")}" maxlength="253" placeholder="留空使用域名"><small>需要独立 Host 时填写；不会修改证书域名。</small></label>
++            <label data-transport-path>路径<input name="transport_path" value="${esc(plan.transport_path)}"></label>
++            <label data-transport-host>HTTP Host<input name="transport_host" value="${esc(plan.transport_host || "")}" maxlength="253" placeholder="留空使用域名"></label>
+             ${plan.transport === "http" ? `<label data-http-method>HTTP 方法<input name="transport_http_method" value="${esc(plan.transport_http_method || "")}" placeholder="留空使用 PUT"></label>` : ""}
+             <label>ALPN<input name="tls_alpn" value="${esc(plan.tls_alpn || "")}" placeholder="留空使用传输默认值"></label>
+           </div>
+-          <div class="plan-fields one" data-caddy-acme><label>ACME 邮箱（可选覆盖）<input name="tls_acme_email" type="email" maxlength="254" value="${esc(plan.tls_acme_email || "")}" placeholder="留空使用本账号系统设置中的邮箱"><small>预设值优先于账号默认值；两处均未设置时仅尝试 Let’s Encrypt。填写邮箱可启用 ZeroSSL 自动账户绑定与回退。</small></label></div>
++          <div class="plan-fields one" data-caddy-acme><label>ACME 邮箱（可选覆盖）<input name="tls_acme_email" type="email" maxlength="254" value="${esc(plan.tls_acme_email || "")}" placeholder="留空使用本账号系统设置中的邮箱"><small>留空使用账号默认邮箱；填写后可启用 ZeroSSL 回退。</small></label></div>
+           <div class="plan-fields two" data-native-certificate>
+             <label>证书路径<input name="certificate_path" value="${esc(plan.certificate_path || "")}"></label>
+             <label>私钥路径<input name="private_key_path" value="${esc(plan.private_key_path || "")}"></label>
+           </div>
+-          <div class="plan-fields one" data-native-certificate><label>客户端信任证书（可选 PEM）<textarea name="tls_client_certificate" rows="4" placeholder="留空使用系统信任根；自签证书填入公共证书">${esc(plan.tls_client_certificate || "")}</textarea><small>仅填写公共证书；指定后使用 sing-box JSON 导出。</small></label></div>
++          <div class="plan-fields one" data-native-certificate><label>客户端信任证书（可选 PEM）<textarea name="tls_client_certificate" rows="4" placeholder="留空使用系统信任根；自签证书填入公共证书">${esc(plan.tls_client_certificate || "")}</textarea><small>指定后使用 sing-box JSON 导出。</small></label></div>
+         </div>
+       </details>
+     </section>
+diff --git a/frontend/modules/server-plan-xhttp.js b/frontend/modules/server-plan-xhttp.js
+index ec830162..c25f78d7 100644
+--- a/frontend/modules/server-plan-xhttp.js
++++ b/frontend/modules/server-plan-xhttp.js
+@@ -16,10 +16,10 @@ export function xhttpProtocolOptions(plan, protocol) {
+   const download = extra.downloadSettings;
+   const settings = download?.xhttpSettings || {};
+   const security = download?.tlsSettings || download?.realitySettings || {};
+-  const basic = `<details class="preset-option-panel xhttp-options" open><summary><b>${group ? "组合公共参数与客户端入口" : "XHTTP · 独立部署"}</b></summary><div class="plan-fields two">${input("transport_host", "服务端 XHTTP Host", plan.transport_host, "留空接受任意 Host；填写后两端必须完全匹配。")}${mode("xhttp_mode", plan.xhttp_mode)}${input("client_address", group ? "Reality 连接地址" : "上传连接地址", plan.client_address, "留空使用节点自动识别地址；IPv6 不附端口。")}${input("client_port", group ? "Reality 连接端口" : "客户端连接端口", plan.client_port || plan.port, "CDN 客户端端口与源站监听端口可以不同。", "number")}${input("client_host", group ? "Reality XHTTP Host（可留空）" : "上传 XHTTP Host", plan.client_host, "与地址、SNI 分开维护；CDN 需填写有效站点 Host。")}</div><p class="validation-note">${group ? "公共端口由 Xray Reality 监听；HTTP 回落与本地 Nginx TLS 目标汇入同一个 XHTTP 后端。单独混合方案只创建所需公共入口与后端；五合一额外启用 Vision 客户端。" : "Xray 直接监听并处理 XHTTP，无需安装 Nginx / Caddy。服务端 mode 固定 auto，允许客户端选择上传模式。"}</p></details>`;
+-  const tlsPanel = tls ? `<details class="preset-option-panel xhttp-options" open><summary><b>${group ? "TLS/CDN 入口与本地反代" : "原生 TLS · 域名与信任"}</b></summary><div class="plan-fields two">${input("tls_server_name", "TLS SNI / 证书域名（必填）", plan.tls_server_name)}${group ? input("xhttp_tls_address", "TLS/CDN 连接地址", plan.xhttp_tls_address, "留空使用 TLS SNI；可填写 CDN 域名或指定 IP。") : ""}${group ? input("xhttp_tls_client_port", "TLS/CDN 连接端口", plan.xhttp_tls_client_port || plan.client_port || plan.port, "CDN 边缘连接端口；可与源站端口不同。", "number") + input("xhttp_tls_host", "TLS/CDN XHTTP Host", plan.xhttp_tls_host || plan.tls_server_name, "与连接地址、TLS SNI 独立维护。") : ""}${input("tls_alpn", "服务端 ALPN", plan.tls_alpn || "h2,http/1.1", group ? "组合反代固定 h2。" : "逗号分隔；建议 h2,http/1.1。")}${input("tls_client_alpn", "客户端 ALPN", plan.tls_client_alpn || "h2", "建议 h2；h3 需要 CDN 支持及 UDP 可达，组合源站使用 TCP/h2。")}<label>CDN<select name="xhttp_cdn">${[["none", "直连"], ["cloudflare", "Cloudflare"], ["other", "其他 CDN"]].map(([key, label]) => `<option value="${key}"${key === (plan.xhttp_cdn || "none") ? " selected" : ""}>${label}</option>`).join("")}</select></label>${group ? input("certificate_path", "节点证书路径（必填）", plan.certificate_path) + input("private_key_path", "节点私钥路径（必填）", plan.private_key_path) : ""}</div><p class="validation-note">客户端证书验证始终开启。直连须使用客户端信任且覆盖 SNI 的证书。CDN 域名须启用代理，路径禁用缓存、允许长请求与流式传输，回源使用 HTTPS 严格验证。CDN 源站证书仅供 CDN 信任，不能代替客户端对边缘证书的验证。${group ? "组合证书须同时覆盖 Reality SNI 与 TLS SNI；证书目录 root:qcontrolhub-core 0750，私钥 0640。Nginx 使用独立受管配置，保留节点现有站点。" : "证书由节点维护，更新文件后重新部署。"}</p></details>` : "";
+-  const split = group ? "" : `<details class="preset-option-panel xhttp-options"${download ? " open" : ""}><summary><b>上下行分离 · 独立下载端点</b></summary><label class="tls-switch"><input type="checkbox" name="xhttp_split" value="1"${download ? " checked" : ""}><strong>启用独立下载参数</strong></label><div data-xhttp-download${download ? "" : " hidden"}><div class="plan-fields two">${input("xhttp_download_address", "下载连接地址", download?.address)}${input("xhttp_download_port", "下载连接端口", download?.port || plan.client_port || plan.port, "", "number")}${input("xhttp_download_sni", "下载 SNI", security.serverName || (tls ? plan.tls_server_name : plan.reality_server_name))}${input("xhttp_download_host", "下载 XHTTP Host", settings.host)}${tls ? input("xhttp_download_alpn", "下载 TLS ALPN", security.alpn?.join(",") || "h2") : ""}</div><button class="button small" type="button" data-xhttp-swap>交换上传与下载地址</button><p class="validation-note">两个端点须到达同一个 XHTTP 入站与相同路径。Reality 双栈需监听 ::、节点具备 IPv4/IPv6 入口且客户端两端均可达；单栈也可使用指向同一后端的两个可达入口。交换仅交换连接地址与端口，SNI / Host 仍分别维护。</p></div></details>`;
+-  const advanced = `<details class="preset-option-panel xhttp-options"><summary><b>XHTTP 高级参数</b></summary><div class="plan-fields two">${protocol.uses_reality && !group ? input("reality_target", "公网 Reality target", plan.reality_target, "公网域名:端口；留空使用所选 SNI:443，保留公网 DNS 与 TLS 校验。") : ""}${protocol.uses_reality ? input("reality_server_names", "允许的 Reality SNI", plan.reality_server_names || plan.reality_server_name, "逗号分隔；客户端所选 SNI 必须在此列表中。") : ""}${group ? input("xhttp_backend_port", "内部 XHTTP 端口", plan.xhttp_backend_port, "仅监听 127.0.0.1，须与所有实例端口不同。", "number") + input("xhttp_tls_port", "本地 TLS 目标端口", plan.xhttp_tls_port, "仅监听 127.0.0.1，由受管 Nginx 提供。", "number") : ""}</div><div class="plan-fields one"><label>客户端 extra（完整 JSON）<textarea name="xhttp_extra" rows="6" spellcheck="false">${esc(plan.xhttp_extra || "{}")}</textarea><small>完整保留 downloadSettings、xmux 与 sockopt。分离表单只更新对应基础字段；其余参数保留。stream-one 不支持分离；maxConcurrency 与 maxConnections 至少一项为 0。hMaxReusableSecs 请使用已验证的 26.3.27；旧 cMaxLifetimeMs 需手动换算为秒。</small></label><label>服务端 extra（JSON）<textarea name="xhttp_server_extra" rows="5" spellcheck="false">${esc(plan.xhttp_server_extra || "{}")}</textarea><small>例如 scMaxEachPostBytes、scMaxBufferedPosts、noSSEHeader。不要填写客户端 downloadSettings / xmux。</small></label></div><p class="validation-note">两端最低 Xray 24.12.15；当前验证版本 26.3.27。此版本 Reality auto：无分离使用 stream-one，有分离使用 stream-up；TLS auto 使用 packet-up。建议保持 auto，按入口能力选择显式模式。HTTP/1.1 单 ALPN 使用标准 TLS 指纹（unsafe 仅表示不用 uTLS，证书验证仍开启）。完整 Xray JSON 支持所有参数；复杂分离不降级为不完整分享链接。</p></details>`;
++  const basic = `<details class="preset-option-panel xhttp-options" open><summary><b>${group ? "组合公共参数与客户端入口" : "XHTTP · 独立部署"}</b></summary><div class="plan-fields two">${input("transport_host", "服务端 XHTTP Host", plan.transport_host, "留空接受任意 Host；填写后两端必须完全匹配。")}${mode("xhttp_mode", plan.xhttp_mode)}${input("client_address", group ? "Reality 连接地址" : "上传连接地址", plan.client_address, "留空使用节点自动识别地址；IPv6 不附端口。")}${input("client_port", group ? "Reality 连接端口" : "客户端连接端口", plan.client_port || plan.port, "CDN 客户端端口与源站监听端口可以不同。", "number")}${input("client_host", group ? "Reality XHTTP Host（可留空）" : "上传 XHTTP Host", plan.client_host, "与地址、SNI 分开维护；CDN 需填写有效站点 Host。")}</div><p class="validation-note">${group ? "公共端口使用 Xray Reality，Nginx 提供本地 TLS；五合一同时启用 Vision。" : "Xray 直接监听；服务端 mode 为 auto。"}</p></details>`;
++  const tlsPanel = tls ? `<details class="preset-option-panel xhttp-options" open><summary><b>${group ? "TLS/CDN 入口与本地反代" : "原生 TLS · 域名与信任"}</b></summary><div class="plan-fields two">${input("tls_server_name", "TLS SNI / 证书域名（必填）", plan.tls_server_name)}${group ? input("xhttp_tls_address", "TLS/CDN 连接地址", plan.xhttp_tls_address, "留空使用 TLS SNI；可填写 CDN 域名或指定 IP。") : ""}${group ? input("xhttp_tls_client_port", "TLS/CDN 连接端口", plan.xhttp_tls_client_port || plan.client_port || plan.port, "CDN 边缘连接端口；可与源站端口不同。", "number") + input("xhttp_tls_host", "TLS/CDN XHTTP Host", plan.xhttp_tls_host || plan.tls_server_name, "与连接地址、TLS SNI 独立维护。") : ""}${input("tls_alpn", "服务端 ALPN", plan.tls_alpn || "h2,http/1.1", group ? "组合反代固定 h2。" : "逗号分隔；建议 h2,http/1.1。")}${input("tls_client_alpn", "客户端 ALPN", plan.tls_client_alpn || "h2", "建议 h2；h3 需要 CDN 支持及 UDP 可达，组合源站使用 TCP/h2。")}<label>CDN<select name="xhttp_cdn">${[["none", "直连"], ["cloudflare", "Cloudflare"], ["other", "其他 CDN"]].map(([key, label]) => `<option value="${key}"${key === (plan.xhttp_cdn || "none") ? " selected" : ""}>${label}</option>`).join("")}</select></label>${group ? input("certificate_path", "节点证书路径（必填）", plan.certificate_path) + input("private_key_path", "节点私钥路径（必填）", plan.private_key_path) : ""}</div><p class="validation-note">直连证书须受客户端信任并覆盖 SNI。使用 CDN 时，启用代理与严格 HTTPS 回源，关闭路径缓存并允许流式长请求。${group ? "组合证书须覆盖 Reality SNI 与 TLS SNI；证书目录 root:qcontrolhub-core 0750，私钥 0640。" : "证书由节点维护，更新文件后重新部署。"}</p></details>` : "";
++  const split = group ? "" : `<details class="preset-option-panel xhttp-options"${download ? " open" : ""}><summary><b>上下行分离 · 独立下载端点</b></summary><label class="tls-switch"><input type="checkbox" name="xhttp_split" value="1"${download ? " checked" : ""}><strong>启用独立下载参数</strong></label><div data-xhttp-download${download ? "" : " hidden"}><div class="plan-fields two">${input("xhttp_download_address", "下载连接地址", download?.address)}${input("xhttp_download_port", "下载连接端口", download?.port || plan.client_port || plan.port, "", "number")}${input("xhttp_download_sni", "下载 SNI", security.serverName || (tls ? plan.tls_server_name : plan.reality_server_name))}${input("xhttp_download_host", "下载 XHTTP Host", settings.host)}${tls ? input("xhttp_download_alpn", "下载 TLS ALPN", security.alpn?.join(",") || "h2") : ""}</div><button class="button small" type="button" data-xhttp-swap>交换上传与下载地址</button><p class="validation-note">两个端点须使用同一入站和路径。Reality 双栈需监听 ::，且 IPv4 / IPv6 均可达。交换仅影响地址与端口。</p></div></details>`;
++  const advanced = `<details class="preset-option-panel xhttp-options"><summary><b>XHTTP 高级参数</b></summary><div class="plan-fields two">${protocol.uses_reality && !group ? input("reality_target", "公网 Reality target", plan.reality_target, "公网域名:端口；留空使用 SNI:443。") : ""}${protocol.uses_reality ? input("reality_server_names", "允许的 Reality SNI", plan.reality_server_names || plan.reality_server_name, "逗号分隔，须包含客户端 SNI。") : ""}${group ? input("xhttp_backend_port", "内部 XHTTP 端口", plan.xhttp_backend_port, "仅监听 127.0.0.1，须与所有实例端口不同。", "number") + input("xhttp_tls_port", "本地 TLS 目标端口", plan.xhttp_tls_port, "仅监听 127.0.0.1，由受管 Nginx 提供。", "number") : ""}</div><div class="plan-fields one"><label>客户端 extra（完整 JSON）<textarea name="xhttp_extra" rows="6" spellcheck="false">${esc(plan.xhttp_extra || "{}")}</textarea><small>stream-one 不支持分离；xmux 的 maxConcurrency 与 maxConnections 至少一项为 0。旧 cMaxLifetimeMs 须换算为 hMaxReusableSecs（秒）。</small></label><label>服务端 extra（JSON）<textarea name="xhttp_server_extra" rows="5" spellcheck="false">${esc(plan.xhttp_server_extra || "{}")}</textarea><small>例如 scMaxEachPostBytes、scMaxBufferedPosts、noSSEHeader。不要填写客户端 downloadSettings / xmux。</small></label></div><p class="validation-note">两端需 Xray ≥ 24.12.15，已验证 26.3.27。建议使用 auto；完整参数请导出 Xray JSON。</p></details>`;
+   return basic + tlsPanel + split + advanced;
+ }
+ 
+diff --git a/frontend/modules/settings-view.js b/frontend/modules/settings-view.js
+index b6e5fceb..48b67dbe 100644
+--- a/frontend/modules/settings-view.js
++++ b/frontend/modules/settings-view.js
+@@ -61,7 +61,7 @@ export function createSettingsView({ esc, can, shell }) {
+         </div>`)}
+         ${section("settings-komari", "06", "Komari 联动", "在节点卡片显示流量周期、用量与额度。", `<div class="settings-grid one-column">${field("komari_url", "Komari 地址", `<input name="komari_url" type="url" value="${esc(item.komari_url || "")}" maxlength="500" placeholder="https://komari.example.com" ${disabled}>`, "站点根地址，不含 /api/nodes。")}${field("komari_api_key", "Komari API Key", `<input name="komari_api_key" type="password" value="" maxlength="500" autocomplete="new-password" placeholder="${item.komari_api_key ? "已配置，留空保持" : "可选"}" ${disabled}>`, "仅用于读取节点信息；已保存的密钥不回显。")}</div>${item.komari_api_key ? `<label class="settings-toggle"><span><b>清除 API Key</b><small>保存时删除密钥</small></span><input type="checkbox" name="clear_komari_api_key" ${disabled}></label>` : ""}<p class="settings-hint">在“节点设置”填写各节点的 Komari 服务器 UUID。</p>`)}
+         ${section("settings-cnip", "07", "CN IP 数据源", "仅当前账号生效；下次配置校验或部署时应用。", `<div class="settings-grid one-column">${field("cnip_ipv4_url", "IPv4 数据源", `<input type="url" name="cnip_ipv4_url" value="${esc(item.cnip_source?.ipv4_url || "")}" placeholder="留空使用默认大陆 IPv4 源" maxlength="2000" ${disabled}>`)}${field("cnip_ipv6_url", "IPv6 数据源", `<input type="url" name="cnip_ipv6_url" value="${esc(item.cnip_source?.ipv6_url || "")}" placeholder="留空使用默认大陆 IPv6 源" maxlength="2000" ${disabled}>`)}</div><p class="settings-hint">填写 HTTPS 文件直链，双栈可共用地址。自动识别 TXT / DAT / SRS / MMDB；DAT / MMDB 提取 CN，SRS 仅接受纯 IP 规则。</p>`)}
+-        ${section("settings-certificates", "08", "证书申请", "仅当前账号生效；保存后请重新部署配置，已提交任务与运行中的服务保持原配置。", `<div class="settings-grid one-column">${field("acme_email", "默认 ACME 邮箱", `<input name="acme_email" type="email" value="${esc(item.acme_email || "")}" maxlength="254" autocomplete="email" placeholder="用于证书申请的邮箱" ${disabled}>`, "Caddy 自动证书先尝试 Let’s Encrypt，失败后回退 ZeroSSL；ZeroSSL 需要邮箱绑定账户。留空且预设也未指定邮箱时，仅使用 Let’s Encrypt。")}</div><p class="settings-hint">适用于自有节点和共享节点上的个人配置；单个预设可覆盖此邮箱，Nginx 自签证书与原生 TLS 不使用该设置。</p>`)}
++        ${section("settings-certificates", "08", "证书申请", "仅当前账号生效，保存后重新部署配置。", `<div class="settings-grid one-column">${field("acme_email", "默认 ACME 邮箱", `<input name="acme_email" type="email" value="${esc(item.acme_email || "")}" maxlength="254" autocomplete="email" placeholder="用于证书申请的邮箱" ${disabled}>`, "填写邮箱可启用 ZeroSSL 回退，单个预设可覆盖。")}</div>`)}
+         ${section("settings-deployment", "09", "部署状态", "只读；密钥、数据库与可信代理在部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b></span><em>${esc(deployment.trusted_proxy_count)} 条网段</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code></dd></div></dl><p data-update-result>尚未检查 GHCR latest；不会自动升级。</p></div></div>`)}
+         ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</b></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint"><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 只读</p>`}
+       </form>
+diff --git a/frontend/modules/traffic-sync-dialog.js b/frontend/modules/traffic-sync-dialog.js
+index cbb62314..01cf1f9d 100644
+--- a/frontend/modules/traffic-sync-dialog.js
++++ b/frontend/modules/traffic-sync-dialog.js
+@@ -17,7 +17,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
+     dialog.className = "traffic-edit-dialog traffic-sync-dialog";
+     dialog.dataset.trafficSyncDialog = "";
+     dialog.setAttribute("aria-labelledby", "traffic-sync-title");
+-    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2><p>核对已生效端口与待部署变更</p></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><p class="traffic-sync-help">按确认生效的配置同步。待部署端口不会提前计量；旧端口保留历史和共享累计，端口预留由节点所有者管理。</p><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry>重新扫描</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>同步所选</button></footer></form>`;
++    dialog.innerHTML = `<header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">端口监控</p><h2 id="traffic-sync-title">同步端口</h2></div><button class="deploy-command-close" type="button" data-sync-close aria-label="关闭同步弹窗">×</button></header><form data-sync-form><div class="traffic-edit-body"><div data-sync-error role="alert" hidden></div><div data-sync-list aria-live="polite">正在读取端口…</div></div><footer><span data-sync-count>已选 0 项</span><button class="button" type="button" data-sync-retry>重新扫描</button><button class="button" type="button" data-sync-close>取消</button><button class="button primary" type="submit" data-sync-submit disabled>同步所选</button></footer></form>`;
+     document.body.append(dialog);
+     const list = dialog.querySelector("[data-sync-list]");
+     const errorBox = dialog.querySelector("[data-sync-error]");
+@@ -37,7 +37,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
+       const available = candidates.filter(candidate => !candidate.blocked_reason).length;
+       if (all) { all.checked = available > 0 && count === available; all.indeterminate = count > 0 && count < available; all.disabled = loading || saving || !available; }
+     };
+-    const showError = (message) => { errorBox.className = "alert error"; updateFeedback(errorBox, message); };
++    const showError = (message) => { errorBox.className = "alert error notice-message"; updateFeedback(errorBox, message); };
+     const cleanup = () => {
+       if (closed) return;
+       closed = true;
+@@ -63,7 +63,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
+       candidates = []; snapshot = "";
+       retry.disabled = true;
+       setVisible(errorBox, false);
+-      updateFeedback(list, "正在扫描配置与部署版本…");
++      updateFeedback(list, "正在扫描端口…");
+       updateSelection();
+       try {
+         const resource = await api("/traffic-endpoints/sync", { signal: controller.signal });
+@@ -103,7 +103,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
+         closeRetiringDialog(dialog);
+         cleanup();
+         const refreshed = await traffic();
+-        if (isCurrent()) notify(`所选 ${chosen.length} 项已核验并同步${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
++        if (isCurrent()) notify(`已同步 ${chosen.length} 项${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
+       } catch (error) {
+         if (closed || !isCurrent()) cleanup();
+         else {
+diff --git a/frontend/styles/310-certificates.css b/frontend/styles/310-certificates.css
+deleted file mode 100644
+index 64afde89..00000000
+--- a/frontend/styles/310-certificates.css
++++ /dev/null
+@@ -1,112 +0,0 @@
+-/* Certificate views use the existing allocation list, form and config dialog. */
+-.cert-center{display:grid;gap:14px}
+-.cert-toolbar{flex-wrap:wrap;justify-content:flex-start}
+-.cert-toolbar label{min-width:0}
+-.cert-toolbar input,.cert-toolbar select{width:100%;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-toolbar .cert-search{flex:1;min-width:180px}
+-.cert-toolbar>.user-allocation-tools{margin-left:auto}
+-.cert-center .user-allocation-node>strong{font-size:calc(13px * var(--ui-font-scale));overflow-wrap:anywhere}
+-.cert-center .user-allocation-node>small{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+-.cert-center .user-allocation-terms{grid-template-columns:repeat(3,minmax(0,1fr))}
+-.cert-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+-.cert-domains,.cert-wrap{overflow-wrap:anywhere}
+-.cert-wrap{word-break:break-all}
+-.cert-error{color:var(--red);overflow-wrap:anywhere}
+-.cert-empty-line{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+-.cert-dialog>.config-inbound-heading{flex-shrink:0}
+-.cert-dialog>.config-inbound-body{overflow:auto;overscroll-behavior:contain}
+-.cert-form{gap:14px}
+-.cert-form :is(input:not([type=checkbox]),select,textarea){width:100%}
+-.cert-form textarea{padding:10px 11px;resize:vertical;font-family:inherit;font-weight:400;line-height:1.6}
+-.cert-form :is([name=certificate],[name=private_key]){font-family:monospace;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-form label>small{font-weight:400;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+-.cert-form label.cert-check{flex-direction:row;align-items:center;gap:8px}
+-.cert-check input{width:16px;height:16px;flex-shrink:0}
+-.cert-form>footer{justify-content:flex-end;padding-top:14px;border-top:1px solid var(--line)}
+-.cert-form>[data-cert-form-error]:empty{display:none}
+-.cert-detail{display:grid;gap:16px;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-detail h3,.cert-dialog [data-cert-modal-content]>h3{margin:0 0 12px;font-size:calc(13px * var(--ui-font-scale))}
+-.cert-detail section{padding-top:14px;border-top:1px solid var(--line);min-width:0}
+-.cert-detail-meta{display:grid;gap:8px;margin:0}
+-.cert-detail-meta>div{display:flex;justify-content:space-between;gap:16px}
+-.cert-detail-meta dt{color:var(--muted);flex-shrink:0}
+-.cert-detail-meta dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0}
+-.cert-record{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);min-width:0;font-size:calc(12px * var(--ui-font-scale))}
+-.cert-record>div{min-width:0}
+-.cert-record strong,.cert-record small{display:block;overflow-wrap:anywhere}
+-.cert-record small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));margin-top:4px}
+-.cert-order{padding:14px 0;border-bottom:1px solid var(--line);display:grid;gap:12px;min-width:0}
+-.cert-order>header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+-.cert-challenge{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+-.cert-challenge>dl{flex-basis:100%;display:grid;gap:8px;margin:0;min-width:0}
+-.cert-challenge dt{color:var(--muted)}
+-.cert-challenge dd{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0;min-width:0}
+-.cert-challenge code{overflow-wrap:anywhere;word-break:break-all;flex:1;min-width:100px}
+-.cert-detail summary,.cert-help summary{cursor:pointer;color:var(--muted);min-height:32px}
+-@media(max-width:700px){
+- .cert-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+- .cert-toolbar .cert-search,.cert-toolbar>.user-allocation-tools{grid-column:1/-1;min-width:0;margin:0}
+- .cert-center .user-allocation-terms{grid-template-columns:repeat(2,minmax(0,1fr))}
+- .cert-detail-meta>div{flex-direction:column;gap:2px}
+- .cert-detail-meta dd{text-align:left}
+- .cert-record{flex-wrap:wrap;align-items:flex-start}
+-}
+-@media(max-width:820px) and (pointer:coarse){
+- .cert-center .button,.cert-dialog .button,.cert-toolbar :is(input,select),.cert-form :is(input:not([type=checkbox]),select){min-height:44px}
+- .cert-form :is(input:not([type=checkbox]),select,textarea){font-size:max(16px,calc(12px * var(--ui-font-scale)))}
+-}
+-/* Certificate dialogs live under body, outside .server-form/.settings-workspace.
+-   Explicitly share semantic control tokens so every portalled surface is themed. */
+-.cert-hero{margin:0;align-items:center}
+-.cert-hero h2{margin:4px 0;font-size:calc(24px * var(--ui-font-scale));letter-spacing:-.5px}
+-.cert-hero p:last-child{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-summary{display:grid;grid-template-columns:auto auto;align-items:baseline;gap:2px 10px;text-align:right;font-size:calc(11px * var(--ui-font-scale));color:var(--muted)}
+-.cert-summary strong{font-size:calc(20px * var(--ui-font-scale));color:var(--ink)}
+-.cert-dialog.config-inbound-dialog{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 40px);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow)}
+-.cert-dialog::backdrop{background:color-mix(in srgb,var(--dock) 65%,transparent);backdrop-filter:blur(3px)}
+-.cert-dialog .config-inbound-heading{background:var(--surface);border-bottom:1px solid var(--line);padding:18px 22px}
+-.cert-dialog .config-inbound-heading h2{font-size:calc(18px * var(--ui-font-scale));line-height:1.4;overflow-wrap:anywhere}
+-.cert-dialog>.config-inbound-body{padding:22px;scroll-padding:16px;min-height:0}
+-.cert-dialog [data-cert-modal-content]>section{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+-.cert-form,.cert-dialog .stack-form{display:grid;gap:16px}
+-.cert-form label,.cert-dialog .stack-form label,.cert-share-domains{display:grid;gap:7px;font-size:calc(12px * var(--ui-font-scale));font-weight:600;color:var(--ink-2);min-width:0}
+-.cert-form :is(input:not([type=checkbox]),select,textarea),.cert-dialog .stack-form :is(input:not([type=checkbox]),select,textarea),.cert-share-domains textarea,.cert-toolbar :is(input,select){min-width:0;max-width:100%;border:1px solid var(--line-2);border-radius:var(--radius-control);padding:10px 12px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:calc(13px * var(--ui-font-scale));line-height:1.5;box-shadow:none}
+-.cert-form :is(input:not([type=checkbox]),select),.cert-dialog .stack-form :is(input:not([type=checkbox]),select){min-height:42px}
+-.cert-form :is(input,textarea)::placeholder{color:var(--muted);opacity:1}
+-.cert-form :is(input,select,textarea):hover:not(:disabled){border-color:var(--accent)}
+-.cert-form :is(input,select,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-color:var(--accent);background:var(--surface)}
+-.cert-dialog :is(select,option){color-scheme:inherit;background-color:var(--surface);color:var(--ink)}
+-.cert-dialog :is(input,select,textarea):disabled{cursor:not-allowed;color:var(--muted);background:var(--surface-3)}
+-.cert-check input{accent-color:var(--accent);margin:0}
+-.cert-form input[type=file]{padding:7px;font-size:calc(11px * var(--ui-font-scale));font-weight:400}
+-.cert-form input[type=file]::file-selector-button{margin-right:10px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);color:var(--ink);padding:6px 10px;cursor:pointer;font:inherit}
+-.cert-form>footer{position:sticky;bottom:-22px;margin:0 -22px -22px;padding:16px 22px;background:var(--surface);z-index:1}
+-.cert-dialog .cert-actions{margin-block:10px}
+-.cert-dialog .cert-actions .danger{color:var(--red);border-color:var(--red)}
+-.cert-dialog .cert-help p{padding:10px 12px;font-weight:400;font-size:calc(12px * var(--ui-font-scale));color:var(--ink-2);overflow-wrap:anywhere}
+-.cert-node-scope{padding:10px 12px;background:var(--accent-soft);border-radius:8px;color:var(--ink-2);overflow-wrap:anywhere}
+-.cert-source-status{padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+-.cert-source-record{display:grid;gap:10px;min-width:0}
+-.cert-empty{display:grid;gap:8px;padding:40px 20px;text-align:center}
+-.cert-empty strong{color:var(--ink);font-size:calc(15px * var(--ui-font-scale))}
+-.cert-empty p{color:var(--muted);font-size:calc(12px * var(--ui-font-scale))}
+-.cert-share-domains{margin:12px 0}
+-.cert-share-domains textarea{resize:vertical;min-height:76px;font-weight:400}
+-.cert-share-domains small{font-weight:400;color:var(--muted)}
+-@media(max-width:700px){
+- .cert-hero{gap:12px}.cert-hero h2{font-size:calc(21px * var(--ui-font-scale))}
+- .cert-summary{display:none}
+- .cert-toolbar>.user-allocation-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+- .cert-toolbar .button{min-height:42px}
+- .cert-dialog.config-inbound-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:12px}
+- .cert-dialog .config-inbound-heading{padding:14px 16px}
+- .cert-dialog>.config-inbound-body{padding:16px}
+- .cert-form>footer{bottom:-16px;margin:0 -16px -16px;padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+- .cert-dialog .cert-actions .button{flex:1;min-height:44px}
+- .cert-form :is(input:not([type=checkbox]),select,textarea){font-size:max(16px,calc(13px * var(--ui-font-scale)))}
+- .cert-record .cert-actions{width:100%}
+-}
+-@media(prefers-reduced-motion:reduce){.cert-dialog,.cert-dialog *{scroll-behavior:auto;transition:none;animation:none}}
+-
+-body:has(.cert-dialog[open]){overflow:hidden}
+diff --git a/frontend/styles/560-traffic-sync.css b/frontend/styles/560-traffic-sync.css
+index c4e8b43e..612ad107 100644
+--- a/frontend/styles/560-traffic-sync.css
++++ b/frontend/styles/560-traffic-sync.css
+@@ -1,3 +1,3 @@
+ 
+ .traffic-policy-list-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+-.traffic-sync-dialog{width:min(720px,calc(100% - 28px))}.traffic-sync-dialog .traffic-edit-body{display:grid;gap:14px;max-height:65vh;overflow:auto}.traffic-sync-help{color:var(--muted);font-size:calc(12px * var(--ui-font-scale));line-height:1.7}.traffic-sync-dialog .traffic-sync-all{display:flex;align-items:center;gap:12px;padding-bottom:12px;font-size:calc(12px * var(--ui-font-scale));color:var(--muted);cursor:pointer}.traffic-sync-list{display:grid;border:1px solid var(--line);border-radius:8px;overflow:hidden}.traffic-sync-dialog .traffic-sync-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;background:var(--surface);cursor:pointer}.traffic-sync-row+.traffic-sync-row{border-top:1px solid var(--line)}.traffic-sync-row:has(input:checked){background:var(--surface-2)}.traffic-sync-dialog input[type=checkbox]{width:16px;height:16px;min-width:16px;accent-color:var(--accent)}.traffic-sync-source{display:grid;gap:5px;min-width:0}.traffic-sync-source strong{font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-source small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-dialog [data-sync-count]{display:block;margin-right:auto;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}.traffic-sync-dialog>form>footer{display:flex;flex-wrap:wrap}@media(max-width:540px){.traffic-sync-dialog .traffic-sync-row{grid-template-columns:16px minmax(0,1fr)}.traffic-sync-row>.status-label{grid-column:2}.traffic-sync-dialog [data-sync-count]{flex-basis:100%}.traffic-sync-dialog>form>footer>.button{flex:1}}
++.traffic-sync-dialog{width:min(720px,calc(100% - 28px))}.traffic-sync-dialog .traffic-edit-body{display:grid;gap:14px;max-height:65vh;overflow:auto}.traffic-sync-dialog .traffic-sync-all{display:flex;align-items:center;gap:12px;padding-bottom:12px;font-size:calc(12px * var(--ui-font-scale));color:var(--muted);cursor:pointer}.traffic-sync-list{display:grid;border:1px solid var(--line);border-radius:8px;overflow:hidden}.traffic-sync-dialog .traffic-sync-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;background:var(--surface);cursor:pointer}.traffic-sync-row+.traffic-sync-row{border-top:1px solid var(--line)}.traffic-sync-row:has(input:checked){background:var(--surface-2)}.traffic-sync-dialog input[type=checkbox]{width:16px;height:16px;min-width:16px;accent-color:var(--accent)}.traffic-sync-source{display:grid;gap:5px;min-width:0}.traffic-sync-source strong{font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-source small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));overflow-wrap:anywhere}.traffic-sync-dialog [data-sync-count]{display:block;margin-right:auto;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}.traffic-sync-dialog>form>footer{display:flex;flex-wrap:wrap}@media(max-width:540px){.traffic-sync-dialog .traffic-sync-row{grid-template-columns:16px minmax(0,1fr)}.traffic-sync-row>.status-label{grid-column:2}.traffic-sync-dialog [data-sync-count]{flex-basis:100%}.traffic-sync-dialog>form>footer>.button{flex:1}}
+diff --git a/frontend/styles/manifest.json b/frontend/styles/manifest.json
+index 2661f470..89c7f26e 100644
+--- a/frontend/styles/manifest.json
++++ b/frontend/styles/manifest.json
+@@ -74,6 +74,5 @@
+   "frontend/styles/690-agent-presence.css",
+   "frontend/styles/700-shell-dock-rail.css",
+   "frontend/styles/710-motion-choreography.css",
+-  "frontend/styles/720-card-movement.css",
+-  "frontend/styles/310-certificates.css"
++  "frontend/styles/720-card-movement.css"
+ ]

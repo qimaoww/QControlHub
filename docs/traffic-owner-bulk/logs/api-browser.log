@@ -1,0 +1,110 @@
+QCH_CORE_INSTALL_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreFirstInstallBrowserSessions$' -v
+=== RUN   TestCoreFirstInstallBrowserSessions
+=== RUN   TestCoreFirstInstallBrowserSessions/alice/desktop
+2026/10/19 02:10:17 INFO waiting for PostgreSQL migration lock backend_pid=2255
+2026/10/19 02:10:17 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:17 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=196.546584ms
+    core_install_users_integration_test.go:296: alice: real password session, manual failure/retry/refresh and owner automatic preparation, exact revision deployment, viewport 1440: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/alice/mobile
+2026/10/19 02:10:21 INFO waiting for PostgreSQL migration lock backend_pid=2273
+2026/10/19 02:10:21 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:21 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=211.493681ms
+2026/10/19 02:10:25 ERROR HTTP request failed request_id=req_d3be6e138464ce23 error="context canceled"
+    core_install_users_integration_test.go:296: alice: real password session, manual failure/retry/refresh and owner automatic preparation, exact revision deployment, viewport 390: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/bob/desktop
+2026/10/19 02:10:25 INFO waiting for PostgreSQL migration lock backend_pid=2287
+2026/10/19 02:10:25 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:26 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=218.912819ms
+    core_install_users_integration_test.go:296: bob: real password session, manual failure/retry/refresh and private automatic preparation, exact revision deployment, viewport 1440: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/bob/mobile
+2026/10/19 02:10:29 INFO waiting for PostgreSQL migration lock backend_pid=2303
+2026/10/19 02:10:29 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:30 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=223.20254ms
+2026/10/19 02:10:33 ERROR HTTP request failed request_id=req_481813691b06d110 error="context canceled"
+    core_install_users_integration_test.go:296: bob: real password session, manual failure/retry/refresh and private automatic preparation, exact revision deployment, viewport 390: passed
+
+--- PASS: TestCoreFirstInstallBrowserSessions (16.25s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/desktop (4.11s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/mobile (4.02s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/desktop (4.03s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/mobile (4.08s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	16.474s
+QCH_MULTI_USER_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(MultiUserBrowserSessions|CertificateBrowserSessions)$' -v
+=== RUN   TestCertificateBrowserSessions
+=== RUN   TestCertificateBrowserSessions/desktop
+2026/10/19 02:10:34 INFO waiting for PostgreSQL migration lock backend_pid=2327
+2026/10/19 02:10:34 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:34 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=206.456071ms
+    certificates_browser_integration_test.go:46: desktop: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        desktop: same-browser logout/login clears private filters, dialogs and credential-account state
+
+=== RUN   TestCertificateBrowserSessions/mobile
+2026/10/19 02:10:38 INFO waiting for PostgreSQL migration lock backend_pid=2346
+2026/10/19 02:10:38 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:39 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=223.438887ms
+    certificates_browser_integration_test.go:46: mobile: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed
+        mobile: same-browser logout/login clears private filters, dialogs and credential-account state
+
+--- PASS: TestCertificateBrowserSessions (8.39s)
+    --- PASS: TestCertificateBrowserSessions/desktop (4.21s)
+    --- PASS: TestCertificateBrowserSessions/mobile (4.18s)
+=== RUN   TestMultiUserBrowserSessions
+=== RUN   TestMultiUserBrowserSessions/desktop
+2026/10/19 02:10:42 INFO waiting for PostgreSQL migration lock backend_pid=2373
+2026/10/19 02:10:43 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:43 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=258.355401ms
+    multi_user_browser_integration_test.go:80: desktop: three independent browser contexts, real password/cookie/CSRF identities
+        desktop: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        desktop: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        desktop: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        desktop: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        desktop: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+=== RUN   TestMultiUserBrowserSessions/mobile
+2026/10/19 02:10:46 INFO waiting for PostgreSQL migration lock backend_pid=2417
+2026/10/19 02:10:46 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:46 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=192.889867ms
+    multi_user_browser_integration_test.go:80: mobile: three independent browser contexts, real password/cookie/CSRF identities
+        mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+--- PASS: TestMultiUserBrowserSessions (7.25s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (3.71s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (3.54s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	15.854s
+QCH_CORE_LOG_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreLogsBrowserSessions$' -v
+=== RUN   TestCoreLogsBrowserSessions
+=== RUN   TestCoreLogsBrowserSessions/desktop
+2026/10/19 02:10:50 INFO waiting for PostgreSQL migration lock backend_pid=2440
+2026/10/19 02:10:50 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:10:51 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=198.766196ms
+    core_logs_browser_test.go:195: desktop: independent admin/A/B password sessions; log access without agents.read; source metadata obeys node privacy
+        desktop: symmetric forged node/user/instance, engine/level/search, history pagination and admin private-node requests verified
+        desktop: UI only offers A's shared instance; pagination and reload preserve the authorized selection; no horizontal overflow
+        desktop: fast A→B selection ignores the delayed A response
+        desktop: live poll removes revoked A data/options/cache; disabled session denied; same-context account switch contains only B data
+
+=== RUN   TestCoreLogsBrowserSessions/mobile
+2026/10/19 02:11:04 INFO waiting for PostgreSQL migration lock backend_pid=2485
+2026/10/19 02:11:04 INFO applying PostgreSQL schema migration from_version=0 to_version=81 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 02:11:04 INFO PostgreSQL schema migration committed from_version=0 to_version=81 elapsed=235.852588ms
+2026/10/19 02:11:17 ERROR HTTP request failed request_id=req_ccae1311e7617514 error="context canceled"
+    core_logs_browser_test.go:195: mobile: independent admin/A/B password sessions; log access without agents.read; source metadata obeys node privacy
+        mobile: symmetric forged node/user/instance, engine/level/search, history pagination and admin private-node requests verified
+        mobile: UI only offers A's shared instance; pagination and reload preserve the authorized selection; no horizontal overflow
+        mobile: fast A→B selection ignores the delayed A response
+        mobile: live poll removes revoked A data/options/cache; disabled session denied; same-context account switch contains only B data
+
+--- PASS: TestCoreLogsBrowserSessions (26.98s)
+    --- PASS: TestCoreLogsBrowserSessions/desktop (13.46s)
+    --- PASS: TestCoreLogsBrowserSessions/mobile (13.52s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	27.205s

@@ -1,0 +1,97 @@
+{
+  "baseline_commit": "c36a1374f4220fb0ae1483f0b1bd669b469b9051",
+  "initial_reproduction_commit": "42a2a28bec8bf4022fa439a4802a6443b589ac7c",
+  "branch": "codex/shared-instance-lifecycle",
+  "schema_version": 77,
+  "go_version": "go1.25.12",
+  "required_checks": [
+    {
+      "command": "make non-browser-checks test",
+      "result": "passed",
+      "evidence": "required-checks-latest-main.log"
+    },
+    {
+      "command": "make non-browser-checks",
+      "result": "passed",
+      "evidence": "final-theme-checks.log"
+    },
+    {
+      "command": "make browser-checks",
+      "result": "passed",
+      "evidence": "browser-checks-final.log"
+    },
+    {
+      "command": "node frontend/module_smoke.mjs",
+      "result": "passed",
+      "evidence": "final-module.log"
+    },
+    {
+      "command": "QCH_SCHEMA_BASE_REF=origin/main node .github/scripts/check-schema-version.mjs",
+      "result": "passed; v76 -> v77"
+    }
+  ],
+  "real_runtime": {
+    "managers": [
+      "systemd on Debian",
+      "OpenRC on Alpine 3.23 with reaping init"
+    ],
+    "kernels": {
+      "mihomo": "1.19.32",
+      "xray": "26.3.27",
+      "sing-box": "1.14.3",
+      "shadowsocks-rust": "1.25.0"
+    },
+    "historical_complete_client_matrix": {
+      "successful": 19,
+      "includes": "temporary OpenRC share, since revoked"
+    },
+    "final_online_client_checks": {
+      "successful": 16,
+      "includes": "main shared recipients, both private nodes and trusted test CA TLS-Trojan"
+    },
+    "actual_browser_flow": "add inbound -> save and deploy -> node management running v2 -> stop retaining v2 -> start v2; owner and B service PID/state unchanged",
+    "certificate_center": "actual authorized selection, isolated immutable deployment, stop/start/restart and pending-restart grant revocation passed",
+    "private_workspace_read": "actual deployed file read preserves draft; runtime status and lifecycle controls remain on node management",
+    "migration_from": [
+      75,
+      76
+    ]
+  },
+  "adversarial_evidence": [
+    "acceptance.json",
+    "adversarial.json",
+    "extended.json",
+    "certificates-shared.json",
+    "openrc-acceptance.json",
+    "reconnect.json"
+  ],
+  "screenshots": {
+    "matched_pairs": 42,
+    "accounts": [
+      "shared-owner",
+      "shared-alice",
+      "shared-bob"
+    ],
+    "theme": "light",
+    "desktop": "1440x1000",
+    "mobile": "390x844",
+    "same_config_version": 1,
+    "additional_screenshots": 7,
+    "supplementary_theme": "dark",
+    "video": "../videos/shared-instance-flow.webm"
+  },
+  "resolved_validation_failures": [
+    "An obsolete config-scope browser assertion required instance explanation on the config page; updated to assert allocated resources, node management link and absence of runtime status/controls; full suite passed.",
+    "Parallel API/store tests can pin PostgreSQL vacuum horizons and fail existing index-only/HOT assertions; project Makefile serial package execution passed.",
+    "Initial OpenRC fixture lacked a reaping init; replaced only the task-owned container with --init and retained the old container for scheduled cleanup."
+  ],
+  "limits": [
+    "No production nodes or real user data were used.",
+    "Actual connectivity covers recorded isolated-network protocol combinations, not every supported protocol, public Internet/CDN or ACME renewal.",
+    "Real Agent disconnect/restart was exercised; lease timeout, delayed results and reordered responses were additionally tested deterministically in API/store/browser regressions.",
+    "CI results are recorded separately after the PR is published."
+  ],
+  "test_ended_at_utc": "2026-10-17T11:23:01+00:00",
+  "cleanup_timer": "qch-shared-4b5d-cleanup.timer",
+  "cleanup_execute_at_utc": "2026-10-20T11:23:01+00:00"
+}

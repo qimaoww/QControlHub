@@ -19,6 +19,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 	}
 	rows, err := s.pool.Query(ctx, `SELECT s.id,s.user_id,u.username,u.display_name,s.agent_id,a.name,s.enabled,
 		s.status,s.invitation_revision,s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,s.engines,
+ ARRAY(SELECT domain FROM certificate_http_grants g WHERE g.agent_id=s.agent_id AND g.user_id=s.user_id ORDER BY domain),
 		CASE WHEN s.ports_unrestricted THEN ARRAY[0]
 			ELSE ARRAY(SELECT p.port FROM agent_share_ports p WHERE p.share_id=s.id ORDER BY p.port) END
 		FROM agent_shares s JOIN panel_users u ON u.id=s.user_id JOIN agents a ON a.id=s.agent_id
@@ -30,7 +31,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 	for rows.Next() {
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.Username, &share.DisplayName, &share.AgentID, &share.AgentName,
-			&share.Enabled, &share.Status, &share.InvitationRevision, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.Ports); err != nil {
+			&share.Enabled, &share.Status, &share.InvitationRevision, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.HTTPDomains, &share.Ports); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -138,6 +139,11 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 		userID := users[recipient.Username].ID
 		enabled := recipient.Enabled == nil || *recipient.Enabled
 		if err := s.setAgentShareTx(ctx, tx, userID, agentID, recipient.LimitBytes, recipient.Engines, recipient.Ports, enabled, recipient.Reinvite); err != nil {
+			return core.AgentSharing{}, err
+		}
+	}
+	for _, recipient := range recipients {
+		if err := setShareHTTPDomainsTx(ctx, tx, agentID, users[recipient.Username].ID, recipient.HTTPDomains); err != nil {
 			return core.AgentSharing{}, err
 		}
 	}

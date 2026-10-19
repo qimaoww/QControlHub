@@ -15,13 +15,14 @@ import (
 )
 
 type tlsFrontendRequest struct {
-	Service      string             `json:"service"`
-	Kind         string             `json:"kind"`
-	Action       core.Action        `json:"action"`
-	Stage        bool               `json:"stage"`
-	Frontends    []core.TLSFrontend `json:"frontends"`
-	Certificates bool               `json:"certificates,omitempty"`
-	Deadline     time.Time          `json:"deadline,omitempty"`
+	Service      string                         `json:"service"`
+	Kind         string                         `json:"kind"`
+	Action       core.Action                    `json:"action"`
+	Stage        bool                           `json:"stage"`
+	Frontends    []core.TLSFrontend             `json:"frontends"`
+	Certificates bool                           `json:"certificates,omitempty"`
+	Deadline     time.Time                      `json:"deadline,omitempty"`
+	SyncSource   *core.ManagedCertificateSource `json:"sync_source,omitempty"`
 }
 
 var tlsRequestName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
@@ -37,11 +38,6 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 	if !tlsRequestName.MatchString(name) {
 		return errors.New("invalid TLS request name")
 	}
-	lock, err := acquireIPQualityDependencyLock(ctx, "/run/qagent-managed-tls")
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
 	directory := tlsFrontendRequests
 	if err := validateProtectedDirectoryChain(directory); err != nil {
 		return err
@@ -77,6 +73,25 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		return err
 	}
 	manager := tlsFrontendManager{tlsFrontendRoot, tlsFrontendState, services, NewCoreUpdater()}
+	if request.SyncSource != nil {
+		source := *request.SyncSource
+		spec, err := managedCertificateSpec(source, request.Kind)
+		if err != nil || source.Engine != engine || spec.Service != request.Service {
+			return errors.New("invalid managed certificate service")
+		}
+		report := manager.scanManagedCertificate(source, request.Kind)
+		encoded, err := json.Marshal(report)
+		if err != nil {
+			return errors.New("cannot encode managed certificate response")
+		}
+		_, err = atomicDeploy(filepath.Join(directory, name+".result"), string(encoded))
+		return err
+	}
+	lock, err := acquireIPQualityDependencyLock(ctx, "/run/qagent-managed-tls")
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	for _, f := range request.Frontends {
 		if (engine == core.EngineXray) != (f.Transport == "xhttp") {
 			return errors.New("TLS frontend transport does not belong to this managed core")

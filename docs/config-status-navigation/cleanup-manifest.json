@@ -1,0 +1,16 @@
+{
+  "scope": "ui-status-4b5d",
+  "test_ended_at": "2026-10-18T04:01:17+00:00",
+  "cleanup_at": "2026-10-21T04:01:17+00:00",
+  "temporary_directory": "/root/.codex/worktrees/4b5d/qcontrolhub/output/playwright/config-status-navigation",
+  "directory_device": 66306,
+  "directory_inode": 2490866,
+  "retained_artifacts": "/root/.codex/worktrees/4b5d/qcontrolhub/docs/config-status-navigation",
+  "production_resources": [],
+  "accounts_created": [],
+  "processes_stopped": true,
+  "browser_session_closed": true,
+  "released_ports": [
+    42457
+  ]
+}

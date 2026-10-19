@@ -1,0 +1,74 @@
+[
+  {
+    "check": "private OpenRC controlled first install + deploy",
+    "task_id": "tsk_7430d3bb7a938c57"
+  },
+  {
+    "check": "OpenRC shared xray controlled deploy",
+    "task_id": "tsk_25161ad82d4ec7a1",
+    "port": 24411
+  },
+  {
+    "check": "OpenRC shared xray stop",
+    "task_id": "tsk_e68d9b592acf7a13"
+  },
+  {
+    "check": "OpenRC shared xray start",
+    "task_id": "tsk_fd20cbd72e0ed1aa"
+  },
+  {
+    "check": "OpenRC shared xray restart",
+    "task_id": "tsk_96400fd51d4ca0fa"
+  },
+  {
+    "check": "OpenRC shared mihomo controlled deploy",
+    "task_id": "tsk_85ba42cd0a38f991",
+    "port": 24412
+  },
+  {
+    "check": "OpenRC shared mihomo stop",
+    "task_id": "tsk_c53cbe208eafc648"
+  },
+  {
+    "check": "OpenRC shared mihomo start",
+    "task_id": "tsk_16816a4564c19531"
+  },
+  {
+    "check": "OpenRC shared mihomo restart",
+    "task_id": "tsk_7b6991b6e1df440f"
+  },
+  {
+    "check": "OpenRC shared sing-box controlled deploy",
+    "task_id": "tsk_8ef18dbbc18a0c5c",
+    "port": 24413
+  },
+  {
+    "check": "OpenRC shared sing-box stop",
+    "task_id": "tsk_c471578f2dc75967"
+  },
+  {
+    "check": "OpenRC shared sing-box start",
+    "task_id": "tsk_12ab87a013e38e5f"
+  },
+  {
+    "check": "OpenRC shared sing-box restart",
+    "task_id": "tsk_e360e7ab71d32e1d"
+  },
+  {
+    "check": "OpenRC shared ss-rust controlled deploy",
+    "task_id": "tsk_6dcc5399c160d02e",
+    "port": 24414
+  },
+  {
+    "check": "OpenRC shared ss-rust stop",
+    "task_id": "tsk_058de4158e34671e"
+  },
+  {
+    "check": "OpenRC shared ss-rust start",
+    "task_id": "tsk_8636cce30343e748"
+  },
+  {
+    "check": "OpenRC shared ss-rust restart",
+    "task_id": "tsk_04670f5874c6a736"
+  }
+]

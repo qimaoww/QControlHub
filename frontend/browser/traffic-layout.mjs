@@ -63,7 +63,7 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
     quota.value = "";
     if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
-    accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha", "delta", "charlie"]));
+    testAPI.nodeOrder = { ids: ["bravo", "alpha", "delta", "charlie"], revision: testAPI.nodeOrder.revision + 1 };
     await waitFor(() => cardNodes() === "bravo,alpha,delta,charlie", "polling did not apply the updated node order");
     assert.equal(cardNodes(), sidebarNodes(), "polling must keep cards and the sidebar in the same node order");
     accountStorage.setItem("qcontrolhub:traffic-card-order", JSON.stringify(["charlie:8445", "alpha:8443"]));
@@ -81,13 +81,13 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "candidates did not load");
     assert.equal(posts(), 0, "preview must not write");
     assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "nothing selected by default");
-    assert.ok(dialog.textContent.includes("已删除 · 可恢复") && dialog.textContent.includes("未监控 · 可添加"), "candidate types missing");
+    assert.ok(dialog.textContent.includes("已删除 · 可恢复") && dialog.textContent.includes("新增"), "candidate types missing");
     dialog.querySelector("[data-sync-close]").click();
     assert.equal(posts(), 0, "cancel must not write");
     assert.ok(!document.querySelector("[data-traffic-sync]").disabled, "cancel must unlock sync");
     testAPI.trafficPreviewFailure = true;
     dialog = await openSync();
-    await waitFor(() => !dialog.querySelector("[data-sync-retry]").hidden, "preview failure must allow retry");
+    await waitFor(() => !dialog.querySelector("[data-sync-retry]").disabled && !dialog.querySelector("[data-sync-error]").hidden, "preview failure must allow retry");
     assert.ok(dialog.querySelector("[data-sync-error]").textContent.includes("服务器处理失败"), "Chinese preview error hidden");
     testAPI.trafficPreviewFailure = false;
     dialog.querySelector("[data-sync-retry]").click();
@@ -114,6 +114,7 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.equal(posts(), 2, "duplicate submission not blocked");
     assert.ok(dialog.querySelector("[data-sync-close]").disabled, "pending mutation close must be disabled");
     assert.equal(JSON.stringify(testAPI.trafficSelection), JSON.stringify([{agent_id:"alpha",port:443},{agent_id:"bravo",port:9443}]), "must send only selected identities");
+    assert.equal(testAPI.trafficSnapshot, "scan-version-1", "submit must carry the scanned configuration snapshot");
     finish();
     await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]") && !document.querySelector("[data-traffic-sync]").disabled, "success did not close and unlock");
     assert.equal(testAPI.trafficCandidates.length, 1, "unselected candidate changed");
@@ -151,6 +152,27 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     testAPI.trafficSyncGate = null;
     location.hash = "#traffic";
     await waitFor(() => document.querySelector("[data-traffic-sync]"), "traffic return before expiry failed");
+    testAPI.trafficCandidates = [
+      {agent_id:"alpha",name:"stable protocol",engine:"sing-box",port:25103,previous_port:25101,protocol:"tcp",kind:"changed",deployment_status:"pending",blocked_reason:"已保存但尚未部署"},
+      {agent_id:"alpha",name:"active protocol",engine:"sing-box",port:25101,protocol:"tcp",kind:"unchanged",deployment_status:"applied"},
+    ];
+    dialog = await openSync();
+    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 2, "versioned candidates missing");
+    assert.ok(dialog.textContent.includes("25101 → 25103") && dialog.textContent.includes("待部署"), "port/deployment change missing");
+    assert.ok(dialog.querySelector('[data-sync-choice="0"]').disabled, "undeployed port is selectable");
+    dialog.querySelector("[data-sync-all]").click();
+    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 1, "select all included blocked port");
+    testAPI.trafficSyncStale = true;
+    dialog.querySelector("[data-sync-submit]").click();
+    await waitFor(() => dialog.textContent.includes("候选已失效"), "stale submission did not clear choices");
+    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "stale candidate remains submittable");
+    testAPI.trafficSyncStale = false;
+    dialog.querySelector("[data-sync-retry]").click();
+    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 2, "rescan did not refresh choices");
+    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 0, "rescan retained old selection");
+    const bounds = dialog.getBoundingClientRect();
+    assert.ok(bounds.left >= -1 && bounds.right <= innerWidth + 1 && dialog.scrollWidth <= dialog.clientWidth + 1, "sync dialog overflows viewport");
+    dialog.querySelector("[data-sync-close]").click();
     testAPI.trafficPreviewUnauthorized = true;
     document.querySelector("[data-traffic-sync]").click();
     await waitFor(() => document.querySelector("#login-form"), "expired session did not reach login");

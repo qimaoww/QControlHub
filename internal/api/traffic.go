@@ -49,6 +49,20 @@ func trafficPoliciesForSession(policies []core.PortTrafficPolicy, heartbeatVerif
 	return prepared
 }
 
+func trafficPolicyHello(policies []core.PortTrafficPolicy, verified bool) core.WireMessage {
+	return core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, verified),
+		TrafficPoliciesPending: !verified && hasSharedTrafficPolicies(policies)}
+}
+
+func hasSharedTrafficPolicies(policies []core.PortTrafficPolicy) bool {
+	for _, policy := range policies {
+		if policy.SharedQuota != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Request) {
 	monthValue := strings.TrimSpace(request.URL.Query().Get("month"))
 	if monthValue == "" {
@@ -83,12 +97,49 @@ func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Request) {
-	policies, err := s.store.ListPortTrafficPolicies(request.Context())
+	changed, err := s.store.RepairAppliedTrafficPolicies(request.Context(), "")
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	for _, agentID := range changed {
+		s.refreshAgentTrafficPolicies(agentID)
+	}
+	policies, err := s.store.CurrentPortTrafficPolicies(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if request.URL.Query().Get("view") == "page" {
+		// Traffic visibility is independent of agents.read. Supply only the
+		// node metadata needed to display and manage this authorized scope.
+		agents, err := s.store.ListAgents(request.Context())
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		type trafficAgent struct {
+			ID           string        `json:"id"`
+			Name         string        `json:"name"`
+			Status       string        `json:"status"`
+			CanManage    bool          `json:"can_manage"`
+			Capabilities []core.Engine `json:"capabilities"`
+			Features     []string      `json:"features"`
+		}
+		sources := make([]trafficAgent, 0, len(agents))
+		for _, agent := range agents {
+			features := []string{}
+			for _, feature := range agent.Features {
+				if feature == "port-traffic-v1" {
+					features = append(features, feature)
+				}
+			}
+			sources = append(sources, trafficAgent{agent.ID, agent.Name, agent.Status, agent.CanManage, agent.Capabilities, features})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"policies": policies, "agents": sources})
+		return
+	}
 	writeJSON(w, http.StatusOK, policies)
 }
 
@@ -106,6 +157,14 @@ func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) 
 }
 
 func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
+	changed, err := s.store.RepairAppliedTrafficPolicies(ctx, connectedAgentID)
+	if err != nil {
+		slog.Warn("repair applied traffic monitors", "error", err)
+		return
+	}
+	for _, agentID := range changed {
+		s.refreshAgentTrafficPolicies(agentID)
+	}
 	if connectedAgentID != "" {
 		configs, err := s.store.AgentConfigsForMonitoring(ctx, connectedAgentID)
 		if err == nil {
@@ -116,10 +175,9 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 		}
 		return
 	}
-	// Reconnects also follow metadata edits. Only a saved
-	// configuration change may prune stale discovered monitors, otherwise a
-	// non-destructive sync would delete them as soon as the Agent reconnects.
-	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, connectedAgentID == "")
+	// Reconnect and save refreshes use confirmed applied revisions. Retirement
+	// happens only after a settled deployment result.
+	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, false)
 	if err != nil {
 		// Listener accounting is best-effort and must never make configuration
 		// management or an authenticated Agent session unavailable.
@@ -143,7 +201,7 @@ func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID
 		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)
 		return
 	}
-	changed, err := s.store.ReconcileAgentPortTrafficEndpoints(ctx, agentID, trafficEndpointsFromConfigs(configs), true)
+	changed, err := s.store.ReconcileAgentPortTrafficEndpoints(ctx, agentID, trafficEndpointsFromConfigs(configs), false)
 	if err != nil {
 		slog.Warn("reconcile saved node traffic endpoints", "agent_id", agentID, "error", err)
 		return
@@ -154,63 +212,45 @@ func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID
 }
 
 func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
-	configs, err := s.store.ListAgentConfigs(request.Context())
+	endpoints, err := s.store.AppliedTrafficEndpoints(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, trafficEndpointsFromConfigs(configs))
+	writeJSON(w, http.StatusOK, endpoints)
 }
 
 func (s *Server) syncPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
 	var input struct {
+		Snapshot   string                      `json:"snapshot"`
 		Selections []core.TrafficSyncSelection `json:"selections"`
 	}
 	if err := decodeJSON(w, request, &input, 512<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	endpoints := trafficEndpointsFromConfigs(configs)
-	changedAgents, err := s.store.SyncSelectedPortTrafficEndpoints(request.Context(), endpoints, input.Selections)
+	changed, err := s.store.SyncPortTrafficSnapshot(request.Context(), input.Snapshot, input.Selections)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	for _, agentID := range changedAgents {
-		s.refreshAgentTrafficPolicies(agentID)
+	for _, id := range changed {
+		s.refreshAgentTrafficPolicies(id)
 	}
-	s.recordAudit(request, "traffic_endpoints.synced", "", "selected ports: "+strconv.Itoa(len(input.Selections))+", changed agents: "+strconv.Itoa(len(changedAgents)))
+	s.recordAudit(request, "traffic_endpoints.synced", "", "selected ports: "+strconv.Itoa(len(input.Selections))+", changed agents: "+strconv.Itoa(len(changed)))
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"endpoints":      endpoints,
-		"changed_agents": changedAgents,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"changed_agents": changed})
 }
 
 func (s *Server) previewPortTrafficSync(w http.ResponseWriter, request *http.Request) {
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	policies, err := s.store.ListPortTrafficPolicies(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	candidates, err := store.TrafficSyncCandidates(trafficEndpointsFromConfigs(configs), policies)
+	preview, err := s.store.PreviewPortTrafficSync(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoint {
@@ -222,6 +262,7 @@ func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoi
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(config.Engine, config.Content) {
 			endpoint.AgentID = config.AgentID
+			endpoint.ConfigID = config.ID
 			endpoint.ConfigVersion = config.Version
 			endpoint.ConfigUpdatedAt = config.UpdatedAt
 			key := endpoint.AgentID + "\x00" + string(endpoint.Engine) + "\x00" + strconv.Itoa(endpoint.Port) + "\x00" + string(endpoint.Protocol) + "\x00" + endpoint.Name

@@ -1,0 +1,1921 @@
+=== RUN   TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules
+=== PAUSE TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules
+=== RUN   TestMainlandAccessPolicyRejectsTagPortMismatch
+=== PAUSE TestMainlandAccessPolicyRejectsTagPortMismatch
+=== RUN   TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON
+=== PAUSE TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON
+=== RUN   TestMainlandRulesUseExternalCoreResources
+=== PAUSE TestMainlandRulesUseExternalCoreResources
+=== RUN   TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts
+=== PAUSE TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts
+=== RUN   TestXHTTPPlansBlockMainlandDestinationByDefault
+=== PAUSE TestXHTTPPlansBlockMainlandDestinationByDefault
+=== RUN   TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules
+=== PAUSE TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules
+=== RUN   TestXrayMainlandDestinationRestoresOwnedDomainStrategy
+=== PAUSE TestXrayMainlandDestinationRestoresOwnedDomainStrategy
+=== RUN   TestXrayMainlandDestinationPreservesOperatorDomainStrategy
+=== PAUSE TestXrayMainlandDestinationPreservesOperatorDomainStrategy
+=== RUN   TestXrayMainlandSourceDoesNotChangeDomainStrategy
+=== PAUSE TestXrayMainlandSourceDoesNotChangeDomainStrategy
+=== RUN   TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange
+=== PAUSE TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange
+=== RUN   TestBoundOutboundsAlwaysHaveIndependentMarks
+=== RUN   TestBoundOutboundsAlwaysHaveIndependentMarks/xray/freedom
+=== RUN   TestBoundOutboundsAlwaysHaveIndependentMarks/xray/vless
+=== RUN   TestBoundOutboundsAlwaysHaveIndependentMarks/sing-box/direct
+=== RUN   TestBoundOutboundsAlwaysHaveIndependentMarks/sing-box/vless
+--- PASS: TestBoundOutboundsAlwaysHaveIndependentMarks (0.01s)
+    --- PASS: TestBoundOutboundsAlwaysHaveIndependentMarks/xray/freedom (0.00s)
+    --- PASS: TestBoundOutboundsAlwaysHaveIndependentMarks/xray/vless (0.00s)
+    --- PASS: TestBoundOutboundsAlwaysHaveIndependentMarks/sing-box/direct (0.00s)
+    --- PASS: TestBoundOutboundsAlwaysHaveIndependentMarks/sing-box/vless (0.00s)
+=== RUN   TestBoundOutboundMarksRejectConflicts
+=== RUN   TestBoundOutboundMarksRejectConflicts/xray
+=== RUN   TestBoundOutboundMarksRejectConflicts/sing-box
+--- PASS: TestBoundOutboundMarksRejectConflicts (0.00s)
+    --- PASS: TestBoundOutboundMarksRejectConflicts/xray (0.00s)
+    --- PASS: TestBoundOutboundMarksRejectConflicts/sing-box (0.00s)
+=== RUN   TestConditionalAndGeneratedRoutesDoNotForceMarks
+--- PASS: TestConditionalAndGeneratedRoutesDoNotForceMarks (0.00s)
+=== RUN   TestAccountingUntaggedOutbounds
+=== RUN   TestAccountingUntaggedOutbounds/xray
+=== RUN   TestAccountingUntaggedOutbounds/sing-box
+--- PASS: TestAccountingUntaggedOutbounds (0.00s)
+    --- PASS: TestAccountingUntaggedOutbounds/xray (0.00s)
+    --- PASS: TestAccountingUntaggedOutbounds/sing-box (0.00s)
+=== RUN   TestAccountingOutboundTagFailures
+--- PASS: TestAccountingOutboundTagFailures (0.00s)
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/vless
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/vmess
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/trojan
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/shadowsocks
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/socks
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/http
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/vless
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/vmess
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/trojan
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/shadowsocks
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/socks
+=== RUN   TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/http
+--- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/vless (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/vmess (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/trojan (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/shadowsocks (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/socks (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/xray/http (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/vless (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/vmess (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/trojan (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/shadowsocks (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/socks (0.00s)
+    --- PASS: TestProtocolOutboundsHaveIndependentIdentityAndMarks/sing-box/http (0.00s)
+=== RUN   TestXrayProtocolMarksMigrateAndRejectConflicts
+--- PASS: TestXrayProtocolMarksMigrateAndRejectConflicts (0.00s)
+=== RUN   TestAccountingPlansAreIdempotentAndPerPort
+=== RUN   TestAccountingPlansAreIdempotentAndPerPort/xray
+=== RUN   TestAccountingPlansAreIdempotentAndPerPort/sing-box
+=== RUN   TestAccountingPlansAreIdempotentAndPerPort/ss-rust
+=== RUN   TestAccountingPlansAreIdempotentAndPerPort/mihomo
+--- PASS: TestAccountingPlansAreIdempotentAndPerPort (0.00s)
+    --- PASS: TestAccountingPlansAreIdempotentAndPerPort/xray (0.00s)
+    --- PASS: TestAccountingPlansAreIdempotentAndPerPort/sing-box (0.00s)
+    --- PASS: TestAccountingPlansAreIdempotentAndPerPort/ss-rust (0.00s)
+    --- PASS: TestAccountingPlansAreIdempotentAndPerPort/mihomo (0.00s)
+=== RUN   TestAccountingRejectsAmbiguousConfigurations
+--- PASS: TestAccountingRejectsAmbiguousConfigurations (0.00s)
+=== RUN   TestMarkedSingBoxAccountingIdempotent
+--- PASS: TestMarkedSingBoxAccountingIdempotent (0.00s)
+=== RUN   TestAccountingUpdateRegeneratesOriginalEdits
+=== RUN   TestAccountingUpdateRegeneratesOriginalEdits/xray
+=== RUN   TestAccountingUpdateRegeneratesOriginalEdits/sing-box
+=== RUN   TestAccountingUpdateRegeneratesOriginalEdits/mihomo
+--- PASS: TestAccountingUpdateRegeneratesOriginalEdits (0.00s)
+    --- PASS: TestAccountingUpdateRegeneratesOriginalEdits/xray (0.00s)
+    --- PASS: TestAccountingUpdateRegeneratesOriginalEdits/sing-box (0.00s)
+    --- PASS: TestAccountingUpdateRegeneratesOriginalEdits/mihomo (0.00s)
+=== RUN   TestAccountingUpdateRemovesObsoleteInboundAndRoutes
+--- PASS: TestAccountingUpdateRemovesObsoleteInboundAndRoutes (0.00s)
+=== RUN   TestSSRustSourceEditReplansVerifiedMarks
+--- PASS: TestSSRustSourceEditReplansVerifiedMarks (0.00s)
+=== RUN   TestAccountingUpdateRetainsEditedSingBoxStatsAPI
+--- PASS: TestAccountingUpdateRetainsEditedSingBoxStatsAPI (0.00s)
+=== RUN   TestCustomXrayAPIAccounting
+--- PASS: TestCustomXrayAPIAccounting (0.00s)
+=== RUN   TestMultipleXrayAPIRoutesRemainStable
+--- PASS: TestMultipleXrayAPIRoutesRemainStable (0.00s)
+=== RUN   TestDirectXrayAPIAddressPreserved
+--- PASS: TestDirectXrayAPIAddressPreserved (0.00s)
+=== RUN   TestMihomoShadowTLSALPNNormalization
+=== RUN   TestMihomoShadowTLSALPNNormalization/empty
+=== RUN   TestMihomoShadowTLSALPNNormalization/whitespace
+=== RUN   TestMihomoShadowTLSALPNNormalization/separators
+=== RUN   TestMihomoShadowTLSALPNNormalization/default
+=== RUN   TestMihomoShadowTLSALPNNormalization/spaces
+=== RUN   TestMihomoShadowTLSALPNNormalization/newlines
+=== RUN   TestMihomoShadowTLSALPNNormalization/trailing_separator
+=== RUN   TestMihomoShadowTLSALPNNormalization/duplicates
+=== RUN   TestMihomoShadowTLSALPNNormalization/http1_only
+--- PASS: TestMihomoShadowTLSALPNNormalization (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/empty (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/whitespace (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/separators (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/default (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/spaces (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/newlines (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/trailing_separator (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/duplicates (0.00s)
+    --- PASS: TestMihomoShadowTLSALPNNormalization/http1_only (0.00s)
+=== RUN   TestMihomoClientExportProtocolMatrix
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/ss2022
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vless
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-tcp
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vmess
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/trojan
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/hysteria2
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vless-xhttp-reality
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-tcp-reality-vision
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-xhttp-reality-vision
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/mieru
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/snell
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/snell-shadow-tls-v3
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/sudoku
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/tuic
+=== RUN   TestMihomoClientExportProtocolMatrix/mihomo/anytls
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/ss2022
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-enc-tcp
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vmess
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/trojan
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/hysteria2
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-reality
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-enc-tcp-reality-vision
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-enc-xhttp-reality-vision
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-tls-reality
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-reality-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-five
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/ss2022
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/trojan
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/hysteria2
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/tuic
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/anytls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless-http2-reality
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-tcp
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-ws
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-http
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-quic
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-ws-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-h2-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vmess-httpupgrade-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless-ws-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless-h2-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless-httpupgrade-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/trojan-ws-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/trojan-h2-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/trojan-httpupgrade-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/vless-tls
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/shadowsocks
+=== RUN   TestMihomoClientExportProtocolMatrix/sing-box/socks
+=== RUN   TestMihomoClientExportProtocolMatrix/ss-rust/ss2022
+=== RUN   TestMihomoClientExportProtocolMatrix/ss-rust/shadowsocks
+--- PASS: TestMihomoClientExportProtocolMatrix (0.02s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/ss2022 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vless (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-tcp (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vmess (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/trojan (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/hysteria2 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vless-xhttp-reality (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-tcp-reality-vision (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/vless-enc-xhttp-reality-vision (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/mieru (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/snell (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/snell-shadow-tls-v3 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/sudoku (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/tuic (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/mihomo/anytls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/ss2022 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-enc-tcp (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vmess (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/trojan (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/hysteria2 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-reality (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-enc-tcp-reality-vision (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-enc-xhttp-reality-vision (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-tls-reality (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-reality-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/xray/vless-xhttp-five (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/ss2022 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/trojan (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/hysteria2 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/tuic (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/anytls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless-http2-reality (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-tcp (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-ws (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-http (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-quic (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-ws-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-h2-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vmess-httpupgrade-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless-ws-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless-h2-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless-httpupgrade-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/trojan-ws-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/trojan-h2-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/trojan-httpupgrade-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/vless-tls (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/shadowsocks (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/sing-box/socks (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/ss-rust/ss2022 (0.00s)
+    --- PASS: TestMihomoClientExportProtocolMatrix/ss-rust/shadowsocks (0.00s)
+=== RUN   TestMihomoClientTransportOptions
+=== RUN   TestMihomoClientTransportOptions/vmess/websocket
+=== RUN   TestMihomoClientTransportOptions/vmess/grpc
+=== RUN   TestMihomoClientTransportOptions/trojan/websocket
+=== RUN   TestMihomoClientTransportOptions/trojan/grpc
+--- PASS: TestMihomoClientTransportOptions (0.00s)
+    --- PASS: TestMihomoClientTransportOptions/vmess/websocket (0.00s)
+    --- PASS: TestMihomoClientTransportOptions/vmess/grpc (0.00s)
+    --- PASS: TestMihomoClientTransportOptions/trojan/websocket (0.00s)
+    --- PASS: TestMihomoClientTransportOptions/trojan/grpc (0.00s)
+=== RUN   TestMihomoOmitsRealityVerificationItCannotExpress
+--- PASS: TestMihomoOmitsRealityVerificationItCannotExpress (0.00s)
+=== RUN   TestClientOutboundsFromDeployedPresets
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/ss2022/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/ss2022/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vmess/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vmess/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/trojan/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/trojan/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/hysteria2/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/hysteria2/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/port-forward/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/port-forward/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp-reality-vision/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp-reality-vision/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-xhttp-reality-vision/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-enc-xhttp-reality-vision/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls-reality/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls-reality/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-five/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-five/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/wireguard/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/xray/wireguard/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/ss2022/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/ss2022/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/hysteria2/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/hysteria2/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/port-forward/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/port-forward/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/tuic/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/tuic/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/anytls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/anytls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/wireguard/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/wireguard/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-http2-reality/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-http2-reality/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-tcp/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-tcp/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-http/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-http/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-quic/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-quic/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-h2-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-h2-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-httpupgrade-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vmess-httpupgrade-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-ws-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-ws-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-h2-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-h2-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-httpupgrade-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-httpupgrade-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-ws-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-ws-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-h2-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-h2-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-httpupgrade-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/trojan-httpupgrade-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-tls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/vless-tls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/shadowsocks/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/shadowsocks/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/socks/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/sing-box/socks/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/ss2022/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/ss2022/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vmess/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vmess/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/trojan/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/trojan/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/hysteria2/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/hysteria2/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/port-forward/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/port-forward/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-xhttp-reality/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-xhttp-reality/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp-reality-vision/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp-reality-vision/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-xhttp-reality-vision/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-xhttp-reality-vision/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/mieru/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/mieru/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/snell/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/snell/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/snell-shadow-tls-v3/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/snell-shadow-tls-v3/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/sudoku/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/sudoku/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/tuic/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/tuic/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/anytls/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/mihomo/anytls/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/ss-rust/ss2022/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/ss-rust/ss2022/sing-box
+=== RUN   TestClientOutboundsFromDeployedPresets/ss-rust/shadowsocks/xray
+=== RUN   TestClientOutboundsFromDeployedPresets/ss-rust/shadowsocks/sing-box
+--- PASS: TestClientOutboundsFromDeployedPresets (0.03s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/ss2022/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/ss2022/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vmess/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vmess/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/trojan/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/trojan/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/hysteria2/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/hysteria2/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/port-forward/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/port-forward/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp-reality-vision/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-tcp-reality-vision/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-xhttp-reality-vision/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-enc-xhttp-reality-vision/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls-reality/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-tls-reality/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-reality-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-five/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/vless-xhttp-five/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/wireguard/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/xray/wireguard/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/ss2022/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/ss2022/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/hysteria2/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/hysteria2/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/port-forward/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/port-forward/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/tuic/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/tuic/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/anytls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/anytls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/wireguard/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/wireguard/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-http2-reality/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-http2-reality/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-tcp/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-tcp/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-http/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-http/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-quic/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-quic/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-ws-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-h2-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-h2-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-httpupgrade-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vmess-httpupgrade-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-ws-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-ws-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-h2-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-h2-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-httpupgrade-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-httpupgrade-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-ws-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-ws-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-h2-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-h2-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-httpupgrade-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/trojan-httpupgrade-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-tls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/vless-tls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/shadowsocks/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/shadowsocks/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/socks/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/sing-box/socks/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/ss2022/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/ss2022/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vmess/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vmess/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/trojan/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/trojan/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/hysteria2/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/hysteria2/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/port-forward/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/port-forward/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-xhttp-reality/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-xhttp-reality/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp-reality-vision/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-tcp-reality-vision/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-xhttp-reality-vision/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/vless-enc-xhttp-reality-vision/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/mieru/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/mieru/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/snell/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/snell/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/snell-shadow-tls-v3/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/snell-shadow-tls-v3/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/sudoku/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/sudoku/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/tuic/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/tuic/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/anytls/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/mihomo/anytls/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/ss-rust/ss2022/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/ss-rust/ss2022/sing-box (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/ss-rust/shadowsocks/xray (0.00s)
+    --- PASS: TestClientOutboundsFromDeployedPresets/ss-rust/shadowsocks/sing-box (0.00s)
+=== RUN   TestClientOutboundSecurityAndTransport
+--- PASS: TestClientOutboundSecurityAndTransport (0.00s)
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol
+=== RUN   TestBuildSnellSurgeConfigIncludesOptionalTransportParameters
+=== PAUSE TestBuildSnellSurgeConfigIncludesOptionalTransportParameters
+=== RUN   TestBuildClientProfileRejectsListenerAndUnsafeAddresses
+=== PAUSE TestBuildClientProfileRejectsListenerAndUnsafeAddresses
+=== RUN   TestBuildClientProfileNamedUsesOperatorName
+=== PAUSE TestBuildClientProfileNamedUsesOperatorName
+=== RUN   TestClientProfileNeverExportsServerPrivateMaterial
+=== PAUSE TestClientProfileNeverExportsServerPrivateMaterial
+=== RUN   TestClientURLComponentsRoundTrip
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/vless/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/vless/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/vless/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/vless/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/vless/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/vless/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/vless/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/vless/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/vless/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/trojan/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/trojan/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/trojan/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/trojan/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/trojan/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/trojan/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/trojan/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/trojan/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/trojan/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/tuic/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/tuic/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/tuic/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/tuic/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/tuic/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/tuic/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/tuic/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/tuic/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/tuic/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/socks/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/socks/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/socks/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/socks/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/socks/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/socks/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/socks/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/socks/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/socks/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/anytls/edge.example.test/
+=== RUN   TestClientURLComponentsRoundTrip/anytls/edge.example.test/___
+=== RUN   TestClientURLComponentsRoundTrip/anytls/edge.example.test/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/anytls/192.0.2.10/
+=== RUN   TestClientURLComponentsRoundTrip/anytls/192.0.2.10/___
+=== RUN   TestClientURLComponentsRoundTrip/anytls/192.0.2.10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/anytls/2001:db8::10/
+=== RUN   TestClientURLComponentsRoundTrip/anytls/2001:db8::10/___
+=== RUN   TestClientURLComponentsRoundTrip/anytls/2001:db8::10/香港_🚀_@:/?#&=+%2F
+=== RUN   TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/
+=== RUN   TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/___
+=== RUN   TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/香港_🚀_@:/?#&=+%2F
+--- PASS: TestClientURLComponentsRoundTrip (0.01s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/shadowsocks/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/ss2022/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/vless/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/trojan/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/hysteria2/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/tuic/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/socks/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/edge.example.test/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/edge.example.test/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/edge.example.test/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/192.0.2.10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/192.0.2.10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/192.0.2.10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/2001:db8::10/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/2001:db8::10/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/2001:db8::10/香港_🚀_@:/?#&=+%2F (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/___ (0.00s)
+    --- PASS: TestClientURLComponentsRoundTrip/anytls/[2001:db8::10]/香港_🚀_@:/?#&=+%2F (0.00s)
+=== RUN   TestClientURLTransportParameters
+--- PASS: TestClientURLTransportParameters (0.00s)
+=== RUN   TestRenameClientURLPreservesConnectionParameters
+--- PASS: TestRenameClientURLPreservesConnectionParameters (0.00s)
+=== RUN   TestClientURLReservedWebSocketPathUsesNativeFormat
+--- PASS: TestClientURLReservedWebSocketPathUsesNativeFormat (0.00s)
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/xray/defaults
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/xray/optional-psk-and-keepalive
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-ipv4
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-ipv6
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-dual-stack
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/sing-box/defaults
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/sing-box/optional-psk-and-keepalive
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-ipv4
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-ipv6
+=== RUN   TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-dual-stack
+--- PASS: TestWireGuardClientFieldsMatchNativeConfig (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/xray/defaults (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/xray/optional-psk-and-keepalive (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-ipv4 (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-ipv6 (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/xray/inferred-dual-stack (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/sing-box/defaults (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/sing-box/optional-psk-and-keepalive (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-ipv4 (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-ipv6 (0.00s)
+    --- PASS: TestWireGuardClientFieldsMatchNativeConfig/sing-box/inferred-dual-stack (0.00s)
+=== RUN   TestSingleLineYAMLClientFieldOrder
+--- PASS: TestSingleLineYAMLClientFieldOrder (0.00s)
+=== RUN   TestCNIPCustomResourcesRemainEditable
+--- PASS: TestCNIPCustomResourcesRemainEditable (0.00s)
+=== RUN   TestPairedConfigFilesPreserveOrder
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/multiple_exits_per_inbound
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/shared_exit_after_dedicated_exits_preserves_order
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/reordered_inbound_keeps_original_default
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/duplicate_port_is_not_assigned_to_either_inbound
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/dedicated_default_without_shared_exits
+=== RUN   TestPairedConfigFilesPreserveOrder/xray/unknown_port_stays_in_common
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/multiple_exits_per_inbound
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/shared_exit_after_dedicated_exits_preserves_order
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/reordered_inbound_keeps_original_default
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/duplicate_port_is_not_assigned_to_either_inbound
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/dedicated_default_without_shared_exits
+=== RUN   TestPairedConfigFilesPreserveOrder/sing-box/unknown_port_stays_in_common
+--- PASS: TestPairedConfigFilesPreserveOrder (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/multiple_exits_per_inbound (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/shared_exit_after_dedicated_exits_preserves_order (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/reordered_inbound_keeps_original_default (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/duplicate_port_is_not_assigned_to_either_inbound (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/dedicated_default_without_shared_exits (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/xray/unknown_port_stays_in_common (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/multiple_exits_per_inbound (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/shared_exit_after_dedicated_exits_preserves_order (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/reordered_inbound_keeps_original_default (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/duplicate_port_is_not_assigned_to_either_inbound (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/dedicated_default_without_shared_exits (0.00s)
+    --- PASS: TestPairedConfigFilesPreserveOrder/sing-box/unknown_port_stays_in_common (0.00s)
+=== RUN   TestConfigFilesRoundTrip
+--- PASS: TestConfigFilesRoundTrip (0.00s)
+=== RUN   TestConfigFilesPresetNamesAndLegacyManifest
+--- PASS: TestConfigFilesPresetNamesAndLegacyManifest (0.00s)
+=== RUN   TestConfigFilesRejectUnsafeBundles
+--- PASS: TestConfigFilesRejectUnsafeBundles (0.00s)
+=== RUN   TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles
+=== PAUSE TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles
+=== RUN   TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip
+=== PAUSE TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip
+=== RUN   TestPortForwardPlanDefaultsRegenerateAndValidate
+=== PAUSE TestPortForwardPlanDefaultsRegenerateAndValidate
+=== RUN   TestVLESSXHTTPRealityPlansMatchBothCoreShapes
+=== PAUSE TestVLESSXHTTPRealityPlansMatchBothCoreShapes
+=== RUN   TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify
+=== PAUSE TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify
+=== RUN   TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair
+=== PAUSE TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair
+=== RUN   TestRegeneratePlanReplacesRealityMaterialTogether
+=== PAUSE TestRegeneratePlanReplacesRealityMaterialTogether
+=== RUN   TestVLESSRealityPlansGenerateAndRoundTripKeys
+=== PAUSE TestVLESSRealityPlansGenerateAndRoundTripKeys
+=== RUN   TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault
+=== PAUSE TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault
+=== RUN   TestGenerateRejectsBadSS2022KeyLength
+=== PAUSE TestGenerateRejectsBadSS2022KeyLength
+=== RUN   TestShadowsocksRustGeneratedConfigurationsRoundTrip
+=== PAUSE TestShadowsocksRustGeneratedConfigurationsRoundTrip
+=== RUN   TestParseAllShadowsocksRustOfficialExtendedConfiguration
+=== PAUSE TestParseAllShadowsocksRustOfficialExtendedConfiguration
+=== RUN   TestGenerateServerConfigurations
+=== PAUSE TestGenerateServerConfigurations
+=== RUN   TestGenerateRejectsDisabledTLSForRequiredProtocols
+=== PAUSE TestGenerateRejectsDisabledTLSForRequiredProtocols
+=== RUN   TestGeneratedConfigurationsRoundTripIntoServerForm
+=== PAUSE TestGeneratedConfigurationsRoundTripIntoServerForm
+=== RUN   TestParseSkipsUnsupportedLeadingInbound
+=== PAUSE TestParseSkipsUnsupportedLeadingInbound
+=== RUN   TestEveryPublishedServerPlanGeneratesNativeSyntax
+=== PAUSE TestEveryPublishedServerPlanGeneratesNativeSyntax
+=== RUN   TestIndependentEgressRejectsBypasses
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-direct-mode
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-global-mode
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-shared-group
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-tun
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-tunnel
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-mutable-api
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-empty-disguised-ingress
+=== RUN   TestIndependentEgressRejectsBypasses/mihomo-empty-disguised-tun
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-direct-action
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-implicit-route
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-cased-detour
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-duplicate-field-fallback
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-inbound-detour
+=== RUN   TestIndependentEgressRejectsBypasses/sing-box-empty-mutable-api
+=== RUN   TestIndependentEgressRejectsBypasses/xray-duplicate-field
+=== RUN   TestIndependentEgressRejectsBypasses/xray-fallback
+=== RUN   TestIndependentEgressRejectsBypasses/xray-reverse
+=== RUN   TestIndependentEgressRejectsBypasses/xray-dynamic-listener
+=== RUN   TestIndependentEgressRejectsBypasses/xray-empty-mutable-api
+=== RUN   TestIndependentEgressRejectsBypasses/ss-rust-manager
+=== RUN   TestIndependentEgressRejectsBypasses/ss-rust-double-listener
+=== RUN   TestIndependentEgressRejectsBypasses/ss-rust-empty-disguised-manager
+=== RUN   TestIndependentEgressRejectsBypasses/ss-rust-empty-disguised-listener
+--- PASS: TestIndependentEgressRejectsBypasses (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-direct-mode (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-global-mode (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-shared-group (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-tun (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-tunnel (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-mutable-api (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-empty-disguised-ingress (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/mihomo-empty-disguised-tun (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-direct-action (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-implicit-route (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-cased-detour (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-duplicate-field-fallback (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-inbound-detour (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/sing-box-empty-mutable-api (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/xray-duplicate-field (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/xray-fallback (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/xray-reverse (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/xray-dynamic-listener (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/xray-empty-mutable-api (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/ss-rust-manager (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/ss-rust-double-listener (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/ss-rust-empty-disguised-manager (0.00s)
+    --- PASS: TestIndependentEgressRejectsBypasses/ss-rust-empty-disguised-listener (0.00s)
+=== RUN   TestIndependentEgressAllowsExplicitFinalInboundDeletion
+--- PASS: TestIndependentEgressAllowsExplicitFinalInboundDeletion (0.00s)
+=== RUN   TestIndependentEgressAccountsForProxyUsingStatisticsName
+--- PASS: TestIndependentEgressAccountsForProxyUsingStatisticsName (0.00s)
+=== RUN   TestIndependentEgressMihomoDefaultIsPerListener
+--- PASS: TestIndependentEgressMihomoDefaultIsPerListener (0.00s)
+=== RUN   TestManagedTLSHTTPAndExternalExport
+=== RUN   TestManagedTLSHTTPAndExternalExport/caddy/ws
+=== RUN   TestManagedTLSHTTPAndExternalExport/caddy/httpupgrade
+=== RUN   TestManagedTLSHTTPAndExternalExport/caddy/h2
+=== RUN   TestManagedTLSHTTPAndExternalExport/external/ws
+=== RUN   TestManagedTLSHTTPAndExternalExport/external/httpupgrade
+=== RUN   TestManagedTLSHTTPAndExternalExport/external/h2
+--- PASS: TestManagedTLSHTTPAndExternalExport (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/caddy/ws (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/caddy/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/caddy/h2 (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/external/ws (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/external/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSHTTPAndExternalExport/external/h2 (0.00s)
+=== RUN   TestManagedTLSLifecycle
+=== RUN   TestManagedTLSLifecycle/caddy/vmess/ws
+=== RUN   TestManagedTLSLifecycle/caddy/vmess/httpupgrade
+=== RUN   TestManagedTLSLifecycle/caddy/vless/ws
+=== RUN   TestManagedTLSLifecycle/caddy/vless/httpupgrade
+=== RUN   TestManagedTLSLifecycle/caddy/trojan/ws
+=== RUN   TestManagedTLSLifecycle/caddy/trojan/httpupgrade
+=== RUN   TestManagedTLSLifecycle/nginx/vmess/ws
+=== RUN   TestManagedTLSLifecycle/nginx/vmess/httpupgrade
+=== RUN   TestManagedTLSLifecycle/nginx/vless/ws
+=== RUN   TestManagedTLSLifecycle/nginx/vless/httpupgrade
+=== RUN   TestManagedTLSLifecycle/nginx/trojan/ws
+=== RUN   TestManagedTLSLifecycle/nginx/trojan/httpupgrade
+--- PASS: TestManagedTLSLifecycle (0.01s)
+    --- PASS: TestManagedTLSLifecycle/caddy/vmess/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/caddy/vmess/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSLifecycle/caddy/vless/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/caddy/vless/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSLifecycle/caddy/trojan/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/caddy/trojan/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/vmess/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/vmess/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/vless/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/vless/httpupgrade (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/trojan/ws (0.00s)
+    --- PASS: TestManagedTLSLifecycle/nginx/trojan/httpupgrade (0.00s)
+=== RUN   TestManagedTLSAuthoritySharedAcrossInbounds
+--- PASS: TestManagedTLSAuthoritySharedAcrossInbounds (0.00s)
+=== RUN   TestMergeGeneratedRemovesStaleManagedInboundFields
+=== PAUSE TestMergeGeneratedRemovesStaleManagedInboundFields
+=== RUN   TestMergeGeneratedForcesCentralLogOutput
+=== PAUSE TestMergeGeneratedForcesCentralLogOutput
+=== RUN   TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields
+=== PAUSE TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields
+=== RUN   TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine
+=== PAUSE TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine
+=== RUN   TestMutateGeneratedConvertsSingleShadowsocksRustServer
+=== PAUSE TestMutateGeneratedConvertsSingleShadowsocksRustServer
+=== RUN   TestMutateGeneratedPreservesShadowsocksRustExtendedEntries
+=== PAUSE TestMutateGeneratedPreservesShadowsocksRustExtendedEntries
+=== RUN   TestMieruCustomPatternRoundTrip
+=== RUN   TestMieruCustomPatternRoundTrip/mixed/TCP
+=== RUN   TestMieruCustomPatternRoundTrip/mixed/UDP
+=== RUN   TestMieruCustomPatternRoundTrip/zeros/TCP
+=== RUN   TestMieruCustomPatternRoundTrip/zeros/UDP
+=== RUN   TestMieruCustomPatternRoundTrip/fixed/TCP
+=== RUN   TestMieruCustomPatternRoundTrip/fixed/UDP
+=== RUN   TestMieruCustomPatternRoundTrip/same_values_as_balanced/TCP
+=== RUN   TestMieruCustomPatternRoundTrip/same_values_as_balanced/UDP
+--- PASS: TestMieruCustomPatternRoundTrip (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/mixed/TCP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/mixed/UDP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/zeros/TCP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/zeros/UDP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/fixed/TCP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/fixed/UDP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/same_values_as_balanced/TCP (0.00s)
+    --- PASS: TestMieruCustomPatternRoundTrip/same_values_as_balanced/UDP (0.00s)
+=== RUN   TestMieruCustomPatternValidation
+=== RUN   TestMieruCustomPatternValidation/missing
+=== RUN   TestMieruCustomPatternValidation/sleep_negative
+=== RUN   TestMieruCustomPatternValidation/sleep_high
+=== RUN   TestMieruCustomPatternValidation/nonce_min_negative
+=== RUN   TestMieruCustomPatternValidation/nonce_max_high
+=== RUN   TestMieruCustomPatternValidation/nonce_reversed
+=== RUN   TestMieruCustomPatternValidation/nonce_type
+=== RUN   TestMieruCustomPatternValidation/fixed_empty
+=== RUN   TestMieruCustomPatternValidation/fixed_invalid
+=== RUN   TestMieruCustomPatternValidation/fixed_long
+=== RUN   TestMieruCustomPatternValidation/padding_negative
+=== RUN   TestMieruCustomPatternValidation/padding_high
+=== RUN   TestMieruCustomPatternValidation/entropy
+=== RUN   TestMieruCustomPatternValidation/rotation
+--- PASS: TestMieruCustomPatternValidation (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/missing (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/sleep_negative (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/sleep_high (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/nonce_min_negative (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/nonce_max_high (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/nonce_reversed (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/nonce_type (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/fixed_empty (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/fixed_invalid (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/fixed_long (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/padding_negative (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/padding_high (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/entropy (0.00s)
+    --- PASS: TestMieruCustomPatternValidation/rotation (0.00s)
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/implicit_values
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/missing_custom_marker
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/unlock_all
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/seed
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/unknown_field
+=== RUN   TestMieruCustomPatternProtectsUnsupportedSource/unknown_nonce
+--- PASS: TestMieruCustomPatternProtectsUnsupportedSource (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/implicit_values (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/missing_custom_marker (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/unlock_all (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/seed (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/unknown_field (0.00s)
+    --- PASS: TestMieruCustomPatternProtectsUnsupportedSource/unknown_nonce (0.00s)
+=== RUN   TestMieruCustomPatternMutation
+--- PASS: TestMieruCustomPatternMutation (0.00s)
+=== RUN   TestMieruPresetRoundTripAndClient
+=== RUN   TestMieruPresetRoundTripAndClient/TCP
+=== RUN   TestMieruPresetRoundTripAndClient/UDP
+--- PASS: TestMieruPresetRoundTripAndClient (0.00s)
+    --- PASS: TestMieruPresetRoundTripAndClient/TCP (0.00s)
+    --- PASS: TestMieruPresetRoundTripAndClient/UDP (0.00s)
+=== RUN   TestMieruTrafficPatternsRoundTrip
+=== RUN   TestMieruTrafficPatternsRoundTrip/off/TCP
+=== RUN   TestMieruTrafficPatternsRoundTrip/off/UDP
+=== RUN   TestMieruTrafficPatternsRoundTrip/light/TCP
+=== RUN   TestMieruTrafficPatternsRoundTrip/light/UDP
+=== RUN   TestMieruTrafficPatternsRoundTrip/balanced/TCP
+=== RUN   TestMieruTrafficPatternsRoundTrip/balanced/UDP
+=== RUN   TestMieruTrafficPatternsRoundTrip/aggressive/TCP
+=== RUN   TestMieruTrafficPatternsRoundTrip/aggressive/UDP
+--- PASS: TestMieruTrafficPatternsRoundTrip (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/off/TCP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/off/UDP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/light/TCP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/light/UDP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/balanced/TCP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/balanced/UDP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/aggressive/TCP (0.00s)
+    --- PASS: TestMieruTrafficPatternsRoundTrip/aggressive/UDP (0.00s)
+=== RUN   TestMieruTrafficPatternMutation
+--- PASS: TestMieruTrafficPatternMutation (0.00s)
+=== RUN   TestMieruRejectsUnsupportedInputs
+=== RUN   TestMieruRejectsUnsupportedInputs/transport
+=== RUN   TestMieruRejectsUnsupportedInputs/traffic_pattern
+=== RUN   TestMieruRejectsUnsupportedInputs/username
+=== RUN   TestMieruRejectsUnsupportedInputs/password
+=== RUN   TestMieruRejectsUnsupportedInputs/TLS
+=== RUN   TestMieruRejectsUnsupportedInputs/Reality
+=== RUN   TestMieruRejectsUnsupportedInputs/WebSocket
+--- PASS: TestMieruRejectsUnsupportedInputs (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/transport (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/traffic_pattern (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/username (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/password (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/TLS (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/Reality (0.00s)
+    --- PASS: TestMieruRejectsUnsupportedInputs/WebSocket (0.00s)
+=== RUN   TestMieruCustomListenersRemainSourceOnly
+=== RUN   TestMieruCustomListenersRemainSourceOnly/multiple_users
+=== RUN   TestMieruCustomListenersRemainSourceOnly/traffic_pattern
+=== RUN   TestMieruCustomListenersRemainSourceOnly/user_hint
+=== RUN   TestMieruCustomListenersRemainSourceOnly/oversized_port
+=== RUN   TestMieruCustomListenersRemainSourceOnly/negative_port
+=== RUN   TestMieruCustomListenersRemainSourceOnly/port_range
+=== RUN   TestMieruCustomListenersRemainSourceOnly/missing_transport
+=== RUN   TestMieruCustomListenersRemainSourceOnly/invalid_transport
+=== RUN   TestMieruCustomListenersRemainSourceOnly/missing_password
+--- PASS: TestMieruCustomListenersRemainSourceOnly (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/multiple_users (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/traffic_pattern (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/user_hint (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/oversized_port (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/negative_port (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/port_range (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/missing_transport (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/invalid_transport (0.00s)
+    --- PASS: TestMieruCustomListenersRemainSourceOnly/missing_password (0.00s)
+=== RUN   TestMieruMutationUpdatesAndRemovesTransport
+--- PASS: TestMieruMutationUpdatesAndRemovesTransport (0.00s)
+=== RUN   TestSnellCompletePresetMatrix
+=== RUN   TestSnellCompletePresetMatrix/plain-snell
+=== RUN   TestSnellCompletePresetMatrix/snell-shadow-tls-v3
+--- PASS: TestSnellCompletePresetMatrix (0.00s)
+    --- PASS: TestSnellCompletePresetMatrix/plain-snell (0.00s)
+    --- PASS: TestSnellCompletePresetMatrix/snell-shadow-tls-v3 (0.00s)
+=== RUN   TestSnellPresetRejectsIncompatibleAndUnsafeSettings
+=== RUN   TestSnellPresetRejectsIncompatibleAndUnsafeSettings/v2_udp
+=== RUN   TestSnellPresetRejectsIncompatibleAndUnsafeSettings/v3_reuse
+=== RUN   TestSnellPresetRejectsIncompatibleAndUnsafeSettings/plain_preset_rejects_carrier
+--- PASS: TestSnellPresetRejectsIncompatibleAndUnsafeSettings (0.00s)
+    --- PASS: TestSnellPresetRejectsIncompatibleAndUnsafeSettings/v2_udp (0.00s)
+    --- PASS: TestSnellPresetRejectsIncompatibleAndUnsafeSettings/v3_reuse (0.00s)
+    --- PASS: TestSnellPresetRejectsIncompatibleAndUnsafeSettings/plain_preset_rejects_carrier (0.00s)
+=== RUN   TestSudokuCompletePresetMatrixAndPrivateKeyIsolation
+=== RUN   TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-stream
+=== RUN   TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-poll
+=== RUN   TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-auto
+=== RUN   TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-ws
+--- PASS: TestSudokuCompletePresetMatrixAndPrivateKeyIsolation (0.00s)
+    --- PASS: TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-stream (0.00s)
+    --- PASS: TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-poll (0.00s)
+    --- PASS: TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-auto (0.00s)
+    --- PASS: TestSudokuCompletePresetMatrixAndPrivateKeyIsolation/httpmask-ws (0.00s)
+=== RUN   TestSudokuPresetRejectsUnsafeOrMismatchedSettings
+=== RUN   TestSudokuPresetRejectsUnsafeOrMismatchedSettings/none_is_forbidden
+=== RUN   TestSudokuPresetRejectsUnsafeOrMismatchedSettings/padding_range
+=== RUN   TestSudokuPresetRejectsUnsafeOrMismatchedSettings/nested_path
+=== RUN   TestSudokuPresetRejectsUnsafeOrMismatchedSettings/legacy_HTTPMask_is_not_live-safe
+--- PASS: TestSudokuPresetRejectsUnsafeOrMismatchedSettings (0.00s)
+    --- PASS: TestSudokuPresetRejectsUnsafeOrMismatchedSettings/none_is_forbidden (0.00s)
+    --- PASS: TestSudokuPresetRejectsUnsafeOrMismatchedSettings/padding_range (0.00s)
+    --- PASS: TestSudokuPresetRejectsUnsafeOrMismatchedSettings/nested_path (0.00s)
+    --- PASS: TestSudokuPresetRejectsUnsafeOrMismatchedSettings/legacy_HTTPMask_is_not_live-safe (0.00s)
+=== RUN   TestApplyClientMetadataIgnoresStaleTagFromAnotherProtocol
+--- PASS: TestApplyClientMetadataIgnoresStaleTagFromAnotherProtocol (0.00s)
+=== RUN   TestNewPlanRandomizesSensitiveValues
+=== PAUSE TestNewPlanRandomizesSensitiveValues
+=== RUN   TestRegeneratePlanPreservesCurrentSelections
+=== PAUSE TestRegeneratePlanPreservesCurrentSelections
+=== RUN   TestRegeneratePlanUsesCurrentEncryptionMethod
+=== PAUSE TestRegeneratePlanUsesCurrentEncryptionMethod
+=== RUN   TestEveryPresetHasIndependentAccounting
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/ss2022
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-enc-tcp
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vmess
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/trojan
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/hysteria2
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/port-forward
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-reality
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-enc-tcp-reality-vision
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-enc-xhttp-reality-vision
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-tls-reality
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-reality-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-five
+=== RUN   TestEveryPresetHasIndependentAccounting/xray/wireguard
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/ss2022
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/trojan
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/hysteria2
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/port-forward
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/tuic
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/anytls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/wireguard
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless-http2-reality
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-tcp
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-ws
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-http
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-quic
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-ws-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-h2-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vmess-httpupgrade-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless-ws-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless-h2-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless-httpupgrade-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/trojan-ws-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/trojan-h2-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/trojan-httpupgrade-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/vless-tls
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/shadowsocks
+=== RUN   TestEveryPresetHasIndependentAccounting/sing-box/socks
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/ss2022
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vless
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-tcp
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vmess
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/trojan
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/hysteria2
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/port-forward
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vless-xhttp-reality
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-tcp-reality-vision
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-xhttp-reality-vision
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/mieru
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/snell
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/snell-shadow-tls-v3
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/sudoku
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/tuic
+=== RUN   TestEveryPresetHasIndependentAccounting/mihomo/anytls
+=== RUN   TestEveryPresetHasIndependentAccounting/ss-rust/ss2022
+=== RUN   TestEveryPresetHasIndependentAccounting/ss-rust/shadowsocks
+--- PASS: TestEveryPresetHasIndependentAccounting (0.24s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/ss2022 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-enc-tcp (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vmess (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/trojan (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/hysteria2 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/port-forward (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-reality (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-enc-tcp-reality-vision (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-enc-xhttp-reality-vision (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-tls-reality (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-reality-tls (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/vless-xhttp-five (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/xray/wireguard (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/ss2022 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/trojan (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/hysteria2 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/port-forward (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/tuic (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/anytls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/wireguard (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless-http2-reality (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-tcp (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-ws (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-http (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-quic (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-ws-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-h2-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vmess-httpupgrade-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless-ws-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless-h2-tls (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless-httpupgrade-tls (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/trojan-ws-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/trojan-h2-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/trojan-httpupgrade-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/vless-tls (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/shadowsocks (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/sing-box/socks (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/ss2022 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vless (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-tcp (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vmess (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/trojan (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/hysteria2 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/port-forward (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vless-xhttp-reality (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-tcp-reality-vision (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/vless-enc-xhttp-reality-vision (0.02s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/mieru (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/snell (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/snell-shadow-tls-v3 (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/sudoku (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/tuic (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/mihomo/anytls (0.01s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/ss-rust/ss2022 (0.00s)
+    --- PASS: TestEveryPresetHasIndependentAccounting/ss-rust/shadowsocks (0.00s)
+=== RUN   TestPresetInboundReferencesRenameAndDelete
+--- PASS: TestPresetInboundReferencesRenameAndDelete (0.00s)
+=== RUN   TestPresetInboundDNSReferencesFailClosedWhenAmbiguous
+--- PASS: TestPresetInboundDNSReferencesFailClosedWhenAmbiguous (0.00s)
+=== RUN   TestPresetInboundMihomoSubruleReferencesFailClosed
+--- PASS: TestPresetInboundMihomoSubruleReferencesFailClosed (0.00s)
+=== RUN   TestRealityPresetsExcludeMicrosoftAndCloudflare
+=== PAUSE TestRealityPresetsExcludeMicrosoftAndCloudflare
+=== RUN   TestNormalizeRealityServerName
+=== PAUSE TestNormalizeRealityServerName
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial
+=== RUN   TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13
+=== PAUSE TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13
+=== RUN   TestRealityProbeDoesNotWaitForUnreachableAddress
+=== PAUSE TestRealityProbeDoesNotWaitForUnreachableAddress
+=== RUN   TestRealityProbeRetainsEveryAddressFailureAndStage
+=== PAUSE TestRealityProbeRetainsEveryAddressFailureAndStage
+=== RUN   TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes
+=== PAUSE TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes
+=== RUN   TestSharedInstanceRemovesOnlyLocalStatisticsAPI
+=== RUN   TestSharedInstanceRemovesOnlyLocalStatisticsAPI/xray
+=== RUN   TestSharedInstanceRemovesOnlyLocalStatisticsAPI/sing-box
+--- PASS: TestSharedInstanceRemovesOnlyLocalStatisticsAPI (0.01s)
+    --- PASS: TestSharedInstanceRemovesOnlyLocalStatisticsAPI/xray (0.00s)
+    --- PASS: TestSharedInstanceRemovesOnlyLocalStatisticsAPI/sing-box (0.00s)
+=== RUN   TestSharedTrafficEndpointsFailClosed
+=== RUN   TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"qch-stat-api","protocol":"vless","port":14443}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"tag":"one","type":"hysteria2","listen_port":14443}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/ss-rust/{"server":"::","server_port":14443,"password":"test","method":"aes-256-gcm"}
+=== RUN   TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_external-controller:_0.0.0.0:9090
+=== RUN   TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_tun:_{enable:_true}
+=== RUN   TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_future,_port:_14443}]
+=== RUN   TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_dns:_{listen:_':53'}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":"10000-20000"}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"Port":22222}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"port":22222}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"allocate":{"strategy":"random"}}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"api":{"listen":"127.0.0.1:10085","services":["HandlerService"]},"inbounds":[{"tag":"one","protocol":"vless","port":14443}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":10085}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"tun","listen_port":14443}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"vless","listen_port":14443}],"services":[{"type":"ssm-api"}]}
+=== RUN   TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"vless","listen_port":14443}],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}
+=== RUN   TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"plugin":"custom"}
+=== RUN   TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"manager_address":"127.0.0.1:6001"}
+=== RUN   TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"servers":[{"server_port":14444}]}
+--- PASS: TestSharedTrafficEndpointsFailClosed (0.01s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}] (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"qch-stat-api","protocol":"vless","port":14443}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"tag":"one","type":"hysteria2","listen_port":14443}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/ss-rust/{"server":"::","server_port":14443,"password":"test","method":"aes-256-gcm"} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_external-controller:_0.0.0.0:9090 (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_tun:_{enable:_true} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_future,_port:_14443}] (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/mihomo/listeners:_[{name:_one,_type:_trojan,_port:_14443}]_dns:_{listen:_':53'} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":"10000-20000"}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"Port":22222}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"port":22222}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":14443,"allocate":{"strategy":"random"}}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"api":{"listen":"127.0.0.1:10085","services":["HandlerService"]},"inbounds":[{"tag":"one","protocol":"vless","port":14443}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/xray/{"inbounds":[{"tag":"one","protocol":"vless","port":10085}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"tun","listen_port":14443}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"vless","listen_port":14443}],"services":[{"type":"ssm-api"}]} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/sing-box/{"inbounds":[{"type":"vless","listen_port":14443}],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"plugin":"custom"} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"manager_address":"127.0.0.1:6001"} (0.00s)
+    --- PASS: TestSharedTrafficEndpointsFailClosed/ss-rust/{"server_port":14443,"servers":[{"server_port":14444}]} (0.00s)
+=== RUN   TestSharedTrafficSupportsGeneratedServerPresets
+--- PASS: TestSharedTrafficSupportsGeneratedServerPresets (0.04s)
+=== RUN   TestSharedTrafficFinalInboundDeletion
+=== RUN   TestSharedTrafficFinalInboundDeletion/ss-rust
+=== RUN   TestSharedTrafficFinalInboundDeletion/mihomo
+=== RUN   TestSharedTrafficFinalInboundDeletion/xray
+=== RUN   TestSharedTrafficFinalInboundDeletion/sing-box
+--- PASS: TestSharedTrafficFinalInboundDeletion (0.00s)
+    --- PASS: TestSharedTrafficFinalInboundDeletion/ss-rust (0.00s)
+    --- PASS: TestSharedTrafficFinalInboundDeletion/mihomo (0.00s)
+    --- PASS: TestSharedTrafficFinalInboundDeletion/xray (0.00s)
+    --- PASS: TestSharedTrafficFinalInboundDeletion/sing-box (0.00s)
+=== RUN   TestSingBoxFinalPresetDeletionRemovesManagedStatistics
+--- PASS: TestSingBoxFinalPresetDeletionRemovesManagedStatistics (0.00s)
+=== RUN   TestSingBoxEmptyLegacyAccountingCleanup
+--- PASS: TestSingBoxEmptyLegacyAccountingCleanup (0.00s)
+=== RUN   TestSingBoxEndpointPresetAccessPolicyAndDeletion
+--- PASS: TestSingBoxEndpointPresetAccessPolicyAndDeletion (0.00s)
+=== RUN   TestSingBoxEndpointMutationChecksBothLists
+=== RUN   TestSingBoxEndpointMutationChecksBothLists/port
+=== RUN   TestSingBoxEndpointMutationChecksBothLists/tag
+--- PASS: TestSingBoxEndpointMutationChecksBothLists (0.00s)
+    --- PASS: TestSingBoxEndpointMutationChecksBothLists/port (0.00s)
+    --- PASS: TestSingBoxEndpointMutationChecksBothLists/tag (0.00s)
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/multiple_peers
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/system_interface
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/custom_dialer
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/unknown_field
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/remote_peer
+=== RUN   TestSingBoxEndpointRejectsLossyPresetEdits/reserved_peer_bytes
+--- PASS: TestSingBoxEndpointRejectsLossyPresetEdits (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/multiple_peers (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/system_interface (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/custom_dialer (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/unknown_field (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/remote_peer (0.00s)
+    --- PASS: TestSingBoxEndpointRejectsLossyPresetEdits/reserved_peer_bytes (0.00s)
+=== RUN   TestSingBoxEndpointAccountingUsesRealDedicatedExits
+=== RUN   TestSingBoxEndpointAccountingUsesRealDedicatedExits/endpoint_only
+=== RUN   TestSingBoxEndpointAccountingUsesRealDedicatedExits/mixed_listeners
+--- PASS: TestSingBoxEndpointAccountingUsesRealDedicatedExits (0.00s)
+    --- PASS: TestSingBoxEndpointAccountingUsesRealDedicatedExits/endpoint_only (0.00s)
+    --- PASS: TestSingBoxEndpointAccountingUsesRealDedicatedExits/mixed_listeners (0.00s)
+=== RUN   TestSingBoxTailscaleNeverClaimsPortOnlyDualAccounting
+--- PASS: TestSingBoxTailscaleNeverClaimsPortOnlyDualAccounting (0.00s)
+=== RUN   TestSingBoxNullNativeListsDoNotDisableAccounting
+--- PASS: TestSingBoxNullNativeListsDoNotDisableAccounting (0.00s)
+=== RUN   TestDiscoverSingBoxEntriesIncludesInboundAndEndpoint
+--- PASS: TestDiscoverSingBoxEntriesIncludesInboundAndEndpoint (0.00s)
+=== RUN   TestMutateGeneratedSingBoxEndpointChecksCrossListIdentity
+--- PASS: TestMutateGeneratedSingBoxEndpointChecksCrossListIdentity (0.00s)
+=== RUN   TestMutateGeneratedSingBoxEndpointPreservesUnknownCustomFields
+--- PASS: TestMutateGeneratedSingBoxEndpointPreservesUnknownCustomFields (0.00s)
+=== RUN   TestSingBoxFinalInboundDeletion
+    singbox_live_test.go:31: QCH_SING_BOX_BINARY is not set
+--- SKIP: TestSingBoxFinalInboundDeletion (0.00s)
+=== RUN   TestSingBoxUpstreamLiveMatrix
+    singbox_live_test.go:88: QCH_SING_BOX_BINARY is not set
+--- SKIP: TestSingBoxUpstreamLiveMatrix (0.00s)
+=== RUN   TestSingBoxTLSVerificationAndRenewal
+    singbox_live_test.go:236: QCH_SING_BOX_BINARY is not set
+--- SKIP: TestSingBoxTLSVerificationAndRenewal (0.00s)
+=== RUN   TestSingBoxUpstreamPresetLifecycle
+=== RUN   TestSingBoxUpstreamPresetLifecycle/ss2022
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess
+=== RUN   TestSingBoxUpstreamPresetLifecycle/trojan
+=== RUN   TestSingBoxUpstreamPresetLifecycle/hysteria2
+=== RUN   TestSingBoxUpstreamPresetLifecycle/tuic
+=== RUN   TestSingBoxUpstreamPresetLifecycle/anytls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless-http2-reality
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-tcp
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-ws
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-http
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-quic
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-ws-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-h2-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vmess-httpupgrade-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless-ws-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless-h2-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless-httpupgrade-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/trojan-ws-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/trojan-h2-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/trojan-httpupgrade-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/vless-tls
+=== RUN   TestSingBoxUpstreamPresetLifecycle/shadowsocks
+=== RUN   TestSingBoxUpstreamPresetLifecycle/socks
+--- PASS: TestSingBoxUpstreamPresetLifecycle (0.01s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/ss2022 (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/trojan (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/hysteria2 (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/tuic (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/anytls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless-http2-reality (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-tcp (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-ws (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-http (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-quic (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-ws-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-h2-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vmess-httpupgrade-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless-ws-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless-h2-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless-httpupgrade-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/trojan-ws-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/trojan-h2-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/trojan-httpupgrade-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/vless-tls (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/shadowsocks (0.00s)
+    --- PASS: TestSingBoxUpstreamPresetLifecycle/socks (0.00s)
+=== RUN   TestSingBoxPresetSecurityAndScope
+--- PASS: TestSingBoxPresetSecurityAndScope (0.00s)
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly/custom-header
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly/custom-tls
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly/unknown-transport
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly/multiple-users
+=== RUN   TestSingBoxImportedCustomOptionsRemainSourceOnly/multiple-hosts
+--- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly (0.00s)
+    --- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly/custom-header (0.00s)
+    --- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly/custom-tls (0.00s)
+    --- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly/unknown-transport (0.00s)
+    --- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly/multiple-users (0.00s)
+    --- PASS: TestSingBoxImportedCustomOptionsRemainSourceOnly/multiple-hosts (0.00s)
+=== RUN   TestSSRustFieldScopesMatchRuntime
+--- PASS: TestSSRustFieldScopesMatchRuntime (0.00s)
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_mode
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/mode
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/acl
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_bind_addr
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_fwmark
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_udp_allow_fragmentation
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/inbound_udp_allow_fragmentation
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_args
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_bind_interface
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_proxy
+=== RUN   TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_opts
+--- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_mode (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/mode (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/acl (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_bind_addr (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_fwmark (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_udp_allow_fragmentation (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/inbound_udp_allow_fragmentation (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_args (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_bind_interface (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/outbound_proxy (0.00s)
+    --- PASS: TestSSRustInboundFieldsIsolatePortsAndRetainDefaults/plugin_opts (0.00s)
+=== RUN   TestSSRustLegacyPortFieldNormalizesWithoutEditingDefaults
+--- PASS: TestSSRustLegacyPortFieldNormalizesWithoutEditingDefaults (0.00s)
+=== RUN   TestSSRustPortFieldsRejectUnsupportedOrAmbiguousScope
+--- PASS: TestSSRustPortFieldsRejectUnsupportedOrAmbiguousScope (0.00s)
+=== RUN   TestSSRustFieldEditsRejectInvalidValuesBeforeSaving
+--- PASS: TestSSRustFieldEditsRejectInvalidValuesBeforeSaving (0.00s)
+=== RUN   TestSSRustScopedPresetDoesNotChangeGlobals
+--- PASS: TestSSRustScopedPresetDoesNotChangeGlobals (0.00s)
+=== RUN   TestSSRustNamesPersistAndKeepPortIdentity
+=== RUN   TestSSRustNamesPersistAndKeepPortIdentity/scoped
+=== RUN   TestSSRustNamesPersistAndKeepPortIdentity/legacy
+--- PASS: TestSSRustNamesPersistAndKeepPortIdentity (0.00s)
+    --- PASS: TestSSRustNamesPersistAndKeepPortIdentity/scoped (0.00s)
+    --- PASS: TestSSRustNamesPersistAndKeepPortIdentity/legacy (0.00s)
+=== RUN   TestSSRustSingleServerRenameAndNameValidation
+--- PASS: TestSSRustSingleServerRenameAndNameValidation (0.00s)
+=== RUN   TestSSRustNativeFieldScopes
+    ss_rust_runtime_linux_test.go:31: requires make ss-rust-runtime-test
+--- SKIP: TestSSRustNativeFieldScopes (0.00s)
+=== RUN   TestSSRustNativeConnectionLogs
+    ss_rust_runtime_linux_test.go:134: requires make ss-rust-runtime-test
+--- SKIP: TestSSRustNativeConnectionLogs (0.00s)
+=== RUN   TestSSRustScriptPresetNetworkRoundTrip
+--- PASS: TestSSRustScriptPresetNetworkRoundTrip (0.00s)
+=== RUN   TestSSRustScriptMutationPreservesPolicyAndGlobalSettings
+--- PASS: TestSSRustScriptMutationPreservesPolicyAndGlobalSettings (0.00s)
+=== RUN   TestSSRustCustomDNSIsNotLostDuringPresetEdit
+--- PASS: TestSSRustCustomDNSIsNotLostDuringPresetEdit (0.00s)
+=== RUN   TestSSRustNewPlanInheritsGlobalOptions
+--- PASS: TestSSRustNewPlanInheritsGlobalOptions (0.00s)
+=== RUN   TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners
+=== PAUSE TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners
+=== RUN   TestDiscoverTrafficPortsDoesNotReturnConfigurationSecrets
+=== PAUSE TestDiscoverTrafficPortsDoesNotReturnConfigurationSecrets
+=== RUN   TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey
+=== PAUSE TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey
+=== RUN   TestVLESSEncryptionRejectsMismatchedClientKey
+=== PAUSE TestVLESSEncryptionRejectsMismatchedClientKey
+=== RUN   TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality
+=== PAUSE TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality
+=== RUN   TestWireGuardMetadataKeepsSourceAuthoritative
+=== RUN   TestWireGuardMetadataKeepsSourceAuthoritative/xray
+=== RUN   TestWireGuardMetadataKeepsSourceAuthoritative/sing-box
+--- PASS: TestWireGuardMetadataKeepsSourceAuthoritative (0.00s)
+    --- PASS: TestWireGuardMetadataKeepsSourceAuthoritative/xray (0.00s)
+    --- PASS: TestWireGuardMetadataKeepsSourceAuthoritative/sing-box (0.00s)
+=== RUN   TestWireGuardDoesNotClaimPublicSourceGeoBlocking
+=== RUN   TestWireGuardDoesNotClaimPublicSourceGeoBlocking/xray
+=== RUN   TestWireGuardDoesNotClaimPublicSourceGeoBlocking/sing-box
+--- PASS: TestWireGuardDoesNotClaimPublicSourceGeoBlocking (0.00s)
+    --- PASS: TestWireGuardDoesNotClaimPublicSourceGeoBlocking/xray (0.00s)
+    --- PASS: TestWireGuardDoesNotClaimPublicSourceGeoBlocking/sing-box (0.00s)
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/#00
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/224.0.0.1/24
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/10.66.66.2/24
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/10.0.0.1/24,10.1.0.1/24
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/::ffff:10.0.0.1/120
+=== RUN   TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/fd00::1/64
+--- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/#00 (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/224.0.0.1/24 (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/10.66.66.2/24 (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/10.0.0.1/24,10.1.0.1/24 (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/::ffff:10.0.0.1/120 (0.00s)
+    --- PASS: TestSingBoxWireGuardRejectsInvalidServerAndListenerAddresses/fd00::1/64 (0.00s)
+=== RUN   TestDiscoverSingBoxEntriesRejectsAmbiguousIdentity
+--- PASS: TestDiscoverSingBoxEntriesRejectsAmbiguousIdentity (0.00s)
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/level
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/keepAlive
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/port
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/mtu
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/preSharedKey
+=== RUN   TestXrayWireGuardParserRejectsLossyNumericFields/email
+--- PASS: TestXrayWireGuardParserRejectsLossyNumericFields (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/level (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/keepAlive (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/port (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/mtu (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/preSharedKey (0.00s)
+    --- PASS: TestXrayWireGuardParserRejectsLossyNumericFields/email (0.00s)
+=== RUN   TestSingBoxEndpointConfigFilesKeepNativeOrderAndPrecision
+--- PASS: TestSingBoxEndpointConfigFilesKeepNativeOrderAndPrecision (0.00s)
+=== RUN   TestWireGuardNativeCoreRoundTrip
+    wireguard_runtime_test.go:27: requires QCH_TEST_SINGBOX_BIN
+--- SKIP: TestWireGuardNativeCoreRoundTrip (0.00s)
+=== RUN   TestWireGuardPlanGenerateClientAndMetadata
+--- PASS: TestWireGuardPlanGenerateClientAndMetadata (0.00s)
+=== RUN   TestWireGuardRejectsInvalidClientCIDR
+--- PASS: TestWireGuardRejectsInvalidClientCIDR (0.00s)
+=== RUN   TestSingBoxWireGuardEndpointKeepsClientPrivateKeyOutOfServer
+--- PASS: TestSingBoxWireGuardEndpointKeepsClientPrivateKeyOutOfServer (0.00s)
+=== RUN   TestSingBoxEndpointClientProfiles
+--- PASS: TestSingBoxEndpointClientProfiles (0.00s)
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-reality
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-tls
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-tls-reality
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-reality-tls
+=== RUN   TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-five
+--- PASS: TestXHTTPStandaloneAndGroupRoundTrip (0.01s)
+    --- PASS: TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-reality (0.00s)
+    --- PASS: TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-tls (0.00s)
+    --- PASS: TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-tls-reality (0.00s)
+    --- PASS: TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-reality-tls (0.00s)
+    --- PASS: TestXHTTPStandaloneAndGroupRoundTrip/vless-xhttp-five (0.00s)
+=== RUN   TestXHTTPDownloadRoundTripAndIPv6URI
+--- PASS: TestXHTTPDownloadRoundTripAndIPv6URI (0.00s)
+=== RUN   TestXHTTPGroupLifecycleAndDetachedMetadata
+--- PASS: TestXHTTPGroupLifecycleAndDetachedMetadata (0.00s)
+=== RUN   TestXHTTPValidationExplainsConflicts
+=== RUN   TestXHTTPValidationExplainsConflicts/flow
+=== RUN   TestXHTTPValidationExplainsConflicts/mode
+=== RUN   TestXHTTPValidationExplainsConflicts/host
+=== RUN   TestXHTTPValidationExplainsConflicts/xmux
+=== RUN   TestXHTTPValidationExplainsConflicts/old_lifetime
+=== RUN   TestXHTTPValidationExplainsConflicts/server_download
+=== RUN   TestXHTTPValidationExplainsConflicts/private_target
+--- PASS: TestXHTTPValidationExplainsConflicts (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/flow (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/mode (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/host (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/xmux (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/old_lifetime (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/server_download (0.00s)
+    --- PASS: TestXHTTPValidationExplainsConflicts/private_target (0.00s)
+=== RUN   TestXHTTPHistoricalAliasesAndTLSIdentification
+--- PASS: TestXHTTPHistoricalAliasesAndTLSIdentification (0.00s)
+=== RUN   TestXHTTPRegenerateKeepsDownloadAssociation
+--- PASS: TestXHTTPRegenerateKeepsDownloadAssociation (0.00s)
+=== RUN   TestXHTTPGroupAccountingRejectsSharedUser
+--- PASS: TestXHTTPGroupAccountingRejectsSharedUser (0.00s)
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/auto
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/packet-up
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/stream-up
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/stream-one
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/h2/auto
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/h2/packet-up
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/h2/stream-up
+=== RUN   TestXHTTPHTTP1ExportKeepsTLSVerification/h2/stream-one
+--- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/auto (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/packet-up (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/stream-up (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/http/1.1/stream-one (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/h2/auto (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/h2/packet-up (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/h2/stream-up (0.00s)
+    --- PASS: TestXHTTPHTTP1ExportKeepsTLSVerification/h2/stream-one (0.00s)
+=== RUN   TestXrayGeneratedAuthenticationRoundTrip
+    xray_auth_runtime_test.go:25: requires QCH_TEST_XRAY_BIN
+--- SKIP: TestXrayGeneratedAuthenticationRoundTrip (0.00s)
+=== RUN   TestLegacyXrayUsersPresetCanBeRepairedWithoutLosingOtherInbounds
+--- PASS: TestLegacyXrayUsersPresetCanBeRepairedWithoutLosingOtherInbounds (0.00s)
+=== CONT  TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules
+=== RUN   TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/mihomo
+=== PAUSE TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/mihomo
+=== RUN   TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/xray
+=== PAUSE TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/xray
+=== RUN   TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/sing-box
+=== PAUSE TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/sing-box
+=== CONT  TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/mihomo
+=== CONT  TestParseAllShadowsocksRustOfficialExtendedConfiguration
+--- PASS: TestParseAllShadowsocksRustOfficialExtendedConfiguration (0.00s)
+=== CONT  TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality
+=== RUN   TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/mihomo
+=== PAUSE TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/mihomo
+=== CONT  TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault
+=== RUN   TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/xray
+=== CONT  TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners
+=== CONT  TestVLESSEncryptionRejectsMismatchedClientKey
+=== CONT  TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify
+=== PAUSE TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/xray
+=== CONT  TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey
+=== RUN   TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-tcp-reality-vision
+=== CONT  TestDiscoverTrafficPortsDoesNotReturnConfigurationSecrets
+=== CONT  TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair
+--- PASS: TestDiscoverTrafficPortsDoesNotReturnConfigurationSecrets (0.00s)
+=== CONT  TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles
+=== RUN   TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell
+=== CONT  TestShadowsocksRustGeneratedConfigurationsRoundTrip
+=== RUN   TestShadowsocksRustGeneratedConfigurationsRoundTrip/ss2022
+=== PAUSE TestShadowsocksRustGeneratedConfigurationsRoundTrip/ss2022
+=== CONT  TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip
+=== RUN   TestShadowsocksRustGeneratedConfigurationsRoundTrip/shadowsocks
+=== PAUSE TestShadowsocksRustGeneratedConfigurationsRoundTrip/shadowsocks
+=== CONT  TestClientProfileNeverExportsServerPrivateMaterial
+=== RUN   TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/mihomo
+=== CONT  TestVLESSXHTTPRealityPlansMatchBothCoreShapes
+=== CONT  TestGenerateRejectsBadSS2022KeyLength
+=== PAUSE TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-tcp-reality-vision
+=== PAUSE TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/mihomo
+=== CONT  TestBuildClientProfileRejectsListenerAndUnsafeAddresses
+=== RUN   TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-xhttp-reality-vision
+=== RUN   TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/xray
+=== PAUSE TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-xhttp-reality-vision
+=== PAUSE TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/xray
+=== RUN   TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-tcp-reality-vision
+=== RUN   TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/sing-box
+=== PAUSE TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/sing-box
+=== PAUSE TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-tcp-reality-vision
+=== CONT  TestBuildSnellSurgeConfigIncludesOptionalTransportParameters
+=== RUN   TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-xhttp-reality-vision
+=== PAUSE TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-xhttp-reality-vision
+=== RUN   TestVLESSXHTTPRealityPlansMatchBothCoreShapes/mihomo
+=== PAUSE TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell
+=== CONT  TestBuildClientProfileNamedUsesOperatorName
+--- PASS: TestGenerateRejectsBadSS2022KeyLength (0.00s)
+=== PAUSE TestVLESSXHTTPRealityPlansMatchBothCoreShapes/mihomo
+=== RUN   TestVLESSXHTTPRealityPlansMatchBothCoreShapes/xray
+=== RUN   TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/mihomo
+=== RUN   TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell-shadow-tls-v3
+=== PAUSE TestVLESSXHTTPRealityPlansMatchBothCoreShapes/xray
+--- PASS: TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault (0.00s)
+=== CONT  TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange
+--- PASS: TestBuildClientProfileNamedUsesOperatorName (0.00s)
+--- PASS: TestClientProfileNeverExportsServerPrivateMaterial (0.00s)
+=== CONT  TestXrayMainlandSourceDoesNotChangeDomainStrategy
+--- PASS: TestBuildClientProfileRejectsListenerAndUnsafeAddresses (0.00s)
+=== CONT  TestXrayMainlandDestinationRestoresOwnedDomainStrategy
+=== CONT  TestXrayMainlandDestinationPreservesOperatorDomainStrategy
+=== PAUSE TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/mihomo
+=== RUN   TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/xray
+--- PASS: TestBuildSnellSurgeConfigIncludesOptionalTransportParameters (0.00s)
+--- PASS: TestVLESSEncryptionRejectsMismatchedClientKey (0.00s)
+--- PASS: TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair (0.00s)
+=== PAUSE TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell-shadow-tls-v3
+=== RUN   TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/sudoku
+=== PAUSE TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/sudoku
+=== CONT  TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol
+=== RUN   TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/mihomo
+=== PAUSE TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/mihomo
+--- PASS: TestXrayMainlandSourceDoesNotChangeDomainStrategy (0.00s)
+=== RUN   TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/xray
+=== CONT  TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON
+=== CONT  TestMainlandRulesUseExternalCoreResources
+=== PAUSE TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/xray
+=== RUN   TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/sing-box
+=== PAUSE TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/sing-box
+=== CONT  TestMainlandAccessPolicyRejectsTagPortMismatch
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/shadowsocks_standard
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/shadowsocks_standard
+=== PAUSE TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/xray
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/shadowsocks
+=== RUN   TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/sing-box
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/shadowsocks
+=== PAUSE TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/sing-box
+=== RUN   TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/ss-rust
+=== PAUSE TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/ss-rust
+=== CONT  TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/sing-box
+--- PASS: TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON (0.00s)
+=== CONT  TestXHTTPPlansBlockMainlandDestinationByDefault
+--- PASS: TestXrayMainlandDestinationPreservesOperatorDomainStrategy (0.00s)
+=== CONT  TestPortForwardPlanDefaultsRegenerateAndValidate
+=== RUN   TestPortForwardPlanDefaultsRegenerateAndValidate/target
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/vless_reality
+=== RUN   TestPortForwardPlanDefaultsRegenerateAndValidate/target_port
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/vless_reality
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/vless_xhttp_reality
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/vless_xhttp_reality
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/vmess
+=== RUN   TestPortForwardPlanDefaultsRegenerateAndValidate/network
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/vmess
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/trojan
+=== CONT  TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/xray
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/trojan
+=== RUN   TestPortForwardPlanDefaultsRegenerateAndValidate/transport
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/hysteria2
+=== CONT  TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/hysteria2
+=== RUN   TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/mihomo
+--- PASS: TestPortForwardPlanDefaultsRegenerateAndValidate (0.00s)
+    --- PASS: TestPortForwardPlanDefaultsRegenerateAndValidate/target (0.00s)
+    --- PASS: TestPortForwardPlanDefaultsRegenerateAndValidate/target_port (0.00s)
+    --- PASS: TestPortForwardPlanDefaultsRegenerateAndValidate/network (0.00s)
+    --- PASS: TestPortForwardPlanDefaultsRegenerateAndValidate/transport (0.00s)
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/tuic
+=== CONT  TestVLESSRealityPlansGenerateAndRoundTripKeys
+=== PAUSE TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/mihomo
+=== RUN   TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/xray
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/tuic
+=== PAUSE TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/xray
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/anytls
+=== RUN   TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/sing-box
+=== PAUSE TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/sing-box
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/anytls
+=== CONT  TestRegeneratePlanReplacesRealityMaterialTogether
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/snell
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/snell
+=== RUN   TestBuildClientProfileCoversEveryServerProtocol/sudoku
+--- PASS: TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange (0.00s)
+=== CONT  TestMutateGeneratedPreservesShadowsocksRustExtendedEntries
+=== PAUSE TestBuildClientProfileCoversEveryServerProtocol/sudoku
+=== CONT  TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes
+--- PASS: TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes (0.00s)
+=== CONT  TestRealityProbeRetainsEveryAddressFailureAndStage
+--- PASS: TestRealityProbeRetainsEveryAddressFailureAndStage (0.00s)
+=== CONT  TestRealityProbeDoesNotWaitForUnreachableAddress
+--- PASS: TestXrayMainlandDestinationRestoresOwnedDomainStrategy (0.01s)
+=== CONT  TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13
+--- PASS: TestMainlandAccessPolicyRejectsTagPortMismatch (0.00s)
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/loopback
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/loopback
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/private
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/private
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/mixed_DNS_answer
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/mixed_DNS_answer
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/documentation_range
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/documentation_range
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv4
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv4
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv6
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv6
+=== RUN   TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_CNAME
+=== PAUSE TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_CNAME
+=== CONT  TestNormalizeRealityServerName
+--- PASS: TestNormalizeRealityServerName (0.00s)
+=== CONT  TestRealityPresetsExcludeMicrosoftAndCloudflare
+--- PASS: TestRealityPresetsExcludeMicrosoftAndCloudflare (0.00s)
+=== CONT  TestRegeneratePlanUsesCurrentEncryptionMethod
+--- PASS: TestMutateGeneratedPreservesShadowsocksRustExtendedEntries (0.00s)
+=== CONT  TestNewPlanRandomizesSensitiveValues
+--- PASS: TestRegeneratePlanUsesCurrentEncryptionMethod (0.00s)
+=== CONT  TestRegeneratePlanPreservesCurrentSelections
+--- PASS: TestNewPlanRandomizesSensitiveValues (0.00s)
+=== CONT  TestEveryPublishedServerPlanGeneratesNativeSyntax
+=== CONT  TestParseSkipsUnsupportedLeadingInbound
+=== CONT  TestGeneratedConfigurationsRoundTripIntoServerForm
+--- PASS: TestRegeneratePlanPreservesCurrentSelections (0.00s)
+=== CONT  TestGenerateRejectsDisabledTLSForRequiredProtocols
+--- PASS: TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify (0.01s)
+=== CONT  TestGenerateServerConfigurations
+=== RUN   TestGenerateServerConfigurations/mihomo_ss2022
+--- PASS: TestRegeneratePlanReplacesRealityMaterialTogether (0.01s)
+=== CONT  TestMutateGeneratedConvertsSingleShadowsocksRustServer
+--- PASS: TestParseSkipsUnsupportedLeadingInbound (0.00s)
+=== CONT  TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields
+=== RUN   TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/mihomo
+=== RUN   TestGenerateServerConfigurations/xray_vless
+--- PASS: TestGenerateRejectsDisabledTLSForRequiredProtocols (0.00s)
+=== PAUSE TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/mihomo
+=== CONT  TestMergeGeneratedForcesCentralLogOutput
+=== RUN   TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/xray
+=== PAUSE TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/xray
+=== RUN   TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/sing-box
+=== PAUSE TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/sing-box
+=== CONT  TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine
+=== RUN   TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/mihomo
+=== PAUSE TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/mihomo
+=== RUN   TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/xray
+=== PAUSE TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/xray
+=== RUN   TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/sing-box
+--- PASS: TestGeneratedConfigurationsRoundTripIntoServerForm (0.00s)
+=== PAUSE TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/sing-box
+=== CONT  TestMergeGeneratedRemovesStaleManagedInboundFields
+=== CONT  TestShadowsocksRustGeneratedConfigurationsRoundTrip/ss2022
+=== RUN   TestGenerateServerConfigurations/singbox_vmess
+=== RUN   TestMergeGeneratedRemovesStaleManagedInboundFields/Mihomo_websocket_TLS_to_raw_SS2022
+=== PAUSE TestMergeGeneratedRemovesStaleManagedInboundFields/Mihomo_websocket_TLS_to_raw_SS2022
+=== RUN   TestMergeGeneratedRemovesStaleManagedInboundFields/Xray_websocket_TLS_to_raw_SS2022
+=== RUN   TestGenerateServerConfigurations/ss-rust_shadowsocks
+--- PASS: TestGenerateServerConfigurations (0.00s)
+    --- PASS: TestGenerateServerConfigurations/mihomo_ss2022 (0.00s)
+    --- PASS: TestGenerateServerConfigurations/xray_vless (0.00s)
+    --- PASS: TestGenerateServerConfigurations/singbox_vmess (0.00s)
+    --- PASS: TestGenerateServerConfigurations/ss-rust_shadowsocks (0.00s)
+=== CONT  TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/mihomo
+--- PASS: TestMainlandRulesUseExternalCoreResources (0.01s)
+=== CONT  TestShadowsocksRustGeneratedConfigurationsRoundTrip/shadowsocks
+=== CONT  TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/xray
+=== PAUSE TestMergeGeneratedRemovesStaleManagedInboundFields/Xray_websocket_TLS_to_raw_SS2022
+=== RUN   TestMergeGeneratedRemovesStaleManagedInboundFields/sing-box_websocket_TLS_to_raw_SS2022
+=== PAUSE TestMergeGeneratedRemovesStaleManagedInboundFields/sing-box_websocket_TLS_to_raw_SS2022
+--- PASS: TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13 (0.01s)
+=== CONT  TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-tcp-reality-vision
+--- PASS: TestMergeGeneratedForcesCentralLogOutput (0.00s)
+=== CONT  TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/sing-box
+=== CONT  TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/mihomo
+=== CONT  TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/xray
+=== CONT  TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-tcp-reality-vision
+--- PASS: TestShadowsocksRustGeneratedConfigurationsRoundTrip (0.00s)
+    --- PASS: TestShadowsocksRustGeneratedConfigurationsRoundTrip/shadowsocks (0.00s)
+    --- PASS: TestShadowsocksRustGeneratedConfigurationsRoundTrip/ss2022 (0.00s)
+=== CONT  TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-xhttp-reality-vision
+--- PASS: TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules (0.00s)
+    --- PASS: TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/mihomo (0.01s)
+    --- PASS: TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/xray (0.01s)
+    --- PASS: TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules/sing-box (0.01s)
+=== CONT  TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-xhttp-reality-vision
+=== CONT  TestVLESSXHTTPRealityPlansMatchBothCoreShapes/mihomo
+--- PASS: TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip (0.00s)
+    --- PASS: TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/sing-box (0.00s)
+    --- PASS: TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/xray (0.00s)
+    --- PASS: TestPortForwardPlansGenerateNativeSyntaxAndRoundTrip/mihomo (0.00s)
+=== CONT  TestVLESSXHTTPRealityPlansMatchBothCoreShapes/xray
+--- PASS: TestMutateGeneratedConvertsSingleShadowsocksRustServer (0.01s)
+--- PASS: TestRealityProbeDoesNotWaitForUnreachableAddress (0.01s)
+=== CONT  TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell-shadow-tls-v3
+--- PASS: TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality (0.00s)
+    --- PASS: TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/xray (0.00s)
+    --- PASS: TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality/mihomo (0.00s)
+=== CONT  TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell
+=== CONT  TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/sudoku
+--- PASS: TestVLESSRealityPlansGenerateAndRoundTripKeys (0.01s)
+=== CONT  TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/mihomo
+=== CONT  TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/sing-box
+=== CONT  TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/xray
+=== CONT  TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/mihomo
+=== CONT  TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/xray
+=== CONT  TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/ss-rust
+=== CONT  TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/mihomo
+--- PASS: TestVLESSXHTTPRealityPlansMatchBothCoreShapes (0.00s)
+    --- PASS: TestVLESSXHTTPRealityPlansMatchBothCoreShapes/mihomo (0.01s)
+    --- PASS: TestVLESSXHTTPRealityPlansMatchBothCoreShapes/xray (0.01s)
+=== CONT  TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/xray
+=== CONT  TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/sing-box
+--- PASS: TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey (0.00s)
+    --- PASS: TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-tcp-reality-vision (0.01s)
+    --- PASS: TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/xray/vless-enc-xhttp-reality-vision (0.01s)
+    --- PASS: TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-tcp-reality-vision (0.01s)
+    --- PASS: TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey/mihomo/vless-enc-xhttp-reality-vision (0.01s)
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/shadowsocks_standard
+=== CONT  TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/sing-box
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/sudoku
+--- PASS: TestXHTTPPlansBlockMainlandDestinationByDefault (0.02s)
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/anytls
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/snell
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/tuic
+--- PASS: TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners (0.01s)
+    --- PASS: TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/xray (0.00s)
+    --- PASS: TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/ss-rust (0.00s)
+    --- PASS: TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/mihomo (0.00s)
+    --- PASS: TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners/sing-box (0.00s)
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/hysteria2
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/trojan
+--- PASS: TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles (0.01s)
+    --- PASS: TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell (0.00s)
+    --- PASS: TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/snell-shadow-tls-v3 (0.01s)
+    --- PASS: TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles/sudoku (0.01s)
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/vless_xhttp_reality
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/vless_reality
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/shadowsocks
+=== CONT  TestBuildClientProfileCoversEveryServerProtocol/vmess
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv4
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/private
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/documentation_range
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/loopback
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/mixed_DNS_answer
+=== CONT  TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/mihomo
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_CNAME
+=== CONT  TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/xray
+=== CONT  TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/mihomo
+=== CONT  TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/sing-box
+=== CONT  TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/sing-box
+=== CONT  TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv6
+=== CONT  TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/xray
+=== CONT  TestMergeGeneratedRemovesStaleManagedInboundFields/Mihomo_websocket_TLS_to_raw_SS2022
+=== CONT  TestMergeGeneratedRemovesStaleManagedInboundFields/sing-box_websocket_TLS_to_raw_SS2022
+--- PASS: TestBuildClientProfileCoversEveryServerProtocol (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/shadowsocks_standard (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/hysteria2 (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/anytls (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/trojan (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/tuic (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/snell (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/shadowsocks (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/vless_reality (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/sudoku (0.01s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/vless_xhttp_reality (0.00s)
+    --- PASS: TestBuildClientProfileCoversEveryServerProtocol/vmess (0.00s)
+=== CONT  TestMergeGeneratedRemovesStaleManagedInboundFields/Xray_websocket_TLS_to_raw_SS2022
+--- PASS: TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules (0.00s)
+    --- PASS: TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/sing-box (0.00s)
+    --- PASS: TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/xray (0.01s)
+    --- PASS: TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules/mihomo (0.01s)
+--- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv4 (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/private (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/documentation_range (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/loopback (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/mixed_DNS_answer (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_CNAME (0.00s)
+    --- PASS: TestProbeRealityTargetRejectsUnsafeDNSBeforeDial/Cloudflare_IPv6 (0.00s)
+--- PASS: TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields (0.00s)
+    --- PASS: TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/xray (0.00s)
+    --- PASS: TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/sing-box (0.00s)
+    --- PASS: TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields/mihomo (0.01s)
+--- PASS: TestMergeGeneratedRemovesStaleManagedInboundFields (0.00s)
+    --- PASS: TestMergeGeneratedRemovesStaleManagedInboundFields/Xray_websocket_TLS_to_raw_SS2022 (0.00s)
+    --- PASS: TestMergeGeneratedRemovesStaleManagedInboundFields/Mihomo_websocket_TLS_to_raw_SS2022 (0.00s)
+    --- PASS: TestMergeGeneratedRemovesStaleManagedInboundFields/sing-box_websocket_TLS_to_raw_SS2022 (0.00s)
+--- PASS: TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine (0.00s)
+    --- PASS: TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/xray (0.00s)
+    --- PASS: TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/sing-box (0.01s)
+    --- PASS: TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine/mihomo (0.01s)
+--- PASS: TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts (0.00s)
+    --- PASS: TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/xray (0.01s)
+    --- PASS: TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/sing-box (0.01s)
+    --- PASS: TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts/mihomo (0.02s)
+--- PASS: TestEveryPublishedServerPlanGeneratesNativeSyntax (0.03s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.510s

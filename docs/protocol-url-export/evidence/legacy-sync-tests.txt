@@ -1,0 +1,24 @@
+=== RUN   TestRenameSubStoreNode
+=== PAUSE TestRenameSubStoreNode
+=== RUN   TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+=== PAUSE TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+=== RUN   TestSubStoreSubscriptionCreateUpdateAndOwnership
+=== PAUSE TestSubStoreSubscriptionCreateUpdateAndOwnership
+=== RUN   TestMergeSubStoreContentByNodeName
+=== PAUSE TestMergeSubStoreContentByNodeName
+=== RUN   TestMergeSubStoreLegacyVMessNamesRespectOwnership
+--- PASS: TestMergeSubStoreLegacyVMessNamesRespectOwnership (0.00s)
+=== RUN   TestSubStoreClientValuePreservesPercentPasswords
+--- PASS: TestSubStoreClientValuePreservesPercentPasswords (0.00s)
+=== RUN   TestSubStoreHysteriaALPNUsesNativeMap
+--- PASS: TestSubStoreHysteriaALPNUsesNativeMap (0.00s)
+=== CONT  TestRenameSubStoreNode
+=== CONT  TestSubStoreSubscriptionCreateUpdateAndOwnership
+--- PASS: TestRenameSubStoreNode (0.00s)
+=== CONT  TestMergeSubStoreContentByNodeName
+--- PASS: TestMergeSubStoreContentByNodeName (0.00s)
+=== CONT  TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync
+--- PASS: TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync (0.00s)
+--- PASS: TestSubStoreSubscriptionCreateUpdateAndOwnership (0.00s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	0.216s

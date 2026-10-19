@@ -5,7 +5,7 @@ DATABASE_URL=""
 ADMIN_TOKEN=""
 DOCKER_NETWORK=""
 FORCE=false
-READY_TIMEOUT=60
+READY_TIMEOUT=360
 
 install_dir_preference_file() {
     local config_root="${XDG_CONFIG_HOME:-${HOME:-}}"
@@ -84,7 +84,7 @@ usage() {
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
   -n DOCKER_NETWORK   external 安装连接的已有 Docker 网络；省略时可交互选择或使用默认网络
   -f                  bundled 模式显式轮换 token 与应用密钥；external 更新不支持
-  -t SECONDS          就绪检查超时时间（默认 60 秒）
+  -t SECONDS          每阶段就绪检查超时时间（默认 360 秒，包含数据库迁移等待）
   -h                  显示帮助
 
 安装可选择 bundled 或 external；普通 external 更新逐字节保留 .env，不迁移凭据或轮换密钥。

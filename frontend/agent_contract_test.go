@@ -18,10 +18,9 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 		t.Fatalf("all eight node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
 	}
 	for _, required := range []string{
-		`import { migrateLegacyNodeOrder } from "./node-order.js";`,
+		`import { configureNodeOrder, refreshNodeOrder } from "./node-order.js";`,
 		`import { orderNodesBySavedOrder } from "./node-order.js";`,
-		`if (path === "/agents" && method === "GET" && session && state.session === session && Array.isArray(result))`,
-		`migrateLegacyNodeOrder(result);`,
+		`if (path === "/agents" && method === "GET" && session) void refreshNodeOrder()?.catch(() => {});`,
 		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
 		`const orderedAgents = orderNodesBySavedOrder(agents);`,
 		`const agents = orderNodesBySavedOrder(state.data.agents || []);`,
@@ -189,11 +188,13 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	for _, required := range []string{
 		`requestAgentStructureRefresh();`,
 		`card?.dataset.runtimeStructure === "full"`,
-		`card.dataset.coreInstalled !== (installed ? "1" : "0")`,
+		`const installedKnown = typeof runtime.installed === "boolean";`,
+		`const installedMarker = installedKnown ? installed ? "1" : "0" : "unknown";`,
+		`card.dataset.coreInstalled !== installedMarker`,
 		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
 		`card.dataset.existingUnsupported !== existingUnsupportedReason`,
 		`card.dataset.runtimeStructure !== "full"`,
-		`card.dataset.coreInstalled = installed ? "1" : "0"`,
+		`card.dataset.coreInstalled = installedMarker`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("updateAgentMetrics structural comparison is missing %q", required)

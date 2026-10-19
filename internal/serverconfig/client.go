@@ -139,7 +139,12 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	case ProtocolShadowsocks, ProtocolSS2022:
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"
-		profile.URI = (&url.URL{Scheme: "ss", User: url.User(identity), Host: host, Fragment: fragment}).String()
+		user := url.User(identity)
+		// SIP002 requires plain, percent-encoded method:password for AEAD-2022.
+		if strings.HasPrefix(input.Method, "2022-") {
+			user = url.UserPassword(input.Method, input.Credential)
+		}
+		profile.URI = clientURL("ss", user, host, nil, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		encryption := "none"
@@ -168,7 +173,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		addTransportQuery(query, input)
 		profile.Format = "VLESS URI"
-		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.URI = clientURL("vless", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolSnell, ProtocolSnellShadowTLS:
 		profile.Format = "Surge Snell"
@@ -202,20 +207,20 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			Cipher  string `json:"scy"`
 			Network string `json:"net"`
 			Type    string `json:"type"`
-			Host    string `json:"host"`
-			Path    string `json:"path"`
-			TLS     string `json:"tls"`
-			SNI     string `json:"sni"`
+			Host    string `json:"host,omitempty"`
+			Path    string `json:"path,omitempty"`
+			TLS     string `json:"tls,omitempty"`
+			SNI     string `json:"sni,omitempty"`
 			ALPN    string `json:"alpn,omitempty"`
 		}{
 			Version: "2", Name: fragment, Address: address, Port: strconv.Itoa(input.Port), ID: input.Credential,
-			AlterID: "0", Cipher: "auto", Network: transport, Type: "none", Path: input.TransportPath,
+			AlterID: "0", Cipher: "auto", Network: transport, Type: "none",
 		}
-		if input.Transport == "websocket" {
-			payload.Host = input.TransportHost
-			if payload.Host == "" {
-				payload.Host = serverName
-			}
+		switch input.Transport {
+		case "websocket":
+			payload.Host, payload.Path = input.TransportHost, input.TransportPath
+		case "grpc":
+			payload.Path = input.TransportPath
 		}
 		if input.TLSEnabled {
 			payload.TLS = "tls"
@@ -230,7 +235,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.URI = "vmess://" + base64.StdEncoding.EncodeToString(encoded)
 		profile.SubscriptionCompatible = true
 	case ProtocolTrojan:
-		query := url.Values{"type": {transport}}
+		query := url.Values{"type": {transport}, "security": {"none"}}
 		if input.TLSEnabled {
 			query.Set("security", "tls")
 			query.Set("sni", serverName)
@@ -240,7 +245,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		addTransportQuery(query, input)
 		profile.Format = "Trojan URI"
-		profile.URI = (&url.URL{Scheme: "trojan", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.URI = clientURL("trojan", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolHy2:
 		query := url.Values{}
@@ -251,7 +256,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			query.Set("sni", serverName)
 		}
 		profile.Format = "Hysteria 2 URI"
-		profile.URI = (&url.URL{Scheme: "hysteria2", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.URI = clientURL("hysteria2", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolTUIC:
 		query := url.Values{"congestion_control": {"bbr"}, "udp_relay_mode": {"native"}}
@@ -262,11 +267,11 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			query.Set("sni", serverName)
 		}
 		profile.Format = "TUIC v5 URI"
-		profile.URI = (&url.URL{Scheme: "tuic", User: url.UserPassword(input.Credential, input.SecondaryCredential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.URI = clientURL("tuic", url.UserPassword(input.Credential, input.SecondaryCredential), host, query, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolSocks:
 		profile.Format = "Socks5 URI"
-		profile.URI = (&url.URL{Scheme: "socks5", User: url.UserPassword(input.Username, input.Credential), Host: host, Fragment: fragment}).String()
+		profile.URI = clientURL("socks5", url.UserPassword(input.Username, input.Credential), host, nil, fragment)
 		profile.SubscriptionCompatible = true
 	case ProtocolAnyTLS:
 		query := url.Values{"security": {"tls"}}
@@ -277,14 +282,15 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			query.Set("sni", serverName)
 		}
 		profile.Format = "AnyTLS URI"
-		profile.URI = (&url.URL{Scheme: "anytls", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.URI = clientURL("anytls", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
 	default:
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
 	}
 	// QUIC and plain HTTP transports do not share Xray's wire format; a
 	// native sing-box outbound is the unambiguous import format for these.
-	if input.Transport == "quic" || input.Transport == "http" || input.Transport == "httpupgrade" || input.TLSClientCertificate != "" {
+	nativeReason := nativeClientURLReason(input)
+	if input.Transport == "quic" || input.Transport == "http" || input.Transport == "httpupgrade" || input.TLSClientCertificate != "" || nativeReason != "" {
 		out, exportErr := singBoxClientOutbound(input, address, serverName)
 		if exportErr != nil {
 			return ClientProfile{}, exportErr
@@ -303,6 +309,17 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		// URL export remains available for protocols whose security options
 		// cannot be represented by Mihomo without losing information.
 		profile.MihomoError = err.Error()
+	}
+	if nativeReason != "" {
+		profile.URIError = nativeReason
+		for index := range profile.Fields {
+			if profile.Fields[index].Label == "导出说明" {
+				profile.Fields[index].Value = profile.URIError
+			}
+		}
+		if profile.MihomoError == "" {
+			profile.Format, profile.URI, profile.SubscriptionCompatible = "Mihomo YAML", profile.Mihomo, true
+		}
 	}
 	if err := addXHTTPClientExport(&profile, input, address, serverName); err != nil {
 		return ClientProfile{}, err

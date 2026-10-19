@@ -1,3 +1,4 @@
+import { refreshNodeOrder } from "./modules/node-order.js";
 import { departWorkspace, restoreWorkspace } from "./modules/workspace-motion.js";
 import { cancelMotion } from "./modules/motion.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
@@ -14,6 +15,7 @@ import { createShellView } from "./modules/shell-view.js";
 import { createLoginPage } from "./modules/login-page.js";
 import { routeForHash, routeModuleNames } from "./modules/routes.js";
 import { createRouteWarmup } from "./modules/route-warmup.js";
+import { createSessionWatch } from "./modules/session-watch.js";
 
 const app = document.querySelector("#app");
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
@@ -63,6 +65,7 @@ const loginPage = createLoginPage({
 });
 
 function renderLogin(message = "") {
+  sessionWatch.stop();
   stopRouteWarmup();
   cancelMotion(app);
   resetFeedback();
@@ -70,6 +73,7 @@ function renderLogin(message = "") {
   routeModules.peek("client-access")?.dispose();
   routeModules.peek("ip-quality")?.dispose();
   routeModules.peek("substore-sync")?.dispose();
+  routeModules.peek("certificates")?.dispose();
   routeModules.peek("users")?.closeInvitation();
   scopedAPI.end();
   if (state.route === "node-settings")
@@ -88,6 +92,7 @@ function renderLogin(message = "") {
   clearTimeout(state.coreLogPollTimer);
   clearTimeout(state.agentPollTimer);
   clearTimeout(state.ipQualityPollTimer);
+  clearTimeout(state.bbrPollTimer);
   loginPage(message);
 }
 
@@ -172,6 +177,10 @@ const routeModules = createRouteModuleLoader({
     return installSystemBBR({
       api, state, can, esc, date, shell, notify, confirmAction,
     });
+  },
+  async certificates() {
+    const { installCertificates } = await import("./modules/certificates.js");
+    return installCertificates({api,state,esc,date,shell,notify,confirmAction});
   },
   async settings() {
     const { installSettings } = await import("./modules/settings.js");
@@ -273,6 +282,8 @@ async function renderOnce() {
       renderLogin();
       return;
     }
+    await refreshNodeOrder();
+    if (renderSignal.aborted) return;
     if (state.session.role !== "admin") {
       const access = await api("/agent-access");
       if (renderSignal.aborted) return;
@@ -330,6 +341,7 @@ async function renderOnce() {
       overview: state.data.overview,
       settings: state.data.settings,
     });
+    sessionWatch.start();
     scheduleRouteWarmup(route);
     if (state.anchor === "new-config")
       document.querySelector("#new-config")?.click();
@@ -387,6 +399,19 @@ const render = () => {
   state.navigationEpoch += 1;
   return scheduleRender();
 };
+const sessionWatch = createSessionWatch({ api, state, onAccessChanged: async () => {
+  // Drop configuration snapshots and selections whose authorization changed.
+  // Account preferences remain in their existing account-scoped storage.
+  routeController?.abort();
+  state.data = {};
+  invalidatePanelReads();
+  await render();
+} });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) sessionWatch.stop();
+  else void sessionWatch.trigger();
+});
+window.addEventListener("focus", () => void sessionWatch.trigger());
 window.addEventListener("hashchange", render);
 window.addEventListener("beforeunload", event => {
   const configModule = routeModules.peek("configs");

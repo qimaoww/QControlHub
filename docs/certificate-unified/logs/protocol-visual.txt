@@ -1,0 +1,33 @@
+### Result
+{"comparisons":8,"caddySelections":4,"screenshots":12}
+### Ran Playwright code
+```js
+await (async rootPage => {
+ let screenshots=0;
+ for(const version of ['before','after']){
+  for(const [label,width,height] of [['desktop',1440,1000],['mobile',375,812]]){
+   for(const theme of ['light','dark']){
+    const page=await rootPage.context().newPage();
+    await page.setViewportSize({width,height}); await page.emulateMedia({reducedMotion:'reduce'});
+    await page.goto(`http://127.0.0.1:${version==='before'?36480:36479}/#live-config?agent=agt_8aa02905afb007ad&engine=sing-box`);
+    await page.getByRole('button',{name:'＋ 增加入站',exact:true}).waitFor();
+    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
+    await page.getByRole('button',{name:'＋ 增加入站',exact:true}).click();
+    await page.locator('.config-inbound-dialog select').first().selectOption('trojan');
+    await page.locator('[name=panel_certificate_id]').waitFor({state:'attached'});
+    await page.locator('[data-builder-step=security]').click();
+    await page.locator('[name=panel_certificate_id]').selectOption('crt_07911fb7e390fd06');
+    await page.locator('[data-builder-step=security]').click();
+    await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/${version}-selector-${label}-${theme}.png`,mask:[page.locator('[name=password]'),page.locator('[name=uuid]')]}); screenshots++;
+    if(version==='after'){
+     await page.locator('[name=panel_certificate_id]').selectOption('crt_10e0ed07f69aa48a');
+     await page.locator('[data-builder-step=security]').click();
+     await page.screenshot({animations:'disabled',path:`docs/certificate-unified/screenshots/caddy-selector-${label}-${theme}.png`,mask:[page.locator('[name=password]'),page.locator('[name=uuid]')]}); screenshots++;
+    }
+    await page.close();
+   }
+  }
+ }
+ return {comparisons:8,caddySelections:4,screenshots};
+})(page);
+```

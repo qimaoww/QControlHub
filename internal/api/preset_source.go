@@ -43,7 +43,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		managed = strings.Contains(current.Content, "outbound_fwmark")
 	}
 	if managed {
-		content, err = serverconfig.AccountingUpdateSource(engine, content, current.Content)
+		content, err = s.accountingUpdateSource(request.Context(), current, content)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

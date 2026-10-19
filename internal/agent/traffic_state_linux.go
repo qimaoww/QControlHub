@@ -24,6 +24,7 @@ func (manager *TrafficManager) saveLocked() error {
 }
 
 func (manager *TrafficManager) setUnavailableLocked(err error) error {
+	manager.haltReason = "共享流量计量不可用，实例已保护性停止：" + limitStateValue(err.Error(), 900)
 	if manager.haltShared != nil {
 		seen := map[core.Engine]bool{}
 		for _, engine := range manager.recoveryEngines {

@@ -89,7 +89,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(trafficPolicies, false)}); err != nil {
+	if err := writeWire(ctx, connection, trafficPolicyHello(trafficPolicies, false)); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -107,6 +107,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		heartbeatDeadline.Reset(heartbeatTimeout)
 	}
 	var inFlightTask string
+	var inFlightAction core.Action
 	// Dispatch is deferred until this connection has supplied a heartbeat that
 	// was persisted. Reading the stored features before the first heartbeat
 	// could observe a stale mihomo-development-source-v1 left by a previous
@@ -114,6 +115,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// unknown core_source. Once the heartbeat is committed, ClaimTask and
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
+	var agentHasFeatureFromStore bool
+	var agentHasManagedCertificates bool
+	var lastManagedScan time.Time
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
 	var sharedEnginesSupported, independentEgressSupported bool
@@ -153,7 +157,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
+			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return err
 			}
 		}
@@ -161,6 +165,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			return err
 		}
 		inFlightTask = task.ID
+		inFlightAction = task.Action
 		return nil
 	}
 	taskReady := s.store.TaskReady(id)
@@ -176,7 +181,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
+			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return
 			}
 		case <-ctx.Done():
@@ -192,6 +197,13 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			return
 		case message := <-incoming:
 			switch message.Type {
+			case core.WireManagedCertificateReport:
+				if !heartbeatReceived || message.ManagedCertificateReport == nil {
+					return
+				}
+				// Never log the envelope or its key material. Failed imports are
+				// persisted as sanitized source status and retried on next scan.
+				_ = s.store.ImportManagedCertificate(ctx, id, *message.ManagedCertificateReport)
 			case core.WireHeartbeat:
 				if message.Heartbeat == nil {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid heartbeat")
@@ -200,6 +212,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if message.Heartbeat.Metrics != nil {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
+				agentHasFeatureFromStore = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCertificates)
+				agentHasManagedCertificates = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCaddyCertificates)
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
 				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
@@ -232,14 +246,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					if err != nil {
 						return
 					}
-					for _, policy := range policies {
-						if policy.SharedQuota == nil {
-							continue
-						}
-						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, true)}); err != nil {
+					// Send even an empty policy set: a share may have been revoked
+					// while this Agent was disconnected.
+					if hasSharedTrafficPolicies(trafficPolicies) || hasSharedTrafficPolicies(policies) {
+						if err := writeWire(ctx, connection, trafficPolicyHello(policies, true)); err != nil {
 							return
 						}
-						break
 					}
 					if managedPublicIPProbe {
 						probeConfig := effectivePublicIPProbe
@@ -301,6 +313,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "task result rejected")
 					return
 				}
+				if message.Result.Result.Success && (inFlightAction == core.ActionDeploy || inFlightAction == core.ActionImportExisting) {
+					s.refreshAgentTrafficPolicies(id)
+				}
 				s.notifyTaskFailure(id, message.Result.TaskID, message.Result.Result)
 				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireResultAck, TaskID: message.Result.TaskID}); err != nil {
 					return
@@ -320,6 +335,26 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				return
 			}
 		case <-taskTicker.C:
+			if heartbeatReceived {
+				if agentHasManagedCertificates && time.Since(lastManagedScan) > 30*time.Second {
+					sources, sourceErr := s.store.AgentManagedCertificateSources(ctx, id)
+					if sourceErr == nil {
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireManagedCertificateSources, ManagedCertificateSources: sources}); err != nil {
+							return
+						}
+					}
+					lastManagedScan = time.Now()
+				}
+				routes, routeErr := s.store.AgentCertificateChallenges(ctx, id)
+				if routeErr != nil {
+					return
+				}
+				if agentHasFeatureFromStore {
+					if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCertificateChallenges, CertificateChallenges: routes}); err != nil {
+						return
+					}
+				}
+			}
 			if err := dispatchTask(); err != nil {
 				slog.Error("claim fallback task for websocket", "agent_id", id, "error", err)
 				return

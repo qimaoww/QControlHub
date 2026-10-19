@@ -75,10 +75,20 @@ func TestSharedXHTTPRecipientLifecycleAndExports(t *testing.T) {
 					if _, err := serverconfig.SharedInstanceRuntimeContent(core.EngineXray, claimed.ConfigContent); err != nil {
 						t.Fatalf("private process configuration: %v", err)
 					}
-					if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+					status := "active"
+					if operation == "delete" {
+						status = "inactive"
+					}
+					if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true,
+						InstanceStatus: &core.SharedInstanceStatus{Engine: claimed.Engine, ShareID: claimed.SharedTrafficID,
+							ConfigID: claimed.ConfigID, ConfigVersion: claimed.ConfigVersion, AppliedTaskID: claimed.ID, TaskID: claimed.ID, Status: status, ObservedAt: time.Now().UTC()}}); err != nil {
 						t.Fatal(err)
 					}
 					var workspace struct{ Inbounds []serverconfig.Input }
+					finished, err := db.GetTask(ctx, claimed.ID)
+					if err != nil || finished.Status != core.TaskSucceeded {
+						t.Fatalf("applied %s reported failure: %+v %v", operation, finished, err)
+					}
 					recipient.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
 					var clients []clientAccessEntry
 					recipient.call("GET", "/client-access", nil, http.StatusOK, &clients)

@@ -169,6 +169,10 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 		}
 		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": []string{f.Path}}}, "handle": []any{map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": versions}}}, "terminal": true})
 	}
+	// A fixed route delegates only ACME challenge paths to the authenticated
+	// Agent's in-memory, Host/token scoped handler. Caddy's own ACME solver
+	// retains precedence. No per-order edits to business routes are necessary.
+	servers["http_challenges"] = managedCaddyHTTPChallenges()
 	names := []string{}
 	for domain := range domains {
 		names = append(names, domain)
@@ -199,7 +203,17 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 	return string(value), err
 }
 
-func renderNginxFrontends(frontends []core.TLSFrontend, root, state string) string {
+func managedCaddyHTTPChallenges() map[string]any {
+	return map[string]any{
+		"listen": []string{":80"},
+		"routes": []any{map[string]any{"match": []any{map[string]any{"path": []string{"/.well-known/acme-challenge/*"}}},
+			"handle": []any{map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": "127.0.0.1:9080"}}}}, "terminal": true},
+			map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}},
+		"automatic_https": map[string]any{"disable": true},
+	}
+}
+
+func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, managedHTTP ...bool) string {
 	var body strings.Builder
 	fmt.Fprintf(&body, "daemon off;\npid %s;\nerror_log stderr info;\nworker_processes 1;\nevents { worker_connections 1024; }\nhttp {\n access_log off;\n client_body_temp_path %s;\n proxy_temp_path %s;\n fastcgi_temp_path %s;\n uwsgi_temp_path %s;\n scgi_temp_path %s;\n map $http_upgrade $qch_connection { default upgrade; '' close; }\n", filepath.Join(state, "nginx.pid"), filepath.Join(state, "client_temp"), filepath.Join(state, "proxy_temp"), filepath.Join(state, "fastcgi_temp"), filepath.Join(state, "uwsgi_temp"), filepath.Join(state, "scgi_temp"))
 	ports := map[int][]core.TLSFrontend{}
@@ -238,6 +252,14 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string) stri
 			}
 			body.WriteString("  location / { return 404; }\n }\n")
 		}
+	}
+	hasCaddy, hasHTTPPort := false, false
+	for _, f := range frontends {
+		hasCaddy = hasCaddy || f.Mode == "caddy"
+		hasHTTPPort = hasHTTPPort || f.PublicPort == 80
+	}
+	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && len(managedHTTP) > 0 && managedHTTP[0] {
+		body.WriteString(" # qch-managed-http-challenges-v1\n server {\n listen 80;\n listen [::]:80;\n server_name _;\n location ^~ /.well-known/acme-challenge/ { proxy_pass http://127.0.0.1:9080; proxy_set_header Host $host; }\n location / { return 404; }\n }\n")
 	}
 	body.WriteString("}\n")
 	return body.String()
@@ -398,7 +420,7 @@ func (m *tlsFrontendManager) validateConfigs(ctx context.Context, frontends []co
 		modes[f.Mode] = true
 	}
 	for mode := range modes {
-		content := renderNginxFrontends(frontends, m.root, m.state)
+		content := renderNginxFrontends(frontends, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
 			var err error
 			content, err = renderCaddyFrontends(frontends, m.state)
@@ -528,7 +550,7 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		if m.services.Kind() == ServiceManagerSystemd {
 			service += ".service"
 		}
-		content := renderNginxFrontends(frontends, m.root, m.state)
+		content := renderNginxFrontends(frontends, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
 			content, err = renderCaddyWithFallback(frontends, m.state, fallback)
 			if err == nil && len(certificateRoutes) > 0 {

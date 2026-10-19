@@ -90,8 +90,11 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	}
 	// Base hash covers the initial release plus the approved v56 revision that
 	// reserved the compact media queries for coarse-pointer devices so desktop
-	// zoom keeps one fixed layout and the shared typography scale revision.
-	const expected = "bbf685608d6a619a5db5cdbee9e6a287fd9aa698f71070038c312f14976d73cc"
+	// zoom keeps one fixed layout, the shared typography scale revision, and
+	// the approved global dropdown consolidation into existing control styles,
+	// and removal of the separate inbound security / switch decorations.
+	// The approved shared type system now owns every UI font role and metric.
+	const expected = "c1ba68bb82bf897ee1e70e8cc5846f7483e3d65c1281675553eb093e6e2f2dd9"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}

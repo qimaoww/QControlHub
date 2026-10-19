@@ -1,0 +1,14 @@
+$ systemctl is-enabled qch-ui-review-7d05-20261018-cleanup.timer
+enabled
+
+$ systemctl is-active qch-ui-review-7d05-20261018-cleanup.timer
+active
+
+$ systemctl show qch-ui-review-7d05-20261018-cleanup.timer -p NextElapseUSecRealtime -p ActiveState -p SubState -p Persistent
+NextElapseUSecRealtime=Wed 2026-10-21 17:38:28 CST
+Persistent=yes
+ActiveState=active
+SubState=waiting
+
+$ python3 /var/lib/qch-ui-review-7d05-20261018/cleanup.py /var/lib/qch-ui-review-7d05-20261018/manifest.json --check
+Scope verified.

@@ -1,0 +1,15 @@
+### Result
+{"endpoints":[{"agent_id":"agt_9727921bdaa2fd0b","name":"keep","engine":"xray","port":21001,"protocol":"both","config_id":"cfg_29d512897189f741","config_version":3,"config_updated_at":"2026-10-19T00:38:58.067368+08:00"}],"policies":[{"config_id":"cfg_29d512897189f741","config_version":3,"inbound_tag":"keep","id":"trf_fc3762fafa7c8a77","agent_id":"agt_9727921bdaa2fd0b","name":"keep","engine":"xray","port":21001,"protocol":"both","cycle":"monthly","cycle_anchor":"2026-10-01T00:00:00Z","limit_bytes":9223372036854776000,"auto_block":false,"quota_enabled":false,"monitoring_enabled":true,"discovered":true,"reset_generation":1,"received_bytes":0,"sent_bytes":0,"used_bytes":0,"receive_bps":0,"send_bps":0,"blocked":false,"enforcement_available":false,"created_at":"2026-10-19T00:26:16.458409+08:00","updated_at":"2026-10-19T00:39:01.554197+08:00"},{"id":"trf_adad66d2c2d35c43","agent_id":"agt_9727921bdaa2fd0b","name":"remove","engine":"xray","port":21002,"protocol":"both","cycle":"monthly","cycle_anchor":"2026-10-01T00:00:00Z","limit_bytes":1073741824,"auto_block":false,"quota_enabled":true,"monitoring_enabled":false,"discovered":true,"reset_generation":3,"received_bytes":12345,"sent_bytes":0,"used_bytes":12345,"receive_bps":0,"send_bps":0,"blocked":false,"enforcement_available":false,"last_reported_at":"2026-10-19T00:26:16.47048+08:00","created_at":"2026-10-19T00:26:16.458409+08:00","updated_at":"2026-10-19T00:41:42.983528+08:00"}],"cards":1}
+### Ran Playwright code
+```js
+await (async (page) => { await page.reload(); await page.getByRole("textbox",{name:"用户名",exact:true}).fill("delete-review"); await page.getByRole("textbox",{name:"密码 / 管理令牌",exact:true}).fill("delete evidence password"); await page.getByRole("button",{name:"登录",exact:true}).click(); await page.getByRole("link",{name:"流量",exact:true}).click(); await page.getByRole("article",{name:"删除链路验证，端口 21001，Xray 内核"}).waitFor(); await page.screenshot({path:"output/playwright/inbound-delete/after-restart-repair.png"}); return await page.evaluate(async()=>({endpoints:await (await fetch("/api/v1/traffic-endpoints")).json(),policies:await (await fetch("/api/v1/traffic-policies")).json(),cards:document.querySelectorAll(".traffic-policy-grid article").length})); })(page);
+```
+### Open tabs
+- 0: (current) [流量配额 · QControlHub](http://127.0.0.1:18584/#traffic)
+- 1: [配置 · QControlHub](http://127.0.0.1:18584/#live-config?agent=agt_9727921bdaa2fd0b&engine=xray)
+### Page
+- Page URL: http://127.0.0.1:18584/#traffic
+- Page Title: 流量配额 · QControlHub
+- Console: 1 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-10-18T16-36-20-908Z.log#L17-L38

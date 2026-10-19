@@ -2,6 +2,7 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -37,6 +38,14 @@ func TestSharedInstanceRemovesOnlyLocalStatisticsAPI(t *testing.T) {
 			ports, err := SharedTrafficEndpoints(test.engine, result)
 			if err != nil || len(ports) != 1 || ports[0].Port != 21001 {
 				t.Fatalf("private ingress changed: %+v %v", ports, err)
+			}
+			dual, err := PrepareSharedAccounting(test.engine, result)
+			if err != nil || dual.Source != "nft-dual" || dual.Ports[0].Mark != uint32(0x51430000)|21001 {
+				t.Fatalf("shared target is unmetered: %+v %v", dual, err)
+			}
+			again, err := PrepareSharedAccounting(test.engine, dual.Content)
+			if err != nil || !reflect.DeepEqual(dual, again) {
+				t.Fatalf("shared plan is not idempotent: %v", err)
 			}
 			if err := ValidateIndependentEgress(test.engine, result); err != nil {
 				t.Fatalf("private exit lost: %v", err)

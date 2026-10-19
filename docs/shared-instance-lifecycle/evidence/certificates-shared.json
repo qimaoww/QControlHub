@@ -1,0 +1,48 @@
+[
+  {
+    "check": "certificate list, selection and deployment reject B without grant",
+    "success": true,
+    "certificate_id": "crt_37fca43c145ceea1"
+  },
+  {
+    "check": "real shared TLS deploy validates certificate and starts instance with readable immutable pair",
+    "success": true,
+    "task_id": "tsk_9c2bda44e502134d",
+    "config_id": "cfg_77c6a491bcbbd519",
+    "config_version": 23,
+    "certificate_version": 1,
+    "permissions": [
+      "/etc/qagent/xray/shares/shr_537bbc3ef3ca26df/panel-certificates/crt_37fca43c145ceea1/v1/cert.pem root:qcontrolhub-core 640",
+      "/etc/qagent/xray/shares/shr_537bbc3ef3ca26df/panel-certificates/crt_37fca43c145ceea1/v1/key.pem root:qcontrolhub-core 640"
+    ]
+  },
+  {
+    "check": "real certificate-backed instance stop reuses applied version",
+    "success": true,
+    "task_id": "tsk_a141c7aeb98c8d66",
+    "config_version": 23
+  },
+  {
+    "check": "real certificate-backed instance start reuses applied version",
+    "success": true,
+    "task_id": "tsk_45fe80a189791535",
+    "config_version": 23
+  },
+  {
+    "check": "real certificate-backed instance restart reuses applied version",
+    "success": true,
+    "task_id": "tsk_8eade43124d0cc4c",
+    "config_version": 23
+  },
+  {
+    "check": "certificate grant revoked before claim blocks pending restart",
+    "success": true,
+    "task_id": "tsk_c81f857884b7dd69",
+    "error": "forbidden: 无证书使用授权"
+  },
+  {
+    "check": "restored certificate grant permits own restart without changing protected services",
+    "success": true,
+    "task_id": "tsk_df2bc7e7cfa29dd4"
+  }
+]

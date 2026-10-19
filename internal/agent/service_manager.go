@@ -148,6 +148,12 @@ func (manager *ServiceManager) status(ctx context.Context, service string) (stri
 		if err == nil {
 			return "active", nil
 		}
+		// Shared-only installs deliberately create instance services without a
+		// base service. An absent base cannot hold legacy shared listeners;
+		// treating this as a collection failure stops every healthy instance.
+		if lower == "* rc-service: service `"+strings.ToLower(service)+"' does not exist" {
+			return "inactive", nil
+		}
 		if strings.Contains(lower, "crashed") {
 			return "failed", nil
 		}

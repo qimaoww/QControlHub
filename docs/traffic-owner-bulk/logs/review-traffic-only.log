@@ -1,0 +1,7 @@
+=== RUN   TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope
+2026/10/19 03:16:42 INFO waiting for PostgreSQL migration lock backend_pid=634
+2026/10/19 03:16:42 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 03:16:42 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=190.361636ms
+--- PASS: TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope (1.63s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	1.854s

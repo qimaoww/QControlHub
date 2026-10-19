@@ -29,6 +29,16 @@ func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit 
 	if limit > 100 {
 		limit = 100
 	}
+	return s.listConfigRevisions(ctx, configID, limit)
+}
+
+// ConfigAccountingRevisions returns only the authorized configuration's
+// evidence, including revisions older than the UI history page limit.
+func (s *Store) ConfigAccountingRevisions(ctx context.Context, configID string) ([]core.Config, error) {
+	return s.listConfigRevisions(ctx, configID, nil)
+}
+
+func (s *Store) listConfigRevisions(ctx context.Context, configID string, limit any) ([]core.Config, error) {
 	var exists bool
 	existsArgs := []any{configID}
 	existsWhere := ownerClause(ctx, "owner_id", &existsArgs)

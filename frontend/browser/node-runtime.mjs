@@ -129,7 +129,7 @@ const cards = () => [...document.querySelectorAll(".client-access-node-card")];
   await waitFor(() => cards().length === 3, "client cards did not load");
   assert.equal(cardNodes(), "alpha,bravo,charlie", "default client cards must follow the API node list");
   assert.equal(cardNodes(), sidebarNodes(), "client cards and their sidebar must agree");
-  assert.equal(accountStorage.getItem("qcontrolhub:node-card-order"), null, "opening clients must not freeze a custom node order");
+  assert.equal(testAPI.nodeOrder.revision, 1, "opening clients only reads the server preference");
   const alpha = cards().find(card => card.dataset.refreshKey === "client-access-node-alpha");
   assert.equal([...alpha.querySelectorAll("[data-config-engine]")].map(link => link.dataset.configEngine).join(","),
     "xray,mihomo", "sorting nodes must preserve engine order within each node");
@@ -137,7 +137,7 @@ const cards = () => [...document.querySelectorAll(".client-access-node-card")];
     "alpha-20002,alpha-20001,alpha-20002,alpha-20001", "sorting nodes must preserve profile order");
 
   const saved = JSON.stringify(["charlie", "delta", "bravo", "alpha"]);
-  accountStorage.setItem("qcontrolhub:node-card-order", saved);
+  testAPI.nodeOrder = { ids: JSON.parse(saved), revision: 2 };
   location.hash = "#node-settings";
   await waitFor(() => document.querySelectorAll(".node-card-grid>[data-agent-node]").length === 4, "node cards did not load");
   assert.equal([...document.querySelectorAll(".node-card-grid>[data-agent-node]")].map(card => card.dataset.agentNode).join(","),
@@ -161,7 +161,7 @@ const cards = () => [...document.querySelectorAll(".client-access-node-card")];
   assert.equal(cardNodes(), "charlie,bravo,alpha", "clearing all filters must restore node order");
   assert.equal(accountStorage.getItem("qcontrolhub:node-card-order"), saved, "filters must not rewrite node order");
 
-  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha"]));
+  testAPI.nodeOrder = { ids: ["bravo", "alpha"], revision: 3 };
   testAPI.clientAccessEntries.reverse();
   document.querySelector("[data-refresh-client-access]").click();
   await waitFor(() => cardNodes() === "bravo,alpha,charlie", "refresh did not apply updated node order");

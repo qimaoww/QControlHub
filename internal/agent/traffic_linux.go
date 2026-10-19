@@ -56,7 +56,9 @@ type trafficState struct {
 
 type TrafficManager struct {
 	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
+	sharedSource     func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
 	haltShared       func(context.Context, core.Engine) error
+	haltReason       string // Set under mu before invoking the stop callbacks.
 	haltLegacyShared func(context.Context, core.Engine, []int) error
 	haltShare        func(context.Context, core.Engine, string) error
 	mu               sync.Mutex
@@ -193,6 +195,8 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			}
 			group := quota
 			group.PortUsedBytes = 0
+			group.CounterEpoch = ""
+			group.LifetimeReceivedBytes, group.LifetimeSentBytes = 0, 0
 			if previous, exists := groups[quota.ID]; exists && !sameSharedQuota(&previous, &group) {
 				return errors.New("control plane returned inconsistent shared allocation totals")
 			}
@@ -268,31 +272,29 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		}
 		if policy.SharedQuota != nil {
 			record.ShareUsedBytes = max(sharedUsed, policy.SharedQuota.PortUsedBytes)
+			quota := policy.SharedQuota
+			if quota.CounterEpoch != "" && record.CounterEpoch == quota.CounterEpoch {
+				var pendingRX, pendingTX uint64
+				if record.LifetimeReceivedBytes > quota.LifetimeReceivedBytes {
+					pendingRX = record.LifetimeReceivedBytes - quota.LifetimeReceivedBytes
+				}
+				if record.LifetimeSentBytes > quota.LifetimeSentBytes {
+					pendingTX = record.LifetimeSentBytes - quota.LifetimeSentBytes
+				}
+				record.ShareUsedBytes = saturatedTrafficAdd(quota.PortUsedBytes, saturatedTrafficAdd(pendingRX, pendingTX))
+			}
 		} else {
 			record.ShareUsedBytes = 0
 		}
 		record.Policy = policy
 		next[policy.ID] = record
 	}
-	guard := trafficState{Records: make(map[string]*trafficRecord)}
-	for id, record := range next {
-		if record.Policy.SharedQuota != nil {
-			guard.Records[id] = record
-		}
-	}
-	if len(guard.Records) > 0 || len(manager.recoveryEngines) > 0 || hasSharedTraffic(manager.records) {
-		if err := saveTrafficState(manager.sharedGuardPath(), guard); err != nil {
-			manager.awaitingPolicies = true
-			manager.recoverSharedEngines(next)
-			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
-		}
-	}
 	type instanceKey struct {
 		shareID string
 		engine  core.Engine
 	}
 	authorized := map[instanceKey]map[int]bool{}
-	toStop := map[instanceKey]struct{}{}
+	toStop := map[instanceKey]string{}
 	legacyStopPorts := map[core.Engine][]int{}
 	addLegacyPort := func(engine core.Engine, port int) {
 		if !slices.Contains(legacyStopPorts[engine], port) {
@@ -309,7 +311,10 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				}
 				authorized[key][record.Policy.Port] = true
 			} else {
-				toStop[key] = struct{}{}
+				toStop[key] = "共享授权已失效或内核权限已收回，请联系节点所有者"
+				if quota.LimitBytes > 0 && quota.UsedBytes >= quota.LimitBytes {
+					toStop[key] = "共享额度已耗尽，实例已停止；请联系节点所有者调整额度"
+				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
 			}
 		}
@@ -318,15 +323,53 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		if quota := record.Policy.SharedQuota; quota != nil {
 			key := instanceKey{quota.ID, record.Policy.Engine}
 			if !authorized[key][record.Policy.Port] {
-				toStop[key] = struct{}{}
+				// A settled deployment may retire a port while keeping this
+				// allocation active on its replacement. Independently verify
+				// the protected local mapping before treating removal as safe.
+				if len(authorized[key]) > 0 && manager.sharedSource != nil {
+					snapshot, err := manager.sharedSource(ctx, key.engine, key.shareID)
+					if errors.Is(err, errSharedAccountingTransition) {
+						// The session retries this policy snapshot after the queued
+						// deployment. Keep both old rules and its activation guard
+						// until the replacement can be independently verified.
+						return fmt.Errorf("shared port retirement awaiting deployment: %w", err)
+					}
+					oldPresent, newPresent := false, false
+					if err == nil && snapshot.Plan.Source == "nft-dual" {
+						for _, port := range snapshot.Plan.Ports {
+							oldPresent = oldPresent || port.Port == record.Policy.Port
+							newPresent = newPresent || authorized[key][port.Port]
+						}
+						if !oldPresent && newPresent {
+							continue
+						}
+					}
+				}
+				if toStop[key] == "" {
+					toStop[key] = "原有监听端口已收回，实例已停止；请核对已分配端口后重新部署"
+				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
 			}
+		}
+	}
+	guard := trafficState{Records: make(map[string]*trafficRecord)}
+	for id, record := range next {
+		if record.Policy.SharedQuota != nil {
+			guard.Records[id] = record
+		}
+	}
+	if len(guard.Records) > 0 || len(manager.recoveryEngines) > 0 || hasSharedTraffic(manager.records) {
+		if err := saveTrafficState(manager.sharedGuardPath(), guard); err != nil {
+			manager.awaitingPolicies = true
+			manager.recoverSharedEngines(next)
+			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
 		}
 	}
 	// Stop removed, revoked, or exhausted instances while the old nftables
 	// rules still protect their listener ports.
 	if manager.haltShare != nil {
-		for instance := range toStop {
+		for instance, reason := range toStop {
+			manager.haltReason = reason
 			if err := manager.haltShare(ctx, instance.engine, instance.shareID); err != nil {
 				manager.awaitingPolicies = true
 				manager.recoverSharedEngines(next)
@@ -363,6 +406,7 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	manager.haltReason = "Agent 身份或节点授权已失效，共享实例已停止"
 	engines := make(map[core.Engine]bool)
 	for _, engine := range manager.recoveryEngines {
 		engines[engine] = true

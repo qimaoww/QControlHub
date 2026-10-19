@@ -4,13 +4,15 @@ import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
 import { describeCoreRuntime } from "./status-controls.js";
+import { sharedAllocationText, sharedConfigPresentation } from "./shared-instance-state.js";
 
 function liveEngineStatus(info = {}, online = true) {
+  if (typeof info.installed !== "boolean") return { label: "状态未知", tone: "unknown" };
   const state = describeCoreRuntime("", info, { online });
   return { label: state.liveLabel, tone: state.liveTone };
 }
 
-export function createLiveConfigView({ can, esc, engineName, conciseVersion, shell }) {
+export function createLiveConfigView({ can, esc, engineName, conciseVersion, shell, bytes }) {
   return ({ agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
     sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
     managedAvailable, emptyManaged, readAction }) => {
@@ -25,7 +27,7 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   const canExecute = can("tasks.execute") && !unsupportedReason && (importSource || managedAvailable);
   const liveActions = !can("agent-config.write")
     ? ""
-    : (privateWorkspace ? '<button class="button" type="submit" data-live-intent="save">保存个人配置</button>' : "") +
+    : (privateWorkspace ? '<button class="button" type="submit" data-live-intent="save">保存草稿</button>' : "") +
       (!canExecute ? "" : importSource
         ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
         : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
@@ -37,7 +39,7 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
     sourceSwitch += '<p class="validation-note">导入保留多端口、DNS、出站绑定、IPv6 优先及出站 ACL。install-ss-rust 的入站防火墙与重应用服务不迁移，修改端口前须另行处理。日志改为 QAgent info；无离线校验，启动失败会回滚。</p>';
   }
   if (privateWorkspace) {
-    sourceSwitch = '<p class="validation-note">可保存多份方案；每台主机的每种内核仅运行一份配置，不能覆盖其他用户正在运行的配置。</p>';
+    sourceSwitch = agent.can_manage === false ? `<p class="validation-note">${esc(sharedAllocationText(agent, bytes))}</p>` : '<p class="validation-note">个人工作区；保存草稿后，需部署才能在本人的服务中生效。</p>';
   }
   if (privateAccount && agent.can_manage === true) {
     sourceSwitch = `<nav class="live-config-source-switch" aria-label="配置来源"><button type="button" data-live-source="personal" class="${privateWorkspace ? "active" : ""}"><b>我的配置</b><small>个人工作区</small></button>${managedAvailable ? `<button type="button" data-live-source="managed" class="${sourceMode === "managed" ? "active" : ""}"><b>读取自有主机配置</b><small>当前托管文件</small></button>` : ""}${existingAvailable ? `<button type="button" data-live-source="import" class="${importSource ? "active" : ""}"><b>系统服务配置</b><small>可选导入</small></button>` : ""}</nav>` +
@@ -57,8 +59,8 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
     const info = agent.runtime?.[item] || {};
     const active = item === engine;
-    const { label, tone } = liveEngineStatus(info, agent.status === "online");
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${label}</small></button>`;
+    const { label, tone } = sharedConfigPresentation(agent, item) || liveEngineStatus(info, agent.status === "online");
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${esc(label)}" title="${esc(label)}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${esc(label)}</small></button>`;
   }).join("")}</nav>`;
   const details = `<div class="live-config-details" role="group" aria-label="当前配置状态">
     ${agentPresenceMarkup(agent.status, { nodeLabel: true })}

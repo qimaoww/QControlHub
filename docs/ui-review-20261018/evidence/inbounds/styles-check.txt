@@ -1,0 +1,36 @@
+node scripts/generate-styles.mjs --check
+node --test .github/scripts/generate-styles.test.mjs
+TAP version 13
+# Subtest: the distributed stylesheet is the byte-exact ordered concatenation
+ok 1 - the distributed stylesheet is the byte-exact ordered concatenation
+  ---
+  duration_ms: 71.155801
+  type: 'test'
+  ...
+# Subtest: every style source is listed once, and no listed source can disappear
+ok 2 - every style source is listed once, and no listed source can disappear
+  ---
+  duration_ms: 2.954578
+  type: 'test'
+  ...
+# Subtest: source slices cannot cut a rule, conditional group, string, or comment
+ok 3 - source slices cannot cut a rule, conditional group, string, or comment
+  ---
+  duration_ms: 0.263674
+  type: 'test'
+  ...
+# Subtest: changing cascade order or a source byte makes the generated check fail
+ok 4 - changing cascade order or a source byte makes the generated check fail
+  ---
+  duration_ms: 1.516033
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 117.695085

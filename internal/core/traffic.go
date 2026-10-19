@@ -32,11 +32,24 @@ func (cycle TrafficCycle) Valid() bool {
 	return cycle == TrafficCycleMonthly || cycle == TrafficCycleYearly
 }
 
+// TrafficOwnership is derived from the authenticated configuration and instance owner.
+type TrafficOwnership struct {
+	OwnerID       string `json:"owner_id"`
+	OwnerName     string `json:"owner_name"`
+	IsCurrentUser bool   `json:"is_current_user"`
+}
+
 // PortTrafficPolicy is the control-plane definition and latest Agent-reported
 // state for one listening port. Every discovered listener is monitored even
 // when QuotaEnabled is false; LimitBytes and AutoBlock only take effect after
 // an operator enables a quota.
 type PortTrafficPolicy struct {
+	TrafficOwnership
+	ServiceStatus        string              `json:"service_status,omitempty"`
+	DeploymentConfirmed  bool                `json:"deployment_confirmed"`
+	ConfigID             string              `json:"config_id,omitempty"`
+	ConfigVersion        int                 `json:"config_version,omitempty"`
+	InboundTag           string              `json:"inbound_tag,omitempty"`
 	SharedQuota          *SharedTrafficQuota `json:"shared_quota,omitempty"`
 	ShareID              string              `json:"-"` // Durable binding, never supplied by a panel request.
 	ShareUsedBytes       uint64              `json:"-"`
@@ -101,11 +114,15 @@ type PortTrafficPolicyRequest struct {
 // configured listener exists before an operator decides whether to attach a
 // quota to it.
 type PortTrafficEndpoint struct {
+	TrafficOwnership
+	ServiceStatus   string          `json:"service_status,omitempty"`
 	AgentID         string          `json:"agent_id"`
 	Name            string          `json:"name"`
 	Engine          Engine          `json:"engine"`
 	Port            int             `json:"port"`
 	Protocol        TrafficProtocol `json:"protocol"`
+	ConfigID        string          `json:"config_id,omitempty"`
+	ShareID         string          `json:"share_id,omitempty"`
 	ConfigVersion   int             `json:"config_version"`
 	ConfigUpdatedAt time.Time       `json:"config_updated_at"`
 }
@@ -118,7 +135,10 @@ type TrafficSyncSelection struct {
 
 type TrafficSyncCandidate struct {
 	PortTrafficEndpoint
-	Kind string `json:"kind"` // deleted or new
+	Kind             string `json:"kind"` // new, changed, removed, unchanged or deleted
+	PreviousPort     int    `json:"previous_port,omitempty"`
+	DeploymentStatus string `json:"deployment_status"`
+	BlockedReason    string `json:"blocked_reason,omitempty"`
 }
 
 type PortTrafficUsage struct {

@@ -55,6 +55,7 @@ export async function testDashboardRuntime(mode, preview = false) {
     const url = new URL(input instanceof Request ? input.url : input, location.href);
     const path = url.pathname.replace(/^\/api\/v1/, "");
     fixture.calls.push({ path, query: url.search });
+    if (path === "/preferences/node-order") return json({ ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "[]"), revision: 1 });
     if (path === "/auth/session") return json(session);
     if (path === "/agent-access") return json({ isolated: false, shares: [] });
     if (path === "/overview") return json({ agents: 4, agents_online: 3, node_configs: 12, configs: 2, tasks_pending: 2, tasks_queued: 1, tasks_running: 1, tasks_failed: 1 });

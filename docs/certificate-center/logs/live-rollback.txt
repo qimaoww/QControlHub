@@ -1,0 +1,15 @@
+time="2026-10-17T08:02:48.983601009Z" level=info msg="Start initial configuration in progress"
+time="2026-10-17T08:02:48.983698843Z" level=info msg="Geodata Loader mode: memconservative"
+time="2026-10-17T08:02:48.983726879Z" level=info msg="Geosite Matcher implementation: succinct"
+time="2026-10-17T08:02:48.983863648Z" level=info msg="Initial configuration complete, total time: 0ms"
+configuration file /etc/qagent/mihomo/.qcontrolhub-validate-0c4bf36579ba7658cae6.yaml test is successful
+deployed to /etc/qagent/mihomo/config.yaml
+backup: /etc/qagent/mihomo/config.yaml.bak-20261017T080249Z-371f01fcd691
+systemd restart qagent-mihomo.service completed
+service status: active
+
+rollback: previous configuration restored
+rollback restart: systemd restart qagent-mihomo.service completed
+service status: active
+PASS: actual Mihomo reload failed on occupied port; previous service, certificate pair and trusted TLS listener restored
+PASS: corrected config deployed successfully after rollback

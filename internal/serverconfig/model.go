@@ -59,6 +59,7 @@ type Protocol struct {
 }
 
 type Input struct {
+	PanelCertificateID           string `json:"panel_certificate_id,omitempty"`
 	XHTTPMode                    string `json:"xhttp_mode,omitempty"`
 	XHTTPExtra                   string `json:"xhttp_extra,omitempty"`
 	XHTTPServerExtra             string `json:"xhttp_server_extra,omitempty"`

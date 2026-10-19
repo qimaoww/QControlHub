@@ -51,6 +51,27 @@ func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
 	}
 }
 
+// Instance metadata can refresh without loading or decrypting configuration
+// bodies, including for accounts without fleet permission.
+func (s *Server) agentConfigState(w http.ResponseWriter, request *http.Request) {
+	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	engine := core.Engine(request.PathValue("engine"))
+	allowed := false
+	for _, enabled := range agent.Capabilities {
+		allowed = allowed || enabled == engine
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "内核未授权或已关闭")
+		return
+	}
+	s.redactAgentMetrics(request, &agent)
+	writeJSON(w, http.StatusOK, agent)
+}
+
 func (s *Server) putAgentName(w http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Name string `json:"name"`

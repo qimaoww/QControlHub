@@ -1,0 +1,80 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "theme": "light",
+  "account": "order-alice",
+  "results": [
+    {
+      "test": "desktop mouse, save acknowledgement",
+      "ids": [
+        "agt_0000000000000004",
+        "agt_0000000000000001",
+        "agt_0000000000000002",
+        "agt_0000000000000003"
+      ]
+    },
+    {
+      "test": "independent browser B reload",
+      "ids": [
+        "agt_0000000000000004",
+        "agt_0000000000000001",
+        "agt_0000000000000002",
+        "agt_0000000000000003"
+      ]
+    },
+    {
+      "test": "clear storage, logout, account switch and shared user keyboard save",
+      "alice": [
+        "agt_0000000000000004",
+        "agt_0000000000000001",
+        "agt_0000000000000002",
+        "agt_0000000000000003"
+      ],
+      "bob": [
+        "agt_0000000000000002",
+        "agt_0000000000000001",
+        "agt_0000000000000003",
+        "agt_0000000000000004"
+      ]
+    },
+    {
+      "test": "delay, rapid keyboard commits, polling, save failure and retry",
+      "writes": 2,
+      "ids": [
+        "agt_0000000000000002",
+        "agt_0000000000000001",
+        "agt_0000000000000004",
+        "agt_0000000000000003"
+      ]
+    },
+    {
+      "test": "unconfirmed failure recovery and delayed old-account response after switch",
+      "ids": [
+        "agt_0000000000000001",
+        "agt_0000000000000002",
+        "agt_0000000000000004",
+        "agt_0000000000000003"
+      ]
+    },
+    {
+      "test": "390px native touch sorting",
+      "ids": [
+        "agt_0000000000000002",
+        "agt_0000000000000001",
+        "agt_0000000000000004",
+        "agt_0000000000000003"
+      ]
+    },
+    {
+      "test": "panel restart and fresh login",
+      "ids": [
+        "agt_0000000000000002",
+        "agt_0000000000000001",
+        "agt_0000000000000004",
+        "agt_0000000000000003"
+      ]
+    }
+  ]
+}

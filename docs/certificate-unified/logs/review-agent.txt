@@ -1,0 +1,12 @@
+=== RUN   TestManagedCertificateScannerScopesManifestFilesAndSecrets
+--- PASS: TestManagedCertificateScannerScopesManifestFilesAndSecrets (0.03s)
+=== RUN   TestManagedCertificateReadHelperHasNoWriteAccessToCaddyOrNetwork
+--- PASS: TestManagedCertificateReadHelperHasNoWriteAccessToCaddyOrNetwork (0.00s)
+=== RUN   TestCaddyHTTPChallengeUpgradePreservesRuntime
+--- PASS: TestCaddyHTTPChallengeUpgradePreservesRuntime (0.00s)
+=== RUN   TestManagedTLSCertificatePreparationPreservesRoutes
+--- PASS: TestManagedTLSCertificatePreparationPreservesRoutes (0.00s)
+=== RUN   TestManagedTLSRuntimeDefinitions
+--- PASS: TestManagedTLSRuntimeDefinitions (0.00s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	3.600s

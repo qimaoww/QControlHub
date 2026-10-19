@@ -13,6 +13,7 @@ export function createAgentSharing(ctx, interactions) {
     username: row.querySelector('[name="username"]').value,
     enabled: row.querySelector('[name="enabled"]').checked,
     engines: [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value),
+    http_domains_text: row.querySelector('[name="http_domains"]').value,
     ports_text: row.querySelector('[name="ports"]').value,
     limit_gib: row.querySelector('[name="limit_gib"]').value,
     reinvite: row.dataset.reinvite === "true",
@@ -28,6 +29,7 @@ export function createAgentSharing(ctx, interactions) {
     </div>
     ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
     ${sharedEngineRuntimeBadges(share, agent, esc)}
+    <label class="settings-field plan-fields one"><span>HTTP-01 允许域名</span><textarea name="http_domains" rows="2" placeholder="auth.example.com&#10;api.example.com">${esc(share.http_domains_text ?? (share.http_domains || []).join("\n"))}</textarea><small>每行一个完整域名；留空不授权，接受共享后生效。</small></label>
     <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
   </div>`;
   const close = () => {
@@ -146,6 +148,7 @@ export function createAgentSharing(ctx, interactions) {
           engines: selectedSharedEngines(controls[index]),
           ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
           reinvite: row.reinvite,
+          http_domains: row.http_domains_text.split(/[\n,，]+/).map(v=>v.trim()).filter(Boolean),
         }));
         capture();
         const submitted = data.agentSharingDrafts.get(agent.id);

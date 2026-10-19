@@ -94,7 +94,7 @@ func TestSharedPortModesLifecycle(t *testing.T) {
 				if err != nil || lease == nil || lease.ID != task.ID {
 					t.Fatalf("claim: %+v %v; want %s", lease, err, task.ID)
 				}
-				if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: settled}); err != nil {
+				if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: settled}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -152,7 +152,7 @@ func TestSharedPortModesLifecycle(t *testing.T) {
 			if task, err := db.GetTask(ctx, validation.ID); err != nil || task.Status != core.TaskFailed {
 				t.Fatalf("narrowing did not invalidate a running validation: %+v %v", task, err)
 			}
-			if err := db.CompleteTask(ctx, agent.ID, validation.ID, core.TaskResultRequest{LeaseID: validationLease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
+			if err := completeSharedTestTask(db, ctx, agent.ID, validation.ID, core.TaskResultRequest{LeaseID: validationLease.LeaseID, Success: true}); !errors.Is(err, ErrConflict) {
 				t.Fatalf("old validation lease remained valid: %v", err)
 			}
 			if _, err := save([]int{0}, 1000, true); err != nil {
@@ -221,7 +221,7 @@ func TestSharedPortModesLifecycle(t *testing.T) {
 			if _, err := db.RespondAgentShare(recipient, share.ID, core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "accept"}); err != nil {
 				t.Fatal(err)
 			}
-			stop, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop})
+			stop, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStop})
 			if err != nil {
 				t.Fatal(err)
 			}

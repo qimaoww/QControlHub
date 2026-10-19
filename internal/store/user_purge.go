@@ -133,6 +133,15 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 		WHERE user_id=$1 OR agent_id IN (SELECT id FROM agents WHERE owner_id=$1)`, id); err != nil {
 		return PurgedUser{}, err
 	}
+	// Keep encrypted certificate resources private under their stable owner.
+	// Cancel orders so the scheduler can clean provider records with the
+	// original credentials, then stop future renewal and distribution.
+	if _, err := tx.Exec(ctx, `UPDATE panel_certificates SET auto_renew=false WHERE owner_id=$1`, id); err != nil {
+		return PurgedUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE certificate_orders SET status='canceling',next_attempt=now() WHERE owner_id=$1 AND status IN ('queued','running','waiting_dns','validating')`, id); err != nil {
+		return PurgedUser{}, err
+	}
 	// Reauthorize before clearing owner/share IDs, otherwise a user's queued
 	// work is promoted into unrestricted administrator work. Running outcomes
 	// remain uncertain; their old result leases must no longer be accepted.
@@ -193,6 +202,8 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	}
 	// Personal, account-scoped data leaves with the account.
 	for _, statement := range []string{
+		`DELETE FROM account_node_orders WHERE account_id=$1`,
+		`DELETE FROM traffic_batch_requests WHERE account_id=$1`,
 		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
 		`DELETE FROM ip_quality_schedules WHERE owner_id=$1`,
 		`DELETE FROM user_substore_settings WHERE owner_id=$1`,

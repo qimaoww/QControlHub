@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -35,6 +36,18 @@ var (
 )
 
 type CoreLogCollector struct {
+	sharedJournalUpdates [2]chan struct{}
+
+	executor            *Executor
+	parent              *CoreLogCollector
+	instanceID          string
+	instanceService     string
+	instancesMu         sync.Mutex
+	discoveryMu         sync.Mutex
+	instances           map[string]*coreLogInstanceRun
+	instanceFailures    map[string]core.SharedInstanceStatus
+	fileBudgetInstances int
+
 	mu                 sync.Mutex
 	filePublishMu      sync.Mutex
 	queued             []core.CoreLogEntry
@@ -62,6 +75,7 @@ type CoreLogCollector struct {
 }
 
 type coreLogFileRun struct {
+	truncated atomic.Bool
 	cancel    context.CancelFunc
 	bindingID string
 	done      chan struct{}
@@ -85,8 +99,10 @@ type coreLogSourceTransition struct {
 }
 
 type coreLogJournalSource struct {
-	arguments   []string
-	unitEngines map[string]core.Engine
+	arguments     []string
+	unitEngines   map[string]core.Engine
+	setStatus     func(string, string)
+	recoverySince *time.Time
 }
 
 type coreLogFileSource struct {
@@ -163,6 +179,18 @@ func (collector *CoreLogCollector) ApplyPolicy(policy core.AgentPolicy) {
 	collector.coreLogRotateCount = int(policy.CoreLogRotateCount)
 	sources := append([]coreLogFileSource(nil), collector.fileSources...)
 	collector.mu.Unlock()
+	if collector.parent == nil {
+		collector.instancesMu.Lock()
+		collector.rebalanceInstanceBudgetsLocked()
+		children := make([]*CoreLogCollector, 0, len(collector.instances))
+		for _, child := range collector.instances {
+			children = append(children, child.collector)
+		}
+		collector.instancesMu.Unlock()
+		for _, child := range children {
+			child.ApplyPolicy(policy)
+		}
+	}
 	for _, source := range sources {
 		collector.removeExcessArchives(source)
 		if changed {
@@ -215,7 +243,7 @@ func (collector *CoreLogCollector) rotationPolicy() (int64, int) {
 	if divisor < 1 {
 		divisor = 1
 	}
-	bytes := collector.coreLogMaxBytes / int64(divisor*(count+1)*sources)
+	bytes := collector.coreLogMaxBytes / int64(divisor*(count+1)*sources*max(1, collector.fileBudgetInstances))
 	if bytes < 1 {
 		bytes = 1
 	}
@@ -224,6 +252,9 @@ func (collector *CoreLogCollector) rotationPolicy() (int64, int) {
 
 func NewCoreLogCollectorForExecutor(executor *Executor) *CoreLogCollector {
 	collector := NewCoreLogCollectorForServiceManager(executor.serviceManager(), executor.Specs, executor.ExistingSpecs)
+	collector.sharedJournalUpdates = [2]chan struct{}{make(chan struct{}, 1), make(chan struct{}, 1)}
+	collector.executor = executor
+	executor.coreLogReady = collector.prepareSharedLogSource
 	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
 		slog.Warn("configure imported sing-box log source", "error", err)
 	}
@@ -354,9 +385,33 @@ func (collector *CoreLogCollector) Run(ctx context.Context) {
 	for _, source := range fileSources {
 		collector.startFileSource(source)
 	}
-	<-ctx.Done()
+	if collector.executor != nil {
+		if collector.executor.serviceManager().Kind() == ServiceManagerSystemd {
+			for index, namespace := range []bool{true, false} {
+				collector.runWait.Add(1)
+				go func(namespace bool, updates <-chan struct{}) {
+					defer collector.runWait.Done()
+					collector.runSharedJournal(ctx, namespace, updates)
+				}(namespace, collector.sharedJournalUpdates[index])
+			}
+		}
+		collector.refreshSharedLogSources(ctx)
+		ticker := time.NewTicker(5 * time.Second)
+		for ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+			case <-ticker.C:
+				collector.refreshSharedLogSources(ctx)
+			}
+		}
+		ticker.Stop()
+	} else {
+		<-ctx.Done()
+	}
+	collector.instancesMu.Lock()
 	collector.mu.Lock()
 	collector.runStopped = true
 	collector.mu.Unlock()
+	collector.instancesMu.Unlock()
 	collector.runWait.Wait()
 }

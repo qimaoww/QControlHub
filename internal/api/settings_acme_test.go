@@ -73,7 +73,7 @@ func TestManagedTLSAccountDefaultForSharedDeployments(t *testing.T) {
 	claim := func(task core.Task, email string) {
 		t.Helper()
 		got, err := db.ClaimTask(ctx, agent.ID)
-		if err != nil || got == nil || got.ID != task.ID || got.SharedInstance != (task.Action == core.ActionDeploy) || len(got.TLSFrontends) != 1 || got.TLSFrontends[0].ACMEEmail != email {
+		if err != nil || got == nil || got.ID != task.ID || !got.SharedInstance || len(got.TLSFrontends) != 1 || got.TLSFrontends[0].ACMEEmail != email {
 			t.Fatalf("incorrect account/snapshot: %+v %v", got, err)
 		}
 		if err := db.CompleteTask(ctx, agent.ID, got.ID, core.TaskResultRequest{LeaseID: got.LeaseID, Success: false, Error: "fixture TLS failure", TrafficSettled: true}); err != nil {

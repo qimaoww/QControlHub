@@ -9,6 +9,13 @@ export function renderXrayExports(profile, id, esc) {
   }).join("")}</section>`;
 }
 
+export function renderNativeClientExport(profile, id, esc) {
+  const value = String(profile?.uri || "");
+  if (!value || profile.xray_json || /^(?:ss|vless|vmess|trojan|hysteria2|tuic|socks5|anytls):\/\//i.test(value)) return "";
+  const target = `${id}-native`;
+  return `<section class="xhttp-client-exports"><h3>${esc(profile.format || "原生配置")}</h3><form class="client-export-control" action="#"><textarea class="client-share-yaml is-masked" id="${target}" readonly autocomplete="off" spellcheck="false" aria-label="原生客户端配置">${esc(value)}</textarea><button class="button small" type="button" data-secret-visibility aria-controls="${target}" aria-pressed="false">显示</button><button class="button small" type="button" data-copy-target="#${target}">复制配置</button></form></section>`;
+}
+
 export function bindXrayDownloads(root = document) {
   root.querySelectorAll("[data-download-xray]").forEach(button => bindEvent(button, "click", () => {
     const source = document.getElementById(button.dataset.downloadXray);

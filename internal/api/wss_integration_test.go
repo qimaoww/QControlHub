@@ -114,6 +114,24 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("create traffic policy: %v", err)
 	}
 
+	// Quota creation alone is not deployment evidence. Seed the acknowledged
+	// listener that this lifecycle test subsequently reports traffic for.
+	deployed, err := dataStore.SaveAgentConfig(ctx, core.Config{AgentID: enrolled.AgentID, Name: "integration listener", Engine: core.EngineMihomo, Content: "listeners: [{name: integration, type: http, port: 24443}]\n"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := dataStore.CreateTask(ctx, core.TaskRequest{AgentID: enrolled.AgentID, Engine: deployed.Engine, ConfigID: deployed.ID, ExpectedConfigVersion: deployed.Version, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialLease, err := dataStore.ClaimTask(ctx, enrolled.AgentID)
+	if err != nil || initialLease == nil || initialLease.ID != initial.ID {
+		t.Fatalf("initial deployment: %+v %v", initialLease, err)
+	}
+	if err := dataStore.CompleteTask(ctx, enrolled.AgentID, initial.ID, core.TaskResultRequest{LeaseID: initialLease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+
 	// An enrolled Agent can fetch the control-plane's exact binary only with
 	// its own fresh Ed25519 request signature. The response is checksummed so
 	// the Agent can verify it before replacing its executable.
@@ -322,7 +340,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: enrolled.AgentID, Name: "integration node configuration", Engine: core.EngineMihomo,
 		Content: "listeners: [{name: wss, type: http, port: 7890}]\nproxies: []\nrules:\n  - MATCH,DIRECT\n",
-	}, 0)
+	}, deployed.Version)
 	if err != nil {
 		t.Fatalf("create agent config: %v", err)
 	}
@@ -478,6 +496,12 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		var ack core.WireMessage
 		if readErr := wsjson.Read(ctx, connection, &ack); readErr != nil || ack.TaskID != created.ID {
 			t.Fatalf("read %s acknowledgment: message=%+v error=%v", action, ack, readErr)
+		}
+		if action == core.ActionDeploy || action == core.ActionImportExisting {
+			var policies core.WireMessage
+			if readErr := wsjson.Read(ctx, connection, &policies); readErr != nil || policies.Type != core.WireHello || len(policies.TrafficPolicies) != 1 || policies.TrafficPolicies[0].Port != 7890 || policies.TrafficPolicies[0].ID == trafficPolicy.ID {
+				t.Fatalf("confirmed deployment did not refresh monitoring: %+v %v", policies, readErr)
+			}
 		}
 		stored, getErr := dataStore.GetTask(ctx, created.ID)
 		if getErr != nil || stored.Status != core.TaskSucceeded {

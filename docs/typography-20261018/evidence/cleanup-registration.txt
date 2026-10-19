@@ -1,0 +1,29 @@
+NextElapseUSecRealtime=Wed 2026-10-21 18:34:38 CST
+Persistent=yes
+Id=qch-typography-d8f3-20261018-cleanup.timer
+ActiveState=active
+SubState=waiting
+UnitFileState=enabled
+# /etc/systemd/system/qch-typography-d8f3-20261018-cleanup.timer
+[Unit]
+Description=Typography review cleanup after 72 hours
+
+[Timer]
+OnCalendar=2026-10-21 10:34:38 UTC
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=qch-typography-d8f3-20261018-cleanup.service
+
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/qch-typography-d8f3-20261018-cleanup.service
+[Unit]
+Description=Clean this typography review scratch environment
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /var/lib/qch-typography-d8f3-20261018/cleanup.py /var/lib/qch-typography-d8f3-20261018/manifest.json
+Restart=on-failure
+RestartSec=1h

@@ -21,6 +21,25 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 	if err != nil {
 		return "", fmt.Errorf("cannot verify previous accounting configuration: %w", err)
 	}
+	return stripVerifiedAccounting(engine, content, previous)
+}
+
+// AccountingSourceFromRevision recovers stale generated references only when
+// the complete old plan can still be reproduced from a saved revision. Merely
+// using a reserved tag never establishes ownership of an outbound or rule.
+func AccountingSourceFromRevision(engine core.Engine, content, revision string) (string, error) {
+	plan, err := PrepareAccounting(engine, revision)
+	if err != nil && engine == core.EngineSingBox {
+		plan, err = PrepareMarkedSingBoxAccounting(revision)
+	}
+	if err != nil {
+		return "", err
+	}
+	return stripVerifiedAccounting(engine, content, plan.Content)
+}
+
+func stripVerifiedAccounting(engine core.Engine, content, previous string) (string, error) {
+	var err error
 	decode := func(value string) (map[string]any, error) {
 		var root map[string]any
 		if engine == core.EngineMihomo {

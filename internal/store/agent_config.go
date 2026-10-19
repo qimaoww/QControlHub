@@ -47,7 +47,20 @@ func (s *Store) AgentConfigsForMonitoring(ctx context.Context, agentID string) (
 	if !scopeForConfig(ctx).Admin {
 		return nil, ErrForbidden
 	}
-	return s.listAgentConfigs(ctx, agentID, true)
+	configurations, err := s.trafficConfigurations(ctx, s.pool, true)
+	if err != nil {
+		return nil, err
+	}
+	result := []core.Config{}
+	for _, item := range configurations {
+		if (agentID == "" || item.Config.AgentID == agentID) && item.ShareID == "" && item.AppliedVersion > 0 && item.AppliedContent != "" {
+			config := item.Config
+			config.Content = item.AppliedContent
+			config.Version = item.AppliedVersion
+			result = append(result, config)
+		}
+	}
+	return result, nil
 }
 
 // AgentConfigs filters before fetching or decrypting configuration bodies.
@@ -143,41 +156,44 @@ func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error
 	return result, rows.Err()
 }
 
-// A shared Xray instance and the owner's base service can run together. The
-// ordinary fleet projection still describes one service per engine; a user
-// view prefers that user's running instance and retains their last successful
-// deployment when the service has stopped.
+// Retain the applied revision even while stopped or a newer draft is saved.
+// A recipient never falls back to another share or to the host base history.
 const ownedLatestDeploymentsSQL = `
 	SELECT DISTINCT ON(agent_id,engine) agent_id,engine,config_id,config_version,finished_at FROM (
-		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
-		FROM agent_engine_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		SELECT state.agent_id,state.engine,state.config_id,state.config_version,state.updated_at AS finished_at,2 AS priority
+		FROM agent_engine_ownership state JOIN agents a ON a.id=state.agent_id
+		WHERE state.owner_id=$1 AND a.owner_id=$1 AND state.config_id<>''
 		UNION ALL
-		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
-		FROM agent_shared_instance_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		SELECT state.agent_id,state.engine,state.config_id,state.config_version,COALESCE(state.deployed_at,state.updated_at) AS finished_at,3 AS priority
+		FROM agent_shared_instance_ownership state JOIN agent_shares sh ON sh.id=state.share_id
+		WHERE state.owner_id=$1 AND sh.user_id=$1 AND sh.enabled AND sh.status='accepted' AND state.engine=ANY(sh.engines) AND state.config_id<>''
 		UNION ALL
 		SELECT t.agent_id,t.engine,t.config_id,t.config_version,t.finished_at,1 AS priority
-		FROM tasks t JOIN configs c ON c.id=t.config_id
+		FROM tasks t JOIN configs c ON c.id=t.config_id JOIN agents a ON a.id=t.agent_id
 		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
-			AND t.finished_at IS NOT NULL
+			AND NOT t.shared_instance AND a.owner_id=$1 AND t.finished_at IS NOT NULL
 	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
 
 // A selected client profile is usable only while another account has not
 // taken over the base core. Keep history and current availability distinct.
 const ownedUsableDeploymentsSQL = `
 	SELECT DISTINCT ON(agent_id,engine) agent_id,engine,config_id,config_version,finished_at FROM (
-		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
-		FROM agent_engine_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		SELECT state.agent_id,state.engine,state.config_id,state.config_version,state.updated_at AS finished_at,2 AS priority
+		FROM agent_engine_ownership state JOIN agents a ON a.id=state.agent_id
+		WHERE state.owner_id=$1 AND a.owner_id=$1 AND NOT state.config_uncertain AND state.config_id<>''
 		UNION ALL
-		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
-		FROM agent_shared_instance_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		SELECT state.agent_id,state.engine,state.config_id,state.config_version,COALESCE(state.deployed_at,state.updated_at) AS finished_at,3 AS priority
+		FROM agent_shared_instance_ownership state JOIN agent_shares sh ON sh.id=state.share_id
+		WHERE state.owner_id=$1 AND sh.user_id=$1 AND sh.enabled AND sh.status='accepted' AND state.engine=ANY(sh.engines)
+		AND NOT state.config_uncertain AND state.config_id<>''
 		UNION ALL
 		SELECT t.agent_id,t.engine,t.config_id,t.config_version,t.finished_at,1 AS priority
-		FROM tasks t JOIN configs c ON c.id=t.config_id
+		FROM tasks t JOIN configs c ON c.id=t.config_id JOIN agents a ON a.id=t.agent_id
 		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
-			AND t.finished_at IS NOT NULL
-			AND (t.shared_instance OR NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
+			AND NOT t.shared_instance AND a.owner_id=$1 AND t.finished_at IS NOT NULL
+			AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
 				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
-				AND state.owner_id<>$1 AND (state.running OR state.uncertain)))
+				AND (state.config_uncertain OR state.owner_id<>$1 AND (state.running OR state.uncertain)))
 	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
 
 // Probe the existing (agent_id,engine,finished_at) partial index once per

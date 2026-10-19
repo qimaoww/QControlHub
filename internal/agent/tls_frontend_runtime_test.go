@@ -6,12 +6,53 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestCaddyHTTPChallengeUpgradePreservesRuntime(t *testing.T) {
+	f := core.TLSFrontend{Tag: "one", Mode: "caddy", Domain: "one.example.test", ACMEEmail: "owner@example.test", PublicPort: 8443, BackendPort: 20001, Transport: "websocket", Path: "/old"}
+	config, err := renderCaddyWithFallback([]core.TLSFrontend{f}, t.TempDir(), map[string]bool{f.Domain: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous map[string]any
+	if err = json.Unmarshal([]byte(config), &previous); err != nil {
+		t.Fatal(err)
+	}
+	servers := previous["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)
+	delete(servers, "http_challenges") // A committed deployment from before this upgrade.
+	legacy, _ := json.Marshal(previous)
+	upgraded, err := upgradeCaddyHTTPChallengeConfig(string(legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current map[string]any
+	if err = json.Unmarshal([]byte(upgraded), &current); err != nil {
+		t.Fatal(err)
+	}
+	currentServers := current["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)
+	if currentServers["http_challenges"] == nil || !strings.Contains(upgraded, "127.0.0.1:9080") {
+		t.Fatal("missing managed challenge route")
+	}
+	delete(currentServers, "http_challenges")
+	if !reflect.DeepEqual(current, previous) {
+		t.Fatal("challenge upgrade changed committed business routes, issuer fallback or storage")
+	}
+	// A second startup must not rewrite or reload an unchanged configuration.
+	if again, err := upgradeCaddyHTTPChallengeConfig(upgraded); err != nil || again != upgraded {
+		t.Fatal("challenge upgrade is not idempotent", err)
+	}
+	for _, invalid := range []string{`{`, `{}`, `{"apps":{"http":{"servers":null}}}`} {
+		if _, err := upgradeCaddyHTTPChallengeConfig(invalid); err == nil {
+			t.Fatal("invalid runtime accepted")
+		}
+	}
+}
 
 func TestManagedTLSAddressFamilies(t *testing.T) {
 	for _, records := range [][]string{{"1.1.1.1"}, {"2606:4700:4700::1111"}, {"1.1.1.1", "2606:4700:4700::1111"}} {

@@ -1,0 +1,14 @@
+cert-alice: before integrated sharing, node=available
+cert-bob: before integrated sharing, node=available
+cert-alice: accepted shared node available with 3 exact domains; no host management permission
+cert-bob: accepted shared node available with 2 exact domains; no host management permission
+cert-admin: real Caddy deployment queued tsk_9139020a8b9c0b16
+cert-admin: Caddy/core deployment succeeded
+cert-admin: Caddy certificate auto-imported v1 under correct resource owner
+cert-alice: real Caddy deployment queued tsk_98f06d4f9e2b3a6d
+cert-alice: Caddy/core deployment succeeded
+cert-alice: Caddy certificate auto-imported v1 under correct resource owner
+cert-bob: real Caddy deployment queued tsk_dac5d9e5ba22594b
+cert-bob: Caddy/core deployment succeeded
+cert-bob: Caddy certificate auto-imported v1 under correct resource owner
+Real Caddy automatic discovery and two ordinary-user instance imports completed

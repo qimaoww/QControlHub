@@ -2359,14 +2359,16 @@ summary.button,
 
 :is(.node-name-settings, .node-komari-settings) form :is(input, select, .button) {
   box-sizing: border-box;
-  height: 34px;
   min-height: 34px;
+  padding-block: 5px;
   border-radius: var(--radius-control);
+  line-height: 1.2;
 }
 
 .traffic-control-panel > .traffic-filters > .button {
+  min-height: 42px;
   padding-inline: 12px;
-  font-size: calc(10px * var(--ui-font-scale));
+  font-size: var(--text-small);
 }
 
 .dashboard-month-popover > footer button {

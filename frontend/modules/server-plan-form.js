@@ -89,7 +89,7 @@ function installGeneratedFieldButtons(form, protocol) {
     if (!control || control.type === "hidden") return;
     if (control.parentElement.querySelector?.(`[data-regenerate]`)) return;
     const button = document.createElement("button");
-    button.className = "field-generate-button";
+    button.className = form.closest?.(".config-inbound-dialog") ? "button field-generate-button" : "field-generate-button";
     button.type = "button";
     const regeneratedFields =
       name === "credential" && protocol?.key === "sudoku"
@@ -164,6 +164,7 @@ export function readServerPlanInput(form, protocol) {
     tls_alpn: values.get("tls_alpn") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
     tls_enabled: tlsEnabled,
+    panel_certificate_id: values.get("panel_certificate_id") || "",
     certificate_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("certificate_path") || "" : "",
     private_key_path: tlsEnabled || protocol.key.startsWith("vless-xhttp-") && protocol.uses_reality && protocol.key !== "vless-xhttp-reality" ? values.get("private_key_path") || "" : "",
     reality_enabled: values.get("reality_enabled") === "1",
@@ -233,11 +234,11 @@ export function readServerPlanInput(form, protocol) {
 function wireguardProtocolOptions(plan, endpoint = false) {
   return `<div class="preset-protocol-options" data-wireguard-options ${endpoint ? "data-wireguard-endpoint" : ""}>
     <details class="preset-option-panel" open><summary><b>WireGuard 密钥与客户端</b><small>导入私钥时须填写匹配公钥</small></summary>
-    ${endpoint ? '<p class="preset-compat-note">sing-box 监听所有接口；需 with_wireguard 与 with_gvisor。</p>' : ""}
+    ${endpoint ? '<div class="plan-fields one"><p class="tls-help">节点内核需支持 WireGuard 与 gVisor。</p></div>' : ""}
     <div class="plan-fields two">
       <label class="secret-input">服务端私钥<span class="secret-value-control"><input type="password" name="wireguard_server_private_key" required maxlength="44" value="${esc(plan.wireguard_server_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
       <label>服务端公钥<input name="wireguard_server_public_key" required maxlength="44" value="${esc(plan.wireguard_server_public_key || "")}"></label>
-      <label class="secret-input">客户端私钥<span class="secret-value-control"><input type="password" name="wireguard_client_private_key" required maxlength="44" value="${esc(plan.wireguard_client_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>仅控制面加密保存，不写入节点。</small></label>
+      <label class="secret-input">客户端私钥<span class="secret-value-control"><input type="password" name="wireguard_client_private_key" required maxlength="44" value="${esc(plan.wireguard_client_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
       <label>客户端公钥<input name="wireguard_client_public_key" required maxlength="44" value="${esc(plan.wireguard_client_public_key || "")}"></label>
       <label class="secret-input">预共享密钥（可选）<span class="secret-value-control"><input type="password" name="wireguard_preshared_key" maxlength="44" value="${esc(plan.wireguard_preshared_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
       <label>客户端地址<input name="wireguard_client_address" required value="${esc(plan.wireguard_client_address || "10.66.66.2/32")}"></label>
@@ -269,7 +270,7 @@ function snellProtocolOptions(plan, shadowTLS = false) {
 
 function sudokuProtocolOptions(plan) {
   return `<div class="preset-protocol-options" data-sudoku-options>
-    <details class="preset-option-panel" open><summary><b>Sudoku 密钥</b><small>Ed25519 分割密钥</small></summary><div class="plan-fields one">${optionSecret("sudoku_client_key", "Available Private Key（客户端）", plan.sudoku_client_key, "64 字节十六进制私钥；仅控制面加密保存，不写入节点。")}</div></details>
+    <details class="preset-option-panel" open><summary><b>Sudoku 密钥</b><small>Ed25519 分割密钥</small></summary><div class="plan-fields one">${optionSecret("sudoku_client_key", "Available Private Key（客户端）", plan.sudoku_client_key, "64 字节十六进制私钥。")}</div></details>
     <details class="preset-option-panel" open><summary><b>填充与字节表</b></summary><div class="plan-fields three"><label>Padding 最小值<input type="number" name="sudoku_padding_min" min="0" max="100" value="${Number(plan.sudoku_padding_min ?? 5)}"></label><label>Padding 最大值<input type="number" name="sudoku_padding_max" min="0" max="100" value="${Number(plan.sudoku_padding_max ?? 15)}"></label><label>Table Type<select name="sudoku_table_type">${["prefer_entropy", "prefer_ascii", "up_ascii_down_entropy", "up_entropy_down_ascii"].map((value) => `<option value="${value}" ${value === (plan.sudoku_table_type || "prefer_entropy") ? "selected" : ""}>${value}</option>`).join("")}</select></label></div></details>
     <details class="preset-option-panel" open><summary><b>HTTPMask 与下行</b><small>服务端固定 auto</small></summary><div class="plan-fields three"><label class="plan-check"><input type="checkbox" name="sudoku_httpmask_enabled" value="1" ${plan.sudoku_httpmask_enabled ? "checked" : ""}><span><b>启用 HTTPMask</b><small>关闭后使用原始 TCP。</small></span></label><label>客户端 HTTPMask 模式<select name="sudoku_httpmask_mode">${["ws", "stream", "poll", "auto"].map((value) => `<option value="${value}" ${value === (plan.sudoku_httpmask_mode || "ws") ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="plan-check" data-sudoku-httpmask-modern><input type="checkbox" name="sudoku_httpmask_tls" value="1" ${plan.sudoku_httpmask_tls ? "checked" : ""}><span><b>客户端强制 HTTPS</b><small>仅现代隧道模式生效。</small></span></label></div><div class="plan-fields three"><label data-sudoku-httpmask-modern data-sudoku-httpmask-fields>Host / SNI<input name="sudoku_httpmask_host" value="${esc(plan.sudoku_httpmask_host || "")}" placeholder="可选 example.com:443"></label><label data-sudoku-httpmask-fields>Path Root<input name="sudoku_httpmask_path_root" maxlength="128" value="${esc(plan.sudoku_httpmask_path_root || "")}" placeholder="例如 aabbcc"></label><label>Fallback<input name="sudoku_fallback" value="${esc(plan.sudoku_fallback || "")}" placeholder="可选 127.0.0.1:80"></label></div><div class="plan-fields two"><label class="plan-check"><input type="checkbox" name="sudoku_enable_pure_downlink" value="1" ${plan.sudoku_enable_pure_downlink ? "checked" : ""}><span><b>纯 Sudoku 下行</b></span></label><label>握手超时（秒）<input type="number" name="sudoku_handshake_timeout" min="1" max="300" value="${Number(plan.sudoku_handshake_timeout || 5)}"></label></div></details>
     <details class="preset-option-panel"><summary><b>原生复用</b></summary><div class="plan-fields one"><label>Sudoku Multiplex<select name="sudoku_multiplex"><option value="off" ${(plan.sudoku_multiplex || "off") === "off" ? "selected" : ""}>off</option><option value="auto" ${plan.sudoku_multiplex === "auto" ? "selected" : ""}>auto</option><option value="on" ${plan.sudoku_multiplex === "on" ? "selected" : ""}>on</option></select><small>auto 仅复用 HTTPMask；on 启用单会话多目标。不叠加 SMux / TCP Brutal。</small></label></div></details>${listenerAdvancedOptions(plan)}</div>`;

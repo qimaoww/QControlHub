@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +16,12 @@ import (
 )
 
 type Store struct {
-	pool       *pgxpool.Pool
-	cryptor    *configCryptor
-	taskWakeMu sync.Mutex
-	taskWakes  map[string]chan struct{}
+	certificateResolver *net.Resolver
+	certificateDNSHTTP  *http.Client
+	pool                *pgxpool.Pool
+	cryptor             *configCryptor
+	taskWakeMu          sync.Mutex
+	taskWakes           map[string]chan struct{}
 }
 
 type storeExecutor interface {
@@ -69,7 +72,12 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
+	// Keep unreachable databases bounded without imposing that short deadline
+	// on schema changes such as building indexes over retained kernel logs.
+	connectContext, cancelConnect := context.WithTimeout(ctx, 20*time.Second)
+	err = pool.Ping(connectContext)
+	cancelConnect()
+	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}

@@ -1,3 +1,4 @@
+import { mergeTrafficPorts, trafficInUserScope } from "./traffic-model.js";
 import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 import { installedEngineCount } from "./agent-service-state.js";
@@ -13,6 +14,7 @@ function contextMarkup(title) {
     const selected = state.data.ipQualityAgent || "";
     return `<div class="context-section-label"><span>选择节点</span><b>${nodes.length}</b></div><nav class="context-list" aria-label="IP 质量检测节点">${nodes.map((node) => `<a class="${selected === node.id ? "active" : ""}" href="#ip-quality" data-ip-quality-agent="${esc(node.id)}"><i class="status-dot ${esc(node.dot)}"></i><span><strong>${esc(node.name)}</strong><small>${esc(node.note)}</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
+  if (state.route === "certificates") return "";
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")
@@ -89,16 +91,15 @@ function contextMarkup(title) {
     return `<a class="context-primary ${selected ? "" : "active"}" href="#system-bbr">全部节点</a><div class="context-section-label"><span>系统 BBR</span><b>${agents.length}</b></div><nav class="context-list" aria-label="系统 BBR 节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#system-bbr-agent-${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("system-bbr-v1") ? "系统 TCP 参数" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "core-logs") {
-    const agents = orderNodesBySavedOrder(state.data.agents || []);
+    const agents = orderNodesBySavedOrder(state.data.coreLogAgents || []);
     const selected = state.data.coreLogFilters?.agent_id || "";
     return `<a class="context-primary ${selected ? "" : "active"}" href="#core-logs" data-core-log-agent="">全部节点日志</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="内核日志节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#core-logs" data-core-log-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("core-logs-v1") ? "集中日志已启用" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "traffic") {
     const agents = orderNodesBySavedOrder(state.data.agents || []);
-    const allPolicies = state.data.trafficPolicies || [];
-    const suppressedPorts = new Set(allPolicies.filter((policy) => policy.monitoring_enabled === false).map((policy) => `${policy.agent_id}:${policy.port}`));
-    const policies = allPolicies.filter((policy) => policy.monitoring_enabled !== false);
-    const endpoints = (state.data.trafficEndpoints || []).filter((endpoint) => !suppressedPorts.has(`${endpoint.agent_id}:${endpoint.port}`));
+    const items = mergeTrafficPorts(state.data.trafficPolicies || [], state.data.trafficEndpoints || []).filter(item => trafficInUserScope(item.policy || item.endpoint, state.data.trafficFilters));
+    const policies = items.filter((item) => item.policy).map((item) => item.policy);
+    const endpoints = items.filter((item) => item.endpoint).map((item) => item.endpoint);
     const selected = state.data.trafficFilters?.agent_id || "";
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span>${agentPresenceMarkup(agent.status)}</a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
@@ -126,7 +127,7 @@ function contextMarkup(title) {
     return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${orderedAgents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${orderedAgents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
   }
   if (state.route === "settings")
-    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-cnip"><span>07</span>CN IP 数据源</a><a href="#settings-certificates"><span>08</span>证书申请</a><a href="#settings-deployment"><span>09</span>部署状态</a></nav>`;
+    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-cnip"><span>07</span>CN IP 数据源</a><a href="#settings-certificates"><span>08</span>证书申请</a><a href="#settings-deployment"><span>09</span>部署状态</a>${can("admin") ? '<a href="#settings-api-keys"><span>10</span>API Key</a>' : ""}</nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
   ) || (state.data.presetAgent?.id === state.data.agentId ? state.data.presetAgent : null);

@@ -1,0 +1,49 @@
+{
+  "job": "qch-shared-traffic-d074-cleanup.timer",
+  "host": "test-host",
+  "test_ended_at": "2026-10-17T18:18:39+00:00",
+  "execute_at_utc": "2026-10-20T18:18:39+00:00",
+  "execute_at_hkt": "2026-10-21T02:18:39+08:00",
+  "registered": true,
+  "persistent": true,
+  "containers": [
+    {
+      "id": "0ceab4df379d911dec72c9e93c4ca8550f029187b55a0b25ccedc669e25806e8",
+      "name": "qch-shared-traffic-d074-web"
+    },
+    {
+      "id": "841d70d634d9c0e3464e9caaea668c6f009e8c3f0bf1a9f1b375f336e3ba1961",
+      "name": "qch-shared-traffic-d074-client"
+    },
+    {
+      "id": "a7426cf65121f081390f983d4145aa36e8e665776b1710a6eb502f4beb75357b",
+      "name": "qch-shared-traffic-d074-client-glibc"
+    },
+    {
+      "id": "2b713dcd73a70d539ad867da5a1904cdaa9ae1f9599f8bb13e97467ec1bbb5d2",
+      "name": "qch-shared-traffic-d074-target"
+    },
+    {
+      "id": "0a7d85eb8bb2dbce3d86808386400320605316cbbfe1a6999d2c7b75efd24a3f",
+      "name": "qch-shared-traffic-d074-panel"
+    },
+    {
+      "id": "8319f463a594334beac53f7ff67ec25f4fde7f1d2fec9528405583035d690fad",
+      "name": "qch-shared-traffic-d074-node"
+    },
+    {
+      "id": "de7354b61d6d5d17084fa4926063880c3df2ab43ba09163b9fce73a2bd736bce",
+      "name": "qch-shared-traffic-d074-db"
+    }
+  ],
+  "network": {
+    "id": "349d569f7bd5f3bf221d464dfaba3662ef9b45d64217bed79a60940f99361ba1",
+    "name": "qch-shared-traffic-d074-net"
+  },
+  "scope": "/var/tmp/qch-shared-traffic-d074 (including port-sync drafts, test accounts/database, replacement binaries, clients and captures)",
+  "preserved": "Repository report/screenshots/sanitized logs and receipts; independent packet capture under /var/lib/qch-test-cleanups/shared-traffic-d074/port-sync-packets; earlier evidence archive",
+  "verification": "NextElapseUSecRealtime=Wed 2026-10-21 02:18:39 CST\nActiveState=active\n",
+  "original_test_ended_at": "2026-10-17T17:35:31+00:00",
+  "previous_execute_at_utc": "2026-10-20T17:35:31+00:00",
+  "retention_extension_reason": "Merge review reused only the scoped PostgreSQL fixture for deleted-archive and existing accounting regressions; all seven containers remain stopped."
+}

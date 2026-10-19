@@ -20,11 +20,11 @@
 @keyframes qch-route-progress{from{transform:scaleX(.15)}to{transform:scaleX(.85)}}
 @keyframes qch-boot-orbit{to{transform:rotate(360deg)}}
 
-.boot{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;overflow:hidden;background:var(--canvas);color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:700;letter-spacing:.02em}
-.boot-content{display:grid;justify-items:center;gap:16px;line-height:1.5;text-align:center;animation:qch-fade-enter var(--motion-base) var(--motion-ease-out)}
+.boot{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;overflow:hidden;background:var(--canvas);color:var(--muted);font-size:var(--text-small);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-normal)}
+.boot-content{display:grid;justify-items:center;gap:16px;line-height:var(--leading-caption);text-align:center;animation:qch-fade-enter var(--motion-base) var(--motion-ease-out)}
 .boot-mark{position:relative;width:42px;height:42px}
 .boot-mark::before{content:"";position:absolute;inset:0;border:2px solid color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);border-radius:50%;animation:qch-boot-orbit var(--motion-loading) linear infinite}
-.boot-mark::after{content:"QH";position:absolute;inset:6px;display:grid;place-items:center;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:calc(10px * var(--ui-font-scale));font-weight:850;letter-spacing:0;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--accent) 70%,transparent)}
+.boot-mark::after{content:"QH";position:absolute;inset:6px;display:grid;place-items:center;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:var(--text-caption);font-weight:var(--weight-bold);letter-spacing:var(--tracking-normal);box-shadow:0 10px 24px -12px color-mix(in srgb,var(--accent) 70%,transparent)}
 
 .workspace-main.is-route-pending,.page-agent-config .config-command-bar[aria-busy=true]{position:relative;cursor:progress}
 .workspace-main.is-route-pending::before,.page-agent-config .config-command-bar[aria-busy=true]::after{content:"";position:absolute;z-index:30;left:0;width:100%;height:2px;background:var(--accent);transform-origin:left;animation:qch-route-progress var(--motion-loading) var(--motion-ease-out) infinite alternate;pointer-events:none}

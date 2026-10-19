@@ -44,6 +44,9 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep the two live backend listeners disjoint from the fixed XHTTP
+	// frontend ports below; NewPlan may otherwise randomly choose 31001.
+	input.Port = 21001
 	input.TLSMode = "nginx"
 	input.TLSServerName = "tls.example.test"
 	input.TLSPublicPort = 443

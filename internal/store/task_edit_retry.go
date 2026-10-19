@@ -15,6 +15,9 @@ func (s *Store) RetryEditor(ctx context.Context, id string) (core.Task, core.Con
 	if (task.Status != core.TaskFailed && task.Status != core.TaskCanceled) || (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) || task.ConfigID == "" {
 		return core.Task{}, core.Config{}, fmt.Errorf("%w: only failed or canceled configuration validation/deployment tasks support edited retry", ErrConflict)
 	}
+	if _, err := sharedTaskRetryOwner(ctx, s.pool, task); err != nil {
+		return core.Task{}, core.Config{}, err
+	}
 	configs, err := s.ListConfigRevisions(ctx, task.ConfigID, 1)
 	if err != nil {
 		return core.Task{}, core.Config{}, err
@@ -44,6 +47,10 @@ func (s *Store) SaveEditedRetry(ctx context.Context, id, content string, version
 		return core.Config{}, core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
+	shareID, err := sharedTaskRetryOwner(ctx, tx, previous)
+	if err != nil {
+		return core.Config{}, core.Task{}, err
+	}
 	var configIDs []string
 	if scopeForConfig(ctx).Admin {
 		configIDs = append(configIDs, input.ID)
@@ -83,6 +90,9 @@ func (s *Store) SaveEditedRetry(ctx context.Context, id, content string, version
 	task, err := s.createTaskTx(ctx, tx, core.TaskRequest{AgentID: previous.AgentID, Engine: previous.Engine, Action: previous.Action, ConfigID: saved.ID, ExpectedConfigVersion: saved.Version, InstallIfMissing: previous.InstallIfMissing}, 0)
 	if err != nil {
 		return core.Config{}, core.Task{}, err
+	}
+	if previous.SharedInstance && (!task.SharedInstance || task.SharedTrafficID != shareID) {
+		return core.Config{}, core.Task{}, fmt.Errorf("%w: 共享实例已变化，请从本人配置重新提交操作", ErrConflict)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return core.Config{}, core.Task{}, err

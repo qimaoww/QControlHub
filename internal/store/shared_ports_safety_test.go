@@ -30,8 +30,14 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 		if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM agent_share_ports WHERE share_id=$1`, access.Shares[0].ID).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("failed request partially reserved ports: %d %v", count, err)
 		}
-		if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 0 {
-			t.Fatalf("failed request created accounting: %+v %v", policies, err)
+		policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, policy := range policies {
+			if policy.SharedQuota != nil {
+				t.Fatalf("failed request created shared accounting: %+v", policy)
+			}
 		}
 	}
 	checkDenied()
@@ -59,7 +65,7 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 	if err != nil || lease == nil || lease.ID != task.ID {
 		t.Fatalf("claim foreign task: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	checkDenied() // The deployed revision still has 21002, not 22002.
@@ -140,7 +146,7 @@ func TestUnrestrictedSharedPortsRejectUncertainForeignDeployment(t *testing.T) {
 		if err != nil || lease == nil || lease.ID != task.ID {
 			t.Fatalf("claim task: %+v %v", lease, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: success, TrafficSettled: success}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: success, TrafficSettled: success}); err != nil {
 			t.Fatal(err)
 		}
 	}

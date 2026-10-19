@@ -109,6 +109,7 @@ func (c *Client) Run(ctx context.Context) error {
 	c.executor.migrateNativeAccounting(ctx)
 	if c.traffic != nil {
 		c.traffic.nativeSource = c.executor.nativeAccounting
+		c.traffic.sharedSource = c.executor.sharedAccounting
 		c.traffic.haltShared = func(ctx context.Context, engine core.Engine) error {
 			c.executor.specsMu.RLock()
 			spec, exists := c.executor.Specs[engine]
@@ -116,7 +117,9 @@ func (c *Client) Run(ctx context.Context) error {
 			if !exists {
 				return errors.New("shared core service is not configured")
 			}
-			return stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec)
+			c.executor.sharedStateMu.Lock()
+			defer c.executor.sharedStateMu.Unlock()
+			return stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec, c.traffic.haltReason)
 		}
 		c.traffic.haltLegacyShared = func(ctx context.Context, engine core.Engine, ports []int) error {
 			c.executor.specsMu.RLock()
@@ -144,6 +147,11 @@ func (c *Client) Run(ctx context.Context) error {
 				return err
 			}
 			_, err = c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
+			if err == nil {
+				c.executor.sharedStateMu.Lock()
+				rememberSharedStopReason(spec, c.traffic.haltReason)
+				c.executor.sharedStateMu.Unlock()
+			}
 			return errors.Join(err, stopServiceTLSFrontends(ctx, c.executor.serviceManager(), engine, spec))
 		}
 		if c.traffic.awaitingPolicies {
@@ -356,6 +364,8 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	connection.SetReadLimit(core.MaxConfigEnvelopeBytes)
 	slog.Info("WSS session established", "agent_id", c.creds.AgentID)
 
+	challenges := &certificateChallengeService{}
+	defer challenges.Close()
 	sessionContext, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	incoming := make(chan core.WireMessage, 1)
@@ -403,6 +413,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 		return err
 	}
+	managedScan := make(chan struct{}, 1)
 	var activeTask string
 	var sentLogBatch string
 	for {
@@ -439,12 +450,27 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 		case message := <-incoming:
 			switch message.Type {
+			case core.WireManagedCertificateSources:
+				select {
+				case managedScan <- struct{}{}:
+					sources := message.ManagedCertificateSources
+					go func() { defer func() { <-managedScan }(); c.syncManagedCertificates(sessionContext, sources, outgoing) }()
+				default:
+				}
+			case core.WireCertificateChallenges:
+				_ = challenges.Replace(sessionContext, message.CertificateChallenges)
+				continue
 			case core.WireHello:
 				// The result ACK can be lost after the control plane committed
 				// it. A subsequent authenticated connection must not leave the
 				// old process running forever with a new binary on disk.
 				if c.committedUpgradeAwaitingRestart() {
 					go c.reexecAfterUpgrade()
+				}
+				// Retain the persisted quota and nftables enforcement during the
+				// handshake. A provisional denial is not a share revocation.
+				if message.TrafficPoliciesPending {
+					continue
 				}
 				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)

@@ -4,6 +4,7 @@ import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
 const initialAnchor = location.hash;
+const readPermissions = ["overview.read", "agents.read", "deployments.read", "client-access.read", "catalogs.read", "agent-config.read", "configs.read", "tasks.read", "settings.read", "audit.read", "metrics.read", "traffic.read", "templates.read", "core-logs.read"];
 const tcpRules = [
   { key: "net.ipv4.tcp_congestion_control", label: "拥塞控制算法", choices: ["bbr", "bbr2", "bbr3", "cubic", "reno"] },
   { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "fq_pie", "pfifo_fast", "sfq", "cake"] },
@@ -171,7 +172,11 @@ if (mode.startsWith("users-layout")) {
 }
 if (mode === "shared-node" || mode === "shared-node-mobile") {
   testAPI.agents = [
-    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false },
+    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false,
+      features:[...(populatedAgents[0].features || []), "shared-core-lifecycle-v1"],
+      shared_allocation:{enabled:true, status:"accepted", ports:[21001,21002], used_bytes:0, limit_bytes:0},
+      runtime:{mihomo:{installed:true, service_status:"active", instance:{id:"instance-alpha-recipient", created:true,
+        saved_config_id:"cfg-recipient", saved_version:2, deployed_config_id:"cfg-recipient", deployed_version:1}}} },
     populatedAgents[1],
   ];
 }
@@ -281,7 +286,7 @@ if (mode.startsWith("config-layout")) {
 if (mode === "uninstall-writeonly")
   setStorageAccount({ role: "user" });
 if (mode.startsWith("bbr")) {
-  setStorageAccount({ role: mode === "bbr-readonly" ? "readonly" : mode === "bbr-writeonly" ? "user" : "admin" });
+  setStorageAccount({ role: ["bbr-readonly", "bbr-writeonly"].includes(mode) ? "user" : "admin" });
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.tcpTasks = [];
   testAPI.tcpMutations = [];
@@ -321,6 +326,19 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (path === "/preferences/node-order") {
+    testAPI.nodeOrder ||= JSON.parse(accountStorage.getItem("qch:test:node-order") || "null") || { ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "null") || testAPI.agents.map(agent => agent.id), revision: 1 };
+    if (method === "PUT") {
+      assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "browser-test-csrf");
+      if (testAPI.failNodeOrder) return json({ error: "fixture save failed" }, 503);
+      const input = JSON.parse(options.body), selected = new Set(input.ids), ids = [...input.ids];
+      testAPI.nodeOrder = { ids: testAPI.nodeOrder.ids.map(id => selected.has(id) ? ids.shift() : id), revision: testAPI.nodeOrder.revision + 1 };
+    }
+    // Mock persistence survives this fixture's document reload; real database
+    // durability and isolated devices are covered by the account-order suite.
+    accountStorage.setItem("qch:test:node-order", JSON.stringify(testAPI.nodeOrder));
+    return json(testAPI.nodeOrder);
+  }
   if (mode === "tasks-preview") {
     if (method === "GET" && path === "/tasks") return json(testAPI.previewTasks);
     if (method === "GET" && path.endsWith("/retry-editor")) return json({ task: testAPI.previewTasks[0], config: testAPI.retryConfig });
@@ -332,18 +350,20 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
-    if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
-    if (path === "/traffic-endpoints") return json(testAPI.trafficEndpoints || []);
+    if (path === "/traffic-policies") return json((testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy })));
+    if (path === "/traffic-endpoints") return json([...(testAPI.trafficPolicies || []).filter(p => p.deployment_confirmed !== false), ...(testAPI.trafficEndpoints || [])].map(endpoint => ({ is_current_user: true, ...endpoint })));
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;
         if (testAPI.trafficPreviewUnauthorized) return json({ error: "session expired" }, 401);
         if (testAPI.trafficPreviewFailure) return json({ error: "preview unavailable" }, 500);
-        return json({ candidates: testAPI.trafficCandidates });
+        return json({ snapshot: "scan-version-1", candidates: testAPI.trafficCandidates.map(candidate => ({ is_current_user: true, ...candidate })) });
       }
       const body = JSON.parse(options.body);
+      testAPI.trafficSnapshot = body.snapshot;
       testAPI.trafficSelection = body.selections;
       if (testAPI.trafficSyncGate) await testAPI.trafficSyncGate;
+      if (testAPI.trafficSyncStale) return json({error:"配置或部署版本已变化，请重新扫描"},409);
       if (testAPI.trafficSyncFailure) return json({ error: "sync unavailable" }, 500);
       testAPI.trafficCandidates = testAPI.trafficCandidates.filter(candidate => {
         if (!body.selections.some(item => item.agent_id === candidate.agent_id && item.port === candidate.port)) return true;
@@ -379,13 +399,17 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json(mode === "uninstall-writeonly"
+    return json(mode === "tasks-preview" && new URLSearchParams(location.search).get("role") === "user"
+      ? { role: "user", user_id: "navigation-user", permissions: ["overview.read", "agents.read", "agent-config.read", "core-logs.read", "tasks.read", "agent-access.read"], csrf_token: "browser-test-csrf" }
+      : mode === "uninstall-writeonly"
       ? { role: "user", permissions: ["agents.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
       : mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
       : mode.startsWith("shared-node")
       ? { role: "user", user_id: "recipient", permissions: ["agents.read", "agents.manage", "enrollment.manage", "agent-config.read", "agent-config.write", "configs.read", "tasks.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
-      : { role: mode === "readonly" || mode.endsWith("-readonly") ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+      : mode === "readonly" || mode.endsWith("-readonly")
+      ? { role: "user", permissions: readPermissions, csrf_token: "browser-test-csrf" }
+      : { role: "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
   if (method === "GET" && path === "/system-tcp/tasks") {
     const latest = new Map();
@@ -460,6 +484,7 @@ window.fetch = async (input, options = {}) => {
     }
     return json(mode === "empty" ? [] : testAPI.agents);
   }
+  if (method === "GET" && path === "/core-log-sources") return json(testAPI.agents.flatMap(agent => ["mihomo", "xray", "sing-box", "ss-rust"].map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"",username:"主实例",features:agent.features,status:agent.status === "offline" ? "offline" : (agent.features || []).includes("core-logs-v1") ? agent.runtime?.[engine]?.core_log_status || "pending" : "unsupported",grant_revision:"fixture"}))));
   if (method === "GET" && path === "/core-logs" && (mode.startsWith("logs") || mode.startsWith("motion"))) {
     const limit = Number(url.searchParams.get("limit") || 1000);
     const agent = url.searchParams.get("agent_id") || "alpha";

@@ -1,0 +1,27 @@
+{
+  "test_completed_at": "2026-10-18T09:38:28+00:00",
+  "browser_modes": 8,
+  "test_exit_code": 0,
+  "browser_workers_disposed": true,
+  "server_closed_by_runner": true,
+  "manual_test_environment": "remains stopped; not restarted for review",
+  "ports_checked_free": [
+    41959,
+    42135,
+    32832,
+    34393,
+    43973,
+    33345,
+    32831,
+    38481,
+    44611,
+    39511,
+    40409,
+    32833,
+    41767,
+    45231,
+    32834
+  ],
+  "cleanup_at": "2026-10-21T17:38:28+08:00",
+  "timezone": "Asia/Hong_Kong (UTC+08:00)"
+}

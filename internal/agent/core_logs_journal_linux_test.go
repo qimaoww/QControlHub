@@ -15,9 +15,11 @@ import (
 func TestSystemdConsoleReadinessCapturesLogsAfterTailPosition(t *testing.T) {
 	for _, test := range []struct {
 		name, cursor string
+		emptyExit    bool
 	}{
 		{name: "existing journal cursor", cursor: "fixture-cursor"},
 		{name: "empty journal bounded timestamp"},
+		{name: "expired empty journal exit one", emptyExit: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			feed := filepath.Join(t.TempDir(), "journal-feed")
@@ -39,7 +41,7 @@ if [ "$show_cursor" = 1 ]; then
 	if [ -n "$QCH_TEST_JOURNAL_CURSOR" ]; then
 		printf '%s\n' "-- cursor: $QCH_TEST_JOURNAL_CURSOR"
 	fi
-	exit 0
+	exit "${QCH_TEST_JOURNAL_CAPTURE_EXIT:-0}"
 fi
 sleep 1
 if [ "$after_cursor" = 1 ]; then
@@ -55,6 +57,9 @@ exec tail -n 0 -f "$QCH_TEST_JOURNAL_FEED"
 			t.Cleanup(func() { journalctlPath = previousJournalctl })
 			t.Setenv("QCH_TEST_JOURNAL_FEED", feed)
 			t.Setenv("QCH_TEST_JOURNAL_CURSOR", test.cursor)
+			if test.emptyExit {
+				t.Setenv("QCH_TEST_JOURNAL_CAPTURE_EXIT", "1")
+			}
 
 			collector := NewCoreLogCollector(map[core.Engine]EngineSpec{
 				core.EngineSingBox: {Service: "qagent-sing-box.service"},
@@ -145,5 +150,44 @@ esac
 	}
 	if entry, ok := waitForLine(t, collector, "after journal reconnect"); !ok || entry.Engine != core.EngineSingBox {
 		t.Fatalf("journal entry after reconnect = %+v, ok=%v", entry, ok)
+	}
+}
+
+func TestSystemdJournalRecoversRetiredInstanceCursor(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "journalctl-retired-cursor")
+	script := `#!/bin/sh
+set -eu
+for argument in "$@"; do
+ case "$argument" in
+  --show-cursor) printf '%s\n' '-- cursor: retired-cursor'; exit 0 ;;
+  --after-cursor=retired-cursor) printf '%s\n' 'Failed to seek to cursor: Cannot assign requested address' >&2; exit 1 ;;
+  --since=@*)
+   printf '%s\n' '{"MESSAGE":"after vacuum","_SYSTEMD_UNIT":"qagent-xray@shr_0123456789abcdef.service","__CURSOR":"new-cursor"}'
+   while :; do sleep 1; done ;;
+ esac
+done
+exit 2
+`
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := journalctlPath
+	journalctlPath = helper
+	t.Cleanup(func() { journalctlPath = previous })
+	collector := NewCoreLogCollector(map[core.Engine]EngineSpec{core.EngineXray: {Service: "qagent-xray@shr_0123456789abcdef.service"}})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("journal vacuum fixture leaked")
+		}
+	}()
+	entry, ok := waitForLine(t, collector, "after vacuum")
+	if !ok || entry.InstanceID != "shr_0123456789abcdef" {
+		t.Fatalf("retired cursor did not recover in instance scope: %+v %v", entry, ok)
 	}
 }

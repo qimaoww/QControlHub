@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,10 +15,17 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	defer connection.Release()
+	slog.Info("waiting for PostgreSQL migration lock", "backend_pid", connection.Conn().PgConn().PID())
 	if _, err := connection.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(0x52464f524745)); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
-	defer connection.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", int64(0x52464f524745))
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := connection.Exec(cleanup, "SELECT pg_advisory_unlock($1)", int64(0x52464f524745)); err != nil {
+			slog.Warn("release PostgreSQL migration lock", "error", err)
+		}
+	}()
 	if _, err := connection.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS qcontrolhub_schema_migrations (
 			version integer PRIMARY KEY CHECK (version > 0),
@@ -35,12 +43,25 @@ func (s *Store) migrate(ctx context.Context) error {
 	if appliedVersion == currentSchemaVersion {
 		return nil
 	}
+	started := time.Now()
+	slog.Info("applying PostgreSQL schema migration", "from_version", appliedVersion, "to_version", currentSchemaVersion,
+		"hint", "retained log indexes may take several minutes; readiness waits until migration commits")
 
 	tx, err := connection.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if appliedVersion < 74 {
+		// PostgreSQL names the old inline engine CHECK tasks_check because it
+		// references both action and engine. Replacing tasks_engine_check never
+		// removed that second rule. Only this confirmed historical name is
+		// superseded; keep every other integrity constraint. schemaSQL now names
+		// the inline rule explicitly so fresh installs cannot recreate it.
+		if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS tasks DROP CONSTRAINT IF EXISTS tasks_check`); err != nil {
+			return fmt.Errorf("schema v74 remove superseded tasks_check: %w", err)
+		}
+	}
 	// substore_sync_targets was split out of the legacy single-target settings
 	// row in schema v31. Create and populate that table before the rest of the
 	// schema so the legacy substore_sync_items rows can receive their target_id.
@@ -150,8 +171,13 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if appliedVersion >= 49 && appliedVersion < 75 {
+		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_covering_idx; DROP INDEX IF EXISTS core_logs_engine_covering_idx`); err != nil {
+			return fmt.Errorf("refresh core log covering indexes: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("apply PostgreSQL schema: %w", err)
+		return fmt.Errorf("apply PostgreSQL schema v%d -> v%d after %s: %w", appliedVersion, currentSchemaVersion, time.Since(started).Round(time.Millisecond), err)
 	}
 	if appliedVersion < 52 {
 		// Legacy selections referred only to a node/engine/tag. Pin them to the
@@ -269,6 +295,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit schema migration: %w", err)
 	}
+	slog.Info("PostgreSQL schema migration committed", "from_version", appliedVersion, "to_version", currentSchemaVersion, "elapsed", time.Since(started))
 	// The log table is partitioned by receive day and needs a partition for
 	// today before the first upload arrives, so this runs once the migration
 	// committed. Creating the partitions inside the transaction would be fine

@@ -1,0 +1,11 @@
+Remote CI follow-up: run 39152073275, Debian / systemd
+Failure: TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers
+The test still required the old binary installed marker after runtime gained an explicit unknown marker.
+The full-card comparison and compact-card assignment now use installedMarker; no production code changed in this follow-up.
+
+Final local commands:
+go test -count=1 -skip '^TestAgentBrowserRuntimeSmoke$' ./frontend
+Exit code: 0
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.069s
+make fmt-check
+Exit code: 0

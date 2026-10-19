@@ -19,6 +19,9 @@ var existingDiscoveryCoreHelper []byte
 
 func TestMain(tests *testing.M) {
 	flag.Parse()
+	if os.Getenv("QCH_LOG_LIVE") == "1" && flag.Lookup("test.run").Value.String() == "^TestSharedCoreLogLiveLifecycle$" {
+		os.Exit(tests.Run())
+	}
 	if os.Getenv("QCH_TEST_MANAGED_TLS_SYSTEMD") == "1" {
 		os.Exit(tests.Run())
 	}

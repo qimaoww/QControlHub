@@ -1,0 +1,52 @@
+{
+  "task_id": "qch-ui-review-7d05-20261018-cleanup",
+  "test_completed_at": "2026-10-18T09:38:28+00:00",
+  "execute_at_utc": "2026-10-21T09:38:28+00:00",
+  "execute_at_local": "2026-10-21T17:38:28+08:00",
+  "timezone": "Asia/Hong_Kong (UTC+08:00)",
+  "container": {
+    "id": "fde5294e10fee20d0604b325ea9d6cdcfa4e60b66e6b586af3badb9edbc4d1e1",
+    "name": "qch-ui-review-20261018-db",
+    "mounts": [
+      {
+        "Type": "volume",
+        "Name": "27efa3ff551bc4e23e8f0480a05a06d43c18398a67eee1bbb6959ab546fdaae3",
+        "Destination": "/var/lib/postgresql/data"
+      }
+    ]
+  },
+  "retained": "docs/ui-review-20261018: screenshots, recordings, report, metrics and sanitized logs; existing containers, data, images and networks excluded",
+  "ports_released": [
+    41959,
+    42135,
+    32832,
+    34393,
+    43973,
+    33345,
+    32831,
+    38481,
+    44611,
+    39511,
+    40409,
+    32833,
+    41767,
+    45231,
+    32834
+  ],
+  "browser_sessions_closed": [
+    "ui-review-20261018",
+    "ui-review-mobile"
+  ],
+  "directories": [
+    {
+      "path": "/root/.codex/worktrees/7d05/qcontrolhub/output/playwright/ui-review-20261018",
+      "device": 66306,
+      "inode": 2492990
+    },
+    {
+      "path": "/root/.codex/worktrees/7d05/qcontrolhub/.playwright-cli",
+      "device": 66306,
+      "inode": 2527851
+    }
+  ]
+}

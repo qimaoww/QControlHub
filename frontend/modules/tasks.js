@@ -11,6 +11,7 @@ export function installTasks(ctx) {
   const {
     api,
     state,
+    can,
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = (timer) => clearTimeout(timer),
     now = () => Date.now(),
@@ -87,10 +88,10 @@ export function installTasks(ctx) {
         (signal) =>
           Promise.all([
             api(`/tasks?${query}`, { signal }),
-            cachedAgents || api("/agents", { signal }),
+            can("agents.read") ? cachedAgents || api("/agents", { signal }) : [],
             preloadedSettings ||
               cachedSettings ||
-              api("/settings", { signal }),
+              (can("settings.read") ? api("/settings", { signal }) : {}),
           ]),
         (value) => {
           payload = value;
@@ -119,7 +120,9 @@ export function installTasks(ctx) {
     refreshStatus?.classList.remove("poll-error");
     const refreshLabel = refreshStatus?.querySelector("[data-task-refresh-label]");
     if (refreshLabel) refreshLabel.textContent = "自动更新";
-    const [items, agents, settings] = payload;
+    const [items, visibleAgents, settings] = payload;
+    const agents = can("agents.read") ? visibleAgents :
+      [...new Set(items.map(item => item.agent_id))].map(id => ({ id, name: id }));
 
     const taskCards = renderTaskCards(items, agents, openResultTaskIds());
     const signature = taskRenderSignature(items, agents);

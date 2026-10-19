@@ -1,5 +1,6 @@
+import { installSelectMenus } from "./select-menu.js";
 import { installInteractionFeedback } from "./interaction-feedback.js";
-import { enterWorkspace, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
+import { enterWorkspace, captureDockMotion, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
 import { cancelMotion, syncSelectionMotion } from "./motion.js";
 import { bindPopups } from "./popup.js";
 import { observeFeedback } from "./presence-motion.js";
@@ -12,6 +13,7 @@ export function createShellView(ctx) {
   const { app, state, can, esc, api, applyTheme, toggleTheme, render, renderLogin, bindConfirmationDialog } = ctx;
   const contextMarkup = createShellContext(ctx);
 function shell(content, title, { viewKey = state.route } = {}) {
+  const dockMotion = captureDockMotion(app.querySelector(".app-dock"));
   const previousMain = document.querySelector(".workspace-main");
   const previousRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
   const outgoing = previousMain && (previousRoute !== state.route || previousMain.dataset.refreshKey !== `workspace-${viewKey}`)
@@ -21,6 +23,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
+    ["certificates", "证书", dockIcons.shield || dockIcons.fileCode],
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["ip-quality", "IP 质量", dockIcons.gauge, true],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
@@ -32,6 +35,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];
   const linkPermissions = {
+    certificates: "certificates.read",
     dashboard: "overview.read",
     "ip-quality": "agents.read",
     agents: "agents.read",
@@ -51,6 +55,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   // Workflow groups: overview | node operations | client delivery | observability | accounts.
   const navGroups = {
+    certificates: "nodes",
     dashboard: "overview",
     "node-settings": "nodes",
     "live-config": "nodes",
@@ -67,12 +72,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : state.route === "certificates" ? " no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
-  const overview = state.data.overview || {};
+  const overview = { ...state.data.overview };
+  const visibleAgents = state.route === "core-logs" ? state.data.coreLogAgents
+    : ["agents", "node-settings", "traffic", "ip-quality", "system-bbr"].includes(state.route) ? state.data.agents : undefined;
+  if (visibleAgents) overview.agents_online = visibleAgents.filter(agent => agent.status === "online").length;
+  const onlineKnown = Number.isInteger(overview.agents_online);
+  const onlineLabel = !onlineKnown ? "节点状态未知" : overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接";
   const panelName = state.data.settings?.panel_name || "QControlHub";
-  const roleName = { admin: "管理员", user: "用户", operator: "用户", auditor: "用户", readonly: "用户" }[
+  const roleName = { admin: "管理员", user: "用户" }[
     state.session.role
   ];
   const activeDockRoute = (id) =>
@@ -81,7 +91,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     (state.route === "archive-config" && id === "live-config");
   const nodeOverviewActions =
     state.route === "node-settings" && state.data.nodeView !== "detail"
-      ? `${can("host.manage") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}${state.session.role === "admin" ? '<button class="button small" type="button" data-open-agent-directory>其他用户节点</button>' : ""}`
+      ? `${(state.data.agents || []).filter(agent => can("host.manage", agent)).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}${state.session.role === "admin" ? '<button class="button small" type="button" data-open-agent-directory>其他用户节点</button>' : ""}`
       : "";
   const topAction =
     state.route === "dashboard"
@@ -101,16 +111,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
                 : state.route === "tasks"
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                   : "";
+  const indicatorMarkup = '<i class="dock-active-indicator" aria-hidden="true"></i>';
   const navigationMarkup = links
     .map(([id, text, icon, mobileSecondary], index) => {
       const active = activeDockRoute(id);
       const groupStart = index > 0 && navGroups[id] !== navGroups[links[index - 1][0]];
-      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}${groupStart ? " dock-group-start" : ""}" href="#${id}" title="${text}" data-dock-group="${navGroups[id] || ""}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
+      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}${groupStart ? " dock-group-start" : ""}" href="#${id}" title="${text}" data-dock-group="${navGroups[id] || ""}" ${active ? 'aria-current="page"' : ""}>${indicatorMarkup}<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
     })
     .join("");
   const settingsActive = activeDockRoute("settings");
   const settingsDockLink = can(linkPermissions.settings)
-    ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
+    ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}>${indicatorMarkup}<svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
     ["system-bbr", "BBR / TCP 调优"],
@@ -122,6 +133,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["core-logs", "日志"],
     ["tasks", "任务"],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : `共享与额度${pendingShares ? ` · ${pendingShares}` : ""}`],
+    ["certificates", "证书中心"],
     ["settings", "设置"],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));
@@ -138,7 +150,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   // Selection only changes the sidebar's highlight/content. Keep its links
   // mounted so rapid node switches retain the launcher and keyboard focus.
   const contextKey = state.route;
-  const markup = `<div class="desktop-app"><aside class="app-dock"><i class="dock-active-indicator" data-refresh-key="motion-highlight" aria-hidden="true"></i><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${onlineLabel}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
   if (previousMain && currentView) {
     const template = document.createElement("template");
@@ -179,10 +191,12 @@ function shell(content, title, { viewKey = state.route } = {}) {
     cancelMotion(renderedMain);
     enterWorkspace(renderedMain, routeChanged ? app.querySelector(".context-sidebar") : null);
   }
-  syncDockMotion(app.querySelector(".app-dock"));
+  const renderedDock = app.querySelector(".app-dock");
+  syncDockMotion(renderedDock, dockMotion);
   syncSelectionMotion(renderedMain, { animate: !routeChanged && !viewChanged });
   observeFeedback(app);
   installInteractionFeedback();
+  installSelectMenus();
   document.querySelector("#logout").onclick = async () => {
     try {
       await api("/auth/logout", { method: "POST" });

@@ -119,6 +119,7 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 						var root map[string]any
 						_ = json.Unmarshal([]byte(config), &root)
 						apps := root["apps"].(map[string]any)
+						relocateCaddyChallengeListener(t, root, singBoxFreePort(t))
 						apps["tls"] = map[string]any{"certificates": map[string]any{"load_files": []any{map[string]any{"certificate": cert, "key": key}}}}
 						for _, server := range apps["http"].(map[string]any)["servers"].(map[string]any) {
 							server.(map[string]any)["automatic_https"] = map[string]any{"disable": true}
@@ -188,6 +189,19 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 			}
 		}
 	}
+}
+
+// These protocol fixtures run without privileged-port capabilities on CI.
+// Keep the production challenge route, but isolate its listener like the
+// fixture's HTTPS/backend listeners. Real port 80 is covered by ACME tests.
+func relocateCaddyChallengeListener(t *testing.T, root map[string]any, port int) {
+	t.Helper()
+	servers := root["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)
+	server, ok := servers["http_challenges"].(map[string]any)
+	if !ok {
+		t.Fatal("production Caddy challenge route missing")
+	}
+	server["listen"] = []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
 }
 
 func singBoxRun(t *testing.T, binary, name, content string) func() string {

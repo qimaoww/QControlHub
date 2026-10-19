@@ -1,4 +1,6 @@
 import { installConfigPages } from "./modules/configs.js";
+import { bindConfigFiles } from "./modules/config-files.js";
+import { reconcileView } from "./modules/refresh.js";
 
 // Paired source files are saved through regular deployment. The dedicated
 // bundle-generation button has been removed from the configuration page.
@@ -78,6 +80,7 @@ export async function testConfigMigrationRuntime(preview = false) {
     await fixture(params.get("engine")||"xray",params.has("readonly"),params.has("import"),true,params.has("legacy"));
     return;
   }
+  testReconciledConfigFiles();
   for (const engine of ["xray","sing-box","mihomo","ss-rust"]) {
     for (const restricted of [false,true]) {
       const test = await fixture(engine, restricted);
@@ -129,6 +132,27 @@ export async function testConfigMigrationRuntime(preview = false) {
   }
   await testSourceSaveRuntime();
   await testConfigReadCacheRuntime();
+}
+
+function testReconciledConfigFiles() {
+  for (const dirty of [false, true]) {
+    const baseline = JSON.stringify({inbounds:[{tag:"alice",port:24101},{tag:"second",port:24105}],outbounds:[{tag:"direct"}]});
+    const markup = () => {
+      const form = document.createElement("form");
+      form.innerHTML = '<section data-code-editor><header class="code-editor-toolbar"></header><textarea data-code-input></textarea></section>';
+      form.querySelector("textarea").textContent = baseline;
+      return form;
+    };
+    const form = markup(); document.body.replaceChildren(form);
+    let files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
+    files.selectInbound("second",24105);
+    if (dirty) form.querySelector("textarea").value = form.querySelector("textarea").value.replace("24105","24106");
+    reconcileView(form, markup());
+    files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
+    assert(files.paths().length === 3 && form.querySelectorAll(".config-file-buttons").length === 1, "refresh lost inbound fragments or duplicated navigation");
+    assert(JSON.parse(files.content()).inbounds[1].port === (dirty ? 24106 : 24105), "refresh discarded an inbound draft");
+    assert(files.selectedInbound()?.tag === "second", "refresh changed the selected inbound");
+  }
 }
 
 async function testConfigReadCacheRuntime() {

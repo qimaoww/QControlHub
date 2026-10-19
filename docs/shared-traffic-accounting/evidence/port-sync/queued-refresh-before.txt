@@ -1,0 +1,5 @@
+--- FAIL: TestSharedPortReplacementSettlesOldCountersWithoutStoppingInstance (0.02s)
+    shared_dual_accounting_linux_test.go:254: transition refresh must retry without removing protection: stopped=1 err=<nil>
+FAIL
+FAIL	github.com/qimaoww/qcontrolhub/internal/agent	0.338s
+FAIL

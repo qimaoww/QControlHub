@@ -41,6 +41,10 @@ qagent_capability_is_bound() {
 	[ $((0x$capability_low_word & (1 << capability_bit))) -ne 0 ]
 }
 
+if qagent_capability_is_bound 10; then
+	capabilities="${capabilities},^cap_net_bind_service"
+fi
+
 if qagent_capability_is_bound 12; then
 	capabilities="${capabilities},^cap_net_admin"
 fi

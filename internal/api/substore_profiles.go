@@ -9,8 +9,31 @@ import (
 	"unicode/utf8"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"gopkg.in/yaml.v3"
 )
+
+// Sub-Store 2.42.6 decodes TUIC/AnyTLS passwords twice. Its native proxy-map
+// importer preserves literal percent escapes, so reuse our existing Mihomo
+// export for these credentials rather than changing the protocol URL encoding.
+func subStoreClientValue(profile serverconfig.ClientProfile) string {
+	u, err := url.Parse(profile.URI)
+	// Its Hysteria 2 URI parser also ignores ALPN, including non-default
+	// values. The existing native map retains the configured TLS parameters.
+	if err == nil && u.Scheme == "hysteria2" && u.Query().Get("alpn") != "" {
+		return profile.Mihomo
+	}
+	if err == nil && (u.Scheme == "tuic" || u.Scheme == "anytls") {
+		password := u.User.Username()
+		if u.Scheme == "tuic" {
+			password, _ = u.User.Password()
+		}
+		if strings.Contains(password, "%") {
+			return profile.Mihomo
+		}
+	}
+	return profile.URI
+}
 
 func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []core.SubStoreSyncSelection) ([]subStoreSyncProfile, error) {
 	entries, err := s.clientAccessEntries(ctx)
@@ -31,7 +54,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 			}
 			profile := subStoreSyncProfile{
 				AgentID: entry.AgentID, ConfigID: entry.ConfigID, AgentName: displayName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
-				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: item.Profile.URI, Available: true,
+				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: subStoreClientValue(item.Profile), Available: true,
 				Mihomo: item.Profile.Mihomo, MihomoError: item.Profile.MihomoError,
 				AddressMode: core.SubStoreAddressModeAuto,
 				DefaultName: strings.TrimSpace(displayName + " · " + item.Tag),
@@ -46,7 +69,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 				for _, candidate := range option.Profiles {
 					if candidate.Tag == item.Tag {
 						profile.Addresses = append(profile.Addresses, subStoreSyncAddress{
-							Address: option.Address, Source: option.Source, Family: option.Family, URI: candidate.Profile.URI, Mihomo: candidate.Profile.Mihomo,
+							Address: option.Address, Source: option.Source, Family: option.Family, URI: subStoreClientValue(candidate.Profile), Mihomo: candidate.Profile.Mihomo,
 						})
 						break
 					}
@@ -60,7 +83,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 					source = "手动设置"
 				}
 				profile.Addresses = []subStoreSyncAddress{{
-					Address: item.Address, Source: source, Family: clientAddressFamily(item.Address), URI: item.Profile.URI, Mihomo: item.Profile.Mihomo,
+					Address: item.Address, Source: source, Family: clientAddressFamily(item.Address), URI: subStoreClientValue(item.Profile), Mihomo: item.Profile.Mihomo,
 				}}
 			}
 			if selection, ok := selected[profile.key()]; ok {
@@ -195,8 +218,8 @@ func renameSubStoreNode(rawValue, name string) (string, error) {
 	if rawValue == "" || strings.ContainsAny(rawValue, "\r\n") {
 		return "", errors.New("客户端分享值无效")
 	}
-	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "#\r\n") {
-		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含 #")
+	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "\r\n") {
+		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含换行")
 	}
 	if config, ok := subStoreSurgeConfig(rawValue); ok {
 		name = strings.TrimSpace(strings.NewReplacer("=", "", ",", "").Replace(name))
@@ -215,14 +238,7 @@ func renameSubStoreNode(rawValue, name string) (string, error) {
 		}
 		return strings.TrimSpace(string(encoded)), nil
 	}
-	parsed, err := url.Parse(rawValue)
-	if err != nil || parsed.Scheme == "" {
-		return "", errors.New("Sub-Store 无法识别客户端分享值")
-	}
-	if fragment := strings.IndexByte(rawValue, '#'); fragment >= 0 {
-		rawValue = rawValue[:fragment]
-	}
-	return rawValue + "#" + name, nil
+	return serverconfig.RenameClientURL(rawValue, name)
 }
 
 func subStoreSurgeConfig(rawValue string) (string, bool) {

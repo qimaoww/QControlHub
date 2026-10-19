@@ -22,11 +22,31 @@ func prepareMarkedAccounting(record *trafficRecord, snapshot nativeAccountingSna
 		if err != nil {
 			return err
 		}
+		// Carry only provable, not-yet-acknowledged listener bytes across the
+		// source migration. Already settled bytes must not enter the new epoch.
+		var pendingRX, pendingTX uint64
+		if quota := record.Policy.SharedQuota; quota != nil && quota.CounterEpoch == record.CounterEpoch &&
+			(record.Accounting == nil || record.Accounting.Source == "listener") {
+			if record.LifetimeReceivedBytes > quota.LifetimeReceivedBytes {
+				pendingRX = record.LifetimeReceivedBytes - quota.LifetimeReceivedBytes
+			}
+			if record.LifetimeSentBytes > quota.LifetimeSentBytes {
+				pendingTX = record.LifetimeSentBytes - quota.LifetimeSentBytes
+			}
+		}
 		record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
 		record.CounterEpoch = epoch
 		record.KernelCounters = map[string]uint64{}
 		record.ReceivedBytes, record.SentBytes, record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0, 0, 0
-		record.Accounting = &core.TrafficAccounting{Source: "nft-dual", Mark: port.Mark, Inbound: port.Inbound, Outbounds: append([]string(nil), port.Outbounds...), ProcessEpoch: snapshot.ProcessEpoch}
+		record.Accounting = &core.TrafficAccounting{Source: "nft-dual", Mark: port.Mark, Inbound: port.Inbound, Outbounds: append([]string(nil), port.Outbounds...), ProcessEpoch: snapshot.ProcessEpoch, ClientReceived: pendingRX, ClientSent: pendingTX}
+		record.LifetimeReceivedBytes, record.LifetimeSentBytes = pendingRX, pendingTX
+		return nil
+	}
+	// A verified replacement configuration no longer contains the old listener,
+	// or does not yet contain a newly reserved listener. Keep the installed nft
+	// generation: it is the evidence for final packets on the retired port.
+	// Never grant this fallback after a source/configuration verification error.
+	if record.Policy.SharedQuota != nil && snapshot.Plan.Source == "nft-dual" {
 		return nil
 	}
 	return errors.New("listener has no independent marked outbound")

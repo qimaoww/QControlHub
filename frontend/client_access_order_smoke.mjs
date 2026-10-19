@@ -111,8 +111,8 @@ try {
   assert.deepEqual(groupIDs(), ["alpha", "beta", "gamma", "missing"],
     "one account must not inherit another account's node order");
   values.set(nodeCardOrderKey, JSON.stringify(["beta", "gamma"]));
-  assert.deepEqual(groupIDs(), ["beta", "gamma", "alpha", "missing"],
-    "direct navigation must respect legacy node ordering");
+  assert.deepEqual(groupIDs(), ["alpha", "beta", "gamma", "missing"],
+    "unattributed global cache must not affect account ordering");
   assert.equal(accountStorage.getItem(nodeCardOrderKey), null,
     "grouping filtered exports must not finalize legacy order migration");
   for (const invalid of ["[]", "invalid JSON"]) {

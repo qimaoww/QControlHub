@@ -1,0 +1,36 @@
+[
+  {
+    "stage": "before",
+    "viewport": {
+      "width": 844,
+      "height": 390
+    },
+    "theme": "dark",
+    "value": "",
+    "menu": null
+  },
+  {
+    "stage": "after",
+    "viewport": {
+      "width": 844,
+      "height": 390
+    },
+    "theme": "dark",
+    "value": "",
+    "menu": {
+      "height": 153,
+      "scroll": 253,
+      "top": 6,
+      "bounds": {
+        "x": 386,
+        "y": 217.75,
+        "width": 200,
+        "height": 155,
+        "top": 217.75,
+        "right": 586,
+        "bottom": 372.75,
+        "left": 386
+      }
+    }
+  }
+]

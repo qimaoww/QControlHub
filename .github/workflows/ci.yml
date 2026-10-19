@@ -237,7 +237,7 @@ jobs:
   core-permissions:
     name: All cores / actual service permissions
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v7
@@ -305,7 +305,20 @@ jobs:
                 -test.run "^TestInstalledOpenRCCorePermissionMigration$" -test.count=1 -test.v
               QCH_PERMISSION_BIN=/binaries QCH_SERVICE_MANAGER=openrc \
                 python3 deploy/tests/core-permissions-runtime.py
+              QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh all
+              mkdir -p /usr/local/lib/qagent/cores
+              cp /binaries/mihomo /binaries/xray /binaries/sing-box /binaries/ssserver /binaries/sslocal /usr/local/lib/qagent/cores/
+              QCH_LOG_LIVE=1 QCH_SERVICE_MANAGER=openrc /permission-agent.test \
+                -test.run "^TestSharedCoreLogLiveLifecycle$" -test.count=1 -test.v
             '
+      - name: Verify shared systemd log discovery, rotation and source isolation
+        run: |
+          sudo env QCH_SERVICE_MANAGER=systemd sh deploy/bootstrap-core-services.sh all
+          sudo install -d -m 0755 /usr/local/lib/qagent/cores
+          sudo install -m 0755 "$RUNNER_TEMP/permission-cores/bin/"{mihomo,xray,sing-box,ssserver,sslocal} /usr/local/lib/qagent/cores/
+          sudo env QCH_LOG_LIVE=1 QCH_SERVICE_MANAGER=systemd \
+            "$RUNNER_TEMP/permission-agent.test" \
+            -test.run '^TestSharedCoreLogLiveLifecycle$' -test.count=1 -test.v
 
   # Build immediately. Bake shares compilation vertices across all targets.
   build-images:

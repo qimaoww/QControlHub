@@ -1,7 +1,7 @@
 import { createConnectionCache } from "./client-connection-cache.js";
 import { defaultConnectionFilters, connectionQuery } from "./client-connection-model.js";
 import { createClientConnectionView } from "./client-connection-view.js";
-import { migrateLegacyNodeOrder, savedNodeOrder } from "./node-order.js";
+import { refreshNodeOrder, savedNodeOrder } from "./node-order.js";
 
 import { bindClientConnections } from "./client-connection-bindings.js";
 
@@ -12,13 +12,7 @@ export function installClientConnections(ctx) {
   let lastNodeOrder = "";
   // Account data owns all filters, cursors and results. No data survives logout.
   async function load({ cursor = "", cursors = [], force = false } = {}) {
-    const nodeOrder = savedNodeOrder();
-    const orderKey = JSON.stringify(nodeOrder);
-    if (cursor && lastNodeOrder && orderKey !== lastNodeOrder) {
-      cursor = "";
-      cursors = [];
-    }
-    lastNodeOrder = orderKey;
+    let orderKey;
     controller?.abort();
     controller = new AbortController();
     const signal = controller.signal;
@@ -47,6 +41,16 @@ export function installClientConnections(ctx) {
       });
     };
     try {
+      const orderRead = force ? refreshNodeOrder() : null;
+      if (orderRead) await orderRead;
+      if (!current()) return;
+      const nodeOrder = savedNodeOrder();
+      orderKey = JSON.stringify(nodeOrder);
+      if (cursor && lastNodeOrder && orderKey !== lastNodeOrder) {
+        cursor = "";
+        cursors = [];
+      }
+      lastNodeOrder = orderKey;
       const query = connectionQuery(filters, cursor, nodeOrder), key = query.toString();
       const cached = cache.get(key);
       result = cached?.result || cache.preview(query);
@@ -58,10 +62,6 @@ export function installClientConnections(ctx) {
         paint({ loading: true });
         result = await api(`/client-connections?${query}&locations=cached`, { signal });
         if (!current()) return;
-        if (!filters.agent_id && result.sources) {
-          migrateLegacyNodeOrder(result.sources.map(source => ({ id: source.agent_id })));
-          if (JSON.stringify(savedNodeOrder()) !== orderKey) return load();
-        }
         if (force) cache.clear();
         fetchedAt = Date.now();
         locationsAttempted = false;

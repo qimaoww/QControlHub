@@ -297,6 +297,10 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 }
 
 func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint) error {
+	return prepareSharedTrafficPortsTx(ctx, tx, shareID, agentID, endpoints, true)
+}
+
+func prepareSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint, activate bool) error {
 	for _, endpoint := range endpoints {
 		var reserved bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports p JOIN agent_shares s ON s.id=p.share_id
@@ -322,7 +326,13 @@ func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID s
 			return fmt.Errorf("%w: remove the existing per-port quota on port %d before using a shared allowance", ErrConflict, endpoint.Port)
 		}
 		if boundID != "" {
-			continue // Changes of config/name must not reset the shared counters.
+			// A previously retired port may return in a later deployment. Keep
+			// its identity/history; the Agent reconciles the next source epoch.
+			if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET name=CASE WHEN config_id='' THEN $3 ELSE name END,monitoring_enabled=monitoring_enabled OR $4,updated_at=now()
+				WHERE agent_id=$1 AND port=$2`, agentID, endpoint.Port, endpoint.Name, activate); err != nil {
+				return err
+			}
+			continue
 		}
 		id, err := core.NewID("trf")
 		if err != nil {

@@ -93,14 +93,22 @@ func TestPR183AuditQueuedHostReadCannotExposeRecipientConfig(t *testing.T) {
 	if claimed.ID != read.ID {
 		t.Fatalf("claimed an unexpected task: %s", claimed.ID)
 	}
-	// The real Agent reads its current on-disk configuration at execution
-	// time. At this point it is the successfully deployed recipient config.
+	// The current Agent routes the recipient deployment to a separate service.
+	// A host read must remain bound to the owner's base file.
+	if claimed.SharedInstance || claimed.SharedTrafficID != "" {
+		t.Fatal("host read targeted a recipient instance")
+	}
+	baseContent := "listeners: []\n"
 	if err := db.CompleteTask(ctx, agent.ID, read.ID, core.TaskResultRequest{
-		LeaseID: claimed.LeaseID, Success: true, Output: bobConfig.Content,
+		LeaseID: claimed.LeaseID, Success: true, Output: baseContent,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	alice.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusForbidden, nil)
+	body := alice.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusOK, nil)
+	if bytes.Contains(body, []byte("bob-private-audit-sentinel")) {
+		t.Fatal("host read leaked the recipient configuration")
+	}
+	alice.call("GET", "/tasks/"+deploy.ID+"/config-snapshot", nil, http.StatusNotFound, nil)
 
 	var stop core.Task
 	alice.call("POST", "/tasks", core.TaskRequest{

@@ -1,0 +1,37 @@
+Re-registered after the pre-merge review regressions; task database stopped.
+Validated task labels, immutable identities, exact path allowlist and 72-hour hold
+
+Unit=qch-cert-e528-cleanup.service
+TimersCalendar={ OnCalendar=2026-10-20 15:59:02 UTC ; next_elapse=Tue 2026-10-20 23:59:02 CST }
+NextElapseUSecRealtime=Tue 2026-10-20 23:59:02 CST
+Persistent=yes
+Id=qch-cert-e528-cleanup.timer
+ActiveState=active
+
+# /etc/systemd/system/qch-cert-e528-cleanup.timer
+[Unit]
+Description=Certificate unified e528 fixture cleanup after 72 hours
+
+[Timer]
+OnCalendar=2026-10-20 15:59:02 UTC
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=qch-cert-e528-cleanup.service
+
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/qch-cert-e528-cleanup.service
+[Unit]
+Description=Remove only certificate-unified-e528 retained test fixtures
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /var/lib/qch-certificate-unified-e528/cleanup.py
+Restart=on-failure
+RestartSec=300
+UMask=0077

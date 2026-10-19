@@ -1,0 +1,211 @@
+[
+  {
+    "user": "shared-alice",
+    "engine": "mihomo",
+    "version": 1,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24102,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "sing-box",
+    "version": 1,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24103,
+    "protocol": "Shadowsocks AEAD",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "ss-rust",
+    "version": 1,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24104,
+    "protocol": "Shadowsocks",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 10,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24101,
+    "protocol": "VLESS-Vision-uTLS-REALITY",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 10,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24105,
+    "protocol": "VMess",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 10,
+    "instance": "shr_537bbc3ef3ca26df",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24106,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 2,
+    "instance": "",
+    "agent_id": "agt_b6db584055565b44",
+    "port": 24301,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 2,
+    "instance": "",
+    "agent_id": "agt_b6db584055565b44",
+    "port": 24302,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "mihomo",
+    "version": 1,
+    "instance": "shr_a8a44d7dc9546138",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24412,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "sing-box",
+    "version": 1,
+    "instance": "shr_a8a44d7dc9546138",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24413,
+    "protocol": "VMess-TCP",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "ss-rust",
+    "version": 1,
+    "instance": "shr_a8a44d7dc9546138",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24414,
+    "protocol": "Shadowsocks",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-alice",
+    "engine": "xray",
+    "version": 1,
+    "instance": "shr_a8a44d7dc9546138",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24411,
+    "protocol": "VMess",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "mihomo",
+    "version": 1,
+    "instance": "shr_a505a4f08f6aded0",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24202,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "sing-box",
+    "version": 1,
+    "instance": "shr_a505a4f08f6aded0",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24203,
+    "protocol": "Shadowsocks AEAD",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "ss-rust",
+    "version": 1,
+    "instance": "shr_a505a4f08f6aded0",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24204,
+    "protocol": "Shadowsocks",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "xray",
+    "version": 1,
+    "instance": "shr_a505a4f08f6aded0",
+    "agent_id": "agt_283a42f1d751a59b",
+    "port": 24201,
+    "protocol": "VLESS-Vision-uTLS-REALITY",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "xray",
+    "version": 3,
+    "instance": "",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24401,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "xray",
+    "version": 3,
+    "instance": "",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24402,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  },
+  {
+    "user": "shared-bob",
+    "engine": "xray",
+    "version": 3,
+    "instance": "",
+    "agent_id": "agt_a5bc03e4e2289369",
+    "port": 24403,
+    "protocol": "Shadowsocks 2022",
+    "success": true,
+    "error": ""
+  }
+]

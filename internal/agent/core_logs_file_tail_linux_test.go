@@ -149,6 +149,13 @@ func TestCoreLogCollectorTailsOpenRCLogFiles(t *testing.T) {
 	if entry, ok := waitForLine(t, collector, "after-rotate"); !ok || entry.Engine != core.EngineXray {
 		t.Fatalf("post-rotation entry = %+v ok=%v", entry, ok)
 	}
+	// Refill to exactly the old size immediately. A stat-only truncation
+	// detector misses this startup prefix because the old offset remains valid.
+	collector.rotateFile(collector.fileSources[0])
+	appendLine("equal-rotate\n")
+	if _, ok := waitForLine(t, collector, "equal-rotate"); !ok {
+		t.Fatal("fast copytruncate/refill lost the new prefix")
+	}
 	cancel()
 	select {
 	case <-done:

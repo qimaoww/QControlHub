@@ -30,6 +30,8 @@ func TestIPQualityMigratesVersion61AndPreservesData(t *testing.T) {
 		ALTER TABLE tasks DROP CONSTRAINT tasks_engine_check;
 		ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK
 			(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp') AND engine=''));
+		ALTER TABLE tasks ADD CHECK
+			(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
 		DELETE FROM qcontrolhub_schema_migrations WHERE version>=62;
 		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(61) ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)

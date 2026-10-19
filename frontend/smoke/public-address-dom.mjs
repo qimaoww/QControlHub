@@ -41,12 +41,12 @@ export async function run() {
   const cardCode = /\.card-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
   const publicCode = /\.public-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
   assert.equal(
-    /font-size:(?:11px|calc\(11px \* var\(--ui-font-scale\)\))/.test(cardCode),
+    /font-size:var\(--text-small\)/.test(cardCode),
     true,
     "card address text must be at least 11px before the shared scale",
   );
   assert.equal(
-    /font-size:(?:12px|calc\(12px \* var\(--ui-font-scale\)\))/.test(publicCode),
+    /font-size:var\(--text-small\)/.test(publicCode),
     true,
     "detail address text must be at least 12px before the shared scale",
   );

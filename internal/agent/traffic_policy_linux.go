@@ -11,11 +11,19 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (manager *TrafficManager) settledSnapshot(ctx context.Context) ([]core.PortTrafficUsage, bool) {
+func (manager *TrafficManager) settledSnapshot(ctx context.Context, task core.Task) ([]core.PortTrafficUsage, bool) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	err := manager.collectLocked(ctx, false)
-	return append([]core.PortTrafficUsage(nil), manager.snapshot...), err == nil
+	settled := err == nil
+	for _, usage := range manager.snapshot {
+		record := manager.records[usage.PolicyID]
+		if record != nil && record.Policy.Engine == task.Engine &&
+			sharedQuotaID(record.Policy.SharedQuota) == task.SharedTrafficID && !usage.EnforcementAvailable {
+			settled = false
+		}
+	}
+	return append([]core.PortTrafficUsage(nil), manager.snapshot...), settled
 }
 
 func (manager *TrafficManager) refreshSnapshotLocked(available bool, message string) {
@@ -38,7 +46,7 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 			ReceivedBytes: record.ReceivedBytes, SentBytes: record.SentBytes,
 			UsedBytes: trafficUsed(record), ReceiveBPS: record.ReceiveBPS, SendBPS: record.SendBPS,
 			PeriodStart: record.PeriodStart, PeriodEnd: record.PeriodEnd, Blocked: record.Blocked,
-			EnforcementAvailable: available && !(record.AccountingError != "" && accounting != nil && accounting.Source != "listener"), EnforcementError: healthMessage,
+			EnforcementAvailable: available && !(record.AccountingError != "" && (record.Policy.SharedQuota != nil || accounting != nil && accounting.Source != "listener")), EnforcementError: healthMessage,
 			CollectedAt: record.LastCollectedAt, CounterEpoch: record.CounterEpoch,
 			LifetimeReceivedBytes: record.LifetimeReceivedBytes, LifetimeSentBytes: record.LifetimeSentBytes,
 			Accounting: accounting,
@@ -73,7 +81,8 @@ func sharedQuotaID(quota *core.SharedTrafficQuota) string {
 func sameSharedQuota(left, right *core.SharedTrafficQuota) bool {
 	return left == nil && right == nil || left != nil && right != nil &&
 		left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
-		left.PortUsedBytes == right.PortUsedBytes && left.Revoked == right.Revoked && slices.Equal(left.Engines, right.Engines)
+		left.PortUsedBytes == right.PortUsedBytes && left.CounterEpoch == right.CounterEpoch &&
+		left.LifetimeReceivedBytes == right.LifetimeReceivedBytes && left.LifetimeSentBytes == right.LifetimeSentBytes && left.Revoked == right.Revoked && slices.Equal(left.Engines, right.Engines)
 }
 
 func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64 {

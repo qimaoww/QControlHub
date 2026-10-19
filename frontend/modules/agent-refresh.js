@@ -1,3 +1,4 @@
+import { orderNodesBySavedOrder } from "./node-order.js";
 import { coreInstallBlockReason } from "./core-install-state.js";
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
@@ -9,6 +10,7 @@ import {
   describeServiceAction,
   resolveRetainedNodeMetrics,
 } from "./status-controls.js";
+import { sharedInstancePresentation, sharedAllocationText, updateSharedInstanceMarkup } from "./shared-instance-state.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -239,9 +241,12 @@ function updateAgentMetrics(item) {
     "upload-total",
     metrics.network_available ? bytes(metrics.network_tx_bytes) : "—",
   );
-  Object.entries(item.runtime || {}).forEach(([engine, runtime]) => {
+  [...new Set([...(item.capabilities || []), ...Object.keys(item.runtime || {})])].forEach(engine => {
+    const runtime = item.runtime?.[engine] || {};
     const card = root.querySelector(`.service-${CSS.escape(engine)}`);
     const installed = Boolean(runtime.installed);
+    const installedKnown = typeof runtime.installed === "boolean";
+    const installedMarker = installedKnown ? installed ? "1" : "0" : "unknown";
     const capabilityEnabled = (item.capabilities || []).includes(engine);
     const existingPending = Boolean(runtime.existing_config_available);
     const existingUnsupportedReason = String(
@@ -253,7 +258,7 @@ function updateAgentMetrics(item) {
     // instead of leaving the DOM permanently stale.
     if (
       card?.dataset.runtimeStructure === "full" &&
-      (card.dataset.coreInstalled !== (installed ? "1" : "0") ||
+      (card.dataset.coreInstalled !== installedMarker ||
         card.dataset.existingPending !== (existingPending ? "1" : "0") ||
         card.dataset.existingUnsupported !== existingUnsupportedReason)
     ) {
@@ -270,7 +275,7 @@ function updateAgentMetrics(item) {
     });
     if (card) {
       if (card.dataset.runtimeStructure !== "full") {
-        card.dataset.coreInstalled = installed ? "1" : "0";
+        card.dataset.coreInstalled = installedMarker;
       }
       if (card.dataset) card.dataset.runtimeState = coreInfo.runtimeState;
     }
@@ -280,13 +285,23 @@ function updateAgentMetrics(item) {
     if (version)
       version.textContent = runtime.installed
         ? conciseVersion(engine, runtime.version)
-        : "尚未安装";
+        : installedKnown ? "尚未安装" : "安装状态未知";
+    const instanceState = sharedInstancePresentation(item, engine);
+    updateSharedInstanceMarkup(root, item, engine, date);
+    const effectiveServiceState = (item.can_manage === false && runtime.instance)
+      ? instanceState.label
+      : (!installedKnown ? "状态未知" : coreInfo.serviceState);
+    const effectiveServiceTone = (item.can_manage === false && runtime.instance)
+      ? instanceState.tone
+      : (!installedKnown ? "muted" : coreInfo.serviceTone);
     const userInstanceEl = root.querySelector(
       `[data-core-user-instance="${CSS.escape(engine)}"]`,
     );
     if (userInstanceEl) {
-      userInstanceEl.textContent = `${coreInfo.userInstanceLabel}${coreInfo.userConfigVersion ? ` · v${coreInfo.userConfigVersion}` : ""}`;
-      userInstanceEl.className = `tone-${coreInfo.userInstanceTone}`;
+      userInstanceEl.textContent = (item.can_manage === false && runtime.instance)
+        ? instanceState.version
+        : `${coreInfo.userInstanceLabel}${coreInfo.userConfigVersion ? ` · v${coreInfo.userConfigVersion}` : ""}`;
+      userInstanceEl.className = `tone-${(item.can_manage === false && runtime.instance) ? effectiveServiceTone : coreInfo.userInstanceTone}`;
     }
     const hostStateEl = root.querySelector(
       `[data-core-host-state="${CSS.escape(engine)}"]`,
@@ -299,8 +314,8 @@ function updateAgentMetrics(item) {
       `[data-core-host-instance="${CSS.escape(engine)}"]`,
     );
     if (hostInstanceEl) {
-      hostInstanceEl.textContent = coreInfo.serviceState;
-      hostInstanceEl.className = `tone-${coreInfo.serviceTone}`;
+      hostInstanceEl.textContent = effectiveServiceState;
+      hostInstanceEl.className = `tone-${effectiveServiceTone}`;
     }
     const sharedSummaryEl = root.querySelector(
       `[data-core-shared-summary="${CSS.escape(engine)}"]`,
@@ -326,9 +341,9 @@ function updateAgentMetrics(item) {
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
     if (service) {
-      service.textContent = coreInfo.serviceState;
+      service.textContent = effectiveServiceState;
       service.closest(".engine-state").className =
-        `engine-state ${coreInfo.serviceTone}`;
+        `engine-state ${effectiveServiceTone}`;
       const reasonEl = service.closest(".service-card")?.querySelector("[data-core-action-reason]");
       if (reasonEl) {
         const uninstallPending = Boolean(state.data.coreUninstallTasks?.[`${item.id}|${engine}`]);
@@ -355,7 +370,8 @@ function updateAgentMetrics(item) {
             installed,
             runtime.service_status,
             item,
-          ) || !capabilityEnabled || (action !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
+            engine,
+          ) || Boolean(state.data.instanceTasks?.[`${item.id}|${engine}`]) || !capabilityEnabled || (item.can_manage !== false && action !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
           button.disabled = isDisabled;
           const actionInfo = describeServiceAction(action, {
             online,
@@ -380,10 +396,12 @@ function updateAgentMetrics(item) {
     const installedCount = (item.capabilities || []).filter(
       (engine) => item.runtime?.[engine]?.installed,
     ).length;
-    installedSummary.textContent = `${item.os || ""} / ${item.arch || ""} · ${
+    const installationUnknown = (item.capabilities || []).some(engine => typeof item.runtime?.[engine]?.installed !== "boolean");
+    const allocationSummary = item.can_manage === false ? sharedAllocationText(item, bytes) : "";
+    installedSummary.textContent = allocationSummary || `${item.os || ""} / ${item.arch || ""} · ${
       installedCount
         ? `${installedCount}/${(item.capabilities || []).length} 内核已安装`
-        : "尚未安装内核"
+        : installationUnknown ? "安装状态未知" : "尚未安装内核"
     }`;
   }
   root.querySelectorAll(".core-version-form button[type=submit]").forEach(
@@ -517,6 +535,19 @@ async function pollAgentMetrics() {
         }
         cardInteractions.defer(() => {
           items.forEach(updateAgentMetrics);
+          // A remote save or a recovered ambiguous write can change the order
+          // without changing fleet membership. Reconcile only after all gesture
+          // and save gates release, using the latest account order at paint time.
+          const grid = document.querySelector(".node-card-grid");
+          if (grid) {
+            const cards = [...grid.querySelectorAll(".node-card")];
+            const sorted = orderNodesBySavedOrder(cards.map(card => ({ id: card.dataset.agentNode, card }))).map(item => item.card);
+            if (sorted.some((card, index) => card !== cards[index])) {
+              const focus = grid.contains(document.activeElement) ? document.activeElement : null;
+              sorted.forEach(card => grid.append(card));
+              focus?.focus({ preventScroll: true });
+            }
+          }
           const online = items.filter((item) => item.status === "online").length;
           const count = document.querySelector("[data-online-count]");
           if (count) {

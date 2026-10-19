@@ -8,6 +8,7 @@ import { bindConfigInbounds } from "./config-inbounds.js";
 import { createLiveConfigView } from "./live-config-view.js";
 import { bindLiveConfigNavigation } from "./live-config-navigation.js";
 import { bindLiveConfigSubmit } from "./live-config-submit.js";
+import { bindSharedInstanceRead } from "./shared-instance-read.js";
 
 export function createLiveConfigPage(ctx, { presets, deployments, reader }) {
   const { api, state, can, engineName, notify, shell, bindCodeEditors } = ctx;
@@ -48,6 +49,10 @@ function maybeRerenderLiveConfig(agentId, engine) {
 async function liveConfig(options = {}) {
   const preferCachedRead = options.preferCachedRead !== false;
   const request = ++liveConfigRequest;
+  if (!can("agent-config.read")) {
+    shell('<section class="section"><div class="alert error" role="alert">当前账号无权查看配置。</div></section>', "配置");
+    return;
+  }
   const privateAccount = Boolean(state.session && state.session.role !== "admin");
   const accountData = state.data;
   const runtimeScope = state.navigationEpoch;
@@ -275,6 +280,7 @@ async function liveConfig(options = {}) {
     agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,
     configFiles, beforeDeploy, workspaceElement, liveConfig, deployments,
   });
+  bindSharedInstanceRead(ctx, {agent, engine, root:workspaceElement, requestSnapshot:requestCurrentConfigSnapshot});
   if (
     !current &&
     !unsupportedReason &&

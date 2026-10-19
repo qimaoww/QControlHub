@@ -31,7 +31,7 @@ func TestCoreFirstInstallUserSessions(t *testing.T) {
 			}
 			features := []string{core.AgentFeatureIndependentEgress, core.AgentFeaturePresetAutoInstall,
 				core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureSharedCoreInstances,
-				core.AgentFeatureSharedCorePrepare}
+				core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle}
 			agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "first-install", OS: "linux", Arch: "amd64",
 				Capabilities: []core.Engine{engine}, Features: features,
 				PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
@@ -92,8 +92,9 @@ func TestCoreFirstInstallUserSessions(t *testing.T) {
 			completeConfigScopeAPITask(t, ctx, db, task)
 			bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine,
 				Action: core.ActionInstall, CoreVersion: "v1.19.29"}, http.StatusForbidden, nil)
-			for _, action := range []core.Action{core.ActionUninstall, core.ActionStop, core.ActionStart, core.ActionRestart} {
-				bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine, Action: action}, http.StatusForbidden, nil)
+			bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine, Action: core.ActionUninstall}, http.StatusForbidden, nil)
+			for _, action := range []core.Action{core.ActionStop, core.ActionStart, core.ActionRestart} {
+				bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: engine, Action: action}, http.StatusConflict, nil)
 			}
 			input, err = serverconfig.NewPlan(serverconfig.Protocols(engine)[0])
 			if err != nil {

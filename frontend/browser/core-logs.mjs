@@ -65,7 +65,8 @@ await waitFor(() => document.querySelector(".desktop-app"), "initial shell missi
   testAPI.logGates["bravo:2000"] = refreshGate.promise;
   const cachedAt = performance.now();
   document.querySelector('[data-core-log-agent="bravo"]').click();
-  assert.match(document.querySelector(".core-log-row pre").textContent, /bravo/, "cached node must appear synchronously with a pending network refresh");
+  assert.equal(document.querySelectorAll(".core-log-row").length, 0, "scope changes hide cached rows until grants are revalidated");
+  await waitFor(() => document.querySelector(".core-log-row pre")?.textContent.includes("bravo"), "authorized cached node did not render before the pending log refresh");
   assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /已显示缓存/);
   const cachedTime = performance.now() - cachedAt;
   refreshGate.resolve();

@@ -21,6 +21,7 @@ func (collector *CoreLogCollector) appendJournal(entry core.CoreLogEntry, cursor
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
 	if cursor != "" {
+		cursor = entry.Service + "/" + entry.InstanceID + "/" + cursor
 		if _, duplicate := collector.seenCursors[cursor]; duplicate {
 			return
 		}
@@ -39,6 +40,34 @@ func (collector *CoreLogCollector) appendJournal(entry core.CoreLogEntry, cursor
 }
 
 func (collector *CoreLogCollector) appendLocked(entry core.CoreLogEntry) {
+	if collector.instanceID != "" {
+		entry.InstanceID = collector.instanceID
+		entry.Service = collector.instanceService
+	}
+	if collector.parent != nil {
+		collector.parent.append(entry)
+		return
+	}
+	if collector.executor != nil {
+		// Reserve a bounded share of the queue for each source. A busy instance
+		// replaces its own oldest line instead of evicting another user's lines.
+		count := 0
+		oldest := -1
+		for index, queued := range collector.queued {
+			if queued.Engine == entry.Engine && queued.InstanceID == entry.InstanceID {
+				count++
+				if oldest < 0 {
+					oldest = index
+				}
+			}
+		}
+		if count >= max(1, coreLogQueueLimit/max(32, collector.fileBudgetInstances+3)) && oldest >= 0 {
+			copy(collector.queued[oldest:], collector.queued[oldest+1:])
+			collector.queued = collector.queued[:len(collector.queued)-1]
+			collector.dropped++
+		}
+	}
+
 	for len(collector.queued)+pendingCoreLogCount(collector.pending) >= coreLogQueueLimit && len(collector.queued) > 0 {
 		collector.queued = collector.queued[1:]
 		collector.dropped++
@@ -128,7 +157,12 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if engine == core.EngineShadowsocksRust {
 		level = ssRustLogLevel(message, level)
 	}
-	return core.CoreLogEntry{Engine: engine, Level: level, Message: message, LoggedAt: loggedAt}, cursor, true
+	service := stringField(record["_SYSTEMD_UNIT"])
+	instance, _ := core.CoreLogInstance(engine, service)
+	if instance == "" {
+		instance = "main"
+	}
+	return core.CoreLogEntry{Engine: engine, Level: level, Message: message, LoggedAt: loggedAt, InstanceID: instance, Service: service}, cursor, true
 }
 
 func stringField(value any) string {

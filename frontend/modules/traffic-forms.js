@@ -8,17 +8,21 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
   function bindTrafficForms(agents, endpoints) {
     document.querySelectorAll("[data-traffic-filter]").forEach((control) => {
       control.onchange = () => {
+        if (state.data.trafficBatch?.busy) return;
+        if (state.data.trafficBatch) state.data.trafficBatch.selected = [];
         filters()[control.dataset.trafficFilter] = control.value;
         renderTraffic(state.data.agents || [], state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
       };
     });
     const reset = document.querySelector("[data-traffic-filter-reset]");
     if (reset) reset.onclick = () => {
+      if (state.data.trafficBatch?.busy) return;
+      if (state.data.trafficBatch) state.data.trafficBatch.selected = [];
       state.data.trafficFilters = {};
       renderTraffic(state.data.agents || [], state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
     };
     const trafficSync = document.querySelector("[data-traffic-sync]");
-    if (trafficSync) trafficSync.disabled = sync.isPending();
+    if (trafficSync) trafficSync.disabled = sync.isPending() || Boolean(state.data.trafficBatch?.busy);
     if (trafficSync) trafficSync.onclick = openTrafficSync;
     document.querySelectorAll('a[href="#traffic-new"]').forEach((link) => {
       link.onclick = (event) => {

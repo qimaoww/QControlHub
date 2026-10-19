@@ -1,0 +1,163 @@
+node frontend/dock_navigation_browser.mjs
+PASS desktop-light-admin
+PASS tablet-dark-admin
+PASS tablet-light-user-reduced
+PASS phone-dark-admin
+PASS phone-light-user
+PASS desktop-browser-zoom-125
+go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$' -v
+=== RUN   TestAgentBrowserRuntimeSmoke
+    browser_runtime_test.go:21: agent browser runtime smoke failed: exit status 1
+        browser workers=2, CPUs=12, memory=20001MiB, modes=85
+        browser timing {"mode":"motion-popup","startupMs":125.414454,"testMs":36055.336291,"cleanupMs":24.82703199999378,"passed":true,"elapsedMs":36205.588726999995}
+        browser timing {"mode":"ip-quality-mobile","startupMs":126.002508,"testMs":36186.876613,"cleanupMs":31.58347599999979,"passed":true,"elapsedMs":36344.474436}
+        PASS motion-cards-coordinates coordinates 34 gestures; max grab error 0.1981 CSS px; preview/final match; DPR 1
+        browser timing {"mode":"motion-cards-coordinates","startupMs":148.51325999999972,"testMs":34079.778567,"cleanupMs":47.209382000000915,"passed":true,"elapsedMs":34275.50558199999}
+        browser timing {"mode":"ip-quality","startupMs":142.67652100000123,"testMs":36025.37500099999,"cleanupMs":24.362292999998317,"passed":true,"elapsedMs":36192.418660999996}
+        browser timing {"mode":"motion-popup-mobile","startupMs":165.2474280000024,"testMs":35804.013321000006,"cleanupMs":35.36094199999934,"passed":true,"elapsedMs":36004.626527}
+        browser timing {"mode":"ip-quality-readonly","startupMs":126.44913399999496,"testMs":35576.535057999994,"cleanupMs":34.77152300000307,"passed":true,"elapsedMs":35737.76246299999}
+        PASS motion-cards-mobile touch; light+dark; full motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave
+        browser timing {"mode":"motion-cards-mobile","startupMs":124.44391299999552,"testMs":34342.95386099999,"cleanupMs":22.9689130000188,"passed":true,"elapsedMs":34490.371515000006}
+        browser timing {"mode":"ip-quality-mobile-reduced","startupMs":136.339043999993,"testMs":34133.940487000014,"cleanupMs":22.651049999985844,"passed":true,"elapsedMs":34292.934698}
+        browser timing {"mode":"admin","startupMs":129.40579300001264,"testMs":31874.98475199999,"cleanupMs":28.61493999999948,"passed":true,"elapsedMs":32033.01118100001}
+        browser timing {"mode":"ip-quality-reduced","startupMs":115.17328399998951,"testMs":34188.52768099998,"cleanupMs":23.567093000019668,"passed":true,"elapsedMs":34327.27299900001}
+        PASS motion-cards-coordinates-mobile coordinates 26 gestures; max grab error 0.0000 CSS px; preview/final match; DPR 1
+        browser timing {"mode":"motion-cards-coordinates-mobile","startupMs":132.59980699999142,"testMs":31609.60173600001,"cleanupMs":27.58965999999782,"passed":true,"elapsedMs":31769.797759999987}
+        PASS motion-cards mouse; light+dark; full motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave
+        browser timing {"mode":"motion-cards","startupMs":120.17551800000365,"testMs":31199.048186,"cleanupMs":26.610160000011092,"passed":true,"elapsedMs":31345.839376999997}
+        browser timing {"mode":"ports","startupMs":134.4302359999856,"testMs":17586.033855000016,"cleanupMs":56.01741499998025,"passed":true,"elapsedMs":17776.487192}
+        browser timing {"mode":"ports-mobile","startupMs":145.99246300000232,"testMs":17150.060079999996,"cleanupMs":31.69796900000074,"passed":true,"elapsedMs":17327.758107}
+        browser timing {"mode":"config-inbounds","startupMs":114.29227400000673,"testMs":18645.890344999993,"cleanupMs":38.48782100001699,"passed":true,"elapsedMs":18798.674868000002}
+        PASS motion-cards-coordinates-mobile-reduced coordinates 26 gestures; max grab error 0.0000 CSS px; preview/final match; DPR 1
+        browser timing {"mode":"motion-cards-coordinates-mobile-reduced","startupMs":146.44799200000125,"testMs":15963.442475000018,"cleanupMs":34.31323899998097,"passed":true,"elapsedMs":16144.210587000009}
+        PASS motion-cards-coordinates-reduced coordinates 34 gestures; max grab error 0.1981 CSS px; preview/final match; DPR 1
+        browser timing {"mode":"motion-cards-coordinates-reduced","startupMs":137.82834300000104,"testMs":15123.614166000014,"cleanupMs":29.69759699999122,"passed":true,"elapsedMs":15291.14648699999}
+        browser timing {"mode":"config-inbounds-mobile","startupMs":135.32612800001516,"testMs":19113.519491999992,"cleanupMs":31.310759999993024,"passed":true,"elapsedMs":19280.162949999998}
+        browser timing {"mode":"bbr-mobile","startupMs":143.11440999998013,"testMs":14297.863668000005,"cleanupMs":54.78041100001428,"passed":true,"elapsedMs":14495.77620600001}
+        browser timing {"mode":"bbr","startupMs":130.86383200000273,"testMs":14287.384690000006,"cleanupMs":58.2833770000143,"passed":true,"elapsedMs":14476.545467999997}
+        browser timing {"mode":"traffic-layout-mobile","startupMs":134.8883560000104,"testMs":14868.209504999977,"cleanupMs":30.7354940000223,"passed":true,"elapsedMs":15033.837172000029}
+        browser timing {"mode":"traffic-layout","startupMs":122.57888999994611,"testMs":14975.692500999954,"cleanupMs":26.381385000015143,"passed":true,"elapsedMs":15124.654563999968}
+        browser timing {"mode":"motion-selection","startupMs":156.58830699999817,"testMs":12461.264803999977,"cleanupMs":30.501115999999456,"passed":true,"elapsedMs":12648.357872000022}
+        PASS motion-cards-mobile-reduced touch; light+dark; reduced motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave
+        browser timing {"mode":"motion-cards-mobile-reduced","startupMs":121.55015500000445,"testMs":12426.038356999983,"cleanupMs":18.162360000016633,"passed":true,"elapsedMs":12565.752865999995}
+        browser timing {"mode":"motion-selection-mobile","startupMs":128.21495699998923,"testMs":12073.13913700002,"cleanupMs":28.725230999989435,"passed":true,"elapsedMs":12230.081183000002}
+        browser timing {"mode":"dashboard","startupMs":128.2937180000008,"testMs":10246.28167300002,"cleanupMs":68.10466599999927,"passed":true,"elapsedMs":10442.682945000008}
+        browser timing {"mode":"motion-mobile","startupMs":138.70707999996375,"testMs":8258.100777000014,"cleanupMs":62.778089999977965,"passed":true,"elapsedMs":8459.591491999978}
+        PASS motion-cards-reduced mouse; light+dark; reduced motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave
+        browser timing {"mode":"motion-cards-reduced","startupMs":132.90393900003983,"testMs":9438.220501999953,"cleanupMs":24.628550000023097,"passed":true,"elapsedMs":9595.756709000038}
+        browser timing {"mode":"dashboard-unavailable","startupMs":126.27256900002249,"testMs":8068.052778999961,"cleanupMs":18.229120000032708,"passed":true,"elapsedMs":8212.556487000023}
+        browser timing {"mode":"motion","startupMs":129.0664429999888,"testMs":8170.7176629999885,"cleanupMs":38.85396199999377,"passed":true,"elapsedMs":8338.641046999954}
+        browser timing {"mode":"motion-popup-mobile-reduced","startupMs":138.03721999999834,"testMs":4823.615881000005,"cleanupMs":26.27937100001145,"passed":true,"elapsedMs":4987.934714999981}
+        browser timing {"mode":"select-menus","startupMs":137.7327370000421,"testMs":428.6446780000115,"cleanupMs":26.459743999992497,"passed":true,"elapsedMs":592.8404159999918}
+        browser timing {"mode":"archive-engines","startupMs":137.4516210000147,"testMs":756.7367519999971,"cleanupMs":31.821847000042908,"passed":true,"elapsedMs":926.0160200000391}
+        browser timing {"mode":"motion-popup-reduced","startupMs":122.68576700001722,"testMs":4577.098957000009,"cleanupMs":27.888335999974515,"passed":true,"elapsedMs":4727.676628999994}
+        browser timing {"mode":"dashboard-mobile","startupMs":138.7575150000048,"testMs":7982.375324999972,"cleanupMs":28.853949000011198,"passed":true,"elapsedMs":8149.988929999992}
+        browser timing {"mode":"select-menus-mobile","startupMs":148.75727300002472,"testMs":400.74061199999414,"cleanupMs":26.90307199995732,"passed":true,"elapsedMs":576.4031870000181}
+        browser timing {"mode":"users-layout-mobile","startupMs":135.020710999961,"testMs":3910.159857999999,"cleanupMs":29.064310000045225,"passed":true,"elapsedMs":4074.2474129999755}
+        browser timing {"mode":"presets-mobile","startupMs":127.99818900000537,"testMs":3411.1107019999763,"cleanupMs":44.33695099997567,"passed":true,"elapsedMs":3583.448772999982}
+        browser timing {"mode":"enrollment-mobile","startupMs":124.81623200001195,"testMs":3091.91982999997,"cleanupMs":29.66143400000874,"passed":true,"elapsedMs":3246.4009199999855}
+        browser timing {"mode":"users-layout","startupMs":144.4077839999809,"testMs":4175.103515999974,"cleanupMs":24.65169099997729,"passed":true,"elapsedMs":4344.16621299996}
+        browser timing {"mode":"logs-mobile","startupMs":118.54376600001706,"testMs":3106.7569660000154,"cleanupMs":20.326920999970753,"passed":true,"elapsedMs":3245.6295399999944}
+        browser timing {"mode":"enrollment","startupMs":152.5140450000181,"testMs":3125.1826979999896,"cleanupMs":28.599935000005644,"passed":true,"elapsedMs":3306.3004940000246}
+        browser timing {"mode":"motion-selection-reduced","startupMs":136.65397799998755,"testMs":2360.0179399999906,"cleanupMs":36.895461999985855,"passed":true,"elapsedMs":2533.5690760000143}
+        browser timing {"mode":"users-mobile","startupMs":118.99629099998856,"testMs":1913.5257259999635,"cleanupMs":27.374489000008907,"passed":true,"elapsedMs":2059.899019000004}
+        PASS logs {"loaded":8000,"domRows":200,"initialMs":138,"expandedMs":44,"pageMs":9,"filterMs":11,"switchAckMs":5,"previewRenderMs":22,"cachedSwitchMs":18,"longPageMs":9}
+        browser timing {"mode":"logs","startupMs":137.9419689999777,"testMs":2969.539577999967,"cleanupMs":34.56011800002307,"passed":true,"elapsedMs":3142.047400999989}
+        browser timing {"mode":"shell-layout","startupMs":123.30448500002967,"testMs":1781.7059320000117,"cleanupMs":27.433678000001237,"passed":true,"elapsedMs":1932.4467290000175}
+        browser timing {"mode":"motion-selection-mobile-reduced","startupMs":159.82308000000194,"testMs":2601.6159229999757,"cleanupMs":27.040451999986544,"passed":true,"elapsedMs":2788.4812259999453}
+        browser timing {"mode":"motion-reduced","startupMs":122.96056300000055,"testMs":1242.1371180000133,"cleanupMs":22.907652999972925,"passed":true,"elapsedMs":1388.0084069999866}
+        browser timing {"mode":"regions","startupMs":134.64380999997957,"testMs":978.2327139999834,"cleanupMs":30.584043000009842,"passed":true,"elapsedMs":1143.4631780000054}
+        browser timing {"mode":"users","startupMs":148.1124149999814,"testMs":1943.798513000016,"cleanupMs":25.38090099999681,"passed":true,"elapsedMs":2117.293994000007}
+        browser timing {"mode":"config-migration","startupMs":146.95397500001127,"testMs":1144.2329589999863,"cleanupMs":31.838249000022188,"passed":true,"elapsedMs":1323.0290909999749}
+        browser timing {"mode":"substore-scope","startupMs":131.8610800000024,"testMs":926.8373720000382,"cleanupMs":26.301044999971054,"passed":true,"elapsedMs":1085.0031200000085}
+        browser timing {"mode":"bbr-writeonly","startupMs":134.83347300003516,"testMs":849.8808500000159,"cleanupMs":31.983785999997053,"passed":true,"elapsedMs":1016.706937000039}
+        browser timing {"mode":"bbr-readonly","startupMs":126.0445329999784,"testMs":788.0304159999941,"cleanupMs":28.20362300000852,"passed":true,"elapsedMs":942.2812459999695}
+        browser timing {"mode":"presets","startupMs":133.9540589999524,"testMs":3716.6305569999968,"cleanupMs":39.550096999970265,"passed":true,"elapsedMs":3890.136817999999}
+        browser timing {"mode":"client-layout-mobile","startupMs":132.26115199999185,"testMs":802.0304189999588,"cleanupMs":22.23027900001034,"passed":true,"elapsedMs":956.5242500000168}
+        browser timing {"mode":"motion-mobile-reduced","startupMs":124.03461700002663,"testMs":1378.0572060000268,"cleanupMs":27.433007000014186,"passed":true,"elapsedMs":1529.5285020000301}
+        browser timing {"mode":"config-restrictions","startupMs":139.11586600000737,"testMs":834.2735920000123,"cleanupMs":31.722211999993306,"passed":true,"elapsedMs":1005.1144270000514}
+        browser timing {"mode":"batch-layout-mobile","startupMs":134.3788109999732,"testMs":952.2681270000176,"cleanupMs":27.038961999991443,"passed":true,"elapsedMs":1113.6880009999732}
+        browser timing {"mode":"sharing","startupMs":137.88565700000618,"testMs":709.093909999996,"cleanupMs":32.33670699998038,"passed":true,"elapsedMs":879.3183899999713}
+        browser timing {"mode":"connections-mobile","startupMs":150.79503300000215,"testMs":596.8208970000269,"cleanupMs":23.12540999997873,"passed":true,"elapsedMs":770.7439959999756}
+        browser timing {"mode":"shell-layout-mobile","startupMs":141.01194400002714,"testMs":1044.299400000018,"cleanupMs":31.444900000002235,"passed":true,"elapsedMs":1216.7587100000237}
+        browser timing {"mode":"logs-restore","startupMs":176.02547799999593,"testMs":700.7977439999813,"cleanupMs":27.81342299998505,"passed":true,"elapsedMs":904.6389399999753}
+        browser timing {"mode":"batch-layout","startupMs":144.1815489999717,"testMs":1024.0402870000107,"cleanupMs":34.79229700000724,"passed":true,"elapsedMs":1203.0163169999723}
+        browser timing {"mode":"shared-node","startupMs":127.45703299995512,"testMs":583.2920770000201,"cleanupMs":25.97230500000296,"passed":true,"elapsedMs":736.7259779999731}
+        browser timing {"mode":"readonly","startupMs":134.50080699997488,"testMs":570.150278999994,"cleanupMs":25.499849000014365,"passed":true,"elapsedMs":730.1535429999931}
+        browser timing {"mode":"substore-layout","startupMs":148.49946199997794,"testMs":1143.2390479999594,"cleanupMs":27.224483000056352,"passed":true,"elapsedMs":1318.9654969999683}
+        browser timing {"mode":"config-scope","startupMs":144.50080300000263,"testMs":422.8476350000128,"cleanupMs":27.85410299996147,"passed":false,"elapsedMs":595.2045339999604}
+        file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:192
+          return new Error(
+                 ^
+
+        Error: Chrome config-scope smoke failed (http://127.0.0.1:44849/agents-browser-smoke.html?mode=config-scope#node-settings): Chrome config-scope smoke 未通过：Error: shared runtime status or lifecycle controls leaked into the configuration page
+            at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)
+            at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)
+            at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5
+
+        'failed' !== 'passed'
+
+        Browser diagnostics: {"browser":{"exitCode":null,"signalCode":null},"cdp":{"state":"open","subscriptions":{"Runtime.enable":"enabled","Inspector.enable":"enabled"},"pendingRequests":[]},"page":{"url":"http://127.0.0.1:44849/agents-browser-smoke.html?mode=config-scope#node-settings","readyState":"complete","visibility":"visible","focused":true,"marker":"failed","routeCoverage":null,"result":"Error: shared runtime status or lifecycle controls leaked into the configuration page\n    at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)\n    at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)\n    at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5","body":"Error: shared runtime status or lifecycle controls leaked into the configuration page\n    at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)\n    at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)\n    at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5","activeElement":"<body><pre id=\"browser-smoke-result\">Error: shared runtime status or lifecycle controls leaked into the configuration page\n    at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)\n    at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)\n    at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5</pre></body>","workspace":null,"busy":null,"gesture":null,"animations":[]},"runtimeExceptions":[],"consoleErrors":["Error: shared runtime status or lifecycle controls leaked into the configuration page\n    at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)\n    at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)\n    at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5"]}
+        Chrome stderr tail (last 8192 chars):
+
+        DevTools listening on ws://127.0.0.1:44755/devtools/browser/15e928e9-1cf0-439a-9055-2d6eb6f36f1b
+
+            at smokeFailure (file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:192:10)
+            at runMode (file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:626:11)
+            at async file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+          [cause]: AssertionError [ERR_ASSERTION]: Chrome config-scope smoke 未通过：Error: shared runtime status or lifecycle controls leaked into the configuration page
+              at assert (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:7:56)
+              at testConfigScopeRuntime (http://127.0.0.1:44849/assets/config_scope_browser_runtime.mjs:83:3)
+              at async http://127.0.0.1:44849/assets/agents_browser_runtime.mjs:52:5
+
+          'failed' !== 'passed'
+
+              at runMode (file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:614:12)
+              at async file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:654:34 {
+            generatedMessage: false,
+            code: 'ERR_ASSERTION',
+            actual: 'failed',
+            expected: 'passed',
+            operator: 'strictEqual',
+            diff: 'simple'
+          }
+        }
+
+        Node.js v22.23.2
+        browser timing {"mode":"config-layout","startupMs":145.7248289999552,"testMs":673.040932999982,"cleanupMs":47.42529400001513,"passed":true,"elapsedMs":866.1926499999827}
+        browser timing {"mode":"config-layout-mobile","startupMs":111.2216040000203,"testMs":670.1244259999949,"cleanupMs":28.1078850000049,"passed":true,"elapsedMs":809.4568380000419}
+        browser timing {"mode":"client-layout","startupMs":129.81649200001266,"testMs":604.727538999985,"cleanupMs":20.890387999999803,"passed":true,"elapsedMs":755.437414999993}
+        browser timing {"mode":"connections","startupMs":138.64271099999314,"testMs":519.80357800005,"cleanupMs":54.89165599999251,"passed":true,"elapsedMs":713.340755000012}
+        browser timing {"mode":"client-order","startupMs":121.01943200000096,"testMs":603.011295000033,"cleanupMs":29.017835999955423,"passed":true,"elapsedMs":753.0514580000308}
+        browser timing {"mode":"sharing-mobile","startupMs":131.75345600000583,"testMs":634.8114580000401,"cleanupMs":42.990133000013884,"passed":true,"elapsedMs":809.5572650000104}
+        browser timing {"mode":"client-order-mobile","startupMs":130.39706899999874,"testMs":617.0020030000014,"cleanupMs":35.674520000000484,"passed":true,"elapsedMs":783.0749780000187}
+        browser timing {"mode":"empty","startupMs":154.96088400000008,"testMs":339.4745990000083,"cleanupMs":42.35983999999007,"passed":true,"elapsedMs":536.800549000036}
+        browser timing {"mode":"shared-node-mobile","startupMs":130.44701599999098,"testMs":509.01483600004576,"cleanupMs":21.585420999967027,"passed":true,"elapsedMs":661.0502640000195}
+        browser timing {"mode":"dashboard-readonly","startupMs":133.13416499999585,"testMs":413.18817799998214,"cleanupMs":32.50160399999004,"passed":true,"elapsedMs":578.8275239999639}
+        browser timing {"mode":"uninstall-writeonly","startupMs":154.46850900002755,"testMs":630.4213219999801,"cleanupMs":24.253819999983534,"passed":true,"elapsedMs":809.1475570000475}
+        browser timing {"mode":"capabilities-settings","startupMs":154.00033199996687,"testMs":473.9768719999702,"cleanupMs":19.61602600000333,"passed":true,"elapsedMs":647.5953139999765}
+        browser timing {"mode":"capabilities-settings-readonly","startupMs":133.24903900001664,"testMs":334.76310500002,"cleanupMs":19.74375299998792,"passed":true,"elapsedMs":487.75791200000094}
+        agents browser runtime smoke passed
+        browser suite elapsed=378.877s
+        node:internal/modules/run_main:123
+            triggerUncaughtException(
+            ^
+
+        AssertionError [ERR_ASSERTION]: browser workers failed: [{"code":0,"signal":null},{"code":1,"signal":null}]
+            at runBrowserWorkers (file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/browser_scheduler.mjs:63:12)
+            at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+            at async file:///root/.codex/worktrees/9f62/qcontrolhub/frontend/agents_browser_smoke.mjs:656:5 {
+          generatedMessage: false,
+          code: 'ERR_ASSERTION',
+          actual: false,
+          expected: true,
+          operator: '==',
+          diff: 'simple'
+        }
+
+        Node.js v22.23.2
+--- FAIL: TestAgentBrowserRuntimeSmoke (378.92s)
+FAIL
+FAIL	github.com/qimaoww/qcontrolhub/frontend	378.923s
+FAIL
+make: *** [Makefile:101: frontend-browser-check] Error 1

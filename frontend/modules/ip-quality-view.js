@@ -1,7 +1,7 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
 import {
   ipQualityToday, ipQualityLatest, ipQualitySummary, ipQualityBlockReason, ipQualityFeature,
-  ipQualityNodeList, ipQualityStatusName, ipQualityStatusTone, ipQualityReportRecord,
+  ipQualityNodeList, ipQualityStatusName, ipQualityStatusTone, ipQualityReportRecord, ipQualityTiming,
 } from "./ip-quality-model.js";
 import { createIPQualityReportView } from "./ip-quality-report-view.js";
 import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
@@ -15,7 +15,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
   const archiveView = createIPQualityArchiveView({ esc, date: formatDate });
   const calendarView = createIPQualityCalendarView({ esc });
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons[name]}</svg>`;
-  return ({ date, timezone, history, availableDates, month, agents = [], loading = false, error = "", submitting, editable, readFailed, recordsRemoved }) => {
+  return ({ date, timezone, history, availableDates, month, agents = [], loading = false, error = "", submitting, creating = new Set(), creationErrors = new Map(), editable, readFailed, recordsRemoved }) => {
     const today = ipQualityToday(), isToday = date === today, isLatest = date === ipQualityLatest;
     const canOperate = isLatest || isToday;
     const records = history?.records || [], schedules = history?.schedules || [];
@@ -39,7 +39,8 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
       const busy = submitting.has(agent.id), reason = ipQualityBlockReason(agent, record);
       const reportRecord = ipQualityReportRecord(record, date, timezone);
       const reports = reportRecord?.result?.reports || [];
-      const runButton = canOperate && editable(agent) ? `<button type="button" class="button small primary" data-ip-quality-run="${esc(agent.id)}"${busy || loading || readFailed || !history || reason ? " disabled" : ""}>${esc(busy ? "正在提交…" : reason || "立即检测")}</button>` : "";
+      const isCreating = creating.has(agent.id), creationError = canOperate && creationErrors.get(agent.id);
+      const runButton = canOperate && editable(agent) ? `<button type="button" class="button small primary" data-ip-quality-run="${esc(agent.id)}"${busy || loading || readFailed || !history || reason ? " disabled" : ""}>${esc(isCreating ? "任务创建中…" : busy ? "正在提交…" : reason || "立即检测")}</button>` : "";
       const controls = canOperate && editable(agent) ? `<div class="ip-quality-actions" role="group" aria-label="节点检测操作">
         <button type="button" class="button small" data-ip-quality-schedule="${esc(agent.id)}" data-enabled="${Boolean(schedule?.enabled)}" aria-pressed="${Boolean(schedule?.enabled)}"${busy || loading || readFailed || !history || (!schedule?.enabled && !agent.features?.includes(ipQualityFeature)) ? " disabled" : ""}>每日检测：${schedule?.enabled ? "开" : "关"}</button>
         ${schedule?.enabled ? `<small>下次：${esc(formatDate(schedule.next_run_at))}</small>` : ""}
@@ -48,10 +49,15 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
       const retained = reportRecord && reportRecord !== record;
       const progress = retained ? `<p class="ip-quality-result-note" role="status">${["pending", "running"].includes(record.status) ? "新检测正在排队或执行，以下保留上次成功报告。" : "最新检测未成功，以下显示上次成功报告。"}</p>` : "";
       const attempt = record && (!reports.length || retained) ? `<p class="ip-quality-no-report">最近发起：${esc(formatDate(record.created_at))}</p>` : "";
+      const timing = ipQualityTiming(record);
+      const lifecycle = isCreating ? "任务创建中，正在等待控制面确认。" : record
+        ? `${record.status === "pending" ? "排队中，等待 Agent 领取。" : record.status === "running" ? "执行中。" : ipQualityStatusName(record.status)}${timing ? ` · ${timing}` : ""}` : "";
       return `<section class="workspace-panel ip-quality-node-panel ${tone}" data-ip-quality-panel="${esc(agent.id)}" data-refresh-key="ip-quality-${esc(agent.id)}" aria-busy="${loading}">
         <header><div class="ip-quality-node-title"><span class="node-avatar" aria-hidden="true">${icon("server")}</span><div><h3>${esc(agent.name)}</h3>${canOperate ? `<small class="ip-quality-node-meta">${agentPresenceMarkup(agent.status)}${reports.length ? `<span>${reports.length} 个地址族</span>` : ""}</small>` : ""}</div></div><div class="ip-quality-node-tools"><span class="status-label ip-quality-badge ${tone}"><i></i>${record ? esc(ipQualityStatusName(record.status)) : !history ? readFailed ? "读取失败" : "读取中" : "未检测"}</span>${runButton}</div></header>
         ${controls}
         <div class="ip-quality-node-body">
+          <p class="ip-quality-no-report ip-quality-lifecycle" data-refresh-key="ip-quality-lifecycle-${esc(agent.id)}"><span role="status" aria-atomic="true">${esc(lifecycle)}</span>${canOperate ? `<span>检测可能需要数分钟，耗时受节点网络和探测源影响。</span>` : ""}</p>
+          ${creationError ? `<p class="alert error ip-quality-error" role="alert" data-refresh-key="ip-quality-create-error-${esc(agent.id)}">${esc(creationError)}</p>` : ""}
           ${progress}
           ${addresses}
           ${attempt}

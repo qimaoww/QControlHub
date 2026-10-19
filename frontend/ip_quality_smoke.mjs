@@ -3,7 +3,7 @@ import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
 import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
 import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary, ipQualityReportRecord } from "./modules/ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary, ipQualityReportRecord, ipQualityTiming } from "./modules/ip-quality-model.js";
 import { createIPQualityCalendarView } from "./modules/ip-quality-calendar-view.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
@@ -29,6 +29,15 @@ const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online",
 const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
 const fixtureDates = [ipQualityToday(), nextIPQualityDay(ipQualityToday(), -1), "2025-09-11", "2025-09-12", "2025-09-13", "2025-09-14", "2025-09-15", "2025-09-16"];
 const history = (day, records = []) => ({ date: day, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", dates: fixtureDates, records, schedules: [] });
+const timingRecord = {status: "running", created_at: "2026-10-17T05:58:00Z", started_at: "2026-10-17T05:58:37Z"};
+const timingNow = Date.parse("2026-10-17T06:00:00Z");
+assert.equal(ipQualityTiming(timingRecord, timingNow), "已执行 1 分 23 秒");
+assert.equal(ipQualityTiming({...timingRecord,status:"pending"},timingNow), "已排队 2 分 0 秒");
+for (const status of ["succeeded","failed","canceled"]) {
+  assert.equal(ipQualityTiming({...timingRecord,status,finished_at:"2026-10-17T06:00:00Z"},timingNow+60000), "执行耗时 1 分 23 秒");
+}
+assert.equal(ipQualityTiming({...timingRecord,started_at:"invalid"},timingNow), "");
+assert.equal(ipQualityTiming({...timingRecord,started_at:"2026-10-18T00:00:00Z"},timingNow), "");
 let markup = "";
 const viewState = { data: {} };
 const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
@@ -173,6 +182,15 @@ assert.ok(ipv6Markup.includes("未检测（仅支持 IPv4）"));
 assert.ok(!ipv6Markup.includes("<dt>干净</dt>"), "IPv4 blacklist counts were attributed to IPv6");
 assert.ok(ipv6Markup.includes("&quot;Total&quot;: 439"), "source JSON lost the upstream values");
 assert.equal(JSON.stringify(ipv6Report), originalIPv6Report, "rendering rewrote the source report");
+
+renderDay(ipQualityLatest, [oldReport], [agent], { submitting: new Set([agent.id]), creating: new Set([agent.id]) });
+assert.ok(markup.includes("任务创建中…"));
+assert.ok(markup.includes("任务创建中，正在等待控制面确认"));
+renderDay(ipQualityLatest, [oldReport], [agent], {creationErrors:new Map([[agent.id,"任务创建失败（请求 ID：req_" + "a".repeat(100) + ") <img>"]])});
+assert.ok(markup.includes("任务创建失败"));
+assert.ok(markup.includes("&lt;img&gt;"));
+assert.ok(markup.includes("203.0.113.1"), "creation failure erased last successful report");
+assert.ok(markup.includes('data-ip-quality-run="alpha">立即检测'), "creation failure kept button disabled");
 
 const originalDocument = globalThis.document;
 globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
@@ -365,6 +383,42 @@ try {
   if (originalDocument === undefined) delete globalThis.document;
   else globalThis.document = originalDocument;
 }
+const savedDocument = globalThis.document;
+globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
+try {
+  const state = { data: {}, route: "ip-quality", navigationEpoch: 0 };
+  const views = [];
+  let releaseCreate, creates = 0, failAcceptedRead = false;
+  const controller = createIPQualityController({state, can:()=>true, notify:()=>{}, confirmAction:async()=>true,
+    setTimer:()=>0, clearTimer:()=>{}, api:async(path,options={})=> {
+      if (options.method) { creates++; return new Promise((resolve,reject)=> {releaseCreate={resolve,reject};}); }
+      if (failAcceptedRead && path !== "/agents") throw new Error("history temporarily unavailable");
+      return path==="/agents" ? [agent] : history(null,[oldReport]);
+    }},value=>views.push(value));
+  await controller.load();
+  const pending = controller.runCheck("alpha");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(views.at(-1).creating.has("alpha"),true);
+  await controller.runCheck("alpha");
+  assert.equal(creates,1,"in-flight creation was submitted twice");
+  releaseCreate.reject(new Error("任务创建失败（请求 ID：req_test）"));
+  await pending;
+  assert.equal(views.at(-1).submitting.has("alpha"),false);
+  assert.equal(views.at(-1).creating.has("alpha"),false);
+  assert.match(views.at(-1).creationErrors.get("alpha"),/req_test/);
+  assert.equal(views.at(-1).history.records[0].task_id,oldReport.task_id);
+  const retry = controller.runCheck("alpha");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(views.at(-1).creationErrors.has("alpha"),false);
+  failAcceptedRead = true;
+  releaseCreate.resolve({id:"accepted",agent_id:"alpha",action:"ip-quality",status:"pending",created_at:new Date().toISOString()}); await retry;
+  assert.equal(views.at(-1).creating.has("alpha"),false,"history read extended the creation phase");
+  assert.equal(views.at(-1).history.records[0].task_id,"accepted","failed history read hid the accepted task");
+  assert.equal(views.at(-1).history.records[0].last_successful.task_id,oldReport.task_id);
+  failAcceptedRead = false;
+  state.data={}; await controller.load();
+  assert.equal(views.at(-1).creationErrors.size,0,"another account inherited creation errors");
+} finally { globalThis.document=savedDocument; }
 console.log("IP quality model, rendering, request races and mutation guards passed");
 
 const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_id: "task-1", archives: [

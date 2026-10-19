@@ -89,7 +89,7 @@ func TestMigrateV54PreservesPrivateBackendsAndDeployedProfilePreferences(t *test
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	preferences := map[string]string{
@@ -187,7 +187,7 @@ func TestMigrateV52AgentSharingPreservesDeployedVersionAndLegacyAccess(t *testin
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	config.Content = "listeners: [{name: draft, type: trojan, port: 21002}]"
@@ -260,7 +260,7 @@ func TestMigrateV52AgentSharingKeepsFailedDeploymentsUncertain(t *testing.T) {
 				if !success && outcome == "running" {
 					return
 				}
-				if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: success}); err != nil {
+				if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: success}); err != nil {
 					t.Fatal(err)
 				}
 			}

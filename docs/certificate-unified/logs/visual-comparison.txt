@@ -1,0 +1,47 @@
+### Result
+{"comparisons":48,"issues":[]}
+### Ran Playwright code
+```js
+await (async page => {
+ const out='docs/certificate-unified/screenshots';
+ const issues=[];
+ await page.emulateMedia({reducedMotion:'reduce'});
+ for(const version of ['before','after']){
+  await page.goto(`http://127.0.0.1:${version==='before'?36480:36479}/#certificates`);
+  await page.locator('[data-cert-source],#login-form').first().waitFor();
+  if(await page.locator('#login-form').count()){
+   await page.getByRole('textbox',{name:'用户名',exact:true}).fill('cert-alice');
+   await page.getByRole('textbox',{name:'密码 / 管理令牌',exact:true}).fill('certificate local fixture password');
+   await page.getByRole('button',{name:'登录',exact:true}).click();
+   await page.locator('#logout').waitFor({state:'attached'});
+   await page.evaluate(()=>location.hash='#certificates');
+  }
+  await page.locator('[data-cert-source]').waitFor();
+  await page.locator('[data-cert-source]').selectOption('self-signed');
+  await page.waitForFunction(()=>document.querySelectorAll('[data-cert-detail]').length===1 && document.querySelector('[data-cert-source]').value==='self-signed');
+  for(const [label,width,height] of [['desktop',1440,1000],['mobile',375,812]]){
+   await page.setViewportSize({width,height});
+   for(const theme of ['light','dark']){
+    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-list-${label}-${theme}.png`});
+    await page.locator('[data-cert-create]').click();await page.locator('dialog[open] [data-cert-form]').waitFor();
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-create-${label}-${theme}.png`});
+    await page.locator('[name=method]').selectOption('http-01');await page.locator('[name=agent_id]').waitFor();
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-http-${label}-${theme}.png`});await page.keyboard.press('Escape');
+    await page.locator('[data-cert-accounts]').click();await page.locator('dialog[open] [data-cert-new-account]').waitFor();
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-accounts-${label}-${theme}.png`});await page.keyboard.press('Escape');
+    await page.locator('[data-cert-detail]').first().click();await page.locator('dialog[open] [data-cert-share]').waitFor();
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-detail-${label}-${theme}.png`});
+    await page.locator('[data-cert-share]').click();await page.locator('[data-cert-grant-form]').waitFor();
+    await page.screenshot({animations:"disabled",path:`${out}/${version}-grants-${label}-${theme}.png`});await page.keyboard.press('Escape');
+    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
+    if(overflow)issues.push(`${version}/${label}/${theme}: horizontal overflow`);
+   }
+  }
+ }
+ if(issues.length)throw new Error(issues.join("; "));
+ return {comparisons:48,issues};
+})(page);
+```
+### Events
+- New console entries: output/playwright/certificate-unified/console-2026-10-17T14-20-58-326Z.log#L2

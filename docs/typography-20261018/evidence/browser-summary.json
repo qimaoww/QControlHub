@@ -1,0 +1,781 @@
+{
+  "passed_unique": 84,
+  "failed": [
+    {
+      "log": "browser-final.txt",
+      "mode": "config-scope",
+      "startupMs": 130.25753299996722,
+      "testMs": 437.31736500002444,
+      "cleanupMs": 35.58516600000439,
+      "passed": false,
+      "elapsedMs": 603.1662689999794
+    }
+  ],
+  "results": [
+    {
+      "log": "browser-final.txt",
+      "mode": "ip-quality-mobile",
+      "startupMs": 203.623344,
+      "testMs": 36249.808454000005,
+      "cleanupMs": 24.01095499999792,
+      "passed": true,
+      "elapsedMs": 36477.456811000004
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-popup",
+      "startupMs": 195.61899899999997,
+      "testMs": 36879.840852,
+      "cleanupMs": 32.92861599999742,
+      "passed": true,
+      "elapsedMs": 37108.397939999995
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-coordinates",
+      "startupMs": 136.7582360000015,
+      "testMs": 34788.78411,
+      "cleanupMs": 35.30931399999827,
+      "passed": true,
+      "elapsedMs": 34960.856399000004
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ip-quality",
+      "startupMs": 139.0241509999978,
+      "testMs": 35865.587682,
+      "cleanupMs": 38.47766299999785,
+      "passed": true,
+      "elapsedMs": 36043.09983099999
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-popup-mobile",
+      "startupMs": 135.76359999999113,
+      "testMs": 35765.537211999996,
+      "cleanupMs": 51.54875099999481,
+      "passed": true,
+      "elapsedMs": 35952.85489199999
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ip-quality-readonly",
+      "startupMs": 123.23176899999089,
+      "testMs": 35186.51646499999,
+      "cleanupMs": 25.736473000011756,
+      "passed": true,
+      "elapsedMs": 35335.48920699999
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-mobile",
+      "startupMs": 110.71158899999864,
+      "testMs": 34817.010687,
+      "cleanupMs": 27.375754999986384,
+      "passed": true,
+      "elapsedMs": 34955.10245599999
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ip-quality-mobile-reduced",
+      "startupMs": 123.96197199999006,
+      "testMs": 34282.187708,
+      "cleanupMs": 32.93113000001176,
+      "passed": true,
+      "elapsedMs": 34439.084293999986
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "admin",
+      "startupMs": 139.5136240000138,
+      "testMs": 31851.516662999988,
+      "cleanupMs": 26.46649900000193,
+      "passed": true,
+      "elapsedMs": 32017.500749
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ip-quality-reduced",
+      "startupMs": 140.60679200000595,
+      "testMs": 34154.18671099999,
+      "cleanupMs": 30.02265999998781,
+      "passed": true,
+      "elapsedMs": 34324.820722000004
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-coordinates-mobile",
+      "startupMs": 142.12041799997678,
+      "testMs": 31434.652994000004,
+      "cleanupMs": 53.52599600001122,
+      "passed": true,
+      "elapsedMs": 31630.305734999973
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards",
+      "startupMs": 123.45665499998722,
+      "testMs": 30666.282758999994,
+      "cleanupMs": 34.72354400000768,
+      "passed": true,
+      "elapsedMs": 30824.468212999986
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ports",
+      "startupMs": 93.9206450000056,
+      "testMs": 17223.330027000018,
+      "cleanupMs": 43.7525349999778,
+      "passed": true,
+      "elapsedMs": 17361.007043999998
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "ports-mobile",
+      "startupMs": 132.81743399999687,
+      "testMs": 17128.929566999985,
+      "cleanupMs": 23.21070100000361,
+      "passed": true,
+      "elapsedMs": 17284.965572999994
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-coordinates-mobile-reduced",
+      "startupMs": 134.15894699998898,
+      "testMs": 15966.666255999997,
+      "cleanupMs": 27.38825099999667,
+      "passed": true,
+      "elapsedMs": 16128.218240999995
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-inbounds",
+      "startupMs": 138.57050399997388,
+      "testMs": 19263.269149,
+      "cleanupMs": 32.185037999995984,
+      "passed": true,
+      "elapsedMs": 19434.03306799999
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-coordinates-reduced",
+      "startupMs": 113.67761099999188,
+      "testMs": 14993.095349999989,
+      "cleanupMs": 28.109507999994094,
+      "passed": true,
+      "elapsedMs": 15134.888703000004
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-inbounds-mobile",
+      "startupMs": 128.88225900000543,
+      "testMs": 19278.91217699999,
+      "cleanupMs": 29.10382000001846,
+      "passed": true,
+      "elapsedMs": 19436.902709999995
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "bbr-mobile",
+      "startupMs": 122.91578899999149,
+      "testMs": 14253.98836800002,
+      "cleanupMs": 29.03697099996498,
+      "passed": true,
+      "elapsedMs": 14405.952925999969
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "bbr",
+      "startupMs": 123.14066299999831,
+      "testMs": 14259.055407000007,
+      "cleanupMs": 69.00632599997334,
+      "passed": true,
+      "elapsedMs": 14451.219164999959
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "traffic-layout-mobile",
+      "startupMs": 120.85201600001892,
+      "testMs": 12892.903789999953,
+      "cleanupMs": 25.621801000030246,
+      "passed": true,
+      "elapsedMs": 13039.380874000024
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "traffic-layout",
+      "startupMs": 152.90710499999113,
+      "testMs": 12964.42710900004,
+      "cleanupMs": 25.616846999968402,
+      "passed": true,
+      "elapsedMs": 13142.95622599998
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-selection",
+      "startupMs": 122.52751300000818,
+      "testMs": 12424.710704999976,
+      "cleanupMs": 48.12964800000191,
+      "passed": true,
+      "elapsedMs": 12595.370982000022
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-mobile-reduced",
+      "startupMs": 125.43174299999373,
+      "testMs": 13033.34177400003,
+      "cleanupMs": 32.68643699999666,
+      "passed": true,
+      "elapsedMs": 13191.465081000002
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-selection-mobile",
+      "startupMs": 121.80751200002851,
+      "testMs": 12008.68531900004,
+      "cleanupMs": 37.99143300001742,
+      "passed": true,
+      "elapsedMs": 12168.487385000044
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "dashboard",
+      "startupMs": 138.83566699997755,
+      "testMs": 10294.789006999985,
+      "cleanupMs": 50.18656499998178,
+      "passed": true,
+      "elapsedMs": 10483.816500000015
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-mobile",
+      "startupMs": 128.87851900001988,
+      "testMs": 8288.420818000042,
+      "cleanupMs": 50.77400499995565,
+      "passed": true,
+      "elapsedMs": 8468.07620900002
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-cards-reduced",
+      "startupMs": 125.58248500002082,
+      "testMs": 9423.990362000011,
+      "cleanupMs": 41.084929000004195,
+      "passed": true,
+      "elapsedMs": 9590.663063999964
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "dashboard-unavailable",
+      "startupMs": 133.58625000005122,
+      "testMs": 8112.785298999981,
+      "cleanupMs": 46.46669299999485,
+      "passed": true,
+      "elapsedMs": 8292.844106000033
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-popup-mobile-reduced",
+      "startupMs": 128.39515799999936,
+      "testMs": 4623.393001999997,
+      "cleanupMs": 29.566071999957785,
+      "passed": true,
+      "elapsedMs": 4781.357987999974
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "select-menus",
+      "startupMs": 126.67918100004317,
+      "testMs": 426.79229900002247,
+      "cleanupMs": 25.340796999982558,
+      "passed": true,
+      "elapsedMs": 578.8147260000114
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion",
+      "startupMs": 122.50280700001167,
+      "testMs": 8115.430040999956,
+      "cleanupMs": 27.547268000023905,
+      "passed": true,
+      "elapsedMs": 8265.483487999998
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "archive-engines",
+      "startupMs": 115.59261800005333,
+      "testMs": 753.3852709999774,
+      "cleanupMs": 30.616802000033204,
+      "passed": true,
+      "elapsedMs": 899.5969069999992
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-popup-reduced",
+      "startupMs": 172.28837099997327,
+      "testMs": 4595.105865999998,
+      "cleanupMs": 27.888724000018556,
+      "passed": true,
+      "elapsedMs": 4795.286613999982
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "dashboard-mobile",
+      "startupMs": 133.07371299999068,
+      "testMs": 7981.000569999975,
+      "cleanupMs": 24.760771000001114,
+      "passed": true,
+      "elapsedMs": 8138.83746000001
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "select-menus-mobile",
+      "startupMs": 126.13053900003433,
+      "testMs": 411.1152020000154,
+      "cleanupMs": 24.268202000006568,
+      "passed": true,
+      "elapsedMs": 561.5166750000208
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "users-layout-mobile",
+      "startupMs": 152.50378400000045,
+      "testMs": 3890.254602000001,
+      "cleanupMs": 26.015475999971386,
+      "passed": true,
+      "elapsedMs": 4068.776943999983
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "presets-mobile",
+      "startupMs": 124.51990799995838,
+      "testMs": 3304.642828000011,
+      "cleanupMs": 27.0490170000121,
+      "passed": true,
+      "elapsedMs": 3456.214378000004
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "enrollment-mobile",
+      "startupMs": 124.6033110000426,
+      "testMs": 3027.279769000015,
+      "cleanupMs": 25.500956000003498,
+      "passed": true,
+      "elapsedMs": 3177.386460000009
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "logs-mobile",
+      "startupMs": 154.34490200004075,
+      "testMs": 3184.871239,
+      "cleanupMs": 39.817004000011366,
+      "passed": true,
+      "elapsedMs": 3379.0351009999868
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "users-layout",
+      "startupMs": 116.3176219999441,
+      "testMs": 4137.8400680000195,
+      "cleanupMs": 29.652316999970935,
+      "passed": true,
+      "elapsedMs": 4283.812244999979
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-selection-reduced",
+      "startupMs": 123.26762499997858,
+      "testMs": 2439.648158999975,
+      "cleanupMs": 45.328406999993604,
+      "passed": true,
+      "elapsedMs": 2608.2465669999947
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "enrollment",
+      "startupMs": 148.57680099998834,
+      "testMs": 3079.0766360000125,
+      "cleanupMs": 32.353836000023875,
+      "passed": true,
+      "elapsedMs": 3260.010008000012
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "users-mobile",
+      "startupMs": 114.89587399997981,
+      "testMs": 1888.3184110000147,
+      "cleanupMs": 31.958646999963094,
+      "passed": true,
+      "elapsedMs": 2035.1756709999754
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "shell-layout",
+      "startupMs": 135.97205099998973,
+      "testMs": 1501.5394080000115,
+      "cleanupMs": 34.008797999995295,
+      "passed": true,
+      "elapsedMs": 1671.5264719999977
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "logs",
+      "startupMs": 128.307444999984,
+      "testMs": 3028.274703000032,
+      "cleanupMs": 28.563873999984935,
+      "passed": true,
+      "elapsedMs": 3185.1484780000173
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-reduced",
+      "startupMs": 108.072921999963,
+      "testMs": 1168.6230080000241,
+      "cleanupMs": 63.847489000007045,
+      "passed": true,
+      "elapsedMs": 1340.5482979999506
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "regions",
+      "startupMs": 140.3550900000264,
+      "testMs": 1024.1378069999628,
+      "cleanupMs": 30.440792000037618,
+      "passed": true,
+      "elapsedMs": 1194.9386810000287
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-selection-mobile-reduced",
+      "startupMs": 142.9788000000408,
+      "testMs": 2566.153809999989,
+      "cleanupMs": 34.33233999996446,
+      "passed": true,
+      "elapsedMs": 2743.4684170000255
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-migration",
+      "startupMs": 140.67149899998913,
+      "testMs": 1170.4493559999974,
+      "cleanupMs": 26.69782399997348,
+      "passed": true,
+      "elapsedMs": 1337.8227579999948
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "substore-scope",
+      "startupMs": 154.70308999996632,
+      "testMs": 859.0808620000025,
+      "cleanupMs": 28.221126999997068,
+      "passed": true,
+      "elapsedMs": 1042.0076559999725
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "users",
+      "startupMs": 135.3570620000246,
+      "testMs": 1946.44399900001,
+      "cleanupMs": 29.198586999962572,
+      "passed": true,
+      "elapsedMs": 2111.001510000031
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "bbr-writeonly",
+      "startupMs": 136.5496479999856,
+      "testMs": 802.9828129999805,
+      "cleanupMs": 38.193352000031155,
+      "passed": true,
+      "elapsedMs": 977.7298729999457
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "bbr-readonly",
+      "startupMs": 138.66807600000175,
+      "testMs": 782.8288689999608,
+      "cleanupMs": 25.706091000000015,
+      "passed": true,
+      "elapsedMs": 947.2045810000272
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "client-layout-mobile",
+      "startupMs": 139.4464240000234,
+      "testMs": 607.1100030000089,
+      "cleanupMs": 20.216500999988057,
+      "passed": true,
+      "elapsedMs": 766.7755469999975
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-restrictions",
+      "startupMs": 133.02848699997412,
+      "testMs": 850.7097000000067,
+      "cleanupMs": 28.619030999951065,
+      "passed": true,
+      "elapsedMs": 1012.3597709999885
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "presets",
+      "startupMs": 132.49711399996886,
+      "testMs": 3757.1470789999585,
+      "cleanupMs": 32.32741700002225,
+      "passed": true,
+      "elapsedMs": 3921.9750559999957
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "sharing",
+      "startupMs": 156.1847640000051,
+      "testMs": 680.514702000015,
+      "cleanupMs": 28.883840000024065,
+      "passed": true,
+      "elapsedMs": 865.585659000033
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "connections-mobile",
+      "startupMs": 138.79576800001087,
+      "testMs": 622.3865329999826,
+      "cleanupMs": 23.16933900001459,
+      "passed": true,
+      "elapsedMs": 784.3537980000256
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "logs-restore",
+      "startupMs": 118.17308800003957,
+      "testMs": 489.812705999997,
+      "cleanupMs": 22.4193179999711,
+      "passed": true,
+      "elapsedMs": 630.4063240000396
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "motion-mobile-reduced",
+      "startupMs": 122.58851299999515,
+      "testMs": 1362.1851529999985,
+      "cleanupMs": 24.907871999952476,
+      "passed": true,
+      "elapsedMs": 1509.6841310000164
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "shared-node",
+      "startupMs": 136.19744999997783,
+      "testMs": 640.4097399999737,
+      "cleanupMs": 27.519590999989305,
+      "passed": true,
+      "elapsedMs": 804.1285100000096
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "batch-layout-mobile",
+      "startupMs": 145.49299800000153,
+      "testMs": 1074.4370220000274,
+      "cleanupMs": 22.19601099996362,
+      "passed": true,
+      "elapsedMs": 1242.128955000022
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "readonly",
+      "startupMs": 135.5071079999907,
+      "testMs": 493.5892950000125,
+      "cleanupMs": 43.80391800001962,
+      "passed": true,
+      "elapsedMs": 672.9034620000166
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-scope",
+      "startupMs": 130.25753299996722,
+      "testMs": 437.31736500002444,
+      "cleanupMs": 35.58516600000439,
+      "passed": false,
+      "elapsedMs": 603.1662689999794
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "shell-layout-mobile",
+      "startupMs": 126.54587500001071,
+      "testMs": 965.2083310000016,
+      "cleanupMs": 31.46848099998897,
+      "passed": true,
+      "elapsedMs": 1123.227442000003
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "batch-layout",
+      "startupMs": 131.59378300001845,
+      "testMs": 892.220094999997,
+      "cleanupMs": 26.297505000024103,
+      "passed": true,
+      "elapsedMs": 1050.1172200000146
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "substore-layout",
+      "startupMs": 125.15250500000548,
+      "testMs": 861.8624269999564,
+      "cleanupMs": 41.94971800001804,
+      "passed": true,
+      "elapsedMs": 1028.9688339999993
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-layout",
+      "startupMs": 116.08423700003186,
+      "testMs": 609.3159640000085,
+      "cleanupMs": 26.350350000022445,
+      "passed": true,
+      "elapsedMs": 751.7533169999951
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "config-layout-mobile",
+      "startupMs": 120.03415700001642,
+      "testMs": 630.7503939999733,
+      "cleanupMs": 27.75981000001775,
+      "passed": true,
+      "elapsedMs": 778.5470820000046
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "client-layout",
+      "startupMs": 109.58586200000718,
+      "testMs": 575.3694170000381,
+      "cleanupMs": 23.320341999991797,
+      "passed": true,
+      "elapsedMs": 708.2796990000061
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "connections",
+      "startupMs": 153.93095799995353,
+      "testMs": 551.211512000009,
+      "cleanupMs": 24.28032900003018,
+      "passed": true,
+      "elapsedMs": 729.4283040000009
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "client-order",
+      "startupMs": 107.79996100004064,
+      "testMs": 576.8577640000149,
+      "cleanupMs": 25.51769199996488,
+      "passed": true,
+      "elapsedMs": 710.1785510000191
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "sharing-mobile",
+      "startupMs": 142.26585899997735,
+      "testMs": 642.0261630000314,
+      "cleanupMs": 41.04704099998344,
+      "passed": true,
+      "elapsedMs": 825.3458760000067
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "client-order-mobile",
+      "startupMs": 136.4892220000038,
+      "testMs": 623.6702990000485,
+      "cleanupMs": 22.89019099995494,
+      "passed": true,
+      "elapsedMs": 783.0554640000337
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "empty",
+      "startupMs": 108.92100399994524,
+      "testMs": 323.9364090000163,
+      "cleanupMs": 20.743726000015158,
+      "passed": true,
+      "elapsedMs": 453.603163999971
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "shared-node-mobile",
+      "startupMs": 128.32495100004598,
+      "testMs": 510.56521600001724,
+      "cleanupMs": 20.633823000011034,
+      "passed": true,
+      "elapsedMs": 659.5284400000237
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "dashboard-readonly",
+      "startupMs": 119.71292499999981,
+      "testMs": 328.21008799999254,
+      "cleanupMs": 22.12529200001154,
+      "passed": true,
+      "elapsedMs": 470.05095599999186
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "uninstall-writeonly",
+      "startupMs": 121.96837799996138,
+      "testMs": 354.39878099999623,
+      "cleanupMs": 22.147827000007965,
+      "passed": true,
+      "elapsedMs": 498.5176859999774
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "capabilities-settings",
+      "startupMs": 115.19605999998748,
+      "testMs": 339.9087090000394,
+      "cleanupMs": 27.410015999979805,
+      "passed": true,
+      "elapsedMs": 482.5185300000012
+    },
+    {
+      "log": "browser-final.txt",
+      "mode": "capabilities-settings-readonly",
+      "startupMs": 145.47631499997806,
+      "testMs": 361.4263430000283,
+      "cleanupMs": 18.844783000007737,
+      "passed": true,
+      "elapsedMs": 525.7509100000025
+    },
+    {
+      "log": "browser-remaining.txt",
+      "mode": "traffic-layout-dense",
+      "startupMs": 152.490825,
+      "testMs": 492.40739299999996,
+      "cleanupMs": 24.71144800000002,
+      "passed": true,
+      "elapsedMs": 669.620727
+    },
+    {
+      "log": "browser-remaining.txt",
+      "mode": "capabilities-settings-mobile",
+      "startupMs": 107.851338,
+      "testMs": 549.068523,
+      "cleanupMs": 36.400859999999966,
+      "passed": true,
+      "elapsedMs": 693.342037
+    },
+    {
+      "log": "browser-remaining.txt",
+      "mode": "dashboard-limited",
+      "startupMs": 143.632972,
+      "testMs": 433.533,
+      "cleanupMs": 24.4371349999999,
+      "passed": true,
+      "elapsedMs": 601.6091789999999
+    },
+    {
+      "log": "browser-remaining.txt",
+      "mode": "traffic-layout-dense-mobile",
+      "startupMs": 148.96164900000008,
+      "testMs": 497.984732,
+      "cleanupMs": 20.365583000000015,
+      "passed": true,
+      "elapsedMs": 667.315461
+    }
+  ]
+}

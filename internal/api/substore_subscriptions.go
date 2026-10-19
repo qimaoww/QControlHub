@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func ownedSubStoreSubscription(subscriptions []map[string]any, integrationID string) map[string]any {
@@ -216,15 +217,7 @@ func subStoreNodeName(rawValue string) string {
 	if _, nameNode, ok := subStoreMihomoNode(rawValue); ok {
 		return strings.TrimSpace(nameNode.Value)
 	}
-	fragment := strings.LastIndexByte(rawValue, '#')
-	if fragment < 0 || fragment == len(rawValue)-1 {
-		return ""
-	}
-	name := strings.TrimSpace(rawValue[fragment+1:])
-	if decoded, err := url.PathUnescape(name); err == nil {
-		name = strings.TrimSpace(decoded)
-	}
-	return name
+	return strings.TrimSpace(serverconfig.ClientURLName(rawValue))
 }
 
 func subStoreManagedNames(value any) []string {
@@ -270,6 +263,21 @@ func mergeSubStoreContentByName(existingContent, desiredContent string, previous
 			continue
 		}
 		name := subStoreNodeName(line)
+		// Older syncs appended a fragment to VMess JSON and tracked that
+		// fragment as the managed name, although clients read the JSON ps.
+		// Migrate only entries whose legacy name is proven owned by this
+		// target; untracked/manual entries keep their existing provenance.
+		if strings.HasPrefix(line, "vmess://") {
+			connection, fragment, present := strings.Cut(line, "#")
+			if present && !strings.Contains(connection, "@") {
+				if legacyName, err := url.PathUnescape(fragment); err == nil {
+					legacyName = strings.TrimSpace(legacyName)
+					if _, owned := managed[legacyName]; owned {
+						name = legacyName
+					}
+				}
+			}
+		}
 		if replacement, exists := desiredLines[name]; exists {
 			if _, alreadyUsed := used[name]; !alreadyUsed {
 				merged = append(merged, replacement)

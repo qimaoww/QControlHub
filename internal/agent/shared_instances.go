@@ -300,7 +300,11 @@ func validateProtectedRegularFile(path string) error {
 
 // A lost accounting policy must not leave any private instance accepting
 // traffic. Directory identities are generated from validated share IDs only.
-func stopSharedInstances(ctx context.Context, manager *ServiceManager, engine core.Engine, base EngineSpec) error {
+func stopSharedInstances(ctx context.Context, manager *ServiceManager, engine core.Engine, base EngineSpec, reasons ...string) error {
+	reason := "共享流量计量保护已触发，实例已停止；请检查流量策略和节点连接后再次启动"
+	if len(reasons) > 0 && reasons[0] != "" {
+		reason = reasons[0]
+	}
 	entries, err := os.ReadDir(sharedInstanceRoot(engine))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -321,6 +325,8 @@ func stopSharedInstances(ctx context.Context, manager *ServiceManager, engine co
 		}
 		if _, err := manager.command(ctx, spec.Service, core.ActionStop); err != nil {
 			failures = append(failures, err)
+		} else {
+			rememberSharedStopReason(spec, reason)
 		}
 		if err := stopServiceTLSFrontends(ctx, manager, engine, spec); err != nil {
 			failures = append(failures, err)
@@ -380,13 +386,8 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 			if err != nil {
 				continue
 			}
-			status, err := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
-			if err != nil {
-				status = "unknown"
-				if _, stopErr := e.serviceManager().command(ctx, spec.Service, core.ActionStop); stopErr == nil {
-					status = "inactive"
-				}
-			}
+			observation := e.sharedInstanceStatus(ctx, engine, entry.Name())
+			status := observation.Status
 			if status == "active" {
 				content, readErr := readConfigurationFile(spec.ConfigPath)
 				if readErr == nil {
@@ -409,12 +410,18 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 				if readErr != nil {
 					if _, stopErr := e.serviceManager().command(ctx, spec.Service, core.ActionStop); stopErr == nil {
 						status = "inactive"
+						_ = stopServiceTLSFrontends(ctx, e.serviceManager(), engine, spec)
 					} else {
 						status = "unknown"
 					}
+					observation.Reason = "独立出口安全检查失败，实例被保护性停止：" + limitStateValue(readErr.Error(), 500)
+					e.sharedStateMu.Lock()
+					rememberSharedStopReason(spec, observation.Reason)
+					e.sharedStateMu.Unlock()
 				}
 			}
-			statuses = append(statuses, core.SharedInstanceStatus{Engine: engine, ShareID: entry.Name(), Status: status})
+			observation.Status = status
+			statuses = append(statuses, observation)
 		}
 	}
 	return statuses

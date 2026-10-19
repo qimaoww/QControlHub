@@ -1,0 +1,6 @@
+### Result
+{"modalLegacyFallback":true,"rawClipboardMatches":true,"remainsMasked":true,"helperRemoved":true}
+### Ran Playwright code
+```js
+await (async (page) => {await page.waitForSelector("[data-client-parameter-open]");await page.locator("[data-client-parameter-open]").first().click();const dialog=page.locator(".client-parameter-dialog[open]");const input=dialog.locator("input[type=password]").first();const expected=await input.inputValue();const id=await input.getAttribute("id");await page.evaluate(()=>{window.savedWrite=navigator.clipboard.writeText;navigator.clipboard.writeText=async()=>{throw Error("test denial")}});const button=dialog.locator("[data-copy-target=\"#"+id+"\"]");await button.click();await page.waitForTimeout(400);const actual=await page.evaluate(()=>navigator.clipboard.readText());if(actual!==expected)throw Error("modal fallback mismatch");if(await dialog.locator("textarea.visually-hidden").count())throw Error("copy helper leaked");if(await input.getAttribute("type")!=="password")throw Error("secret unmasked");await page.evaluate(()=>{navigator.clipboard.writeText=window.savedWrite;delete window.savedWrite});return {modalLegacyFallback:true,rawClipboardMatches:true,remainsMasked:true,helperRemoved:true};})(page);
+```

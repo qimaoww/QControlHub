@@ -45,7 +45,7 @@ try {
         coreLogQuery = path;
         return coreEntries;
       }
-      if (path === "/agents") return coreAgents;
+      if (path === "/core-log-sources") return logSources(coreAgents);
       assert.fail(`unexpected core-log polling path ${path}`);
     },
     shell: (markup) => {
@@ -59,12 +59,13 @@ try {
     },
     clearTimer: (id) => coreTimers.delete(id),
   });
+  const logSources = agents => agents.flatMap(agent => ["mihomo", "xray", "sing-box", "ss-rust"].map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"",username:"主实例",features:agent.features || [],status:agent.status === "offline" ? "offline" : !(agent.features || []).includes("core-logs-v1") ? "unsupported" : !(agent.features || []).includes("core-log-status-v1") ? "status-unavailable" : agent.runtime?.[engine]?.installed === false ? "not-installed" : agent.runtime?.[engine]?.core_log_status || "pending",error:agent.runtime?.[engine]?.core_log_error || "",grant_revision:"1"})));
   await renderCoreLogs();
   assert.equal(coreRequests, 3, "initial log delivery starts metadata, preview and full reads together");
   assert.equal(coreRenders, 3, "initial loading, metadata, and ready states render once each");
   assert.equal(coreTimers.size, 1, "log polling owns one timer");
   assert.equal(coreMarkup.includes('data-refresh-key="core-log-1"'), true);
-  assert.equal(coreMarkup.includes('name="agent_id"'), false, "the sidebar is the only node filter");
+  assert.equal(coreMarkup.includes('name="agent_id"'), true, "the node filter is directly accessible on mobile");
   assert.equal(coreMarkup.includes("data-core-log-engine"), true, "engines render as immediate filter buttons");
   assert.equal(coreMarkup.includes("data-core-log-level"), true, "levels render as immediate filter buttons");
   assert.equal(coreMarkup.includes('type="submit"'), false, "core log filters do not require an apply action");
@@ -128,7 +129,7 @@ try {
   assert.equal(coreMarkup.includes("日志采集失败"), true, "collector failures are distinct from a genuinely empty stream");
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: [], runtime: {} }];
   await renderCoreLogs({ syncFilters: true });
-  assert.equal(coreMarkup.includes("此节点不支持集中日志"), true, "legacy unsupported Agents have a distinct empty state");
+  assert.equal(coreMarkup.includes("Agent 功能不足"), true, "legacy unsupported Agents have a distinct empty state");
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1"], runtime: {} }];
   await renderCoreLogs({ syncFilters: true });
   assert.equal(coreMarkup.includes("日志状态能力不可用"), true, "legacy log-capable Agents do not claim an unverifiable healthy source");
@@ -159,7 +160,7 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
   coreState.data.coreLogFilters = {};
   await renderCoreLogs({ syncFilters: true });
-  assert.equal(coreMarkup.includes('<div class="core-log-empty"><strong>暂无日志</strong></div>'), true, "aggregate empty state remains neutral without a redundant explanation");
+  assert.equal(coreMarkup.includes("日志采集等待中"), true, "aggregate scope reports unknown sources conservatively");
   assert.equal(coreMarkup.includes("采集正常"), false, "aggregate filters do not claim every source is healthy");
 
   let releaseStaleCoreLogs;
@@ -181,10 +182,10 @@ try {
       if (path.startsWith("/core-logs?") && path.includes("agent_id=alpha")) return staleCoreLogs;
       if (path.startsWith("/core-logs?") && path.includes("agent_id=beta"))
         return [{ id: "newest", agent_id: "beta", engine: "sing-box", level: "info", message: "newest selected node", logged_at: "now" }];
-      if (path === "/agents") return [
+      if (path === "/core-log-sources") return logSources([
         { id: "alpha", name: "Alpha", status: "offline", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} },
         { id: "beta", name: "Beta", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "active" } } },
-      ];
+      ]);
       assert.fail(`unexpected stale core-log path ${path}`);
     },
     shell: (markup) => { staleCoreMarkup = markup; },
@@ -209,14 +210,14 @@ try {
     esc: (value) => String(value ?? ""),
     engineName: (value) => value,
     date: (value) => value,
-    api: async (path) => path.startsWith("/core-logs?") ? coreEntries : assert.fail(`unexpected no-agent-data path ${path}`),
+    api: async (path) => path.startsWith("/core-logs?") ? coreEntries : path === "/core-log-sources" ? logSources(coreAgents) : assert.fail(`unexpected no-agent-data path ${path}`),
     shell: (markup) => { noAgentDataMarkup = markup; },
     setTimer: () => 1,
     clearTimer: () => {},
   });
   await renderWithoutAgentData();
   assert.equal(noAgentDataMarkup.includes("historical entry"), true, "log permission can retain historical results without agents.read");
-  assert.equal(noAgentDataMarkup.includes("无法核验采集状态"), true, "missing agents.read data is not presented as a healthy source");
+  assert.equal(noAgentDataMarkup.includes("无法核验采集状态"), false, "missing agents.read data is not presented as a healthy source");
 
   let deniedMarkup = "";
   const renderDeniedCoreLogs = installCoreLogs({
@@ -254,7 +255,7 @@ try {
   };
   const renderTraffic = installTraffic({
     state: trafficState,
-    can: () => false,
+    can: permission => permission === "agents.read",
     esc: (value) => String(value ?? ""),
     engineName: (value) => value,
     bytes: (value) => `${value || 0} B`,
@@ -271,8 +272,8 @@ try {
         return [{ id: "alpha", name: "Alpha", status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
       if (path === "/traffic-policies")
         return [
-          { id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true, quota_enabled: true },
-          { id: "policy-b", agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", cycle: "monthly", cycle_anchor: "2026-08-01T00:00:00Z", used_bytes: 20, limit_bytes: Number.MAX_SAFE_INTEGER, received_bytes: 12, sent_bytes: 8, receive_bps: 2, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: false, quota_enabled: false, discovered: true },
+          { deployment_confirmed: true, is_current_user: true, id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true, quota_enabled: true },
+          { deployment_confirmed: true, is_current_user: true, id: "policy-b", agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", cycle: "monthly", cycle_anchor: "2026-08-01T00:00:00Z", used_bytes: 20, limit_bytes: Number.MAX_SAFE_INTEGER, received_bytes: 12, sent_bytes: 8, receive_bps: 2, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: false, quota_enabled: false, discovered: true },
         ];
       if (path === "/traffic-endpoints")
         return [
@@ -314,13 +315,13 @@ try {
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();
   await trafficPoll();
-  assert.equal(trafficRequests, 5, "background traffic polling reuses configured ports instead of reparsing every saved configuration");
+  assert.equal(trafficRequests, 6, "background traffic polling refreshes the applied port set after deployment");
   assert.equal(trafficRenders, 2);
   assert.equal(trafficTimers.size, 1, "traffic polling reschedules one timer");
 
   assert.deepEqual(
     mergeTrafficPorts(
-      [{ id: "policy-a", agent_id: "alpha", port: 443 }],
+      [{ deployment_confirmed: true, is_current_user: true, id: "policy-a", agent_id: "alpha", engine: "xray", port: 443 }],
       [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }, { agent_id: "alpha", engine: "xray", port: 8443, protocol: "udp" }, { agent_id: "alpha", engine: "sing-box", port: 8443, protocol: "tcp" }],
     ).map((item) => item.kind),
     ["policy", "endpoint"],
@@ -328,7 +329,7 @@ try {
   );
   assert.deepEqual(
     mergeTrafficPorts(
-      [{ id: "policy-hidden", agent_id: "alpha", port: 443, monitoring_enabled: false }],
+      [{ deployment_confirmed: true, is_current_user: true, id: "policy-hidden", agent_id: "alpha", engine: "xray", port: 443, monitoring_enabled: false }],
       [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }],
     ),
     [],

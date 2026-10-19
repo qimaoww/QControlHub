@@ -64,7 +64,12 @@ func main() {
 		slog.Error("invalid managed public IP probe configuration", "error", err)
 		os.Exit(1)
 	}
-	startupContext, cancelStartup := context.WithTimeout(context.Background(), 20*time.Second)
+	startupTimeout, err := databaseStartupTimeout(os.Getenv("QCH_DATABASE_STARTUP_TIMEOUT"))
+	if err != nil {
+		slog.Error("invalid database startup timeout", "error", err)
+		os.Exit(1)
+	}
+	startupContext, cancelStartup := context.WithTimeout(context.Background(), startupTimeout)
 	allowInsecureDatabase := envBool("QCH_ALLOW_INSECURE_DATABASE", false)
 	if allowInsecureDatabase {
 		slog.Warn("remote PostgreSQL certificate verification is explicitly disabled")
@@ -83,6 +88,7 @@ func main() {
 	if configEncryptionKey != "" {
 		slog.Info("configuration payloads will be encrypted at rest")
 	}
+	slog.Info("opening PostgreSQL data store", "startup_timeout", startupTimeout)
 	dataStore, err := store.OpenWithConfigKeyring(startupContext, databaseURL, allowInsecureDatabase, configEncryptionKey, previousConfigEncryptionKeys)
 	if err == nil {
 		if selection := strings.TrimSpace(os.Getenv("QCH_DEFAULT_AGENT_ENGINES")); selection != "" {
@@ -95,7 +101,7 @@ func main() {
 	}
 	cancelStartup()
 	if err != nil {
-		slog.Error("open data store", "error", err)
+		slog.Error("open data store", "error", err, "startup_timeout", startupTimeout)
 		os.Exit(1)
 	}
 	defer dataStore.Close()
@@ -155,6 +161,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go janitor(ctx, dataStore)
+	go certificateMaintenance(ctx, dataStore)
 	go cleanDeletedAgents(ctx, dataStore)
 	go backfillClientConnectionLogs(ctx, dataStore)
 	go apiServer.MonitorAgentPresence(ctx)

@@ -117,7 +117,7 @@ docker() {
                     grep -Fq 'image: sha256:old-control' "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml"
                     grep -Fq 'image: sha256:old-web' "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml"
                     case " $* " in *" --pull never "*) ;; *) return 1 ;; esac
-                    case " $* " in *" --no-deps control-plane qcontrol-web "*) ;; *) return 1 ;; esac
+                    case " $* " in *" --no-deps control-plane "*|*" --no-deps qcontrol-web "*) ;; *) return 1 ;; esac
                     printf '%s\n' rollback > "$QCH_UPDATE_PHASE"
                     return 0
                     ;;
@@ -126,6 +126,13 @@ docker() {
                     [ "${QCH_UPDATE_FAIL_UP:-false}" = false ]
                     ;;
             esac
+            ;;
+        *" exec control-container wget "*)
+            if [ "${QCH_UPDATE_FAIL_CONTROL_READY:-false}" = true ] && \
+                [ "$(<"$QCH_UPDATE_PHASE")" = updated ]; then
+                return 1
+            fi
+            return 0
             ;;
         *) return 0 ;;
     esac
@@ -197,6 +204,12 @@ up_line="$(grep -nF 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG" | tail -n 
 }
 [ "$(grep -Fc '/healthz' "$QCH_UPDATE_CURL_LOG")" -eq 2 ]
 [ "$(grep -Fc '/readyz' "$QCH_UPDATE_CURL_LOG")" -eq 2 ]
+# The web container must be created only after the control plane answered
+# readiness, both during updates and when restoring the original images.
+control_up="$(grep -n 'up .*--no-deps control-plane$' "$QCH_UPDATE_DOCKER_LOG" | cut -d: -f1)"
+control_ready="$(grep -n 'exec control-container wget' "$QCH_UPDATE_DOCKER_LOG" | cut -d: -f1)"
+web_up="$(grep -n 'up .*--no-deps qcontrol-web$' "$QCH_UPDATE_DOCKER_LOG" | cut -d: -f1)"
+[ "$control_up" -lt "$control_ready" ] && [ "$control_ready" -lt "$web_up" ]
 
 # Either application image changing is enough to update the deployment.
 for changed_service in control web; do
@@ -297,6 +310,23 @@ cmp "$test_root/expected.env" "$ENV_FILE"
 cmp "$test_root/expected-compose.yml" "$EXTERNAL_COMPOSE_FILE"
 [ "$(<"$QCH_UPDATE_PHASE")" = rollback ]
 grep -Fq '已恢复旧配置，原版本容器继续运行' "$test_root/health-failure.out"
+
+# A failed migration cannot start the new frontend. The recovered control
+# plane must pass readiness before rollback starts the original frontend.
+export QCH_UPDATE_FAIL_HEALTH=false QCH_UPDATE_FAIL_CONTROL_READY=true
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-control-not-ready.log"
+export QCH_UPDATE_CURL_LOG="$test_root/curl-control-not-ready.log"
+printf '%s\n' old > "$QCH_UPDATE_PHASE"
+write_fixture
+if (update_external_services) > "$test_root/control-not-ready.out" 2>&1; then
+    printf '%s\n' 'quick-start update regression: migration failure succeeded' >&2
+    exit 1
+fi
+grep -Fq '已恢复旧配置，原版本容器继续运行' "$test_root/control-not-ready.out"
+web_up="$(grep 'up .*--no-deps qcontrol-web$' "$QCH_UPDATE_DOCKER_LOG")"
+[ "$(printf '%s\n' "$web_up" | wc -l)" -eq 1 ]
+grep -Fq 'docker-compose.rollback.yml' <<< "$web_up"
+export QCH_UPDATE_FAIL_CONTROL_READY=false
 
 # Recovery itself can fail (for example, storage becomes read-only). Do not
 # delete the only backups or claim the original deployment has been restored.

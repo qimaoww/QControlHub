@@ -1,0 +1,1594 @@
+[
+  {
+    "kind": "capture",
+    "stage": "after",
+    "device": "mobile",
+    "theme": "light",
+    "results": [
+      {
+        "name": "certificates",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "certificate-detail",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-grants",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 259,
+              "scrollHeight": 259
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-order",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-sources",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-accounts",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-acme-account",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-account",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-create",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-http",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-import",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-empty",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "traffic-sync",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 362,
+              "scrollWidth": 362,
+              "height": 640,
+              "scrollHeight": 640
+            }
+          ]
+        }
+      },
+      {
+        "name": "node-sharing",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 358,
+              "scrollWidth": 358,
+              "height": 810,
+              "scrollHeight": 810
+            }
+          ]
+        }
+      },
+      {
+        "name": "tls-preset",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "xhttp-preset",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "settings-acme",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      }
+    ]
+  },
+  {
+    "kind": "capture",
+    "stage": "after",
+    "device": "mobile",
+    "theme": "dark",
+    "results": [
+      {
+        "name": "certificates",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "certificate-detail",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-grants",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 259,
+              "scrollHeight": 259
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-order",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-sources",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-accounts",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 372,
+              "scrollWidth": 372,
+              "height": 826,
+              "scrollHeight": 826
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-acme-account",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-account",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-create",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-http",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-import",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 390,
+              "scrollWidth": 390,
+              "height": 844,
+              "scrollHeight": 844
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-empty",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "traffic-sync",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 362,
+              "scrollWidth": 362,
+              "height": 640,
+              "scrollHeight": 640
+            }
+          ]
+        }
+      },
+      {
+        "name": "node-sharing",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": [
+            {
+              "width": 358,
+              "scrollWidth": 358,
+              "height": 810,
+              "scrollHeight": 810
+            }
+          ]
+        }
+      },
+      {
+        "name": "tls-preset",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "xhttp-preset",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "settings-acme",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 390,
+          "document": 390,
+          "dialogs": []
+        }
+      }
+    ]
+  },
+  {
+    "kind": "capture",
+    "stage": "after",
+    "device": "tablet",
+    "theme": "light",
+    "results": [
+      {
+        "name": "certificates",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "certificate-detail",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 1130,
+              "scrollHeight": 1130
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-grants",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 279,
+              "scrollHeight": 279
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-order",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 1130,
+              "scrollHeight": 1130
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-sources",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 805,
+              "scrollHeight": 805
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-accounts",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 881,
+              "scrollHeight": 881
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-acme-account",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 608,
+              "scrollHeight": 608
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-account",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 704,
+              "scrollHeight": 704
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-create",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 1013,
+              "scrollHeight": 1013
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-http",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 1131,
+              "scrollHeight": 1131
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-import",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 919,
+              "scrollHeight": 919
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-empty",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "traffic-sync",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 720,
+              "scrollWidth": 720,
+              "height": 504,
+              "scrollHeight": 504
+            }
+          ]
+        }
+      },
+      {
+        "name": "node-sharing",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 713,
+              "scrollHeight": 713
+            }
+          ]
+        }
+      },
+      {
+        "name": "tls-preset",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "xhttp-preset",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "settings-acme",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "light",
+        "actualTheme": "light",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      }
+    ]
+  },
+  {
+    "kind": "capture",
+    "stage": "after",
+    "device": "tablet",
+    "theme": "dark",
+    "results": [
+      {
+        "name": "certificates",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "certificate-detail",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 1130,
+              "scrollHeight": 1130
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-grants",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 279,
+              "scrollHeight": 279
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-order",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 1130,
+              "scrollHeight": 1130
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-sources",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 805,
+              "scrollHeight": 805
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-accounts",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 786,
+              "scrollWidth": 786,
+              "height": 881,
+              "scrollHeight": 881
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-acme-account",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 608,
+              "scrollHeight": 608
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-dns-account",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 704,
+              "scrollHeight": 704
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-create",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 1013,
+              "scrollHeight": 1013
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-http",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 1131,
+              "scrollHeight": 1131
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-import",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 919,
+              "scrollHeight": 919
+            }
+          ]
+        }
+      },
+      {
+        "name": "certificate-empty",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "traffic-sync",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 720,
+              "scrollWidth": 720,
+              "height": 504,
+              "scrollHeight": 504
+            }
+          ]
+        }
+      },
+      {
+        "name": "node-sharing",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": [
+            {
+              "width": 560,
+              "scrollWidth": 560,
+              "height": 713,
+              "scrollHeight": 713
+            }
+          ]
+        }
+      },
+      {
+        "name": "tls-preset",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "xhttp-preset",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      },
+      {
+        "name": "settings-acme",
+        "viewport": {
+          "width": 820,
+          "height": 1180
+        },
+        "theme": "dark",
+        "actualTheme": "dark",
+        "touch": {
+          "points": 1,
+          "coarse": true
+        },
+        "overflow": {
+          "width": 820,
+          "document": 820,
+          "dialogs": []
+        }
+      }
+    ]
+  }
+]

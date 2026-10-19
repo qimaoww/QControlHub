@@ -36,7 +36,7 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 		if err != nil || lease == nil || lease.ID != task.ID {
 			t.Fatalf("claim %s: %+v %v", saved.Engine, lease, err)
 		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,12 +59,16 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 	if err != nil || lease == nil || lease.ID != task.ID {
 		t.Fatalf("claim changed port: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
-	if err != nil || len(policies) != 5 {
+	if err != nil || len(policies) != 4 {
 		t.Fatalf("missing actual-port accounting: %+v %v", policies, err)
+	}
+	var retired bool
+	if err := db.pool.QueryRow(ctx, `SELECT NOT monitoring_enabled FROM port_traffic_policies WHERE agent_id=$1 AND port=21001`, agent.ID).Scan(&retired); err != nil || !retired {
+		t.Fatalf("old shared port must retain history without live monitoring: %v %v", retired, err)
 	}
 	now := time.Now().UTC().Add(time.Second)
 	usages := make([]core.PortTrafficUsage, 0, len(policies))
@@ -74,9 +78,9 @@ func TestUnrestrictedSharedPortsAllEnginesRemainMetered(t *testing.T) {
 		}
 		start, end, _ := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
 		usages = append(usages, core.PortTrafficUsage{PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration,
-			ReceivedBytes: 200, UsedBytes: 200, LifetimeReceivedBytes: 200, CounterEpoch: strings.Repeat("a", 32),
+			ReceivedBytes: 250, UsedBytes: 250, LifetimeReceivedBytes: 250, CounterEpoch: strings.Repeat("a", 32),
 			CollectedAt: now, PeriodStart: start, PeriodEnd: end, EnforcementAvailable: true,
-			ShareID: policy.SharedQuota.ID, ShareUsedBytes: 200})
+			ShareID: policy.SharedQuota.ID, ShareUsedBytes: 250})
 	}
 	for range 2 {
 		if err := db.UpdatePortTrafficUsage(ctx, agent.ID, usages, now); err != nil {
@@ -136,7 +140,7 @@ func TestUnrestrictedSharedPortsAdoptExactRunningSnapshot(t *testing.T) {
 	if err != nil || lease == nil {
 		t.Fatalf("claim: %+v %v", lease, err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+	if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	config.Content = strings.ReplaceAll(config.Content, "21001", "21002")
@@ -153,7 +157,7 @@ func TestUnrestrictedSharedPortsAdoptExactRunningSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 0 {
+	if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 1 || policies[0].SharedQuota != nil {
 		t.Fatalf("pending invitation adopted a running service: %+v %v", policies, err)
 	}
 	acceptSharedTestInvitations(t, db, ctx, user.ID, access)

@@ -93,7 +93,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		(engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark"))
 	mutationSource := current.Content
 	if managedAccounting && engine == core.EngineShadowsocksRust {
-		mutationSource, err = serverconfig.PresetAccountingSource(engine, current.Content)
+		mutationSource, err = s.presetAccountingSource(request.Context(), current)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -116,7 +116,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 	}
 	if managedAccounting {
 		if engine != core.EngineShadowsocksRust {
-			content, err = serverconfig.AccountingUpdateSource(engine, content, current.Content)
+			content, err = s.accountingUpdateSource(request.Context(), current, content)
 		}
 	}
 	if err == nil && len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {

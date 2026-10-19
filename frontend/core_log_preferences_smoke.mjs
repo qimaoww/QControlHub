@@ -264,13 +264,13 @@ try {
     clearTimer: () => {},
     api: async (path) => {
       calls.push(path);
-      if (path === "/agents") return agents;
+      if (path === "/core-log-sources") return agents.flatMap(agent => engines.map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"self",username:"self",features:agent.features,status:"active",grant_revision:"1"})));
       const params = new URLSearchParams(path.split("?")[1]);
       return entries(params.get("agent_id") || "", Number(params.get("limit")));
     },
   });
   await render();
-  assert.equal(calls[0], "/agents");
+  assert.equal(calls[0], "/core-log-sources");
   assert.equal(
     calls[1],
     `/core-logs?agent_id=${agentID}&limit=200`,
@@ -375,7 +375,7 @@ try {
     clearTimer: () => {},
     api: async (path) => {
       explicitCalls.push(path);
-      return path === "/agents" ? [] : [];
+      return path === "/core-log-sources" ? [] : [];
     },
   });
   await explicitRender();
@@ -394,7 +394,7 @@ try {
     undefined,
     "the session keeps control of the live-update switch",
   );
-  assert.deepEqual(explicitCalls, ["/agents", "/core-logs?limit=200"]);
+  assert.deepEqual(explicitCalls, ["/core-log-sources", "/core-logs?limit=200"]);
   assert.match(explicitMarkup, /<option value="200" selected>/);
 
   const deniedDom = stubDom();

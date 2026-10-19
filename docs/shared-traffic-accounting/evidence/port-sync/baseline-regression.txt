@@ -1,0 +1,5 @@
+--- FAIL: TestSharedPortReplacementSettlesOldCountersWithoutStoppingInstance (0.01s)
+    shared_dual_accounting_linux_test.go:215: reserved future listener stopped the running instance
+FAIL
+FAIL	github.com/qimaoww/qcontrolhub/internal/agent	0.336s
+FAIL

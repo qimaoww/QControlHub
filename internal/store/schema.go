@@ -3,9 +3,30 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 73
+const currentSchemaVersion = 82
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS traffic_batch_requests (
+ account_id text NOT NULL,
+ request_id text NOT NULL,
+ payload_hash text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(account_id,request_id)
+);
+CREATE TABLE IF NOT EXISTS traffic_batch_results (
+ account_id text NOT NULL,
+ request_id text NOT NULL,
+ policy_id text NOT NULL,
+ result jsonb NOT NULL,
+ PRIMARY KEY(account_id,request_id,policy_id),
+ FOREIGN KEY(account_id,request_id) REFERENCES traffic_batch_requests(account_id,request_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS account_node_orders (
+ account_id text PRIMARY KEY,
+ node_ids text[] NOT NULL DEFAULT '{}',
+ revision bigint NOT NULL CHECK (revision > 0)
+);
+
 CREATE TABLE IF NOT EXISTS agents (
     id text PRIMARY KEY,
     name varchar(100) NOT NULL,
@@ -83,13 +104,27 @@ CREATE TABLE IF NOT EXISTS core_logs (
     UNIQUE (batch_id,entry_index,received_at)
 ) PARTITION BY RANGE (received_at);
 
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS instance_id text NOT NULL DEFAULT '';
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS service text NOT NULL DEFAULT '';
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+-- Historical rows lack an ownership snapshot, including formerly unassigned
+-- nodes. This sentinel must never match an actual current node owner.
+ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS node_owner_id text NOT NULL DEFAULT 'unverified';
+CREATE INDEX IF NOT EXISTS core_logs_instance_recent_idx ON core_logs(agent_id,engine,instance_id,node_owner_id,owner_id,id DESC)
+ INCLUDE(level,message,logged_at,received_at,service);
+CREATE TABLE IF NOT EXISTS core_log_source_states (
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ engine text NOT NULL, instance_id text NOT NULL, status text NOT NULL, error text NOT NULL DEFAULT '',
+ updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(agent_id,engine,instance_id)
+);
+
 -- Node windows require (agent_id,engine,id); fleet windows require (engine,id).
 -- The node index cannot supply fleet recency order, especially for a quiet
 -- engine: it otherwise scans/sorts history or reads the primary-key heap.
 CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
-    INCLUDE (level,message,logged_at,received_at);
+    INCLUDE (level,message,logged_at,received_at,instance_id,service,owner_id,node_owner_id);
 CREATE INDEX IF NOT EXISTS core_logs_engine_covering_idx ON core_logs(engine,id DESC)
-    INCLUDE (agent_id,level,message,logged_at,received_at);
+    INCLUDE (agent_id,level,message,logged_at,received_at,instance_id,service,owner_id,node_owner_id);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 
@@ -181,15 +216,15 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
-	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
+    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
+	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
 	    mainland_access_policies jsonb NOT NULL DEFAULT '[]'::jsonb,
 	    core_version varchar(64),
 	    core_source varchar(32),
-	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
+	    status varchar(20) NOT NULL CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled')),
 	    attempt integer NOT NULL DEFAULT 0,
     output text,
     error text,
@@ -497,6 +532,15 @@ CREATE TABLE IF NOT EXISTS agent_shared_instance_ownership (
 	updated_at timestamptz NOT NULL,
 	PRIMARY KEY (agent_id,engine,share_id)
 );
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS service_status text NOT NULL DEFAULT 'unknown';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS status_reason text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS observed_at timestamptz;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS sampled_at timestamptz;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS last_task_id text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS applied_task_id text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS deployed_at timestamptz;
+CREATE INDEX IF NOT EXISTS shared_instances_owner_idx ON agent_shared_instance_ownership(owner_id,agent_id,engine);
+CREATE INDEX IF NOT EXISTS tasks_instance_recent_idx ON tasks(agent_id,engine,shared_traffic_id,created_at DESC) WHERE shared_instance;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS config_uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_settled boolean NOT NULL DEFAULT false;
@@ -507,21 +551,35 @@ SELECT latest.agent_id,latest.engine,COALESCE(c.owner_id,deployed.owner_id,lates
 	latest.status<>'succeeded',
 	EXISTS(
 		SELECT 1 FROM tasks failed WHERE failed.agent_id=latest.agent_id AND failed.engine=latest.engine
-			AND failed.action IN ('deploy','import-existing') AND failed.status<>'succeeded'
+			AND NOT failed.shared_instance AND failed.action IN ('deploy','import-existing') AND failed.status<>'succeeded'
 			AND failed.started_at IS NOT NULL AND failed.started_at>COALESCE(deployed.finished_at,'-infinity'::timestamptz)),
 	COALESCE(latest.finished_at,latest.started_at,latest.created_at)
 FROM (SELECT DISTINCT ON(agent_id,engine) *
-	FROM tasks WHERE action IN ('deploy','import-existing','start','restart','stop','uninstall')
+	FROM tasks WHERE NOT shared_instance AND action IN ('deploy','import-existing','start','restart','stop','uninstall')
 		AND (started_at IS NOT NULL OR status='succeeded')
 	ORDER BY agent_id,engine,COALESCE(started_at,finished_at,created_at) DESC,created_at DESC,id DESC) latest
 LEFT JOIN LATERAL (
 	SELECT owner_id,config_id,config_version,finished_at FROM tasks
 	WHERE agent_id=latest.agent_id AND engine=latest.engine AND action IN ('deploy','import-existing')
-		AND status='succeeded' AND config_id IS NOT NULL AND finished_at IS NOT NULL
+		AND NOT shared_instance AND status='succeeded' AND config_id IS NOT NULL AND finished_at IS NOT NULL
 	ORDER BY finished_at DESC,id DESC LIMIT 1
 ) deployed ON true
 LEFT JOIN configs c ON c.id=COALESCE(deployed.config_id,latest.config_id)
 ON CONFLICT(agent_id,engine) DO NOTHING;
+-- A lifecycle attempt can be uncertain while the previous applied revision is
+-- still the traffic baseline. Never infer confirmation from a claimed task.
+ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_config_confirmed boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS traffic_config_confirmed boolean NOT NULL DEFAULT false;
+UPDATE agent_engine_ownership state SET traffic_config_confirmed=true
+WHERE NOT traffic_config_confirmed AND config_id<>'' AND config_version>0 AND
+ (NOT config_uncertain OR EXISTS(SELECT 1 FROM tasks t WHERE t.agent_id=state.agent_id AND t.engine=state.engine
+  AND NOT t.shared_instance AND t.config_id=state.config_id AND t.config_version=state.config_version
+  AND t.action IN ('deploy','import-existing') AND t.status='succeeded' AND t.finished_at IS NOT NULL));
+UPDATE agent_shared_instance_ownership state SET traffic_config_confirmed=true
+WHERE NOT traffic_config_confirmed AND config_id<>'' AND config_version>0 AND
+ (NOT config_uncertain OR applied_task_id<>'' OR EXISTS(SELECT 1 FROM tasks t WHERE t.agent_id=state.agent_id AND t.engine=state.engine
+  AND t.shared_instance AND t.shared_traffic_id=state.share_id AND t.config_id=state.config_id AND t.config_version=state.config_version
+  AND t.action='deploy' AND t.status='succeeded' AND t.finished_at IS NOT NULL));
 CREATE INDEX IF NOT EXISTS tasks_owner_created_idx ON tasks(owner_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -850,4 +908,114 @@ CREATE TABLE IF NOT EXISTS client_connection_locations (
  province varchar(100) NOT NULL DEFAULT '',
  retry_after timestamptz NOT NULL
 );
+
+-- Certificate resources use strict ownership even for panel administrators.
+CREATE TABLE IF NOT EXISTS certificate_accounts (
+ id text PRIMARY KEY, owner_id text NOT NULL, kind text NOT NULL CHECK(kind IN ('acme','dns')),
+ metadata jsonb NOT NULL, secret text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS certificate_accounts_owner ON certificate_accounts(owner_id,kind);
+CREATE TABLE IF NOT EXISTS panel_certificates (
+ id text PRIMARY KEY, owner_id text NOT NULL, metadata jsonb NOT NULL,
+ version integer NOT NULL DEFAULT 0, auto_renew boolean NOT NULL DEFAULT false,
+ next_attempt timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS panel_certificates_owner ON panel_certificates(owner_id);
+CREATE TABLE IF NOT EXISTS managed_certificate_sources (
+ id text PRIMARY KEY, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, config_id text NOT NULL, task_id text NOT NULL,
+ engine text NOT NULL, share_id text NOT NULL DEFAULT '', domain text NOT NULL,
+ certificate_id text REFERENCES panel_certificates(id) ON DELETE SET NULL,
+ present boolean NOT NULL DEFAULT true, status text NOT NULL DEFAULT 'pending',
+ error text NOT NULL DEFAULT '', last_synced timestamptz, last_requested timestamptz,
+ UNIQUE(agent_id,owner_id,config_id,domain)
+);
+CREATE INDEX IF NOT EXISTS managed_certificate_sources_owner ON managed_certificate_sources(owner_id);
+CREATE TABLE IF NOT EXISTS certificate_versions (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ version integer NOT NULL, secret text NOT NULL, metadata jsonb NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(certificate_id,version)
+);
+CREATE TABLE IF NOT EXISTS certificate_grants (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ user_id text NOT NULL REFERENCES panel_users(id) ON DELETE CASCADE,
+ PRIMARY KEY(certificate_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_orders (
+ id text PRIMARY KEY, certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, status text NOT NULL, stage text NOT NULL DEFAULT 'queued',
+ secret text NOT NULL, error text NOT NULL DEFAULT '', attempt integer NOT NULL DEFAULT 0,
+ next_attempt timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS certificate_active_order ON certificate_orders(certificate_id)
+ WHERE status IN ('queued','running','waiting_dns','validating','canceling');
+CREATE INDEX IF NOT EXISTS certificate_orders_due ON certificate_orders(next_attempt) WHERE status IN ('queued','running','validating','canceling');
+CREATE TABLE IF NOT EXISTS certificate_http_grants (
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ user_id text NOT NULL REFERENCES panel_users(id) ON DELETE CASCADE, domain text NOT NULL,
+ PRIMARY KEY(agent_id,domain)
+);
+CREATE TABLE IF NOT EXISTS certificate_http_challenges (
+ order_id text NOT NULL REFERENCES certificate_orders(id) ON DELETE CASCADE,
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ domain text NOT NULL, token text NOT NULL, value text NOT NULL, expires_at timestamptz NOT NULL,
+ PRIMARY KEY(order_id,domain,token), UNIQUE(agent_id,domain,token)
+);
+CREATE TABLE IF NOT EXISTS certificate_bindings (
+ certificate_id text NOT NULL REFERENCES panel_certificates(id),
+ config_id text NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+ owner_id text NOT NULL, version integer NOT NULL DEFAULT 0, config_version integer NOT NULL DEFAULT 0, enabled boolean NOT NULL DEFAULT false, task_id text NOT NULL DEFAULT '',
+ status text NOT NULL DEFAULT 'pending', error text NOT NULL DEFAULT '', retry_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(certificate_id,config_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_task_versions (
+ task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ certificate_id text NOT NULL REFERENCES panel_certificates(id), version integer NOT NULL,
+ PRIMARY KEY(task_id,certificate_id)
+);
+CREATE TABLE IF NOT EXISTS certificate_dns_leases (
+ name text NOT NULL, value text NOT NULL, order_id text NOT NULL REFERENCES certificate_orders(id) ON DELETE CASCADE,
+ PRIMARY KEY(name,value)
+);
+-- Applied listener identity survives retirement independently of quota/history.
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_id text NOT NULL DEFAULT '';
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS config_version integer NOT NULL DEFAULT 0;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS inbound_tag text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS admin_api_keys (
+ id text PRIMARY KEY,
+ name varchar(100) NOT NULL,
+ prefix varchar(24) NOT NULL,
+ digest bytea NOT NULL UNIQUE CHECK(octet_length(digest)=32),
+ creator_type text NOT NULL CHECK(creator_type IN ('user','environment')),
+ creator_id text NOT NULL,
+ owner_id text NOT NULL,
+ permissions jsonb NOT NULL,
+ ip_allowlist jsonb NOT NULL DEFAULT '[]'::jsonb,
+ disabled boolean NOT NULL DEFAULT false,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz,
+ last_used_at timestamptz,
+ revoked_at timestamptz,
+ revision bigint NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS admin_api_keys_creator_idx ON admin_api_keys(creator_type,creator_id,created_at DESC);
+
+CREATE OR REPLACE FUNCTION revoke_admin_api_keys_for_user() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='DELETE' THEN
+  UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
+   WHERE creator_type='user' AND creator_id=OLD.id AND revoked_at IS NULL;
+  RETURN OLD;
+ END IF;
+ IF NEW.disabled OR NEW.role<>'admin' THEN
+  UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
+   WHERE creator_type='user' AND creator_id=NEW.id AND revoked_at IS NULL;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS panel_users_revoke_api_keys ON panel_users;
+CREATE TRIGGER panel_users_revoke_api_keys BEFORE UPDATE OR DELETE ON panel_users
+ FOR EACH ROW EXECUTE FUNCTION revoke_admin_api_keys_for_user();
 `

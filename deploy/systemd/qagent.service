@@ -44,10 +44,11 @@ NoNewPrivileges=true
 # Managed configuration validation is launched by systemd in a transient unit
 # with the same qcontrolhub-core identity used by the long-running service, so
 # QAgent itself does not need process-identity capabilities.
+# CAP_NET_BIND_SERVICE allows the temporary HTTP-01 challenge listener.
 # CAP_NET_ADMIN is limited to the Agent's dedicated nftables table for
 # engine-independent per-port traffic accounting and quota enforcement.
-CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN
-AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

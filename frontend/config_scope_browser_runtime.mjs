@@ -20,6 +20,7 @@ async function configFixture({ writable = true, executable = false, installed = 
   const content = "mixed-port: 21001\n# alice-private-workspace\n";
   const agent = { id: "shared", name: "共享主机", status: "online", os: "linux", arch: "amd64",
     can_manage: owned,
+    shared_allocation: owned ? undefined : { ports:[21001], limit_bytes:1024, used_bytes:0 },
     capabilities: ["mihomo"], features: ["managed-config-read-v1"],
     runtime: { mihomo: { installed, existing_config_available: true } } };
   const state = { route: "live-config", navigationEpoch: 1, session: { role: "user", user_id: "alice" },
@@ -71,13 +72,16 @@ export async function testConfigScopeRuntime(preview = false) {
     assert(!document.querySelector('[data-live-intent="deploy"], [data-live-intent="validate"]'), "save-only user was offered task execution");
     editor.value = "mixed-port: 23001\n# saved-private-draft\n";
     document.querySelector('[data-live-intent="save"]').click();
-    await waitFor(() => records.notifications.includes("个人配置已保存"), "personal save did not complete");
+    await waitFor(() => records.notifications.includes("已保存，尚未部署"), "personal save did not complete");
     assert(records.writes.length === 1 && records.tasks.length === 0, "save-only operation submitted a task");
     assert(records.writes[0].content.includes("saved-private-draft"), "personal save lost edited content");
   }
   await configFixture({ executable: true });
   assert(document.querySelector('[data-live-intent="save"]') && document.querySelector('[data-live-intent="deploy"]'), "authorized user must have separate save and deploy controls");
-  assert(document.body.textContent.includes("不能覆盖其他用户"), "shared-host deployment boundary is not explained");
+  assert(document.body.textContent.includes("本人端口 21001"), "shared workspace must identify the recipient's allocated resources");
+  assert(document.querySelector('a[href="#settings-node-shared"]')?.textContent.includes("实例管理"), "shared workspace lost its node management link");
+  assert(!document.querySelector("[data-task-action], [data-instance-version]"), "shared runtime status or lifecycle controls leaked into the configuration page");
+  assert([...document.querySelectorAll(".live-engine-status")].every(badge => badge.textContent === "配置待核实"), "shared configuration badges must describe the unknown configuration, without borrowing host runtime status");
   const owned = await configFixture({ owned: true });
   assert(document.querySelector('[data-live-source="managed"]') && document.querySelector('[data-live-source="import"]'), "owner cannot explicitly read/import its host configuration");
   assert(!owned.records.calls.includes("/tasks") && !owned.records.tasks.length, "owner's personal editor auto-read a host snapshot");
