@@ -655,7 +655,7 @@
   border-left: 1px solid var(--line);
 }
 .node-operations-actions .button {
-  min-height: 33px;
+  min-height: 34px;
   padding: 5px 12px;
 }
 
@@ -2254,8 +2254,9 @@ a.node-card:hover .node-card-open {
   box-sizing: border-box;
   height: 32px;
   min-height: 32px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 78%, var(--line));
+  border-radius: var(--radius-control);
+  background: var(--surface);
   overflow: hidden;
 }
 .core-action {
@@ -2296,11 +2297,123 @@ a.node-card:hover .node-card-open {
   align-items: center;
   justify-content: center;
   padding: 4px 11px;
+  border-radius: var(--radius-control);
   line-height: 1.2;
+}
+
+/* === Unified Site-Wide Button & Peer Control Harmony === */
+:root,
+[data-theme="light"],
+[data-theme="dark"] {
+  --radius-control: 8px;
+}
+
+.button,
+summary.button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-control);
+  line-height: 1.2;
+  transform: none;
+}
+
+.button:not(.primary):not(.danger-button):not(.danger):not(.batch-danger):not(.traffic-status-button),
+summary.button,
+.node-identity-refresh .button {
+  border-color: color-mix(in srgb, var(--line-2) 78%, var(--line));
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-2));
+  color: var(--ink-2);
+  box-shadow: none;
+}
+
+.button:is(.active, [aria-pressed="true"], [aria-expanded="true"]):not(.primary),
+.config-tools-menu[open] > summary.button,
+.config-inbound-menu[open] > summary.button,
+.traffic-card-actions .button:last-child:not(.danger-button),
+.traffic-configured-port .traffic-configure-port {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface));
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.button.primary,
+.core-package-buttons > .button.small.primary,
+.context-primary {
+  border: 1px solid color-mix(in srgb, var(--accent) 86%, var(--ink) 14%);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.button:is(.danger-button, .danger):not(.batch-danger),
+.core-package-buttons > .button.small.danger-button {
+  border-color: color-mix(in srgb, var(--red) 28%, var(--line-2));
+  background: color-mix(in srgb, var(--red-soft) 38%, var(--surface));
+  color: var(--red);
+  box-shadow: none;
+}
+
+:is(.node-name-settings, .node-komari-settings) form :is(input, select, .button) {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  border-radius: var(--radius-control);
+}
+
+.traffic-control-panel > .traffic-filters > .button {
+  padding-inline: 12px;
+  font-size: calc(10px * var(--ui-font-scale));
+}
+
+.dashboard-month-popover > footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-soft) 52%, var(--surface));
+  color: var(--accent);
+  font-size: calc(9.5px * var(--ui-font-scale));
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
 }
 
 /* Site-Wide Interaction States, Scroll Containers & Viewport Safety */
 @media (hover: hover) and (pointer: fine) {
+  .button:not(.primary):not(.danger-button):not(.danger):not(.batch-danger):not(:disabled):hover,
+  summary.button:hover,
+  .node-identity-refresh .button:not(:disabled):hover,
+  .dashboard-month-popover > footer button:hover {
+    border-color: color-mix(in srgb, var(--accent) 36%, var(--line-2));
+    background: color-mix(in srgb, var(--accent-soft) 52%, var(--surface));
+    color: var(--accent);
+    box-shadow: none;
+    transform: none;
+  }
+  .button.primary:not(:disabled):hover,
+  .core-package-buttons > .button.small.primary:not(:disabled):hover,
+  .context-primary:hover {
+    border-color: var(--accent-2);
+    background: var(--accent-2);
+    color: var(--on-accent);
+    box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--accent) 24%, transparent);
+    transform: none;
+  }
+  .button:is(.danger-button, .danger):not(.batch-danger):not(:disabled):hover,
+  .core-package-buttons > .button.small.danger-button:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--red) 48%, var(--line-2));
+    background: var(--red-soft);
+    color: var(--red);
+    box-shadow: none;
+    transform: none;
+  }
   .core-action:not(:disabled):hover {
     background: var(--accent-soft);
     color: var(--accent);
