@@ -133,7 +133,7 @@ export function bindAgentWorkspace({ state, can }, agentsByID, { loadMetricHisto
         .querySelectorAll("[data-node-panel]")
         .forEach((panel) => {
           const active = panel.dataset.nodePanel === target;
-          setPanelVisible(panel, active, { id: "qch-tab-panel" });
+          setPanelVisible(panel, active, button);
         });
     };
     button.onclick = activate;
