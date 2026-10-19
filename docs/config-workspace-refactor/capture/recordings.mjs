@@ -2,7 +2,9 @@ import {mkdir, writeFile} from "node:fs/promises";
 import {resolve} from "node:path";
 import {strict as assert} from "node:assert";
 
-const {chromium} = await import(process.env.QCH_PLAYWRIGHT_MODULE || "playwright");
+const playwright = await import(process.env.QCH_PLAYWRIGHT_MODULE || "playwright");
+// Playwright ships CommonJS, so a filesystem module path resolves to its default export.
+const {chromium} = playwright.chromium ? playwright : playwright.default;
 const [base, directory] = process.argv.slice(2);
 if (!base || !directory) throw Error("Usage: recordings.mjs AFTER_URL RAW_VIDEO_DIRECTORY");
 const output = resolve(directory);

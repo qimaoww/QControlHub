@@ -27,7 +27,8 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
   };
   const render = () => {
     const objects = model.objects(), chosen = model.selected();
-    const item = (id, attributes, title, detail, dirty = false) => `<button type="button" class="config-file-button${chosen === id ? " active" : ""}${dirty ? " is-dirty" : ""}" data-config-object="${esc(id)}" ${attributes} aria-current="${chosen === id}" aria-pressed="${chosen === id}" aria-label="${esc(`${title} · ${detail}${dirty ? " · 未保存" : ""}`)}"><b>${esc(title)}</b><small>${esc(detail)}</small></button>`;
+    const compact = value => { const text = String(value ?? ""); return text.length > 26 ? `${text.slice(0, 13)}…${text.slice(-10)}` : text; };
+    const item = (id, attributes, title, detail, dirty = false) => `<button type="button" class="config-file-button${chosen === id ? " active" : ""}${dirty ? " is-dirty" : ""}" data-config-object="${esc(id)}" ${attributes} title="${esc(`${title} · ${detail}`)}" aria-current="${chosen === id}" aria-pressed="${chosen === id}" aria-label="${esc(`${title} · ${detail}${dirty ? " · 未保存" : ""}`)}"><b>${esc(compact(title))}</b><small>${esc(compact(detail))}</small></button>`;
     const buttons = objects.map((object, index) => item(object.id, `data-config-file="${index}"`, object.title,
       `${object.kind === "common" ? "公共" : object.kind === "outbound" ? object.system ? "统计" : "出站" : "入站"}${object.detail ? ` · ${object.detail}` : ""}`, object.dirty));
     if (!model.segmented) for (const inbound of model.inbounds()) {
