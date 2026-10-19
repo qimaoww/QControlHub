@@ -194,3 +194,62 @@ Real HTTP owner/shared protocol forms
     --- PASS: TestCoreFirstInstallBrowserSessions/bob/mobile (3.77s)
 PASS
 ok  	github.com/qimaoww/qcontrolhub/internal/api	15.082s
+
+Button layout follow-up
+========================
+Restore original horizontal object buttons and existing styles; remove the inner object sidebar.
+No CSS, inline styles or workflow changes. Earlier full Go/HTTP results above predate this presentation-only follow-up.
+
+Commands repeated after the follow-up:
+go test ./frontend -skip '^TestAgentBrowserRuntimeSmoke$'
+node frontend/module_smoke.mjs
+node --test frontend/module_policy_test.mjs frontend/smoke_policy_test.mjs
+go build -buildvcs=false -trimpath -o <task temporary build directory>/ ./cmd/control-plane ./cmd/agent [exit 0]
+QCH_BROWSER_SMOKE_MODES=config-layout,config-layout-mobile,config-migration,config-scope,config-inbounds,config-inbounds-mobile,config-restrictions node frontend/agents_browser_smoke.mjs
+
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.084s
+
+browser workers=2, CPUs=12, memory=20001MiB, modes=7
+browser timing {"mode":"config-inbounds","startupMs":130.09741100000002,"testMs":20623.395587,"cleanupMs":30.707304999999906,"passed":true,"elapsedMs":20784.211676}
+browser timing {"mode":"config-inbounds-mobile","startupMs":129.753332,"testMs":20832.710167,"cleanupMs":27.133287000000564,"passed":true,"elapsedMs":20989.607313}
+browser timing {"mode":"config-layout","startupMs":229.4540589999997,"testMs":911.1679269999986,"cleanupMs":28.844787000001816,"passed":true,"elapsedMs":1169.472012000002}
+browser timing {"mode":"config-migration","startupMs":287.41318200000023,"testMs":1187.9535130000004,"cleanupMs":31.84075799999846,"passed":true,"elapsedMs":1507.211456000001}
+browser timing {"mode":"config-restrictions","startupMs":131.5529260000003,"testMs":868.0876239999998,"cleanupMs":29.892071000002034,"passed":true,"elapsedMs":1029.5373710000022}
+agents browser runtime smoke passed
+browser timing {"mode":"config-layout-mobile","startupMs":124.4439280000006,"testMs":658.1781740000006,"cleanupMs":27.237089999998716,"passed":true,"elapsedMs":809.8644010000025}
+browser timing {"mode":"config-scope","startupMs":139.44795099999828,"testMs":400.8819220000005,"cleanupMs":27.43622999999934,"passed":true,"elapsedMs":567.7739389999988}
+agents browser runtime smoke passed
+browser suite elapsed=23.933s
+agents browser runtime smoke passed
+
+TAP version 13
+# frontend/module_policy_test.mjs: 192 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 45.610966
+  type: 'test'
+  ...
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 2 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 5.51502
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 3 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 3.811239
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 58.408748
+
+Paired screenshot generation and all three actual browser recordings passed after this follow-up. Same accounts, fixtures, themes and viewports; no document overflow or browser exceptions. Mobile/tablet remain Chromium touch/viewport emulation, not physical-device testing.

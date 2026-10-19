@@ -75,13 +75,22 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const editor = document.querySelector("#live-config-form").getBoundingClientRect();
     assert.ok(tools.bottom <= editor.top + 1,"configuration tools remain below the source editor");
     const workspace = document.querySelector(".live-config-workspace");
-    const rail = workspace.querySelector(".field-rail").getBoundingClientRect();
+    const navigation = workspace.querySelector(".config-file-list").getBoundingClientRect();
     const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
+    assert.ok(navigation.bottom <= frame.top + 1, "object buttons must precede the editor");
+    assert.ok(frame.width >= workspace.getBoundingClientRect().width - 4, "object navigation reduced the editor width");
     if (innerWidth > 1100) {
-      assert.ok(rail.right <= frame.left + 1 && rail.width >= 200, "desktop object rail did not leave a clear editing workspace");
       assert.ok(frame.width > 400, "desktop source editor is too narrow");
-    } else assert.ok(rail.bottom <= frame.top + 1, "mobile navigation did not precede editing");
+    }
     assert.equal(document.querySelectorAll("[data-config-objects]").length, 1, "object navigation is duplicated");
+    for (const button of workspace.querySelectorAll("[data-config-object]")) {
+      assert.equal(button.tagName, "BUTTON", "object switching must use the original button interaction");
+      assert.ok(button.getBoundingClientRect().height >= 44, "object buttons lost their touch target height");
+    }
+    const preview = workspace.querySelector("[data-config-preview]");
+    preview.click();
+    const selected = preview.getBoundingClientRect();
+    assert.ok(selected.left >= navigation.left - 1 && selected.right <= navigation.right + 1, "selected object button is clipped");
     assert.ok(workspace.querySelector('.config-file-actions [data-inbound-action="add"]'), "stable add action is missing");
     for (const button of workspace.querySelectorAll(".config-file-actions button")) {
       assert.ok(button.scrollWidth <= button.clientWidth + 1, "mobile action label is squeezed");

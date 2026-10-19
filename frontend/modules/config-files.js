@@ -1,6 +1,5 @@
 import { bindEvent } from "./refresh.js";
 import { createConfigDocument } from "./config-document.js";
-import { revealSelectedFields } from "./config-fields.js";
 
 export { configJSONMembers, canonicalConfigJSON, splitConfigFiles, mergeConfigFiles, configFileDisplayName } from "./config-json.js";
 
@@ -18,15 +17,25 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
   let updating = false;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
   const flush = () => { if (!updating && !input.readOnly && input.value !== model.text()) model.edit(input.value); };
+  const revealSelectedObject = () => {
+    const selected = list?.querySelector('[aria-current="true"]');
+    if (!selected || !list.clientWidth) return;
+    const bounds = list.getBoundingClientRect(), item = selected.getBoundingClientRect();
+    // Keep the selected button visible without moving the page or editor.
+    if (item.left < bounds.left) list.scrollLeft += item.left - bounds.left - 2;
+    else if (item.right > bounds.right) list.scrollLeft += item.right - bounds.right + 2;
+  };
   const render = () => {
     const objects = model.objects(), chosen = model.selected();
-    const buttons = objects.map((object, index) => `<a class="field-link${chosen === object.id ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="${esc(object.id)}" data-config-file="${index}" aria-current="${chosen === object.id}" aria-pressed="${chosen === object.id}"><span class="field-link-copy"><strong>${esc(object.title)}</strong><code>${esc(object.detail)}</code></span><small class="field-kind">${object.dirty ? "未保存" : object.kind === "common" ? "公共" : object.kind === "outbound" ? object.system ? "统计" : "出站" : "入站"}</small></a>`);
+    const item = (id, attributes, title, detail, dirty = false) => `<button type="button" class="config-file-button${chosen === id ? " active" : ""}${dirty ? " is-dirty" : ""}" data-config-object="${esc(id)}" ${attributes} aria-current="${chosen === id}" aria-pressed="${chosen === id}" aria-label="${esc(`${title} · ${detail}${dirty ? " · 未保存" : ""}`)}"><b>${esc(title)}</b><small>${esc(detail)}</small></button>`;
+    const buttons = objects.map((object, index) => item(object.id, `data-config-file="${index}"`, object.title,
+      `${object.kind === "common" ? "公共" : object.kind === "outbound" ? object.system ? "统计" : "出站" : "入站"}${object.detail ? ` · ${object.detail}` : ""}`, object.dirty));
     if (!model.segmented) for (const inbound of model.inbounds()) {
       const id = `native:${inbound.tag}:${inbound.port}`;
-      buttons.push(`<a class="field-link${chosen === id ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="${esc(id)}" data-access-inbound="${esc(inbound.tag)}" aria-current="${chosen === id}" aria-pressed="${chosen === id}"><span class="field-link-copy"><strong>${esc(inbound.tag)}</strong><code>${esc(inbound.protocol || engine)} · ${Number(inbound.port)}</code></span><small class="field-kind">入站</small></a>`);
+      buttons.push(item(id, `data-access-inbound="${esc(inbound.tag)}"`, inbound.tag, `入站 · ${inbound.protocol || engine} · ${Number(inbound.port)}`));
     }
-    if (model.segmented) buttons.push(`<a class="field-link${chosen === "source" ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="source" data-config-source aria-current="${chosen === "source"}"><span class="field-link-copy"><strong>完整源码</strong><code>${readOnly ? "查看完整配置" : "编辑、粘贴或导入配置"}</code></span><small class="field-kind">${readOnly ? "只读" : model.dirty() ? "未保存" : "源码"}</small></a>`);
-    buttons.push(`<a class="field-link${chosen === "preview" ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="preview" data-config-preview aria-current="${chosen === "preview"}" aria-pressed="${chosen === "preview"}"><span class="field-link-copy"><strong>完整配置预览</strong><code>包含全部编辑内容</code></span><small class="field-kind">只读</small></a>`);
+    if (model.segmented) buttons.push(item("source", "data-config-source", "完整源码", readOnly ? "查看完整配置" : "编辑完整配置", model.dirty()));
+    buttons.push(item("preview", "data-config-preview", "完整配置预览", "只读 · 包含全部编辑内容"));
     if (list) {
       // Keep focused navigation elements stable while typing or switching.
       const template = document.createElement("template"); template.innerHTML = buttons.join("");
@@ -35,7 +44,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
         if (old) {
           old.className = fresh.className;
           if (fresh.hasAttribute("data-config-file")) old.dataset.configFile = fresh.dataset.configFile;
-          for (const name of ["aria-current", "aria-pressed"]) old.setAttribute(name, fresh.getAttribute(name));
+          for (const name of ["aria-current", "aria-pressed", "aria-label"]) old.setAttribute(name, fresh.getAttribute(name));
           if (old.innerHTML !== fresh.innerHTML) old.innerHTML = fresh.innerHTML;
         }
         const element = old || fresh;
@@ -70,7 +79,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     input.dispatchEvent(new Event("input", {bubbles:true}));
     input.dispatchEvent(new Event("config-selection", {bubbles:true}));
     updating = false;
-    revealSelectedFields(form);
+    revealSelectedObject();
   };
   bindEvent(list, "click", event => {
     const button = event.target.closest("[data-config-object]");
@@ -100,7 +109,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     refreshObjects() { render(); input.dispatchEvent(new Event("config-selection", {bubbles:true})); },
   };
   editor.configFileController = controller;
-  bindEvent(globalThis.window, "resize", () => { if (form.isConnected) revealSelectedFields(form); }, {bindingKey:"config-objects"});
+  bindEvent(globalThis.window, "resize", () => { if (form.isConnected) revealSelectedObject(); }, {bindingKey:"config-objects"});
   display();
   return controller;
 }
