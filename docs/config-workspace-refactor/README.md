@@ -153,6 +153,14 @@
 - 没有向真实代理内核/系统服务执行部署、安装或迁移，没有验证真实节点网络抖动；任务结果为确定性 Agent 报告或 API fixture。原生语法、字段与权限在 API/模型层验证，真实内核兼容性依赖既有节点校验机制。
 - 未运行包含所有其他页面的完整浏览器矩阵，也没有运行整个 `make check`；实际命令和排除项已明确列出。
 
+### CI 并发测试修复
+
+[CI 39229333578](https://github.com/qimaoww/QControlHub/actions/runs/39229333578) 的 Debian 测试在 `TestPublicIPProberCoalescesConcurrentRefresh` 报告请求数为 2，三个后续镜像检查因此被阻断。原测试启动第二个协程后立即释放第一个请求，未保证第二次刷新已经进入进行中的请求；第一轮先结束时，后来的刷新会正确发起新请求。
+
+改用项目 Go 1.25 已有的 `testing/synctest` 和内存 HTTP transport，在放行响应前等待所有调用进入阻塞状态。测试保留并发仅请求一次的断言，并增加 8 个调用、完成前不得返回、结果地址及来源正确发布、完成后允许新刷新等检查。没有修改公网 IP 运行逻辑或 CI 工作流。
+
+旧用例的本地重复运行没有复现 CI 的偶发失败，失败证据来自上述 CI 日志。修复后已通过 5 种并行度、共 5,000 次竞态检查；完整命令和本轮 Agent 回归结果追加于 [validation.txt](evidence/validation.txt)。本轮修改仅涉及测试及交付记录，沿用上一轮页面截图和录屏。
+
 ## 证据复现
 
 `capture/server.mjs ROOT` 分别服务基线归档与当前 checkout；两个版本均使用同一配置 fixture。`capture/screenshots.mjs BEFORE_URL AFTER_URL OUTPUT` 生成 36 张配对截图并核对保存字节及完整预览语义。`capture/recordings.mjs AFTER_URL RAW_DIRECTORY` 录制三段流程并断言目标内容/版本。
@@ -167,9 +175,9 @@
 
 ## 测试环境清理
 
-测试结束于 **2026-10-19 17:18:45 Asia/Shanghai**。本次浏览器、HTTP 服务和独立 PostgreSQL 已停止，相关端口和进程核对均为空。
+测试结束于 **2026-10-19 17:47:22 Asia/Hong_Kong**。本次浏览器、HTTP 服务和独立 PostgreSQL 已停止，相关端口和进程核对均为空。
 
-持久 systemd 任务 **`qch-config-workspace-cleanup-20261019-abszbg.timer`** 已启用，状态 `active / waiting`、`Persistent=yes`，执行时间为 **2026-10-22 17:18:45 Asia/Shanghai**（`2026-10-22 09:18:45 UTC`），距测试结束 72 小时。
+持久 systemd 任务 **`qch-config-workspace-cleanup-20261019-abszbg.timer`** 已启用，状态 `active / waiting`、`Persistent=yes`，执行时间为 **2026-10-22 17:47:22 Asia/Hong_Kong**（`2026-10-22 09:47:22 UTC`），距测试结束 72 小时。
 
 清理仅删除 `/tmp/qch-config-workspace-20261019-ABsZBG`：本次基线归档、独立 PostgreSQL 程序/数据/套接字、临时构建和原始视频等。脚本使用固定路径及归属标记，拒绝符号链接和挂载目录，已通过 dry-run；不会按旧 PID 终止其他进程。调度文件和执行审计保留在 `/var/lib/qch-config-workspace-cleanup-20261019-abszbg` 及对应 systemd unit，便于核对执行结果。
 

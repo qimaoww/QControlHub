@@ -295,3 +295,32 @@ Three real UI recordings passed; the mobile dark recording now includes running 
 Six additional desktop-light/mobile-dark feedback screenshots were inspected. No CSS, inline style or workflow changes.
 The broader Go/PostgreSQL/real-HTTP checks earlier in this report were not repeated for this frontend follow-up.
 Node/core task results remain simulated; no physical devices or real core deployment were tested.
+
+CI concurrency follow-up
+=======================
+Failing run: https://github.com/qimaoww/QControlHub/actions/runs/39229333578
+Head: fd5e7934519398a6c73a32067a02d87ba344f2f4
+Debian / systemd: TestPublicIPProberCoalescesConcurrentRefresh reported
+"concurrent refresh made 2 requests, want 1". The three image checks were blocked by that job.
+The old test released the first response immediately after starting the follower goroutine;
+it did not establish that the follower entered the in-flight wait before the first refresh finished.
+
+The old test passed locally with -count=1000 -cpu=1,2,4,16,64 and with
+-race -count=1000 -cpu=1,2,12,64. Its intermittent CI failure was not reproduced locally.
+The saved CI failure and the missing synchronization are the evidence for the fix.
+
+Use the existing Go 1.25 testing/synctest package and an in-memory HTTP transport.
+Wait for all eight callers to block before releasing the response. Keep the one-request
+assertion and check that callers wait for completion, the address/source is published,
+and a subsequent refresh issues a new request. Runtime behavior and CI workflows unchanged.
+
+Final focused check (Go 1.25.12 linux/amd64):
+go test -race ./internal/agent -run '^TestPublicIPProberCoalescesConcurrentRefresh$' -count=1000 -cpu=1,2,4,16,64 -timeout=120s
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	8.986s
+
+Affected package, uncached:
+go test ./internal/agent -count=1 -timeout=10m
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	237.065s
+
+No UI code changed in this follow-up; earlier UI captures remain applicable.
+Test processes exited and the task's browser/server/database ports remain released.
