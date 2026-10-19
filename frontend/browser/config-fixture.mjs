@@ -130,8 +130,9 @@ export async function createConfigFixture(engine, options = {}) {
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:options.deployedConfigID || "cfg", config_version:deployedVersion}];
     if (request.method === "POST" && path === "/tasks") {
       if (!["read-managed-config", "read-config"].includes(body.action)) {
+        if (test.taskGate) await test.taskGate;
         if (test.taskFailure) throw Object.assign(new Error("fixture task unavailable"), {status:503});
-        const task = {...body, id:`task-${++test.serial}`, status:test.taskStatus, config_version:saved.version};
+        const task = {...body, id:`task-${++test.serial}`, status:test.taskStatus, error:test.taskError || "", config_version:saved.version};
         tasks.set(task.id, task); return task;
       }
       test.readRequests.push(body);
@@ -191,7 +192,7 @@ export async function createConfigFixture(engine, options = {}) {
       const task = tasks.get(path.split("/")[2].split("?")[0]);
       if (path.endsWith("/config-snapshot")) return {content:task?.snapshot || ""};
       if (task?.action === "deploy" && test.taskStatus === "succeeded") { agentContent = saved.content; deployedVersion = task.config_version; }
-      return {...task, status:test.taskStatus};
+      return {...task, status:test.taskStatus, error:test.taskError || ""};
     }
     throw new Error(`Unexpected fixture API: ${path}`);
   };

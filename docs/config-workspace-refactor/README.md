@@ -43,7 +43,18 @@
 
 切换时捕获草稿并确认，标签页内的 sessionStorage 按账号隔离，刷新、返回和深链接可恢复对应上下文。切换账号、退出和授权失效会清理工作区及相关缓存。文件读取、原生预览、表单初始化和任务回调均检查上下文，组件销毁后的响应无法覆盖新工作区。
 
-保存成功但任务创建失败时，反馈已保存版本并保留内容；重试使用该有效版本，不重复创建相同保存。运行状态、未保存修改、已保存待部署、校验结果、部署结果分别显示。托管部署保留独立的新鲜 Agent 读取、版本比对和现有内核校验。
+保存成功后立即更新文档基线和保存/部署状态栏；任务创建或页面刷新失败时，结果区只显示错误，已保存版本和内容仍保留。重试使用该有效版本，不重复保存。运行状态、未保存修改、已保存待部署、校验结果、部署结果分别显示。托管部署保留独立的新鲜 Agent 读取、版本比对和现有内核校验。
+
+### 操作提示调整
+
+根据实际浏览器页面检查，移除保存版本前缀、草稿保留说明、通用排查建议和同一错误的重复弹出提示。成功显示“保存成功 / 校验成功 / 部署成功”，执行中显示“正在核验配置… / 等待部署… / 正在部署…”，失败直接显示经过既有脱敏处理的错误正文。配置源码语法错误只显示一处；格式化提示精简为“格式化成功 / 无需格式化”。
+
+结果区域统一使用已有 `alert`、`success`、`error` 类和无障碍状态。移除旧保存提示属性，避免旧样式覆盖成功颜色。连续点击已有部署保留原任务反馈；保存后的基线同步不解除尚在提交中的控件锁。
+
+| 实际页面 | 提示截图 |
+| --- | --- |
+| 桌面明色 | [保存成功](evidence/feedback-desktop-light-save.png) · [部署中](evidence/feedback-desktop-light-progress.png) · [部署失败](evidence/feedback-desktop-light-error.png) |
+| 手机暗色 | [部署中](evidence/feedback-mobile-dark-progress.png) · [部署失败](evidence/feedback-mobile-dark-error.png) · [重试成功](evidence/feedback-mobile-dark-success.png) |
 
 ### 完整源码与自定义配置
 
@@ -107,9 +118,9 @@
 
 | 录屏 | 操作 |
 | --- | --- |
-| [桌面：上下文与草稿，10.76 秒](evidence/desktop-context-drafts.mp4) | 分段修改、完整预览、取消/确认切换内核、切回恢复、刷新、节点往返 |
-| [手机暗色：文件、保存与重试部署，8.84 秒](evidence/mobile-file-save-retry-deploy.mp4) | 本地文件进入草稿、完整预览、保存成功后任务失败、重试校验、指定版本部署和状态核对 |
-| [手机明色：协议与独立出站，5.32 秒](evidence/mobile-protocol-outbound.mp4) | 新入站表单、字段分组、保存并校验、选择同步、独立出站弹窗 |
+| [桌面：上下文与草稿，11.04 秒](evidence/desktop-context-drafts.mp4) | 分段修改、完整预览、取消/确认切换内核、切回恢复、刷新、节点往返 |
+| [手机暗色：文件、保存与重试部署，12.64 秒](evidence/mobile-file-save-retry-deploy.mp4) | 本地文件进入草稿、完整预览、保存后任务创建失败、重试校验、部署进度、部署失败及重试成功、版本核对 |
+| [手机明色：协议与独立出站，5.36 秒](evidence/mobile-protocol-outbound.mp4) | 新入站表单、字段分组、保存并校验、选择同步、独立出站弹窗 |
 
 文件信息见 [recordings.json](evidence/recordings.json)。桌面录屏的页面刷新包含真实重载瞬间。视频仅做 H.264 编码，没有替换、拼接或生成操作画面。
 
@@ -134,6 +145,8 @@
 
 按钮布局调整后重新通过：前端 Go 合约、模块 smoke、模块/浏览器测试策略、两个二进制构建，以及 `config-layout`、`config-layout-mobile`、`config-migration`、`config-scope`、`config-inbounds`、`config-inbounds-mobile`、`config-restrictions` 七个浏览器模式。布局断言检查编辑器整行宽度、按钮触摸高度、选中可见及页面无横向溢出。完整 Go 和真实 HTTP/数据库多用户验证来自本 PR 前一轮；本次只调整呈现，未重跑该完整矩阵。
 
+提示调整后重新通过上述前端合约、模块与策略、两个二进制构建，以及全部 9 个配置浏览器模式。新增断言覆盖错误只显示一次、错误脱敏、保存后任务失败、保存后刷新失败、立即更新保存基线、任务提交期间控件保持锁定、连续点击保留进度、部署失败不推进部署版本及正确版本重试。源码重复错误和连续部署反馈覆盖问题均先在浏览器复现，再修复验证。36 张对比截图和三段录屏再次生成，新增六张结果截图并人工查看。
+
 - 使用 Linux Chromium，桌面真实浏览器进程；手机/平板为视口及触摸模拟，人工查看截图、弹窗、菜单、源码与状态；自动化检查滚动、焦点、选中状态、触摸和键盘操作。
 - 多用户 API/浏览器使用真实 HTTP、独立 PostgreSQL、真实登录和 CSRF。正向配置表单流程覆盖自有用户与共享用户；管理员正向工作区主要通过生产 UI fixture 和 API 回归验证。
 - 没有使用实体手机/平板，没有覆盖 Safari、Firefox 或移动系统原生文件选择器；本地文件通过浏览器 file input 注入。
@@ -154,9 +167,9 @@
 
 ## 测试环境清理
 
-测试结束于 **2026-10-19 16:25:27 Asia/Shanghai**。本次浏览器、六个 HTTP 服务和独立 PostgreSQL 已停止，相关端口和进程核对均为空。
+测试结束于 **2026-10-19 17:18:45 Asia/Shanghai**。本次浏览器、HTTP 服务和独立 PostgreSQL 已停止，相关端口和进程核对均为空。
 
-持久 systemd 任务 **`qch-config-workspace-cleanup-20261019-abszbg.timer`** 已启用，状态 `active / waiting`、`Persistent=yes`，执行时间为 **2026-10-22 16:25:27 Asia/Shanghai**（`2026-10-22 08:25:27 UTC`），距测试结束 72 小时。
+持久 systemd 任务 **`qch-config-workspace-cleanup-20261019-abszbg.timer`** 已启用，状态 `active / waiting`、`Persistent=yes`，执行时间为 **2026-10-22 17:18:45 Asia/Shanghai**（`2026-10-22 09:18:45 UTC`），距测试结束 72 小时。
 
 清理仅删除 `/tmp/qch-config-workspace-20261019-ABsZBG`：本次基线归档、独立 PostgreSQL 程序/数据/套接字、临时构建和原始视频等。脚本使用固定路径及归属标记，拒绝符号链接和挂载目录，已通过 dry-run；不会按旧 PID 终止其他进程。调度文件和执行审计保留在 `/var/lib/qch-config-workspace-cleanup-20261019-abszbg` 及对应 systemd unit，便于核对执行结果。
 

@@ -1,5 +1,6 @@
 import { enterSurface } from "./motion.js";
 import { taskTerminal } from "./task-monitor.js";
+import { redactDiagnostic } from "./errors.js";
 
 // Operation feedback remains account-scoped and follows the same deployment
 // poller used by the source editor.
@@ -15,6 +16,7 @@ function saveOperation(operation) {
   state.data.presetOperation = operation;
   return operation;
 }
+const hasTaskFeedback = taskID => Object.values(state.data.presetOperations || {}).some(operation => operation.task?.id === taskID);
 
 function renderPresetStatus() {
   const key = state.route === "live-config" ? `${state.data.liveAgent}|${state.data.liveEngine}|${state.data.liveConfigSource}` : `${state.data.agentId}|${state.data.engine}`;
@@ -38,10 +40,10 @@ function renderPresetStatus() {
   status.setAttribute("aria-live", "polite");
   status.textContent = operation.message;
   if (changed) enterSurface(status, { token: "--motion-feedback" });
-  if (operation.task?.id && can("tasks.read")) {
+  if (operation.task?.id && can("tasks.read") && operation.tone !== "error") {
     const link = document.createElement("a");
     link.href = "#tasks";
-    link.textContent = " 查看执行记录";
+    link.textContent = " 查看任务";
     status.append(link);
   }
   if (operation.reload) {
@@ -74,7 +76,7 @@ function renderPresetStatus() {
       catch (error) {
         if (operationFor(key) !== operation) return;
         operation.reload = true;
-        operation.message = `页面加载失败：${error.message}。请重新加载后继续编辑。`;
+        operation.message = redactDiagnostic(error.message) || "配置加载失败";
         renderPresetStatus();
         editor.syncControls();
       }
@@ -87,7 +89,7 @@ function renderPresetStatus() {
 function watchPresetOperation(operation) {
   if (!operation?.task?.id || operation.monitoring) return;
   const sessionData = state.data;
-  const {key, intent, version, task} = operation;
+  const {key, intent, task} = operation;
   const verb = intent === "deploy" ? "部署" : intent === "import" ? "迁移" : "校验";
   const [agentId, engine] = key.split("|");
   const tracked = () => sessionData === state.data && operationFor(key) === operation;
@@ -95,9 +97,8 @@ function watchPresetOperation(operation) {
     if (!tracked()) return;
     operation.task = latest;
     operation.message = latest.status === "succeeded"
-      ? `配置 v${version} ${verb}成功。`
-      : `配置 v${version} 已保存，${verb}任务${latest.status === "canceled" ? "已取消" : "失败"}：${latest.error || "请查看执行记录"}`;
-    if (operation.reload) operation.message += " 请重新加载配置后继续编辑。";
+      ? `${verb}成功`
+      : redactDiagnostic(latest.error) || `${verb}${latest.status === "canceled" ? "已取消" : "失败"}`;
     operation.tone = latest.status === "succeeded" ? "success" : "error";
     if (task.install_if_missing || intent === "deploy") onRuntimeChange(agentId, engine);
     renderPresetStatus();
@@ -107,8 +108,8 @@ function watchPresetOperation(operation) {
   operation.monitoring = true;
   const progress = (latest, error) => {
     if (!tracked() || operation.reload) return;
-    const message = error ? `配置 v${version} 已保存，任务状态连接暂时中断，正在重试…` :
-      `配置 v${version} 已保存，${task.install_if_missing ? "稳定版安装及" : ""}${verb}任务${latest.status === "running" ? "正在执行" : "正在排队"}…`;
+    const action = `${task.install_if_missing ? "安装并" : ""}${verb}`;
+    const message = error ? "正在重新连接…" : latest.status === "running" ? `正在${action}…` : `等待${action}…`;
     if (operation.message === message) return;
     operation.message = message;
     operation.tone = "";
@@ -120,12 +121,12 @@ function watchPresetOperation(operation) {
     finish(latest);
   }).catch(error => {
     if (!tracked() || error.name === "AbortError") return;
-    operation.message = "配置已保存，任务状态暂不可读取，请查看执行记录。";
+    operation.message = redactDiagnostic(error.message) || "无法获取任务结果";
     operation.tone = "error";
     renderPresetStatus();
   }).finally(() => { operation.monitoring = false; });
 }
 
 
-  return { operationFor, saveOperation, renderPresetStatus, watchPresetOperation };
+  return { operationFor, saveOperation, renderPresetStatus, watchPresetOperation, hasTaskFeedback };
 }

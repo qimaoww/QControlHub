@@ -2,7 +2,7 @@ import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-files.js";
 import { bindConfigMenu } from "./config-menu.js";
 import { bindDialogBackdrop, closePopup, closeRetiringDialog } from "./popup.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { updateFeedback, setVisible } from "./presence-motion.js";
 import { formatConfigContent } from "./code-format.js";
 import { bindOutboundPresets } from "./outbound-presets.js";
@@ -339,11 +339,11 @@ export function bindConfigOutbounds({ navigation, container, api, agent, engine,
               !(await confirmAction(`${deleting ? "删除出站" : "保存出站"}：${inbound ? `${inbound.tag} :${inbound.port} · ` : ""}${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
           if (!active()) return;
           if (intent === "deploy" && beforeDeploy) {
-            updateFeedback(status, "正在核验 Agent 当前配置…");
+            updateFeedback(status, "正在核验配置…");
             await beforeDeploy();
             if (!active()) return;
           }
-          updateFeedback(status, "正在保存配置并提交任务…");
+          updateFeedback(status, "正在提交…");
           submitted = true;
           const result = await api(`${base}/source`, {method:"POST", body:JSON.stringify({
             name:fresh.config.name, description:fresh.config.description, engine, version:fresh.config.version, content, intent,
@@ -355,7 +355,7 @@ export function bindConfigOutbounds({ navigation, container, api, agent, engine,
         } catch (error) {
           if (!active()) return;
           uncertain = submitted && (!error.status || error.status === 409 || error.status >= 500);
-          updateFeedback(errorBox, `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`);
+          updateFeedback(errorBox, redactDiagnostic(error.message) || "提交失败");
         } finally {
           saving = false;
           updateFeedback(status, "");
@@ -370,7 +370,7 @@ export function bindConfigOutbounds({ navigation, container, api, agent, engine,
         const message = document.createElement("p");
         message.className = "alert error";
         message.setAttribute("role", "alert");
-        updateFeedback(message, diagnosticError(error.message));
+        updateFeedback(message, redactDiagnostic(error.message) || "配置加载失败");
         body.append(message);
       }
     }

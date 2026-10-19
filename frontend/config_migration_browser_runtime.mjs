@@ -226,7 +226,7 @@ async function testSourceSaveRuntime() {
     button.click();
     await waitFor(()=>test.writes.length === 1, "source save did not start");
     assert(form.dataset.saving === "1" && form.getAttribute("aria-busy") === "true" &&
-      document.querySelector("[data-live-save-status]").textContent.includes("正在保存"), "pending source save has no status");
+      document.querySelector("[data-workspace-result]").textContent.includes("正在保存"), "pending source save has no status");
     assert([...document.querySelectorAll(".live-config-workspace button, .live-config-workspace input, .live-config-workspace select, .live-config-workspace textarea")]
       .every(element=>element.disabled), "source save left mutable controls active");
     assert(test.pages.configHasUnsavedChanges(), "pending source save lost navigation protection");
@@ -255,7 +255,7 @@ async function testSourceSaveRuntime() {
     const button = document.querySelector('[data-live-intent="validate"]');
     const baseline = [...document.querySelectorAll(".live-config-workspace button, .live-config-workspace textarea")].map(element=>[element, element.disabled]);
     button.click();
-    await waitFor(()=>!form.dataset.saving && document.querySelector("[data-live-save-status]")?.getAttribute("role") === "alert", `${failure} failure lost source feedback`);
+    await waitFor(()=>!form.dataset.saving && document.querySelector("[data-workspace-result]")?.getAttribute("role") === "alert", `${failure} failure lost source feedback`);
     const activeInput = document.querySelector("[data-code-input]");
     assert(activeInput.value === draft && !activeInput.disabled, `${failure} failure discarded or locked the source draft`);
     if (failure === "save") {
@@ -265,7 +265,8 @@ async function testSourceSaveRuntime() {
       await waitFor(()=>test.tasks.length === 1, "correctable source failure could not retry");
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
     } else {
-      assert(document.querySelector("[data-live-save-status]").textContent.includes("配置 v2 已保存"), "partial source success misreported durable configuration as unsaved");
+      assert(document.querySelector("[data-workspace-save-state]").textContent === "已保存 v2" && !test.pages.configHasUnsavedChanges(), "partial success did not update the visible saved baseline");
+      assert(document.querySelector("[data-workspace-result]").textContent === (failure === "task" ? "task unavailable" : "refresh unavailable"), "partial success added redundant text to the error");
       test.taskError = null; test.refreshError = null;
       document.querySelector('[data-live-intent="validate"]').click();
       await waitFor(()=>test.tasks.length === 2, "partially successful save could not retry its task");

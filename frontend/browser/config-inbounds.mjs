@@ -118,7 +118,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     form.elements.tag.value = "keep-my-draft";
     test.fail = true;
     form.querySelector("[data-plan-intent=validate]").click();
-    await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("草稿已保留"), "conflict did not preserve draft");
+    await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.firstChild?.textContent === "fixture version conflict", "conflict did not preserve draft");
     assert(form.elements.tag.value === "keep-my-draft" && form.querySelector("[data-plan-intent=validate]").disabled, "conflict allowed stale resubmission");
     test.dispose();
     assert(!document.querySelector("dialog"), "route abort left an orphan modal");
@@ -135,7 +135,7 @@ export async function testConfigInboundsRuntime(preview = false) {
       await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "auto-install submission failed");
       assert(test.writes[0].install_if_missing && test.writes[0].intent === "validate", "missing core did not opt into stable installation");
       assert(!test.calls.some(call=>call.path === "/tasks"), "installation requires an open frontend for a second task");
-      assert(document.body.textContent.includes("稳定版安装"), "installation progress missing");
+      assert(document.body.textContent.includes("等待安装并校验"), "installation progress missing");
       const runtimeReads = test.calls.filter(call=>call.path === "/agents").length;
       test.agent.runtime.xray.installed = true;
       test.agent.runtime.xray.version = "stable-installed";
@@ -196,7 +196,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   const switchReads = switcher.calls.filter(call=>call.path.includes("/mihomo/")).length;
   assert(switchReads === 1, "repeated click duplicated switch request");
   releaseSwitch();
-  await waitFor(()=>switcher.notices.some(message=>message.includes("切换内核失败")), "failed switch lost feedback");
+  await waitFor(()=>switcher.notices.some(message=>message === "fixture switch failed"), "failed switch lost its concise error");
   assert(switcher.state.data.liveEngine === "xray" && !missingTab.disabled, "failed switch did not restore usable previous editor");
   assert(!document.querySelector("#live-config-form").inert, "failed switch left the source inert");
   switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});
@@ -238,7 +238,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   conflictForm.elements.tag.value = "keep-conflicting-draft";
   deployConflict.setAgentContent(deployConflict.saved().content + "\n");
   conflictForm.querySelector("[data-plan-intent=deploy]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("部署前核验发现"),
+  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.firstChild?.textContent === "节点配置已变化",
     "changed Agent configuration did not stop deployment");
   assert(deployConflict.writes.length === 0 && document.querySelector("dialog[open]") &&
     conflictForm.elements.tag.value === "keep-conflicting-draft",
@@ -289,8 +289,8 @@ export async function testConfigInboundsRuntime(preview = false) {
   refreshFailure.failRefresh = true;
   document.querySelector("[data-plan-intent=validate]").click();
   await waitFor(()=>!document.querySelector("dialog") &&
-    document.querySelector("[data-preset-status]")?.textContent.includes("已保存且任务已提交，页面刷新失败"), "committed save was silently lost after parent refresh failed");
-  assert(refreshFailure.writes.length === 1 && refreshFailure.notices.some(message=>message.includes("已保存且任务已提交")), "refresh failure misreported the durable mutation");
+    document.querySelector("[data-preset-status]")?.firstChild?.textContent === "fixture refresh unavailable", "committed save was silently lost after parent refresh failed");
+  assert(refreshFailure.writes.length === 1 && refreshFailure.saved().version === 2 && refreshFailure.notices.length === 0, "refresh failure misreported the durable mutation");
   refreshFailure.failRefresh = false;
   document.querySelector("[data-preset-status] button").click();
   await waitFor(()=>document.querySelector('[data-workspace-save-state]')?.textContent === "已保存 v2", "refresh recovery did not bind the saved revision");

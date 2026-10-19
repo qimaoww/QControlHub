@@ -1,11 +1,12 @@
 {
-  "testEndedUTC": "2026-10-19T08:25:27+00:00",
-  "testEndedLocal": "2026-10-19T16:25:27+08:00",
+  "testEndedUTC": "2026-10-19T09:18:45+00:00",
+  "testEndedLocal": "2026-10-19T17:18:45+08:00",
   "timezone": "Asia/Shanghai",
   "stopped": {
     "browserSessions": [
       "qch-config-refactor",
-      "qch-config-compact"
+      "qch-config-compact",
+      "qch-config-feedback"
     ],
     "httpPorts": [
       46881,
@@ -13,7 +14,9 @@
       40899,
       33765,
       41421,
-      35845
+      35845,
+      45815,
+      38897
     ],
     "postgresPort": 55487,
     "remainingTaskProcesses": [],
@@ -31,9 +34,9 @@
     "status": "registered",
     "timer": "qch-config-workspace-cleanup-20261019-abszbg.timer",
     "service": "qch-config-workspace-cleanup-20261019-abszbg.service",
-    "calendar": "2026-10-22 08:25:27 UTC",
-    "executeUTC": "2026-10-22T08:25:27+00:00",
-    "executeLocal": "2026-10-22T16:25:27+08:00",
+    "calendar": "2026-10-22 09:18:45 UTC",
+    "executeUTC": "2026-10-22T09:18:45+00:00",
+    "executeLocal": "2026-10-22T17:18:45+08:00",
     "delayHours": 72,
     "script": "/var/lib/qch-config-workspace-cleanup-20261019-abszbg/cleanup.py",
     "auditDirectory": "/var/lib/qch-config-workspace-cleanup-20261019-abszbg",
@@ -47,12 +50,12 @@
       "/var/lib/qch-config-workspace-cleanup-20261019-abszbg"
     ],
     "verifiedProperties": {
-      "NextElapseUSecRealtime": "Thu 2026-10-22 16:25:27 CST",
+      "NextElapseUSecRealtime": "Thu 2026-10-22 17:18:45 CST",
       "Persistent": "yes",
       "ActiveState": "active",
       "SubState": "waiting",
       "UnitFileState": "enabled"
     }
   },
-  "followup": "Button-layout testing completed; existing cleanup timer rescheduled to 72 hours after the final tests."
+  "followup": "Concise operation feedback testing completed; browser session and both evidence servers stopped. Existing cleanup timer rescheduled to 72 hours after final testing."
 }

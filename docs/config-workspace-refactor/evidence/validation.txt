@@ -253,3 +253,45 @@ ok 3 - browser modules must all be reachable from the regression runner
 # duration_ms 58.408748
 
 Paired screenshot generation and all three actual browser recordings passed after this follow-up. Same accounts, fixtures, themes and viewports; no document overflow or browser exceptions. Mobile/tablet remain Chromium touch/viewport emulation, not physical-device testing.
+
+Concise operation feedback follow-up
+=====================================
+Actual browser review found duplicate source syntax errors and legacy save-status styling overriding success color.
+Repeated deploy was reproduced replacing the active task's feedback; the scoped operation is now retained.
+Feedback shows only the redacted error or concise result/progress. Saved versions remain in the workspace status.
+Saving commits the visible baseline immediately even if task creation or page refresh fails, while preserving submission locks.
+
+All following checks passed after the final implementation changes:
+node frontend/module_smoke.mjs
+node --test frontend/module_policy_test.mjs frontend/smoke_policy_test.mjs
+go test ./frontend -skip '^TestAgentBrowserRuntimeSmoke$'
+go build -buildvcs=false -trimpath -o <task temporary build directory>/ ./cmd/control-plane ./cmd/agent [exit 0; no output]
+QCH_BROWSER_SMOKE_MODES=config-inbounds,config-inbounds-mobile,config-layout,config-layout-mobile,config-scope,presets,presets-mobile,config-migration,config-restrictions node frontend/agents_browser_smoke.mjs
+
+The expanded source lifecycle checks cover one syntax error location; exact redacted deployment error; no duplicate notifications;
+save success followed by task/refresh failure; visible saved baseline; locked controls while task submission is pending;
+repeated pending deployment; failed deployment retaining its old deployed version; retry of the correct saved content without a duplicate write.
+
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.055s
+
+browser workers=2, CPUs=12, memory=20001MiB, modes=9
+browser timing {"mode":"config-inbounds","startupMs":154.674848,"testMs":23172.762113,"cleanupMs":52.085478000000876,"passed":true,"elapsedMs":23379.533578}
+browser timing {"mode":"config-inbounds-mobile","startupMs":150.149333,"testMs":23186.632985,"cleanupMs":41.95175899999958,"passed":true,"elapsedMs":23378.743776}
+browser timing {"mode":"presets-mobile","startupMs":139.09818599999926,"testMs":3552.181802000003,"cleanupMs":34.47770699999819,"passed":true,"elapsedMs":3725.762759000001}
+browser timing {"mode":"presets","startupMs":122.01645599999756,"testMs":3635.106346999997,"cleanupMs":38.309361999999965,"passed":true,"elapsedMs":3795.4358759999996}
+browser timing {"mode":"config-restrictions","startupMs":141.3090639999973,"testMs":1006.3283269999993,"cleanupMs":31.141795999999886,"passed":true,"elapsedMs":1178.7840739999992}
+agents browser runtime smoke passed
+browser timing {"mode":"config-migration","startupMs":127.11687600000005,"testMs":1220.1742270000032,"cleanupMs":26.891145999998116,"passed":true,"elapsedMs":1374.1864879999994}
+browser timing {"mode":"config-layout","startupMs":116.34775699999955,"testMs":673.7860890000011,"cleanupMs":30.21562499999709,"passed":true,"elapsedMs":820.3543750000026}
+browser timing {"mode":"config-layout-mobile","startupMs":144.79011399999945,"testMs":655.4302500000013,"cleanupMs":27.45589000000109,"passed":true,"elapsedMs":827.6852820000022}
+browser timing {"mode":"config-scope","startupMs":120.05845699999918,"testMs":401.51578099999824,"cleanupMs":28.263794999998936,"passed":true,"elapsedMs":549.8433450000011}
+agents browser runtime smoke passed
+browser suite elapsed=30.804s
+agents browser runtime smoke passed
+
+Capture follow-up: 36 matched screenshots regenerated, no document overflow or browser exceptions;
+all six saved-byte hashes and complete-preview semantic hashes matched. Baseline images retained.
+Three real UI recordings passed; the mobile dark recording now includes running deployment, the actual fixture error and successful retry.
+Six additional desktop-light/mobile-dark feedback screenshots were inspected. No CSS, inline style or workflow changes.
+The broader Go/PostgreSQL/real-HTTP checks earlier in this report were not repeated for this frontend follow-up.
+Node/core task results remain simulated; no physical devices or real core deployment were tested.

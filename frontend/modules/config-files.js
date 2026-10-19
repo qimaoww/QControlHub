@@ -11,7 +11,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
   if (!editor || !input) return null;
   const previous = editor.configFileController;
   previous?.dirty();
-  const model = options.document || previous?.document || createConfigDocument(engine, input.value, {inbounds:options.inbounds});
+  let model = options.document || previous?.document || createConfigDocument(engine, input.value, {inbounds:options.inbounds});
   const list = form.querySelector("[data-config-objects]");
   const readOnly = input.readOnly;
   let updating = false;
@@ -65,7 +65,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     const summary = form.querySelector(".config-draft-summary");
     if (summary) {
       summary.dataset.dirty = model.dirty() ? "1" : "0";
-      summary.textContent = readOnly ? "只读 · 完整配置" : `${model.dirty() ? "有未保存修改" : "已保存"} · 保存包含完整配置`;
+      summary.textContent = readOnly ? "只读" : model.dirty() ? "有未保存修改" : "";
     }
     options.onChange?.(model);
   };
@@ -73,7 +73,6 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     updating = true;
     input.value = model.text();
     input.readOnly = readOnly || model.selected() === "preview";
-    input.disabled = false;
     editor.codeBaseline = {content:model.original(), status:model.selected() === "preview" ? "完整配置 · 只读" : readOnly ? "只读" : "已保存", validation:""};
     render();
     input.dispatchEvent(new Event("input", {bubbles:true}));
@@ -93,16 +92,17 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     model.edit(input.value); render();
   }, {bindingKey:"config-document"});
   const controller = {
-    document:model,
-    selectedCommon:model.selectedCommon,
-    selectedInbound:model.selectedInbound,
+    get document() { return model; },
+    selectedCommon:() => model.selectedCommon(),
+    selectedInbound:() => model.selectedInbound(),
     selectedOutbound:() => model.objects().find(item => item.id === model.selected() && item.kind === "outbound"),
     selectInbound(tag, port) { flush(); if (model.selectInbound(tag, port)) display(); },
     content() { flush(); return model.content(); },
     paths:() => model.objects().map(file => file.path),
-    original:model.original,
+    original:() => model.original(),
     dirty() { flush(); return model.dirty(); },
-    currentDirty:model.currentDirty,
+    currentDirty:() => model.currentDirty(),
+    rebase(document) { model = document; display(); },
     reset() { model.reset(); display(); },
     replace(content) { flush(); model.replace(content); display(); },
     display,

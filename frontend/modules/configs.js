@@ -15,6 +15,7 @@ export function installConfigPages(ctx) {
   const deployments = createConfigDeployment(ctx, {
     invalidateLiveSnapshot: reader.invalidateLiveSnapshot,
     maybeRerenderLiveConfig: (agentId, engine) => live.maybeRerenderLiveConfig(agentId, engine),
+    hasTaskFeedback: taskID => presets.status.hasTaskFeedback(taskID),
   });
   const presets = createPresetEditor(ctx, {
     deployments,

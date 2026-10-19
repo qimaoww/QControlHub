@@ -8,6 +8,7 @@ import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups } from "./ss
 import { createPresetView } from "./preset-view.js";
 import { createPresetStatus } from "./preset-status.js";
 import { createPresetBindings } from "./preset-bindings.js";
+import { redactDiagnostic } from "./errors.js";
 
 export function createPresetEditor(ctx, { deployments, renderLiveConfig, onRuntimeChange }) {
   const { api, state, engines, can, esc, ago, confirmAction, notify } = ctx;
@@ -44,7 +45,7 @@ function agentConfig(options = {}) {
       ctx.navigationEpoch = state.navigationEpoch;
       if (!editor.savePending && !ctx.navigating) {
         const key = editor.host?.operationKey || `${ctx.agent.id}|${ctx.engine}`;
-        const failure = {key, message:`配置加载失败：${error.message}。草稿已保留，请重新加载后继续编辑。`, tone:"error", reload:true};
+        const failure = {key, message:redactDiagnostic(error.message) || "配置加载失败", tone:"error", reload:true};
         const operation = operationFor(key);
         if (operation) Object.assign(operation, failure);
         else saveOperation(failure);
@@ -102,7 +103,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       prior.navigationEpoch = navigationEpoch;
       Object.assign(state.data, {protocol:prior.protocol?.key, inboundTag:prior.selectedInbound?.tag || ""});
       const key = host?.operationKey || `${prior.agent.id}|${engine}`;
-      saveOperation({key, message:"服务端已有更新版本，当前草稿已保留。请重新加载后再提交，避免覆盖其他修改。", tone:"error", reload:true});
+      saveOperation({key, message:"配置版本已变化", tone:"error", reload:true});
       // The old editor may have been unmounted while visiting another page.
       // Recreate that exact revision so its retained drafts remain visible.
       await renderAgentConfig({workspace:prior.workspace});
@@ -292,12 +293,12 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         config, catalog: workspace.catalog, presentFields: workspace.present_fields }));
     }
     bindAgentConfigPage(context, true);
-  }).catch(error => { if (isCurrent()) notify(`字段加载失败：${error.message}`, "error"); }); });
+  }).catch(error => { if (isCurrent()) notify(redactDiagnostic(error.message) || "字段加载失败", "error"); }); });
   if (!loadedWorkspace && operationFor(`${agent.id}|${engine}`)) {
     const operation = operationFor(`${agent.id}|${engine}`);
     if (operation.reload) {
-      operation.message = `已重新加载配置 v${config?.version || 0}，可以继续编辑。`;
-      operation.tone = "";
+      operation.message = "刷新成功";
+      operation.tone = "success";
       operation.reload = false;
       renderPresetStatus();
       editor.syncControls();
@@ -319,7 +320,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}</small></span></span>`).join("")}</nav>`;
         loaded = true;
       } catch (error) {
-        if (history.isConnected && isCurrent()) updateFeedback(body, `版本历史加载失败：${error.message}；重新展开可重试。`);
+        if (history.isConnected && isCurrent()) updateFeedback(body, redactDiagnostic(error.message) || "版本历史加载失败");
       } finally { loading = false; }
     };
     bindEvent(history, "toggle", loadHistory);

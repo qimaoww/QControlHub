@@ -1,6 +1,7 @@
 import { bindEvent } from "./refresh.js";
 import { presetRoute } from "./preset-route.js";
 import { updateFeedback, removePresented } from "./presence-motion.js";
+import { redactDiagnostic } from "./errors.js";
 
 export function bindLiveConfigNavigation({state, notify, confirmAction, engineName}, {
   agent, engine, accountData, sourceMode, workspaceElement, liveConfig, workspace, workspaces,
@@ -15,7 +16,7 @@ export function bindLiveConfigNavigation({state, notify, confirmAction, engineNa
     if (target.agentId === state.data.liveAgent && target.engine === state.data.liveEngine && target.sourceMode === state.data.liveConfigSource) return;
     const request = ++selectionRequest;
     if (workspace.submitting || document.querySelector('#live-config-form[data-saving="1"], .config-inbound-dialog[data-saving="1"]')) {
-      notify("配置正在提交，请等待保存结果后再切换。", "error"); return;
+      notify("配置正在提交", "error"); return;
     }
     workspaces.capture();
     if (workspaces.dirty() && !(await confirmAction("当前工作区有未保存修改。切换后会保留草稿，确定切换？", title))) return;
@@ -43,7 +44,7 @@ export function bindLiveConfigNavigation({state, notify, confirmAction, engineNa
         const active = tab.dataset.liveEngine === engine;
         tab.classList.toggle("active", active); tab.setAttribute("aria-pressed", String(active));
       });
-      notify(`${title}失败：${error.message}`, "error");
+      notify(redactDiagnostic(error.message) || `${title}失败`, "error");
     } finally {
       if (workspaceElement.isConnected && request === selectionRequest) {
         workspaceElement.removeAttribute("aria-busy"); removePresented(status);

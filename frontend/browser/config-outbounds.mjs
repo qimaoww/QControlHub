@@ -70,7 +70,7 @@ export async function testConfigOutboundsRuntime() {
     save(); save(); await pause();
     assert(document.querySelector("dialog form").getAttribute("aria-busy") === "true" &&
       document.querySelector("[data-outbound-close]").disabled && input().disabled &&
-      document.querySelector("[data-outbound-status]").textContent.includes("正在保存"), "pending outbound save has no consistent lock/status");
+      document.querySelector("[data-outbound-status]").textContent.includes("正在提交"), "pending outbound save has no consistent lock/status");
     document.querySelector("dialog").dispatchEvent(new Event("cancel", {cancelable:true}));
     assert(document.querySelector("dialog[open]"), "Escape closed an uncertain outbound write");
     release();

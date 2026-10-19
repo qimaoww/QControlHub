@@ -226,7 +226,7 @@ export async function testCommonConfigRuntime() {
   form().elements.fragment.value = '{"level":"keep-this-draft"}';
   conflict.fail = true;
   form().querySelector("[data-field-intent=validate]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("草稿已保留"),
+  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.firstChild?.textContent === "fixture version conflict",
     "common save conflict did not preserve the draft");
   assert(form().elements.fragment.value.includes("keep-this-draft") && form().querySelector("[data-field-intent=validate]").disabled,
     "common conflict allowed stale resubmission or discarded inputs");

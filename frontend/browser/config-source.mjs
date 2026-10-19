@@ -14,6 +14,9 @@ export async function testCompleteSourceRuntime() {
   await waitFor(()=>input.value === "", "blank complete draft did not open");
   assert(!input.readOnly && !test.writes.length, "starting a complete configuration performed a write");
   change(input, '{"inbounds":');
+  assert(document.querySelector("[data-code-validation]").textContent.startsWith("JSON 格式错误") &&
+    !document.querySelector("[data-workspace-result]").textContent,
+    "source syntax error was duplicated in the operation feedback");
   document.querySelector("[data-config-preview]").click();
   assert(input.value === '{"inbounds":' && !input.readOnly, "invalid complete source was discarded by a view switch");
   const native = '{\n "custom":18446744073709551615,\n "inbounds":[{"tag":"own","protocol":"socks","port":23001,"settings":{"auth":"noauth"}}],\n "outbounds":[{"tag":"direct","protocol":"freedom"}]\n}\n';
@@ -55,4 +58,41 @@ export async function testCompleteSourceRuntime() {
   await waitFor(()=>document.querySelector('[data-access-inbound="first"]')?.textContent.includes("23009"), "native source edit did not update its object navigation");
   assert(nativeInput.selectionStart === 8 && !nativeTest.writes.length, "native object refresh reset the caret or saved the draft");
   nativeTest.dispose();
+  const deployment = await createConfigFixture("xray");
+  deployment.confirm = true;
+  document.querySelector("[data-config-source]").click();
+  change(document.querySelector("[data-code-input]"), native);
+  deployment.taskFailure = true;
+  let releaseTask;
+  deployment.taskGate = new Promise(resolve => { releaseTask = resolve; });
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>deployment.writes.length === 1 && document.querySelector("[data-workspace-save-state]").textContent === "已保存 v2",
+    "saved baseline was delayed until task submission finished");
+  assert([...document.querySelectorAll("#live-config-form button, #live-config-form textarea")].every(control => control.disabled),
+    "updating the saved baseline unlocked controls during task submission");
+  releaseTask(); deployment.taskGate = null;
+  await waitFor(()=>document.querySelector("[data-workspace-result]")?.textContent === "fixture task unavailable", "task creation failure added redundant advice or hid the error");
+  assert(deployment.saved().content === native && deployment.writes.length === 1 &&
+    document.querySelector("[data-workspace-save-state]").textContent === "已保存 v2", "partial success lost the saved document or baseline");
+  assert(!deployment.notices.length, "inline failure was duplicated in a notification");
+  deployment.taskFailure = false;
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>document.querySelector("[data-workspace-result]")?.firstChild?.textContent === "等待部署…", "queued deployment has no concise progress");
+  const queuedTasks = deployment.calls.filter(call => call.path === "/tasks" && call.method === "POST").length;
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert(document.querySelector("[data-workspace-result]")?.firstChild?.textContent === "等待部署…" &&
+    deployment.calls.filter(call => call.path === "/tasks" && call.method === "POST").length === queuedTasks,
+    "repeated deployment replaced its active feedback or submitted a duplicate task");
+  deployment.taskError = "config.json: private_key: secret-material; listen 23001: address already in use";
+  deployment.taskStatus = "failed";
+  await waitFor(()=>document.querySelector("[data-workspace-result]")?.textContent === "config.json: private_key: [redacted]; listen 23001: address already in use", "deployment failure did not show only the redacted error");
+  assert(!deployment.notices.length && document.querySelector("[data-workspace-deploy-state]").textContent.includes("v2 待部署"), "failed deployment duplicated feedback or advanced its deployed version");
+  deployment.taskStatus = "succeeded";
+  deployment.taskError = "";
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>document.querySelector("[data-workspace-result]")?.firstChild?.textContent === "部署成功" &&
+    document.querySelector("[data-workspace-deploy-state]")?.textContent === "已部署 v2", "retry did not report the actual successful deployment");
+  assert(deployment.writes.length === 1 && deployment.saved().content === native, "deployment retry rewrote the saved draft");
+  deployment.dispose();
 }

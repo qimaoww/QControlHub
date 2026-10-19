@@ -30,7 +30,7 @@ export async function testSamePageRecovery({ FakeForm, AGENT_ID, ENGINE, makeAge
     failSave=true;
     await fieldForm.dispatchSubmit({fieldIntent:"deploy"});
     assert.equal(state.data.presetOperation.reload,true,"unknown commit outcome allowed blind resubmission");
-    assert.ok(state.data.presetOperation.message.includes("未能确认保存结果"));
+    assert.equal(state.data.presetOperation.message, "response lost");
     savedVersion=2;allowDiscard=false;
     await pages.agentConfig();
     assert.equal(state.data.presetOperation.reload,true,"canceling a version replacement must keep the old draft locked against stale saves");

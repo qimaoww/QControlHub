@@ -42,12 +42,12 @@ function deployPreflightError(message) {
 export function assertAgentConfigBaseline(expected, actual) {
   if (typeof expected !== "string") {
     throw deployPreflightError(
-      "部署前没有可核验的 Agent 配置基线，已停止保存和部署。请先重新读取节点配置。",
+      "缺少节点配置基线",
     );
   }
   if (actual !== expected) {
     throw deployPreflightError(
-      "部署前核验发现 Agent 当前配置已在页面读取后发生变化，已停止保存和部署。当前草稿已保留，请重新读取节点配置并合并修改。",
+      "节点配置已变化",
     );
   }
 }

@@ -176,11 +176,11 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`liveConfig({preferCachedRead:false})`,
 		`liveConfigSnapshotReusable`,
 		`assertAgentConfigBaseline`,
-		`正在核验节点当前配置`,
+		`正在核验配置`,
 		`beforeDeploy`,
 		`submitLiveConfigChange`,
 		`!unsupportedReason`,
-		`diagnosticError(source?.error || unsupportedReason)`,
+		`redactDiagnostic(source?.error || unsupportedReason)`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("manual configuration flow is missing %q", required)

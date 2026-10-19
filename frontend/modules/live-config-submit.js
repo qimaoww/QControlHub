@@ -1,10 +1,10 @@
 import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { submitLiveConfigChange } from "./live-config-state.js";
 import { taskTerminal } from "./task-monitor.js";
 
-export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, submitTask}, {
+export function bindLiveConfigSubmit({api, state, can, confirmAction, submitTask}, {
   agent, engine, accountData, sourceKey, source, privateWorkspace, importSource, configFiles, beforeDeploy,
   workspaceElement, liveConfig, deployments, workspace, workspaces, status,
 }) {
@@ -25,7 +25,7 @@ export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, su
     const intent = event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
     if (!["save", "validate", "deploy", "import"].includes(intent) || !can("agent-config.write") ||
       intent !== "save" && (!can("tasks.execute") || agent.status !== "online") || importSource !== (intent === "import")) return;
-    if (workspace.conflict) { report("服务端版本已变化，草稿已保留。请核对新版本后再提交。", "error"); return; }
+    if (workspace.conflict) { report("配置版本已变化", "error"); return; }
     const form = new FormData(formElement);
     try { form.set("content", configFiles ? configFiles.content() : form.get("content")); }
     catch (error) { report(error.message, "error"); return; }
@@ -33,7 +33,7 @@ export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, su
     const ongoing = status.operationFor(key);
     if (intent !== "save" && ongoing?.task?.id && !taskTerminal(ongoing.task) && ongoing.intent === intent &&
         ongoing.version === workspace.saved?.version && form.get("content") === workspace.saved?.content) {
-      notify("此版本的任务正在执行，请等待结果后重试。", "error"); return;
+      status.renderPresetStatus(); return;
     }
     const controls = [...workspaceElement.querySelectorAll("button, input, select, textarea")].map(element => [element, element.disabled]);
     const submitter = event.submitter, label = submitter?.textContent;
@@ -50,12 +50,12 @@ export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, su
         : "保存当前配置并部署到此节点的所选内核？部署会启动或重启服务。", "保存并部署"))) return;
       if (!current()) return;
       submitted = true;
-      report("正在保存配置…");
+      report("正在保存…");
       if (submitter) updateFeedback(submitter, "正在提交…");
       result = await submitLiveConfigChange({api, submitTask, agent, engine, intent, form, source,
         existingAvailable:importSource, savedConfig:workspace.saved, isCurrent:current,
         beforeDeploy:beforeDeploy ? async () => {
-          report("正在核验节点当前配置…");
+          report("正在核验配置…");
           await beforeDeploy();
         } : null,
         onSavedConfig:config => {
@@ -63,6 +63,7 @@ export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, su
           if (accountData !== state.data) return;
           state.data.presetDrafts?.clear(`${workspace.agentId}|${engine}|${workspace.sourceMode}|`);
           workspaces.commit(workspace, config);
+          if (current()) configFiles?.rebase(workspace.document);
           state.data.liveSources[sourceKey] = {...source, content:config.content, saved:!importSource, cached:false};
         },
         onDeployTask:taskId => {
@@ -75,16 +76,15 @@ export function bindLiveConfigSubmit({api, state, can, notify, confirmAction, su
       if (!persisted) workspaces.commit(workspace, result.saved);
       state.data.liveSources[sourceKey] = {...source, content:result.content, saved:!importSource, cached:false};
       workspace.phase = result.task ? "tracking" : "ready";
-      report(intent === "save" ? `配置 v${result.saved.version} 已保存，尚未部署。`
-        : `配置 v${result.saved.version} 已保存，${intent === "deploy" ? "部署" : intent === "import" ? "迁移" : "校验"}任务已提交。`, "", result.task, intent);
+      report(intent === "save" ? "保存成功"
+        : `${intent === "deploy" ? "部署" : intent === "import" ? "迁移" : "校验"}已提交`, intent === "save" ? "success" : "", result.task, intent);
       if (current()) await liveConfig();
     } catch (error) {
       if (accountData !== state.data || error.name === "AbortError") return;
       workspace.uncertain = !error.deployPreflight && submitted && !persisted && (!error.status || error.status >= 500 || error.status === 409);
       workspace.phase = workspace.uncertain ? "uncertain" : "ready";
-      const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务未完成：` : ""}${diagnosticError(error.message)}${workspace.uncertain ? " 草稿已保留，请刷新并核对保存结果。" : persisted ? " 可以重新提交任务，已保存的内容仍然保留。" : ""}`;
+      const message = redactDiagnostic(error.message) || "提交失败";
       report(message, "error");
-      if (current()) notify(message, "error");
       if (persisted && current()) {
         try { await liveConfig(); } catch { /* Durable saved state and feedback are retained for the next render. */ }
       }

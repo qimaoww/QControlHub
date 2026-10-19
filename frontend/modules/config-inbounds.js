@@ -159,7 +159,7 @@ export function bindConfigInbounds(ctx) {
             buttons.forEach(item => { item.disabled = true; });
             try {
               if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
-                updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验 Agent 当前配置…");
+                updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验配置…");
                 await beforeDeploy();
                 if (!active()) return;
                 updateFeedback(body.querySelector("[data-inbound-error]"), "");
@@ -172,8 +172,7 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              const reason = error.status === 409 ? "配置版本已变化，请重新读取后重试。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
-              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>删除入站失败</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
+              updateFeedback(body.querySelector("[data-inbound-error]"), redactDiagnostic(error.message) || "删除失败");
               if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }

@@ -1,11 +1,12 @@
 import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-json.js";
 import { updateFeedback } from "./presence-motion.js";
+import { redactDiagnostic } from "./errors.js";
 
 // Deliberately check only recognizable foreign formats. Unknown native fields
 // remain editable and are checked by the selected core on explicit validation.
 export function configSourceProblem(engine, content) {
-  if (!content.trim()) return "配置内容为空，请输入完整配置。";
+  if (!content.trim()) return "配置内容为空";
   if (new TextEncoder().encode(content).length > 2097152) return "配置超过 2 MiB 上限。";
   if (content.includes("\u0000")) return "文件含有二进制内容，请选择 UTF-8 配置文本。";
   let document;
@@ -30,7 +31,21 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
   if (!picker || !files) return;
   const input = root.querySelector("[data-code-input]"), status = root.querySelector("[data-workspace-result]");
   const engine = workspace.engine;
-  let request = 0, applying = false, previewTimer, previewController;
+  let request = 0, applying = false, previewTimer, previewController, sourceMessage;
+  const report = (message, tone = "") => {
+    if (!status) return;
+    sourceMessage = message;
+    status.className = message ? `alert preset-submit-status ${tone}` : "";
+    status.setAttribute("role", tone === "error" ? "alert" : "status");
+    updateFeedback(status, message);
+  };
+  const showProblem = problem => {
+    const validation = root.querySelector("[data-code-validation]");
+    if (validation && root.querySelector("[data-code-editor]")?.dataset.codeValid === "0") {
+      if (status?.textContent === sourceMessage) report("");
+      updateFeedback(validation, problem);
+    } else report(problem, "error");
+  };
   const cancelPreview = () => { clearTimeout(previewTimer); previewController?.abort(); };
   state.routeSignal?.addEventListener("abort", cancelPreview, {once:true});
   const replace = async (content, name, ticket = ++request) => {
@@ -44,9 +59,10 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
     try { files.replace(content); } finally { applying = false; }
     workspaces.capture();
     input.focus({preventScroll:true});
+    if (!name && !content.trim()) { report("空白草稿已创建", "success"); return; }
     const problem = configSourceProblem(engine, content);
-    updateFeedback(status, problem || (name ? `已导入 ${name}，尚未保存。` : "已创建空白草稿，请输入完整配置。"));
-    if (problem || !content.trim()) return;
+    if (problem) { showProblem(problem); return; }
+    report(`已导入 ${name}`, "success");
     try {
       const preview = await api(`/agents/${encodeURIComponent(workspace.agentId)}/configs/${encodeURIComponent(engine)}/workspace/preview`, {
         method:"POST", body:JSON.stringify({content, expected_version:workspace.saved?.version || 0}),
@@ -57,7 +73,7 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
       try { files.display(); } finally { applying = false; }
     } catch (error) {
       if (current() && ticket === request && files.document.text() === content)
-        updateFeedback(status, `草稿已保留：${error.message}`);
+        report(redactDiagnostic(error.message) || "配置校验失败", "error");
     }
   };
   bindEvent(root.querySelector("[data-config-file-open]"), "click", () => { if (current()) picker.click(); });
@@ -66,21 +82,21 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
     const file = picker.files?.[0]; picker.value = "";
     if (!file || !current()) return;
     const ticket = ++request;
-    if (file.size > 2097152) { notify("文件超过 2 MiB 上限，当前草稿已保留。", "error"); return; }
+    if (file.size > 2097152) { notify("文件超过 2 MiB 上限", "error"); return; }
     try {
       const bytes = await file.arrayBuffer();
       const content = new TextDecoder("utf-8", {fatal:true}).decode(bytes);
       if (current() && ticket === request) await replace(content, file.name, ticket);
-    } catch (error) { if (current() && ticket === request) notify(`无法读取 UTF-8 配置文件：${error.message}。当前草稿已保留。`, "error"); }
+    } catch (error) { if (current() && ticket === request) notify(`无法读取 UTF-8 配置文件：${redactDiagnostic(error.message)}`, "error"); }
   });
   bindEvent(input, "input", () => {
     if (applying) return;
     const ticket = ++request;
     cancelPreview();
+    if (status?.textContent === sourceMessage) report("");
     if (["source", "common"].includes(files.document.selected())) {
       const problem = configSourceProblem(engine, files.document.selected() === "source" || !files.document.segmented ? input.value : (() => { try { return files.content(); } catch { return input.value; } })());
-      if (problem) updateFeedback(status, problem);
-      else if (status?.textContent.startsWith("JSON 格式错误") || status?.textContent.startsWith("当前选择") || status?.textContent.startsWith("配置内容为空")) updateFeedback(status, "");
+      if (problem) showProblem(problem);
     }
     if (!files.document.segmented && !input.readOnly && !configSourceProblem(engine, input.value)) {
       const content = input.value;
@@ -97,7 +113,7 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
         } catch (error) {
           if (error.name !== "AbortError" && current() && ticket === request) {
             files.document.updateInbounds([]); files.refreshObjects();
-            updateFeedback(status, `草稿已保留：${error.message}`);
+            report(redactDiagnostic(error.message) || "配置校验失败", "error");
           }
         }
       }, 250);

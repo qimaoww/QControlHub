@@ -1,12 +1,12 @@
 import { bindEvent } from "./refresh.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { assertAgentConfigBaseline, deployPreflightError, liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveSourceKey } from "./live-config-state.js";
 import { presetRoute } from "./preset-route.js";
 import { bindConfigFiles } from "./config-files.js";
 import { bindConfigSourceEditor } from "./config-source-editor.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
 import { bindConfigInbounds } from "./config-inbounds.js";
-import { createLiveConfigView } from "./live-config-view.js";
+import { createLiveConfigView, configWorkspaceStatus } from "./live-config-view.js";
 import { bindLiveConfigNavigation } from "./live-config-navigation.js";
 import { bindLiveConfigSubmit } from "./live-config-submit.js";
 import { bindSharedInstanceRead } from "./shared-instance-read.js";
@@ -183,7 +183,7 @@ async function liveConfig(options = {}) {
     ? async () => {
         if (!readAction) {
           throw deployPreflightError(
-            "当前 Agent 版本无法在部署前独立读取 QAgent 托管配置，已停止保存和部署。请先升级 Agent。",
+            "Agent 不支持读取 QAgent 托管配置",
           );
         }
         const isCurrent = () =>
@@ -203,12 +203,12 @@ async function liveConfig(options = {}) {
         } catch (error) {
           if (error?.deployPreflight) throw error;
           throw deployPreflightError(
-            `部署前无法核验 Agent 当前配置，已停止保存和部署：${diagnosticError(error.message)}`,
+            redactDiagnostic(error.message) || "无法核验节点配置",
           );
         }
         if (!fresh || !isCurrent()) {
           throw deployPreflightError(
-            "部署前页面状态已变化，已停止保存和部署。当前草稿已保留，请重新确认节点与内核。",
+            "工作区已切换",
           );
         }
         assertAgentConfigBaseline(source?.agentContent, fresh.content);
@@ -237,7 +237,7 @@ async function liveConfig(options = {}) {
   bindEvent(workspaceElement?.querySelector("[data-config-refresh]"), "click", async () => {
     if (!ticket.current()) return;
     try { await refreshConfig(); }
-    catch (error) { if (accountData === state.data && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode) notify(`读取配置失败：${error.message}`, "error"); }
+    catch (error) { if (accountData === state.data && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode) notify(redactDiagnostic(error.message) || "读取配置失败", "error"); }
   });
   bindEvent(document.querySelector("[data-read-current]"), "click", async () => {
       delete state.data.liveSources[sourceKey];
@@ -246,8 +246,11 @@ async function liveConfig(options = {}) {
   const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify, {
     document:workspace.document, inbounds:workspace.inbounds,
     onChange:model => {
+      const labels = configWorkspaceStatus({runtime, workspace, saved:workspace.saved, source, importSource});
       const status = workspaceElement.querySelector("[data-workspace-save-state]");
-      if (status) status.textContent = importSource ? "系统服务快照" : model.dirty() ? "有未保存修改" : workspace.saved?.version ? `已保存 v${workspace.saved.version}` : "尚未保存";
+      if (status) status.textContent = !importSource && model.dirty() ? "有未保存修改" : labels.saved;
+      const deployment = workspaceElement.querySelector("[data-workspace-deploy-state]");
+      if (deployment) deployment.textContent = labels.deployed;
     },
   });
   bindCodeEditors();
@@ -256,6 +259,7 @@ async function liveConfig(options = {}) {
     if (accountData !== state.data) return;
     const key = workspace.operationKey;
     workspaces.commit(workspace, result.config);
+    if (ticket.current()) configFiles?.rebase(workspace.document);
     state.data.liveSources[sourceKey] = {
       ...(state.data.liveSources[sourceKey] || source),
       content: result.config.content,
@@ -266,7 +270,7 @@ async function liveConfig(options = {}) {
       let operation = operationFor(key);
       if (operation?.task?.id !== result.task.id) operation = saveOperation({
         key, task:result.task, version:result.config.version, intent:result.task.action,
-        message:`配置 v${result.config.version} 已保存，任务已提交。`,
+        message:`${result.task.action === "deploy" ? "部署" : "校验"}已提交`,
       });
       watchPresetOperation(operation);
       if (result.task.action === "deploy") {
@@ -281,11 +285,10 @@ async function liveConfig(options = {}) {
         if (accountData !== state.data) return;
         // The mutation is already durable. Do not report it as a failed save
         // or silently lose the error after the embedded editor is disposed.
-        const message = `配置 v${result.config.version} 已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
+        const message = redactDiagnostic(error.message) || "配置加载失败";
         const operation = operationFor(key);
         if (operation?.task?.id === result.task?.id) Object.assign(operation, {message, tone:"error", reload:true});
         renderPresetStatus();
-        notify(message, "error");
       }
     }
   };

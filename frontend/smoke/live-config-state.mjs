@@ -136,7 +136,7 @@ assert.doesNotThrow(() => assertAgentConfigBaseline("agent bytes\n", "agent byte
 let baselineConflict;
 try { assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"); }
 catch (error) { baselineConflict = error; }
-assert.match(baselineConflict?.message || "", /部署前核验发现 Agent 当前配置已在页面读取后发生变化/);
+assert.match(baselineConflict?.message || "", /节点配置已变化/);
 assert.equal(baselineConflict.deployPreflight, true);
 
 const deployOrder = [];
@@ -179,7 +179,7 @@ await assert.rejects(submitLiveConfigChange({
   existingAvailable: false,
   savedConfig: null,
   beforeDeploy: async () => assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"),
-}), /已停止保存和部署/);
+}), /节点配置已变化/);
 assert.equal(preflightMutationAttempted, false,
   "a changed Agent baseline must block both the config save and deploy task");
 

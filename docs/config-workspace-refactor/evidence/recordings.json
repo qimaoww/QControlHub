@@ -8,8 +8,8 @@
     "theme": "light",
     "exceptions": [],
     "file": "desktop-context-drafts.mp4",
-    "seconds": 10.76,
-    "bytes": 1203614,
+    "seconds": 11.04,
+    "bytes": 1186896,
     "scope": "Production UI with isolated API fixtures; task results simulated"
   },
   {
@@ -21,8 +21,8 @@
     "theme": "dark",
     "exceptions": [],
     "file": "mobile-file-save-retry-deploy.mp4",
-    "seconds": 8.84,
-    "bytes": 199218,
+    "seconds": 12.64,
+    "bytes": 245513,
     "scope": "Production UI with isolated API fixtures; task results simulated"
   },
   {
@@ -34,8 +34,8 @@
     "theme": "light",
     "exceptions": [],
     "file": "mobile-protocol-outbound.mp4",
-    "seconds": 5.32,
-    "bytes": 285339,
+    "seconds": 5.36,
+    "bytes": 276474,
     "scope": "Production UI with isolated API fixtures; task results simulated"
   }
 ]

@@ -72,7 +72,7 @@ export async function testConfigScopeRuntime(preview = false) {
     assert(!document.querySelector('[data-live-intent="deploy"], [data-live-intent="validate"]'), "save-only user was offered task execution");
     editor.value = "mixed-port: 23001\n# saved-private-draft\n";
     document.querySelector('[data-live-intent="save"]').click();
-    await waitFor(() => document.querySelector("[data-workspace-result]")?.textContent.includes("已保存，尚未部署"), "personal save did not complete");
+    await waitFor(() => document.querySelector("[data-workspace-result]")?.textContent === "保存成功", "personal save did not complete");
     assert(records.writes.length === 1 && records.tasks.length === 0, "save-only operation submitted a task");
     assert(records.writes[0].content.includes("saved-private-draft"), "personal save lost edited content");
   }
