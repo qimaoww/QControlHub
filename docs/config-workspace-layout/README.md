@@ -147,4 +147,17 @@ evidence/
 
 ## 十、测试环境与清理
 
-本轮测试使用本机静态服务器（端口 8901 / 8902）与无头 Chromium，测试结束后停止进程、关闭浏览器会话并释放端口。截图、录屏与本文档保留在仓库内；临时目录按登记的时间点清理。
+本轮测试使用本机静态服务器（端口 8901 / 8902）与无头 Chromium。测试结束时已停止两个静态服务器、结束测试浏览器会话，并确认 8901 / 8902 端口不再监听。截图、录屏、度量 JSON 与本文档随分支入库保留。
+
+延时清理任务（测试结束后 72 小时执行）：
+
+| 项目 | 值 |
+| --- | --- |
+| 任务标识 | `automation_57e7a7e6-df15-4def-9154-b586651ea934` |
+| 执行时间 | 2026-10-22 19:09（测试结束 2026-10-19 19:09 起 72 小时） |
+| 时区 | Asia/Hong_Kong |
+| 权限 | danger-full-access（仅删除下列范围） |
+
+清理范围：本次布局测试的两个工作树（`/root/.codex/worktrees/pr308-layout/qcontrolhub`、基线 `/root/preview/pr308-before`）、`/root/preview` 下本次采集的截图与探针脚本、`/tmp/videos-before`、`/tmp/videos-after` 与本轮日志文件，并在主仓库执行 `git worktree prune`。
+
+保留范围：`docs/config-workspace-layout/` 下的报告与 `evidence/`（截图、录屏、度量），以及远端分支 `codex/config-workspace-layout`。不属于本轮测试的进程与临时目录不在清理范围内。
