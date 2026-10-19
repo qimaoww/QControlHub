@@ -1,8 +1,9 @@
 import { assert, waitFor } from "./assertions.mjs";
+import { selectConfigContext } from "./config-fixture.mjs";
 
 export async function testConfigLayoutRuntime({ testAPI }) {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
-    assert.equal(document.querySelectorAll(".live-engine-bar [data-live-engine]").length,4,"top bar must expose all installed engines");
+    assert.equal(document.querySelectorAll("[data-live-engine-select] option").length,4,"core selector must expose all installed engines");
     assert.equal(document.querySelectorAll(".context-sidebar [data-live-engine]").length,0,"sidebar must not duplicate engine navigation");
     assert.equal(document.querySelectorAll('.dock-nav a[href="#agents"], .mobile-account-menu a[href="#agents"]').length,0,"independent preset navigation remains");
     if (!new URLSearchParams(location.search).has("preview")) {
@@ -21,10 +22,10 @@ export async function testConfigLayoutRuntime({ testAPI }) {
               : workspace.querySelector("#live-config-form"));
         }, "legacy config link did not preserve node/core: " + hash);
       }
-      const engineLauncher = document.querySelector('[data-live-engine="sing-box"]');
-      engineLauncher.focus(); engineLauncher.click();
+      const engineLauncher = document.querySelector('[data-live-engine-select]');
+      engineLauncher.focus(); selectConfigContext("engine", "sing-box");
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
-      assert.equal(document.activeElement, document.querySelector('[data-live-engine="sing-box"]'), "replaced engine editor must retain selection launcher focus");
+      assert.equal(document.activeElement, document.querySelector('[data-live-engine-select]'), "replaced engine editor must retain selection launcher focus");
       assert.ok(location.hash.includes("engine=sing-box"),"engine switch not reflected in safe deep link");
       const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
       const draft = input.value;
@@ -65,11 +66,12 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty node switch did not prompt");
       document.querySelector("[data-confirm-cancel]").click();
       assert.equal(input.value,draft,"cancel node switch lost draft");
-      document.querySelector('[data-live-engine="mihomo"]').click();
+      selectConfigContext("engine", "mihomo");
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty engine switch did not prompt");
       document.querySelector("[data-confirm-cancel]").click();
       assert.ok(document.querySelector('#live-config-form[data-engine="sing-box"]'),"cancel discarded active engine");
-      document.querySelector('[data-live-engine="mihomo"]').click();
+      assert.equal(document.querySelector('[data-live-engine-select]').value,"sing-box","cancel left the selector pointing to an uncommitted core");
+      selectConfigContext("engine", "mihomo");
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"second switch did not prompt");
       document.querySelector("[data-confirm-accept]").click();
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
@@ -86,6 +88,10 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       document.querySelector('[data-live-agent="bravo"]').click();
       await waitFor(()=>pendingNodes.has("bravo"),"first node request did not start");
       assert.ok(document.querySelector("#live-config-form").inert,"node switch left the previous editor active");
+      assert.ok(document.querySelector("[data-live-engine-select]").inert,"node switch left the previous node's core selector active");
+      selectConfigContext("engine", "sing-box");
+      await new Promise(resolve=>setTimeout(resolve,20));
+      assert.ok(!pendingNodes.has("alpha"),"old core selector redirected the pending node selection");
       document.querySelector('[data-live-agent="delta"]').click();
       await waitFor(()=>pendingNodes.has("delta"),"latest node request did not start");
       pendingNodes.get("delta").release();
@@ -102,6 +108,8 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const workspace = document.querySelector(".live-config-workspace");
     const nav = workspace.querySelector(".config-file-buttons").getBoundingClientRect();
     const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
+    const submit = workspace.querySelector("[data-config-submit-bar]").getBoundingClientRect();
+    assert.ok(submit.bottom <= frame.top + 1,"save and deployment actions must be visible before the source editor");
     assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
     assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
     assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
@@ -109,8 +117,9 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-reset]'),"reset must stay with current-file tools");
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-format]'),"format must stay with current-file tools");
     assert.ok([...workspace.querySelectorAll('.code-workspace>footer button')].every(button => button.type === "submit"),"submission footer mixes file tools with save actions");
-    const details = workspace.querySelector(".live-config-details").getBoundingClientRect();
-    assert.ok(details.bottom <= workspace.querySelector(".live-engine-bar").getBoundingClientRect().top + 1,"node metadata must stay with the heading");
+    const context = workspace.querySelector('.settings-grid[aria-label="配置工作区"]').getBoundingClientRect();
+    assert.ok(context.bottom <= nav.top + 1,"core and source context must precede the editing object");
+    assert.ok(workspace.querySelector('[data-common-action="modify"]').closest(".code-editor-toolbar") && !workspace.querySelector('[data-common-action="modify"]').closest("details"),"current object editing must have a direct entry");
     assert.ok(document.querySelector('[data-inbound-action="history"]').closest(".config-tools-menu"),"secondary tools are not grouped in the header");
     const more = document.querySelector(".config-tools-menu");
     more.querySelector("summary").focus();
@@ -118,28 +127,18 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(more.open && document.activeElement.matches('[role="menuitem"]'),"tools menu cannot be opened by keyboard");
     more.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
     assert.ok(!more.open && document.activeElement === more.querySelector("summary"),"tools menu did not restore focus after Escape");
-    const engineTabs = [...document.querySelectorAll(".live-engine-tab")];
-    engineTabs.forEach(tab => {
-      assert.ok(Math.abs(tab.offsetWidth-engineTabs[0].offsetWidth) <= 1,"engine buttons must have equal widths");
-      assert.ok(tab.offsetHeight >= (innerWidth <= 820 ? 44 : 40),"engine buttons lost their minimum target height");
-      const bounds = tab.getBoundingClientRect();
-      assert.ok(bounds.left >= 0 && bounds.right <= innerWidth,"engine choice is hidden outside the viewport");
-    });
-    if (innerWidth <= 600) {
-      assert.equal(engineTabs[0].offsetTop,engineTabs[1].offsetTop,"first engine pair must share a row");
-      assert.ok(engineTabs[2].offsetTop > engineTabs[0].offsetTop,"mobile engines must form two rows");
-      assert.equal(engineTabs[2].offsetTop,engineTabs[3].offsetTop,"second engine pair must share a row");
+    for (const select of workspace.querySelectorAll(".settings-grid select")) {
+      const bounds = select.getBoundingClientRect();
+      assert.ok(bounds.left >= 0 && bounds.right <= innerWidth,"context selector overflows the viewport");
+      assert.ok(bounds.height >= 38,"context selector is too small");
     }
     if (innerWidth <= 820) {
-      const bar = document.querySelector(".live-engine-bar").getBoundingClientRect();
-      const tab = document.querySelector(".live-engine-tab").getBoundingClientRect();
-      assert.ok(tab.left-bar.left >= 15.5,"mobile engine tabs lost their horizontal inset");
       const toolbar = document.querySelector(".code-editor-toolbar").getBoundingClientRect();
       const file = document.querySelector(".code-file-meta").getBoundingClientRect();
       const meta = document.querySelector(".code-editor-meta").getBoundingClientRect();
       assert.ok(file.top-toolbar.top >= 15.5 && toolbar.bottom-meta.bottom >= 15.5,`mobile file controls touch section dividers: ${file.top-toolbar.top}/${toolbar.bottom-meta.bottom}`);
       const footer = document.querySelector(".code-workspace>footer").getBoundingClientRect();
-      const actions = document.querySelector(".code-workspace>footer>div").getBoundingClientRect();
+      const actions = document.querySelector("[data-config-submit-actions]").getBoundingClientRect();
       assert.ok(actions.top-footer.top >= 15.5 && footer.bottom-actions.bottom >= 15.5,"mobile actions touch section dividers");
     }
 }

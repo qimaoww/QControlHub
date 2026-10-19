@@ -67,7 +67,7 @@ export async function testConfigScopeRuntime(preview = false) {
     const editor = document.querySelector("[data-code-input]");
     assert(editor && !editor.readOnly, "private workspace must be editable without task permission or an installed core");
     assert(!editor.value.includes("other-user-runtime-secret"), "private editor inherited the shared host snapshot");
-    assert(!document.querySelector("[data-read-current], [data-auto-read-current], [data-live-source]"), "private editor offered shared-host configuration reads");
+    assert(!document.querySelector('[data-read-current], [data-auto-read-current], [data-live-source-select] option:not([value="personal"])'), "private editor offered shared-host configuration reads");
     assert(document.querySelector('[data-live-intent="save"]'), "save-only users cannot save their configuration");
     assert(!document.querySelector('[data-live-intent="deploy"], [data-live-intent="validate"]'), "save-only user was offered task execution");
     editor.value = "mixed-port: 23001\n# saved-private-draft\n";
@@ -85,7 +85,7 @@ export async function testConfigScopeRuntime(preview = false) {
   assert(!document.querySelector("[data-task-action], [data-instance-version]"), "shared runtime status or lifecycle controls leaked into the configuration page");
   assert([...document.querySelectorAll(".live-engine-status")].every(badge => badge.textContent === "配置待核实"), "shared configuration badges must describe the unknown configuration, without borrowing host runtime status");
   const owned = await configFixture({ owned: true });
-  assert(document.querySelector('[data-live-source="managed"]') && document.querySelector('[data-live-source="import"]'), "owner cannot explicitly read/import its host configuration");
+  assert(document.querySelector('[data-live-source-select] option[value="managed"]') && document.querySelector('[data-live-source-select] option[value="import"]'), "owner cannot explicitly read/import its host configuration");
   assert(!owned.records.calls.includes("/tasks") && !owned.records.tasks.length, "owner's personal editor auto-read a host snapshot");
   await configFixture({ writable: false });
   assert(document.querySelector("[data-code-input]").readOnly && !document.querySelector("[data-live-intent]"), "read-only workspace is writable");

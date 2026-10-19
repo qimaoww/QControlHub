@@ -1,0 +1,11 @@
+browser workers=2, CPUs=12, memory=20001MiB, modes=6
+browser timing {"mode":"config-layout","startupMs":180.198733,"testMs":1380.935796,"cleanupMs":36.526073,"passed":true,"elapsedMs":1597.674242}
+browser timing {"mode":"config-layout-mobile","startupMs":132.45302199999992,"testMs":1395.0127730000002,"cleanupMs":33.8324419999999,"passed":true,"elapsedMs":1561.304065}
+browser timing {"mode":"shared-node","startupMs":151.1047940000003,"testMs":639.87259,"cleanupMs":24.56356700000015,"passed":true,"elapsedMs":815.5474990000002}
+browser timing {"mode":"shared-node-mobile","startupMs":143.40227500000037,"testMs":631.0006659999999,"cleanupMs":29.44272799999999,"passed":true,"elapsedMs":803.8513560000001}
+browser timing {"mode":"config-scope","startupMs":152.19464900000003,"testMs":849.0378660000006,"cleanupMs":37.05403500000011,"passed":true,"elapsedMs":1038.2926609999995}
+agents browser runtime smoke passed
+browser timing {"mode":"motion-selection","startupMs":164.259518,"testMs":13471.508740000001,"cleanupMs":40.414692999998806,"passed":true,"elapsedMs":13676.201121}
+agents browser runtime smoke passed
+browser suite elapsed=13.734s
+agents browser runtime smoke passed

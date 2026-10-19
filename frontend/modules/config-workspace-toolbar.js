@@ -11,13 +11,17 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
     [...navigation.children].filter(element => !element.matches(".config-file-list"))
       .forEach(element => selectionActions.append(element));
     navigation.append(sourceActions);
-    const editorActions = document.createElement("div");
-    editorActions.className = "config-editor-actions";
-    editorActions.setAttribute("role", "group");
-    editorActions.setAttribute("aria-label", "当前文件操作");
-    form.querySelectorAll("[data-code-reset], [data-code-format]")
-      .forEach(button => editorActions.append(button));
-    toolbar.append(selectionActions, editorActions);
+    const sourceTools = selectionActions.querySelector(".config-inbound-menu");
+    form.querySelectorAll("[data-code-reset], [data-code-format]").forEach(button => {
+      button.className = "";
+      button.setAttribute("role", "menuitem");
+      button.tabIndex = -1;
+      sourceTools.querySelector('[role="menu"]').append(button);
+    });
+    sourceTools.addEventListener("click", event => {
+      if (event.target.closest('[role="menuitem"]')) closePopup(sourceTools);
+    });
+    toolbar.append(selectionActions);
     const draft = form.querySelector(".config-draft-summary");
     if (draft) form.querySelector(".code-workspace>footer").prepend(draft);
     form.querySelector(".config-file-navigation")?.remove();

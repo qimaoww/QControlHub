@@ -9,7 +9,13 @@
     "buttons": [
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 0,
+      "sourceTop": 422.09375,
+      "submitTop": 972.09375,
+      "submitBottom": 1043.09375
+    }
   },
   {
     "phase": "before",
@@ -21,7 +27,13 @@
     "buttons": [
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 0,
+      "sourceTop": 422.09375,
+      "submitTop": 972.09375,
+      "submitBottom": 1043.09375
+    }
   },
   {
     "phase": "before",
@@ -33,7 +45,13 @@
     "buttons": [
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 1,
+      "sourceTop": 818.78125,
+      "submitTop": 1223.890625,
+      "submitBottom": 1333.6875
+    }
   },
   {
     "phase": "before",
@@ -45,7 +63,13 @@
     "buttons": [
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 1,
+      "sourceTop": 818.78125,
+      "submitTop": 1223.890625,
+      "submitBottom": 1333.6875
+    }
   },
   {
     "phase": "after",
@@ -58,7 +82,13 @@
       "保存草稿",
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 0,
+      "sourceTop": 490.78125,
+      "submitTop": 419.78125,
+      "submitBottom": 490.78125
+    }
   },
   {
     "phase": "after",
@@ -71,7 +101,13 @@
       "保存草稿",
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 0,
+      "sourceTop": 490.78125,
+      "submitTop": 419.78125,
+      "submitBottom": 490.78125
+    }
   },
   {
     "phase": "after",
@@ -84,7 +120,13 @@
       "保存草稿",
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 1,
+      "sourceTop": 908.0625,
+      "submitTop": 746.265625,
+      "submitBottom": 908.0625
+    }
   },
   {
     "phase": "after",
@@ -97,7 +139,13 @@
       "保存草稿",
       "保存并校验",
       "保存并部署"
-    ]
+    ],
+    "initialLayout": {
+      "touch": 1,
+      "sourceTop": 908.0625,
+      "submitTop": 746.265625,
+      "submitBottom": 908.0625
+    }
   },
   {
     "name": "phone-small",

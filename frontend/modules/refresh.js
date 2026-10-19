@@ -52,6 +52,8 @@ function nodeKey(node) {
     "data-live-agent",
     "data-live-engine",
     "data-live-source",
+    "data-live-engine-select",
+    "data-live-source-select",
     "data-engine-select",
     "data-preset-protocol",
     "data-common-field",

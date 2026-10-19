@@ -1,3 +1,4 @@
+import { selectConfigContext } from "./config-fixture.mjs";
 import { bindLiveConfigNavigation } from "../modules/live-config-navigation.js";
 import { syncSelectionMotion } from "../modules/motion.js";
 import { assert, delay, waitFor } from "./assertions.mjs";
@@ -215,7 +216,7 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
   // A confirmation belongs to the selection and route that opened it.
   // Resolving an older prompt must never start a new config read.
   const host = document.createElement("section");
-  host.innerHTML = '<article class="live-config-workspace"><a href="#" data-live-agent="bravo">bravo</a><button data-live-source="import">import</button><form id="live-config-form"><div data-code-editor><textarea data-code-input>original</textarea></div></form></article>';
+  host.innerHTML = '<article class="live-config-workspace"><a href="#" data-live-agent="bravo">bravo</a><label><select data-live-source-select><option value="qagent">qagent</option><option value="import">import</option></select></label><form id="live-config-form"><div data-code-editor><textarea data-code-input>original</textarea></div></form></article>';
   document.body.append(host);
   host.querySelector("textarea").value = "unsaved";
   const configState = { route: "live-config", navigationEpoch: 1, data: { liveAgent: "alpha", liveEngine: "mihomo", liveConfigSource: "qagent" } };
@@ -225,7 +226,7 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
     agent: { id: "alpha" }, engine: "mihomo", accountData: configState.data, sourceMode: "qagent", current: { content: "original" },
     workspaceElement: host.firstElementChild, liveConfig: async () => { configReads++; },
   });
-  host.querySelector('[data-live-agent]').click(); host.querySelector('[data-live-source]').click();
+  host.querySelector('[data-live-agent]').click(); selectConfigContext("source", "import");
   assert.equal(confirmations.length, 2);
   confirmations[0](true); confirmations[1](false); await delay(10);
   assert.equal(configReads, 0, "superseded config selection cannot commit");

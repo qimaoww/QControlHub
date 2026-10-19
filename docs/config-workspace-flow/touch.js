@@ -5,10 +5,22 @@ async page => {
   const origin = new URL(page.url()).origin;
   const results = [];
   try {
-    for (const [width,height] of [[390,844],[844,390],[820,1180],[1180,820]]) {
+    for (const [width,height] of [[375,812],[390,844],[844,390],[820,1180],[1180,820]]) {
       await p.setViewportSize({width,height});
       await p.goto(`${origin}/agents-browser-smoke.html?mode=config-inbounds&preview=1`);
       await p.waitForSelector('#live-config-form');
+      await p.evaluate(()=>document.fonts.ready);
+      await p.waitForTimeout(800);
+      const buttons = await p.locator('[data-live-intent]').evaluateAll(items=>items.map(button=>{
+        const range = document.createRange(); range.selectNodeContents(button);
+        return {label:button.textContent,lines:range.getClientRects().length};
+      }));
+      if (buttons.some(button=>button.lines !== 1)) throw Error('submission button label wraps: '+JSON.stringify(buttons));
+      if (width === 375) {
+        await p.locator('[data-config-submit-bar]').evaluate(el=>el.scrollIntoView({block:'center'}));
+        await p.waitForTimeout(200);
+        await p.screenshot({path:'docs/config-workspace-flow/phone-small-actions.png'});
+      }
       await p.locator('[data-inbound-action="add"]').tap();
       await p.waitForSelector('dialog[open] #server-plan-form');
       await p.locator('dialog [name="tag"]').fill('touch-retained-draft');
@@ -17,13 +29,11 @@ async page => {
       await p.evaluate(()=>window.inboundFixture.confirm=true);
       await p.locator('[data-inbound-close]').tap();
       await p.waitForSelector('dialog[open]', {state:'detached'});
-      const launcher = p.locator('.config-selection-actions summary:has([data-config-operation-label])');
-      await launcher.tap();
-      await p.getByRole('menuitem',{name:'修改通用配置项',exact:true}).tap();
+      await p.locator('[data-common-action=modify]').tap();
       await p.waitForSelector('dialog[open] #field-form');
       await p.keyboard.press('Escape');
       await p.waitForSelector('dialog[open]', {state:'detached'});
-      results.push(await p.evaluate(()=>({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,overflow:document.documentElement.scrollWidth>innerWidth})));
+      results.push({...await p.evaluate(()=>({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,overflow:document.documentElement.scrollWidth>innerWidth})),buttons});
       if (results.at(-1).overflow || !results.at(-1).touch) throw Error('touch viewport is not valid');
       if (width === 390) {
         await p.evaluate(()=>window.scrollTo(0,0));

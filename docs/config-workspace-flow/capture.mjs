@@ -31,19 +31,24 @@ try {
     for (const [device,width,height] of [['desktop',1440,1000], ['mobile',390,844]]) {
       for (const theme of ['light','dark']) {
         measurements.push(run(`
-          await page.setViewportSize({width:${width},height:${height}});
+          const captureContext = await page.context().browser().newContext({viewport:{width:${width},height:${height}},isMobile:${device === "mobile"},hasTouch:${device === "mobile"}});
+          page = await captureContext.newPage();
+          try {
           await page.goto('${origin}/agents-browser-smoke.html?mode=config-layout&preview=1#live-config');
+          await page.reload();
           await page.waitForSelector('#live-config-form');
           await page.evaluate(theme=>document.documentElement.dataset.theme=theme, '${theme}');
           await page.waitForFunction(()=>document.documentElement.dataset.browserSmoke==='passed');
-          await page.locator('.config-tools-menu summary').focus();
+          await page.locator('.config-workspace-tools .config-tools-menu summary').focus();
           await page.evaluate(()=>document.fonts.ready);
           await page.waitForTimeout(800);
+          const initialLayout = await page.evaluate(()=>({touch:navigator.maxTouchPoints,sourceTop:document.querySelector('.code-editor-frame').getBoundingClientRect().top,submitTop:document.querySelector('.code-workspace>footer').getBoundingClientRect().top,submitBottom:document.querySelector('.code-workspace>footer').getBoundingClientRect().bottom}));
           await page.screenshot({path:'${directory}/${phase}-${device}-${theme}.png'});
-          await page.locator('.code-workspace>footer').scrollIntoViewIfNeeded();
+          await page.locator('.code-workspace>footer').evaluate(el=>el.scrollIntoView({block:'center'}));
           await page.waitForTimeout(400);
           await page.screenshot({path:'${directory}/${phase}-${device}-${theme}-actions.png'});
-          return await page.evaluate(()=>({phase:'${phase}',device:'${device}',theme:'${theme}',width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,buttons:[...document.querySelectorAll('[data-live-intent]')].map(b=>b.textContent)}));
+          return {...await page.evaluate(()=>({phase:'${phase}',device:'${device}',theme:'${theme}',width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,buttons:[...document.querySelectorAll('[data-live-intent]')].map(b=>b.textContent)})),initialLayout};
+          } finally { await captureContext.close(); }
         `));
       }
     }
@@ -66,7 +71,7 @@ try {
   run(`
     await page.locator('[data-code-input]').fill((await page.locator('[data-code-input]').inputValue())+'\\n');
     await page.waitForTimeout(800);
-    await page.locator('[data-live-engine="sing-box"]').click();
+    await page.locator('[data-live-engine-select]').selectOption('sing-box');
     await page.waitForSelector('[data-confirm-dialog][open]');
     await page.waitForTimeout(600);
     await page.locator('[data-confirm-cancel]').click();
@@ -74,7 +79,7 @@ try {
     await page.locator('[data-config-preview]').click();
     await page.waitForTimeout(500);
     await page.locator('[data-config-preview]').click();
-    await page.locator('[data-live-engine="sing-box"]').click();
+    await page.locator('[data-live-engine-select]').selectOption('sing-box');
     await page.waitForSelector('[data-confirm-dialog][open]');
     await page.locator('[data-confirm-accept]').click();
     await page.waitForSelector('#live-config-form[data-engine="sing-box"]');

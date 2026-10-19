@@ -166,11 +166,11 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`action: "import-existing"`,
 		`existing_config_unsupported_reason`,
 		`检测到现有服务，但不可自动迁移`,
-		`系统服务只读快照`,
-		`data-live-source="managed"`,
-		`data-live-source="import"`,
+		`label:"系统服务配置"`,
+		`value:"managed", label:"节点托管配置"`,
+		`value:"import", label:"系统服务配置"`,
 		`QAgent 托管配置`,
-		`系统服务 · 只读快照`,
+		`只读快照，可导入并迁移。`,
 		`read-managed-config`,
 		`prefer_cached: true`,
 		`liveConfig({ preferCachedRead: false, resetEditor:true })`,
@@ -205,8 +205,8 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	}
 	for _, required := range []string{
 		`(item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item], can("agent-config.write"))`,
-		`class="live-engine-bar" aria-label="选择内核"`,
-		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
+		`select data-live-engine-select aria-label="选择内核"`,
+		`select data-live-source-select aria-label="配置来源"`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("manual configuration engine top bar is missing %q", required)

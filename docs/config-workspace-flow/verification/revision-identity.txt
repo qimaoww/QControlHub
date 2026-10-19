@@ -1,0 +1,32 @@
+=== RUN   TestMultiUserBrowserSessions
+=== RUN   TestMultiUserBrowserSessions/desktop
+2026/10/19 12:20:47 INFO waiting for PostgreSQL migration lock backend_pid=37
+2026/10/19 12:20:47 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 12:20:47 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=134.268426ms
+    multi_user_browser_integration_test.go:87: desktop: three independent browser contexts, real password/cookie/CSRF identities
+        desktop: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        desktop: replacement cookie cannot populate the old account's page; B's session remains valid
+        desktop: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        desktop: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        desktop: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        desktop: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        desktop: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+        
+=== RUN   TestMultiUserBrowserSessions/mobile
+2026/10/19 12:20:55 INFO waiting for PostgreSQL migration lock backend_pid=46
+2026/10/19 12:20:55 INFO applying PostgreSQL schema migration from_version=0 to_version=82 hint="retained log indexes may take several minutes; readiness waits until migration commits"
+2026/10/19 12:20:55 INFO PostgreSQL schema migration committed from_version=0 to_version=82 elapsed=113.294805ms
+    multi_user_browser_integration_test.go:87: mobile: three independent browser contexts, real password/cookie/CSRF identities
+        mobile: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        mobile: replacement cookie cannot populate the old account's page; B's session remains valid
+        mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+        
+--- PASS: TestMultiUserBrowserSessions (15.43s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (7.52s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (7.91s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	15.685s

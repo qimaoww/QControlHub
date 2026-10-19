@@ -1,3 +1,4 @@
+import { selectConfigContext } from "./browser/config-fixture.mjs";
 import { installConfigPages } from "./modules/configs.js";
 import { bindConfigFiles } from "./modules/config-files.js";
 import { reconcileView } from "./modules/refresh.js";
@@ -226,9 +227,8 @@ async function testSourceSaveRuntime() {
       .every(element=>element.disabled), "source save left mutable controls active");
     assert(test.pages.configHasUnsavedChanges(), "pending source save lost navigation protection");
     form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
-    const otherEngine = [...document.querySelectorAll("[data-live-engine]")].find(tab=>tab.dataset.liveEngine !== engine);
-    await otherEngine.onclick({preventDefault(){}});
-    await document.querySelector('[data-live-source="import"]').onclick();
+    selectConfigContext("engine", engine === "xray" ? "sing-box" : "xray");
+    selectConfigContext("source", "import");
     assert(test.state.data.liveEngine === engine && test.state.data.liveConfigSource === "managed", "pending source save allowed target switching");
     assert(test.writes.length === 1 && !test.tasks.length, "source save submitted twice or created a task before persistence");
     release();

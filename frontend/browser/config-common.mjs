@@ -19,7 +19,7 @@ export async function testCommonConfigRuntime() {
     const structure = protectedStructure(test);
     test.selectCommon();
     assert(!document.querySelector("dialog"), "selecting public config must not automatically open an editor");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作", "public selection did not change the operation menu");
+    assert(document.querySelector(".config-inbound-menu [role=menu]").getAttribute("aria-label") === "通用配置操作", "public selection did not change the operation menu");
     assert(!document.querySelector("[data-common-actions]").hidden &&
       document.querySelector('[data-inbound-action="modify"]').hidden, "public menu mixes common and inbound mutations");
     const add = document.querySelector('[data-inbound-action="add"]');
@@ -75,7 +75,7 @@ export async function testCommonConfigRuntime() {
       !Object.hasOwn(test.writes[0], "install_if_missing"), "common add used wrong field, revision, or installation flow");
     assert(protectedStructure(test) === structure && JSON.parse(test.saved().content).dns.servers[0] === "1.1.1.1",
       "adding a common field altered inbounds or their paired exits");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作",
+    assert(document.querySelector(".config-inbound-menu [role=menu]").getAttribute("aria-label") === "通用配置操作",
       "common save changed the current file selection");
     assert(test.confirmations.some(item=>item.title === "存在其他未保存修改"), "saving one common field silently discarded other field drafts");
 
@@ -89,10 +89,10 @@ export async function testCommonConfigRuntime() {
     const menu = document.querySelector(".config-inbound-menu");
     menu.querySelector("summary").focus();
     menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
-    assert(document.activeElement.dataset.inboundAction === "modify", "keyboard menu navigation focused a hidden common action");
+    assert(document.activeElement.dataset.inboundAction === "delete", "keyboard menu navigation focused a hidden common action");
     menu.querySelector("summary").focus();
     menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowUp", bubbles:true}));
-    assert(document.activeElement.dataset.inboundAction === "delete", "menu ArrowUp did not enter at the last visible item");
+    assert(document.activeElement.hasAttribute("data-code-format"), "menu ArrowUp did not enter at the last visible item");
     menu.open = false;
     if (["xray", "sing-box"].includes(engine)) {
       document.querySelector("[data-config-preview]").click();

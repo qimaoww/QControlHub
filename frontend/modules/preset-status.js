@@ -28,7 +28,7 @@ function renderPresetStatus() {
     status = document.createElement("div");
     status.dataset.presetStatus = "";
     const anchor = !editor.host && state.route === "live-config"
-      ? root.querySelector("#live-config-form, .node-config-source")
+      ? root.querySelector("[data-config-submit-bar]") || root.querySelector("#live-config-form, .node-config-source")
       : root.querySelector(".config-command-bar, .live-config-details");
     if (anchor) anchor.after(status);
     else if (editor.host) root.prepend(status);

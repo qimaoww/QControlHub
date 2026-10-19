@@ -1,4 +1,4 @@
-import { assert, pause, waitFor, createConfigFixture as fixture } from "./config-fixture.mjs";
+import { assert, pause, waitFor, createConfigFixture as fixture, selectConfigContext } from "./config-fixture.mjs";
 
 const input = () => document.querySelector('#live-config-form [data-code-input]');
 const emit = () => input().dispatchEvent(new Event('input', {bubbles:true}));
@@ -52,28 +52,28 @@ export async function testConfigWorkflowRuntime() {
   owner.confirm = true;
   let release;
   owner.workspaceGate = new Promise(resolve=>{release=resolve;});
-  document.querySelector('[data-live-source="managed"]').click();
+  selectConfigContext('source', 'managed');
   await waitFor(()=>document.querySelector('[data-config-switching]'), 'source switch did not freeze old workspace');
   const old = document.querySelector('#live-config-form');
   old.dispatchEvent(new SubmitEvent('submit', {bubbles:true, cancelable:true}));
   assert(!owner.writes.length, 'old source editor submitted during source switch');
   release();
   await waitFor(()=>owner.state.data.liveConfigSource === 'managed' && !document.querySelector('[data-config-switching]'), 'owner source switch failed');
-  assert(!input().readOnly && document.querySelector('[data-live-source="managed"]').getAttribute('aria-pressed') === 'true', 'source permissions and selected state did not update');
+  assert(!input().readOnly && document.querySelector('[data-live-source-select]').value === 'managed', 'source permissions and selected state did not update');
   const pending = [];
   owner.workspaceGate = () => new Promise(resolve=>pending.push(resolve));
-  document.querySelector('[data-live-source="personal"]').click();
+  selectConfigContext('source', 'personal');
   await waitFor(()=>pending.length === 1, 'first source race did not start');
-  document.querySelector('[data-live-source="import"]').click();
+  selectConfigContext('source', 'import');
   await waitFor(()=>pending.length === 2, 'latest source race did not start');
   pending[1]();
   await waitFor(()=>input().readOnly && owner.state.data.liveConfigSource === 'import', 'latest source response did not take effect');
   pending[0](); await pause();
-  assert(input().readOnly && document.querySelector('[data-live-source="import"]').getAttribute('aria-pressed') === 'true', 'old source response replaced the latest source');
+  assert(input().readOnly && document.querySelector('[data-live-source-select]').value === 'import', 'old source response replaced the latest source');
   owner.dispose();
 
   const shared = await fixture('xray', {source:true, shared:true});
-  assert(document.querySelectorAll('[data-live-intent="deploy"]').length === 1 && !document.querySelector('[data-live-source="managed"]'), 'shared user has duplicate deploy or host source access');
+  assert(document.querySelectorAll('[data-live-intent="deploy"]').length === 1 && !document.querySelector('[data-live-source-select] option[value="managed"]'), 'shared user has duplicate deploy or host source access');
   shared.confirm = true;
   shared.taskStatus = 'failed';
   submit('deploy');

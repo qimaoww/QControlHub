@@ -2,7 +2,7 @@
 Description=72 hour retention for config-workspace-flow-7850
 
 [Timer]
-OnCalendar=2026-10-21 20:17:16 UTC
+OnCalendar=2026-10-22 04:29:57 UTC
 Persistent=true
 AccuracySec=1s
 Unit=qch-config-flow-7850-cleanup.service

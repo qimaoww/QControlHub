@@ -1,0 +1,536 @@
+node frontend/module_smoke.mjs
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+shared instance state smoke checks passed
+Core install operation permissions and state reasons passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+Core log conditional transport smoke passed
+Preset reads, render tree and task monitor smoke passed
+traffic selection and ordering module smoke passed
+Core log staged loading/cache smoke passed
+Chinese error messages smoke tests passed
+Account node order queue, migration race, conflict, failure and stale-account smoke passed
+Config file split/merge smoke passed
+Core log selection persistence smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Archive defaults reuse all four canonical examples; draft baselines and forms are independent
+Remaining route factories are inert and preserve their public APIs
+Task retry rendering handles omitted historical revisions and operation permissions
+IP quality model, rendering, request races and mutation guards passed
+Idle session revalidation, revocation, single timer and delayed account switching passed
+node --test frontend/module_policy_test.mjs
+TAP version 13
+# frontend/module_policy_test.mjs: 186 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 39.328784
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 45.035908
+node --test frontend/smoke_policy_test.mjs
+TAP version 13
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 1 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 9.15009
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 2 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 5.020102
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 69.032189
+node --test .github/scripts/run-ci-tests.test.mjs .github/scripts/require-ci-success.test.mjs
+TAP version 13
+# Subtest: required image checks accept only a complete successful graph
+ok 1 - required image checks accept only a complete successful graph
+  ---
+  duration_ms: 1.360619
+  type: 'test'
+  ...
+# Subtest: waits for every parallel task, then runs repeatable after-checks sequentially in CLI order
+ok 2 - waits for every parallel task, then runs repeatable after-checks sequentially in CLI order
+  ---
+  duration_ms: 1271.724849
+  type: 'test'
+  ...
+# Subtest: still runs after-checks and retains failures from each kind of parallel task
+    # Subtest: go-1
+    ok 1 - go-1
+      ---
+      duration_ms: 1295.273753
+      type: 'test'
+      ...
+    # Subtest: extra
+    ok 2 - extra
+      ---
+      duration_ms: 1333.083582
+      type: 'test'
+      ...
+    # Subtest: checks-1
+    ok 3 - checks-1
+      ---
+      duration_ms: 1268.28668
+      type: 'test'
+      ...
+    1..3
+ok 3 - still runs after-checks and retains failures from each kind of parallel task
+  ---
+  duration_ms: 3897.743105
+  type: 'test'
+  ...
+# Subtest: reports a failing after-check and continues with later after-checks
+ok 4 - reports a failing after-check and continues with later after-checks
+  ---
+  duration_ms: 1297.17427
+  type: 'test'
+  ...
+# Subtest: dry-run prints after-check commands in CLI order without executing any tasks
+ok 5 - dry-run prints after-check commands in CLI order without executing any tasks
+  ---
+  duration_ms: 142.942747
+  type: 'test'
+  ...
+# Subtest: uses one metadata load, auto-includes a new helper-based database package exactly once
+ok 6 - uses one metadata load, auto-includes a new helper-based database package exactly once
+  ---
+  duration_ms: 164.218201
+  type: 'test'
+  ...
+# Subtest: unknown extra tasks wait for the cluster-wide database transaction horizon
+ok 7 - unknown extra tasks wait for the cluster-wide database transaction horizon
+  ---
+  duration_ms: 1307.867101
+  type: 'test'
+  ...
+# Subtest: cancellation stops gated subprocesses and never starts after-checks
+ok 8 - cancellation stops gated subprocesses and never starts after-checks
+  ---
+  duration_ms: 1316.639335
+  type: 'test'
+  ...
+# Subtest: format gate excludes downloaded templates and checks new source directories
+ok 9 - format gate excludes downloaded templates and checks new source directories
+  ---
+  duration_ms: 19.096894
+  type: 'test'
+  ...
+1..9
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9487.644218
+node --test frontend/agents_browser_smoke_diagnostics_test.mjs frontend/browser_scheduler_test.mjs
+TAP version 13
+# (node:854117) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unanswered diagnostic subscriptions do not move the 45s verdict; live evidence precedes cleanup
+ok 1 - unanswered diagnostic subscriptions do not move the 45s verdict; live evidence precedes cleanup
+  ---
+  duration_ms: 13.649606
+  type: 'test'
+  ...
+# Subtest: popup marker observation keeps the original 60s boundary
+ok 2 - popup marker observation keeps the original 60s boundary
+  ---
+  duration_ms: 3.76979
+  type: 'test'
+  ...
+# Subtest: a stuck snapshot has only 1500ms after the original failure, with no retry
+ok 3 - a stuck snapshot has only 1500ms after the original failure, with no retry
+  ---
+  duration_ms: 2.841608
+  type: 'test'
+  ...
+# Subtest: an already-closed CDP socket preserves the close cause and does not wait for a snapshot
+ok 4 - an already-closed CDP socket preserves the close cause and does not wait for a snapshot
+  ---
+  duration_ms: 2.669207
+  type: 'test'
+  ...
+# Subtest: Inspector.targetCrashed before any pending command is remembered and fails promptly
+ok 5 - Inspector.targetCrashed before any pending command is remembered and fails promptly
+  ---
+  duration_ms: 3.277669
+  type: 'test'
+  ...
+# Subtest: Inspector.detached before any pending command is remembered and fails promptly
+ok 6 - Inspector.detached before any pending command is remembered and fails promptly
+  ---
+  duration_ms: 4.935382
+  type: 'test'
+  ...
+# Subtest: a socket closing before open is diagnosed without waiting for the connection deadline
+ok 7 - a socket closing before open is diagnosed without waiting for the connection deadline
+  ---
+  duration_ms: 1.651108
+  type: 'test'
+  ...
+# Subtest: a WebSocket construction error is available to startup failure formatting
+ok 8 - a WebSocket construction error is available to startup failure formatting
+  ---
+  duration_ms: 1.094024
+  type: 'test'
+  ...
+# Subtest: expected runtime errors do not turn a passed fixture into a failed smoke
+ok 9 - expected runtime errors do not turn a passed fixture into a failed smoke
+  ---
+  duration_ms: 1.301014
+  type: 'test'
+  ...
+# Subtest: failed page assertions are preserved and snapshot/event output stays bounded
+ok 10 - failed page assertions are preserved and snapshot/event output stays bounded
+  ---
+  duration_ms: 4.743457
+  type: 'test'
+  ...
+# Subtest: one and two process plans cover every scene exactly once, including new scenes
+ok 11 - one and two process plans cover every scene exactly once, including new scenes
+  ---
+  duration_ms: 3.011835
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 159.306399
+node --test .github/scripts/check-pr.test.mjs
+TAP version 13
+# Subtest: accepts a conventional title and completed template
+ok 1 - accepts a conventional title and completed template
+  ---
+  duration_ms: 3.698147
+  type: 'test'
+  ...
+# Subtest: accepts breaking-change markers
+ok 2 - accepts breaking-change markers
+  ---
+  duration_ms: 0.373344
+  type: 'test'
+  ...
+# Subtest: rejects a free-form title
+ok 3 - rejects a free-form title
+  ---
+  duration_ms: 0.350486
+  type: 'test'
+  ...
+# Subtest: rejects missing and template-only sections
+ok 4 - rejects missing and template-only sections
+  ---
+  duration_ms: 0.252889
+  type: 'test'
+  ...
+# Subtest: reports an empty GitHub body instead of throwing
+ok 5 - reports an empty GitHub body instead of throwing
+  ---
+  duration_ms: 0.275253
+  type: 'test'
+  ...
+# Subtest: rejects non-English title and description characters
+ok 6 - rejects non-English title and description characters
+  ---
+  duration_ms: 0.510866
+  type: 'test'
+  ...
+# Subtest: rejects titles longer than 100 characters
+ok 7 - rejects titles longer than 100 characters
+  ---
+  duration_ms: 0.288888
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 128.059713
+node --test .github/scripts/check-schema-version.test.mjs
+TAP version 13
+# Subtest: reads the migration version and schema body
+ok 1 - reads the migration version and schema body
+  ---
+  duration_ms: 5.526276
+  type: 'test'
+  ...
+# Subtest: rejects a schema change without a version increment
+ok 2 - rejects a schema change without a version increment
+  ---
+  duration_ms: 1.05686
+  type: 'test'
+  ...
+# Subtest: accepts a schema change with a version increment
+ok 3 - accepts a schema change with a version increment
+  ---
+  duration_ms: 0.248258
+  type: 'test'
+  ...
+# Subtest: accepts a hotfix version increment without another schema edit
+ok 4 - accepts a hotfix version increment without another schema edit
+  ---
+  duration_ms: 0.143419
+  type: 'test'
+  ...
+# Subtest: rejects a schema version downgrade
+ok 5 - rejects a schema version downgrade
+  ---
+  duration_ms: 0.240116
+  type: 'test'
+  ...
+# Subtest: checks legacy and schema-file bases in a real temporary Git repository
+ok 6 - checks legacy and schema-file bases in a real temporary Git repository
+  ---
+  duration_ms: 358.070774
+  type: 'test'
+  ...
+# Subtest: reports an invalid base reference instead of falling back to store.go
+ok 7 - reports an invalid base reference instead of falling back to store.go
+  ---
+  duration_ms: 56.92922
+  type: 'test'
+  ...
+# Subtest: fails explicitly when the base contains neither schema location
+ok 8 - fails explicitly when the base contains neither schema location
+  ---
+  duration_ms: 51.524881
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 597.19868
+node scripts/generate-deploy-scripts.mjs --check
+node --test .github/scripts/generate-deploy-scripts.test.mjs
+TAP version 13
+# Subtest: every deploy distribution script exactly matches its ordered source modules
+ok 1 - every deploy distribution script exactly matches its ordered source modules
+  ---
+  duration_ms: 4.969637
+  type: 'test'
+  ...
+# Subtest: the generator check command accepts the checked-in distribution scripts
+ok 2 - the generator check command accepts the checked-in distribution scripts
+  ---
+  duration_ms: 29.615929
+  type: 'test'
+  ...
+# Subtest: the manifest rejects a source slice that was not given an output order
+ok 3 - the manifest rejects a source slice that was not given an output order
+  ---
+  duration_ms: 0.424872
+  type: 'test'
+  ...
+# Subtest: shared download module is reusable across outputs but never duplicated in one script
+ok 4 - shared download module is reusable across outputs but never duplicated in one script
+  ---
+  duration_ms: 0.155647
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 85.056535
+bash -n deploy/quick-start.sh
+sh -n deploy/existing-core-mapping.sh
+sh -n deploy/remote/install-agent.sh
+sh -n deploy/remote/install-core-engines.sh
+sh deploy/tests/github-download.sh
+GitHub network evidence ipv4_tls=true ipv6_tls=false network=ipv4
+GitHub download network=ipv4 accelerated=false
+GitHub network evidence ipv4_tls=true ipv6_tls=true network=dual-stack
+GitHub download network=dual-stack accelerated=false
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=ipv6-only
+GitHub download network=ipv6-only accelerated=true
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=nat64-dns64
+GitHub download network=nat64-dns64 accelerated=false
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=ipv6-github-direct
+GitHub download network=ipv6-github-direct accelerated=false
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=unknown
+GitHub download network=unknown accelerated=false
+GitHub download rejected redirect outside public HTTPS GitHub sources
+GitHub download response failed: HTTP 404; check repository, resource, GitHub API rate limits and channel availability
+GitHub download request failed: stage=dns-connect-transfer request=1 retry=1 network=unknown curl_exit=28 host=github.com
+GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource
+GitHub download request failed: stage=dns-connect-transfer request=2 retry=1 network=unknown curl_exit=28 host=v6.gh-proxy.org
+acceleration failed: check DNS/HTTPS access to v6.gh-proxy.org; if both domains fail to resolve, configure a reachable IPv6 DNS resolver; existing files preserved
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=unknown
+GitHub download network=unknown accelerated=false
+GitHub download network, cache, metadata, redirect and failure regressions passed
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=unknown
+GitHub download network=unknown accelerated=false
+Could not resolve host api.github.comGitHub download request failed: stage=dns-connect-transfer request=1 retry=1 network=unknown curl_exit=6 host=api.github.com
+GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource
+Could not resolve hostGitHub download request failed: stage=dns-connect-transfer request=1 retry=1 network=unknown curl_exit=6 host=api.github.com
+GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource
+Could not resolve hostGitHub download request failed: stage=dns-connect-transfer request=2 retry=1 network=unknown curl_exit=6 host=v6.gh-proxy.org
+acceleration failed: check DNS/HTTPS access to v6.gh-proxy.org; if both domains fail to resolve, configure a reachable IPv6 DNS resolver; existing files preserved
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=unknown
+GitHub download network=unknown accelerated=false
+GitHub download request failed: stage=dns-connect-transfer request=1 retry=1 network=unknown curl_exit=60 host=api.github.com
+permanent curl failure; acceleration not retried (check TLS verification, local output and size limit)
+GitHub download response failed: HTTP 404; check repository, resource, GitHub API rate limits and channel availability
+Could not resolve host api.github.comGitHub download request failed: stage=dns-connect-transfer request=1 retry=1 network=unknown curl_exit=6 host=api.github.com
+acceleration not attempted: explicit egress proxy preserved
+GitHub network evidence ipv4_tls=false ipv6_tls=true network=unknown
+GitHub download network=unknown accelerated=false
+Unknown fallback, redirects, memoization, proxy failure, TLS refusal and cancellation regressions passed
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+GitHub download attempt timed out
+GitHub download failed: attempts=1; total budget or retry limit exhausted; existing files preserved
+Probe requests share the total download budget
+sh deploy/tests/core-gzip-staging.sh
+
+gzip: /tmp/tmp.Fp3yHqvd57/bad.gz: not in gzip format
+Core gzip staging, execute permissions and version failure regressions passed
+node scripts/generate-styles.mjs --check
+node --test .github/scripts/generate-styles.test.mjs
+TAP version 13
+# Subtest: the distributed stylesheet is the byte-exact ordered concatenation
+ok 1 - the distributed stylesheet is the byte-exact ordered concatenation
+  ---
+  duration_ms: 83.985274
+  type: 'test'
+  ...
+# Subtest: every style source is listed once, and no listed source can disappear
+ok 2 - every style source is listed once, and no listed source can disappear
+  ---
+  duration_ms: 4.519828
+  type: 'test'
+  ...
+# Subtest: source slices cannot cut a rule, conditional group, string, or comment
+ok 3 - source slices cannot cut a rule, conditional group, string, or comment
+  ---
+  duration_ms: 0.495959
+  type: 'test'
+  ...
+# Subtest: changing cascade order or a source byte makes the generated check fail
+ok 4 - changing cascade order or a source byte makes the generated check fail
+  ---
+  duration_ms: 4.225253
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 150.947928
+sh deploy/tests/inherit-existing-core.sh
+kept safely owned active qagent-shadowsocks-rust.service pending explicit import
+kept safely owned active qagent-shadowsocks-rust.service pending explicit import
+kept safely owned active qagent-xray.service pending explicit import
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.hrmcx3/core/conf.d-official/config.json)
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.hrmcx3/core/sing-box.json)
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.hrmcx3/core/sing-box.json)
+existing core mapping regressions passed
+sh deploy/tests/install-agent-redeploy.sh
+== dependency failure stops before Agent replacement/service startup ==
+== first install (fresh node) ==
+== second install (already deployed) ==
+== update existing agent ==
+== migrate to another control plane ==
+== interrupted migration retains credentials ==
+== retry interrupted migration ==
+== uninstall agent ==
+install-agent redeploy: OK
+bash deploy/tests/quick-start-ui.sh
+quick-start terminal layout regression passed
+bash deploy/tests/quick-start-ready.sh
+quick-start readiness probe regression passed
+bash deploy/tests/quick-start-env.sh
+-> 已备份现有 .env：/tmp/qcontrolhub-quick-start.hAyXLf/bundled.env.bak.20261019122131.866825.21807
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.hAyXLf/bundled-secrets/config-encryption-key.bak.20261019122131.866825.6457
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.hAyXLf/bundled-secrets/config-encryption-previous-keys.bak.20261019122131.866825.3447
+-> 已备份现有 .env：/tmp/qcontrolhub-quick-start.hAyXLf/bundled.env.bak.20261019122131.866825.26796
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.hAyXLf/bundled-secrets/config-encryption-key.bak.20261019122131.866825.28785
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.hAyXLf/bundled-secrets/config-encryption-previous-keys.bak.20261019122131.866825.19737
+quick-start external configuration regression passed
+bash deploy/tests/quick-start-bootstrap.sh
+-> 安装 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/install target
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/install target
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/saved install directory
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/legacy git install
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/legacy git install
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.MYWvrn/install target
+GitHub network evidence ipv4_tls=false ipv6_tls=false network=unknown
+GitHub download network=unknown accelerated=false
+streamed quick-start bootstrap regression passed
+bash deploy/tests/quick-start-update.sh
+quick-start external update rollback regression passed
+bash deploy/tests/quick-start-modes.sh
+quick-start bundled/external CLI regression passed
+bash deploy/tests/quick-start-compose.sh
+quick-start real Compose topology/environment regression passed
+go vet ./...

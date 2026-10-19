@@ -1,0 +1,60 @@
+### Result
+[{"width":375,"height":812,"touch":1,"overflow":false,"buttons":[{"label":"保存草稿","lines":1},{"label":"保存并校验","lines":1},{"label":"保存并部署","lines":1}]},{"width":390,"height":844,"touch":1,"overflow":false,"buttons":[{"label":"保存草稿","lines":1},{"label":"保存并校验","lines":1},{"label":"保存并部署","lines":1}],"nativePan":true},{"width":844,"height":390,"touch":1,"overflow":false,"buttons":[{"label":"保存草稿","lines":1},{"label":"保存并校验","lines":1},{"label":"保存并部署","lines":1}]},{"width":820,"height":1180,"touch":1,"overflow":false,"buttons":[{"label":"保存草稿","lines":1},{"label":"保存并校验","lines":1},{"label":"保存并部署","lines":1}]},{"width":1180,"height":820,"touch":1,"overflow":false,"buttons":[{"label":"保存草稿","lines":1},{"label":"保存并校验","lines":1},{"label":"保存并部署","lines":1}]}]
+### Ran Playwright code
+```js
+await (async page => {
+  const browser = page.context().browser();
+  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  const p = await context.newPage();
+  const origin = new URL(page.url()).origin;
+  const results = [];
+  try {
+    for (const [width,height] of [[375,812],[390,844],[844,390],[820,1180],[1180,820]]) {
+      await p.setViewportSize({width,height});
+      await p.goto(`${origin}/agents-browser-smoke.html?mode=config-inbounds&preview=1`);
+      await p.waitForSelector('#live-config-form');
+      await p.evaluate(()=>document.fonts.ready);
+      await p.waitForTimeout(800);
+      const buttons = await p.locator('[data-live-intent]').evaluateAll(items=>items.map(button=>{
+        const range = document.createRange(); range.selectNodeContents(button);
+        return {label:button.textContent,lines:range.getClientRects().length};
+      }));
+      if (buttons.some(button=>button.lines !== 1)) throw Error('submission button label wraps: '+JSON.stringify(buttons));
+      if (width === 375) {
+        await p.locator('[data-config-submit-bar]').evaluate(el=>el.scrollIntoView({block:'center'}));
+        await p.waitForTimeout(200);
+        await p.screenshot({path:'docs/config-workspace-flow/phone-small-actions.png'});
+      }
+      await p.locator('[data-inbound-action="add"]').tap();
+      await p.waitForSelector('dialog[open] #server-plan-form');
+      await p.locator('dialog [name="tag"]').fill('touch-retained-draft');
+      await p.locator('[data-inbound-close]').tap();
+      if (!(await p.locator('dialog[open] [name="tag"]').inputValue()).includes('touch-retained')) throw Error('touch close lost draft');
+      await p.evaluate(()=>window.inboundFixture.confirm=true);
+      await p.locator('[data-inbound-close]').tap();
+      await p.waitForSelector('dialog[open]', {state:'detached'});
+      await p.locator('[data-common-action=modify]').tap();
+      await p.waitForSelector('dialog[open] #field-form');
+      await p.keyboard.press('Escape');
+      await p.waitForSelector('dialog[open]', {state:'detached'});
+      results.push({...await p.evaluate(()=>({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,overflow:document.documentElement.scrollWidth>innerWidth})),buttons});
+      if (results.at(-1).overflow || !results.at(-1).touch) throw Error('touch viewport is not valid');
+      if (width === 390) {
+        await p.evaluate(()=>window.scrollTo(0,0));
+        const session = await context.newCDPSession(p);
+        await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:355,y:700}]});
+        for (let i=1;i<=8;i++) {
+          await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:355,y:700-i*55}]});
+          await p.waitForTimeout(25);
+        }
+        await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        await p.waitForTimeout(300);
+        results.at(-1).nativePan = await p.evaluate(()=>scrollY>0);
+        if (!results.at(-1).nativePan) throw Error('native touch scroll did not move');
+      }
+    }
+    return results;
+  } finally { await context.close(); }
+}
+)(page);
+```

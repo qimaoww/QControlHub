@@ -3,6 +3,11 @@ import { bindCodeEditors } from "../modules/code-editor.js";
 
 export const assert = (value, message) => { if (!value) throw new Error(message); };
 export const pause = () => new Promise(resolve => setTimeout(resolve, 30));
+export function selectConfigContext(kind, value) {
+  const select = document.querySelector(`[data-live-${kind}-select]`);
+  select.value = value;
+  select.dispatchEvent(new Event("change", {bubbles:true}));
+}
 export const waitFor = async (condition, message) => {
   const end = Date.now() + 4000;
   while (!condition()) {

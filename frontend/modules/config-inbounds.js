@@ -119,7 +119,7 @@ export function bindConfigInbounds(ctx) {
   if (!navigation) {
     navigation = document.createElement("nav");
     navigation.className = "config-file-buttons config-empty-actions";
-    container.querySelector(".live-engine-bar").after(navigation);
+    container.querySelector(".settings-grid").after(navigation);
   }
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";
@@ -127,13 +127,19 @@ export function bindConfigInbounds(ctx) {
     <div class="config-inbound-menu-items" role="menu">
       <div data-common-actions role="group" aria-label="通用配置操作" hidden>
         <button type="button" role="menuitem" data-common-action="add">＋ 增加通用配置项</button>
-        <button type="button" role="menuitem" data-common-action="modify">修改通用配置项</button>
+        <button type="button" role="menuitem" data-common-action="modify">编辑配置项</button>
         <button type="button" role="menuitem" class="danger-text" data-common-action="delete">删除通用配置项</button>
       </div>
-      <button type="button" role="menuitem" data-inbound-action="modify">修改入站</button>
+      <button type="button" role="menuitem" data-inbound-action="modify">编辑入站</button>
       <button type="button" role="menuitem" class="danger-text" data-inbound-action="delete">删除入站</button>
     </div>`;
   navigation.append(menu);
+  const editButtons = [menu.querySelector('[data-inbound-action="modify"]'), menu.querySelector('[data-common-action="modify"]')];
+  editButtons.forEach(button => {
+    button.className = "button";
+    button.removeAttribute("role");
+    navigation.insertBefore(button, menu);
+  });
   bindConfigMenu(menu);
   bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, beforeDeploy, onSaved, state, selectedInbound:target, input, canReadPeers:can("client-access.read") });
   // Adding an inbound is independent of the selected file. Keep one persistent
@@ -160,16 +166,17 @@ export function bindConfigInbounds(ctx) {
   const tools = composeConfigWorkspaceToolbar({ can, container, form, navigation, sourceActions, sourceMode, agent, engine });
   const actionKind = button => button.dataset.commonAction ? `common-${button.dataset.commonAction}` : button.dataset.inboundAction;
   const isMutation = kind => ["add", "modify", "delete", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
-  const triggers = [addInbound, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
+  const triggers = [addInbound, ...editButtons, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
     ...tools.querySelectorAll("[data-inbound-action]")];
   const update = () => {
     const common = commonSelected();
-    setVisible(menu, !(!common && !target() && Boolean(files)));
+    setVisible(menu, Boolean(form) || common || Boolean(target()) || !files);
     setVisible(menu.querySelector("[data-common-actions]"), !(!common));
-    menu.querySelector("[data-config-operation-label]").textContent = common ? "通用配置操作" : target() || !files ? "入站操作" : "配置操作";
+    menu.querySelector("[data-config-operation-label]").textContent = "更多操作";
+    menu.querySelector('[role="menu"]').setAttribute("aria-label", common ? "通用配置操作" : target() ? "入站操作" : "源码操作");
     for (const button of triggers) {
       const kind = actionKind(button), commonAction = kind.startsWith("common-");
-      setVisible(button, !(["modify", "delete"].includes(kind) && common));
+      setVisible(button, !(["modify", "delete"].includes(kind) && common || button === editButtons[1] && !common || button === editButtons[0] && Boolean(files) && !target()));
       button.disabled = busy || (isMutation(kind) && !writable()) || (commonAction && !common) ||
         (kind !== "add" && !saved) || (["modify", "delete"].includes(kind) && !target()) ||
         (kind === "modify" && !editable(target()));
