@@ -324,3 +324,25 @@ ok  	github.com/qimaoww/qcontrolhub/internal/agent	237.065s
 
 No UI code changed in this follow-up; earlier UI captures remain applicable.
 Test processes exited and the task's browser/server/database ports remain released.
+
+CI live XHTTP port follow-up
+===========================
+Failing run: https://github.com/qimaoww/QControlHub/actions/runs/39232748928
+All cores / actual service permissions: Xray failed to bind 127.0.0.1:43331.
+The fixture released each selected port before listener startup, allowing reallocation.
+Reserve every server/API/backend/TLS/client port until its process starts, and wait
+for listeners before running clients. Only the XHTTP fixture changed.
+
+Existing local tools, not installed or modified by this task:
+Xray 26.3.27 d2758a0; Mihomo 1.19.32; Nginx 1.26.3.
+Xray/Mihomo match CI; the failing CI used Nginx 1.24.0.
+The unmodified local matrix passed once (53.860s); the intermittent bind failure
+was captured in CI, not reproduced locally.
+
+After the reservation/readiness fix:
+TMPDIR=<owned task runtime> QCH_XRAY_BINARY=<existing Xray> QCH_MIHOMO_BINARY=<existing Mihomo> QCH_NGINX_BINARY=<existing Nginx> go test ./internal/agent -run '^TestXHTTPLiveMatrix$' -count=2 -v -timeout=5m
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	94.074s
+Two complete matrices, 20 owner/shared deployments, 106 passing cases including parents.
+Five XHTTP protocols, exported Xray/Mihomo clients, IPv4/IPv6, TLS/Reality split and user statistics passed.
+The actual cores/proxy ran only inside temporary loopback fixtures; no user node or system service was changed.
+Owned Xray/Mihomo/Nginx/test processes exited. Existing external test binaries are excluded from cleanup.
