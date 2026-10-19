@@ -1,4 +1,7 @@
 import { installConfigPages } from "../modules/configs.js";
+import { bindCodeEditors } from "../modules/code-editor.js";
+import { configJSONMembers } from "../modules/config-json.js";
+import { patchConfigObject } from "../modules/config-document.js";
 
 export const assert = (value, message) => { if (!value) throw new Error(message); };
 export const pause = () => new Promise(resolve => setTimeout(resolve, 30));
@@ -58,7 +61,8 @@ export async function createConfigFixture(engine, options = {}) {
         ...inbounds.map(item=>({tag:`qch-trf-${item.port}-abcdef012345`, protocol:"freedom", type:"direct"}))]})});
   const content = () => JSON.stringify(root(), null, 2);
   let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content()};
-  let agentContent = saved ? options.drift ? saved.content + "\n# node-only" : saved.content : "";
+  let agentContent = saved ? options.drift ? saved.content + "\n " : saved.content : "";
+  let deployedVersion = options.deployedVersion || 1;
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
@@ -69,6 +73,15 @@ export async function createConfigFixture(engine, options = {}) {
     protocols:entries.map(entry => entry.protocol), reality_presets:["www.amazon.com"],
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},
     present_fields:Object.fromEntries(fields.map(field=>[field.key, Object.hasOwn(root(), field.key)]))});
+  const draftWorkspace = text => {
+    const document = JSON.parse(text);
+    const source = engine === "mihomo" ? document.listeners || [] : engine === "ss-rust" ? document.servers || [] : [...document.inbounds || [], ...document.endpoints || []];
+    const draftInbounds = source.map(item => ({...basePlan, ...inbounds.find(inbound => inbound.tag === (item.tag || item.name || item.remarks)),
+      tag:item.tag || item.name || item.remarks, port:item.port || item.listen_port || item.server_port}));
+    return {...workspace(), config:{...saved, content:text}, inbounds:options.native ? [] : draftInbounds,
+      inbound_targets:draftInbounds.map(item => ({tag:item.tag, port:item.port, kind:item.protocol})),
+      present_fields:Object.fromEntries(fields.map(field => [field.key, Object.hasOwn(document, field.key)]))};
+  };
   const api = async (path, request = {}) => {
     test.calls.push({path, method:request.method || "GET"});
     const body = request.body && JSON.parse(request.body);
@@ -90,15 +103,37 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
       return workspace();
     }
+    if (path.endsWith("/preview")) {
+      assert(body.expected_version === (saved?.version || 0), "draft preview lost optimistic version");
+      const preview = draftWorkspace(body.content);
+      if (path.endsWith("/workspace/preview")) return preview;
+      if (test.fieldGate) await test.fieldGate;
+      const key = decodeURIComponent(path.split("/fields/")[1].split("/")[0]);
+      const members = configJSONMembers(body.content);
+      return {version:(saved?.version || 0)+(test.staleField?1:0), present:members.has(key), fragment:members.get(key) || ""};
+    }
+    if (request.method === "PUT") {
+      assert(body.version === (saved?.version || 0), "complete source save lost optimistic version");
+      if (test.gate) await test.gate;
+      if (test.fail) throw Object.assign(new Error("fixture save rejected"), {status:422});
+      test.writes.push({path, ...body});
+      saved = {...saved, ...body, id:"cfg", version:(saved?.version || 0)+1};
+      inbounds = draftWorkspace(saved.content).inbounds;
+      return saved;
+    }
     if (path.endsWith("/plans")) {
       const entry = entries.find(item => item.protocol.key === body.protocol);
       return {...structuredClone(entry.plan), tag:`new-${++test.serial}`, port:22000+test.serial};
     }
     if (path.includes("/revisions/")) return {...saved, content:"{}"};
     if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
-    if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
+    if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:options.deployedConfigID || "cfg", config_version:deployedVersion}];
     if (request.method === "POST" && path === "/tasks") {
-      assert(body.action === "read-managed-config" || body.action === "read-config", "deploy preflight created a non-read task");
+      if (!["read-managed-config", "read-config"].includes(body.action)) {
+        if (test.taskFailure) throw Object.assign(new Error("fixture task unavailable"), {status:503});
+        const task = {...body, id:`task-${++test.serial}`, status:test.taskStatus, config_version:saved.version};
+        tasks.set(task.id, task); return task;
+      }
       test.readRequests.push(body);
       const task = {id:`read-${++test.serial}`, action:body.action, engine, status:"succeeded", snapshot:agentContent};
       tasks.set(task.id, task);
@@ -119,21 +154,29 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
       assert(body.expected_version === (saved?.version || 0), "mutation request lost optimistic version");
       test.writes.push({path, ...body});
+      const draftContent = body.content || saved?.content || content();
+      const members = configJSONMembers(draftContent);
+      inbounds = draftWorkspace(draftContent).inbounds;
       if (path.endsWith("/server-inbounds")) {
         if (body.operation === "delete") assert(Object.keys(body.input).sort().join(",") === "port,tag", "delete leaked selection metadata into the strict input schema");
         if (body.operation !== "add") inbounds = inbounds.filter(item => item.tag !== body.original_tag);
         if (body.operation !== "delete") inbounds.push(body.input);
+        const generated = root();
+        for (const key of ["inbounds", "endpoints", "listeners", "servers", "outbounds"]) {
+          if (Object.hasOwn(generated, key)) members.set(key, JSON.stringify(generated[key]));
+        }
       } else {
         const key = decodeURIComponent(path.split("/fields/")[1].split("?")[0]);
-        const present = values.has(key);
+        const present = members.has(key);
         assert(present === (body.mutation !== "add"), "field request does not match saved presence");
-        if (body.mutation === "delete") values.delete(key);
+        if (body.mutation === "delete") { values.delete(key); members.delete(key); }
         else {
           JSON.parse(body.fragment); // JSON fragments are also valid YAML.
           values.set(key, body.fragment);
+          members.set(key, body.fragment);
         }
       }
-      saved = {id:"cfg", agent_id:agent.id, engine, name:"配置", version:(saved?.version || 0)+1, content:content()};
+      saved = {id:"cfg", agent_id:agent.id, engine, name:"配置", version:(saved?.version || 0)+1, content:patchConfigObject(draftContent, members)};
       const task = {id:`task-${saved.version}`, action:body.intent, config_version:saved.version, status:test.taskStatus,
         install_if_missing:Boolean(body.install_if_missing && !agent.runtime[engine].installed)};
       tasks.set(task.id, task);
@@ -147,7 +190,7 @@ export async function createConfigFixture(engine, options = {}) {
     if (path.startsWith("/tasks/")) {
       const task = tasks.get(path.split("/")[2].split("?")[0]);
       if (path.endsWith("/config-snapshot")) return {content:task?.snapshot || ""};
-      if (task?.action === "deploy" && test.taskStatus === "succeeded") agentContent = saved.content;
+      if (task?.action === "deploy" && test.taskStatus === "succeeded") { agentContent = saved.content; deployedVersion = task.config_version; }
       return {...task, status:test.taskStatus};
     }
     throw new Error(`Unexpected fixture API: ${path}`);
@@ -157,8 +200,8 @@ export async function createConfigFixture(engine, options = {}) {
     can:permission=>(!options.readonly || ["agents.read", "agent-config.read", "configs.read"].includes(permission)) && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute") &&
       !(options.noPeerRead && permission === "client-access.read"),
     confirmAction:async(message, title)=>{test.confirmations.push({message, title}); return test.confirm;}, notify:message=>test.notices.push(message),
-    renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors:()=>{},
-    submitTask:async()=>{throw new Error("inbounds must use atomic mutation, not a second task request");},
+    renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors,
+    submitTask:async body=>api("/tasks", {method:"POST", body:JSON.stringify(body)}),
     shell:markup=>{
       document.body.className = "app-body page-live-config";
       document.body.innerHTML = `<main class="workspace-main" style="max-width:1280px;margin:auto">${markup}</main>`;
@@ -182,7 +225,7 @@ export async function createConfigFixture(engine, options = {}) {
     state.navigationEpoch++;
     await pages.liveConfig();
   };
-  const dispose = () => { controller.abort(); state.data = {}; };
+  const dispose = () => { controller.abort(); pages.clearWorkspace(); state.data = {}; };
   Object.assign(test, {state, agent, pages, click, common, select, selectCommon, reenter, dispose,
     setAgentContent:value=>{agentContent=value;},
     primaryField, secondaryField, extraField, saved:()=>saved});

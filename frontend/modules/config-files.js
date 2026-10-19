@@ -1,317 +1,106 @@
-import { cancelMotion, enterSurface } from "./motion.js";
+import { bindEvent } from "./refresh.js";
+import { createConfigDocument } from "./config-document.js";
+import { revealSelectedFields } from "./config-fields.js";
 
-// Keep JSON tokens verbatim: parsing and stringifying an entire configuration
-// through JS numbers would corrupt integers larger than Number.MAX_SAFE_INTEGER.
-export function configJSONMembers(text, array = false) {
-  const parsed = JSON.parse(text);
-  if (array ? !Array.isArray(parsed) : !parsed || Array.isArray(parsed) || typeof parsed !== "object")
-    throw new Error(array ? "入站/出站必须是数组" : "配置文件必须是 JSON 对象");
-  const parts = [];
-  let depth = 0, quoted = false, escaped = false, start = text.indexOf(array ? "[" : "{") + 1;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (c === "\\") escaped = true;
-      else if (c === '"') quoted = false;
-      continue;
-    }
-    if (c === '"') { quoted = true; continue; }
-    if (c === "{" || c === "[") depth++;
-    else if (c === "}" || c === "]") {
-      if (!depth) { if (text.slice(start, i).trim()) parts.push(text.slice(start, i).trim()); break; }
-      depth--;
-    } else if (c === "," && !depth) { parts.push(text.slice(start, i).trim()); start = i + 1; }
-  }
-  if (array) return parts;
-  const result = new Map();
-  for (const part of parts) {
-    const match = part.match(/^("(?:[^"\\]|\\.)*")\s*:\s*([\s\S]*)$/);
-    if (!match) throw new Error("无效 JSON 字段");
-    const key = JSON.parse(match[1]);
-    if (result.has(key)) throw new Error(`重复 JSON 字段：${key}`);
-    result.set(key, match[2]);
-  }
-  return result;
-}
-const members = configJSONMembers;
-const objectText = (map) => `{\n${[...map].map(([key,value]) => `  ${JSON.stringify(key)}: ${value}`).join(",\n")}\n}\n`;
+export { configJSONMembers, canonicalConfigJSON, splitConfigFiles, mergeConfigFiles, configFileDisplayName } from "./config-json.js";
 
-// Compare JSON snapshots without rounding large numeric tokens or depending
-// on object-key order. Arrays and scalar spellings retain their exact meaning.
-export function canonicalConfigJSON(content) {
-  const text = String(content).trim();
-  JSON.parse(text);
-  if (text.startsWith("{"))
-    return `{${[...members(text)].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${JSON.stringify(key)}:${canonicalConfigJSON(value)}`).join(",")}}`;
-  if (text.startsWith("["))
-    return `[${members(text, true).map(canonicalConfigJSON).join(",")}]`;
-  return text;
-}
-
-function entryFilename(tag, kind, index, used) {
-  let base = typeof tag === "string" ? tag.replace(/\.json$/, "") : "";
-  base = Array.from(base.replace(/[^\p{L}\p{N}_.-]/gu, "_").replace(/^\.+|\.+$/g, "")).slice(0,48).join("");
-  if (!base) base = `${kind.replace(/s$/, "")}-${index + 1}`;
-  let name = `${base}.json`;
-  for (let suffix = 2; used.has(name); suffix++) name = `${base}-${suffix}.json`;
-  used.add(name);
-  return name;
-}
-
-export function splitConfigFiles(engine, content) {
-  if (!["xray", "sing-box"].includes(engine)) return [{path: engine === "mihomo" ? "config.yaml" : "config.json", content}];
-  const root = members(content);
-  const lists = new Map();
-  const ingressKeys = engine === "sing-box" ? ["inbounds", "endpoints"] : ["inbounds"];
-  for (const key of [...ingressKeys, "outbounds"]) {
-    if (!root.has(key)) continue;
-    const entries = members(root.get(key), true);
-    entries.forEach(entry => members(entry));
-    lists.set(key, entries);
-  }
-  const listeners = ingressKeys.flatMap(key => (lists.get(key) || []).map((entry, index) => ({key, entry, index})));
-  const outbounds = lists.get("outbounds") || [];
-  const owners = new Map(), portKey = engine === "xray" ? "port" : "listen_port";
-  listeners.forEach(({entry}, i) => {
-    const raw = JSON.parse(entry)[portKey];
-    const port = typeof raw === "number" || typeof raw === "string" && /^[+]?[0-9]+$/.test(raw.trim()) ? Number(raw) : 0;
-    if (Number.isInteger(port) && port > 0 && port <= 65535) owners.set(port, owners.has(port) ? -1 : i);
-  });
-  const ownerOf = raw => {
-    const tag = JSON.parse(raw).tag;
-    const match = typeof tag === "string" && tag.match(/^qch-trf-([1-9][0-9]{0,4})-[a-f0-9]{12}$/);
-    return match ? owners.get(Number(match[1])) : undefined;
-  };
-  // Shared/default exits remain first. Pair only an ordered dedicated suffix,
-  // so imported routing and default-outbound priority are never changed.
-  let cut = outbounds.length, next = listeners.length;
-  while (cut > 0) {
-    const owner = ownerOf(outbounds[cut - 1]);
-    if (owner === undefined || owner < 0 || owner > next) break;
-    next = owner; cut--;
-  }
-  const paired = listeners.map(() => []);
-  for (const raw of outbounds.slice(cut)) paired[ownerOf(raw)].push(raw);
-  if (cut < outbounds.length) {
-    if (cut) root.set("outbounds", `[${outbounds.slice(0, cut).join(",\n")}]`);
-    else root.delete("outbounds");
-  }
-  const files = [{path:"common.json", content:""}], used = new Set();
-  listeners.forEach(({key, entry, index}, i) => {
-    const fragment = new Map([[key, `[${entry}]`]]);
-    if (paired[i].length) fragment.set("outbounds", `[${paired[i].join(",\n")}]`);
-    files.push({path:`${key}/${entryFilename(JSON.parse(entry).tag, key, index, used)}`, content:objectText(fragment)});
-  });
-  for (const key of ingressKeys) if (lists.get(key)?.length) root.delete(key);
-  files[0].content = objectText(root);
-  return files;
-}
-
-export function mergeConfigFiles(files) {
-  if (!files.length || files.length > 1025 || !["common.json","00-common.json"].includes(files[0].path)) throw new Error("无效配置文件列表");
-  const root = members(files[0].content), lists = new Map();
-  const seen = new Set();
-  let pairedExits = false, standaloneExits = false;
-  for (const file of files.slice(1)) {
-    const [key, name, extra] = file.path.split("/"), entries = lists.get(key) || [];
-    const validName = files[0].path === "00-common.json"
-      ? file.path === `${key}/${String(entries.length).padStart(4,"0")}.json`
-      : extra === undefined && typeof name === "string" && new TextEncoder().encode(name).length <= 220 && /^[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.json$/u.test(name);
-    if (!["inbounds","endpoints","outbounds"].includes(key) || !validName || seen.has(file.path))
-      throw new Error("无效配置文件路径或顺序");
-    seen.add(file.path);
-    const fragment = members(file.content);
-    if (!fragment.has(key) || [...fragment.keys()].some(field => field !== key && !(key !== "outbounds" && field === "outbounds" && files[0].path === "common.json")))
-      throw new Error(`${file.path} 只能包含 ${key}${key !== "outbounds" ? " 和配套 outbounds" : ""}`);
-    const values = members(fragment.get(key), true);
-    if (values.length !== 1) throw new Error(`${file.path} 必须包含一个入站或出站`);
-    members(values[0]);
-    entries.push(values[0]); lists.set(key,entries);
-    if (key === "outbounds") standaloneExits = true;
-    else if (fragment.has("outbounds")) {
-      const exits = members(fragment.get("outbounds"), true);
-      exits.forEach(exit => members(exit));
-      pairedExits = true;
-      lists.set("outbounds", [...(lists.get("outbounds") || []), ...exits]);
-    }
-  }
-  if (pairedExits && standaloneExits) throw new Error("不能混用成套入站出口和旧版独立出站文件");
-  for (let [key, entries] of lists) {
-    if (root.has(key)) {
-      if (key !== "outbounds" || !pairedExits) throw new Error(`${key} 同时存在于公共文件和独立文件中`);
-      entries = [...members(root.get(key), true), ...entries];
-    }
-    root.set(key,`[\n${entries.join(",\n")}\n]`);
-  }
-  const content = objectText(root);
-  for (const key of ["inbounds", "endpoints", "outbounds"]) if (root.has(key)) members(root.get(key), true).forEach(entry => members(entry));
-  if (new TextEncoder().encode(content).length > 2097152) throw new Error("合并配置超过 2 MiB 上限");
-  return content;
-}
-
-export function configFileDisplayName(path, content) {
-  if (["common.json","00-common.json"].includes(path)) return "公共配置.json";
-  const name = path.split("/").at(-1);
-  try {
-    const key = path.split("/")[0], entry = JSON.parse(content)[key]?.[0];
-    const protocol = entry?.type || entry?.protocol;
-    if (typeof protocol === "string" && protocol) return `${name} · ${protocol}`;
-  } catch { /* Invalid drafts retain their file identity. */ }
-  return name;
-}
-
-export function bindConfigFiles(form, engine, notify) {
-  if (!form || !["xray","sing-box"].includes(engine)) return null;
+// A DOM adapter only: document content, selection and dirty state belong to
+// the workspace model, including on native YAML/ssserver configurations.
+export function bindConfigFiles(form, engine, notify, options = {}) {
+  if (!form) return null;
   const editor = form.querySelector("[data-code-editor]"), input = form.querySelector("[data-code-input]");
   if (!editor || !input) return null;
-  // Reconciliation preserves the visible fragment's value, which is not the
-  // complete configuration. Rebinding from that fragment would silently lose
-  // every other inbound tab. Keep real edits, otherwise use the fresh full
-  // server baseline supplied by the rendered textarea.
   const previous = editor.configFileController;
-  const selectedInbound = previous?.selectedInbound();
-  if (previous) {
-    input.value = previous.dirty() ? previous.content() : input.defaultValue;
-    editor.querySelector(".config-file-buttons")?.remove();
-    editor.querySelector(".config-file-navigation")?.remove();
-  }
-  let files;
-  try { files = splitConfigFiles(engine,input.value); } catch { return null; }
-  const originals = files.map(file => file.content), readOnly = input.readOnly;
-  let selected = 0;
-  const tabs = document.createElement("nav");
-  tabs.className = "config-file-buttons";
-  tabs.setAttribute("aria-label", "选择入站或公共配置");
-  const fileList = document.createElement("div");
-  fileList.className = "config-file-list";
-  tabs.append(fileList);
-  const buttons = files.map((file, i) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "config-file-button";
-    button.dataset.configFile = String(i);
-    button.append(document.createElement("b"), document.createElement("small"));
-    button.addEventListener("click", () => switchFile(i));
-    fileList.append(button);
-    return button;
-  });
-  const fileLabel = editor.querySelector(".code-file-meta b");
-  const renderButtons = () => {
-    files.forEach((file, i) => {
-      const button = buttons[i];
-      let name = file.path.split("/").at(-1).replace(/\.json$/, "");
-      let detail = "路由 · DNS · 共享出口";
-      if (i === 0) name = "公共配置";
-      else {
-        detail = "入站配置";
-        try {
-          const entry = JSON.parse(file.content)[file.path.split("/")[0]]?.[0];
-          name = typeof entry?.tag === "string" && entry.tag ? entry.tag : name;
-          detail = [entry?.type || entry?.protocol, entry?.listen_port ?? entry?.port].filter(value => value !== undefined && value !== "").join(" · ") || detail;
-        } catch { /* Invalid drafts keep their navigation identity. */ }
+  previous?.dirty();
+  const model = options.document || previous?.document || createConfigDocument(engine, input.value, {inbounds:options.inbounds});
+  const list = form.querySelector("[data-config-objects]");
+  const readOnly = input.readOnly;
+  let updating = false;
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
+  const flush = () => { if (!updating && !input.readOnly && input.value !== model.text()) model.edit(input.value); };
+  const render = () => {
+    const objects = model.objects(), chosen = model.selected();
+    const buttons = objects.map((object, index) => `<a class="field-link${chosen === object.id ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="${esc(object.id)}" data-config-file="${index}" aria-current="${chosen === object.id}" aria-pressed="${chosen === object.id}"><span class="field-link-copy"><strong>${esc(object.title)}</strong><code>${esc(object.detail)}</code></span><small class="field-kind">${object.dirty ? "未保存" : object.kind === "common" ? "公共" : object.kind === "outbound" ? object.system ? "统计" : "出站" : "入站"}</small></a>`);
+    if (!model.segmented) for (const inbound of model.inbounds()) {
+      const id = `native:${inbound.tag}:${inbound.port}`;
+      buttons.push(`<a class="field-link${chosen === id ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="${esc(id)}" data-access-inbound="${esc(inbound.tag)}" aria-current="${chosen === id}" aria-pressed="${chosen === id}"><span class="field-link-copy"><strong>${esc(inbound.tag)}</strong><code>${esc(inbound.protocol || engine)} · ${Number(inbound.port)}</code></span><small class="field-kind">入站</small></a>`);
+    }
+    if (model.segmented) buttons.push(`<a class="field-link${chosen === "source" ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="source" data-config-source aria-current="${chosen === "source"}"><span class="field-link-copy"><strong>完整源码</strong><code>${readOnly ? "查看完整配置" : "编辑、粘贴或导入配置"}</code></span><small class="field-kind">${readOnly ? "只读" : model.dirty() ? "未保存" : "源码"}</small></a>`);
+    buttons.push(`<a class="field-link${chosen === "preview" ? " active" : ""}" href="${esc(globalThis.location?.hash || "#live-config")}" data-config-object="preview" data-config-preview aria-current="${chosen === "preview"}" aria-pressed="${chosen === "preview"}"><span class="field-link-copy"><strong>完整配置预览</strong><code>包含全部编辑内容</code></span><small class="field-kind">只读</small></a>`);
+    if (list) {
+      // Keep focused navigation elements stable while typing or switching.
+      const template = document.createElement("template"); template.innerHTML = buttons.join("");
+      for (const [index, fresh] of [...template.content.children].entries()) {
+        const old = [...list.children].find(element => element.dataset.configObject === fresh.dataset.configObject);
+        if (old) {
+          old.className = fresh.className;
+          if (fresh.hasAttribute("data-config-file")) old.dataset.configFile = fresh.dataset.configFile;
+          for (const name of ["aria-current", "aria-pressed"]) old.setAttribute(name, fresh.getAttribute(name));
+          if (old.innerHTML !== fresh.innerHTML) old.innerHTML = fresh.innerHTML;
+        }
+        const element = old || fresh;
+        if (list.children[index] !== element) list.insertBefore(element, list.children[index] || null);
       }
-      button.querySelector("b").textContent = name;
-      button.querySelector("small").textContent = detail;
-      button.title = configFileDisplayName(file.path, file.content);
-      button.classList.toggle("active", selected === i);
-      button.setAttribute("aria-pressed", String(selected === i));
-    });
-    if (fileLabel) fileLabel.textContent = selected === "preview" ? "合并预览 · config.json" : files[selected].path;
+      const ids = new Set([...(template.content.children)].map(element => element.dataset.configObject));
+      // Appending removes nodes from the fragment, so include model IDs too.
+      objects.forEach(object => ids.add(object.id)); ids.add("preview"); if (model.segmented) ids.add("source");
+      model.inbounds().forEach(inbound => ids.add(`native:${inbound.tag}:${inbound.port}`));
+      [...list.children].filter(element => !ids.has(element.dataset.configObject)).forEach(element => element.remove());
+    }
+    const count = form.querySelector("[data-config-object-count]");
+    if (count) count.textContent = model.segmented
+      ? `${objects.filter(item => item.kind === "inbound").length} 入站 · ${objects.filter(item => item.kind === "outbound" && !item.system).length} 出站`
+      : `${model.inbounds().length} 入站 · 完整配置`;
+    const label = editor.querySelector(".code-file-meta b");
+    if (label) label.textContent = chosen === "preview" ? "完整配置预览" : chosen === "source" ? "完整源码" : (objects.find(item => item.id === chosen)?.title || model.selectedInbound()?.tag || "完整源码");
+    const summary = form.querySelector(".config-draft-summary");
+    if (summary) {
+      summary.dataset.dirty = model.dirty() ? "1" : "0";
+      summary.textContent = readOnly ? "只读 · 完整配置" : `${model.dirty() ? "有未保存修改" : "已保存"} · 保存包含完整配置`;
+    }
+    options.onChange?.(model);
   };
-  editor.querySelector(".code-editor-toolbar").before(tabs);
-  const navigation = document.createElement("div"); navigation.className = "config-file-navigation";
-  const summary = document.createElement("span");
-  summary.className = "config-draft-summary";
-  summary.setAttribute("role", "status");
-  const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.className = "button"; previewButton.textContent = "合并预览";
-  previewButton.dataset.configPreview = "";
-  previewButton.setAttribute("aria-pressed", "false");
-  const actions = document.createElement("div"); actions.className = "config-file-actions";
-  actions.append(previewButton);
-  navigation.append(summary, actions);
-  editor.querySelector(".code-editor-toolbar").after(navigation);
-  let lastFile = 0;
-  previewButton.addEventListener("click", () => {
-    switchFile(selected === "preview" ? lastFile : "preview");
+  const display = () => {
+    updating = true;
+    input.value = model.text();
+    input.readOnly = readOnly || model.selected() === "preview";
+    input.disabled = false;
+    editor.codeBaseline = {content:model.original(), status:model.selected() === "preview" ? "完整配置 · 只读" : readOnly ? "只读" : "已保存", validation:""};
+    render();
+    input.dispatchEvent(new Event("input", {bubbles:true}));
+    input.dispatchEvent(new Event("config-selection", {bubbles:true}));
+    updating = false;
+    revealSelectedFields(form);
+  };
+  bindEvent(list, "click", event => {
+    const button = event.target.closest("[data-config-object]");
+    if (!button || !list.contains(button)) return;
+    event.preventDefault();
+    try { flush(); if (model.select(button.dataset.configObject)) display(); }
+    catch (error) { notify(error.message, "error"); }
   });
-  const save = () => { if (selected !== "preview" && !readOnly) files[selected].content = input.value; };
-  const updateDrafts = () => {
-    let count = 0;
-    files.forEach((file, i) => {
-      const dirty = file.content !== originals[i];
-      if (dirty) count++;
-      buttons[i].classList.toggle("is-dirty", dirty);
-      buttons[i].setAttribute("aria-label", `${buttons[i].querySelector("b").textContent} · ${buttons[i].querySelector("small").textContent}${dirty ? " · 未保存" : ""}`);
-    });
-    summary.dataset.dirty = count ? "1" : "0";
-    const message = `${selected === "preview" ? "合并预览只读 · " : ""}${count ? `${count} 个未保存` : `${files.length} 个源码文件`} · 保存与部署包含全部文件`;
-    if (summary.textContent !== message) summary.textContent = message;
-    return count;
-  };
-  // Reflect renamed preset tags on navigation, preserving invalid drafts until
-  // the user fixes them. Only the returned merged content is saved/deployed.
-  const refreshNames = () => {
-    try {
-      const renamed = splitConfigFiles(engine, mergeConfigFiles(files));
-      if (renamed.length !== files.length) return;
-      files.forEach((file,i) => {
-        file.path = renamed[i].path;
-      });
-    } catch { /* A syntax error must not discard a draft or block switching. */ }
-  };
+  bindEvent(input, "input", () => {
+    if (updating || input.readOnly) return;
+    model.edit(input.value); render();
+  }, {bindingKey:"config-document"});
   const controller = {
-    selectedCommon() { return selected === 0; },
-    selectedInbound() {
-      if (selected === "preview" || selected === 0) return null;
-      try {
-        const entry = JSON.parse(input.value)[files[selected].path.split("/")[0]]?.[0];
-        return entry && { tag: entry.tag, port: Number(entry.port ?? entry.listen_port) };
-      } catch { return null; }
-    },
-    selectInbound(tag, port) {
-      const index = files.findIndex((file, i) => {
-        if (!i) return false;
-        try { const entry = JSON.parse(file.content)[file.path.split("/")[0]]?.[0]; return entry?.tag === tag && Number(entry.port ?? entry.listen_port) === port; } catch { return false; }
-      });
-      if (index > 0) switchFile(index);
-    },
-    content() { save(); return mergeConfigFiles(files); },
-    paths() { save(); refreshNames(); return files.map(file => file.path); },
-    original() { return selected === "preview" ? input.value : originals[selected]; },
-    dirty() { save(); return updateDrafts() > 0; },
-    currentDirty() { return selected !== "preview" && input.value !== originals[selected]; },
-    reset() {
-      if (selected === "preview" || readOnly) return;
-      input.value = files[selected].content = originals[selected];
-      refreshNames(); renderButtons(); updateDrafts();
-    },
+    document:model,
+    selectedCommon:model.selectedCommon,
+    selectedInbound:model.selectedInbound,
+    selectedOutbound:() => model.objects().find(item => item.id === model.selected() && item.kind === "outbound"),
+    selectInbound(tag, port) { flush(); if (model.selectInbound(tag, port)) display(); },
+    content() { flush(); return model.content(); },
+    paths:() => model.objects().map(file => file.path),
+    original:model.original,
+    dirty() { flush(); return model.dirty(); },
+    currentDirty:model.currentDirty,
+    reset() { model.reset(); display(); },
+    replace(content) { flush(); model.replace(content); display(); },
+    display,
+    refreshObjects() { render(); input.dispatchEvent(new Event("config-selection", {bubbles:true})); },
   };
-  function switchFile(next) {
-    if (next === selected) return;
-    save(); refreshNames();
-    try {
-      const content = next === "preview" ? mergeConfigFiles(files) : files[next].content;
-      if (next !== "preview") lastFile = next;
-      selected = next; input.value = content; input.readOnly = readOnly || next === "preview";
-      previewButton.textContent = next === "preview" ? "返回文件" : "合并预览";
-      previewButton.setAttribute("aria-pressed", String(next === "preview"));
-      input.dispatchEvent(new Event("input", {bubbles:true}));
-      const frame = editor.querySelector(".code-editor-frame");
-      if (frame) {
-        cancelMotion(frame);
-        enterSurface(frame, { token: "--motion-feedback", id: "qch-selection" });
-      }
-    } catch (error) { notify(error.message,"error"); }
-    renderButtons();
-    updateDrafts();
-  }
-  renderButtons();
-  updateDrafts();
-  input.value = files[0].content;
-  const reset = editor.querySelector("[data-code-reset]");
-  if (reset) reset.textContent = "恢复当前文件";
   editor.configFileController = controller;
-  if (selectedInbound) controller.selectInbound(selectedInbound.tag, selectedInbound.port);
+  bindEvent(globalThis.window, "resize", () => { if (form.isConnected) revealSelectedFields(form); }, {bindingKey:"config-objects"});
+  display();
   return controller;
 }

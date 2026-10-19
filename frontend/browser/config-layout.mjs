@@ -16,9 +16,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
         await waitFor(()=>{
           const workspace = document.querySelector(`[data-refresh-key^="live-config-content-${node}-${engine}-"]`);
           return location.hash.startsWith("#live-config") && workspace &&
-            (testAPI.agents.find(agent=>agent.id === node).status === "offline"
-              ? workspace.querySelector(".node-config-source")?.textContent.includes("节点离线")
-              : workspace.querySelector("#live-config-form"));
+            workspace.querySelector("#live-config-form");
         }, "legacy config link did not preserve node/core: " + hash);
       }
       const engineLauncher = document.querySelector('[data-live-engine="sing-box"]');
@@ -26,41 +24,39 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
       assert.equal(document.activeElement, document.querySelector('[data-live-engine="sing-box"]'), "replaced engine editor must retain selection launcher focus");
       assert.ok(location.hash.includes("engine=sing-box"),"engine switch not reflected in safe deep link");
-      const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
-      const draft = input.value;
+      document.querySelector('[data-config-file="0"]').click();
+      const input = document.querySelector("[data-code-input]");
+      input.focus(); input.setSelectionRange(1, 3);
       const fileButtons = document.querySelectorAll("[data-config-file]");
-      input.focus(); input.setSelectionRange(1, 3); fileButtons[0].click();
-      assert.equal(input.selectionStart, 1, "same source file must retain the caret");
+      fileButtons[0].click();
+      assert.equal(input.selectionStart, 1, "same object changed the caret");
       assert.equal(input.selectionEnd, 3);
-      assert.equal(input.closest(".code-editor-frame").getAnimations().length, 0, "same source file must not replay feedback");
-      assert.ok(fileButtons.length >= 2,"shared/inbound buttons missing");
-      assert.ok(fileButtons[0].classList.contains("is-dirty"),"edited common file is not marked unsaved");
-      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"draft summary did not count the edited file");
+      input.value = input.value.replace("{", '{"future_workspace_counter":18446744073709551615,');
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+      assert.equal(document.querySelector(".code-workspace .config-draft-summary").dataset.dirty, "1");
       fileButtons[1].click();
-      assert.equal(fileButtons[1].getAttribute("aria-pressed"),"true","inbound selection missing");
-      assert.ok(document.querySelector("[data-code-reset]").disabled,"a clean file can be reset because another file is dirty");
-      input.value += "\n"; input.dispatchEvent(new Event("input",{bubbles:true}));
+      assert.equal(fileButtons[1].getAttribute("aria-current"), "true");
+      assert.ok(document.querySelector("[data-code-reset]").disabled, "clean object inherited another object's dirty state");
+      const inboundBaseline = input.value;
+      input.value = input.value.replace(/("listen_port"\s*:\s*)(\d+)/, (_match, prefix, port) => prefix + (Number(port) + 1));
+      input.dispatchEvent(new Event("input", {bubbles:true}));
       const inboundDraft = input.value;
-      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"multiple drafts are not counted");
       fileButtons[0].click();
-      assert.equal(input.value,draft,"switch lost common draft");
+      assert.ok(input.value.includes("18446744073709551615"), "common draft was lost");
       fileButtons[1].click();
-      assert.equal(input.value,inboundDraft,"switch lost inbound draft");
-      fileButtons[0].click();
-      assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
+      assert.equal(input.value, inboundDraft, "inbound draft was lost");
       document.querySelector("[data-config-preview]").click();
-      assert.ok(input.readOnly,"merged preview must be readonly");
-      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"merged preview hid pending drafts");
-      document.querySelector("[data-config-preview]").click();
-      assert.equal(input.value,draft,"preview lost file draft");
-      assert.ok(!input.readOnly,"return from preview must restore editing");
+      assert.ok(input.readOnly && input.value.includes("18446744073709551615"));
+      assert.ok(document.querySelector("[data-code-format]").disabled, "read-only preview exposes an enabled format action");
+      document.querySelector("[data-config-source]").click();
+      assert.ok(!input.readOnly && input.value.includes("18446744073709551615"), "complete source is not an editable merged document");
       fileButtons[1].click();
       document.querySelector("[data-code-reset]").click();
-      assert.ok(!fileButtons[1].classList.contains("is-dirty") && fileButtons[0].classList.contains("is-dirty"),"reset changed drafts outside the current file");
-      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"reset did not update the draft summary");
-      assert.ok(document.querySelector("[data-code-reset]").disabled,"reset remains enabled for a restored file");
+      assert.equal(input.value, inboundBaseline, "reset changed a different object");
+      assert.ok(document.querySelector("[data-code-reset]").disabled);
       fileButtons[0].click();
-      assert.equal(input.value,draft,"resetting an inbound lost the common-file draft");
+      const draft = input.value;
+      assert.ok(draft.includes("18446744073709551615"), "reset discarded another object's custom field");
       document.querySelectorAll("[data-live-agent]")[1].click();
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty node switch did not prompt");
       document.querySelector("[data-confirm-cancel]").click();
@@ -79,12 +75,17 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const editor = document.querySelector("#live-config-form").getBoundingClientRect();
     assert.ok(tools.bottom <= editor.top + 1,"configuration tools remain below the source editor");
     const workspace = document.querySelector(".live-config-workspace");
-    const nav = workspace.querySelector(".config-file-buttons").getBoundingClientRect();
+    const rail = workspace.querySelector(".field-rail").getBoundingClientRect();
     const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
-    assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
-    assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
-    assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
-    assert.ok(workspace.querySelector('.config-file-buttons [data-inbound-action="add"]'),"add action must stay with file navigation");
+    if (innerWidth > 1100) {
+      assert.ok(rail.right <= frame.left + 1 && rail.width >= 200, "desktop object rail did not leave a clear editing workspace");
+      assert.ok(frame.width > 400, "desktop source editor is too narrow");
+    } else assert.ok(rail.bottom <= frame.top + 1, "mobile navigation did not precede editing");
+    assert.equal(document.querySelectorAll("[data-config-objects]").length, 1, "object navigation is duplicated");
+    assert.ok(workspace.querySelector('.config-file-actions [data-inbound-action="add"]'), "stable add action is missing");
+    for (const button of workspace.querySelectorAll(".config-file-actions button")) {
+      assert.ok(button.scrollWidth <= button.clientWidth + 1, "mobile action label is squeezed");
+    }
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-reset]'),"reset must stay with current-file tools");
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-format]'),"format must stay with current-file tools");
     assert.ok([...workspace.querySelectorAll('.code-workspace>footer button')].every(button => button.type === "submit"),"submission footer mixes file tools with save actions");

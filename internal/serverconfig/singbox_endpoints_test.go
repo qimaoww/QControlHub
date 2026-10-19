@@ -39,11 +39,11 @@ func TestMutateGeneratedSingBoxEndpointChecksCrossListIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	modified, err := MutateGenerated(core.EngineSingBox, added, generated, "wg", "modify")
-	if err != nil || strings.Contains(modified, `"tag": "wg"`) || !strings.Contains(modified, `"tag": "wg2"`) {
+	if err != nil || containsNativeJSON(modified, `"tag": "wg"`) || !containsNativeJSON(modified, `"tag": "wg2"`) {
 		t.Fatalf("rename endpoint error=%v\n%s", err, modified)
 	}
 	deleted, err := MutateGenerated(core.EngineSingBox, modified, `{"endpoints":[{"tag":"wg2","type":"wireguard","listen_port":51821}]}`, "wg2", "delete")
-	if err != nil || strings.Contains(deleted, `"tag": "wg2"`) {
+	if err != nil || containsNativeJSON(deleted, `"tag": "wg2"`) {
 		t.Fatalf("delete endpoint error=%v\n%s", err, deleted)
 	}
 }
@@ -58,7 +58,7 @@ func TestMutateGeneratedSingBoxEndpointPreservesUnknownCustomFields(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(updated, `"custom_vendor_field"`) || !strings.Contains(updated, `"keep": true`) {
+	if !strings.Contains(updated, `"custom_vendor_field"`) || !containsNativeJSON(updated, `"keep": true`) {
 		t.Fatalf("unknown endpoint field was lost: %s", updated)
 	}
 }

@@ -3,6 +3,7 @@ import { diagnosticError } from "./errors.js";
 import { assertAgentConfigBaseline, deployPreflightError, liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveSourceKey } from "./live-config-state.js";
 import { presetRoute } from "./preset-route.js";
 import { bindConfigFiles } from "./config-files.js";
+import { bindConfigSourceEditor } from "./config-source-editor.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
 import { bindConfigInbounds } from "./config-inbounds.js";
 import { createLiveConfigView } from "./live-config-view.js";
@@ -10,7 +11,7 @@ import { bindLiveConfigNavigation } from "./live-config-navigation.js";
 import { bindLiveConfigSubmit } from "./live-config-submit.js";
 import { bindSharedInstanceRead } from "./shared-instance-read.js";
 
-export function createLiveConfigPage(ctx, { presets, deployments, reader }) {
+export function createLiveConfigPage(ctx, { presets, deployments, reader, workspaces }) {
   const { api, state, can, engineName, notify, shell, bindCodeEditors } = ctx;
   const { operationFor, saveOperation, renderPresetStatus, watchPresetOperation } = presets.status;
   const { mountPresetEditor } = presets;
@@ -21,13 +22,22 @@ let liveConfigRequest = 0;
 let liveAgentRuntimeScope;
 let liveAgentRuntimeLoaded = false;
 
+async function refreshConfig({operationKey} = {}) {
+  const record = workspaces.current(), owner = state.data, epoch = state.navigationEpoch;
+  if (!record || operationKey && operationKey !== record.operationKey || record.submitting || document.querySelector('.config-inbound-dialog[data-saving="1"]')) return false;
+  workspaces.capture();
+  if (configHasUnsavedChanges() && !(await ctx.confirmAction("重新读取会放弃当前工作区未保存的修改，确定继续？", "重新读取配置"))) return false;
+  if (owner !== state.data || epoch !== state.navigationEpoch || record !== workspaces.current()) return false;
+  liveAgentRuntimeLoaded = false;
+  workspaces.discard(record);
+  state.data.presetDrafts?.clear(`${record.agentId}|${record.engine}|${record.sourceMode}|`);
+  delete state.data.liveSources[record.sourceKey];
+  await liveConfig({preferCachedRead:false});
+  return true;
+}
 
 function configHasUnsavedChanges() {
-  const editor = document.querySelector("#live-config-form [data-code-editor]");
-  const input = editor?.querySelector("[data-code-input]");
-  const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
-    input && !input.readOnly && input.value !== input.defaultValue;
-  return presets.presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('#live-config-form[data-saving="1"], .config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
+  return workspaces.dirty() || presets.presetHasUnsavedChanges() || Boolean(document.querySelector('.config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
 }
 
 function maybeRerenderLiveConfig(agentId, engine) {
@@ -49,6 +59,7 @@ function maybeRerenderLiveConfig(agentId, engine) {
 async function liveConfig(options = {}) {
   const preferCachedRead = options.preferCachedRead !== false;
   const request = ++liveConfigRequest;
+  const ticket = workspaces.begin();
   if (!can("agent-config.read")) {
     shell('<section class="section"><div class="alert error" role="alert">当前账号无权查看配置。</div></section>', "配置");
     return;
@@ -65,6 +76,8 @@ async function liveConfig(options = {}) {
   // Start independent reads together for an already selected workspace.
   // Do not prefetch across pending deployment reconciliation or access scopes.
   const selectedAgent = state.data.liveAgent, selectedEngine = state.data.liveEngine;
+  const confirmedDeployments = can("deployments.read")
+    ? api("/deployments").catch(() => null) : Promise.resolve(null);
   const prefetchWorkspace = can("agents.read") && selectedAgent && selectedEngine &&
     !state.data.pendingDeployTasks?.[liveSourceKey(selectedAgent, selectedEngine)]
     ? api(`/agents/${encodeURIComponent(selectedAgent)}/configs/${encodeURIComponent(selectedEngine)}/workspace`)
@@ -74,7 +87,7 @@ async function liveConfig(options = {}) {
     : null;
   const agents = targetedWorkspace ? [targetedWorkspace.agent].filter(Boolean) :
     state.session && !can("agents.read") ? [] : refreshRuntime ? await api("/agents") : state.data.agents;
-  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
+  if (!ticket.current()) return;
   state.data.agents = agents;
   liveAgentRuntimeLoaded = true;
   liveAgentRuntimeScope = runtimeScope;
@@ -115,24 +128,26 @@ async function liveConfig(options = {}) {
     state.data.liveEngine = installedEngines.find(item => agent.runtime?.[item]?.installed) || installedEngines[0];
   }
   const engine = state.data.liveEngine;
-  if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
-    globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
   await reconcilePendingDeploy(agent.id, engine);
+  if (!ticket.current()) return;
   const prefetched = prefetchWorkspace && selectedAgent === agent.id && selectedEngine === engine
     ? await prefetchWorkspace : null;
   if (prefetched?.error) throw prefetched.error;
   const configWorkspace = targetedWorkspace || prefetched?.value || await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
-  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
+  if (!ticket.current()) return;
   agent = configWorkspace.agent || agent;
   state.data.agents = agents.map(item => item.id === agent.id ? agent : item);
   const privateWorkspace = privateAccount && (agent.can_manage !== true ||
     !["managed", "import"].includes(state.data.liveConfigSource));
   const saved = configWorkspace.config || null;
+  const deployment = (await confirmedDeployments)?.find(item => item.agent_id === agent.id &&
+    item.engine === engine && saved?.id && item.config_id === saved.id);
+  if (!ticket.current()) return;
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
-    runtime.existing_config_unsupported_reason || "",
+    privateWorkspace ? "" : runtime.existing_config_unsupported_reason || "",
   );
   const existingAvailable = (!privateAccount || agent.can_manage === true) && Boolean(runtime.existing_config_available);
   const managedAvailable = Boolean(runtime.installed);
@@ -146,6 +161,8 @@ async function liveConfig(options = {}) {
       ? "import"
       : "managed";
   state.data.liveConfigSource = sourceMode;
+  if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
+    globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine, sourceMode}));
   const importSource = sourceMode === "import";
   const readAction = privateWorkspace || emptyManaged ? "" : liveConfigReadAction({
     sourceMode,
@@ -158,7 +175,7 @@ async function liveConfig(options = {}) {
     delete state.data.liveSources[sourceKey];
   const source = privateWorkspace
     ? { content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n") }
-    : state.data.liveSources[sourceKey] || (emptyManaged ? {
+    : state.data.liveSources[sourceKey] || ((emptyManaged || !importSource && (!readAction || !can("tasks.execute") || agent.status !== "online") && saved) ? {
       content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n"),
       saved: true,
     } : null);
@@ -207,22 +224,38 @@ async function liveConfig(options = {}) {
         content: source.content,
       }
     : null;
+  const workspace = workspaces.open({operationKey:`${agent.id}|${engine}|${sourceMode}`, agentId:agent.id, agent, engine, sourceMode, sourceKey, source, saved, runtime,
+    deployedVersion:deployment?.config_version,
+    content:current?.content, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || []});
   const workspaceElement = renderLiveConfigView({
     agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
     sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
-    managedAvailable, emptyManaged, readAction,
+    managedAvailable, emptyManaged, readAction, workspace,
   });
   state.data.liveEngines = installedEngines;
-  bindLiveConfigNavigation(ctx, { agent, engine, accountData, sourceMode, current, workspaceElement, liveConfig });
+  bindLiveConfigNavigation(ctx, { agent, engine, accountData, sourceMode, current, workspaceElement, liveConfig, workspace, workspaces });
+  bindEvent(workspaceElement?.querySelector("[data-config-refresh]"), "click", async () => {
+    if (!ticket.current()) return;
+    try { await refreshConfig(); }
+    catch (error) { if (accountData === state.data && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode) notify(`读取配置失败：${error.message}`, "error"); }
+  });
   bindEvent(document.querySelector("[data-read-current]"), "click", async () => {
       delete state.data.liveSources[sourceKey];
       await readCurrentConfig(agent, engine, sourceKey, readAction);
   });
-  const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify);
+  const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify, {
+    document:workspace.document, inbounds:workspace.inbounds,
+    onChange:model => {
+      const status = workspaceElement.querySelector("[data-workspace-save-state]");
+      if (status) status.textContent = importSource ? "系统服务快照" : model.dirty() ? "有未保存修改" : workspace.saved?.version ? `已保存 v${workspace.saved.version}` : "尚未保存";
+    },
+  });
   bindCodeEditors();
+  bindConfigSourceEditor(ctx, {root:workspaceElement, files:configFiles, workspace, workspaces, current:ticket.current});
   const applyInboundMutation = async (result, chosen) => {
     if (accountData !== state.data) return;
-    const key = `${agent.id}|${engine}`;
+    const key = workspace.operationKey;
+    workspaces.commit(workspace, result.config);
     state.data.liveSources[sourceKey] = {
       ...(state.data.liveSources[sourceKey] || source),
       content: result.config.content,
@@ -242,7 +275,7 @@ async function liveConfig(options = {}) {
       }
     }
     state.data.liveSelectedInbound = chosen ? {agentId:agent.id, engine, ...chosen} : null;
-    if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine) {
+    if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode) {
       try { await liveConfig(); }
       catch (error) {
         if (accountData !== state.data) return;
@@ -261,24 +294,20 @@ async function liveConfig(options = {}) {
     agent, engine, saved, sourceMode, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || [],
     beforeDeploy, onSaved: applyInboundMutation,
   });
-  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
+  if (!ticket.current()) return;
   const selected = state.data.liveSelectedInbound;
   if (selected?.agentId === agent.id && selected.engine === engine)
     (configFiles || restrictionSelection)?.selectInbound(selected.tag, selected.port);
   bindConfigInbounds({
     ...ctx, form:document.querySelector("#live-config-form"), container:workspaceElement, files:configFiles,
     selection:restrictionSelection, agent, engine, saved, workspace:configWorkspace, sourceMode,
+    workspaceRecord:workspace, workspaces,
     sourceContent:current?.content, mountEditor:mountPresetEditor, beforeDeploy, onSaved:applyInboundMutation,
-    onRefresh:async () => {
-      liveAgentRuntimeLoaded = false;
-      delete state.data.liveSources[sourceKey];
-      await liveConfig({ preferCachedRead: false });
-    },
   });
   renderPresetStatus();
   bindLiveConfigSubmit(ctx, {
     agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,
-    configFiles, beforeDeploy, workspaceElement, liveConfig, deployments,
+    configFiles, beforeDeploy, workspaceElement, liveConfig, deployments, workspace, workspaces, status:presets.status,
   });
   bindSharedInstanceRead(ctx, {agent, engine, root:workspaceElement, requestSnapshot:requestCurrentConfigSnapshot});
   if (
@@ -293,7 +322,7 @@ async function liveConfig(options = {}) {
 
 
   return {
-    liveConfig, configHasUnsavedChanges, maybeRerenderLiveConfig,
+    liveConfig, refreshConfig, configHasUnsavedChanges, maybeRerenderLiveConfig,
     invalidateRuntime() { liveAgentRuntimeLoaded = false; },
   };
 }

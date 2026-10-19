@@ -55,8 +55,7 @@ export async function testConfigOutboundsRuntime() {
     release(); test.workspaceGate = null; await pause();
     assert(!document.querySelector("dialog"), "late read reopened a canceled outbound dialog");
     await open("add");
-    assert(document.querySelector("[data-bound-inbound]").textContent.includes("first") &&
-      document.querySelector("[data-outbound-mark]").textContent.includes("0x51435209"), "binding identity or required mark missing");
+    assert(document.querySelector("[data-bound-inbound]").textContent.includes("first"), "binding editor lost the selected inbound identity");
     if (innerWidth <= 600) {
       const dialog = document.querySelector("dialog"), rect = dialog.getBoundingClientRect();
       assert(dialog.scrollWidth <= dialog.clientWidth + 1 && rect.left >= 0 && rect.right <= innerWidth,

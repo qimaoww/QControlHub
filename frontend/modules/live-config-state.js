@@ -65,6 +65,7 @@ export async function submitLiveConfigChange({
   beforeDeploy,
   onDeployTask,
   onSavedConfig,
+  isCurrent = () => true,
 }) {
   const editor = liveConfigEditorState({
     existingAvailable,
@@ -78,9 +79,9 @@ export async function submitLiveConfigChange({
   // must never persist a draft or enqueue a task until a fresh Agent read has
   // been compared with the exact baseline that the editor was opened from.
   if (intent === "deploy") await beforeDeploy?.();
+  if (!isCurrent()) throw new DOMException("工作区已切换", "AbortError");
   let saved = savedConfig;
   if (
-    !existingAvailable ||
     !saved ||
     String(saved.content || "") !== editor.content
   ) {
@@ -100,17 +101,18 @@ export async function submitLiveConfigChange({
     );
     onSavedConfig?.(saved);
   }
+  if (!isCurrent()) throw new DOMException("工作区已切换", "AbortError");
   if (intent === "save") return { saved, content: editor.content };
   if (intent === "deploy" || intent === "validate") {
     if (intent === "validate") {
-      await submitTask({
+      const task = await submitTask({
         agent_id: agent.id,
         engine,
         action: "validate",
         config_id: saved.id,
         expected_config_version: saved.version,
       });
-      return { saved, content: editor.content };
+      return { saved, content: editor.content, task };
     }
     const task = await submitTask({
       agent_id: agent.id,
@@ -152,7 +154,7 @@ export function liveConfigSnapshotReusable(source, now = Date.now()) {
 export { deployPreflightError };
 
 export function liveSourceKey(agentId, engine, source = "managed") {
-  return source === "import"
-    ? `${agentId}|${engine}|import`
+  return ["import", "personal"].includes(source)
+    ? `${agentId}|${engine}|${source}`
     : `${agentId}|${engine}`;
 }

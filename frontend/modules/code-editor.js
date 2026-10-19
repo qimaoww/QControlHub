@@ -90,6 +90,7 @@ export function bindCodeEditors(root = document) {
       editor.dataset.codeValid = result.valid ? "1" : "0";
       input.classList.toggle("is-invalid", !result.valid);
       if (reset) reset.disabled = !(editor.configFileController?.currentDirty?.() ?? dirty) || input.readOnly;
+      if (format) format.disabled = input.readOnly || input.disabled;
       if (!result.valid) {
         if (status) updateFeedback(status, result.status);
         if (validation) updateFeedback(validation, result.message);

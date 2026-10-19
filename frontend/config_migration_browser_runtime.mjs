@@ -94,14 +94,14 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(test.writes.length===0 && test.tasks.length===0,"canceling source deployment wrote data");
       test.accept = true;
       const buttons = document.querySelectorAll("[data-config-file]");
-      assert(buttons[1].querySelector("b").textContent === "a", "filename must follow the preset tag, not the server name");
+      assert(buttons[1].querySelector("strong").textContent === "a", "filename must follow the preset tag, not the server name");
       buttons[1].click();
       const input = document.querySelector("[data-code-input]");
       assert(JSON.parse(input.value).outbounds?.[0]?.tag === "qch-trf-1080-111111111111", "inbound editor did not include its dedicated exit");
       assert(!document.querySelector('optgroup[label="出站"]'), "legacy outbound file group remains visible");
       input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
       buttons[0].click();
-      assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
+      assert(buttons[1].querySelector("strong").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
       document.querySelector('[data-live-intent="deploy"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
       assert(test.reads.length===1 && test.reads[0].prefer_cached===undefined,
@@ -112,6 +112,9 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(test.confirmations.length===2,"source deployment presented duplicate confirmations");
     }
     await fixture(engine,false,true);
+    assert(document.querySelector("[data-workspace-save-state]").textContent === "系统服务快照" &&
+      document.querySelector("[data-workspace-deploy-state]").textContent === "待导入并迁移", "system snapshot borrowed the managed saved/deployed version");
+    assert(!document.querySelector('[data-inbound-action="history"], [data-inbound-action="diff"]'), "system snapshot exposes history or diff for another source");
     assert(!document.querySelector('[data-live-intent="migrate-files"]'),"external service must not expose managed-file migration");
     assert(document.querySelector('[data-live-intent="import"]') && !document.querySelector('[data-live-intent="deploy"]'),
       "removing bundle generation changed explicit external-service import");
@@ -124,7 +127,7 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(legacy.writes.length===0 && legacy.tasks.length===0,"canceling legacy source deployment wrote data");
       legacy.accept = true;
       button.click(); await pause();
-      assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
+      assert(legacy.writes.length===0 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
         "removing bundle generation blocked normal deployment to a legacy Agent");
       assert(legacy.reads.length===1 && legacy.reads[0].prefer_cached===undefined,
         "legacy source deployment skipped its forced Agent read");
@@ -139,7 +142,7 @@ function testReconciledConfigFiles() {
     const baseline = JSON.stringify({inbounds:[{tag:"alice",port:24101},{tag:"second",port:24105}],outbounds:[{tag:"direct"}]});
     const markup = () => {
       const form = document.createElement("form");
-      form.innerHTML = '<section data-code-editor><header class="code-editor-toolbar"></header><textarea data-code-input></textarea></section>';
+      form.innerHTML = '<nav data-config-objects></nav><section data-code-editor><header class="code-editor-toolbar"></header><textarea data-code-input></textarea></section>';
       form.querySelector("textarea").textContent = baseline;
       return form;
     };
@@ -149,7 +152,7 @@ function testReconciledConfigFiles() {
     if (dirty) form.querySelector("textarea").value = form.querySelector("textarea").value.replace("24105","24106");
     reconcileView(form, markup());
     files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
-    assert(files.paths().length === 3 && form.querySelectorAll(".config-file-buttons").length === 1, "refresh lost inbound fragments or duplicated navigation");
+    assert(files.paths().length === 4 && form.querySelectorAll("[data-config-objects]").length === 1, "refresh lost inbound/outbound objects or duplicated navigation");
     assert(JSON.parse(files.content()).inbounds[1].port === (dirty ? 24106 : 24105), "refresh discarded an inbound draft");
     assert(files.selectedInbound()?.tag === "second", "refresh changed the selected inbound");
   }
@@ -188,7 +191,7 @@ async function testConfigReadCacheRuntime() {
   await waitFor(()=>deploy.tasks.length === 1, "fresh preflight did not recover a concurrent snapshot retirement");
   assert(deploy.reads.length === 2 && deploy.reads.every(read=>read.prefer_cached === undefined),
     "fresh preflight recovery used a cached read");
-  assert(deploy.writes.length === 1, "preflight recovery duplicated configuration persistence");
+  assert(deploy.writes.length === 0, "deploying an unchanged configuration created an unnecessary revision");
   await pause();
   deploy.dispose();
 
@@ -217,6 +220,8 @@ async function testSourceSaveRuntime() {
     let release;
     test.saveGate = new Promise(resolve => { release = resolve; });
     const form = document.querySelector("#live-config-form");
+    const source = form.querySelector("[data-code-input]");
+    source.value = source.value.replace("9007199254740993", "9007199254740995"); source.dispatchEvent(new Event("input", {bubbles:true}));
     const button = document.querySelector('[data-live-intent="validate"]');
     button.click();
     await waitFor(()=>test.writes.length === 1, "source save did not start");
@@ -227,12 +232,12 @@ async function testSourceSaveRuntime() {
     assert(test.pages.configHasUnsavedChanges(), "pending source save lost navigation protection");
     form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
     const otherEngine = [...document.querySelectorAll("[data-live-engine]")].find(tab=>tab.dataset.liveEngine !== engine);
-    await otherEngine.onclick({preventDefault(){}});
-    await document.querySelector('[data-live-source="import"]').onclick();
+    otherEngine.click();
+    document.querySelector('[data-live-source="import"]').click();
     assert(test.state.data.liveEngine === engine && test.state.data.liveConfigSource === "managed", "pending source save allowed target switching");
     assert(test.writes.length === 1 && !test.tasks.length, "source save submitted twice or created a task before persistence");
     release();
-    await waitFor(()=>document.querySelector(".live-config-version")?.textContent === "配置 v2", "source save did not load its saved revision");
+    await waitFor(()=>document.querySelector("[data-workspace-save-state]")?.textContent === "已保存 v2", "source save did not load its saved revision");
     assert(test.writes.length === 1 && test.tasks.length === 1 && test.tasks[0].expected_config_version === 2, "source save lost exact-once revision/task submission");
     assert(!document.querySelector("[data-live-intent]").disabled, "source save did not unlock fresh controls");
     test.dispose();
@@ -251,7 +256,8 @@ async function testSourceSaveRuntime() {
     const baseline = [...document.querySelectorAll(".live-config-workspace button, .live-config-workspace textarea")].map(element=>[element, element.disabled]);
     button.click();
     await waitFor(()=>!form.dataset.saving && document.querySelector("[data-live-save-status]")?.getAttribute("role") === "alert", `${failure} failure lost source feedback`);
-    assert(input.value === draft && !input.disabled, `${failure} failure discarded or locked the source draft`);
+    const activeInput = document.querySelector("[data-code-input]");
+    assert(activeInput.value === draft && !activeInput.disabled, `${failure} failure discarded or locked the source draft`);
     if (failure === "save") {
       assert(baseline.every(([element, disabled])=>element.disabled === disabled), "rejected source save changed preexisting disabled states");
       test.saveError = null;
@@ -260,9 +266,10 @@ async function testSourceSaveRuntime() {
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
     } else {
       assert(document.querySelector("[data-live-save-status]").textContent.includes("配置 v2 已保存"), "partial source success misreported durable configuration as unsaved");
-      assert(button.disabled, "partial source success allows uncertain resubmission");
-      form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
-      assert(test.writes.length === 1 && test.tasks.length === 1, "partial source failure repeated a committed mutation");
+      test.taskError = null; test.refreshError = null;
+      document.querySelector('[data-live-intent="validate"]').click();
+      await waitFor(()=>test.tasks.length === 2, "partially successful save could not retry its task");
+      assert(test.writes.length === 1, "task retry repeated a committed configuration mutation");
     }
     test.dispose();
   }

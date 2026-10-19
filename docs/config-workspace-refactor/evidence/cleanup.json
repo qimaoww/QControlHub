@@ -1,0 +1,54 @@
+{
+  "testEndedUTC": "2026-10-19T07:34:56+00:00",
+  "testEndedLocal": "2026-10-19T15:34:56+08:00",
+  "timezone": "Asia/Shanghai",
+  "stopped": {
+    "browserSessions": [
+      "qch-config-refactor"
+    ],
+    "httpPorts": [
+      46881,
+      37677,
+      40899,
+      33765
+    ],
+    "postgresPort": 55487,
+    "remainingTaskProcesses": [],
+    "listeningTaskPorts": []
+  },
+  "scope": [
+    "/tmp/qch-config-workspace-20261019-ABsZBG"
+  ],
+  "preserved": [
+    "docs/config-workspace-refactor/evidence",
+    "docs/config-workspace-refactor/README.md",
+    "output/playwright/config-workspace-20261019 (screenshots, video review and logs)"
+  ],
+  "scheduledCleanup": {
+    "status": "registered",
+    "timer": "qch-config-workspace-cleanup-20261019-abszbg.timer",
+    "service": "qch-config-workspace-cleanup-20261019-abszbg.service",
+    "calendar": "2026-10-22 07:34:56 UTC",
+    "executeUTC": "2026-10-22T07:34:56+00:00",
+    "executeLocal": "2026-10-22T15:34:56+08:00",
+    "delayHours": 72,
+    "script": "/var/lib/qch-config-workspace-cleanup-20261019-abszbg/cleanup.py",
+    "auditDirectory": "/var/lib/qch-config-workspace-cleanup-20261019-abszbg",
+    "persistent": true,
+    "scope": [
+      "/tmp/qch-config-workspace-20261019-ABsZBG"
+    ],
+    "resourcesRetainedForAudit": [
+      "/etc/systemd/system/qch-config-workspace-cleanup-20261019-abszbg.service",
+      "/etc/systemd/system/qch-config-workspace-cleanup-20261019-abszbg.timer",
+      "/var/lib/qch-config-workspace-cleanup-20261019-abszbg"
+    ],
+    "verifiedProperties": {
+      "NextElapseUSecRealtime": "Thu 2026-10-22 15:34:56 CST",
+      "Persistent": "yes",
+      "ActiveState": "active",
+      "SubState": "waiting",
+      "UnitFileState": "enabled"
+    }
+  }
+}

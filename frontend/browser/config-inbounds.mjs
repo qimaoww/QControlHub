@@ -3,6 +3,7 @@ import { testConfigOutboundsRuntime } from "./config-outbounds.mjs";
 import { testCommonConfigRuntime } from "./config-common.mjs";
 import { testWireGuardConfigRuntime } from "./config-wireguard.mjs";
 import { testPresetFieldLayoutRuntime } from "./preset-layout.mjs";
+import { testCompleteSourceRuntime } from "./config-source.mjs";
 
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
@@ -21,9 +22,11 @@ export async function testConfigInboundsRuntime(preview = false) {
     return;
   }
   await testWireGuardConfigRuntime();
+  await testCompleteSourceRuntime();
   await testPresetFieldLayoutRuntime();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
+    assert(document.querySelector("[data-workspace-deploy-state]").textContent === "已部署 v1", "workspace omitted the confirmed deployment for its own configuration");
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);
     assert(!document.querySelector('[data-live-intent="migrate-files"]'), "configuration page still renders the removed bundle action");
     assert(document.querySelector(".config-inbound-menu").previousElementSibling?.matches("[data-config-access-open]"), "inbound menu must be beside restrictions");
@@ -54,6 +57,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     assert(test.writes.length === 1 && test.writes[0].original_tag === "second" && test.writes[0].expected_version === 1 &&
       test.writes[0].input.tag === "renamed" && !test.writes[0].install_if_missing, "modify identity/version/installation regression");
     assert(document.querySelector("#live-config-form"), "save left the configuration page");
+    assert(document.querySelector("[data-workspace-deploy-state]").textContent.includes("v2 待部署"), "validation incorrectly advanced the deployed revision");
     test.click("add");
     await waitFor(()=>document.querySelector("#server-plan-form"), "add editor did not load");
     form = document.querySelector("#server-plan-form");
@@ -84,13 +88,16 @@ export async function testConfigInboundsRuntime(preview = false) {
       test.select("first");
       document.querySelector("[data-config-preview]").click();
       assert(action("modify").disabled && action("delete").disabled, "merged preview allows mutation");
-      document.querySelector("[data-config-preview]").click();
+      test.select("first");
     }
+    document.querySelector("[data-config-source]")?.click();
     const input = document.querySelector("[data-code-input]");
     const original = input.value;
-    input.value += "\n "; input.dispatchEvent(new Event("input"));
+    input.value = input.value.replace("{", '{"custom":18446744073709551615,'); input.dispatchEvent(new Event("input"));
     test.click("add"); await pause();
-    assert(!document.querySelector("dialog[open]") && test.notices.some(message=>message.includes("未保存修改")), "dirty source was overwritten");
+    await waitFor(()=>document.querySelector("#server-plan-form"), "form could not use the current complete draft");
+    assert(input.value.includes("18446744073709551615") && test.writes.length === 3, "opening a protocol form overwrote or saved the source draft");
+    document.querySelector("[data-inbound-close]").click(); await pause();
     input.value = original; input.dispatchEvent(new Event("input"));
     test.click("advanced");
     await waitFor(()=>document.querySelector("#field-form"), "advanced field editor missing");
@@ -141,7 +148,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   }
   for (const options of [{readonly:true}]) {
     const test = await fixture("xray", options);
-    test.click("add"); await pause();
+    document.querySelector('[data-inbound-action="add"]')?.click(); await pause();
     assert(!document.querySelector("dialog"), "read-only or diverged snapshot permitted mutation");
     test.dispose();
   }
@@ -160,17 +167,19 @@ export async function testConfigInboundsRuntime(preview = false) {
     offlineTab.getAttribute("aria-label").includes("状态未知"), "offline node presented cached running state as current");
   offline.dispose();
   const shared = await fixture("xray", {shared:true});
+  shared.saved().version = 2;
   shared.agent.runtime.xray.instance = {saved_config_id:"cfg", saved_version:2, deployed_config_id:"cfg", deployed_version:1};
   await shared.reenter();
   const sharedTab = () => document.querySelector('[data-live-engine="xray"]');
-  assert(sharedTab().querySelector(".live-engine-status").textContent === "v2 待部署", "共享配置状态控件缺失或使用了服务状态");
-  assert(sharedTab().title === "v2 待部署" && sharedTab().getAttribute("aria-label").includes("v2 待部署"), "共享配置状态缺少无障碍说明");
+  assert(document.querySelector("[data-workspace-deploy-state]").textContent.includes("v2 待部署"), "shared configuration lost its saved/deployed revision distinction");
+  assert(sharedTab().getAttribute("aria-label").includes("正在运行"), "shared instance runtime state is not separately accessible");
   assert(document.querySelector('.config-tools-menu a[href="#settings-node-node"]'), "共享配置没有返回节点管理的入口");
   assert(!document.querySelector("[data-task-action], [data-instance-version]"), "实例启停或运行状态被放回了配置页");
   shared.agent.runtime.xray.instance.saved_version = 1;
+  shared.saved().version = 1;
   shared.agent.runtime.xray.service_status = "inactive";
   await shared.reenter();
-  assert(sharedTab().querySelector("small").textContent === "已部署 v1", "停止实例丢失了文件的部署状态");
+  assert(document.querySelector("[data-workspace-deploy-state]").textContent === "已部署 v1" && sharedTab().querySelector("small").textContent === "已停止", "stopped instance lost its separate deployed revision");
   shared.dispose();
   const switcher = await fixture("xray", {multi:true});
   assert(switcher.state.data.liveEngine === "xray", "default selected an uninstalled core");
@@ -284,7 +293,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   assert(refreshFailure.writes.length === 1 && refreshFailure.notices.some(message=>message.includes("已保存且任务已提交")), "refresh failure misreported the durable mutation");
   refreshFailure.failRefresh = false;
   document.querySelector("[data-preset-status] button").click();
-  await waitFor(()=>document.querySelector('.live-config-version')?.textContent === "配置 v2", "refresh recovery did not bind the saved revision");
+  await waitFor(()=>document.querySelector('[data-workspace-save-state]')?.textContent === "已保存 v2", "refresh recovery did not bind the saved revision");
   assert(refreshFailure.writes.length === 1, "reload repeated the inbound mutation");
   refreshFailure.dispose();
   await testCommonConfigRuntime();

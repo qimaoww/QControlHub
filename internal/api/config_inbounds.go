@@ -80,6 +80,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		Name                  string             `json:"name"`
 		Description           string             `json:"description"`
 		Intent                string             `json:"intent"`
+		Content               *string            `json:"content,omitempty"`
 		Input                 serverconfig.Input `json:"input"`
 	}
 	mutationError := func(message string) {
@@ -144,6 +145,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
+	current.Engine, current.AgentID = engine, agent.ID
+	current, err = s.configDraftSource(request.Context(), current, input.Content)
+	if err != nil {
+		mutationError(err.Error())
+		return
+	}
 	content := generated
 	var existingShadowsocksRustPolicies []core.MainlandAccessPolicy
 	if engine == core.EngineShadowsocksRust {
@@ -153,7 +160,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			return
 		}
 	}
-	if currentErr == nil {
+	if currentErr == nil || input.Content != nil {
 		current.Content, err = s.presetAccountingSource(request.Context(), current)
 		if err != nil {
 			prefix := "无法安全更新独立出口配置："

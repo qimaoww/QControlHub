@@ -150,12 +150,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       onApplied: (plan) => {
         serverPlanForm.elements.namedItem("port")?.dispatchEvent(new Event("input", { bubbles: true }));
         if (!ctx.selectedInbound) state.data.serverPlans[
-          `${ctx.agent.id}|${ctx.engine}|${ctx.protocol.key}`
+          `${ctx.agent.id}|${ctx.engine}|${ctx.host?.sourceMode || "legacy"}|${ctx.protocol.key}`
         ] = plan;
       },
     });
   }
-  const operationKey = `${ctx.agent.id}|${ctx.engine}`;
+  const operationKey = ctx.host?.operationKey || `${ctx.agent.id}|${ctx.engine}`;
   const showStatus = (message, tone = "", task) => {
     const previous = operationFor(operationKey);
     const reload = task?.id && previous?.task?.id === task.id && previous.reload;
@@ -307,6 +307,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
               description: `${ctx.protocol.name} 服务端入站，由 QControlHub 方案生成`,
               intent,
               preserve_ss_rust_globals: ctx.engine === "ss-rust",
+              content:ctx.host?.draftContent,
               input,
             }),
           });
@@ -329,6 +330,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
               fragment: deletingCommon ? "" : values.get("fragment"),
               expected_version: ctx.workspace.config.version,
               name: ctx.workspace.config.name, description: ctx.workspace.config.description, intent,
+              content:ctx.host?.draftContent,
             }),
           });
         }

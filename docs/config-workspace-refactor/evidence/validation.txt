@@ -1,0 +1,196 @@
+Config workspace final validation
+Baseline: 955f442e69ddb0a35b8163822ff3129c30e9c02f
+
+Commands:
+QCH_TEST_DATABASE_URL=<isolated local PostgreSQL> go test -count=1 -timeout 20m -p 1 -skip '^TestAgentBrowserRuntimeSmoke$' ./...
+go build -buildvcs=false -trimpath -o <task temporary build directory>/ ./cmd/control-plane ./cmd/agent  [exit 0; no output]
+go test ./frontend -skip '^TestAgentBrowserRuntimeSmoke$'
+node frontend/module_smoke.mjs
+node --test frontend/module_policy_test.mjs frontend/smoke_policy_test.mjs
+QCH_BROWSER_SMOKE_MODES=config-inbounds,config-inbounds-mobile,config-layout,config-layout-mobile,config-migration,config-scope,config-restrictions,presets,presets-mobile node frontend/agents_browser_smoke.mjs
+QCH_BROWSER_SMOKE_MODES=config-migration,config-layout,config-layout-mobile node frontend/agents_browser_smoke.mjs
+QCH_TEST_DATABASE_URL=<isolated local PostgreSQL> QCH_MULTI_USER_BROWSER=1 go test ./internal/api -run '^TestMultiUserBrowserSessions$' -count=1 -v -timeout 5m
+QCH_TEST_DATABASE_URL=<isolated local PostgreSQL> QCH_CORE_INSTALL_BROWSER=1 go test ./internal/api -run '^TestCoreFirstInstallBrowserSessions$' -count=1 -v -timeout 5m
+
+All commands above passed. Full make check and the unrelated browser matrix were not run.
+Agent/node task results in browser integration fixtures are simulated. Physical devices and real core deployments were not tested.
+
+Uncached Go suite (isolated PostgreSQL, UTC)
+============================================
+ok  	github.com/qimaoww/qcontrolhub	0.002s
+ok  	github.com/qimaoww/qcontrolhub/cmd/agent	0.375s
+ok  	github.com/qimaoww/qcontrolhub/cmd/control-plane	25.087s
+?   	github.com/qimaoww/qcontrolhub/docs/protocol-url-export	[no test files]
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.074s
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	244.359s
+ok  	github.com/qimaoww/qcontrolhub/internal/api	194.113s
+ok  	github.com/qimaoww/qcontrolhub/internal/architecture	0.012s
+ok  	github.com/qimaoww/qcontrolhub/internal/authn	1.594s
+ok  	github.com/qimaoww/qcontrolhub/internal/certificates	0.078s
+ok  	github.com/qimaoww/qcontrolhub/internal/cnip	0.024s
+ok  	github.com/qimaoww/qcontrolhub/internal/configschema	0.004s
+ok  	github.com/qimaoww/qcontrolhub/internal/core	0.018s
+ok  	github.com/qimaoww/qcontrolhub/internal/geoip	5.282s
+ok  	github.com/qimaoww/qcontrolhub/internal/githubfetch	2.207s
+ok  	github.com/qimaoww/qcontrolhub/internal/hostmetrics	0.026s
+ok  	github.com/qimaoww/qcontrolhub/internal/komari	0.005s
+ok  	github.com/qimaoww/qcontrolhub/internal/netpolicy	0.002s
+ok  	github.com/qimaoww/qcontrolhub/internal/notify	0.057s
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.757s
+ok  	github.com/qimaoww/qcontrolhub/internal/store	74.451s
+?   	github.com/qimaoww/qcontrolhub/internal/testdb	[no test files]
+
+Frontend static contracts
+=========================
+ok  	github.com/qimaoww/qcontrolhub/frontend	0.058s
+
+Module smoke
+============
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+shared instance state smoke checks passed
+Core install operation permissions and state reasons passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Configuration document: complete/section source, precision, native comments, draft reload, races and account isolation passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+Core log conditional transport smoke passed
+Preset reads, render tree and task monitor smoke passed
+traffic selection and ordering module smoke passed
+Core log staged loading/cache smoke passed
+Chinese error messages smoke tests passed
+Account node order queue, migration race, conflict, failure and stale-account smoke passed
+Config file split/merge smoke passed
+Core log selection persistence smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Archive defaults reuse all four canonical examples; draft baselines and forms are independent
+Remaining route factories are inert and preserve their public APIs
+Task retry rendering handles omitted historical revisions and operation permissions
+IP quality model, rendering, request races and mutation guards passed
+Idle session revalidation, revocation, single timer and delayed account switching passed
+
+Module policies
+===============
+TAP version 13
+# frontend/module_policy_test.mjs: 192 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 38.595475
+  type: 'test'
+  ...
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 2 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 6.337046
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 3 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 3.604316
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 56.959347
+
+Configuration browser matrix
+============================
+browser workers=2, CPUs=12, memory=20001MiB, modes=9
+browser timing {"mode":"config-inbounds","startupMs":152.420493,"testMs":20707.747801,"cleanupMs":26.77324899999803,"passed":true,"elapsedMs":20886.954102}
+browser timing {"mode":"config-inbounds-mobile","startupMs":139.881089,"testMs":20903.019544000002,"cleanupMs":32.03653800000029,"passed":true,"elapsedMs":21074.948281999998}
+browser timing {"mode":"presets-mobile","startupMs":144.2250270000004,"testMs":3331.774621999997,"cleanupMs":41.868883999999525,"passed":true,"elapsedMs":3517.8741870000013}
+browser timing {"mode":"presets","startupMs":136.15352599999824,"testMs":3590.8075880000033,"cleanupMs":52.06621299999824,"passed":true,"elapsedMs":3779.031888999998}
+browser timing {"mode":"config-restrictions","startupMs":138.50061000000278,"testMs":1006.1625439999989,"cleanupMs":26.692847999998776,"passed":true,"elapsedMs":1171.361549000001}
+agents browser runtime smoke passed
+browser timing {"mode":"config-migration","startupMs":133.02055299999847,"testMs":1196.5018009999985,"cleanupMs":49.44416100000308,"passed":true,"elapsedMs":1378.9697179999966}
+browser timing {"mode":"config-layout","startupMs":133.9615980000017,"testMs":673.9519939999991,"cleanupMs":29.874931999998807,"passed":true,"elapsedMs":837.7927090000012}
+browser timing {"mode":"config-layout-mobile","startupMs":136.8890879999999,"testMs":666.1590759999999,"cleanupMs":45.47554599999785,"passed":true,"elapsedMs":848.5287729999982}
+browser timing {"mode":"config-scope","startupMs":140.23115600000165,"testMs":429.64070900000297,"cleanupMs":28.73439899999721,"passed":true,"elapsedMs":598.6143330000014}
+agents browser runtime smoke passed
+browser suite elapsed=28.380s
+agents browser runtime smoke passed
+
+Readonly final browser checks
+=============================
+browser workers=2, CPUs=12, memory=20001MiB, modes=3
+browser timing {"mode":"config-layout","startupMs":139.728676,"testMs":827.247492,"cleanupMs":26.207546000000093,"passed":true,"elapsedMs":993.1943289999999}
+browser timing {"mode":"config-migration","startupMs":143.53830299999998,"testMs":1266.803997,"cleanupMs":35.728327000000036,"passed":true,"elapsedMs":1446.080505}
+agents browser runtime smoke passed
+browser timing {"mode":"config-layout-mobile","startupMs":134.01874299999986,"testMs":755.9645890000002,"cleanupMs":42.62086899999986,"passed":true,"elapsedMs":932.6084629999998}
+agents browser runtime smoke passed
+browser suite elapsed=1.975s
+agents browser runtime smoke passed
+
+Real HTTP multi-user browser sessions
+=====================================
+=== RUN   TestMultiUserBrowserSessions
+=== RUN   TestMultiUserBrowserSessions/desktop
+    multi_user_browser_integration_test.go:87: desktop: three independent browser contexts, real password/cookie/CSRF identities
+        desktop: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        desktop: replacement cookie cannot populate the old account's page; B's session remains valid
+        desktop: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        desktop: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        desktop: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        desktop: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        desktop: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+=== RUN   TestMultiUserBrowserSessions/mobile
+    multi_user_browser_integration_test.go:87: mobile: three independent browser contexts, real password/cookie/CSRF identities
+        mobile: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation
+        mobile: replacement cookie cannot populate the old account's page; B's session remains valid
+        mobile: owned nodes isolated; pending shares denied, accepted shares visible without host management
+        mobile: symmetric A/B archives, foreign revisions/update/delete rejected with no side effects
+        mobile: private workspaces and tasks; duplicate submit reused B task; foreign task access/cancel denied
+        mobile: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted
+        mobile: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated
+
+--- PASS: TestMultiUserBrowserSessions (13.95s)
+    --- PASS: TestMultiUserBrowserSessions/desktop (6.95s)
+    --- PASS: TestMultiUserBrowserSessions/mobile (7.00s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	14.167s
+
+Real HTTP owner/shared protocol forms
+=====================================
+=== RUN   TestCoreFirstInstallBrowserSessions
+=== RUN   TestCoreFirstInstallBrowserSessions/alice/desktop
+    core_install_users_integration_test.go:296: alice: real password session, manual failure/retry/refresh and owner automatic preparation, exact revision deployment, viewport 1440: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/alice/mobile
+    core_install_users_integration_test.go:296: alice: real password session, manual failure/retry/refresh and owner automatic preparation, exact revision deployment, viewport 390: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/bob/desktop
+    core_install_users_integration_test.go:296: bob: real password session, manual failure/retry/refresh and private automatic preparation, exact revision deployment, viewport 1440: passed
+
+=== RUN   TestCoreFirstInstallBrowserSessions/bob/mobile
+    core_install_users_integration_test.go:296: bob: real password session, manual failure/retry/refresh and private automatic preparation, exact revision deployment, viewport 390: passed
+
+--- PASS: TestCoreFirstInstallBrowserSessions (14.87s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/desktop (3.71s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/alice/mobile (3.72s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/desktop (3.68s)
+    --- PASS: TestCoreFirstInstallBrowserSessions/bob/mobile (3.77s)
+PASS
+ok  	github.com/qimaoww/qcontrolhub/internal/api	15.082s
