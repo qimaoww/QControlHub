@@ -66,7 +66,9 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     const summary = form.querySelector(".config-draft-summary");
     if (summary) {
       summary.dataset.dirty = model.dirty() ? "1" : "0";
-      summary.textContent = readOnly ? "只读" : model.dirty() ? "有未保存修改" : "";
+      // Read-only is already stated by the editor status; repeating it here
+      // only leaves an empty footer row next to the submit actions.
+      summary.textContent = model.dirty() ? "有未保存修改" : "";
     }
     options.onChange?.(model);
   };

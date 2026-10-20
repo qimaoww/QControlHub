@@ -7,6 +7,28 @@ const longText = params.get("long") === "1";
 
 window.reviewScenario = installAgentFixture(mode);
 
+// State fixtures let every rendered phase be reviewed with the same layout,
+// typography and theme rules as production pages.
+const fixtureAgents = window.reviewScenario.testAPI.agents;
+const primaryAgent = fixtureAgents.find(agent => agent.id === "alpha") || fixtureAgents[0];
+if (primaryAgent) {
+  const engineKey = params.get("engine") || "xray";
+  const engineRuntime = {...(primaryAgent.runtime?.[engineKey] || {})};
+  if (scenario === "offline") primaryAgent.status = "offline";
+  if (scenario === "unsupported") primaryAgent.runtime = {...primaryAgent.runtime, [engineKey]: {
+    ...engineRuntime, installed: false, existing_config_available: true,
+    existing_config_unsupported_reason: "现有系统服务配置包含无法自动迁移的字段：tun.stack、experimental.cache_file",
+  }};
+  // An older Agent cannot tell the managed file from a system service one, so
+  // the workspace has no managed config to open and must ask for an upgrade.
+  if (scenario === "upgrade") {
+    primaryAgent.features = (primaryAgent.features || []).filter(item => item !== "managed-config-read-v1");
+    primaryAgent.runtime = {...primaryAgent.runtime, [engineKey]: {...engineRuntime, existing_config_available: true}};
+  }
+  if (scenario === "import") primaryAgent.runtime = {...primaryAgent.runtime, [engineKey]: {...engineRuntime, installed: false, existing_config_available: true}};
+}
+if (scenario === "empty") window.reviewScenario.testAPI.agents = [];
+
 if (longText) {
   const agents = window.reviewScenario.testAPI.agents;
   const target = agents.find(agent => agent.id === "alpha") || agents[0];
@@ -65,8 +87,13 @@ if (scenario || longText) {
     if (scenario === "loading" && isWorkspaceRead) return new Promise(() => {});
     if (scenario === "error" && isWorkspaceRead)
       return new Response(JSON.stringify({error: "节点存储层读取超时，请稍后重新读取"}), {status: 504, headers: {"Content-Type": "application/json"}});
-    const response = await inner(input, options);
+    // A node that is offline cannot be read at all, so the phase has to come
+    // from the agent state rather than from a generic read failure.
+    if (scenario === "offline" && isWorkspaceRead)
+      return new Response(JSON.stringify({error: "节点离线，暂时无法读取配置"}), {status: 503, headers: {"Content-Type": "application/json"}});
     const tail = String(segments[segments.length - 1] || "");
+    if (scenario === "slow" && method !== "GET") await new Promise(resolve => setTimeout(resolve, 8000));
+    const response = await inner(input, options);
     if (scenario === "fail" && tail === "tasks" && method === "POST") {
       // Only operator actions fail; configuration reads stay healthy so the
       // editor and its retry affordances remain visible.
@@ -77,6 +104,10 @@ if (scenario || longText) {
           {status: 200, headers: {"Content-Type": "application/json"}},
         );
       return response;
+    }
+    if (scenario === "upgrade" && isWorkspaceRead) {
+      const payload = await response.clone().json();
+      return new Response(JSON.stringify({...payload, config: null}), {status: 200, headers: {"Content-Type": "application/json"}});
     }
     if (!longText || (!isWorkspaceRead && !isSnapshot)) return response;
     const payload = await response.clone().json();
