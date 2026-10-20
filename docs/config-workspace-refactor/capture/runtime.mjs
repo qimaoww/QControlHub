@@ -87,6 +87,9 @@ if (scenario || longText) {
     if (scenario === "loading" && isWorkspaceRead) return new Promise(() => {});
     if (scenario === "error" && isWorkspaceRead)
       return new Response(JSON.stringify({error: "节点存储层读取超时，请稍后重新读取"}), {status: 504, headers: {"Content-Type": "application/json"}});
+    // English operator log: the workspace must pair it with a Chinese cause.
+    if (scenario === "error-en" && isWorkspaceRead)
+      return new Response(JSON.stringify({error: "read workspace: dial tcp 10.0.4.21:7801: connect: connection refused"}), {status: 502, headers: {"Content-Type": "application/json"}});
     // A node that is offline cannot be read at all, so the phase has to come
     // from the agent state rather than from a generic read failure.
     if (scenario === "offline" && isWorkspaceRead)

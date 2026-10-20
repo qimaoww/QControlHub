@@ -45,6 +45,30 @@
 - **提交 toast 去重**：`submitTask` 增加 `options.quiet`，配置页校验 / 部署不再弹全局「任务已提交」toast——内联结果区已含「校验已提交 · 查看任务」与终态，失败时也不会再出现绿勾提示与红色错误并列。
 - **页脚高度**：就绪态 83 → 71（去掉空结果行占位），提交后 90，只读 33。
 
+### 6. 报错统一为「中文故障说明 + 原始日志」（第三轮）
+
+此前配置页的报错只有一半信息：读取失败在 `requestJSON` 里被翻译成中文状态说明后，原始日志被丢弃；任务失败则直接显示 Agent 的英文输出。现在统一成两段式：
+
+- **中文故障说明**：`frontend/modules/errors.js` 的 `diagnosticError` 新增端口占用（`bind: address already in use`）、内核启动失败、JSON / YAML 解析失败、不支持的字段等规则，其余沿用证书、权限、磁盘、DNS 等既有分类；未命中时给出通用排查句。
+- **原始日志**：脱敏后的原文照常输出，前缀「原始错误（供排查）：」，不做二次改写。
+- **HTTP 层不再丢日志**：`requestJSON` 构造错误时附带 `body.error`（仅当它不是中文时），读取失败卡片、提交结果与通知都会同时带两类信息。
+- **渲染**：无编辑器卡片用 `<small>` 分两行；提交区结果由 `preset-status.js` 的 `fillStatusText` 用 `<br>` 分行，不写内联样式，长度随内容自适应。
+- **断言同步**：`frontend/browser/config-source.mjs`、`frontend/config_migration_browser_runtime.mjs` 改为断言「包含中文说明 + 原始日志，且原始文本只出现一次」。
+
+例如部署失败时提交区显示：
+
+```
+端口已被占用：该端口已有进程在监听，请更换端口或停止占用进程后重试。
+原始错误（供排查）：listen tcp 0.0.0.0:23001: bind: address already in use
+```
+
+读取失败（英文操作日志）时错误卡片显示：
+
+```
+无法连接后端服务，请稍后重试，或联系管理员检查反向代理与后端服务。
+原始错误（供排查）：read workspace: dial tcp 10.0.4.21:7801: connect: connection refused
+```
+
 
 ## 二、纵向节奏（1440×1000 / 浅色 / 就绪）
 
@@ -97,6 +121,7 @@
 | 提交失败 | `?state=fail` + 保存并校验 | 结果区显示节点返回的错误，编辑器与草稿保留 |
 | 首屏加载 | `?state=loading` | 仍为应用级过渡（本次未改，见未验证项） |
 | 离线 | `?state=offline` | 「节点离线」卡片 + 重新读取，无动作按钮 |
+| 英文原始错误 | `?state=error-en` | 中文故障说明 + 「原始错误（供排查）」两行 |
 | 不可迁移 | `?state=unsupported` | 说明卡片（不可自动迁移的字段），无动作按钮 |
 | 需升级 | `?state=upgrade` | 说明卡片 + 重新读取 |
 | 导入快照 | `?state=import` | 只读快照、页脚「导入并迁移」、单来源不渲染切换 |
@@ -143,6 +168,7 @@
 - 桌面 / 手机 / 平板、明暗主题、字号 90 / 100 / 110 下均无横向溢出、无对象按钮裁切，编辑器可聚焦并输入，输入后状态回到「未保存」；
 - 键盘：对象列表 Enter 切换、焦点留在按钮；「更多」菜单 Enter / ArrowDown / Escape 与焦点归还正常；`focus-visible` 轮廓可见。
 - 第二轮状态走查：15 个状态 × 桌面 / 手机 × 浅色 / 深色共 60 次采集，全部 `overflowX=false`、无页面异常，页脚与提交按钮在提交中 / 成功 / 失败时同屏。
+- 第三轮报错格式：`errors_smoke`、`module_smoke`、`config_workspace_smoke`、7 个配置浏览器套件全部通过；`?state=error-en` 与 `?state=fail` 截图确认中文说明 + 原始日志两行同屏。
 - 第二轮回归：`module_smoke`、`config_workspace_smoke`、`generate-styles --check`、`go test ./frontend -run 'TestStyles|TestConfig'` 通过；`QCH_BROWSER_SMOKE_MODES=config-layout,config-layout-mobile,config-inbounds,config-inbounds-mobile,config-restrictions,config-scope,config-migration` 的 `TestAgentBrowserRuntimeSmoke` 通过（25.8s）。
 
 ## 七、未验证项与已知限制
@@ -153,6 +179,7 @@
 - 只读来源的草稿、部署确认等 #308 既有能力未改动，其行为由 #308 套件覆盖。
 - 对象较多时（`?long=1` 的 13 个对象）对象导航为横向滚动，选中项会自动滚入视野，列表左端因此可能出现被裁切一半的按钮，这是横向滚动列表的固有表现。
 - 配置版本冲突（`conflict`）提示没有单独构造采集，其渲染路径与 `alert` 错误一致，由 #308 套件覆盖。
+- 原始日志较长（多行内核输出）时错误卡片会随内容变高，未做折叠或截断，便于直接复制排查。
 
 ## 八、证据复现
 

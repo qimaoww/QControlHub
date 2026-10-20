@@ -1,6 +1,6 @@
 import { enterSurface } from "./motion.js";
 import { taskTerminal } from "./task-monitor.js";
-import { redactDiagnostic } from "./errors.js";
+import { diagnosticError } from "./errors.js";
 
 // Operation feedback remains account-scoped and follows the same deployment
 // poller used by the source editor.
@@ -17,6 +17,22 @@ function saveOperation(operation) {
   return operation;
 }
 const hasTaskFeedback = taskID => Object.values(state.data.presetOperations || {}).some(operation => operation.task?.id === taskID);
+
+// Failure feedback carries a Chinese explanation followed by the original log,
+// so newlines become real line breaks without injecting markup.
+function fillStatusText(element, message) {
+  const text = String(message ?? "");
+  if (!text.includes("\n") || typeof document.createTextNode !== "function") {
+    element.textContent = text;
+    return;
+  }
+  const nodes = [];
+  text.split("\n").forEach((line, index) => {
+    if (index) nodes.push(document.createElement("br"));
+    nodes.push(document.createTextNode(line));
+  });
+  element.replaceChildren(...nodes);
+}
 
 function renderPresetStatus() {
   const key = state.route === "live-config" ? `${state.data.liveAgent}|${state.data.liveEngine}|${state.data.liveConfigSource}` : `${state.data.agentId}|${state.data.engine}`;
@@ -38,7 +54,7 @@ function renderPresetStatus() {
   status.className = `alert preset-submit-status ${operation.tone}`;
   status.setAttribute("role", operation.tone === "error" ? "alert" : "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = operation.message;
+  fillStatusText(status, operation.message);
   if (changed) enterSurface(status, { token: "--motion-feedback" });
   if (operation.task?.id && can("tasks.read") && operation.tone !== "error") {
     const link = document.createElement("a");
@@ -76,7 +92,7 @@ function renderPresetStatus() {
       catch (error) {
         if (operationFor(key) !== operation) return;
         operation.reload = true;
-        operation.message = redactDiagnostic(error.message) || "配置加载失败";
+        operation.message = diagnosticError(error.message) || "配置加载失败";
         renderPresetStatus();
         editor.syncControls();
       }
@@ -98,7 +114,7 @@ function watchPresetOperation(operation) {
     operation.task = latest;
     operation.message = latest.status === "succeeded"
       ? `${verb}成功`
-      : redactDiagnostic(latest.error) || `${verb}${latest.status === "canceled" ? "已取消" : "失败"}`;
+      : diagnosticError(latest.error) || `${verb}${latest.status === "canceled" ? "已取消" : "失败"}`;
     operation.tone = latest.status === "succeeded" ? "success" : "error";
     if (task.install_if_missing || intent === "deploy") onRuntimeChange(agentId, engine);
     renderPresetStatus();
@@ -121,7 +137,7 @@ function watchPresetOperation(operation) {
     finish(latest);
   }).catch(error => {
     if (!tracked() || error.name === "AbortError") return;
-    operation.message = redactDiagnostic(error.message) || "无法获取任务结果";
+    operation.message = diagnosticError(error.message) || "无法获取任务结果";
     operation.tone = "error";
     renderPresetStatus();
   }).finally(() => { operation.monitoring = false; });
