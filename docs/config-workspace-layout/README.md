@@ -244,6 +244,15 @@ evidence/
 | 时区 | Asia/Hong_Kong |
 | 权限 | danger-full-access（仅删除下列范围） |
 
+第四轮（配置操作衔接）的测试环境同样在本轮结束时停止、关闭浏览器并释放端口；临时捕获在 `/root/preview/ops-before`、`ops-after`、`ops2-before`、`ops2-after`、`video-*`，入库材料保留在 `evidence/screenshots/ops-before`、`ops-after` 与 `evidence/recordings`。
+
+| 项目 | 值 |
+| --- | --- |
+| 任务标识 | `automation_2b458eb2-4f21-49c8-856a-fc180c0e6503` |
+| 执行时间 | 2026-10-23 18:45（测试结束 2026-10-20 18:45 起 72 小时） |
+| 时区 | Asia/Hong_Kong |
+| 范围 | 停止 8901/8902 预览服务与测试浏览器，删除 `/root/preview` 下本轮临时捕获，保留仓库 evidence |
+
 清理范围：本次布局测试的两个工作树（`/root/.codex/worktrees/pr308-layout/qcontrolhub`、基线 `/root/preview/pr308-before`）、`/root/preview` 下本次采集的截图与探针脚本、`/tmp/videos-before`、`/tmp/videos-after` 与本轮日志文件，并在主仓库执行 `git worktree prune`。
 
 保留范围：`docs/config-workspace-layout/` 下的报告与 `evidence/`（截图、录屏、度量），以及远端分支 `codex/config-workspace-layout`。不属于本轮测试的进程与临时目录不在清理范围内。
