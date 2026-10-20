@@ -169,7 +169,12 @@ export function bindConfigInbounds(ctx) {
                 name:fresh.config.name, description:fresh.config.description, intent:button.dataset.deleteIntent,
                 content:draftContent,
               })});
-              await commit(result, null);
+              // Keep the walkthrough continuous: land on the neighbour of the
+              // removed inbound instead of dropping the selection entirely.
+              const remaining = (fresh.inbounds || []).filter(item => !(item.tag === chosen.tag && Number(item.port) === Number(chosen.port)));
+              const position = (fresh.inbounds || []).findIndex(item => item.tag === chosen.tag && Number(item.port) === Number(chosen.port));
+              const neighbor = remaining[Math.max(0, position - 1)] || remaining[0] || null;
+              await commit(result, neighbor);
             } catch (error) {
               if (!active()) return;
               updateFeedback(body.querySelector("[data-inbound-error]"), redactDiagnostic(error.message) || "删除失败");

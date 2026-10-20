@@ -322,6 +322,13 @@ async function liveConfig(options = {}) {
     workspaceRecord:workspace, workspaces,
     sourceContent:current?.content, mountEditor:mountPresetEditor, beforeDeploy, onSaved:applyInboundMutation,
   });
+  // A submit that was still running when the route changed keeps its task id;
+  // re-attach the watcher so its result replaces the stale progress text.
+  const pendingOperation = operationFor(workspace.operationKey);
+  const stalled = /^(正在|等待)/.test(pendingOperation?.message || "");
+  if (pendingOperation?.task?.id && stalled && !pendingOperation.monitoring) watchPresetOperation(pendingOperation);
+  else if (pendingOperation && !pendingOperation.task?.id && stalled)
+    Object.assign(pendingOperation, { message: "上次操作未完成，请重新提交", tone: "error" });
   renderPresetStatus();
   bindLiveConfigSubmit(ctx, {
     agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,

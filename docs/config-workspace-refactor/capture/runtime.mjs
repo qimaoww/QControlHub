@@ -76,7 +76,8 @@ function longConfig(engine) {
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
-if (scenario || longText) {
+let opsWorkspace = null;
+if (scenario || longText || params.get("ops") === "1") {
   const inner = window.fetch.bind(window);
   window.fetch = async (input, options = {}) => {
     const url = typeof input === "string" ? input : input?.url || String(input);
@@ -84,6 +85,81 @@ if (scenario || longText) {
     const segments = new URL(url, location.href).pathname.split("/").filter(Boolean);
     const isWorkspaceRead = segments[segments.length - 1] === "workspace" && method === "GET";
     const isSnapshot = segments[segments.length - 1] === "config-snapshot" && method === "GET";
+
+    // Writable workspace for operation walkthroughs (?ops=1): create, edit,
+    // delete, save and deploy share one in-memory configuration.
+    if (params.get("ops") === "1") {
+      const opsJson = payload => new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}});
+      const persistOps = () => { try { sessionStorage.setItem("qch-ops-workspace", JSON.stringify(opsWorkspace)); } catch { /* private mode */ } };
+      try { const stored = sessionStorage.getItem("qch-ops-workspace"); if (stored && stored !== "null") opsWorkspace = JSON.parse(stored); } catch { /* ignore */ }
+      const taskFails = params.get("task") === "fail";
+      const isPreview = method === "POST" && segments[segments.length - 1] === "preview";
+      const isConfigSave = method === "PUT" && segments.includes("configs");
+      const isInboundMutation = method === "POST" && segments[segments.length - 1] === "server-inbounds";
+      if ((isWorkspaceRead || isPreview) && !opsWorkspace) {
+        const payload = await (await inner(input, options)).json();
+        const agent = window.reviewScenario.testAPI.agents.find(item => item.id === "alpha");
+        const parsedConfig = JSON.parse(payload.config.content || "{}");
+        payload.inbounds = (parsedConfig.inbounds || []).map(item => ({tag: item.tag, port: item.port, protocol: item.protocol}));
+        payload.inbound_targets = payload.inbounds;
+        opsWorkspace = {config: payload.config, agent, protocols: [{key: "vless", label: "VLESS", default_port: 443}, {key: "vmess", label: "VMess", default_port: 443}, {key: "trojan", label: "Trojan", default_port: 443}, {key: "shadowsocks", label: "Shadowsocks", default_port: 8388}, {key: "socks", label: "SOCKS", default_port: 1080}, {key: "http", label: "HTTP", default_port: 8080}], reality_presets: ["www.amazon.com"], common_fields: [], catalog: {fields: [], protocols: [{key: "vless", label: "VLESS", default_port: 443}, {key: "vmess", label: "VMess", default_port: 443}, {key: "trojan", label: "Trojan", default_port: 443}, {key: "shadowsocks", label: "Shadowsocks", default_port: 8388}, {key: "socks", label: "SOCKS", default_port: 1080}, {key: "http", label: "HTTP", default_port: 8080}]}};
+        persistOps();
+      }
+      if (method === "POST" && segments[0] === "tasks" && segments.length === 1) {
+        const response = await inner(input, options);
+        const payload = await response.clone().json();
+        const fails = taskFails || (params.get("task") === "fail-once" && !window.__opsFailedOnce);
+        if (fails) window.__opsFailedOnce = true;
+        window.__opsTaskStatus = window.__opsTaskStatus || {};
+        window.__opsTaskStatus[payload.id] = fails ? "failed" : "succeeded";
+        payload.status = fails ? "failed" : "succeeded";
+        payload.error = fails ? "listen tcp 0.0.0.0:24001: bind: address already in use" : "";
+        return new Response(JSON.stringify(payload), {status: response.status, headers: {"Content-Type": "application/json"}});
+      }
+      if (method === "GET" && segments[0] === "tasks" && segments.length === 2) {
+        const id = segments[1];
+        const status = (window.__opsTaskStatus || {})[id] || "succeeded";
+        return opsJson({id, action: "validate", status, error: status === "failed" ? "listen tcp 0.0.0.0:24001: bind: address already in use" : "", config_version: (opsWorkspace && opsWorkspace.config.version) || 0});
+      }
+      if (isWorkspaceRead) return opsJson(opsWorkspace);
+      if (isSnapshot && opsWorkspace) return opsJson({content: opsWorkspace.config.content});
+      if (isPreview) {
+        const body = JSON.parse(options.body);
+        return opsJson({config: {...opsWorkspace.config, content: body.content}, agent: opsWorkspace.agent, protocols: opsWorkspace.protocols, reality_presets: opsWorkspace.reality_presets, common_fields: opsWorkspace.common_fields, catalog: opsWorkspace.catalog, inbounds: JSON.parse(body.content).inbounds || []});
+      }
+      if (isConfigSave) {
+        if (params.get("delay")) await new Promise(resolve => setTimeout(resolve, Number(params.get("delay")) * 1000));
+        const body = JSON.parse(options.body);
+        opsWorkspace = {...opsWorkspace, config: {...opsWorkspace.config, ...body, version: opsWorkspace.config.version + 1}};
+        persistOps();
+        return opsJson(opsWorkspace.config);
+      }
+      if (method === "POST" && segments[segments.length - 1] === "plans") {
+        const body = JSON.parse(options.body);
+        const protocol = opsWorkspace.protocols.find(item => item.key === body.protocol) || opsWorkspace.protocols[0];
+        return opsJson({protocol: protocol.key, tag: "", listen: "0.0.0.0", port: protocol.default_port, transport: "raw", username: "", credential: ""});
+      }
+      if (isInboundMutation) {
+        if (params.get("delay")) await new Promise(resolve => setTimeout(resolve, Number(params.get("delay")) * 1000));
+        const body = JSON.parse(options.body);
+        const doc = JSON.parse(opsWorkspace.config.content);
+        const list = Array.isArray(doc.inbounds) ? doc.inbounds : [];
+        if (body.operation === "delete") doc.inbounds = list.filter(item => item.tag !== body.original_tag);
+        else if (body.operation === "add") doc.inbounds = [...list, body.input];
+        else doc.inbounds = list.map(item => item.tag === body.original_tag ? {...item, ...body.input} : item);
+        const content = JSON.stringify(doc, null, 2) + String.fromCharCode(10);
+        opsWorkspace = {...opsWorkspace, config: {...opsWorkspace.config, content, version: opsWorkspace.config.version + 1}};
+        opsWorkspace.inbounds = (doc.inbounds || []).map(item => ({tag: item.tag, port: item.port, protocol: item.protocol}));
+        opsWorkspace.inbound_targets = opsWorkspace.inbounds;
+        persistOps();
+        const task = {id: "layout-ops-" + Date.now(), action: body.intent, status: taskFails ? "failed" : "succeeded",
+          config_version: opsWorkspace.config.version, engine: params.get("engine") || "xray", agent_id: "alpha",
+          error: taskFails ? "listen tcp 0.0.0.0:23001: bind: address already in use" : ""};
+        window.reviewScenario.testAPI.layoutTasks.set(task.id, task);
+        return opsJson({config: opsWorkspace.config, task});
+      }
+    }
+
     if (scenario === "loading" && isWorkspaceRead) return new Promise(() => {});
     if (scenario === "error" && isWorkspaceRead)
       return new Response(JSON.stringify({error: "节点存储层读取超时，请稍后重新读取"}), {status: 504, headers: {"Content-Type": "application/json"}});

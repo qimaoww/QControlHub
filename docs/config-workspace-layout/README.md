@@ -70,6 +70,15 @@
 ```
 
 
+### 7. 配置操作衔接（第四轮）
+
+本轮只处理操作之间的衔接与收尾，不新增任何样式：
+
+- **删除后落在相邻对象**（`frontend/modules/config-inbounds.js`）：删除前记录位置，成功后选中前一个（没有则后一个）入站，不再跳回「完整源码」。
+- **离开页面再回来不留悬挂进度**（`frontend/modules/live-config-page.js`）：重新渲染时给仍在运行的任务重新挂接轮询；保存阶段被中断、没有任务可跟踪的操作改为「上次操作未完成，请重新提交」，草稿与输入保持不变。
+- **新增与修改后仍定位该对象**：`applyInboundMutation` 把新对象写回 `liveSelectedInbound`，本轮验证了新增后可直接编辑、保存后选中与版本同步。
+- **空对象收尾**：删除全部入站后对象列表只剩公共配置、出站、完整源码和预览，顶部「增加入站」入口仍可用。
+
 ## 二、纵向节奏（1440×1000 / 浅色 / 就绪）
 
 | 区块 | 修改前 | 修改后 |
@@ -151,6 +160,12 @@
 
 见 `evidence/screenshots/before` 与 `evidence/screenshots/after`。
 
+## 四、修改前后截图（第四轮补充）
+
+- 删除当前对象后（1440×1000，`?ops=1`，同一账号与数据）：`evidence/screenshots/ops-before/delete-selection.png`（跳回「完整源码」）对比 `ops-after/delete-selection.png`（落到前一个入站）。
+- 提交中切换页面再返回：`ops-before/switch-back.png`（停在「正在保存…」）对比 `ops-after/switch-back.png`（提示上次操作未完成，草稿保留）。
+- 新增后自动选中：`ops-after/add-selected.png`；删空入站后的对象列表：`ops-after/empty-inbounds.png`。
+
 ## 五、交互录屏
 
 `evidence/videos` 内含三组对照录屏（修改前 / 修改后同名场景）：
@@ -159,7 +174,13 @@
 - `mobile-file-save-retry-deploy`：导入文件 → 预览 → 保存失败反馈 → 重试成功 → 部署。
 - `mobile-protocol-outbound`：协议与出站对象的编辑与提交链路。
 
+## 五、交互录屏（第四轮补充）
+
+- `evidence/recordings/ops-before.webm` / `ops-after.webm`：新增入站 → 编辑并保存 → 删除当前对象 → 落到相邻对象的连续操作。
+
 ## 六、验证结果
+
+- 第四轮操作走查（1440×1000，`?ops=1` 夹具，同一账号与数据）：新增入站 → 落到新对象（v8→v9）；改源码保存 → 选中不变、v9→v10；删除当前对象 → 选中前一个入站；连续删除到没有入站 → 空列表且「增加入站」可用；提交中切到其他页面再回来 → 不残留「正在保存…」，草稿保留；删除弹窗取消 → 选中与焦点回到原菜单。
 
 - `node --check` 覆盖改动文件；
 - `node frontend/module_smoke.mjs`、`node frontend/config_workspace_smoke.mjs` 通过；
@@ -172,6 +193,9 @@
 - 第二轮回归：`module_smoke`、`config_workspace_smoke`、`generate-styles --check`、`go test ./frontend -run 'TestStyles|TestConfig'` 通过；`QCH_BROWSER_SMOKE_MODES=config-layout,config-layout-mobile,config-inbounds,config-inbounds-mobile,config-restrictions,config-scope,config-migration` 的 `TestAgentBrowserRuntimeSmoke` 通过（25.8s）。
 
 ## 七、未验证项与已知限制
+
+- 第四轮的真机任务失败重试与部署失败回滚未在真实节点复跑：夹具把任务直接置为终态，覆盖的是状态机与渲染，不覆盖后端真实失败路径。
+- 被分享节点用户的配置写入路径未单独采集，沿用 #308 的权限矩阵与套件。
 
 - 首屏加载瞬间仍是应用级空白过渡（`app.js` 的加载契约，未在本次范围内改动）。
 - 平板横屏 1024×768 与字号 110% 下页头变高，提交按钮需要轻微滚动才完整显示；桌面 1440×1000 + 字号 100% 已回到首屏。
