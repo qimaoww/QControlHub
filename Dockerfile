@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.25-alpine AS build-base
+FROM golang:1.26-alpine AS build-base
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -62,7 +62,7 @@ COPY --from=build-binaries /out/qagent /usr/local/bin/qagent
 VOLUME ["/var/lib/qcontrolhub"]
 ENTRYPOINT ["/usr/local/bin/qagent"]
 
-FROM nginx:1.27-alpine AS qcontrol-web
+FROM nginx:1.31-alpine AS qcontrol-web
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
