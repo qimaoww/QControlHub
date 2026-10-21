@@ -17,23 +17,24 @@ const (
 // AgentShare is a durable per-user allocation. Access requires both Enabled
 // and recipient acceptance. Revocation or reinvitation never resets usage.
 type AgentShare struct {
-	HTTPDomains        []string         `json:"http_domains"`
-	ID                 string           `json:"id"`
-	UserID             string           `json:"user_id"`
-	Username           string           `json:"username,omitempty"`
-	DisplayName        string           `json:"display_name,omitempty"`
-	AgentID            string           `json:"agent_id"`
-	AgentName          string           `json:"agent_name"`
-	OwnerUsername      string           `json:"owner_username,omitempty"`
-	Enabled            bool             `json:"enabled"`
-	Status             AgentShareStatus `json:"status"`
-	InvitationRevision int64            `json:"invitation_revision"`
-	Engines            []Engine         `json:"engines"`
-	Ports              []int            `json:"ports"`       // Empty is unallocated; [0] permits any available port.
-	LimitBytes         uint64           `json:"limit_bytes"` // Zero is unlimited.
-	UsedBytes          uint64           `json:"used_bytes"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
+	HTTPDomains        []string                     `json:"http_domains"`
+	ID                 string                       `json:"id"`
+	UserID             string                       `json:"user_id"`
+	Username           string                       `json:"username,omitempty"`
+	DisplayName        string                       `json:"display_name,omitempty"`
+	AgentID            string                       `json:"agent_id"`
+	AgentName          string                       `json:"agent_name"`
+	OwnerUsername      string                       `json:"owner_username,omitempty"`
+	Enabled            bool                         `json:"enabled"`
+	Status             AgentShareStatus             `json:"status"`
+	InvitationRevision int64                        `json:"invitation_revision"`
+	Engines            []Engine                     `json:"engines"`
+	EngineRuntime      map[Engine]SharedCoreRuntime `json:"engine_runtime,omitempty"`
+	Ports              []int                        `json:"ports"`       // Empty is unallocated; [0] permits any available port.
+	LimitBytes         uint64                       `json:"limit_bytes"` // Zero is unlimited.
+	UsedBytes          uint64                       `json:"used_bytes"`
+	CreatedAt          time.Time                    `json:"created_at"`
+	UpdatedAt          time.Time                    `json:"updated_at"`
 }
 
 type AgentAccess struct {

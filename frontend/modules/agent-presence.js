@@ -1,11 +1,12 @@
 import { updateFeedback } from "./presence-motion.js";
+import { connectionStateLabel, normalizeConnectionState } from "./status-controls.js";
+
 function presenceState(status) {
-  return status === "online" || status === "offline" ? status : "unknown";
+  return normalizeConnectionState(status);
 }
 
 function presenceLabel(state, nodeLabel) {
-  const label = state === "online" ? "在线" : state === "offline" ? "离线" : "未知";
-  return nodeLabel ? `节点${label}` : label;
+  return connectionStateLabel(state, { nodeLabel });
 }
 
 // Connection state has its own presentation, independent of task/service health.

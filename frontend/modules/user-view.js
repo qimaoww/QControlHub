@@ -1,5 +1,5 @@
 import { closeRetiringDialog } from "./popup.js";
-import { sharedEngineNames } from "./engine-capabilities.js";
+import { sharedEngineNames, sharedEngineRuntimeBadges } from "./engine-capabilities.js";
 import { agentShareStatus, sharedPortsLabel, usage, userActionRestriction } from "./user-model.js";
 export function createUserView({ state, esc, shell }, lifecycle) {
   function shareRow(share, agents) {
@@ -9,7 +9,7 @@ export function createUserView({ state, esc, shell }, lifecycle) {
     const statusClass = !share.enabled ? "muted" : share.status === "accepted" ? "ok" : "warn";
     return `<article class="user-allocation-row" data-allocation-agent="${esc(share.agent_id)}">
       <div class="user-allocation-node"><strong>${esc(name)}</strong><span class="status-label ${statusClass}" data-share-status>${agentShareStatus(share)}</span>${supported ? "" : `<small>${agent ? "Agent 需升级" : "节点不可用"}</small>`}</div>
-      <dl class="user-allocation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc(sharedPortsLabel(share.ports))}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+      <dl class="user-allocation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}${sharedEngineRuntimeBadges(share, agent, esc)}</dd></div><div><dt>端口</dt><dd>${esc(sharedPortsLabel(share.ports))}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
       <div class="user-allocation-row-actions"><button class="button small" type="button" data-allocation-edit="${esc(share.agent_id)}" aria-label="编辑 ${esc(name)} 的分配">编辑</button>${!share.enabled || share.status === "rejected" ? `<button class="button small" type="button" data-allocation-invite="${esc(share.agent_id)}" aria-label="重新邀请使用 ${esc(name)}">重新邀请</button>` : ""}${share.enabled ? `<button class="button small danger-button" type="button" data-allocation-revoke="${esc(share.agent_id)}" aria-label="撤销 ${esc(name)} 的共享">撤销</button>` : ""}</div>
     </article>`;
   }

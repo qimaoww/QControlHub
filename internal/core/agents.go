@@ -4,11 +4,30 @@ import (
 	"time"
 )
 
+type SharedCoreRuntime struct {
+	ShareID        string `json:"share_id"`
+	UserID         string `json:"user_id,omitempty"`
+	Username       string `json:"username,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Installed      bool   `json:"installed"`
+	Version        string `json:"version,omitempty"`
+	ServiceStatus  string `json:"service_status"`
+	Deployed       bool   `json:"deployed,omitempty"`
+	ConfigVersion  int    `json:"config_version,omitempty"`
+	Running        bool   `json:"running,omitempty"`
+	Uncertain      bool   `json:"uncertain,omitempty"`
+	TrafficSettled bool   `json:"traffic_settled,omitempty"`
+}
+
 type RuntimeState struct {
 	Instance                        *SharedInstanceRuntime `json:"instance,omitempty"`
 	Installed                       bool                   `json:"installed"`
 	Version                         string                 `json:"version,omitempty"`
 	ServiceStatus                   string                 `json:"service_status,omitempty"`
+	InstanceScope                   string                 `json:"instance_scope,omitempty"`
+	Deployed                        bool                   `json:"deployed,omitempty"`
+	ConfigVersion                   int                    `json:"config_version,omitempty"`
+	SharedInstances                 []SharedCoreRuntime    `json:"shared_instances,omitempty"`
 	ExistingConfigAvailable         bool                   `json:"existing_config_available,omitempty"`
 	ExistingConfigUnsupportedReason string                 `json:"existing_config_unsupported_reason,omitempty"`
 	CoreLogStatus                   string                 `json:"core_log_status,omitempty"`

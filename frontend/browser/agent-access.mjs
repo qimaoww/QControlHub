@@ -37,13 +37,15 @@ const assertSharedStatusOrder = (root) => {
   assertSharedStatusOrder(document.querySelector(".node-operations-workspace"));
   assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
   assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
+  assert.ok(document.querySelector('[data-core-recipient-split="mihomo"]'), "共享接收者内核卡片未拆分个人实例与宿主状态");
+  assert.ok(document.querySelector('[data-core-user-instance="mihomo"]') && document.querySelector('[data-core-host-state="mihomo"]'), "共享接收者缺少个人实例或宿主内核状态字段");
   assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
   assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="restart"]').disabled, false, "节点管理未保留本人实例重启");
   assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="stop"]').disabled, false, "节点管理未保留本人实例停止");
   assert.equal(document.querySelector('[data-instance-version="mihomo"]').textContent, "运行 v1 · v2 待部署");
   assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-core-uninstall], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
   if (mode === "shared-node-mobile") {
-    for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
+    for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-core-recipient-split="mihomo"]', '[data-config="alpha"]']) {
       const element = document.querySelector(selector), rect = element.getBoundingClientRect();
       assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1,
         `手机共享详情被裁切：${selector}`);
@@ -57,11 +59,16 @@ const assertSharedStatusOrder = (root) => {
   assert.ok(document.querySelector('[data-agent-sharing="bravo"]'), "自有节点不能继续分享");
   assert.equal(document.querySelector(".agent-shared-badge"), null, "自有节点被标记为共享");
   if (mode === "shared-node-mobile") {
+    document.querySelector('[data-node-tab="cores"]').click();
     const card = document.querySelector(".service-mihomo");
     const actions = card.querySelector(".core-runtime-actions");
     assert.ok(card.querySelector("[data-core-uninstall]"), "手机自有节点缺少卸载入口");
     assert.ok(actions.scrollWidth <= actions.clientWidth + 1 && card.scrollWidth <= card.clientWidth + 1,
       "手机自有节点内核操作被裁切");
+    for (const selector of [".node-back-link", '[data-node-tab="cores"]', '[data-node-panel="cores"] [data-node-subtab]', ".core-action", '[data-core-uninstall]']) {
+      const targetEl = document.querySelector(selector);
+      assert.ok(targetEl && targetEl.getBoundingClientRect().height >= 42, `触屏主要按钮触控高度不足：${selector}`);
+    }
   }
   location.hash = "#settings-node-alpha";
   await waitFor(() => document.querySelector('[data-config="alpha"]'), "重新打开共享节点失败");

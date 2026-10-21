@@ -30,11 +30,26 @@ export function bindAgentWorkspace({ state, can }, agentsByID, { loadMetricHisto
       );
       if (serviceCount) {
         const compact = serviceCount.hasAttribute("data-installed-summary");
-        serviceCount.textContent = installedCount
-          ? compact
-            ? `${installedCount} 个已安装`
-            : `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`
-          : "尚未安装内核";
+        if (!installedCount) {
+          serviceCount.textContent = "尚未安装内核";
+        } else if (compact) {
+          const sharedTotals = (agent?.capabilities || []).reduce(
+            (acc, engine) => {
+              const list = Array.isArray(agent?.runtime?.[engine]?.shared_instances)
+                ? agent.runtime[engine].shared_instances
+                : [];
+              acc.total += list.length;
+              acc.running += list.filter((entry) => entry?.running || ["active", "running"].includes(entry?.service_status)).length;
+              return acc;
+            },
+            { total: 0, running: 0 },
+          );
+          serviceCount.textContent = sharedTotals.total > 0
+            ? `${installedCount} 个已安装 · 多用户实例 ${sharedTotals.running}/${sharedTotals.total} 运行`
+            : `${installedCount} 个已安装`;
+        } else {
+          serviceCount.textContent = `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`;
+        }
       }
       const machineFooter = item.querySelector(".machine-footer");
       item.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
@@ -59,36 +74,37 @@ export function bindAgentWorkspace({ state, can }, agentsByID, { loadMetricHisto
         });
         if (item.open && can("metrics.read"))
           loadMetricHistory(item.dataset.agentNode);
-      } else if (
-        can("metrics.read") &&
-        item.querySelector('[data-node-panel="metrics"]:not([hidden])')
-      ) {
-        loadMetricHistory(item.dataset.agentNode);
       }
     });
-  document.querySelectorAll("[data-node-tab]").forEach((button) => {
+  document.querySelectorAll("[data-node-subtab]").forEach((button) => {
     button.onclick = () => {
-      const workspace = button.closest(".node-operations-workspace");
-      if (!workspace) return;
-      const tab = button.dataset.nodeTab;
-      state.data.nodeSettingsTab = tab;
-      workspace.querySelectorAll("[data-node-tab]").forEach((candidate) => {
-        const selected = candidate === button;
-        candidate.setAttribute("aria-selected", String(selected));
-        candidate.tabIndex = selected ? 0 : -1;
-      });
-      workspace.querySelectorAll("[data-node-panel]").forEach((panel) => {
-        setPanelVisible(panel, panel.dataset.nodePanel === tab, button);
-      });
-      if (tab === "metrics" && can("metrics.read"))
-        loadMetricHistory(workspace.dataset.agentNode);
+      const panel = button.closest(".node-tab-panel");
+      if (!panel) return;
+      const [group, subpage] = String(button.dataset.nodeSubtab || "").split(":");
+      if (group === "cores") state.data.nodeCoresSubpage = subpage;
+      if (group === "agent") state.data.nodeAgentSubpage = subpage;
+      panel
+        .querySelectorAll(`[data-node-subtab^="${group}:"]`)
+        .forEach((peer) => {
+          const active = peer === button;
+          peer.setAttribute("aria-selected", String(active));
+          peer.tabIndex = active ? 0 : -1;
+        });
+      panel
+        .querySelectorAll(`[data-node-subpanel^="${group}:"]`)
+        .forEach((subpanel) => {
+          const active = subpanel.dataset.nodeSubpanel === `${group}:${subpage}`;
+          subpanel.classList.toggle("is-active", active);
+        });
     };
     button.onkeydown = (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
-        return;
-      event.preventDefault();
-      const tabs = [...button.closest("[role=tablist]").querySelectorAll("[role=tab]")];
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const nav = button.closest(".node-subpage-nav");
+      if (!nav) return;
+      const tabs = [...nav.querySelectorAll("[data-node-subtab]")];
       const current = tabs.indexOf(button);
+      if (current < 0) return;
+      event.preventDefault();
       const next =
         event.key === "Home"
           ? 0
@@ -100,28 +116,45 @@ export function bindAgentWorkspace({ state, can }, agentsByID, { loadMetricHisto
       tabs[next].click();
     };
   });
-  document.querySelectorAll("[data-config]").forEach((button) => {
-    button.onclick = () => {
-      state.data.agentId = button.dataset.config;
-      state.data.engine = button.dataset.engine;
-      // A preset card can be opened after editing another engine. The
-      // protocol and inbound are engine-specific; retaining them can render
-      // an empty editor or submit the wrong generated plan.
-      state.data.protocol = "";
-      state.data.inboundTag = "";
-      state.data.configField = "";
-      state.data.configInboundField = "";
-      state.data.liveAgent = state.data.agentId;
-      state.data.liveEngine = state.data.engine;
-      state.data.liveConfigSource = "";
-      location.hash = `#live-config?${new URLSearchParams({agent:state.data.agentId, engine:state.data.engine})}`;
+  document.querySelectorAll("[data-node-tab]").forEach((button) => {
+    const activate = () => {
+      const workspace = button.closest(".node-operations-workspace");
+      if (!workspace) return;
+      const target = button.dataset.nodeTab;
+      state.data.nodeSettingsTab = target;
+      workspace
+        .querySelectorAll("[data-node-tab]")
+        .forEach((peer) => {
+          const active = peer === button;
+          peer.setAttribute("aria-selected", String(active));
+          peer.tabIndex = active ? 0 : -1;
+        });
+      workspace
+        .querySelectorAll("[data-node-panel]")
+        .forEach((panel) => {
+          const active = panel.dataset.nodePanel === target;
+          setPanelVisible(panel, active, button);
+        });
+    };
+    button.onclick = activate;
+    button.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const tabs = [
+        ...button
+          .closest(".node-settings-tabs")
+          .querySelectorAll("[data-node-tab]"),
+      ];
+      const current = tabs.indexOf(button);
+      event.preventDefault();
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      tabs[next].focus();
+      tabs[next].click();
     };
   });
-  document.querySelectorAll("[data-client-agent]").forEach((link) => {
-    link.onclick = () => {
-      state.data.accessAgent = link.dataset.clientAgent;
-      state.data.accessEngine = link.dataset.clientEngine;
-    };
-  });
-
 }

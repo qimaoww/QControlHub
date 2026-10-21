@@ -36,7 +36,10 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 		}
 		result.Shares = append(result.Shares, share)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	return result, s.populateShareEngineRuntimes(ctx, result.Shares)
 }
 
 // SetAgentSharing replaces grants only on the caller's own node. Recipients

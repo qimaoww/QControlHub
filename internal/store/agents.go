@@ -36,6 +36,13 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	batch.Queue(query+where+` ORDER BY enrolled_at DESC`, args...)
 	enrollmentQuery, enrollmentArgs := enrollmentAvailabilityQuery(ctx, nil)
 	batch.Queue(enrollmentQuery, enrollmentArgs...)
+	managedSharedQuery, managedSharedArgs := managedSharedInstanceRuntimeQuery(ctx, nil)
+	batch.Queue(managedSharedQuery, managedSharedArgs...)
+	includeRecipientShared := !scopeForConfig(ctx).Admin
+	if includeRecipientShared {
+		recipientSharedQuery, recipientSharedArgs := recipientSharedInstanceRuntimeQuery(ctx, nil)
+		batch.Queue(recipientSharedQuery, recipientSharedArgs...)
+	}
 	results := s.pool.SendBatch(ctx, batch)
 	defer results.Close()
 	rows, err := results.Query()
@@ -54,13 +61,30 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	if err != nil {
 		return nil, err
 	}
+	byID, _, _ := prepareSharedInstanceRuntimeOverlay(agents)
+	rows, err = results.Query()
+	if err != nil {
+		return nil, err
+	}
+	if err := scanManagedSharedInstanceRuntime(rows, byID); err != nil {
+		return nil, err
+	}
+	if includeRecipientShared {
+		rows, err = results.Query()
+		if err != nil {
+			return nil, err
+		}
+		if err := scanRecipientSharedInstanceRuntime(rows, byID); err != nil {
+			return nil, err
+		}
+	}
 	if err := results.Close(); err != nil {
 		return nil, err
 	}
 	for index := range agents {
 		agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
 	}
-	return agents, s.overlaySharedInstanceRuntime(ctx, agents)
+	return agents, nil
 }
 
 const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
