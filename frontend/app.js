@@ -75,6 +75,7 @@ function renderLogin(message = "") {
   routeModules.peek("substore-sync")?.dispose();
   routeModules.peek("certificates")?.dispose();
   routeModules.peek("users")?.closeInvitation();
+  routeModules.peek("configs")?.clearWorkspace();
   scopedAPI.end();
   if (state.route === "node-settings")
     routeModules.peek("agents")?.cancelAgentInteractions();
@@ -231,9 +232,8 @@ async function renderOnce() {
       Object.assign(state.data, {protocol:"", inboundTag:"", configField:"", configInboundField:""});
     }
     Object.assign(state.data, presetSelection);
-    if (state.data.liveAgent !== presetSelection.agentId || state.data.liveEngine !== presetSelection.engine)
-      state.data.liveConfigSource = "";
-    Object.assign(state.data, {liveAgent:presetSelection.agentId, liveEngine:presetSelection.engine});
+    Object.assign(state.data, {liveAgent:presetSelection.agentId, liveEngine:presetSelection.engine,
+      liveConfigSource:presetSelection.liveConfigSource || ""});
   }
   if (hash === "agents" || hash === "agent-config" || hash === "preset-node" || hash.startsWith("preset-node-")) {
     if (hash === "agent-config") {
@@ -400,6 +400,7 @@ const render = () => {
   return scheduleRender();
 };
 const sessionWatch = createSessionWatch({ api, state, onAccessChanged: async () => {
+  routeModules.peek("configs")?.clearWorkspace();
   // Drop configuration snapshots and selections whose authorization changed.
   // Account preferences remain in their existing account-scoped storage.
   routeController?.abort();

@@ -8,6 +8,7 @@ import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups } from "./ss
 import { createPresetView } from "./preset-view.js";
 import { createPresetStatus } from "./preset-status.js";
 import { createPresetBindings } from "./preset-bindings.js";
+import { redactDiagnostic } from "./errors.js";
 
 export function createPresetEditor(ctx, { deployments, renderLiveConfig, onRuntimeChange }) {
   const { api, state, engines, can, esc, ago, confirmAction, notify } = ctx;
@@ -43,8 +44,8 @@ function agentConfig(options = {}) {
       // working recovery action instead of dead handlers from an old epoch.
       ctx.navigationEpoch = state.navigationEpoch;
       if (!editor.savePending && !ctx.navigating) {
-        const key = `${ctx.agent.id}|${ctx.engine}`;
-        const failure = {key, message:`配置加载失败：${error.message}。草稿已保留，请重新加载后继续编辑。`, tone:"error", reload:true};
+        const key = editor.host?.operationKey || `${ctx.agent.id}|${ctx.engine}`;
+        const failure = {key, message:redactDiagnostic(error.message) || "配置加载失败", tone:"error", reload:true};
         const operation = operationFor(key);
         if (operation) Object.assign(operation, failure);
         else saveOperation(failure);
@@ -86,10 +87,12 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   }
   state.data.engine = engine;
   const base = `/agents/${encodeURIComponent(state.data.agentId)}/configs/${encodeURIComponent(engine)}`;
-  const workspace = loadedWorkspace || await api(`${base}/workspace`);
+  const workspace = loadedWorkspace || (host?.draftContent !== undefined
+    ? await api(`${base}/workspace/preview`, {method:"POST", body:JSON.stringify({content:host.draftContent, expected_version:host.workspaceRecord?.saved?.version || 0})})
+    : await api(`${base}/workspace`));
   if (!isCurrent()) return;
   const prior = editor.context;
-  const scope = `${state.data.agentId}|${engine}|`;
+  const scope = `${state.data.agentId}|${engine}|${host?.sourceMode || "legacy"}|`;
   if (!loadedWorkspace && !editor.savePending && prior?.sessionData === sessionData &&
       prior.draftScope === scope && prior.draftVersion !== (workspace.config?.version || 0) && drafts().dirty(scope)) {
     const discard = await confirmAction(
@@ -99,8 +102,8 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     if (!discard) {
       prior.navigationEpoch = navigationEpoch;
       Object.assign(state.data, {protocol:prior.protocol?.key, inboundTag:prior.selectedInbound?.tag || ""});
-      const key = `${prior.agent.id}|${engine}`;
-      saveOperation({key, message:"服务端已有更新版本，当前草稿已保留。请重新加载后再提交，避免覆盖其他修改。", tone:"error", reload:true});
+      const key = host?.operationKey || `${prior.agent.id}|${engine}`;
+      saveOperation({key, message:"配置版本已变化", tone:"error", reload:true});
       // The old editor may have been unmounted while visiting another page.
       // Recreate that exact revision so its retained drafts remain visible.
       await renderAgentConfig({workspace:prior.workspace});
@@ -132,7 +135,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   );
   state.data.protocol = selectedProtocolKey;
   let plan = selectedInbound;
-  const planKey = `${agent.id}|${engine}|${selectedProtocolKey}`;
+  const planKey = `${agent.id}|${engine}|${host?.sourceMode || "legacy"}|${selectedProtocolKey}`;
   state.data.serverPlans ||= {};
   const editingPlan = !host || ["add", "modify"].includes(host.kind);
   if (!plan && editingPlan && can("agent-config.write") && protocol) {
@@ -169,11 +172,17 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     state.data.configInboundField = selectedInboundField.key;
   // Auxiliary editors must not hold the preset form hostage to a slow field
   // read or revision query. They replace only their own placeholders below.
-  const fieldRead = path => presetRead(workspace, path, () => api(path).then(value => {
+  const fieldRead = path => presetRead(workspace, path, () => {
+    const [pathname, query] = path.split("?");
+    const reading = host?.draftContent === undefined ? api(path) : api(`${pathname}/preview${query ? `?${query}` : ""}`, {
+      method:"POST", body:JSON.stringify({content:host.draftContent, expected_version:config.version}),
+    });
+    return reading.then(value => {
     if (value.version !== undefined && value.version !== config.version)
       throw new Error("配置版本已变化，请重新加载配置后编辑字段");
     return value;
-  }));
+    });
+  });
   const fieldValues = [
     config && selectedField && (!host || host.kind === "advanced" || commonMutation)
       ? fieldRead(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
@@ -246,7 +255,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     host,
     root,
     request,
-    draftScope: `${agent.id}|${engine}|`,
+    draftScope: `${agent.id}|${engine}|${host?.sourceMode || "legacy"}|`,
     draftVersion: config?.version || 0,
     generating: false,
     sessionData,
@@ -284,12 +293,12 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         config, catalog: workspace.catalog, presentFields: workspace.present_fields }));
     }
     bindAgentConfigPage(context, true);
-  }).catch(error => { if (isCurrent()) notify(`字段加载失败：${error.message}`, "error"); }); });
+  }).catch(error => { if (isCurrent()) notify(redactDiagnostic(error.message) || "字段加载失败", "error"); }); });
   if (!loadedWorkspace && operationFor(`${agent.id}|${engine}`)) {
     const operation = operationFor(`${agent.id}|${engine}`);
     if (operation.reload) {
-      operation.message = `已重新加载配置 v${config?.version || 0}，可以继续编辑。`;
-      operation.tone = "";
+      operation.message = "刷新成功";
+      operation.tone = "success";
       operation.reload = false;
       renderPresetStatus();
       editor.syncControls();
@@ -311,7 +320,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}</small></span></span>`).join("")}</nav>`;
         loaded = true;
       } catch (error) {
-        if (history.isConnected && isCurrent()) updateFeedback(body, `版本历史加载失败：${error.message}；重新展开可重试。`);
+        if (history.isConnected && isCurrent()) updateFeedback(body, redactDiagnostic(error.message) || "版本历史加载失败");
       } finally { loading = false; }
     };
     bindEvent(history, "toggle", loadHistory);
@@ -328,7 +337,8 @@ function mountPresetEditor(host, workspace, chosen) {
   editor.host = host;
   editor.context = null;
   const sessionData = state.data;
-  const scope = `${workspace.agent.id}|${workspace.engine || state.data.liveEngine}|`;
+  const scope = `${workspace.agent.id}|${workspace.engine || state.data.liveEngine}|${host.sourceMode || "legacy"}|`;
+  drafts().restore(host.workspaceRecord?.formDrafts);
   Object.assign(state.data, {
     agentId: workspace.agent.id, engine: state.data.liveEngine,
     inboundTag: chosen?.tag || "", protocol: workspace.inbounds?.find(item => item.tag === chosen?.tag)?.protocol || "",
@@ -336,6 +346,10 @@ function mountPresetEditor(host, workspace, chosen) {
   });
   return {
     ready: agentConfig({workspace}),
+    capture() {
+      if (sessionData === state.data && host.workspaceRecord)
+        host.workspaceRecord.formDrafts = drafts().serialize(scope);
+    },
     busy: () => editor.savePending || Boolean(editor.context?.generating || editor.context?.navigating),
     dirty: () => sessionData === state.data && drafts().dirty(scope),
     dispose(discard) {
@@ -343,6 +357,7 @@ function mountPresetEditor(host, workspace, chosen) {
       if (sessionData === state.data) {
         drafts().capture();
         if (discard) drafts().clear(scope);
+        if (host.workspaceRecord) host.workspaceRecord.formDrafts = drafts().serialize(scope);
       }
       editor.host = null;
       editor.context = null;

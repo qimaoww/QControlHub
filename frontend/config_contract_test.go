@@ -9,7 +9,7 @@ import (
 func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	form := string(mustReadFrontendFile(t, "modules/server-plan-form.js"))
 	content := form + "\n" + frontendSources(t,
-		"modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js")
+		"modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js", "modules/protocol-form.js")
 	start := strings.Index(form, "export function bindServerPlanRegeneration")
 	if start < 0 {
 		t.Fatal("server-plan-form.js is missing the isolated server-plan regeneration handler")
@@ -161,28 +161,26 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	content := frontendSources(t, "modules/live-config-page.js", "modules/live-config-state.js",
 		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js")
 	for _, required := range []string{
-		`data-live-intent="import">手动导入并迁移`,
-		`迁移任一步失败都会自动恢复原服务`,
+		`data-live-intent="import">导入并迁移`,
+		`失败会恢复原服务`,
 		`action: "import-existing"`,
 		`existing_config_unsupported_reason`,
 		`检测到现有服务，但不可自动迁移`,
-		`系统服务只读快照`,
-		`data-live-source="managed"`,
-		`data-live-source="import"`,
+		`只读快照`,
+		`key:"managed"`,
+		`key:"import"`,
 		`QAgent 托管配置`,
-		`系统服务 · 只读快照`,
+		`系统服务快照`,
 		`read-managed-config`,
 		`prefer_cached: true`,
-		`liveConfig({ preferCachedRead: false })`,
-		`手动刷新及部署前核验会跳过缓存`,
-		`最近 600 秒内已校验的节点快照`,
+		`liveConfig({preferCachedRead:false})`,
 		`liveConfigSnapshotReusable`,
 		`assertAgentConfigBaseline`,
-		`正在核验 Agent 当前配置`,
+		`正在核验配置`,
 		`beforeDeploy`,
 		`submitLiveConfigChange`,
 		`!unsupportedReason`,
-		`esc(unsupportedReason)`,
+		`redactDiagnostic(source?.error || unsupportedReason)`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("manual configuration flow is missing %q", required)

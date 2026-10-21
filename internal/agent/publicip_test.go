@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -428,31 +430,52 @@ func TestManagedPublicIPProbeRunAppliesConfigImmediately(t *testing.T) {
 }
 
 func TestPublicIPProberCoalescesConcurrentRefresh(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var requests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests++
-		if requests == 1 {
-			close(started)
+	synctest.Test(t, func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var requests atomic.Int32
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			if requests.Add(1) == 1 {
+				close(started)
+			}
+			<-release
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("198.35.26.96")),
+			}, nil
+		})}
+		prober := &PublicIPProber{
+			httpV4: client, httpV6: client, interval: time.Minute,
+			config: publicIPProbeRuntimeConfig{endpoints: [2][]string{{"https://probe.example.test/v4"}, {}}, source: core.PublicIPProbeSourceAgent},
+			wake:   make(chan struct{}, 1),
 		}
-		<-release
-		_, _ = w.Write([]byte("198.35.26.96"))
-	}))
-	defer server.Close()
-	prober := &PublicIPProber{
-		httpV4: server.Client(), httpV6: server.Client(), interval: time.Minute,
-		config: publicIPProbeRuntimeConfig{endpoints: [2][]string{{server.URL}, {}}, source: core.PublicIPProbeSourceAgent},
-		wake:   make(chan struct{}, 1),
-	}
-	done := make(chan struct{}, 2)
-	go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
-	<-started
-	go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
-	close(release)
-	<-done
-	<-done
-	if requests != 1 {
-		t.Fatalf("concurrent refresh made %d requests, want 1", requests)
-	}
+		const callers = 8
+		done := make(chan struct{}, callers)
+		go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
+		<-started
+		for range callers - 1 {
+			go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
+		}
+		// All followers must enter the in-flight wait before the response is released.
+		// A real network read cannot provide this synchronization to synctest.
+		synctest.Wait()
+		if completed := len(done); completed != 0 {
+			t.Errorf("%d refreshes returned before the probe completed", completed)
+		}
+		close(release)
+		for range callers {
+			<-done
+		}
+		if got := requests.Load(); got != 1 {
+			t.Fatalf("concurrent refresh made %d requests, want 1", got)
+		}
+		if ipv4, _, source, _ := prober.SnapshotWithSources(); ipv4 != "198.35.26.96" || source != core.PublicIPProbeSourceAgent {
+			t.Fatalf("concurrent refresh did not publish its result: address=%q source=%q", ipv4, source)
+		}
+
+		prober.probeAll(context.Background())
+		if got := requests.Load(); got != 2 {
+			t.Fatalf("subsequent refresh made %d requests, want 2", got)
+		}
+	})
 }

@@ -1,8 +1,8 @@
 import { createTaskMonitor } from "./task-monitor.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { liveSourceKey } from "./live-config-state.js";
 
-export function createConfigDeployment({ api, state, can, notify }, { invalidateLiveSnapshot, maybeRerenderLiveConfig }) {
+export function createConfigDeployment({ api, state, can, notify }, { invalidateLiveSnapshot, maybeRerenderLiveConfig, hasTaskFeedback = () => false }) {
 const waitForDeployTerminal = createTaskMonitor({
   // Explicit GET bypasses render-scoped read caching for live task state.
   read: id => api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"}),
@@ -32,10 +32,10 @@ function handleDeployTerminal(result, taskID, agentId, engine) {
     // cache. Only the currently tracked operation may refresh the editor.
     if (clearPendingDeploy(agentId, engine, taskID)) maybeRerenderLiveConfig(agentId, engine);
   } else {
-    // Failed/canceled: notify and clear only if still current pending.
+    // Scoped feedback owns its task result; recovery must not duplicate it.
     if (clearPendingDeploy(agentId, engine, taskID)) {
-      notify(
-        diagnosticError(result.error) ||
+      if (!hasTaskFeedback(taskID)) notify(
+        redactDiagnostic(result.error) ||
           `部署${result.status === "canceled" ? "已取消" : "失败"}`,
         "error",
       );

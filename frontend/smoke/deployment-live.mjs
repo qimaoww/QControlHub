@@ -23,7 +23,7 @@ export async function testLiveEditorConverges({ FakeForm, AGENT_ID, ENGINE, KEY,
     const { ctx } = buildContext(state, {
       "GET /agents": () => [makeAgent()],
       "GET /agents/test-agent/configs/xray/workspace": emptyWorkspace,
-      "PUT /agents/test-agent/configs/xray": { config: { id: "lc", version: 2 } },
+      "PUT /agents/test-agent/configs/xray": { id: "lc", version: 2, engine:ENGINE, content:NEW_CONTENT },
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
         if (body.action === "deploy") return { id: "lc-deploy-task" };

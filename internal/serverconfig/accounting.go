@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -45,6 +46,7 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 		return AccountingPlan{}, err
 	}
 	plan := AccountingPlan{Source: "core-api"}
+	before := encodeAccountingDocument(engine, root)
 	if engine == core.EngineShadowsocksRust {
 		plan.Source = "nft-dual"
 		if root["plugin"] != nil {
@@ -84,7 +86,11 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 			plan.Ports = append(plan.Ports, AccountingPort{Port: port, Mark: mark})
 		}
 	} else if engine == core.EngineMihomo {
-		return prepareMihomoAccounting(root)
+		plan, err = prepareMihomoAccounting(root)
+		if err == nil {
+			plan.Content, err = configschema.ApplyDocumentChanges(engine, content, string(before), plan.Content)
+		}
+		return plan, err
 	} else if engine == core.EngineXray || engine == core.EngineSingBox {
 		if err := prepareTaggedAccounting(engine, root, &plan, forceMarks); err != nil {
 			return plan, err
@@ -97,5 +103,8 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 	}
 	value, err := json.MarshalIndent(root, "", "  ")
 	plan.Content = string(value) + "\n"
+	if err == nil {
+		plan.Content, err = configschema.ApplyDocumentChanges(engine, content, string(before), plan.Content)
+	}
 	return plan, err
 }
