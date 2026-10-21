@@ -227,7 +227,7 @@ Cache format is `qch-v4`. Module and object caches have independent identities
 for Debian/glibc, Alpine/musl and the upgrade sandbox. Alpine and sandbox keys
 fingerprint the actual image's Go version, architecture, OS and libc; floating
 base tags continue to receive upstream updates and invalidate objects when their
-fingerprint changes. Debian setup-go still selects Go 1.25.0 from go.mod.
+fingerprint changes. Debian setup-go still selects Go 1.26.10 from go.mod.
 Dependency hashes and Go source hashes (excluding .ci-cache itself) create new
 cache entries; restore prefixes
 can supply older objects/modules, which Go revalidates and recompiles as needed.

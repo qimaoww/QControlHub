@@ -20,7 +20,7 @@ jobs:
   debian:
     name: Debian / systemd
     runs-on: ubuntu-latest
-    container: golang:1.25-bookworm
+    container: golang:1.26-bookworm
     timeout-minutes: 35
     services:
       postgres:
@@ -151,7 +151,7 @@ jobs:
 
       - name: Pull and identify the Alpine toolchain
         id: alpine-toolchain
-        run: sh .github/scripts/container-toolchain.sh golang:1.25-alpine
+        run: sh .github/scripts/container-toolchain.sh golang:1.26-alpine
 
       - name: Restore Alpine Go objects and modules
         uses: ./.github/actions/go-cache
@@ -172,7 +172,7 @@ jobs:
             -v "$PWD/.ci-cache/alpine-build:/cache/build" \
             -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -e VERSION="${{ github.sha }}" \
-            -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
+            -v "$PWD:/src" -w /src golang:1.26-alpine sh -euxc '
               # Module smoke uses zh Intl.DisplayNames. Chromium previously
               # supplied full ICU data transitively; keep that data explicitly.
               sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client
@@ -218,7 +218,7 @@ jobs:
           cache: false
       - name: Pull and identify the sandbox toolchain
         id: sandbox-toolchain
-        run: sh .github/scripts/container-toolchain.sh golang:1.25-bookworm
+        run: sh .github/scripts/container-toolchain.sh golang:1.26-bookworm
       - name: Restore sandbox Go objects and modules
         uses: ./.github/actions/go-cache
         with:
@@ -293,7 +293,7 @@ jobs:
           sh .github/scripts/run-ci-container.sh --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
-            -w /src golang:1.25-alpine sh -ec '
+            -w /src golang:1.26-alpine sh -ec '
               apk add --no-cache python3 openrc libcap openssl coreutils nftables iproute2 >/dev/null
               QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh --prepare-agent
               mkdir /binaries
