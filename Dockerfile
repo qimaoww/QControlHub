@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.26-alpine AS build-base
+FROM golang:1.26.10-alpine AS build-base
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -89,6 +89,10 @@ COPY deploy/systemd/qagent-shadowsocks-rust@.service /usr/share/nginx/html/insta
 COPY deploy/systemd/qagent.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent.service
 COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
+# nginx resolves literal upstream names while parsing the config, and the
+# deployment supplies `control-plane` through compose DNS. Stub the name to
+# loopback for this syntax check only; the runtime regenerates /etc/hosts.
+RUN printf '127.0.0.1 control-plane\n' >> /etc/hosts && nginx -t
 RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \
     && js_version="${js_content_version}-$(printf '%s' "${VERSION}" | sha256sum | cut -c1-10)" \
