@@ -79,6 +79,17 @@
 - **新增与修改后仍定位该对象**：`applyInboundMutation` 把新对象写回 `liveSelectedInbound`，本轮验证了新增后可直接编辑、保存后选中与版本同步。
 - **空对象收尾**：删除全部入站后对象列表只剩公共配置、出站、完整源码和预览，顶部「增加入站」入口仍可用。
 
+### 8. 手动编辑配置源码的体验（第五轮）
+
+只改输入与反馈，不动 2 MiB 上限、校验时机与提交拦截：
+
+- **语法错误给位置**：`frontend/modules/config-source-editor.js` 与 `frontend/modules/code-editor.js` 解析 `JSON.parse` 的 `position` / `line column`，输出「JSON 语法错误（第 N 行第 M 列）：原因」，并在状态区追加「跳到第 N 行」按钮，点击即把光标与滚动落到出错位置；解析器不给位置时（内容被截断）按末尾行计算。
+- **按键不重建行号**：`code-editor.js` 缓存行数，只有行数变化才重建行号节点。
+- **改写可撤销**：恢复当前对象与格式化改为 `execCommand("insertText")` 写入，`Ctrl+Z` / `Ctrl+Shift+Z` 能回到改写前；恢复动作由 `config-files.js` 的 `display({history:true})` 走同一条路径。
+- **回车继承缩进**：`keydown` 里按当前行缩进插入换行，Tab / Shift+Tab 行为不变。
+- **移动端不改造引号**：编辑器统一设置 `autocapitalize="off"`、`autocorrect="off"`、`autocomplete="off"`、`spellcheck="false"`。
+- **空内容与超限给恢复动作**：空内容提示点「恢复当前对象」取回已保存内容；超限说明超出多少字节、约从第几行起超限，并指明可改用「导入文件」。
+
 ## 二、纵向节奏（1440×1000 / 浅色 / 就绪）
 
 | 区块 | 修改前 | 修改后 |
@@ -160,7 +171,7 @@
 
 见 `evidence/screenshots/before` 与 `evidence/screenshots/after`。
 
-## 四、修改前后截图（第四轮补充）
+### 第四轮补充
 
 - 删除当前对象后（1440×1000，`?ops=1`，同一账号与数据）：`evidence/screenshots/ops-before/delete-selection.png`（跳回「完整源码」）对比 `ops-after/delete-selection.png`（落到前一个入站）。
 - 提交中切换页面再返回：`ops-before/switch-back.png`（停在「正在保存…」）对比 `ops-after/switch-back.png`（提示上次操作未完成，草稿保留）。
@@ -174,11 +185,19 @@
 - `mobile-file-save-retry-deploy`：导入文件 → 预览 → 保存失败反馈 → 重试成功 → 部署。
 - `mobile-protocol-outbound`：协议与出站对象的编辑与提交链路。
 
-## 五、交互录屏（第四轮补充）
+### 第四轮补充
 
 - `evidence/recordings/ops-before.webm` / `ops-after.webm`：新增入站 → 编辑并保存 → 删除当前对象 → 落到相邻对象的连续操作。
 
+### 第五轮补充
+
+- `evidence/recordings/editor-desktop-error.webm`：桌面连续编辑、语法错误出现、点击跳转并在出错处修正。
+- `evidence/recordings/editor-format-undo.webm`：格式化后用 `Ctrl+Z` 回到格式化前。
+- `evidence/recordings/editor-mobile-quotes.webm`：390×844 触摸视口下的引号输入。
+
 ## 六、验证结果
+
+- 第五轮手动编辑（`?ops=1&long=1`，507 行 / 13.0 KiB）：语法错误提示「第 507 行第 2 列」并可一键跳转；30 次连续 `input` 共 65 ms（修改前 67 ms），约 2.2 ms/键、无掉帧；恢复当前对象与格式化后 `Ctrl+Z` 都能回到操作前；空内容与超限给出恢复动作；移动端编辑器 `autocapitalize` / `autocorrect` 均为 off。
 
 - 第四轮操作走查（1440×1000，`?ops=1` 夹具，同一账号与数据）：新增入站 → 落到新对象（v8→v9）；改源码保存 → 选中不变、v9→v10；删除当前对象 → 选中前一个入站；连续删除到没有入站 → 空列表且「增加入站」可用；提交中切到其他页面再回来 → 不残留「正在保存…」，草稿保留；删除弹窗取消 → 选中与焦点回到原菜单。
 
@@ -196,6 +215,7 @@
 
 - 第四轮的真机任务失败重试与部署失败回滚未在真实节点复跑：夹具把任务直接置为终态，覆盖的是状态机与渲染，不覆盖后端真实失败路径。
 - 被分享节点用户的配置写入路径未单独采集，沿用 #308 的权限矩阵与套件。
+- 第五轮的真实手机软键盘弹出高度只在 390×844 触摸视口下模拟，未接真机；内核侧对配置的实际校验仍依赖真实节点后端。
 
 - 首屏加载瞬间仍是应用级空白过渡（`app.js` 的加载契约，未在本次范围内改动）。
 - 平板横屏 1024×768 与字号 110% 下页头变高，提交按钮需要轻微滚动才完整显示；桌面 1440×1000 + 字号 100% 已回到首屏。

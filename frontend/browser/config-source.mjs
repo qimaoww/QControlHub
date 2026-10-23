@@ -14,7 +14,9 @@ export async function testCompleteSourceRuntime() {
   await waitFor(()=>input.value === "", "blank complete draft did not open");
   assert(!input.readOnly && !test.writes.length, "starting a complete configuration performed a write");
   change(input, '{"inbounds":');
-  assert(document.querySelector("[data-code-validation]").textContent.startsWith("JSON 格式错误") &&
+  const problem = document.querySelector("[data-code-validation]");
+  assert(problem.textContent.startsWith("JSON 语法错误") && problem.textContent.includes("第 1 行") &&
+    problem.querySelector("[data-code-jump]") &&
     !document.querySelector("[data-workspace-result]").textContent,
     "source syntax error was duplicated in the operation feedback");
   document.querySelector("[data-config-preview]").click();

@@ -99,6 +99,7 @@ if (scenario || longText || params.get("ops") === "1") {
       if ((isWorkspaceRead || isPreview) && !opsWorkspace) {
         const payload = await (await inner(input, options)).json();
         const agent = window.reviewScenario.testAPI.agents.find(item => item.id === "alpha");
+        if (longText) payload.config = {...payload.config, content: longConfig(params.get("engine") || "xray")};
         const parsedConfig = JSON.parse(payload.config.content || "{}");
         payload.inbounds = (parsedConfig.inbounds || []).map(item => ({tag: item.tag, port: item.port, protocol: item.protocol}));
         payload.inbound_targets = payload.inbounds;

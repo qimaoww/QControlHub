@@ -26,11 +26,52 @@ export function bindCodeEditors(root = document) {
     const baselineValidation = validation?.textContent || "";
     const baseline = () => editor.codeBaseline || { content: original, status: baselineStatus, validation: baselineValidation };
     input.setAttribute("wrap", "off");
+    // Mobile keyboards must not rewrite JSON: no autocapitalisation, no
+    // autocorrection and no smart quotes inside the source editor.
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("autocorrect", "off");
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("spellcheck", "false");
+    // Replace the whole document through an editing command so Ctrl+Z can
+    // return to the text before a programmatic rewrite.
+    const replaceWithHistory = (next) => {
+      try { input.focus?.(); input.select?.(); } catch { /* headless smoke DOM */ }
+      let applied = false;
+      try { applied = document.execCommand("insertText", false, next); } catch { applied = false; }
+      if (!applied || input.value !== next) {
+        input.value = next;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    };
+    const jumpTo = (line, column) => {
+      const lines = input.value.split("\n");
+      const offset = lines.slice(0, Math.max(0, line - 1)).reduce((total, item) => total + item.length + 1, 0) + Math.max(0, column - 1);
+      input.focus();
+      input.setSelectionRange(offset, offset);
+      const lineHeight = typeof getComputedStyle === "function"
+        ? Number.parseFloat(getComputedStyle(input).lineHeight) || 20
+        : 20;
+      input.scrollTop = Math.max(0, lineHeight * (line - 1) - input.clientHeight / 2);
+      updatePosition();
+    };
     const updatePosition = () => {
       if (!position) return;
       const before = input.value.slice(0, input.selectionStart);
       const lineStart = before.lastIndexOf("\n") + 1;
       position.textContent = `行 ${before.split("\n").length}，列 ${before.length - lineStart + 1}`;
+    };
+    const resetLabel = reset?.textContent || "恢复";
+    const oversizeMessage = (size) => {
+      const over = size - maxBytes;
+      const lines = input.value.split("\n");
+      let total = 0;
+      let line = lines.length;
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        total += new TextEncoder().encode(lines[index]).length + (index < lines.length - 1 ? 1 : 0);
+        line = index + 1;
+        if (total >= over) break;
+      }
+      return `配置源码超出 2 MiB 上限 ${formatCodeBytes(over)}；约从第 ${line} 行起超限，可删除该行之后的内容，或改用「导入文件」分批导入。`;
     };
     const inspect = () => {
       const size = new Blob([input.value]).size;
@@ -38,25 +79,48 @@ export function bindCodeEditors(root = document) {
         return {
           valid: false,
           status: "内容过大",
-          message: "配置源码超过 2 MiB 上限，无法提交。",
+          message: oversizeMessage(size),
           size,
         };
       if (!input.value.trim())
         return {
           valid: false,
           status: "内容为空",
-          message: "配置源码不能为空。",
+          message: `配置源码不能为空；点击「${resetLabel}」可取回已保存内容。`,
           size,
         };
       if ((editor.dataset.codeLanguage || "").toUpperCase() === "JSON") {
         try {
           JSON.parse(input.value);
           return { valid: true, json: true, size };
-        } catch {
+        } catch (error) {
+          const text = String(error?.message || "");
+          const explicit = /line (\d+) column (\d+)/.exec(text);
+          const offset = /position (\d+)/.exec(text);
+          let line = Number(explicit?.[1]) || 0;
+          let column = Number(explicit?.[2]) || 0;
+          if ((!line || !column) && offset) {
+            const before = input.value.slice(0, Number(offset[1]));
+            line = before.split("\n").length;
+            column = before.length - before.lastIndexOf("\n");
+          }
+          if (!line || !column) {
+            // Parsers without an offset (truncated input) fail at the end.
+            line = input.value.split("\n").length;
+            column = input.value.length - input.value.lastIndexOf("\n");
+          }
+          const reason = text
+            .replace(/\s*in JSON at position \d+.*$/, "")
+            .replace(/\s*at position \d+.*$/, "")
+            .trim() || "内容无法解析";
           return {
             valid: false,
             status: "语法错误",
-            message: "JSON 语法错误，请检查括号、逗号和引号。",
+            message: line
+              ? `JSON 语法错误（第 ${line} 行第 ${column} 列）：${reason}。`
+              : `JSON 语法错误：${reason}。`,
+            line,
+            column,
             size,
           };
         }
@@ -76,13 +140,18 @@ export function bindCodeEditors(root = document) {
           }
         });
     };
+    let gutterLines = -1;
+    const updateGutter = (count) => {
+      // Line numbers only depend on the line count, so typing inside a line
+      // must not rebuild hundreds of gutter nodes.
+      if (count === gutterLines) return;
+      gutterLines = count;
+      gutter.textContent = Array.from({ length: count }, (_, index) => String(index + 1)).join("\n");
+    };
     const update = () => {
       const result = inspect();
       const dirty = editor.configFileController ? editor.configFileController.dirty() : input.value !== baseline().content;
-      gutter.textContent = Array.from(
-        { length: Math.max(1, input.value.split("\n").length) },
-        (_, index) => String(index + 1),
-      ).join("\n");
+      updateGutter(Math.max(1, input.value.split("\n").length));
       if (byteLabel)
         byteLabel.textContent =
           `${formatCodeBytes(result.size)}${result.size > maxBytes ? " / 2 MiB" : ""}`;
@@ -93,7 +162,19 @@ export function bindCodeEditors(root = document) {
       if (format) format.disabled = input.readOnly || input.disabled;
       if (!result.valid) {
         if (status) updateFeedback(status, result.status);
-        if (validation) updateFeedback(validation, result.message);
+        if (validation) {
+          validation.querySelector?.("[data-code-jump]")?.remove();
+          updateFeedback(validation, result.message);
+          if (result.line && typeof document.createElement === "function") {
+            const jump = document.createElement("button");
+            jump.type = "button";
+            jump.className = "button small";
+            jump.dataset.codeJump = "1";
+            jump.textContent = `跳到第 ${result.line} 行`;
+            jump.addEventListener("click", () => jumpTo(result.line, result.column));
+            validation.append?.(jump);
+          }
+        }
         if (statusDot) statusDot.style.background = "var(--red)";
       } else if (dirty) {
         if (status) updateFeedback(status, "未保存");
@@ -119,6 +200,21 @@ export function bindCodeEditors(root = document) {
     );
     bindEvent(input, "keydown", (event) => {
       if (input.readOnly || input.disabled) return;
+      if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const start = input.selectionStart;
+        const before = input.value.slice(0, start);
+        const lineStart = before.lastIndexOf("\n") + 1;
+        const indent = /^[ \t]*/.exec(before.slice(lineStart))[0];
+        if (!indent) return;
+        event.preventDefault();
+        let applied = false;
+        try { applied = document.execCommand("insertText", false, "\n" + indent); } catch { applied = false; }
+        if (!applied) {
+          input.setRangeText("\n" + indent, start, input.selectionEnd, "end");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        return;
+      }
       if (
         event.key !== "Tab" ||
         event.altKey ||
@@ -150,7 +246,8 @@ export function bindCodeEditors(root = document) {
     bindEvent(reset, "click", () => {
       if (input.readOnly) return;
       if (editor.configFileController) editor.configFileController.reset();
-      else input.value = baseline().content;
+      else replaceWithHistory(baseline().content);
+      input.focus?.();
       input.setSelectionRange(0, 0);
       update();
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -185,7 +282,7 @@ export function bindCodeEditors(root = document) {
           if (statusDot) statusDot.style.background = "var(--red)";
           return;
         }
-        input.value = formatted;
+        replaceWithHistory(formatted);
         const nextLength = input.value.length;
         input.setSelectionRange(
           Math.min(selectionStart, nextLength),

@@ -72,9 +72,19 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     }
     options.onChange?.(model);
   };
-  const display = () => {
+  const display = ({ history = false } = {}) => {
     updating = true;
-    input.value = model.text();
+    const text = model.text();
+    if (history) {
+      // Restore through an editing command so Ctrl+Z can return to the draft.
+      input.focus();
+      input.select();
+      let applied = false;
+      try { applied = document.execCommand("insertText", false, text); } catch { applied = false; }
+      if (!applied || input.value !== text) input.value = text;
+    } else {
+      input.value = text;
+    }
     input.readOnly = readOnly || model.selected() === "preview";
     editor.codeBaseline = {content:model.original(), status:model.selected() === "preview" ? "完整配置 · 只读" : readOnly ? "只读" : "已保存", validation:""};
     render();
@@ -106,7 +116,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     dirty() { flush(); return model.dirty(); },
     currentDirty:() => model.currentDirty(),
     rebase(document) { model = document; display(); },
-    reset() { model.reset(); display(); },
+    reset() { model.reset(); display({history:true}); },
     replace(content) { flush(); model.replace(content); display(); },
     display,
     refreshObjects() { render(); input.dispatchEvent(new Event("config-selection", {bubbles:true})); },
