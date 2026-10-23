@@ -1215,33 +1215,38 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-file-navigation .button{flex-shrink:0;min-height:32px;padding:5px 12px}
 .config-file-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;min-width:0}
 .config-file-navigation .config-file-actions .button{margin-left:0}
-.live-config-details{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 20px 16px;background:var(--surface);color:var(--ink-2);font-size:var(--text-small);line-height:var(--leading-caption)}
-.live-config-detail{display:inline-flex;align-items:center;gap:6px;min-height:30px;max-width:100%;padding:5px 10px;border-radius:6px;background:var(--surface-2);overflow-wrap:anywhere}
+.live-config-details{display:flex;align-items:center;flex-wrap:nowrap;gap:8px;padding:4px 20px 16px;background:var(--surface);color:var(--ink-2);font-size:var(--text-small);line-height:var(--leading-caption);overflow-x:auto;scrollbar-width:thin;scroll-padding-inline:20px;scroll-snap-type:x proximity}
+.live-config-detail{display:inline-flex;align-items:center;gap:6px;min-height:30px;max-width:100%;padding:5px 10px;border-radius:6px;background:var(--surface-2);overflow-wrap:anywhere;flex:0 0 auto;scroll-snap-align:start}
 .live-config-detail-label{color:var(--muted)}
 .live-config-details>.live-engine-loading{flex-basis:100%;font-size:var(--text-small)}
 .live-config-workspace .live-config-editor{display:block;min-width:0}
 .live-config-workspace .code-workspace{min-width:0;border:0;border-radius:0}
 .live-config-workspace .code-file-meta select{width:auto;min-width:210px;max-width:100%}
 .live-config-workspace .code-file-meta b[hidden]{display:none}
-.live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:clamp(320px,calc(100dvh - 450px),680px)}
+.live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:200px;height:clamp(200px,calc(100dvh - 560px - 120px*(var(--ui-font-scale) - 1)),680px)}
 .live-config-workspace .code-editor-input{padding-inline:20px}
 
 .live-config-workspace .code-workspace>footer{padding:14px 18px;flex-wrap:wrap;border-top:1px solid var(--line);background:var(--surface)}
 .live-config-workspace .code-workspace>footer>div{flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
-.live-config-workspace [data-live-save-status]{flex:1 0 100%;color:var(--accent);font-size:var(--text-small);line-height:var(--leading-body);overflow-wrap:anywhere}
+.live-config-workspace [data-live-save-status]{flex:1 0 100%;max-height:40px;overflow:auto;overscroll-behavior:contain;color:var(--accent);font-size:var(--text-small);line-height:var(--leading-body);overflow-wrap:anywhere}
 .live-config-workspace [data-live-save-status][role=alert]{color:var(--red)}
 .live-config-editor[aria-busy=true]{cursor:progress}
+@media(max-width:1100px){
+  .live-config-workspace .config-file-list{flex-wrap:wrap;overflow-x:visible}
+  .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{height:clamp(200px,calc(100dvh - 560px - 120px*(var(--ui-font-scale) - 1)),680px)}
+}
+
 @media(max-width:820px){
   .page-live-config .desktop-app{display:block;height:auto;overflow:visible}
   .page-live-config .context-sidebar{position:relative;width:auto;height:auto;margin:0;padding:12px;border:0;border-radius:0}
   .page-live-config .context-brand,.page-live-config .context-primary{display:none}
   .page-live-config .context-sidebar .context-list{display:flex;overflow-x:auto;gap:8px;padding:0}
-  .page-live-config .context-sidebar .context-list>a{flex:0 0 190px;margin:0}
+  .page-live-config .context-sidebar .context-list>a{flex:0 0 calc(50% - 4px);min-width:0;margin:0}
   .page-live-config .workspace-shell{width:100%;height:auto;overflow:visible}
-  .page-live-config .workspace-main{padding:12px 12px 76px;overflow:visible}
+  .page-live-config .workspace-main{padding:12px 12px calc(76px + 156px);overflow:visible}
   .page-live-config .workspace-topbar{margin:0;height:48px;padding:0 14px;border-radius:0}
   .page-live-config .workspace-actions{display:none}
-  .live-config-workspace>.editor-toolbar{padding:16px 16px 8px;align-items:flex-start}
+  .live-config-workspace>.editor-toolbar{padding:10px 14px 6px;align-items:flex-start}
   .live-engine-bar{padding:12px 16px}
   .live-engine-tab{min-height:44px}
   .live-config-details{padding:4px 16px 14px;gap:6px}
@@ -1252,22 +1257,22 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .config-file-navigation>span{flex:1 1 190px}
   .config-file-navigation .button{margin-left:auto}
   .config-file-navigation .button{min-height:44px}
-  .live-config-workspace .code-workspace>footer{padding:16px;gap:16px}
+  .live-config-workspace .code-workspace>footer{padding:16px;gap:10px;position:fixed;left:0;right:0;bottom:64px;z-index:40}
   .live-config-workspace .code-workspace>footer .button{min-height:44px}
   .live-config-workspace .code-editor-frame{grid-template-columns:36px minmax(0,1fr)}
   .live-config-workspace .code-editor-input{padding:14px 12px;}
-  .live-config-workspace .code-workspace>footer>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;width:100%;margin:0}
-  .live-config-workspace [data-live-intent="deploy"]{grid-column:1/-1}
+  .live-config-workspace .code-workspace>footer>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;margin:0}
+  .live-config-workspace [data-live-intent="deploy"]{grid-column:auto}
 }
 
 @media(max-width:600px){
-  .live-engine-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .live-engine-tab{flex-direction:column;gap:3px;min-height:58px;padding:7px 10px}
+  .live-engine-bar{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:12px 16px}
+  .live-engine-tab{flex-direction:column;gap:2px;min-height:46px;padding:7px 10px}
 }
 
 /* Selection, current-file tools, source, and submission each have one home. */
-.live-config-workspace .config-file-list{display:flex;flex:1 1 0;gap:8px;min-width:0;max-width:100%;padding:2px;overflow-x:auto;scrollbar-width:thin;scroll-padding:2px}
-.live-config-workspace .config-file-list>.config-file-button{flex:0 0 auto;min-width:120px;max-width:240px;min-height:48px;padding:6px 12px;gap:2px;box-shadow:none}
+.live-config-workspace .config-file-list{display:flex;flex:1 1 0;gap:8px;min-width:0;max-width:100%;padding:2px;overflow-x:auto;scrollbar-width:thin;scroll-padding:2px;scroll-snap-type:x proximity}
+.live-config-workspace .config-file-list>.config-file-button{flex:0 0 auto;min-width:120px;max-width:240px;min-height:48px;padding:6px 12px;gap:2px;box-shadow:none;scroll-snap-align:start;scroll-snap-stop:always}
 .config-file-button.is-dirty b::after{content:"●";display:inline-block;margin-left:7px;color:var(--amber);font-size:var(--text-caption);vertical-align:middle}
 .live-config-workspace .config-draft-summary{flex:1 1 220px;font-size:var(--text-small);line-height:var(--leading-body);color:var(--muted)}
 .live-config-workspace .config-draft-summary[data-dirty="1"]{color:var(--amber)}
@@ -1290,7 +1295,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .live-config-workspace .config-editor-actions{flex-shrink:0}
 .live-config-workspace .config-editor-actions:empty{display:none}
 .live-config-workspace .code-workspace>footer{gap:12px;padding:16px 20px}
-.live-config-workspace .code-workspace>footer>span:not(.config-draft-summary){flex:1 0 100%}
+.live-config-workspace .code-workspace>footer>span:not(.config-draft-summary):not([data-workspace-result]){flex:1 0 100%}
 .live-config-workspace .code-workspace>footer>div{margin-left:auto}
 @media(max-width:820px){
   .live-config-workspace>.editor-toolbar{flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px}
@@ -1306,12 +1311,14 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .live-config-workspace .code-editor-meta [data-code-position]{display:none}
   .live-config-workspace .config-selection-actions{flex:1 1 auto}
   .live-config-workspace .config-file-buttons{flex-wrap:wrap;padding:10px 14px;gap:8px}
-  .live-config-workspace .config-file-list{flex-basis:100%}
-  .live-config-workspace .config-file-actions{flex:1 1 100%}
+  .live-config-workspace .config-file-list{flex-basis:100%;flex-wrap:wrap;overflow-x:visible}
+  .live-config-workspace .config-file-list>.config-file-button{flex:0 0 calc(33.333% - 6px);min-width:0}
+  .page-live-config .context-sidebar .context-list>a{flex:0 0 calc(50% - 4px);min-width:0}
+  .live-config-workspace .config-file-actions{flex:0 0 auto;flex-wrap:nowrap}
   .live-config-workspace .config-editor-actions{flex-wrap:wrap;flex:1 1 auto;min-width:max-content}
   .live-config-workspace .config-editor-actions>.button{flex:1;min-width:max-content;padding-inline:10px;white-space:nowrap}
   .live-config-workspace .config-file-actions>.button{flex:1;min-width:0;padding-inline:10px}
-  .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:48dvh}
+  .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:120px;height:clamp(120px,calc(100dvh - 762px),420px)}
   .live-config-workspace .code-workspace>footer{padding:16px}
   .live-config-workspace .code-workspace>footer>span{flex:none;width:100%}
   .live-config-workspace .code-workspace>footer>div{gap:8px}

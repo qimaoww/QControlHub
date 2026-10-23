@@ -1,6 +1,6 @@
 import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
-import { redactDiagnostic } from "./errors.js";
+import { diagnosticError } from "./errors.js";
 import { submitLiveConfigChange } from "./live-config-state.js";
 import { taskTerminal } from "./task-monitor.js";
 
@@ -28,7 +28,7 @@ export function bindLiveConfigSubmit({api, state, can, confirmAction, submitTask
     if (workspace.conflict) { report("配置版本已变化", "error"); return; }
     const form = new FormData(formElement);
     try { form.set("content", configFiles ? configFiles.content() : form.get("content")); }
-    catch (error) { report(error.message, "error"); return; }
+    catch (error) { report(diagnosticError(error.message), "error"); return; }
     form.set("version", workspace.saved?.version || 0);
     const ongoing = status.operationFor(key);
     if (intent !== "save" && ongoing?.task?.id && !taskTerminal(ongoing.task) && ongoing.intent === intent &&
@@ -83,7 +83,7 @@ export function bindLiveConfigSubmit({api, state, can, confirmAction, submitTask
       if (accountData !== state.data || error.name === "AbortError") return;
       workspace.uncertain = !error.deployPreflight && submitted && !persisted && (!error.status || error.status >= 500 || error.status === 409);
       workspace.phase = workspace.uncertain ? "uncertain" : "ready";
-      const message = redactDiagnostic(error.message) || "提交失败";
+      const message = diagnosticError(error.message) || "提交失败";
       report(message, "error");
       if (persisted && current()) {
         try { await liveConfig(); } catch { /* Durable saved state and feedback are retained for the next render. */ }

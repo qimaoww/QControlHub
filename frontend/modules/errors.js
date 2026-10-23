@@ -54,6 +54,10 @@ export function diagnosticError(value) {
   const cause = raw.replace(/configuration fields: [^;\r\n]*;\s*/gi, "");
   const certificateFormatMessage = "证书或 TLS 私钥格式错误。请检查 PEM 编码、证书与私钥是否匹配，并按下方字段修正配置。";
   const explanations = [
+    [/address already in use|bind: address already in use/i, "端口已被占用：该端口已有进程在监听，请更换端口或停止占用进程后重试。"],
+    [/failed to (?:start|run) (?:the )?(?:core|service)|(?:core|service) (?:start|run) failed|start service failed/i, "内核服务启动失败，请检查配置、端口占用与运行权限，并按下方原始日志定位原因。"],
+    [/(?:unexpected end of JSON input|invalid character|json: cannot unmarshal|yaml: (?:unmarshal|line)|did not find expected)/i, "配置内容无法解析，请检查 JSON / YAML 语法（括号、逗号、缩进与引号）后重试。"],
+    [/(?:unknown field|unsupported field|field .* not found|unsupported (?:protocol|option|type))/i, "内核不支持该配置项，请核对字段名与内核版本后重试。"],
     [/lookup api\.github\.com[^\r\n]*(?:timeout|timed out)|GitHub API domain resolution timed out/i, "GitHub API 域名解析超时。请检查节点 DNS；仅 IPv6 节点需使用可达的 IPv6 DNS。下方原始错误会说明是否尝试加速及其结果。"],
     [/GitHub API.*rate limit.*(?:exhausted|exceeded)/i, "GitHub API 请求额度已耗尽，请按下方提示的重置时间重试；加速服务可能共享上游额度。"],
     [/(?:GitHub API metadata|release download) returned HTTP 404/i, "GitHub Release 或下载资源不存在，请检查所选核心、版本及发布来源。"],
@@ -141,9 +145,15 @@ export async function requestJSON(url, options, {
     }
     assertCurrent();
     const message = errorMessage(body?.error, response.status);
+    const rawDetail = typeof body?.error === "string" ? redactDiagnostic(body.error.trim()) : "";
+    // Keep the operator log next to the Chinese cause; an already localized
+    // message is its own explanation.
+    const rawSuffix = rawDetail && !/\p{Script=Han}/u.test(rawDetail) && rawDetail !== message
+      ? `\n原始错误（供排查）：${rawDetail}`
+      : "";
     const requestID = body?.request_id || response.headers?.get?.("X-Request-ID");
     const safeRequestID = typeof requestID === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(requestID) ? requestID : "";
-    const error = new Error(`${message}${safeRequestID ? `（请求 ID：${safeRequestID}）` : ""}`);
+    const error = new Error(`${message}${safeRequestID ? `（请求 ID：${safeRequestID}）` : ""}${rawSuffix}`);
     error.status = response.status;
     error.requestID = safeRequestID;
     if (body?.code === "task_schema_incompatible" && body?.stage === "task_creation" && response.status === 500) {

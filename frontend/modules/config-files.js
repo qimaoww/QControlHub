@@ -27,7 +27,8 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
   };
   const render = () => {
     const objects = model.objects(), chosen = model.selected();
-    const item = (id, attributes, title, detail, dirty = false) => `<button type="button" class="config-file-button${chosen === id ? " active" : ""}${dirty ? " is-dirty" : ""}" data-config-object="${esc(id)}" ${attributes} aria-current="${chosen === id}" aria-pressed="${chosen === id}" aria-label="${esc(`${title} · ${detail}${dirty ? " · 未保存" : ""}`)}"><b>${esc(title)}</b><small>${esc(detail)}</small></button>`;
+    const compact = value => { const text = String(value ?? ""); return text.length > 26 ? `${text.slice(0, 13)}…${text.slice(-10)}` : text; };
+    const item = (id, attributes, title, detail, dirty = false) => `<button type="button" class="config-file-button${chosen === id ? " active" : ""}${dirty ? " is-dirty" : ""}" data-config-object="${esc(id)}" ${attributes} title="${esc(`${title} · ${detail}`)}" aria-current="${chosen === id}" aria-pressed="${chosen === id}" aria-label="${esc(`${title} · ${detail}${dirty ? " · 未保存" : ""}`)}"><b>${esc(compact(title))}</b><small>${esc(compact(detail))}</small></button>`;
     const buttons = objects.map((object, index) => item(object.id, `data-config-file="${index}"`, object.title,
       `${object.kind === "common" ? "公共" : object.kind === "outbound" ? object.system ? "统计" : "出站" : "入站"}${object.detail ? ` · ${object.detail}` : ""}`, object.dirty));
     if (!model.segmented) for (const inbound of model.inbounds()) {
@@ -65,13 +66,25 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     const summary = form.querySelector(".config-draft-summary");
     if (summary) {
       summary.dataset.dirty = model.dirty() ? "1" : "0";
-      summary.textContent = readOnly ? "只读" : model.dirty() ? "有未保存修改" : "";
+      // Read-only is already stated by the editor status; repeating it here
+      // only leaves an empty footer row next to the submit actions.
+      summary.textContent = model.dirty() ? "有未保存修改" : "";
     }
     options.onChange?.(model);
   };
-  const display = () => {
+  const display = ({ history = false } = {}) => {
     updating = true;
-    input.value = model.text();
+    const text = model.text();
+    if (history) {
+      // Restore through an editing command so Ctrl+Z can return to the draft.
+      input.focus();
+      input.select();
+      let applied = false;
+      try { applied = document.execCommand("insertText", false, text); } catch { applied = false; }
+      if (!applied || input.value !== text) input.value = text;
+    } else {
+      input.value = text;
+    }
     input.readOnly = readOnly || model.selected() === "preview";
     editor.codeBaseline = {content:model.original(), status:model.selected() === "preview" ? "完整配置 · 只读" : readOnly ? "只读" : "已保存", validation:""};
     render();
@@ -103,7 +116,7 @@ export function bindConfigFiles(form, engine, notify, options = {}) {
     dirty() { flush(); return model.dirty(); },
     currentDirty:() => model.currentDirty(),
     rebase(document) { model = document; display(); },
-    reset() { model.reset(); display(); },
+    reset() { model.reset(); display({history:true}); },
     replace(content) { flush(); model.replace(content); display(); },
     display,
     refreshObjects() { render(); input.dispatchEvent(new Event("config-selection", {bubbles:true})); },

@@ -5,16 +5,55 @@ import { redactDiagnostic } from "./errors.js";
 
 // Deliberately check only recognizable foreign formats. Unknown native fields
 // remain editable and are checked by the selected core on explicit validation.
+const formatBytes = value => value < 1024
+  ? `${value} B`
+  : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+
+const jsonProblem = (content, error) => {
+  const text = String(error?.message || "");
+  const explicit = /line (\d+) column (\d+)/.exec(text);
+  const offset = /position (\d+)/.exec(text);
+  let line = Number(explicit?.[1]) || 0;
+  let column = Number(explicit?.[2]) || 0;
+  if ((!line || !column) && offset) {
+    const before = content.slice(0, Number(offset[1]));
+    line = before.split("\n").length;
+    column = before.length - before.lastIndexOf("\n");
+  }
+  if (!line || !column) {
+    // Parsers without an offset (truncated input) fail at the end.
+    line = content.split("\n").length;
+    column = content.length - content.lastIndexOf("\n");
+  }
+  const reason = text
+    .replace(/\s*in JSON at position \d+.*$/, "")
+    .replace(/\s*at position \d+.*$/, "")
+    .trim() || "内容无法解析";
+  return line ? `JSON 语法错误（第 ${line} 行第 ${column} 列）：${reason}。` : `JSON 语法错误：${reason}。`;
+};
+
 export function configSourceProblem(engine, content) {
-  if (!content.trim()) return "配置内容为空";
-  if (new TextEncoder().encode(content).length > 2097152) return "配置超过 2 MiB 上限。";
+  if (!content.trim()) return "配置源码不能为空；点击「恢复当前对象」可取回已保存内容。";
+  const size = new TextEncoder().encode(content).length;
+  if (size > 2097152) {
+    const over = size - 2097152;
+    const lines = content.split("\n");
+    let total = 0;
+    let line = lines.length;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      total += new TextEncoder().encode(lines[index]).length + (index < lines.length - 1 ? 1 : 0);
+      line = index + 1;
+      if (total >= over) break;
+    }
+    return `配置源码超出 2 MiB 上限 ${formatBytes(over)}；约从第 ${line} 行起超限，可删除该行之后的内容，或改用「导入文件」分批导入。`;
+  }
   if (content.includes("\u0000")) return "文件含有二进制内容，请选择 UTF-8 配置文本。";
   let document;
   try {
     if (engine !== "mihomo") configJSONMembers(content);
     document = JSON.parse(content);
   } catch (error) {
-    return engine === "mihomo" ? "" : `JSON 格式错误：${error.message}`;
+    return engine === "mihomo" ? "" : jsonProblem(content, error);
   }
   if (!document || Array.isArray(document) || typeof document !== "object") return "完整配置必须是对象。";
   const inbounds = Array.isArray(document.inbounds) ? document.inbounds : [];
@@ -39,11 +78,31 @@ export function bindConfigSourceEditor({state, api, confirmAction, notify}, {roo
     status.setAttribute("role", tone === "error" ? "alert" : "status");
     updateFeedback(status, message);
   };
+  const jumpToProblem = (line, column) => {
+    if (!input || input.readOnly) return;
+    const lines = input.value.split("\n");
+    const offset = lines.slice(0, Math.max(0, line - 1)).reduce((total, item) => total + item.length + 1, 0) + Math.max(0, column - 1);
+    input.focus();
+    input.setSelectionRange(offset, offset);
+    const lineHeight = Number.parseFloat(getComputedStyle(input).lineHeight) || 20;
+    input.scrollTop = Math.max(0, lineHeight * (line - 1) - input.clientHeight / 2);
+  };
   const showProblem = problem => {
     const validation = root.querySelector("[data-code-validation]");
     if (validation && root.querySelector("[data-code-editor]")?.dataset.codeValid === "0") {
       if (status?.textContent === sourceMessage) report("");
+      validation.querySelector?.("[data-code-jump]")?.remove();
       updateFeedback(validation, problem);
+      const found = /第 (\d+) 行第 (\d+) 列/.exec(problem);
+      if (found && typeof document.createElement === "function") {
+        const jump = document.createElement("button");
+        jump.type = "button";
+        jump.className = "button small";
+        jump.dataset.codeJump = "1";
+        jump.textContent = `跳到第 ${found[1]} 行`;
+        jump.addEventListener("click", () => jumpToProblem(Number(found[1]), Number(found[2])));
+        validation.append?.(jump);
+      }
     } else report(problem, "error");
   };
   const cancelPreview = () => { clearTimeout(previewTimer); previewController?.abort(); };

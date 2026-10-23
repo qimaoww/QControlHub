@@ -83,7 +83,9 @@ export async function testConfigInboundsRuntime(preview = false) {
     document.querySelector("[data-delete-intent=validate]").click();
     await waitFor(()=>!document.querySelector("dialog[open]"), "delete did not return to editor");
     assert(test.writes.length === 3 && test.writes[2].operation === "delete" && test.writes[2].original_tag === test.writes[1].input.tag, "wrong deletion target");
-    assert(action("modify").disabled && action("delete").disabled, "deletion retained removed selection");
+    const selectedAfterDelete = document.querySelector("[data-config-objects] [aria-current='true']")?.textContent || "";
+    assert(!action("delete").disabled, "deletion left no neighbour selected");
+    assert(!selectedAfterDelete.includes(test.writes[1].input.tag), "deletion retained removed selection");
     if (["xray", "sing-box"].includes(engine)) {
       test.select("first");
       document.querySelector("[data-config-preview]").click();
