@@ -7,6 +7,13 @@ const longText = params.get("long") === "1";
 
 window.reviewScenario = installAgentFixture(mode);
 
+// Font scale comes from the account settings; expose it for viewport sweeps.
+const fontScale = Number(params.get("scale"));
+if ([90, 100, 110].includes(fontScale)) {
+  const testAPI = window.reviewScenario.testAPI;
+  testAPI.settings = {...(testAPI.settings || {panel_name: "QControlHub"}), ui_font_scale: fontScale};
+}
+
 // State fixtures let every rendered phase be reviewed with the same layout,
 // typography and theme rules as production pages.
 const fixtureAgents = window.reviewScenario.testAPI.agents;
@@ -92,7 +99,13 @@ if (scenario || longText || params.get("ops") === "1") {
       const opsJson = payload => new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}});
       const persistOps = () => { try { sessionStorage.setItem("qch-ops-workspace", JSON.stringify(opsWorkspace)); } catch { /* private mode */ } };
       try { const stored = sessionStorage.getItem("qch-ops-workspace"); if (stored && stored !== "null") opsWorkspace = JSON.parse(stored); } catch { /* ignore */ }
-      const taskFails = params.get("task") === "fail";
+      const taskMode = params.get("task") || "";
+      const taskFails = taskMode === "fail" || taskMode === "fail-long";
+      const longTaskError = [
+        "control plane rejected the configuration write:",
+        ...Array.from({length: 30}, (_, index) => "  check " + (index + 1) + ": dial tcp 10.0.4.21:7801: connect: connection refused"),
+        "rollback kept the previous revision",
+      ].join(String.fromCharCode(10));
       const isPreview = method === "POST" && segments[segments.length - 1] === "preview";
       const isConfigSave = method === "PUT" && segments.includes("configs");
       const isInboundMutation = method === "POST" && segments[segments.length - 1] === "server-inbounds";
@@ -114,13 +127,13 @@ if (scenario || longText || params.get("ops") === "1") {
         window.__opsTaskStatus = window.__opsTaskStatus || {};
         window.__opsTaskStatus[payload.id] = fails ? "failed" : "succeeded";
         payload.status = fails ? "failed" : "succeeded";
-        payload.error = fails ? "listen tcp 0.0.0.0:24001: bind: address already in use" : "";
+        payload.error = fails ? taskMode === "fail-long" ? longTaskError : "listen tcp 0.0.0.0:24001: bind: address already in use" : "";
         return new Response(JSON.stringify(payload), {status: response.status, headers: {"Content-Type": "application/json"}});
       }
       if (method === "GET" && segments[0] === "tasks" && segments.length === 2) {
         const id = segments[1];
         const status = (window.__opsTaskStatus || {})[id] || "succeeded";
-        return opsJson({id, action: "validate", status, error: status === "failed" ? "listen tcp 0.0.0.0:24001: bind: address already in use" : "", config_version: (opsWorkspace && opsWorkspace.config.version) || 0});
+        return opsJson({id, action: "validate", status, error: status === "failed" ? taskMode === "fail-long" ? longTaskError : "listen tcp 0.0.0.0:24001: bind: address already in use" : "", config_version: (opsWorkspace && opsWorkspace.config.version) || 0});
       }
       if (isWorkspaceRead) return opsJson(opsWorkspace);
       if (isSnapshot && opsWorkspace) return opsJson({content: opsWorkspace.config.content});
@@ -155,7 +168,7 @@ if (scenario || longText || params.get("ops") === "1") {
         persistOps();
         const task = {id: "layout-ops-" + Date.now(), action: body.intent, status: taskFails ? "failed" : "succeeded",
           config_version: opsWorkspace.config.version, engine: params.get("engine") || "xray", agent_id: "alpha",
-          error: taskFails ? "listen tcp 0.0.0.0:23001: bind: address already in use" : ""};
+          error: taskMode === "fail-long" ? longTaskError : taskFails ? "listen tcp 0.0.0.0:23001: bind: address already in use" : ""};
         window.reviewScenario.testAPI.layoutTasks.set(task.id, task);
         return opsJson({config: opsWorkspace.config, task});
       }
@@ -164,6 +177,11 @@ if (scenario || longText || params.get("ops") === "1") {
     if (scenario === "loading" && isWorkspaceRead) return new Promise(() => {});
     if (scenario === "error" && isWorkspaceRead)
       return new Response(JSON.stringify({error: "节点存储层读取超时，请稍后重新读取"}), {status: 504, headers: {"Content-Type": "application/json"}});
+    // A long operator log must not push the submit row out of the first screen.
+    if (scenario === "error-long" && isWorkspaceRead) {
+      const lines = Array.from({length: 40}, (_, index) => "read workspace " + (index + 1) + ": dial tcp 10.0.4.21:7801: connect: connection refused");
+      return new Response(JSON.stringify({error: lines.join(String.fromCharCode(10))}), {status: 502, headers: {"Content-Type": "application/json"}});
+    }
     // English operator log: the workspace must pair it with a Chinese cause.
     if (scenario === "error-en" && isWorkspaceRead)
       return new Response(JSON.stringify({error: "read workspace: dial tcp 10.0.4.21:7801: connect: connection refused"}), {status: 502, headers: {"Content-Type": "application/json"}});
