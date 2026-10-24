@@ -23,10 +23,10 @@ absent, no retained log rows, sing-box selected in the filter.
 | `GET /core-log-sources` | `failed` + `config-unavailable` | `not-configured` + `source=file`, no error |
 | Panel | "日志采集失败" / "来源读取失败（config-unavailable），请检查 Agent 诊断日志。" | "未配置" / "e2e-after · sing-box · 主实例 尚无托管配置，部署后自动采集。" |
 
-Screenshots: `before/desktop-light.png` and `after/desktop-light.png` (1440x1000),
-`after/desktop-dark.png`, `before/mobile-light.png`, `after/mobile-light.png` and
-`after/mobile-dark.png` (390x844). Both sides use the same viewport, theme, filter and a
-single visible node.
+Screenshots: `before/desktop-light.png`, `before/desktop-dark.png`,
+`after/desktop-light.png` and `after/desktop-dark.png` (1440x1000); `before/mobile-light.png`,
+`before/mobile-dark.png`, `after/mobile-light.png` and `after/mobile-dark.png` (390x844). Both sides use the same viewport, theme, filter and a single visible node;
+the screenshot hashes differ only because the baseline stack was captured separately.
 
 ## Scenario two: "healthy" state with no logs
 
