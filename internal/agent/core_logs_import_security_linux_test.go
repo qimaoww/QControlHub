@@ -180,7 +180,7 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	}
 }
 
-func TestImportedSingBoxActiveSourceRejectsHardLinkBeforePublish(t *testing.T) {
+func TestImportedSingBoxArmedSourceRejectsHardLinkBeforePublish(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		token   string
@@ -217,17 +217,11 @@ func TestImportedSingBoxActiveSourceRejectsHardLinkBeforePublish(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
 			go func() { collector.Run(ctx); close(done) }()
-			deadline := time.Now().Add(5 * time.Second)
-			for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "active" {
-				time.Sleep(25 * time.Millisecond)
-			}
-			if status := collector.Status()[core.EngineSingBox]; status.Status != "active" {
-				cancel()
-				<-done
-				t.Fatalf("file source did not become active: %+v", status)
-			}
+			// An armed reader has fixed its cursor but delivered no line yet, so it
+			// reports waiting. Active is reserved for a delivered line.
+			waitForArmedCoreLogFile(t, collector, core.EngineSingBox)
 
-			// Let the active reader settle at EOF so the link and write happen
+			// Let the armed reader settle at EOF so the link and write happen
 			// before its next read. The write still comes through the external
 			// hard link to the inode that is already open by the collector.
 			time.Sleep(100 * time.Millisecond)
@@ -247,14 +241,14 @@ func TestImportedSingBoxActiveSourceRejectsHardLinkBeforePublish(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			deadline = time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
 				time.Sleep(25 * time.Millisecond)
 			}
 			if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
 				cancel()
 				<-done
-				t.Fatalf("active hard-linked source status = %+v", status)
+				t.Fatalf("armed hard-linked source status = %+v", status)
 			}
 
 			// The reader retries after two seconds. Leaving the hard link in

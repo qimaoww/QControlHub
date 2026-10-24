@@ -29,7 +29,7 @@ func TestTrafficSchemaUpgradeFromMain81PreservesAPIKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = db.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil || version != 82 {
+	if err = db.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil || version != currentSchemaVersion {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 	for _, query := range []string{

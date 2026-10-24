@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
@@ -69,6 +71,16 @@ func coreLogFileSourceKey(source coreLogFileSource) string {
 
 func coreLogFileBindingID(source coreLogFileSource) string {
 	return source.path + "\x00" + source.configDigest + "\x00" + source.ownership.SourceDigest + "\x00" + strconv.FormatUint(source.epoch, 10)
+}
+
+// coreLogFileArmCode explains the armed file reader: a service that is
+// definitively stopped cannot append lines, so that reason wins over the
+// generic "no line yet" code.
+func (collector *CoreLogCollector) coreLogFileArmCode(source coreLogFileSource) string {
+	if collector.coreLogServiceIdle(source.service) {
+		return core.CoreLogErrorServiceInactive
+	}
+	return core.CoreLogErrorAwaitingFirstLog
 }
 
 // runFileSource keeps one tail reader alive per managed OpenRC log file with
@@ -162,7 +174,10 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		return err
 	}
 	setCoreLogFileRunProgress(run, source.path, openedIdentity, offset)
-	collector.setFileSourceStatus(source, "active", "")
+	// The reader is armed at the current end of the file, but no line has been
+	// delivered yet. Report waiting so "quiet" stays distinguishable from
+	// "broken"; the first published line marks the source active.
+	collector.setFileSourceStatus(source, core.CoreLogStatusWaiting, collector.coreLogFileArmCode(source))
 	collector.filePublishMu.Unlock()
 	// A single Fstat gates every block before any byte can enter partial state or
 	// the shared queue. A 64 KiB block keeps that fail-closed check bounded

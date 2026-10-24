@@ -160,7 +160,7 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
   coreState.data.coreLogFilters = {};
   await renderCoreLogs({ syncFilters: true });
-  assert.equal(coreMarkup.includes("日志采集等待中"), true, "aggregate scope reports unknown sources conservatively");
+  assert.equal(coreMarkup.includes("采集已就绪，尚未收到日志"), true, "an armed source that never delivered is not reported as a healthy quiet source");
   assert.equal(coreMarkup.includes("采集正常"), false, "aggregate filters do not claim every source is healthy");
 
   let releaseStaleCoreLogs;

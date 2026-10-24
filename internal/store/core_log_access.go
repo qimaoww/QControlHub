@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -53,6 +54,8 @@ type CoreLogSource struct {
 	Username      string      `json:"username"`
 	Features      []string    `json:"features"`
 	Status        string      `json:"status"`
+	Source        string      `json:"source,omitempty"`
+	LastLogAt     *time.Time  `json:"last_log_at,omitempty"`
 	GrantRevision string      `json:"grant_revision"`
 	Error         string      `json:"error,omitempty"`
 }
@@ -70,7 +73,10 @@ func (s *Store) ListCoreLogSources(ctx context.Context) ([]CoreLogSource, error)
  WHEN r.instance_id='main' THEN COALESCE(r.runtime->r.engine->>'core_log_status','pending')
  WHEN state.updated_at<now()-interval '45 seconds' THEN 'pending'
  ELSE COALESCE(state.status,'pending') END,
- COALESCE(CASE WHEN r.instance_id='main' THEN r.runtime->r.engine->>'core_log_error' ELSE state.error END,'')
+ COALESCE(CASE WHEN r.instance_id='main' THEN r.runtime->r.engine->>'core_log_source' ELSE state.source END,''),
+ COALESCE(CASE WHEN r.instance_id='main' THEN r.runtime->r.engine->>'core_log_error' ELSE state.error END,''),
+ CASE WHEN r.instance_id='main' THEN r.runtime->r.engine->>'core_log_last_at' END,
+ CASE WHEN r.instance_id<>'main' THEN state.last_at END
  FROM resources r LEFT JOIN core_log_source_states state ON state.agent_id=r.agent_id AND state.engine=r.engine AND state.instance_id=r.instance_id
  ORDER BY r.name,r.agent_id,r.instance_id,r.engine`, args...)
 	if err != nil {
@@ -81,11 +87,22 @@ func (s *Store) ListCoreLogSources(ctx context.Context) ([]CoreLogSource, error)
 	for rows.Next() {
 		var source CoreLogSource
 		var features []byte
-		if err := rows.Scan(&source.AgentID, &source.Name, &source.InstanceID, &source.Engine, &source.OwnerID, &source.Username, &features, &source.GrantRevision, &source.Status, &source.Error); err != nil {
+		var status, transport, reason string
+		var lastLogAtText *string
+		var lastLogAt *time.Time
+		if err := rows.Scan(&source.AgentID, &source.Name, &source.InstanceID, &source.Engine, &source.OwnerID, &source.Username, &features, &source.GrantRevision, &status, &transport, &reason, &lastLogAtText, &lastLogAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(features, &source.Features); err != nil {
 			return nil, err
+		}
+		source.Status = normalizeCoreLogSourceStatus(status)
+		source.Source = normalizeCoreLogSource(transport)
+		source.Error = coreLogErrorForStatus(source.Status, reason)
+		if source.InstanceID == "main" {
+			source.LastLogAt = parseCoreLogLastAtText(lastLogAtText)
+		} else {
+			source.LastLogAt = lastLogAt
 		}
 		result = append(result, source)
 	}
