@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -144,10 +145,25 @@ func TestSharedCoreLogLiveLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := manager.command(ctx, specs[1].Service, core.ActionRestart); err != nil {
+			if manager.Kind() == ServiceManagerOpenRC {
+				// File sources keep one reader per instance, so the healthy sibling
+				// stays readable while the other one recovers. The shared journal is
+				// one namespace-wide reader and is covered by its own recovery below.
+				waitLiveLogCondition(t, ctx, func() bool {
+					return collector.InstanceStatuses()[string(engine)+"/"+shares[1]].CoreLogStatus == "active"
+				})
+			}
+			// Recovery is proven by a delivered line, not by an armed reader: wait
+			// for the reader to re-arm at the current end of its source, then
+			// restart the recovered service so its next entry becomes visible.
+			waitLiveLogCondition(t, ctx, func() bool {
+				status := collector.InstanceStatuses()[string(engine)+"/"+shares[0]].CoreLogStatus
+				return status == "waiting" || status == "active"
+			})
+			if _, err := manager.command(ctx, specs[0].Service, core.ActionRestart); err != nil {
 				t.Fatal(err)
 			}
-			waitLiveInstanceLog(t, ctx, collector, engine, shares[1])
+			waitLiveInstanceLog(t, ctx, collector, engine, shares[0])
 			waitLiveLogCondition(t, ctx, func() bool {
 				return collector.InstanceStatuses()[string(engine)+"/"+shares[0]].CoreLogStatus == "active"
 			})
@@ -174,7 +190,8 @@ func waitLiveLogCondition(t *testing.T, ctx context.Context, condition func() bo
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal("live log condition timed out")
+	_, file, line, _ := runtime.Caller(1)
+	t.Fatalf("live log condition timed out at %s:%d", filepath.Base(file), line)
 }
 func waitLiveInstanceLog(t *testing.T, ctx context.Context, c *CoreLogCollector, engine core.Engine, share string) {
 	t.Helper()

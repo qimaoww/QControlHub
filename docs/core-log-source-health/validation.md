@@ -65,6 +65,10 @@ BUILD_OK
 $ go test ./internal/agent -run 'CoreLog|Journal|Import|Instance|SSRust' -count=1
 ok  github.com/qimaoww/qcontrolhub/internal/agent  55.085s
 
+$ QCH_LOG_LIVE=1 go test ./internal/agent -run TestSharedCoreLogLiveLifecycle -count=1   # Alpine/OpenRC and Ubuntu/systemd containers
+--- PASS: TestSharedCoreLogLiveLifecycle (60.08s)  # openrc: mihomo, xray, sing-box, ss-rust
+--- PASS: TestSharedCoreLogLiveLifecycle (81.24s)  # systemd: mihomo, xray, sing-box, ss-rust
+
 $ go test ./internal/store -count=1
 ok  github.com/qimaoww/qcontrolhub/internal/store  229.859s
 
@@ -91,5 +95,6 @@ ok  github.com/qimaoww/qcontrolhub/frontend
   independent probe yet. This branch proves delivery with `last_log_at`, isolates states
   per transport and promotes the host journal once it delivers, instead of treating
   "process started" as healthy.
-- The shared-instance live lifecycle (`QCH_LOG_LIVE=1`, isolated node image) and a real
-  OpenRC host were not run; OpenRC file sources are covered by unit tests.
+- The shared-instance live lifecycle (`QCH_LOG_LIVE=1`) was run in isolated containers on
+  2026-10-24: Alpine/OpenRC and Ubuntu/systemd, all four engines each. A real operator
+  OpenRC host was not used.
