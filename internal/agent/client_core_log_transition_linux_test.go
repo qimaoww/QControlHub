@@ -134,13 +134,13 @@ func TestDeployTaskOwnsSingBoxLogTransitionExactlyOnce(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
 			go func() { collector.Run(ctx); close(done) }()
-			waitForCoreLogSourceStatus(t, collector, core.EngineSingBox, "active")
+			waitForArmedCoreLogFile(t, collector, core.EngineSingBox)
 			key := string(core.EngineSingBox) + "\x00file"
 			collector.mu.Lock()
 			oldRun := collector.activeFiles[key]
 			collector.mu.Unlock()
 			if oldRun == nil {
-				t.Fatal("initial imported file watcher was not active")
+				t.Fatal("initial imported file watcher was not started")
 			}
 
 			client := &Client{

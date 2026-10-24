@@ -199,7 +199,10 @@ func (c *CoreLogCollector) InstanceStatuses() map[string]core.SharedInstanceStat
 		if state.Status == "" {
 			state.Status = "pending"
 		}
-		result[key] = core.SharedInstanceStatus{Engine: run.engine, ShareID: run.shareID, CoreLogStatus: state.Status, CoreLogError: state.Error}
+		result[key] = core.SharedInstanceStatus{
+			Engine: run.engine, ShareID: run.shareID, CoreLogStatus: state.Status, CoreLogError: state.Error,
+			CoreLogSource: state.Source, CoreLogLastAt: state.LastAt,
+		}
 	}
 	for key, state := range c.instanceFailures {
 		result[key] = state
@@ -241,18 +244,22 @@ func (c *CoreLogCollector) runSharedJournal(ctx context.Context, namespace bool,
 		}
 		source := newCoreLogJournalSource(units, namespace)
 		source.recoverySince = &recoverySince
-		source.setStatus = func(status, code string) {
+		source.report = func(unit string, engine core.Engine, status, code string) {
 			// The managed namespace is authoritative. A generic fallback can still
-			// prove itself by delivering a line; its absence cannot mask namespace health.
+			// prove itself per delivered line; its absence cannot mask namespace health.
 			if !namespace {
 				return
 			}
 			for _, child := range children {
-				child.collector.setSourceStatus(child.engine, "journal", status, code)
+				if child.engine == engine && child.spec.Service == unit {
+					child.collector.setSourceStatus(child.engine, source.kind, status, code)
+				}
 			}
 		}
 		if err := validatePrivilegedExecutable(journalctlPath); err != nil {
-			source.setStatus("failed", "collector-unavailable")
+			for unit, engine := range units {
+				c.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusFailed, "collector-unavailable")
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -288,7 +295,9 @@ func (c *CoreLogCollector) runSharedJournal(ctx context.Context, namespace bool,
 		if changed {
 			continue
 		}
-		source.setStatus("failed", coreLogErrorCode(outcome.err))
+		for unit, engine := range source.unitEngines {
+			c.reportJournalSourceFailure(source, unit, engine, outcome.err)
+		}
 		timer := time.NewTimer(2 * time.Second)
 		select {
 		case <-ctx.Done():

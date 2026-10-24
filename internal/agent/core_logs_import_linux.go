@@ -45,6 +45,14 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 				collector.replaceImportedSingBoxSource(nil)
 				return nil
 			}
+			// The kernel is installed but no managed configuration exists yet, so
+			// there is nothing to collect. That is not a read failure: the next
+			// deploy flips this source back to waiting and then active.
+			collector.markImportedSingBoxSourceNotConfigured()
+			if succeeded != nil {
+				return errors.New("managed sing-box configuration is missing after the source transition")
+			}
+			return nil
 		}
 		collector.failImportedSingBoxSource("config-unavailable")
 		return err
@@ -106,7 +114,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 		return err
 	}
 	source := coreLogFileSource{
-		path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "file",
+		path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "file", service: spec.Service,
 		configPath: spec.ConfigPath, configDigest: configDigest, markerPrefix: executor.MigrationMarkerPrefix,
 		executor: executor, ownership: ownership,
 	}
@@ -394,6 +402,17 @@ func (collector *CoreLogCollector) selectConsoleSource(engine core.Engine) {
 		kind = "journal"
 	}
 	collector.selectSourceKind(engine, kind, CoreLogSourceStatus{Status: "waiting", Error: "collector-starting"})
+}
+
+// markImportedSingBoxSourceNotConfigured reports an installed kernel with no
+// managed configuration. The file transport is named because that is where the
+// managed sing-box logs would live, and any previous error is replaced.
+func (collector *CoreLogCollector) markImportedSingBoxSourceNotConfigured() {
+	collector.mu.Lock()
+	delete(collector.transitions, core.EngineSingBox)
+	collector.mu.Unlock()
+	collector.replaceImportedSingBoxSource(nil)
+	collector.selectSourceStatus(core.EngineSingBox, core.CoreLogSourceFile, core.CoreLogStatusNotConfigured, core.CoreLogErrorConfigMissing)
 }
 
 func (collector *CoreLogCollector) failImportedSingBoxSource(code string) {

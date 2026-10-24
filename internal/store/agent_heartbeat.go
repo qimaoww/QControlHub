@@ -32,16 +32,34 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	if len(heartbeat.SharedInstances) > 256 {
 		return fmt.Errorf("%w: too many shared instance statuses", ErrInvalid)
 	}
-	for _, instance := range heartbeat.SharedInstances {
-		if instance.CoreLogStatus != "" && instance.CoreLogStatus != "active" && instance.CoreLogStatus != "waiting" && instance.CoreLogStatus != "failed" && instance.CoreLogStatus != "pending" {
+	for index := range heartbeat.SharedInstances {
+		instance := &heartbeat.SharedInstances[index]
+		if instance.CoreLogStatus != "" && !core.ValidCoreLogStatus(instance.CoreLogStatus) {
 			return fmt.Errorf("%w: invalid instance log status", ErrInvalid)
 		}
+		if !validCoreLogSource(instance.CoreLogSource) {
+			return fmt.Errorf("%w: invalid instance log source", ErrInvalid)
+		}
+		instance.CoreLogLastAt = normalizeCoreLogLastAt(instance.CoreLogLastAt, receivedAt)
 		if len(instance.CoreLogError) > 100 {
 			return fmt.Errorf("%w: invalid instance log error", ErrInvalid)
 		}
-		if err := validateSharedInstanceStatus(instance); err != nil {
+		if err := validateSharedInstanceStatus(*instance); err != nil {
 			return err
 		}
+	}
+	// The main instances carry the same agent-reported fields inside the
+	// runtime snapshot. Validate them under the same contract so the directory
+	// never has to trust a status, transport, or clock it does not understand.
+	for engine, state := range heartbeat.Runtime {
+		if state.CoreLogStatus != "" && !core.ValidCoreLogStatus(state.CoreLogStatus) {
+			return fmt.Errorf("%w: invalid core log status", ErrInvalid)
+		}
+		if !validCoreLogSource(state.CoreLogSource) {
+			return fmt.Errorf("%w: invalid core log source", ErrInvalid)
+		}
+		state.CoreLogLastAt = normalizeCoreLogLastAt(state.CoreLogLastAt, receivedAt)
+		heartbeat.Runtime[engine] = state
 	}
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
 	heartbeat.OS = strings.TrimSpace(heartbeat.OS)
@@ -112,26 +130,44 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 			reportedPolicies[usage.ShareID] = append(reportedPolicies[usage.ShareID], usage.PolicyID)
 		}
 	}
-	engines, instances, statuses, logErrors := []string{}, []string{}, []string{}, []string{}
+	engines, instances, statuses, logErrors, sources, lastAts := []string{}, []string{}, []string{}, []string{}, []string{}, []string{}
 	for _, instance := range heartbeat.SharedInstances {
 		if instance.CoreLogStatus != "" {
+			lastAt := ""
+			if instance.CoreLogLastAt != nil {
+				lastAt = instance.CoreLogLastAt.UTC().Format(time.RFC3339Nano)
+			}
 			engines = append(engines, string(instance.Engine))
 			instances = append(instances, instance.ShareID)
 			statuses = append(statuses, instance.CoreLogStatus)
-			logErrors = append(logErrors, instance.CoreLogError)
+			logErrors = append(logErrors, coreLogErrorForStatus(instance.CoreLogStatus, instance.CoreLogError))
+			sources = append(sources, instance.CoreLogSource)
+			lastAts = append(lastAts, lastAt)
 		}
 	}
 	if len(instances) > 0 {
-		if _, err := s.pool.Exec(ctx, `INSERT INTO core_log_source_states(agent_id,engine,instance_id,status,error)
- SELECT $1,r.engine,r.instance,r.status,r.error FROM (
- SELECT DISTINCT ON(engine,instance) engine,instance,status,error
- FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY r(engine,instance,status,error,ordinal)
+		if _, err := s.pool.Exec(ctx, `INSERT INTO core_log_source_states(agent_id,engine,instance_id,status,error,source,last_at)
+ SELECT $1,r.engine,r.instance,r.status,CASE WHEN r.status='failed' THEN r.error ELSE '' END,r.source,NULLIF(r.last_at,'')::timestamptz FROM (
+ SELECT DISTINCT ON(engine,instance) engine,instance,status,error,source,last_at
+ FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[]) WITH ORDINALITY r(engine,instance,status,error,source,last_at,ordinal)
  ORDER BY engine,instance,ordinal DESC) r
  JOIN agent_shared_instance_ownership o ON o.agent_id=$1 AND o.engine=r.engine AND o.share_id=r.instance
  JOIN agent_shares sh ON sh.id=o.share_id AND sh.agent_id=o.agent_id AND sh.user_id=o.owner_id
- ON CONFLICT(agent_id,engine,instance_id) DO UPDATE SET status=EXCLUDED.status,error=EXCLUDED.error,updated_at=now()`, id, engines, instances, statuses, logErrors); err != nil {
+  AND sh.enabled AND sh.status='accepted'
+ ON CONFLICT(agent_id,engine,instance_id) DO UPDATE SET status=EXCLUDED.status,error=EXCLUDED.error,
+  source=EXCLUDED.source,last_at=EXCLUDED.last_at,updated_at=now()`, id, engines, instances, statuses, logErrors, sources, lastAts); err != nil {
 			return err
 		}
+	}
+	// A revoked, disabled, or reassigned instance must not keep a status row
+	// that a later grant could mistake for a fresh observation.
+	if _, err := s.pool.Exec(ctx, `DELETE FROM core_log_source_states state
+ WHERE state.agent_id=$1 AND NOT EXISTS (
+  SELECT 1 FROM agent_shared_instance_ownership o
+  JOIN agent_shares sh ON sh.id=o.share_id AND sh.agent_id=o.agent_id AND sh.user_id=o.owner_id
+  WHERE o.agent_id=state.agent_id AND o.engine=state.engine AND o.share_id=state.instance_id
+   AND sh.enabled AND sh.status='accepted')`, id); err != nil {
+		return err
 	}
 	if len(heartbeat.SharedInstances) > 0 {
 		tx, err := s.pool.Begin(ctx)

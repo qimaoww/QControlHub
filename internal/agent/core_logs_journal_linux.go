@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLogJournalSource) {
@@ -27,8 +29,8 @@ func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLog
 			return
 		}
 		slog.Warn("managed core journal reader stopped", "error", err)
-		for _, engine := range source.unitEngines {
-			collector.setSourceStatus(engine, "journal", "failed", coreLogErrorCode(err))
+		for unit, engine := range source.unitEngines {
+			collector.reportJournalSourceFailure(source, unit, engine, err)
 		}
 		timer := time.NewTimer(2 * time.Second)
 		select {
@@ -62,13 +64,9 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 	// The separately captured tail position makes this readiness declaration
 	// safe: records written after that cursor (or the bounded timestamp used for
 	// an empty journal) remain readable while journalctl completes its startup.
-	if source.setStatus != nil {
-		source.setStatus("active", "")
-	} else {
-		for _, engine := range source.unitEngines {
-			collector.setSourceStatus(engine, "journal", "active", "")
-		}
-	}
+	// A started follower is still no proof of delivery, so report waiting until
+	// the first decoded record arrives instead of claiming active.
+	collector.reportJournalSourceArmed(source)
 	lastResume := resume
 	recoverySince := time.Now().UTC()
 	if source.recoverySince != nil {
@@ -86,14 +84,7 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 			if source.recoverySince != nil {
 				*source.recoverySince = recoverySince
 			}
-			if source.setStatus != nil && entry.InstanceID != "main" {
-				collector.instancesMu.Lock()
-				child := collector.instances[string(entry.Engine)+"/"+entry.InstanceID]
-				collector.instancesMu.Unlock()
-				if child != nil {
-					child.collector.setSourceStatus(entry.Engine, "journal", "active", "")
-				}
-			}
+			collector.markJournalDelivery(entry, source.kind)
 			collector.appendJournal(entry, cursor)
 		}
 	}
@@ -120,6 +111,66 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 		return lastResume, waitErr
 	}
 	return lastResume, io.EOF
+}
+
+// reportJournalSourceArmed publishes the armed-but-undelivered state of a
+// journal follower. The source may still be quiet, so the reason is either
+// awaiting-first-line or service-inactive when the unit is provably stopped.
+func (collector *CoreLogCollector) reportJournalSourceArmed(source coreLogJournalSource) {
+	for unit, engine := range source.unitEngines {
+		code := core.CoreLogErrorAwaitingFirstLog
+		if collector.coreLogServiceIdleForSource(source, unit) {
+			code = core.CoreLogErrorServiceInactive
+		}
+		collector.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusWaiting, code)
+	}
+}
+
+// coreLogServiceIdleForSource limits the service probe to the collector's own
+// journal sources. A shared follower covers every instance on the node and
+// probing each instance unit on every (re)start would scale with instance
+// count; instance health is reported separately per instance instead.
+func (collector *CoreLogCollector) coreLogServiceIdleForSource(source coreLogJournalSource, unit string) bool {
+	if source.report != nil {
+		return false
+	}
+	return collector.coreLogServiceIdle(unit)
+}
+
+// reportJournalSourceFailure keeps a stopped unit out of the failed state: an
+// idle service cannot write records, so an empty or unreachable journal is not
+// a read failure. Permission and helper failures keep their failed code.
+func (collector *CoreLogCollector) reportJournalSourceFailure(source coreLogJournalSource, unit string, engine core.Engine, err error) {
+	code := coreLogErrorCode(err)
+	if code == "collector-failed" && collector.coreLogServiceIdleForSource(source, unit) {
+		collector.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusWaiting, core.CoreLogErrorServiceInactive)
+		return
+	}
+	collector.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusFailed, code)
+}
+
+func (collector *CoreLogCollector) reportJournalSourceStatus(source coreLogJournalSource, unit string, engine core.Engine, status, code string) {
+	if source.report != nil {
+		source.report(unit, engine, status, code)
+		return
+	}
+	collector.setSourceStatus(engine, source.kind, status, code)
+}
+
+// markJournalDelivery records a decoded record for the instance that owns it. A
+// shared follower must credit the instance collector, not the parent, so a
+// broken instance never masks a healthy sibling.
+func (collector *CoreLogCollector) markJournalDelivery(entry core.CoreLogEntry, kind string) {
+	target := collector
+	if entry.InstanceID != "main" {
+		collector.instancesMu.Lock()
+		child := collector.instances[string(entry.Engine)+"/"+entry.InstanceID]
+		collector.instancesMu.Unlock()
+		if child != nil {
+			target = child.collector
+		}
+	}
+	target.markCoreLogDelivery(entry.Engine, kind)
 }
 
 func captureJournalPosition(ctx context.Context, source coreLogJournalSource) (string, error) {
