@@ -88,7 +88,15 @@ func (collector *CoreLogCollector) coreLogFileArmCode(source coreLogFileSource) 
 func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource, run *coreLogFileRun) {
 	for ctx.Err() == nil {
 		err := collector.followFile(ctx, source, run)
-		source.initial = nil
+		// Retry from the last complete line already published by this binding.
+		// A fresh inode or a truncated file is handled by followFile's identity
+		// checks; the initial no-history EOF rule applies only to the first open.
+		collector.filePublishMu.Lock()
+		if run != nil && run.progress.exists {
+			progress := run.progress
+			source.initial = &progress
+		}
+		collector.filePublishMu.Unlock()
 		if ctx.Err() == nil {
 			slog.Warn("managed core log file reader stopped", "path", source.path, "error", err)
 			collector.setFileSourceStatus(source, "failed", coreLogErrorCode(err))

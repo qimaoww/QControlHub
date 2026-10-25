@@ -66,7 +66,7 @@ service_manager=${QCH_SERVICE_MANAGER:-}
 if [ -z "$service_manager" ]; then
   if [ -f /etc/alpine-release ]; then
     command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
-    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc >/dev/null
+    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc util-linux >/dev/null
     service_manager=openrc
   elif command -v "$systemctl_cmd" >/dev/null 2>&1; then
     service_manager=systemd

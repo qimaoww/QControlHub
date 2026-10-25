@@ -245,11 +245,6 @@ func (c *CoreLogCollector) runSharedJournal(ctx context.Context, namespace bool,
 		source := newCoreLogJournalSource(units, namespace)
 		source.recoverySince = &recoverySince
 		source.report = func(unit string, engine core.Engine, status, code string) {
-			// The managed namespace is authoritative. A generic fallback can still
-			// prove itself per delivered line; its absence cannot mask namespace health.
-			if !namespace {
-				return
-			}
 			for _, child := range children {
 				if child.engine == engine && child.spec.Service == unit {
 					child.collector.setSourceStatus(child.engine, source.kind, status, code)
