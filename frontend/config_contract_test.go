@@ -180,7 +180,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`beforeDeploy`,
 		`submitLiveConfigChange`,
 		`!unsupportedReason`,
-		`redactDiagnostic(source?.error || unsupportedReason)`,
+		`diagnosticError(source?.error || unsupportedReason)`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("manual configuration flow is missing %q", required)
