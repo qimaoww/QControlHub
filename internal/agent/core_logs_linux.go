@@ -53,30 +53,32 @@ type CoreLogCollector struct {
 	instanceFailures    map[string]core.SharedInstanceStatus
 	fileBudgetInstances int
 
-	mu                 sync.Mutex
-	filePublishMu      sync.Mutex
-	queued             []core.CoreLogEntry
-	pending            *core.CoreLogBatch
-	dropped            uint64
-	sources            []coreLogJournalSource
-	fileSources        []coreLogFileSource
-	seenCursors        map[string]struct{}
-	cursorOrder        []string
-	runContext         context.Context
-	runWait            sync.WaitGroup
-	runStopped         bool
-	activeFiles        map[string]*coreLogFileRun
-	status             map[core.Engine]CoreLogSourceStatus
-	statusKind         map[core.Engine]string
-	kindStatus         map[core.Engine]map[string]CoreLogSourceStatus
-	preferredKind      map[core.Engine]string
-	consoleKind        map[core.Engine]string
-	transitions        map[core.Engine]*coreLogSourceTransition
-	nextFileEpoch      uint64
-	sourceReady        map[core.Engine]chan struct{}
-	coreLogMaxBytes    int64
-	coreLogRotateCount int
-	fileBudgetDivisor  int
+	mu                   sync.Mutex
+	filePublishMu        sync.Mutex
+	queued               []core.CoreLogEntry
+	pending              *core.CoreLogBatch
+	dropped              uint64
+	sources              []coreLogJournalSource
+	fileSources          []coreLogFileSource
+	seenCursors          map[string]struct{}
+	cursorOrder          []string
+	runContext           context.Context
+	runWait              sync.WaitGroup
+	runStopped           bool
+	activeFiles          map[string]*coreLogFileRun
+	status               map[core.Engine]CoreLogSourceStatus
+	statusKind           map[core.Engine]string
+	kindStatus           map[core.Engine]map[string]CoreLogSourceStatus
+	preferredKind        map[core.Engine]string
+	consoleKind          map[core.Engine]string
+	transitions          map[core.Engine]*coreLogSourceTransition
+	nextFileEpoch        uint64
+	sourceReady          map[core.Engine]chan struct{}
+	coreLogMaxBytes      int64
+	coreLogRotateCount   int
+	fileBudgetDivisor    int
+	configuredPaths      map[string]bool
+	missingSingBoxConfig bool
 }
 
 type coreLogFileRun struct {
@@ -286,6 +288,9 @@ func (collector *CoreLogCollector) Status() map[core.Engine]CoreLogSourceStatus 
 	defer collector.mu.Unlock()
 	result := make(map[core.Engine]CoreLogSourceStatus, len(collector.status))
 	for engine, status := range collector.status {
+		if engine == core.EngineSingBox && collector.missingSingBoxConfig {
+			status = CoreLogSourceStatus{Status: core.CoreLogStatusFailed, Error: core.CoreLogErrorConfigMissing, Source: core.CoreLogSourceFile}
+		}
 		result[engine] = status
 	}
 	return result
@@ -323,6 +328,14 @@ func (collector *CoreLogCollector) setSourceStatusLocked(engine core.Engine, kin
 	if preferred := collector.preferredKind[engine]; preferred != "" && preferred != kind {
 		return
 	}
+	if status == core.CoreLogStatusFailed && collector.isConsoleSourceLocked(engine, kind) {
+		if alternate, healthy, _ := collector.consoleSourceLocked(engine); healthy.Status == core.CoreLogStatusActive {
+			collector.preferredKind[engine] = alternate
+			collector.status[engine] = healthy
+			collector.statusKind[engine] = alternate
+			return
+		}
+	}
 	collector.status[engine] = value
 	collector.statusKind[engine] = kind
 }
@@ -332,13 +345,48 @@ func (collector *CoreLogCollector) setSourceStatusLocked(engine core.Engine, kin
 // state: a line written from now on is readable. Active additionally requires a
 // delivered line and is reported separately.
 func (collector *CoreLogCollector) armSourceReadyLocked(engine core.Engine, kind, status string) {
-	if kind != collector.consoleKind[engine] || collector.sourceReady[engine] == nil {
+	if !collector.isConsoleSourceLocked(engine, kind) || collector.sourceReady[engine] == nil {
 		return
 	}
-	if status == core.CoreLogStatusWaiting || status == core.CoreLogStatusActive {
+	if coreLogTransportReady(collector.kindStatus[engine][kind]) {
 		close(collector.sourceReady[engine])
 		collector.sourceReady[engine] = nil
 	}
+}
+
+func coreLogTransportReady(status CoreLogSourceStatus) bool {
+	return status.Status == core.CoreLogStatusActive || status.Status == core.CoreLogStatusWaiting &&
+		(status.Error == core.CoreLogErrorAwaitingFirstLog || status.Error == core.CoreLogErrorServiceInactive || status.Error == "")
+}
+
+func (collector *CoreLogCollector) isConsoleSourceLocked(engine core.Engine, kind string) bool {
+	console := collector.consoleKind[engine]
+	return console != "" && (kind == console || console == core.CoreLogSourceJournal &&
+		(kind == core.CoreLogSourceJournalHost || kind == core.CoreLogSourceFallback))
+}
+
+// Preserve the current working transport. An active alternative wins over an
+// armed-but-quiet reader, and a missing file never satisfies console readiness.
+func (collector *CoreLogCollector) consoleSourceLocked(engine core.Engine) (string, CoreLogSourceStatus, bool) {
+	preferred := collector.preferredKind[engine]
+	if collector.isConsoleSourceLocked(engine, preferred) {
+		if value := collector.kindStatus[engine][preferred]; value.Status == core.CoreLogStatusActive {
+			return preferred, value, true
+		}
+	}
+	kinds := []string{collector.consoleKind[engine], core.CoreLogSourceJournalHost, core.CoreLogSourceFallback}
+	for _, kind := range kinds {
+		if value := collector.kindStatus[engine][kind]; collector.isConsoleSourceLocked(engine, kind) && value.Status == core.CoreLogStatusActive {
+			return kind, value, true
+		}
+	}
+	for _, kind := range append([]string{preferred}, kinds...) {
+		if value := collector.kindStatus[engine][kind]; collector.isConsoleSourceLocked(engine, kind) && coreLogTransportReady(value) {
+			return kind, value, true
+		}
+	}
+	kind := collector.consoleKind[engine]
+	return kind, collector.kindStatus[engine][kind], false
 }
 
 // markCoreLogDelivery records one collected line for the transport that
@@ -407,7 +455,7 @@ func (collector *CoreLogCollector) coreLogServiceIdle(service string) bool {
 		state = probed
 	}
 	switch strings.TrimSpace(state) {
-	case "inactive", "failed", "activating", "deactivating", "reloading":
+	case "inactive", "failed":
 		return true
 	}
 	return false

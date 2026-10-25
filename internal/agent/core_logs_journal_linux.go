@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -106,7 +107,7 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 			lastResume = fmt.Sprintf("--since=@%d.%06d", recoverySince.Unix(), recoverySince.Nanosecond()/int(time.Microsecond))
 		}
 		if message != "" {
-			return lastResume, errors.New(message)
+			return lastResume, journalCommandError(message, waitErr)
 		}
 		return lastResume, waitErr
 	}
@@ -137,12 +138,10 @@ func (collector *CoreLogCollector) coreLogServiceIdleForSource(source coreLogJou
 	return collector.coreLogServiceIdle(unit)
 }
 
-// reportJournalSourceFailure keeps a stopped unit out of the failed state: an
-// idle service cannot write records, so an empty or unreachable journal is not
-// a read failure. Permission and helper failures keep their failed code.
+// A clean EOF from an idle service is distinct from a failed journal reader.
 func (collector *CoreLogCollector) reportJournalSourceFailure(source coreLogJournalSource, unit string, engine core.Engine, err error) {
 	code := coreLogErrorCode(err)
-	if code == "collector-failed" && collector.coreLogServiceIdleForSource(source, unit) {
+	if errors.Is(err, io.EOF) && collector.coreLogServiceIdleForSource(source, unit) {
 		collector.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusWaiting, core.CoreLogErrorServiceInactive)
 		return
 	}
@@ -166,9 +165,10 @@ func (collector *CoreLogCollector) markJournalDelivery(entry core.CoreLogEntry, 
 		collector.instancesMu.Lock()
 		child := collector.instances[string(entry.Engine)+"/"+entry.InstanceID]
 		collector.instancesMu.Unlock()
-		if child != nil {
-			target = child.collector
+		if child == nil || child.spec.Service != entry.Service {
+			return
 		}
+		target = child.collector
 	}
 	target.markCoreLogDelivery(entry.Engine, kind)
 }
@@ -190,7 +190,7 @@ func captureJournalPosition(ctx context.Context, source coreLogJournalSource) (s
 		empty := errors.As(err, &exit) && exit.ExitCode() == 1 && message == "" && strings.TrimSpace(stdout.String()) == ""
 		if !empty {
 			if message != "" {
-				return "", errors.New(message)
+				return "", journalCommandError(message, err)
 			}
 			return "", err
 		}
@@ -215,6 +215,14 @@ func captureJournalPosition(ctx context.Context, source coreLogJournalSource) (s
 	seconds := capturedAt.Unix()
 	microseconds := capturedAt.Nanosecond() / int(time.Microsecond)
 	return fmt.Sprintf("--since=@%d.%06d", seconds, microseconds), nil
+}
+
+func journalCommandError(message string, cause error) error {
+	text := strings.ToLower(message)
+	if strings.Contains(text, "permission denied") || strings.Contains(text, "operation not permitted") || strings.Contains(text, "access denied") {
+		return fmt.Errorf("%s: %w", message, os.ErrPermission)
+	}
+	return fmt.Errorf("%s: %w", message, cause)
 }
 
 func journalCursorArguments(arguments []string) []string {

@@ -197,6 +197,10 @@ func (e *Executor) validateManagedServiceSnapshot(ctx context.Context, engine co
 }
 
 func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core.Engine, spec EngineSpec, content string, identity *commandIdentity, metadata fileMetadata) (string, error) {
+	return e.validateSnapshotCandidate(ctx, engine, spec, content, identity, metadata, spec.Binary, "")
+}
+
+func (e *Executor) validateSnapshotCandidate(ctx context.Context, engine core.Engine, spec EngineSpec, content string, identity *commandIdentity, metadata fileMetadata, binary, candidateEnvironment string) (string, error) {
 	// Core diagnostics may echo an invalid inline key. Redact before any
 	// caller can persist validation output or include it in a task error.
 	redact := coreDiagnosticRedactor(engine, content)
@@ -204,16 +208,16 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
-	if _, err := exec.LookPath(spec.Binary); err != nil {
-		return "", fmt.Errorf("%s binary not found in PATH", spec.Binary)
+	if _, err := exec.LookPath(binary); err != nil {
+		return "", fmt.Errorf("%s binary not found in PATH", binary)
 	}
 	if engine == core.EngineXray {
-		if err := validateXrayXHTTPCapabilities(ctx, spec.Binary, content); err != nil {
+		if err := validateXrayXHTTPCapabilities(ctx, binary, content); err != nil {
 			return "", err
 		}
 	}
 	if engine == core.EngineSingBox {
-		if err := validateSingBoxCapabilities(ctx, spec.Binary, content); err != nil {
+		if err := validateSingBoxCapabilities(ctx, binary, content); err != nil {
 			return "", err
 		}
 	}
@@ -310,10 +314,13 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
 	environment := spec.commandEnv
+	if candidateEnvironment != "" {
+		environment = candidateEnvironment
+	}
 	if engine == core.EngineMihomo && identity != nil {
 		environment = "SAFE_PATHS=" + directory + ":/etc/qcontrolhub/tls:" + coreCertificateWorkingDirectory(engine, spec, e.serviceManager().Kind())
 	}
-	output, err := e.runManagedIdentityCommand(ctx, directory, environment, spec.Binary, identity, args...)
+	output, err := e.runManagedIdentityCommand(ctx, directory, environment, binary, identity, args...)
 	output = redact(output)
 	if validationHomeName != "" {
 		cleanupErr := e.cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
@@ -375,6 +382,10 @@ func (e *Executor) runManagedIdentityCommand(ctx context.Context, directory, env
 }
 
 func (e *Executor) runSystemdValidationIdentityCommand(ctx context.Context, directory, environment, name string, identity commandIdentity, args ...string) (string, error) {
+	return e.runSystemdValidationCommand(ctx, directory, environment, name, identity, nil, args...)
+}
+
+func (e *Executor) runSystemdValidationCommand(ctx context.Context, directory, environment, name string, identity commandIdentity, properties []string, args ...string) (string, error) {
 	systemdRun := "/usr/bin/systemd-run"
 	if e != nil && strings.TrimSpace(e.validationSystemdRunPath) != "" {
 		systemdRun = e.validationSystemdRunPath
@@ -399,6 +410,9 @@ func (e *Executor) runSystemdValidationIdentityCommand(ctx context.Context, dire
 	}
 	for _, item := range commandEnvironment(environment) {
 		arguments = append(arguments, "--setenv="+item)
+	}
+	for _, property := range properties {
+		arguments = append(arguments, "--property="+property)
 	}
 	arguments = append(arguments, "--", name)
 	arguments = append(arguments, args...)

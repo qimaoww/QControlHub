@@ -273,7 +273,7 @@ func TestJournalReadFailureFollowsServiceState(t *testing.T) {
 		wantStatus string
 		wantError  string
 	}{
-		{name: "inactive service waits", service: "inactive", wantStatus: core.CoreLogStatusWaiting, wantError: core.CoreLogErrorServiceInactive},
+		{name: "inactive service keeps read failure", service: "inactive", wantStatus: core.CoreLogStatusFailed, wantError: "collector-failed"},
 		{name: "running service fails", service: "active", wantStatus: core.CoreLogStatusFailed, wantError: "collector-failed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
