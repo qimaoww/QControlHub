@@ -99,11 +99,18 @@ func NewCoreUpdater() *CoreUpdater {
 }
 
 func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager) (string, error) {
-	return updater.install(ctx, engine, spec, selector, source, manager, true)
+	return updater.installWithTransaction(ctx, engine, spec, selector, source, manager, true, managedCoreUpdateTransaction(nil, engine, spec, manager))
 }
 
 // Preparation verifies and publishes the binary without touching any service.
 func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager, activate bool) (string, error) {
+	return updater.installWithTransaction(ctx, engine, spec, selector, source, manager, activate, nil)
+}
+
+func (updater *CoreUpdater) installWithTransaction(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager, activate bool, transaction coreUpdateTransaction) (string, error) {
+	if transaction != nil {
+		defer transaction.Close()
+	}
 	if updater == nil {
 		return "", errors.New("core updater is required")
 	}
@@ -157,9 +164,35 @@ func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spe
 	for _, tempAsset := range xrayAssets {
 		defer root.Remove(tempAsset)
 	}
+	preflightOutput := ""
+	if transaction != nil {
+		preflightOutput, err = transaction.Preflight(ctx, root, tempName, xrayAssets)
+		if err != nil {
+			return preflightOutput, fmt.Errorf("core update compatibility check failed before binary/resource replacement: %w", err)
+		}
+		stopOutput, stopErr := transaction.Stop(ctx)
+		preflightOutput = joinCoreUpdateOutput(preflightOutput, stopOutput)
+		if stopErr != nil {
+			recoveryCtx, cancel := coreUpdateRecoveryContext()
+			recoveryOutput, recoveryErr := transaction.Recover(recoveryCtx)
+			cancel()
+			return joinCoreUpdateOutput(preflightOutput, recoveryOutput), errors.Join(stopErr, recoveryErr)
+		}
+	}
 	backup, err := replaceCoreBinary(root, filepath.Base(spec.Binary), tempName)
 	if err != nil {
-		return "", err
+		rollbackOutput := ""
+		var rollbackErr error
+		if _, candidateErr := root.Lstat(tempName); backup != "" || errors.Is(candidateErr, os.ErrNotExist) {
+			rollbackOutput, rollbackErr = rollbackCoreBinary(root, filepath.Base(spec.Binary), backup)
+		}
+		if transaction != nil {
+			recoveryCtx, cancel := coreUpdateRecoveryContext()
+			recoveryOutput, recoveryErr := transaction.Recover(recoveryCtx)
+			cancel()
+			return joinCoreUpdateOutput(preflightOutput, rollbackOutput, recoveryOutput), errors.Join(err, rollbackErr, recoveryErr)
+		}
+		return joinCoreUpdateOutput(preflightOutput, rollbackOutput), errors.Join(err, rollbackErr)
 	}
 	assetBackups := make(map[string]string, len(xrayAssets))
 	for _, name := range xrayMigrationAssetNames {
@@ -169,11 +202,18 @@ func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spe
 		}
 		assetBackup, assetErr := replaceCoreAsset(root, name, tempAsset)
 		if assetErr != nil {
-			for installedName, installedBackup := range assetBackups {
-				_, _ = rollbackCoreBinary(root, installedName, installedBackup)
+			if _, candidateErr := root.Lstat(tempAsset); assetBackup != "" || errors.Is(candidateErr, os.ErrNotExist) {
+				assetBackups[name] = assetBackup
 			}
-			_, _ = rollbackCoreBinary(root, filepath.Base(spec.Binary), backup)
-			return "", fmt.Errorf("install Xray resource %s: %w", name, assetErr)
+			rollbackOutput, rollbackErr := rollbackCoreUpdateFiles(root, filepath.Base(spec.Binary), backup, assetBackups)
+			if transaction != nil {
+				recoveryCtx, cancel := coreUpdateRecoveryContext()
+				recoveryOutput, recoveryErr := transaction.Recover(recoveryCtx)
+				cancel()
+				rollbackOutput = joinCoreUpdateOutput(rollbackOutput, recoveryOutput)
+				rollbackErr = errors.Join(rollbackErr, recoveryErr)
+			}
+			return joinCoreUpdateOutput(preflightOutput, rollbackOutput), errors.Join(fmt.Errorf("install Xray resource %s: %w", name, assetErr), rollbackErr)
 		}
 		assetBackups[name] = assetBackup
 	}
@@ -181,7 +221,11 @@ func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spe
 	restartOutput := ""
 	var restartErr error
 	if activate {
-		restartOutput, restartErr = serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
+		if transaction != nil {
+			restartOutput, restartErr = transaction.Activate(ctx)
+		} else {
+			restartOutput, restartErr = serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
+		}
 	}
 	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Digest, spec.Binary)
 	if fallbackReason != "" {
@@ -193,24 +237,35 @@ func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spe
 	if versionOutput != "" {
 		output += "\nversion: " + versionOutput
 	}
+	output = joinCoreUpdateOutput(preflightOutput, output)
 	if restartOutput != "" {
 		output += "\n" + restartOutput
 	}
 	if restartErr == nil {
 		return output, nil
 	}
-	for name, assetBackup := range assetBackups {
-		if _, assetRollbackErr := rollbackCoreBinary(root, name, assetBackup); assetRollbackErr != nil {
-			return output, fmt.Errorf("core restart failed (%v); roll back Xray resource %s: %w", restartErr, name, assetRollbackErr)
-		}
+	if transaction != nil {
+		stopCtx, cancel := coreUpdateRecoveryContext()
+		stopOutput, stopErr := transaction.Stop(stopCtx)
+		cancel()
+		output = joinCoreUpdateOutput(output, stopOutput)
+		restartErr = errors.Join(restartErr, stopErr)
 	}
-	rollbackOutput, rollbackErr := rollbackCoreBinary(root, filepath.Base(spec.Binary), backup)
+	rollbackOutput, rollbackErr := rollbackCoreUpdateFiles(root, filepath.Base(spec.Binary), backup, assetBackups)
 	if rollbackOutput != "" {
 		output += "\n" + rollbackOutput
 	}
-	if rollbackErr != nil {
-		return output, fmt.Errorf("core installed but service restart failed (%v); binary rollback also failed: %w", restartErr, rollbackErr)
+	if transaction != nil {
+		recoveryCtx, cancel := coreUpdateRecoveryContext()
+		recoveryOutput, recoveryErr := transaction.Recover(recoveryCtx)
+		cancel()
+		output = joinCoreUpdateOutput(output, recoveryOutput)
+		if recoveryErr != nil || rollbackErr != nil {
+			return output, errors.Join(fmt.Errorf("core activation failed: %w", restartErr), rollbackErr, recoveryErr)
+		}
+		return output, fmt.Errorf("core activation failed; previous files and instance states were restored: %w", restartErr)
 	}
+	var recoveryErr error
 	if backup == "" {
 		// A first-install service commonly uses automatic respawn. Once the new
 		// binary is removed, its supervisor can otherwise keep retrying a
@@ -219,20 +274,19 @@ func (updater *CoreUpdater) install(ctx context.Context, engine core.Engine, spe
 		if stopOutput != "" {
 			output += "\nrollback stop: " + stopOutput
 		}
-		if stopErr != nil {
-			return output, fmt.Errorf("new core restart failed (%v); binary was removed but the failed service could not be stopped: %w", restartErr, stopErr)
-		}
+		recoveryErr = stopErr
 	}
 	if backup != "" {
 		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		recoveryOutput, recoveryErr := serviceCommandAndVerifyWithManager(recoveryContext, manager, spec.Service, core.ActionRestart)
+		var recoveryOutput string
+		recoveryOutput, recoveryErr = serviceCommandAndVerifyWithManager(recoveryContext, manager, spec.Service, core.ActionRestart)
 		recoveryCancel()
 		if recoveryOutput != "" {
 			output += "\nrollback restart: " + recoveryOutput
 		}
-		if recoveryErr != nil {
-			return output, fmt.Errorf("new core restart failed (%v); previous binary restored but recovery failed: %w", restartErr, recoveryErr)
-		}
+	}
+	if rollbackErr != nil || recoveryErr != nil {
+		return output, errors.Join(fmt.Errorf("new core restart failed: %w", restartErr), rollbackErr, recoveryErr)
 	}
 	return output, fmt.Errorf("new core restart failed and the binary change was rolled back: %w", restartErr)
 }

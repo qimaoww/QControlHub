@@ -105,13 +105,14 @@ export async function submitLiveConfigChange({
   if (intent === "save") return { saved, content: editor.content };
   if (intent === "deploy" || intent === "validate") {
     if (intent === "validate") {
+      // The workspace shows the task outcome inline, so skip the global toast.
       const task = await submitTask({
         agent_id: agent.id,
         engine,
         action: "validate",
         config_id: saved.id,
         expected_config_version: saved.version,
-      });
+      }, undefined, { quiet: true });
       return { saved, content: editor.content, task };
     }
     const task = await submitTask({
@@ -120,7 +121,7 @@ export async function submitLiveConfigChange({
       action: "deploy",
       config_id: saved.id,
       expected_config_version: saved.version,
-    });
+    }, undefined, { quiet: true });
     if (!task?.id) throw new Error("部署任务未创建");
     onDeployTask?.(task.id);
     return { saved, content: editor.content, task };

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,7 +39,11 @@ var (
 type CoreLogCollector struct {
 	sharedJournalUpdates [2]chan struct{}
 
-	executor            *Executor
+	executor *Executor
+	manager  *ServiceManager
+	// serviceState is a test seam for the managed service probe that keeps a
+	// stopped core from being reported as a read failure.
+	serviceState        func(service string) (string, error)
 	parent              *CoreLogCollector
 	instanceID          string
 	instanceService     string
@@ -48,30 +53,32 @@ type CoreLogCollector struct {
 	instanceFailures    map[string]core.SharedInstanceStatus
 	fileBudgetInstances int
 
-	mu                 sync.Mutex
-	filePublishMu      sync.Mutex
-	queued             []core.CoreLogEntry
-	pending            *core.CoreLogBatch
-	dropped            uint64
-	sources            []coreLogJournalSource
-	fileSources        []coreLogFileSource
-	seenCursors        map[string]struct{}
-	cursorOrder        []string
-	runContext         context.Context
-	runWait            sync.WaitGroup
-	runStopped         bool
-	activeFiles        map[string]*coreLogFileRun
-	status             map[core.Engine]CoreLogSourceStatus
-	statusKind         map[core.Engine]string
-	kindStatus         map[core.Engine]map[string]CoreLogSourceStatus
-	preferredKind      map[core.Engine]string
-	consoleKind        map[core.Engine]string
-	transitions        map[core.Engine]*coreLogSourceTransition
-	nextFileEpoch      uint64
-	sourceReady        map[core.Engine]chan struct{}
-	coreLogMaxBytes    int64
-	coreLogRotateCount int
-	fileBudgetDivisor  int
+	mu                   sync.Mutex
+	filePublishMu        sync.Mutex
+	queued               []core.CoreLogEntry
+	pending              *core.CoreLogBatch
+	dropped              uint64
+	sources              []coreLogJournalSource
+	fileSources          []coreLogFileSource
+	seenCursors          map[string]struct{}
+	cursorOrder          []string
+	runContext           context.Context
+	runWait              sync.WaitGroup
+	runStopped           bool
+	activeFiles          map[string]*coreLogFileRun
+	status               map[core.Engine]CoreLogSourceStatus
+	statusKind           map[core.Engine]string
+	kindStatus           map[core.Engine]map[string]CoreLogSourceStatus
+	preferredKind        map[core.Engine]string
+	consoleKind          map[core.Engine]string
+	transitions          map[core.Engine]*coreLogSourceTransition
+	nextFileEpoch        uint64
+	sourceReady          map[core.Engine]chan struct{}
+	coreLogMaxBytes      int64
+	coreLogRotateCount   int
+	fileBudgetDivisor    int
+	configuredPaths      map[string]bool
+	missingSingBoxConfig bool
 }
 
 type coreLogFileRun struct {
@@ -99,17 +106,26 @@ type coreLogSourceTransition struct {
 }
 
 type coreLogJournalSource struct {
-	arguments     []string
-	unitEngines   map[string]core.Engine
-	setStatus     func(string, string)
+	arguments   []string
+	unitEngines map[string]core.Engine
+	// kind is the transport this source reports: the managed journal namespace
+	// or the host journal.
+	kind string
+	// report delivers this source's status for one unit. A nil report means the
+	// source belongs to the collector itself; shared journals report through
+	// their instance collectors instead.
+	report        func(unit string, engine core.Engine, status, code string)
 	recoverySince *time.Time
 }
 
 type coreLogFileSource struct {
-	path         string
-	root         string
-	engine       core.Engine
-	kind         string
+	path   string
+	root   string
+	engine core.Engine
+	kind   string
+	// service owns the files this source reads; it is probed to keep a stopped
+	// service out of the failed state.
+	service      string
 	configPath   string
 	configDigest string
 	markerPrefix string
@@ -125,6 +141,11 @@ type coreLogFileSource struct {
 type CoreLogSourceStatus struct {
 	Status string
 	Error  string
+	// Source is the transport that produced Status. A nil LastAt means this
+	// transport has not delivered a line yet, which separates a quiet source
+	// from a broken one.
+	Source string
+	LastAt *time.Time
 }
 
 func NewCoreLogCollector(specs ...map[core.Engine]EngineSpec) *CoreLogCollector {
@@ -137,6 +158,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 	}
 	collector := &CoreLogCollector{
 		activeFiles: make(map[string]*coreLogFileRun), status: make(map[core.Engine]CoreLogSourceStatus),
+		manager:    manager,
 		statusKind: make(map[core.Engine]string), kindStatus: make(map[core.Engine]map[string]CoreLogSourceStatus),
 		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
 		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
@@ -266,6 +288,9 @@ func (collector *CoreLogCollector) Status() map[core.Engine]CoreLogSourceStatus 
 	defer collector.mu.Unlock()
 	result := make(map[core.Engine]CoreLogSourceStatus, len(collector.status))
 	for engine, status := range collector.status {
+		if engine == core.EngineSingBox && collector.missingSingBoxConfig {
+			status = CoreLogSourceStatus{Status: core.CoreLogStatusFailed, Error: core.CoreLogErrorConfigMissing, Source: core.CoreLogSourceFile}
+		}
 		result[engine] = status
 	}
 	return result
@@ -290,18 +315,153 @@ func (collector *CoreLogCollector) setSourceStatusLocked(engine core.Engine, kin
 	if collector.kindStatus[engine] == nil {
 		collector.kindStatus[engine] = make(map[string]CoreLogSourceStatus)
 	}
-	value := CoreLogSourceStatus{Status: status, Error: code}
-	collector.kindStatus[engine][kind] = value
-	armed := status == "active" || (kind == "openrc" && status == "waiting")
-	if armed && kind == collector.consoleKind[engine] && collector.sourceReady[engine] != nil {
-		close(collector.sourceReady[engine])
-		collector.sourceReady[engine] = nil
+	value := collector.kindStatus[engine][kind]
+	value.Status = status
+	value.Error = code
+	value.Source = kind
+	if status == core.CoreLogStatusActive {
+		now := time.Now().UTC()
+		value.LastAt = &now
 	}
+	collector.kindStatus[engine][kind] = value
+	collector.armSourceReadyLocked(engine, kind, status)
 	if preferred := collector.preferredKind[engine]; preferred != "" && preferred != kind {
 		return
 	}
+	if status == core.CoreLogStatusFailed && collector.isConsoleSourceLocked(engine, kind) {
+		if alternate, healthy, _ := collector.consoleSourceLocked(engine); healthy.Status == core.CoreLogStatusActive {
+			collector.preferredKind[engine] = alternate
+			collector.status[engine] = healthy
+			collector.statusKind[engine] = alternate
+			return
+		}
+	}
 	collector.status[engine] = value
 	collector.statusKind[engine] = kind
+}
+
+// armSourceReadyLocked releases the deployment barrier once the console
+// transport is armed. Waiting (cursor fixed, file opened at EOF) is the armed
+// state: a line written from now on is readable. Active additionally requires a
+// delivered line and is reported separately.
+func (collector *CoreLogCollector) armSourceReadyLocked(engine core.Engine, kind, status string) {
+	if !collector.isConsoleSourceLocked(engine, kind) || collector.sourceReady[engine] == nil {
+		return
+	}
+	if coreLogTransportReady(collector.kindStatus[engine][kind]) {
+		close(collector.sourceReady[engine])
+		collector.sourceReady[engine] = nil
+	}
+}
+
+func coreLogTransportReady(status CoreLogSourceStatus) bool {
+	// OpenRC creates output_log on first service start. Its armed follower
+	// reads that newly created file from zero, so it must allow that start.
+	return status.Status == core.CoreLogStatusActive || status.Status == core.CoreLogStatusWaiting &&
+		(status.Error == core.CoreLogErrorAwaitingFirstLog || status.Error == core.CoreLogErrorServiceInactive || status.Error == "" ||
+			status.Source == core.CoreLogSourceOpenRC && status.Error == core.CoreLogErrorSourceMissing)
+}
+
+func (collector *CoreLogCollector) isConsoleSourceLocked(engine core.Engine, kind string) bool {
+	console := collector.consoleKind[engine]
+	return console != "" && (kind == console || console == core.CoreLogSourceJournal &&
+		(kind == core.CoreLogSourceJournalHost || kind == core.CoreLogSourceFallback))
+}
+
+// Preserve the current working transport. An active alternative wins over an
+// armed-but-quiet reader. An absent fallback never satisfies journal readiness.
+func (collector *CoreLogCollector) consoleSourceLocked(engine core.Engine) (string, CoreLogSourceStatus, bool) {
+	preferred := collector.preferredKind[engine]
+	if collector.isConsoleSourceLocked(engine, preferred) {
+		if value := collector.kindStatus[engine][preferred]; value.Status == core.CoreLogStatusActive {
+			return preferred, value, true
+		}
+	}
+	kinds := []string{collector.consoleKind[engine], core.CoreLogSourceJournalHost, core.CoreLogSourceFallback}
+	for _, kind := range kinds {
+		if value := collector.kindStatus[engine][kind]; collector.isConsoleSourceLocked(engine, kind) && value.Status == core.CoreLogStatusActive {
+			return kind, value, true
+		}
+	}
+	for _, kind := range append([]string{preferred}, kinds...) {
+		if value := collector.kindStatus[engine][kind]; collector.isConsoleSourceLocked(engine, kind) && coreLogTransportReady(value) {
+			return kind, value, true
+		}
+	}
+	kind := collector.consoleKind[engine]
+	return kind, collector.kindStatus[engine][kind], false
+}
+
+// markCoreLogDelivery records one collected line for the transport that
+// produced it. The first line makes the source active, every line refreshes
+// LastAt (UTC), and the delivering transport becomes the reported source.
+func (collector *CoreLogCollector) markCoreLogDelivery(engine core.Engine, kind string) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	collector.markCoreLogDeliveryLocked(engine, kind)
+}
+
+func (collector *CoreLogCollector) markCoreLogDeliveryLocked(engine core.Engine, kind string) {
+	if collector.status == nil {
+		collector.status = make(map[core.Engine]CoreLogSourceStatus)
+	}
+	if collector.statusKind == nil {
+		collector.statusKind = make(map[core.Engine]string)
+	}
+	if collector.kindStatus == nil {
+		collector.kindStatus = make(map[core.Engine]map[string]CoreLogSourceStatus)
+	}
+	if collector.kindStatus[engine] == nil {
+		collector.kindStatus[engine] = make(map[string]CoreLogSourceStatus)
+	}
+	now := time.Now().UTC()
+	value := collector.kindStatus[engine][kind]
+	value.Status = core.CoreLogStatusActive
+	value.Error = ""
+	value.Source = kind
+	value.LastAt = &now
+	collector.kindStatus[engine][kind] = value
+	collector.armSourceReadyLocked(engine, kind, value.Status)
+	// Last delivery wins: only a transport that actually delivered a line may
+	// claim the reported source, so a waiting or failed sibling can never
+	// displace a healthy source.
+	collector.preferredKind[engine] = kind
+	collector.status[engine] = value
+	collector.statusKind[engine] = kind
+}
+
+// coreLogServiceIdle reports whether the service that writes a log source is
+// definitively not running. Only an explicit inactive-like state counts, so an
+// unreachable service manager never hides a genuine read failure.
+func (collector *CoreLogCollector) coreLogServiceIdle(service string) bool {
+	if strings.TrimSpace(service) == "" {
+		return false
+	}
+	var state string
+	if probe := collector.serviceState; probe != nil {
+		probed, err := probe(service)
+		if err != nil {
+			return false
+		}
+		state = probed
+	} else {
+		manager := collector.manager
+		if manager == nil {
+			return false
+		}
+		probeContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		probed, err := serviceStatusWithManager(probeContext, manager, service)
+		if err != nil {
+			return false
+		}
+		state = probed
+	}
+	switch strings.TrimSpace(state) {
+	case "inactive", "failed":
+		return true
+	}
+	return false
 }
 
 func (collector *CoreLogCollector) setFileSourceStatus(source coreLogFileSource, status, code string) {
@@ -330,6 +490,7 @@ func (collector *CoreLogCollector) selectSourceKind(engine core.Engine, kind str
 	if current, ok := collector.kindStatus[engine][kind]; ok {
 		collector.status[engine] = current
 	} else {
+		fallback.Source = kind
 		collector.status[engine] = fallback
 	}
 	collector.statusKind[engine] = kind
@@ -363,9 +524,11 @@ func (collector *CoreLogCollector) Run(ctx context.Context) {
 	if len(collector.sources) > 0 {
 		if err := validatePrivilegedExecutable(journalctlPath); err != nil {
 			slog.Warn("managed core log streaming is unavailable", "error", err)
+			// A missing or unsafe journalctl is a real read failure: the reader
+			// itself is unavailable, not merely quiet.
 			for _, source := range collector.sources {
-				for _, engine := range source.unitEngines {
-					collector.setSourceStatus(engine, "journal", "failed", "collector-unavailable")
+				for unit, engine := range source.unitEngines {
+					collector.reportJournalSourceStatus(source, unit, engine, core.CoreLogStatusFailed, "collector-unavailable")
 				}
 			}
 		} else {

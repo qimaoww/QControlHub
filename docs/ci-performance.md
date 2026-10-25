@@ -33,6 +33,8 @@ observable from these APIs.
 All runs below passed every necessary CI job. The controlled branches use the
 same application code/test assertions as main, on Ubuntu 24.04 runners (4 CPUs,
 about 16GiB), Debian Go 1.25.0/glibc, Alpine Go 1.25.14/musl and PostgreSQL 17.
+Those toolchain figures are the historical 1.25-era baseline; CI now builds with
+Go 1.26.10 in every job.
 All candidate data includes real database/runtime execution, cache upload and
 strict required gates. These measurements precede the #270 main update. The scope difference is the user-requested optional
 browser matrix, described below; this is not a claim of identical mandatory coverage.
@@ -225,9 +227,14 @@ image pulling or container creation.
 
 Cache format is `qch-v4`. Module and object caches have independent identities
 for Debian/glibc, Alpine/musl and the upgrade sandbox. Alpine and sandbox keys
-fingerprint the actual image's Go version, architecture, OS and libc; floating
-base tags continue to receive upstream updates and invalidate objects when their
-fingerprint changes. Debian setup-go still selects Go 1.25.0 from go.mod.
+fingerprint the actual image's Go version, architecture, OS and libc. The Go
+images are pinned to the toolchain patch that `go.mod` requires
+(`golang:1.26.10-*`) because the `go` line is a minimum: an image older than the
+pinned patch cannot build, and the sandbox and native-runtime paths cannot fetch
+a toolchain (`GOTOOLCHAIN=local`, `--network none`). Identities still change when
+a pinned tag's base layers move. `nginx:1.31-alpine` keeps floating and re-keys
+the web image when upstream updates it. Debian setup-go still selects Go 1.26.10
+from go.mod.
 Dependency hashes and Go source hashes (excluding .ci-cache itself) create new
 cache entries; restore prefixes
 can supply older objects/modules, which Go revalidates and recompiles as needed.

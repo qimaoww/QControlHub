@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
@@ -71,12 +73,30 @@ func coreLogFileBindingID(source coreLogFileSource) string {
 	return source.path + "\x00" + source.configDigest + "\x00" + source.ownership.SourceDigest + "\x00" + strconv.FormatUint(source.epoch, 10)
 }
 
+// coreLogFileArmCode explains the armed file reader: a service that is
+// definitively stopped cannot append lines, so that reason wins over the
+// generic "no line yet" code.
+func (collector *CoreLogCollector) coreLogFileArmCode(source coreLogFileSource) string {
+	if collector.coreLogServiceIdle(source.service) {
+		return core.CoreLogErrorServiceInactive
+	}
+	return core.CoreLogErrorAwaitingFirstLog
+}
+
 // runFileSource keeps one tail reader alive per managed OpenRC log file with
 // the same retry cadence as the journal readers.
 func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource, run *coreLogFileRun) {
 	for ctx.Err() == nil {
 		err := collector.followFile(ctx, source, run)
-		source.initial = nil
+		// Retry from the last complete line already published by this binding.
+		// A fresh inode or a truncated file is handled by followFile's identity
+		// checks; the initial no-history EOF rule applies only to the first open.
+		collector.filePublishMu.Lock()
+		if run != nil && run.progress.exists {
+			progress := run.progress
+			source.initial = &progress
+		}
+		collector.filePublishMu.Unlock()
 		if ctx.Err() == nil {
 			slog.Warn("managed core log file reader stopped", "path", source.path, "error", err)
 			collector.setFileSourceStatus(source, "failed", coreLogErrorCode(err))
@@ -162,7 +182,10 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		return err
 	}
 	setCoreLogFileRunProgress(run, source.path, openedIdentity, offset)
-	collector.setFileSourceStatus(source, "active", "")
+	// The reader is armed at the current end of the file, but no line has been
+	// delivered yet. Report waiting so "quiet" stays distinguishable from
+	// "broken"; the first published line marks the source active.
+	collector.setFileSourceStatus(source, core.CoreLogStatusWaiting, collector.coreLogFileArmCode(source))
 	collector.filePublishMu.Unlock()
 	// A single Fstat gates every block before any byte can enter partial state or
 	// the shared queue. A 64 KiB block keeps that fail-closed check bounded

@@ -140,3 +140,104 @@ func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestCoreLogSourceStatesNameTheBrokenSource(t *testing.T) {
+	module := frontendSources(t, "modules/core-log-source-status.js", "modules/core-log-view.js")
+	for _, required := range []string{
+		`coreLogSourceState`,
+		`coreLogSourceStatus(relevant`,
+		`coreLogGuardStatus`,
+		`"not-configured"`,
+		`"未配置"`,
+		`部署后自动采集`,
+		`采集已就绪，尚未收到日志`,
+		`采集正常，最近日志 `,
+		`部分来源采集失败`,
+		`读取失败`,
+		`coreLogInstanceName`,
+		`last_log_at`,
+		`core_log_last_at`,
+		`core_log_source`,
+		`coreLogLastSeen`,
+	} {
+		if !strings.Contains(module, required) {
+			t.Errorf("core-log source states are missing %q", required)
+		}
+	}
+	// A healthy engine must never inherit a sibling's failure: the old
+	// aggregate read every runtime state on the node instead of the filter.
+	for _, obsolete := range []string{
+		`sourceStates.includes("failed")`,
+		`暂无匹配记录`,
+		`采集正常，等待新的日志`,
+		`日志采集等待中`,
+	} {
+		if strings.Contains(module, obsolete) {
+			t.Errorf("core-log source states still aggregate across engines with %q", obsolete)
+		}
+	}
+}
+
+func TestCoreLogStatusAggregatesOnlyTheActiveFilterScope(t *testing.T) {
+	view := frontendSources(t, "modules/core-log-view.js")
+	for _, required := range []string{
+		`const relevant = selectedSources.filter(source => !filters.engine || source.engine === filters.engine)`,
+		`coreLogSourceStatus(relevant, {`,
+		`filtered: Boolean(filters.q || filters.level)`,
+		`scopeStatus.noticeTitle`,
+		`scopeStatus.meta`,
+		`const instanceName = coreLogInstanceName`,
+	} {
+		if !strings.Contains(view, required) {
+			t.Errorf("core-log status is not scoped to the active filters: missing %q", required)
+		}
+	}
+	statuses := frontendSources(t, "modules/core-log-source-status.js")
+	// A failed source names its node, engine and instance instead of a generic
+	// user-facing code that cannot be located on the node.
+	for _, required := range []string{
+		`source?.name`,
+		`engineName(source?.engine || "")`,
+		`coreLogInstanceName(source)`,
+		`source.username || "共享实例"`,
+		`source.instance_id`,
+	} {
+		if !strings.Contains(statuses, required) {
+			t.Errorf("core-log failure location is missing %q", required)
+		}
+	}
+	for _, state := range []string{
+		`case "active":`,
+		`case "waiting":`,
+		`case "not-configured":`,
+		`case "failed":`,
+		`case "offline":`,
+		`case "unsupported":`,
+		`case "status-unavailable":`,
+		`case "not-installed":`,
+	} {
+		if !strings.Contains(statuses, state) {
+			t.Errorf("core-log source state dispatch is missing %q", state)
+		}
+	}
+}
+
+func TestCoreLogStatusShowsReportedTransportAndLastDelivery(t *testing.T) {
+	statuses := frontendSources(t, "modules/core-log-source-status.js")
+	for _, required := range []string{
+		`"journal-host": "journal（主机）"`,
+		`"systemd-fallback": "systemd（回退）"`,
+		`coreLogTransportName`,
+		`reported.length === states.length && transports.length === 1`,
+		`最近日志 `,
+		`coreLogLastSeen(newestAt, now)`,
+	} {
+		if !strings.Contains(statuses, required) {
+			t.Errorf("core-log source metadata is missing %q", required)
+		}
+	}
+	view := frontendSources(t, "modules/core-log-view.js")
+	if !strings.Contains(view, `scopeStatus.meta`) {
+		t.Error("the log status line must render the reported transport and last delivery")
+	}
+}

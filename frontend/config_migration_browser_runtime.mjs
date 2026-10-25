@@ -266,7 +266,9 @@ async function testSourceSaveRuntime() {
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
     } else {
       assert(document.querySelector("[data-workspace-save-state]").textContent === "已保存 v2" && !test.pages.configHasUnsavedChanges(), "partial success did not update the visible saved baseline");
-      assert(document.querySelector("[data-workspace-result]").textContent === (failure === "task" ? "task unavailable" : "refresh unavailable"), "partial success added redundant text to the error");
+      const failureText = document.querySelector("[data-workspace-result]").textContent;
+      assert(failureText.includes(`原始错误（供排查）：${failure === "task" ? "task unavailable" : "refresh unavailable"}`), "partial success lost the original failure log");
+      assert(failureText.split(failure === "task" ? "task unavailable" : "refresh unavailable").length === 2, "partial success duplicated the original failure log");
       test.taskError = null; test.refreshError = null;
       document.querySelector('[data-live-intent="validate"]').click();
       await waitFor(()=>test.tasks.length === 2, "partially successful save could not retry its task");

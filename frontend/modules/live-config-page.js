@@ -132,18 +132,33 @@ async function liveConfig(options = {}) {
   if (!ticket.current()) return;
   const prefetched = prefetchWorkspace && selectedAgent === agent.id && selectedEngine === engine
     ? await prefetchWorkspace : null;
-  if (prefetched?.error) throw prefetched.error;
-  const configWorkspace = targetedWorkspace || prefetched?.value || await api(
-    `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
+  // A first paint without a workspace keeps the shell and its retry button; a
+  // reload or engine switch with a workspace already on screen still surfaces
+  // the failure to the navigation layer that owns the recovery path.
+  const hadWorkspace = Boolean(
+    state.data.liveSources && Object.keys(state.data.liveSources).length,
   );
+  let readFailure = "";
+  let configWorkspace = null;
+  try {
+    configWorkspace = targetedWorkspace || prefetched?.value || await api(
+      `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
+    );
+  } catch (error) {
+    // A failed read keeps the workspace shell and its retry affordance instead
+    // of replacing the whole page with a bare alert.
+    if (!ticket.current()) return;
+    if (hadWorkspace) throw error;
+    readFailure = redactDiagnostic(error?.message) || "读取配置失败";
+  }
   if (!ticket.current()) return;
-  agent = configWorkspace.agent || agent;
+  agent = configWorkspace?.agent || agent;
   state.data.agents = agents.map(item => item.id === agent.id ? agent : item);
   const privateWorkspace = privateAccount && (agent.can_manage !== true ||
     !["managed", "import"].includes(state.data.liveConfigSource));
-  const saved = configWorkspace.config || null;
-  const deployment = (await confirmedDeployments)?.find(item => item.agent_id === agent.id &&
-    item.engine === engine && saved?.id && item.config_id === saved.id);
+  const saved = configWorkspace?.config || null;
+  const deployment = configWorkspace ? (await confirmedDeployments)?.find(item => item.agent_id === agent.id &&
+    item.engine === engine && saved?.id && item.config_id === saved.id) : null;
   if (!ticket.current()) return;
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
@@ -173,7 +188,7 @@ async function liveConfig(options = {}) {
   state.data.liveSources ||= {};
   if (!liveConfigSnapshotReusable(state.data.liveSources[sourceKey]))
     delete state.data.liveSources[sourceKey];
-  const source = privateWorkspace
+  const source = readFailure ? { error: readFailure } : privateWorkspace
     ? { content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n") }
     : state.data.liveSources[sourceKey] || ((emptyManaged || !importSource && (!readAction || !can("tasks.execute") || agent.status !== "online") && saved) ? {
       content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n"),
@@ -214,7 +229,7 @@ async function liveConfig(options = {}) {
         assertAgentConfigBaseline(source?.agentContent, fresh.content);
       }
     : null;
-  const current = (privateWorkspace || !unsupportedReason) && source?.content
+  const current = !readFailure && (privateWorkspace || !unsupportedReason) && source?.content
     ? {
         ...(saved || {
           name: `${agent.name} · ${engineName(engine)}`,
@@ -226,7 +241,7 @@ async function liveConfig(options = {}) {
     : null;
   const workspace = workspaces.open({operationKey:`${agent.id}|${engine}|${sourceMode}`, agentId:agent.id, agent, engine, sourceMode, sourceKey, source, saved, runtime,
     deployedVersion:deployment?.config_version,
-    content:current?.content, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || []});
+    content:current?.content, inbounds:configWorkspace?.inbound_targets || configWorkspace?.inbounds || []});
   const workspaceElement = renderLiveConfigView({
     agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
     sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
@@ -294,7 +309,7 @@ async function liveConfig(options = {}) {
   };
   const restrictionSelection = await bindConfigRestrictions({
     ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
-    agent, engine, saved, sourceMode, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || [],
+    agent, engine, saved, sourceMode, inbounds:configWorkspace?.inbound_targets || configWorkspace?.inbounds || [],
     beforeDeploy, onSaved: applyInboundMutation,
   });
   if (!ticket.current()) return;
@@ -307,6 +322,13 @@ async function liveConfig(options = {}) {
     workspaceRecord:workspace, workspaces,
     sourceContent:current?.content, mountEditor:mountPresetEditor, beforeDeploy, onSaved:applyInboundMutation,
   });
+  // A submit that was still running when the route changed keeps its task id;
+  // re-attach the watcher so its result replaces the stale progress text.
+  const pendingOperation = operationFor(workspace.operationKey);
+  const stalled = /^(正在|等待)/.test(pendingOperation?.message || "");
+  if (pendingOperation?.task?.id && stalled && !pendingOperation.monitoring) watchPresetOperation(pendingOperation);
+  else if (pendingOperation && !pendingOperation.task?.id && stalled)
+    Object.assign(pendingOperation, { message: "上次操作未完成，请重新提交", tone: "error" });
   renderPresetStatus();
   bindLiveConfigSubmit(ctx, {
     agent, engine, accountData, sourceKey, source, saved, privateWorkspace, importSource,

@@ -56,6 +56,10 @@ func addCoreLogUnit(units map[string]core.Engine, ambiguous map[string]bool, uni
 }
 
 func newCoreLogJournalSource(units map[string]core.Engine, managedNamespace bool) coreLogJournalSource {
+	kind := core.CoreLogSourceJournalHost
+	if managedNamespace {
+		kind = core.CoreLogSourceJournal
+	}
 	arguments := []string{"--follow", "--lines=0", "--output=json",
 		"--output-fields=MESSAGE,_SYSTEMD_UNIT,PRIORITY,__REALTIME_TIMESTAMP,__CURSOR"}
 	if managedNamespace {
@@ -71,5 +75,5 @@ func newCoreLogJournalSource(units map[string]core.Engine, managedNamespace bool
 	for _, unit := range names {
 		arguments = append(arguments, "--unit="+unit)
 	}
-	return coreLogJournalSource{arguments: arguments, unitEngines: copyMap}
+	return coreLogJournalSource{arguments: arguments, unitEngines: copyMap, kind: kind}
 }

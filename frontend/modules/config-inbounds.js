@@ -80,7 +80,7 @@ export function bindConfigInbounds(ctx) {
     const opened = dialog;
     opened.className = `config-inbound-dialog${["add", "modify"].includes(kind) ? " config-outbound-dialog" : ""}${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
     opened.setAttribute("aria-labelledby", "config-inbound-title");
-    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异",
+    const titles = { add:"增加入站", modify:"编辑入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异",
       "common-add":"增加通用配置项", "common-modify":"修改通用配置项", "common-delete":"删除通用配置项" };
     opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-inbound-title">${titles[kind]}</h2><p>${esc(agent.name)} / ${esc(engineName(engine))}${commonAction ? " / 公共配置" : chosen && kind !== "add" ? ` / ${esc(chosen.tag)} · :${Number(chosen.port)}` : ""}</p></div><button class="config-access-close" type="button" data-inbound-close aria-label="关闭弹窗">×</button></header><div class="config-inbound-body" data-inbound-body><p role="status">正在加载…</p></div>`;
     const body = opened.querySelector("[data-inbound-body]");
@@ -169,7 +169,12 @@ export function bindConfigInbounds(ctx) {
                 name:fresh.config.name, description:fresh.config.description, intent:button.dataset.deleteIntent,
                 content:draftContent,
               })});
-              await commit(result, null);
+              // Keep the walkthrough continuous: land on the neighbour of the
+              // removed inbound instead of dropping the selection entirely.
+              const remaining = (fresh.inbounds || []).filter(item => !(item.tag === chosen.tag && Number(item.port) === Number(chosen.port)));
+              const position = (fresh.inbounds || []).findIndex(item => item.tag === chosen.tag && Number(item.port) === Number(chosen.port));
+              const neighbor = remaining[Math.max(0, position - 1)] || remaining[0] || null;
+              await commit(result, neighbor);
             } catch (error) {
               if (!active()) return;
               updateFeedback(body.querySelector("[data-inbound-error]"), redactDiagnostic(error.message) || "删除失败");

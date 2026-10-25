@@ -1,0 +1,188 @@
+[
+  {
+    "name": "tablet-landscape",
+    "theme": "light",
+    "scale": 100,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-tablet-landscape.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 449,
+      "bottom": 769,
+      "width": 674,
+      "height": 320
+    },
+    "objects": 6,
+    "objectMinHeight": 54,
+    "clipped": 0,
+    "deploy": {
+      "top": 786,
+      "bottom": 824,
+      "width": 98,
+      "height": 38
+    },
+    "deployVisible": false,
+    "detailsHeight": 96,
+    "engineBarHeight": 66
+  },
+  {
+    "name": "tablet-portrait",
+    "theme": "light",
+    "scale": 100,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-tablet-portrait.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 572,
+      "bottom": 1064,
+      "width": 742,
+      "height": 492
+    },
+    "objects": 6,
+    "objectMinHeight": 54,
+    "clipped": 0,
+    "deploy": {
+      "top": 1145,
+      "bottom": 1189,
+      "width": 351,
+      "height": 44
+    },
+    "deployVisible": false,
+    "detailsHeight": 98,
+    "engineBarHeight": 70
+  },
+  {
+    "name": "desktop-scale90",
+    "theme": "dark",
+    "scale": 90,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-desktop-scale90.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 407,
+      "bottom": 911,
+      "width": 1090,
+      "height": 504
+    },
+    "objects": 6,
+    "objectMinHeight": 50,
+    "clipped": 0,
+    "deploy": {
+      "top": 928,
+      "bottom": 966,
+      "width": 91,
+      "height": 38
+    },
+    "deployVisible": true,
+    "detailsHeight": 58,
+    "engineBarHeight": 66
+  },
+  {
+    "name": "desktop-scale110",
+    "theme": "dark",
+    "scale": 110,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-desktop-scale110.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 442,
+      "bottom": 946,
+      "width": 1090,
+      "height": 504
+    },
+    "objects": 6,
+    "objectMinHeight": 57,
+    "clipped": 0,
+    "deploy": {
+      "top": 963,
+      "bottom": 1003,
+      "width": 105,
+      "height": 40
+    },
+    "deployVisible": false,
+    "detailsHeight": 60,
+    "engineBarHeight": 89
+  },
+  {
+    "name": "tablet-scale110",
+    "theme": "dark",
+    "scale": 110,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-tablet-scale110.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 482,
+      "bottom": 802,
+      "width": 674,
+      "height": 320
+    },
+    "objects": 6,
+    "objectMinHeight": 57,
+    "clipped": 0,
+    "deploy": {
+      "top": 819,
+      "bottom": 858,
+      "width": 105,
+      "height": 40
+    },
+    "deployVisible": false,
+    "detailsHeight": 99,
+    "engineBarHeight": 89
+  },
+  {
+    "name": "mobile-scale110",
+    "theme": "light",
+    "scale": 110,
+    "focus": true,
+    "editState": {
+      "status": "未保存",
+      "save": "有未保存修改"
+    },
+    "file": "/root/preview/after/after-mobile-scale110.png",
+    "errors": [],
+    "overflowX": 0,
+    "frame": {
+      "top": 739,
+      "bottom": 1144,
+      "width": 364,
+      "height": 405
+    },
+    "objects": 6,
+    "objectMinHeight": 57,
+    "clipped": 0,
+    "deploy": {
+      "top": 1225,
+      "bottom": 1269,
+      "width": 162,
+      "height": 44
+    },
+    "deployVisible": false,
+    "detailsHeight": 137,
+    "engineBarHeight": 155
+  }
+]

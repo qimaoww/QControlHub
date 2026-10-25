@@ -14,7 +14,9 @@ export async function testCompleteSourceRuntime() {
   await waitFor(()=>input.value === "", "blank complete draft did not open");
   assert(!input.readOnly && !test.writes.length, "starting a complete configuration performed a write");
   change(input, '{"inbounds":');
-  assert(document.querySelector("[data-code-validation]").textContent.startsWith("JSON 格式错误") &&
+  const problem = document.querySelector("[data-code-validation]");
+  assert(problem.textContent.startsWith("JSON 语法错误") && problem.textContent.includes("第 1 行") &&
+    problem.querySelector("[data-code-jump]") &&
     !document.querySelector("[data-workspace-result]").textContent,
     "source syntax error was duplicated in the operation feedback");
   document.querySelector("[data-config-preview]").click();
@@ -71,7 +73,8 @@ export async function testCompleteSourceRuntime() {
   assert([...document.querySelectorAll("#live-config-form button, #live-config-form textarea")].every(control => control.disabled),
     "updating the saved baseline unlocked controls during task submission");
   releaseTask(); deployment.taskGate = null;
-  await waitFor(()=>document.querySelector("[data-workspace-result]")?.textContent === "fixture task unavailable", "task creation failure added redundant advice or hid the error");
+  await waitFor(()=>String(document.querySelector("[data-workspace-result]")?.textContent || "").includes("原始错误（供排查）：fixture task unavailable"), "task creation failure lost its original log");
+  assert(document.querySelector("[data-workspace-result]").textContent.split("fixture task unavailable").length === 2, "task creation failure duplicated or dropped the original log");
   assert(deployment.saved().content === native && deployment.writes.length === 1 &&
     document.querySelector("[data-workspace-save-state]").textContent === "已保存 v2", "partial success lost the saved document or baseline");
   assert(!deployment.notices.length, "inline failure was duplicated in a notification");
@@ -86,7 +89,11 @@ export async function testCompleteSourceRuntime() {
     "repeated deployment replaced its active feedback or submitted a duplicate task");
   deployment.taskError = "config.json: private_key: secret-material; listen 23001: address already in use";
   deployment.taskStatus = "failed";
-  await waitFor(()=>document.querySelector("[data-workspace-result]")?.textContent === "config.json: private_key: [redacted]; listen 23001: address already in use", "deployment failure did not show only the redacted error");
+  await waitFor(()=>{
+    const text = String(document.querySelector("[data-workspace-result]")?.textContent || "");
+    return text.includes("端口已被占用") &&
+      text.includes("原始错误（供排查）：config.json: private_key: [redacted]; listen 23001: address already in use");
+  }, "deployment failure did not show a Chinese explanation with the redacted log");
   assert(!deployment.notices.length && document.querySelector("[data-workspace-deploy-state]").textContent.includes("v2 待部署"), "failed deployment duplicated feedback or advanced its deployed version");
   deployment.taskStatus = "succeeded";
   deployment.taskError = "";
