@@ -1,5 +1,0 @@
-=== RUN   TestCertificateHTTP01ExistingNginxWithLocalACME
-    certificate_http_acme_integration_test.go:162: Pebble actually validated two HTTP-01 authorizations through running Nginx -> Agent handler; business route preserved; panel has no challenge listener
---- PASS: TestCertificateHTTP01ExistingNginxWithLocalACME (1.10s)
-PASS
-ok  	github.com/qimaoww/qcontrolhub/internal/agent	1.414s

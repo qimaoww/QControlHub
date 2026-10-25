@@ -1,5 +1,0 @@
-browser workers=1, CPUs=12, memory=20001MiB, modes=1
-browser timing {"mode":"ip-quality","startupMs":135.72490599999998,"testMs":35768.183452,"cleanupMs":28.23785399999906,"passed":true,"elapsedMs":35932.164403}
-agents browser runtime smoke passed
-browser suite elapsed=35.981s
-agents browser runtime smoke passed

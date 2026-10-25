@@ -1,8 +1,0 @@
-{
-  "new_css_files": [],
-  "new_css_custom_property_definitions": [],
-  "source_rule_blocks_before": 4776,
-  "source_rule_blocks_after": 4770,
-  "new_inline_style_attributes": false,
-  "notes": "Removed security/switch decoration rules and extended existing allocation field, touch target and dialog scrolling rules. No new rule block or library."
-}

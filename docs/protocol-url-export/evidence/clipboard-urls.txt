@@ -1,6 +1,0 @@
-### Result
-[{"tag":"client-profile-hk-01-ss-rust-ss2022","length":168,"copy":true},{"tag":"client-profile-hk-01-xray-vless-websocket","length":304,"copy":true},{"tag":"client-profile-hk-01-xray-vmess-grpc","length":392,"copy":true}]
-### Ran Playwright code
-```js
-await (async (page) => {if(await page.locator(".client-parameter-dialog[open]").count())await page.locator(".client-parameter-dialog[open] [data-client-parameter-close]").click();const inputs=page.locator(".client-profile-row > .client-export-control input");const results=[];for(let i=0;i<await inputs.count();i++){const input=inputs.nth(i);const expected=await input.inputValue();const tag=await input.locator("../..").getAttribute("data-refresh-key");await input.locator("..").locator("[data-copy-target]").click();await page.waitForFunction(()=>document.querySelectorAll("[data-copy-state=success]").length>0);const copied=await page.evaluate(()=>navigator.clipboard.readText());if(copied!==expected||/[\r\n]/.test(copied)||copied.includes("&amp;"))throw Error("URL clipboard mismatch "+tag);results.push({tag,length:copied.length,copy:true});}return results;})(page);
-```

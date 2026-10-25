@@ -1,1 +1,0 @@
-PASS: ordinary-user local CA v1 -> real signed Agent -> non-root Mihomo -> trusted TLS handshake -> manual DNS renewal v2 -> automatic instance sync -> changed trusted TLS fingerprint

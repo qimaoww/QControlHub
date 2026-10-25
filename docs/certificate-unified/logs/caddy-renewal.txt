@@ -1,4 +1,0 @@
-Real Caddy honored local CA ARI and renewed certificate
-Agent imported version 2; certificate ID and binding unchanged
-Different real node automatically deployed version 2; live TLS fingerprint matches
-Caddy remains renewal manager; no panel ACME order for source certificate

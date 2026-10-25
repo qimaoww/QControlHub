@@ -1,13 +1,62 @@
 
 # Presentation stays independent of Docker so menus can be previewed safely.
 ui_text() {
-    local style="$1"
+    local style="$1" literal=false
     shift
-    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
-        printf '\033[%sm%s\033[0m\n' "$style" "$*"
-    else
-        printf '%s\n' "$*"
+    if [ "${1:-}" = --literal ]; then
+        literal=true
+        shift
     fi
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
+        printf '\033[%sm' "$style"
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
+        printf '\033[0m'
+    else
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
+    fi
+}
+
+# Bash's printf pads bytes. Count terminal cells for the Chinese labels and
+# punctuation used here; use a UTF-8 locale even when the caller uses LC_ALL=C.
+ui_char_width() {
+    local LC_ALL=C.UTF-8 code
+    printf -v code '%d' "'$1"
+    if (( (code >= 0x2e80 && code <= 0xa4cf) ||
+          (code >= 0xac00 && code <= 0xd7a3) ||
+          (code >= 0xf900 && code <= 0xfaff) ||
+          (code >= 0xfe10 && code <= 0xfe6f) ||
+          (code >= 0xff01 && code <= 0xff60) )); then
+        printf 2
+    else
+        printf 1
+    fi
+}
+
+ui_wrap() {
+    local LC_ALL=C.UTF-8 text="$1" width cells=0 char size i
+    width="$(ui_width)"
+    for ((i=0; i<${#text}; i++)); do
+        char="${text:i:1}"
+        if [ "$char" = $'\n' ]; then
+            printf '\n'; cells=0; continue
+        fi
+        size="$(ui_char_width "$char")"
+        if [ "$cells" -gt 0 ] && [ "$((cells + size))" -gt "$width" ]; then
+            printf '\n'; cells=0
+        fi
+        printf '%s' "$char"
+        cells=$((cells + size))
+    done
+    printf '\n'
+}
+
+ui_service_name() {
+    case "$1" in
+        control-plane) printf '控制面' ;;
+        qcontrol-web) printf '网页服务' ;;
+        postgres|PostgreSQL) printf 'PostgreSQL 数据库' ;;
+        *) printf '%s' "$1" ;;
+    esac
 }
 
 ui_width() {
@@ -37,39 +86,46 @@ ui_section() {
 
 ui_detail() {
     ui_text 2 "  $1"
-    printf '    %s\n' "$2"
+    # Preserve copyable values; the terminal can soft-wrap their visual lines.
+    ui_text 0 --literal "    $2"
 }
 
-# Only ASCII service names use padding; Chinese labels stay unpadded.
 ui_service_row() {
+    local LC_ALL=C.UTF-8 name cells=0 i padding
+    name="$(ui_service_name "$1")"
     if [ "$(ui_width)" -lt 60 ]; then
-        ui_detail "$1" "$2"
+        ui_detail "$name" "$2"
     else
-        printf '  %-16s %s\n' "$1" "$2"
+        for ((i=0; i<${#name}; i++)); do
+            cells=$((cells + $(ui_char_width "${name:i:1}")))
+        done
+        printf -v padding '%*s' "$((18 - cells))" ''
+        ui_text 0 "  $name$padding $2"
     fi
 }
 
 show_action_menu() {
     ui_heading "管理菜单"
     ui_section "工作目录"
-    printf '  %s\n' "$WORK_DIR"
+    ui_text 0 --literal "  $WORK_DIR"
     ui_section "部署管理"
-    printf '  [1] 安装 / 重新配置\n'
-    printf '  [2] 更新现有部署\n'
+    ui_text 0 "  [1] 安装 / 重新配置"
+    ui_text 0 "  [2] 更新现有部署"
     ui_text 2 "      检查镜像版本，无变化时跳过更新"
     ui_section "维护选项"
-    printf '  [3] 卸载服务\n'
+    ui_text 0 "  [3] 卸载服务"
     ui_text 2 "      保留配置、密钥和数据库卷"
-    printf '  [4] 设置目录\n'
+    ui_text 0 "  [4] 设置目录"
     printf '\n'
 }
 
 show_mode_menu() {
     ui_heading "数据库模式"
     ui_section "选择部署方式"
-    printf '  [1] 内置 PostgreSQL（推荐）\n'
+    ui_text 0 "  [1] 内置 PostgreSQL（推荐）"
     ui_text 2 "      自动部署数据库和应用，适合从零安装"
-    printf '\n  [2] 连接外部 PostgreSQL\n'
+    printf '\n'
+    ui_text 0 "  [2] 连接外部 PostgreSQL"
     ui_text 2 "      复用已有数据库，仅部署应用"
     printf '\n'
 }
@@ -77,7 +133,6 @@ show_mode_menu() {
 show_no_update_result() {
     ui_heading "检查完成"
     ui_text '1;32' "  当前镜像与目标版本一致，无需更新"
-    ui_text 2 "  保留当前运行容器和部署配置"
     printf '\n'
 }
 
@@ -85,7 +140,7 @@ show_result() {
     local result_name="$1" url="$2" stop_cmd="$3"
     ui_heading "$result_name"
     ui_section "访问面板"
-    ui_text '1;32' "  $url"
+    ui_text '1;32' --literal "  $url"
     ui_text 2 "  登录方式：用户名 + 密码 / 管理令牌"
     ui_section "部署文件"
     ui_detail "配置文件" "$ENV_FILE"
@@ -114,7 +169,7 @@ local_panel_url() {
 
 show_admin_token_once() {
     [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
-    ui_heading "管理员 token（仅本次显示）"
+    ui_heading "管理员令牌（仅本次显示）"
     printf '\n  %s\n\n' "$ADMIN_TOKEN_TO_DISPLAY"
     ui_text '1;33' "  请立即保存到密码管理器。"
     ui_text 2 "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"

@@ -1,7 +1,0 @@
-browser workers=2, CPUs=12, memory=20001MiB, modes=2
-browser timing {"mode":"config-inbounds","startupMs":136.63092,"testMs":21040.627328000002,"cleanupMs":37.81150599999819,"passed":true,"elapsedMs":21215.080092}
-agents browser runtime smoke passed
-browser timing {"mode":"config-inbounds-mobile","startupMs":133.872522,"testMs":21161.168391,"cleanupMs":38.4947809999976,"passed":true,"elapsedMs":21333.54363}
-agents browser runtime smoke passed
-browser suite elapsed=21.389s
-agents browser runtime smoke passed

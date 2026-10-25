@@ -1,3 +1,0 @@
-PASS: node owner used the real account-management form to grant cert-bob the exact shared-auth.example.test HTTP-01 domain on an accepted shared node.
-PASS: cert-bob can select this node in the actual HTTP-01 form; ordinary deployment sharing remains separate from HTTP entry authorization.
-Scope: local task-owned preview fixtures; no public HTTP-01 issuance claimed for this fake node.

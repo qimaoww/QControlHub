@@ -1,4 +1,0 @@
-ok  	github.com/qimaoww/qcontrolhub/internal/store	10.714s
-ok  	github.com/qimaoww/qcontrolhub/internal/api	13.265s
-ok  	github.com/qimaoww/qcontrolhub/internal/agent	1.888s
-ok  	github.com/qimaoww/qcontrolhub/frontend	0.002s [no tests to run]

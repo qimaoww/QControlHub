@@ -81,7 +81,7 @@ jobs:
           # postgresql-client creates one isolated database per test shard.
           # Agent tests validate the real, root-owned systemctl helper. It was
           # previously pulled through Chromium's udev dependencies.
-          apt-get install --no-install-recommends --yes systemd openssl iproute2 postgresql-client
+          apt-get install --no-install-recommends --yes systemd openssl iproute2 postgresql-client jq
 
       - name: Download Go modules
         run: sh .github/scripts/ci-time.sh modules go mod download
@@ -175,7 +175,7 @@ jobs:
             -v "$PWD:/src" -w /src golang:1.26.10-alpine sh -euxc '
               # Module smoke uses zh Intl.DisplayNames. Chromium previously
               # supplied full ICU data transitively; keep that data explicitly.
-              sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client
+              sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client jq
               sh .github/scripts/ci-time.sh modules go mod download
               bash .github/scripts/run-ci-tests.sh \
                 --checks "make alpine-non-browser-checks" \
