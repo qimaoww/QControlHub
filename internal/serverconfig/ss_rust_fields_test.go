@@ -209,3 +209,40 @@ func assertSSRustJSONEqual(t *testing.T, before, after map[string]json.RawMessag
 		t.Error("root keys changed")
 	}
 }
+
+func TestSSRustBindingOverridesSurvivePortEditing(t *testing.T) {
+	for _, list := range []string{"servers", "shadowsocks"} {
+		current := `{"outbound_bind_addr":"2001:db8::10","ipv6_first":false,"mode":"tcp_and_udp","` + list + `":[{"id":"one","server":"::","server_port":20001,"method":"aes-256-gcm","password":"test-password","outbound_bind_addr":"2001:db8::20"},{"id":"two","server":"::","server_port":20002,"method":"aes-256-gcm","password":"test-password"}]}`
+		plans := ParseAll(core.EngineShadowsocksRust, current)
+		if len(plans) != 2 || plans[0].SSRustOutboundBindAddr != "2001:db8::20" || plans[1].SSRustOutboundBindAddr != "" {
+			t.Fatalf("explicit overrides confused with inherited binding: %+v", plans)
+		}
+		plans[0].Tag = "renamed"
+		plans[0].Credential = "isolated-binding-test-password"
+		generated, err := Generate(core.EngineShadowsocksRust, plans[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		edited, err := MutateSSRustPort(current, generated, "one", "modify")
+		if err != nil {
+			t.Fatal(err)
+		}
+		binding, present, inherited, err := SSRustInboundField(edited, "renamed", "outbound_bind_addr")
+		if err != nil || !present || binding != `"2001:db8::20"` || inherited != `"2001:db8::10"` {
+			t.Fatalf("port/global binding lost: %s %t %s %v", binding, present, inherited, err)
+		}
+		beforeSecond, _, _, _ := SSRustInboundField(current, "two", "server_port")
+		afterSecond, _, _, _ := SSRustInboundField(edited, "two", "server_port")
+		if beforeSecond != afterSecond || !strings.Contains(edited, `"ipv6_first": false`) {
+			t.Fatal("port edit changed another port or global DNS preference")
+		}
+		removed, err := MergeSSRustInboundField(edited, "renamed", "outbound_bind_addr", "", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, present, inherited, err = SSRustInboundField(removed, "renamed", "outbound_bind_addr")
+		if err != nil || present || inherited != `"2001:db8::10"` {
+			t.Fatalf("removing an override must restore the global binding: %t %s %v", present, inherited, err)
+		}
+	}
+}

@@ -82,7 +82,7 @@ export function coreLogSourceState(source, { now = Date.now(), engineName = Stri
     case "status-unavailable":
       return { key: "status-unavailable", title: "日志状态能力不可用", detail: "此 Agent 无法核验来源状态，请升级 Agent。", lastAt: 0, transport };
     case "not-installed":
-      return { key: "not-installed", title: "内核尚未安装", detail: "安装后可采集此实例的日志。", lastAt: 0, transport };
+      return { key: "not-installed", title: "内核尚未安装", detail: `${where} 未安装，可查看保留期内的历史日志。`, lastAt: 0, transport };
     default:
       return { key: "pending", title: "等待日志", detail: `${where} 采集状态尚未上报。`, lastAt: 0, transport };
   }
@@ -103,6 +103,7 @@ export function coreLogSourceStatus(sources, { now = Date.now(), engineName = St
   const unsupported = of("unsupported");
   const unavailable = of("status-unavailable");
   const missing = of("not-installed");
+  const allMissing = missing.length > 0 && missing.length === states.length;
   const usable = healthy.length + ready.length;
   const named = (items, more) =>
     items.slice(0, 2).map((state) => state.detail.replace(/。$/, "")).join("；") +
@@ -133,15 +134,15 @@ export function coreLogSourceStatus(sources, { now = Date.now(), engineName = St
   } else if (unavailable.length) {
     emptyTitle = "日志状态能力不可用";
     emptyDetail = "此 Agent 无法核验来源状态，请升级 Agent。";
-  } else if (missing.length) {
-    emptyTitle = "内核尚未安装";
-    emptyDetail = "安装后可采集此实例的日志。";
   } else if (unconfigured.length) {
     emptyTitle = "未配置";
     emptyDetail = `${named(unconfigured, "个来源尚未配置")}。`;
   } else if (waiting.length) {
     emptyTitle = "等待日志";
     emptyDetail = `${named(waiting, "个来源等待首条日志")}。`;
+  } else if (allMissing) {
+    emptyTitle = "内核尚未安装";
+    emptyDetail = `${named(missing, "个来源未安装")}。`;
   }
   // A healthy headline must not hide a broken or unconfigured sibling when no
   // rows are shown; the notice carries the same location once rows exist.
@@ -163,14 +164,17 @@ export function coreLogSourceStatus(sources, { now = Date.now(), engineName = St
   } else if (unavailable.length) {
     noticeTitle = "日志状态能力不可用";
     noticeDetail = "此 Agent 无法核验来源状态，请升级 Agent。";
-  } else if (missing.length && !usable) {
-    // A kernel that is simply not installed beside a healthy source is not a
-    // collection problem for the page: the healthy rows stay authoritative.
+  } else if (allMissing) {
+    // Installation is a source fact, independent of collection readiness and
+    // historical rows. Only a wholly uninstalled scope can use this headline.
     noticeTitle = "内核尚未安装";
-    noticeDetail = "安装后可采集此实例的日志。";
+    noticeDetail = `${named(missing, "个来源未安装")}。`;
   } else if (unconfigured.length && !usable) {
     noticeTitle = "未配置";
     noticeDetail = `${named(unconfigured, "个来源尚未配置")}。`;
+  } else if (waiting.length && !usable) {
+    noticeTitle = "等待日志";
+    noticeDetail = `${named(waiting, "个来源等待首条日志")}。`;
   }
 
   const reported = states.filter((state) => state.transport);

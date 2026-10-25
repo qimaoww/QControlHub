@@ -39,7 +39,7 @@ export function createPresetView({ state, can, esc, engineName, shell }) {
   const portForward = Boolean(protocol?.port_forward);
   const protocolOptions =
     engine === "ss-rust"
-      ? `<details class="preset-option-panel" open><summary><b>当前端口 · 出站绑定</b></summary><div class="plan-fields one"><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(ssRustPlanBinding(plan, config, selectedInbound))}" placeholder="留空继承全局绑定"><small>须为节点本机 IPv4 / IPv6；留空删除端口覆盖，不禁用全局绑定。DNS、IPv6 优先与性能项在「全局与默认值」单独保存。</small></label></div></details>`
+      ? `<details class="preset-option-panel" open><summary><b>当前端口 · 出站绑定</b></summary><div class="plan-fields one"><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(ssRustPlanBinding(plan, config, selectedInbound))}" placeholder="留空继承全局绑定"><small>须为节点本机 IP；纯 IPv6 绑定无法连接 IPv4 目标，IPv6 优先不转换地址族。留空删除端口覆盖，继承全局绑定。</small></label></div></details>`
       : selectedProtocolKey === "mieru"
         ? mieruProtocolOptions(plan)
       : selectedProtocolKey === "snell"

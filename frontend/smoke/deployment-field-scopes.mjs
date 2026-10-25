@@ -53,6 +53,8 @@ export async function testFieldScopes({ FakeForm, AGENT_ID, makeAgent, workspace
     const pages = installForms(ctx, { "#inbound-field-form": portForm, "#field-form": globalForm, "#server-plan-form": planForm });
     await pages.agentConfig();
     assert.ok(markup().includes("当前端口选项") && markup().includes("全局与默认值"));
+    assert.ok(markup().includes("纯 IPv6 绑定无法连接 IPv4 目标"));
+    assert.ok(markup().includes("IPv6 优先不转换地址族"));
     assert.ok(!markup().includes("全局字段与源码"));
     const portStudio = markup().split('id="inbound-options"')[1].split('id="advanced"')[0];
     assert.ok(!portStudio.includes('data-inbound-field="dns"'));
