@@ -11,7 +11,7 @@ services:
     image: ghcr.io/qimaoww/qcontrol-plane:latest
     restart: unless-stopped
     environment:
-      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}
       QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
@@ -36,7 +36,7 @@ YAML
 YAML
     if [ -n "$config_key" ]; then
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
-      QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?QCH_CONFIG_ENCRYPTION_KEY required}
+      QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?必须设置 QCH_CONFIG_ENCRYPTION_KEY}
 YAML
     else
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
@@ -130,7 +130,7 @@ networks:
 YAML
     if [ -n "$docker_network" ]; then
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
-    name: ${QCH_DOCKER_NETWORK:?custom Docker network required}
+    name: ${QCH_DOCKER_NETWORK:?必须设置自定义 Docker 网络}
     external: true
 YAML
     else
@@ -149,18 +149,18 @@ services:
   control-plane:
     environment:
       QCH_ADMIN_TOKEN: ""
-      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?administrator token digest required}
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?必须设置管理员令牌摘要}
       QCH_CONFIG_ENCRYPTION_KEY: ""
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ""
       QCH_CONFIG_ENCRYPTION_KEY_FILE: /run/secrets/qch-config-encryption-key
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE: /run/secrets/qch-config-encryption-previous-keys
     volumes:
       - type: bind
-        source: ${QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE:?configuration encryption key file required}
+        source: ${QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE:?必须设置配置加密密钥文件}
         target: /run/secrets/qch-config-encryption-key
         read_only: true
       - type: bind
-        source: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE:?previous configuration encryption keys file required}
+        source: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE:?必须设置旧配置加密密钥文件}
         target: /run/secrets/qch-config-encryption-previous-keys
         read_only: true
 YAML
@@ -223,7 +223,7 @@ services:
     image: ghcr.io/qimaoww/qcontrol-plane:latest
     restart: unless-stopped
     environment:
-      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}
       QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}

@@ -24,8 +24,7 @@ preview_update() {
     show_current_application_versions sample-control sample-web
     ui_service_row PostgreSQL "当前版本：镜像 c69214df85ab"
     show_update_targets ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest postgres:17-alpine
-    ui_section "正在检查更新（拉取目标镜像）..."
-    ui_text 2 "  [预览] 此处省略 Docker 拉取输出"
+    ui_section "正在检查远程镜像"
     ui_section "镜像对比结果"
     if [ "$state" = update ]; then
         target=sample-next
@@ -37,7 +36,10 @@ preview_update() {
     if [ "$state" = unchanged ]; then
         show_no_update_result
     else
-        printf '\n-> 检测到镜像变化，开始更新\n'
+        ui_section "拉取镜像：ghcr.io/qimaoww/qcontrol-plane:latest"
+        ui_text 2 "  [预览] 仅拉取控制面已检查的目标摘要"
+        ui_section "开始更新"
+        ui_text 2 "  按原有启动顺序启动服务并检查就绪状态"
     fi
 }
 
@@ -51,7 +53,7 @@ preview_screen() {
     esac
 }
 
-printf '布局预览 · 示例数据，不执行部署\n'
+ui_text 0 "布局预览：示例数据，不执行部署"
 if [ "${1:-menu}" = all ]; then
     for screen in menu mode update unchanged result; do
         preview_screen "$screen"

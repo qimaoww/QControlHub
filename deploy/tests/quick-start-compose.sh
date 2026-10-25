@@ -67,7 +67,7 @@ export QCH_DATABASE_STARTUP_TIMEOUT=1s
 export QCH_BIND_ADDRESS=0.0.0.0 QCH_PORT=19999
 prepare_external_update_compose
 cmp "$test_root/expected.env" "$ENV_FILE"
-grep -Fq '${QCH_DATABASE_URL:?QCH_DATABASE_URL required}' "$EXTERNAL_COMPOSE_FILE"
+grep -Fq '${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}' "$EXTERNAL_COMPOSE_FILE"
 if grep -Fq 'remote:p%40ss' "$EXTERNAL_COMPOSE_FILE"; then
     printf '%s\n' 'rendered database credentials leaked into persisted Compose' >&2
     exit 1
