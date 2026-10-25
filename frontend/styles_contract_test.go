@@ -94,7 +94,10 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	// the approved global dropdown consolidation into existing control styles,
 	// and removal of the separate inbound security / switch decorations.
 	// The approved shared type system now owns every UI font role and metric.
-	const expected = "c1ba68bb82bf897ee1e70e8cc5846f7483e3d65c1281675553eb093e6e2f2dd9"
+	// The jump-symbol cleanup removed the retired back-link, card-arrow and
+	// trailing row-affordance rules, so the reserved columns and the arrow
+	// spacing they depended on no longer exist.
+	const expected = "0598a0ec3b7f421491ed6530d8249a3a662af447013ad638ad6f2a1ea17f8f8b"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}

@@ -30,7 +30,7 @@ const assertSharedStatusOrder = (root) => {
   const sharedCard = document.querySelector('.node-card[data-agent-node="alpha"]');
   assertSharedStatusOrder(sharedCard);
   assert.equal(sharedCard.getAttribute("href"), "#settings-node-alpha", "共享节点卡片绕过了节点管理");
-  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点 →");
+  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点");
   assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
   sharedCard.click();
   await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");

@@ -59,7 +59,7 @@ export function renderFieldEditor({ selected, value, perPort = false, format = "
   const error = value.error || (locked && Boolean(value.present) !== (mutation !== "add") ?
     "配置项状态已变化，请重新加载后再编辑" : "");
   return `<section class="field-canvas" data-refresh-key="${esc(refreshKey)}">
-    <header><div class="field-editor-heading"><h2>${esc(selected.label)}</h2><code>${perPort ? "servers[]." : ""}${esc(selected.key)}</code></div><a href="${esc(selected.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>
+    <header><div class="field-editor-heading"><h2>${esc(selected.label)}</h2><code>${perPort ? "servers[]." : ""}${esc(selected.key)}</code></div><a href="${esc(selected.docs)}" target="_blank" rel="noopener noreferrer">文档</a></header>
     ${hint ? `<p class="field-scope-hint">${esc(hint)}</p>` : ""}${selected.description ? `<p class="field-description">${esc(selected.description)}</p>` : ""}
     ${error ? renderFieldEmpty("字段暂不可编辑", `${error}；请检查完整源码。`) : `${inheritance}<form id="${perPort ? "inbound-field-form" : "field-form"}" data-refresh-key="${perPort ? "inbound" : "global"}-value-${esc(selected.key)}-${value.present ? "set" : "unset"}${locked ? `-${mutation}` : ""}">
       <div class="field-mutation">${locked ? `<input type="hidden" name="mutation" value="${mutation}">` : `<label>操作<select name="mutation" data-refresh-key="${perPort ? "inbound" : "global"}-mutation-${esc(selected.key)}-${value.present ? "set" : "unset"}">${value.present ? '<option value="modify" selected>修改字段</option><option value="delete">删除字段</option>' : '<option value="add" selected>新增字段</option>'}</select></label>`}<span class="field-value-state">${value.present ? perPort ? "已设置端口值" : "已设置字段值" : "未单独设置"}</span></div>
@@ -91,7 +91,7 @@ export function renderGlobalFieldStudio({ fields, selected, value, config, catal
   return `<details class="advanced-studio config-field-studio" id="advanced">
     ${renderFieldSummary("全局字段", `${fields.length} 项 · ${catalog.format}`)}
     ${config && selected ? `<div class="advanced-studio-body scoped-field-body">${renderFieldRail({ fields, selected, presentFields })}${renderFieldEditor({ selected, value, format: catalog.format, hint: "顶层字段与完整源码分别保存。", refreshKey: `config-field-${selected.key}` })}</div>` : renderFieldEmpty("尚未保存配置", "请先创建并保存服务端入站。")}
-    ${topics.length ? `<details class="field-docs"><summary><b>配置参考文档</b><small>${catalog.topic_count} 个主题 ↗</small></summary><div>${topics.map((group) => `<details><summary>${esc(group.name)}<small>${group.topics.length}</small></summary><nav>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</nav></details>`).join("")}</div></details>` : ""}
+    ${topics.length ? `<details class="field-docs"><summary><b>配置参考文档</b><small>${catalog.topic_count} 个主题</small></summary><div>${topics.map((group) => `<details><summary>${esc(group.name)}<small>${group.topics.length}</small></summary><nav>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)}</a>`).join("")}</nav></details>`).join("")}</div></details>` : ""}
   </details>`;
 }
 
@@ -99,7 +99,7 @@ export function renderConfigSourceStudio({ config, catalog, engineInstalled, ope
   if (!config) return "";
   return `<details class="source-studio config-source-studio"${open ? " open" : ""}>
     ${renderFieldSummary("完整源码", `${catalog.format === "YAML" ? "config.yaml" : "config.json"} · v${config.version}`)}
-    <div class="config-source-body"><p class="field-source-note">${ssRust ? "包含 servers 列表及未收录字段，保存可能同时影响多个端口。" : "编辑完整配置文件，保存将创建新版本。"}<a href="${esc(catalog.source)}" target="_blank" rel="noopener noreferrer">官方完整配置定义 ↗</a></p>
+    <div class="config-source-body"><p class="field-source-note">${ssRust ? "包含 servers 列表及未收录字段，保存可能同时影响多个端口。" : "编辑完整配置文件，保存将创建新版本。"}<a href="${esc(catalog.source)}" target="_blank" rel="noopener noreferrer">官方完整配置定义</a></p>
     <form id="source-config-form"><div class="form-grid"><label>配置名称<input name="name" maxlength="100" required value="${esc(config.name)}"></label><label>说明<input name="description" maxlength="300" value="${esc(config.description)}"></label></div>
       <label class="field-value-label">${esc(catalog.format)} 配置源码<textarea name="content" spellcheck="false" required>${esc(config.content)}</textarea></label>
       <footer><div><button class="button" type="submit" data-source-intent="validate" ${engineInstalled ? "" : "disabled"}>保存源码并校验</button><button class="button primary" type="submit" data-source-intent="deploy" ${engineInstalled ? "" : "disabled"}>保存源码并部署</button></div></footer>
