@@ -1793,14 +1793,18 @@ prepare_external_env() {
 
 # Presentation stays independent of Docker so menus can be previewed safely.
 ui_text() {
-    local style="$1"
+    local style="$1" literal=false
     shift
+    if [ "${1:-}" = --literal ]; then
+        literal=true
+        shift
+    fi
     if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
         printf '\033[%sm' "$style"
-        ui_wrap "$*"
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
         printf '\033[0m'
     else
-        ui_wrap "$*"
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
     fi
 }
 
@@ -1874,7 +1878,8 @@ ui_section() {
 
 ui_detail() {
     ui_text 2 "  $1"
-    ui_text 0 "    $2"
+    # Preserve copyable values; the terminal can soft-wrap their visual lines.
+    ui_text 0 --literal "    $2"
 }
 
 ui_service_row() {
@@ -1894,7 +1899,7 @@ ui_service_row() {
 show_action_menu() {
     ui_heading "管理菜单"
     ui_section "工作目录"
-    ui_text 0 "  $WORK_DIR"
+    ui_text 0 --literal "  $WORK_DIR"
     ui_section "部署管理"
     ui_text 0 "  [1] 安装 / 重新配置"
     ui_text 0 "  [2] 更新现有部署"
@@ -1927,7 +1932,7 @@ show_result() {
     local result_name="$1" url="$2" stop_cmd="$3"
     ui_heading "$result_name"
     ui_section "访问面板"
-    ui_text '1;32' "  $url"
+    ui_text '1;32' --literal "  $url"
     ui_text 2 "  登录方式：用户名 + 密码 / 管理令牌"
     ui_section "部署文件"
     ui_detail "配置文件" "$ENV_FILE"

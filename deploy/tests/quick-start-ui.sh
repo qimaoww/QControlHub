@@ -34,8 +34,21 @@ grep -Fq '[待启动]' <<< "$(show_target_image_version control-plane '' sha256:
 # Replacing the final subcommand must not corrupt a directory containing 'down'.
 stop_cmd="docker compose --project-directory '$WORK_DIR' down"
 result="$(show_result 更新完成 http://127.0.0.1:8080 "$stop_cmd")"
-grep -Fq -- "docker compose --project-directory '$WORK_DIR' logs -f" <<< "${result//$'\n'/}"
-grep -Fq -- "$stop_cmd" <<< "${result//$'\n'/}"
+grep -Fxq -- "    docker compose --project-directory '$WORK_DIR' logs -f" <<< "$result"
+grep -Fxq -- "    $stop_cmd" <<< "$result"
+
+# Narrow displays must preserve commands, paths and URLs as single logical
+# lines, so terminal soft wrapping does not introduce clipboard newlines.
+long_url='https://control-panel.example.test/a/long/path?view=deployment'
+for width in 72 40 24; do
+    result="$(COLUMNS="$width" show_result 更新完成 "$long_url" "$stop_cmd")"
+    grep -Fxq -- "    docker compose --project-directory '$WORK_DIR' logs -f" <<< "$result"
+    grep -Fxq -- "    $stop_cmd" <<< "$result"
+    grep -Fxq -- "    $ENV_FILE" <<< "$result"
+    grep -Fxq -- "  $long_url" <<< "$result"
+    menu="$(COLUMNS="$width" show_action_menu)"
+    grep -Fxq -- "  $WORK_DIR" <<< "$menu"
+done
 
 # A new token appears once and is cleared; later summaries never redisplay it.
 output="$(
@@ -57,7 +70,9 @@ for width in 72 40 24; do
             if (text.includes("\x1b")) throw Error("NO_COLOR emitted ANSI escapes");
             for (const line of text.split("\n")) {
                 const cells = [...line].reduce((n,c) => n + (/[^\x00-\x7f]/u.test(c) ? 2 : 1), 0);
-                // Raw commands and paths may wrap naturally in a terminal.
+                // Copyable values stay on one logical line and soft-wrap in
+                // the terminal. Prose and labels still have a hard width bound.
+                if (/^ {4}\S/u.test(line) || /^  (?:\/|https?:\/\/)/u.test(line)) continue;
                 if (cells > Number(process.argv[1])) throw Error(`line exceeds width: ${line}`);
             }
         });' "$width"
