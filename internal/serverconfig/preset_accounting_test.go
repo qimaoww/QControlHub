@@ -89,7 +89,7 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 						t.Fatal(err)
 					}
 					again, err := PrepareAccounting(engine, roundTrip)
-					if err != nil || !reflect.DeepEqual(plan, again) {
+					if err != nil || !sameAccountingPlan(plan, again) {
 						t.Fatalf("paired files changed preset accounting: %v", err)
 					}
 				}

@@ -13,6 +13,7 @@ import "./config_fields_smoke.mjs";
 import "./access_control_smoke.mjs";
 import "./system_bbr_smoke.mjs";
 import "./config_files_smoke.mjs";
+import "./config_workspace_smoke.mjs";
 import "./config_outbounds_smoke.mjs";
 import "./preset_drafts_smoke.mjs";
 import "./preset_runtime_smoke.mjs";

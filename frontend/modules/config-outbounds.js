@@ -2,10 +2,11 @@ import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-files.js";
 import { bindConfigMenu } from "./config-menu.js";
 import { bindDialogBackdrop, closePopup, closeRetiringDialog } from "./popup.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { updateFeedback, setVisible } from "./presence-motion.js";
 import { formatConfigContent } from "./code-format.js";
 import { bindOutboundPresets } from "./outbound-presets.js";
+import { createPresetDrafts } from "./preset-drafts.js";
 
 const generated = tag => /^qch-(?:trf-|stat-)/.test(tag || "");
 const objectText = entries => `{\n${[...entries].map(([key, value]) => `${JSON.stringify(key)}: ${value}`).join(",\n")}\n}`;
@@ -145,53 +146,58 @@ export function changeInboundOutbound(content, engine, inbound, operation, index
   return bindOutbound(changed, engine, inbound, operation === "delete" ? "" : JSON.parse(fragment).tag, operation === "delete");
 }
 
-export function bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify,
-  confirmAction, beforeDeploy, onSaved, state, selectedInbound, input:sourceInput, canReadPeers }) {
+export function bindConfigOutbounds({ navigation, container, api, agent, engine, saved, current, content:readContent, writable, notify,
+  confirmAction, beforeDeploy, onSaved, state, workspaceRecord, workspaces, selectedInbound, selectedOutbound = () => null, input:sourceInput, canReadPeers }) {
   if (!["xray", "sing-box"].includes(engine)) return;
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";
   menu.innerHTML = `<summary class="button" aria-haspopup="menu">出站操作 <span aria-hidden="true">▾</span></summary>
     <div class="config-inbound-menu-items" role="menu" aria-label="出站操作">
-      <button type="button" role="menuitem" data-outbound-action="add">＋ 增加并绑定出站</button>
+      <button type="button" role="menuitem" data-outbound-action="add">增加并绑定出站</button>
       <button type="button" role="menuitem" data-outbound-action="bind">绑定已有出站</button>
       <button type="button" role="menuitem" data-outbound-action="modify">修改绑定出站</button>
       <button type="button" role="menuitem" class="danger-text" data-outbound-action="delete">删除绑定出站</button>
     </div>`;
+  navigation.querySelector("[data-config-outbound-menu]")?.remove();
+  menu.dataset.configOutboundMenu = "";
   navigation.append(menu);
   bindConfigMenu(menu);
   let dialog;
-  const bindingCache = new Map();
-  const triggers = [...menu.querySelectorAll("button")];
+  const triggers = [...menu.querySelectorAll("button"), ...container?.querySelectorAll('[data-outbound-action="create"]') || []];
   const update = () => {
-    const chosen = selectedInbound();
-    setVisible(menu, chosen);
+    const chosen = selectedInbound(), outbound = selectedOutbound();
+    setVisible(menu, chosen || outbound);
     let binding = "", reason = "";
     if (saved && chosen) {
-      const key = JSON.stringify([chosen.tag, chosen.port]);
-      if (!bindingCache.has(key)) {
-        try { bindingCache.set(key, {binding:inboundOutbound(saved.content, engine, chosen)}); }
-        catch (error) { bindingCache.set(key, {reason:error.message}); }
-      }
-      ({binding = "", reason = ""} = bindingCache.get(key));
+      try { binding = inboundOutbound(readContent?.() ?? saved.content, engine, chosen); }
+      catch (error) { reason = error.message; }
     }
     triggers.forEach(button => {
-      const needsBinding = ["modify", "delete"].includes(button.dataset.outboundAction);
-      button.disabled = !saved || !writable() || !chosen || Boolean(dialog) || Boolean(reason) || needsBinding && !binding;
+      const operation = button.dataset.outboundAction;
+      const needsBinding = ["modify", "delete"].includes(operation);
+      if (operation !== "create") setVisible(button, !outbound || needsBinding);
+      if (needsBinding) button.textContent = operation === "modify" ? outbound ? "修改出站" : "修改绑定出站" : outbound ? "删除出站" : "删除绑定出站";
+      button.disabled = !saved || !writable() || Boolean(dialog) || operation !== "create" && (!chosen && !outbound || Boolean(reason) || needsBinding && !outbound && !binding || outbound?.system);
       button.title = !chosen ? "请先选择入站，再操作绑定出站" :
         reason || (needsBinding && !binding ? "当前入站尚未绑定出站，请先增加或绑定已有出站" : "");
     });
     menu.querySelector("summary").title = !chosen ? "请先选择入站，再操作绑定出站" :
       binding ? `当前绑定：${binding}` : "当前入站尚未设置专属出站绑定";
   };
-  sourceInput?.addEventListener("config-selection", update);
-  sourceInput?.addEventListener("input", update);
+  bindEvent(sourceInput, "config-selection", update, {bindingKey:"config-outbounds"});
+  bindEvent(sourceInput, "input", update, {bindingKey:"config-outbounds"});
   update();
 
   triggers.forEach(trigger => bindEvent(trigger, "click", async () => {
     closePopup(menu);
-    if (!current() || dialog || trigger.disabled || !writable() || !selectedInbound()) return;
-    if (dirty()) { notify("配置源码有未保存修改，请先保存，再操作出站。", "error"); return; }
-    const inbound = { ...selectedInbound() }, operation = trigger.dataset.outboundAction;
+    if (!current() || dialog || trigger.disabled || !writable()) return;
+    const standalone = trigger.dataset.outboundAction === "create" || Boolean(selectedOutbound());
+    const inbound = standalone ? null : { ...selectedInbound() }, chosenOutbound = selectedOutbound();
+    const operation = trigger.dataset.outboundAction === "create" ? "add" : trigger.dataset.outboundAction;
+    if (!standalone && !inbound?.tag) return;
+    let draftContent;
+    try { draftContent = readContent?.() ?? saved.content; }
+    catch (error) { notify(error.message, "error"); return; }
     const deleting = operation === "delete", selecting = operation === "bind";
     const base = `/agents/${encodeURIComponent(agent.id)}/configs/${engine}`;
     const opened = document.createElement("dialog");
@@ -200,32 +206,40 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
     opened.setAttribute("aria-labelledby", "config-outbound-title");
     opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-outbound-title"></h2><p data-outbound-context></p></div><button type="button" class="config-access-close" data-outbound-close aria-label="关闭弹窗">×</button></header>
       <div class="config-inbound-body" data-outbound-body><p role="status">正在读取出站配置…</p></div>`;
-    opened.querySelector("h2").textContent = {add:"增加并绑定出站", bind:"绑定已有出站", modify:"修改绑定出站", delete:"删除绑定出站"}[operation];
-    opened.querySelector("[data-outbound-context]").textContent = `${agent.name} / ${engine === "xray" ? "Xray" : "sing-box"} · ${inbound.tag} :${inbound.port}`;
+    opened.querySelector("h2").textContent = standalone ? {add:"增加出站", modify:"修改出站", delete:"删除出站"}[operation] : {add:"增加并绑定出站", bind:"绑定已有出站", modify:"修改绑定出站", delete:"删除绑定出站"}[operation];
+    opened.querySelector("[data-outbound-context]").textContent = `${agent.name} / ${engine === "xray" ? "Xray" : "sing-box"}${inbound ? ` · ${inbound.tag} :${inbound.port}` : chosenOutbound ? ` · ${chosenOutbound.tag}` : ""}`;
     const body = opened.querySelector("[data-outbound-body]");
     const active = () => current() && dialog === opened && opened.isConnected;
     const readController = new AbortController();
-    let saving = false, confirming = false, isDirty = () => false, preset;
-    const dispose = () => {
+    let saving = false, confirming = false, isDirty = () => false, preset, draftController, drafts, draftScope, draftKey;
+    const dispose = (discard = false) => {
       readController.abort();
+      if (drafts) {
+        drafts.capture();
+        if (discard) drafts.clear(draftKey);
+        if (workspaceRecord) workspaceRecord.formDrafts = drafts.serialize(draftScope);
+      }
+      if (workspaceRecord?.formEditor === draftController) workspaceRecord.formEditor = null;
+      workspaces?.capture();
       preset?.dispose();
-      state.routeSignal?.removeEventListener("abort", dispose);
+      state.routeSignal?.removeEventListener("abort", abort);
       closeRetiringDialog(opened); opened.remove();
       if (dialog === opened) dialog = null;
-      if (current()) { update(); menu.querySelector("summary").focus(); }
+      if (current()) { update(); (trigger.closest("details")?.querySelector("summary") || trigger).focus(); }
     };
     const close = async () => {
       if (saving || confirming) return;
       confirming = true;
       try {
         if (isDirty() && !(await confirmAction("出站配置有未保存修改，确定放弃并关闭？", "放弃修改"))) return;
-        dispose();
+        dispose(true);
       } finally { confirming = false; }
     };
     bindEvent(opened.querySelector("[data-outbound-close]"), "click", close);
     bindEvent(opened, "cancel", event => { event.preventDefault(); void close(); });
     bindDialogBackdrop(opened, () => { void close(); });
-    state.routeSignal?.addEventListener("abort", dispose, {once:true});
+    const abort = () => dispose(false);
+    state.routeSignal?.addEventListener("abort", abort, {once:true});
     document.body.append(opened);
     opened.showModal();
     update();
@@ -233,38 +247,40 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
       const fresh = await api(`${base}/workspace`, {method:"GET", signal:readController.signal});
       if (!active()) return;
       if (!fresh.config || fresh.config.version !== saved.version) throw Error("配置版本已变化，请关闭弹窗并重新读取后再编辑");
-      if (dirty()) throw Error("配置源码有未保存修改，请先保存");
-      if (selectedInbound()?.tag !== inbound.tag || selectedInbound()?.port !== inbound.port) throw Error("所选入站已变化，请重新打开出站操作");
-      const entries = outboundEntries(fresh.config.content).filter(entry => exit(entry, engine) && entry.tag);
-      const bound = inboundOutbound(fresh.config.content, engine, inbound);
+      if (!standalone && (selectedInbound()?.tag !== inbound.tag || selectedInbound()?.port !== inbound.port)) throw Error("所选入站已变化，请重新打开出站操作");
+      const entries = outboundEntries(draftContent).filter(entry => (standalone || exit(entry, engine)) && entry.tag);
+      const bound = standalone ? chosenOutbound?.tag || "" : inboundOutbound(draftContent, engine, inbound);
       const entry = entries.find(entry => entry.tag === bound);
       if (operation !== "add" && !entries.length) throw Error("没有可绑定的流量出站，请先增加出站");
       if (["modify", "delete"].includes(operation) && !entry) throw Error("当前入站尚未绑定可编辑出站，请先增加或绑定已有出站");
       body.innerHTML = `<section class="config-field-studio config-outbound-studio"><div class="field-canvas">
-        <div class="config-outbound-binding"><span>绑定入站 <strong data-bound-inbound></strong></span><span class="status-label" data-outbound-mark></span></div>
+        <div class="config-outbound-binding"><span>${inbound ? "绑定入站" : "配置对象"} <strong data-bound-inbound></strong></span></div>
         <p class="field-scope-hint" data-outbound-hint></p>
         <form><div class="field-mutation"><label data-outbound-select>选择出站<select aria-label="选择出站"></select></label><span class="field-value-state" data-outbound-state></span></div>
           <label class="field-value-label" data-outbound-source>出站配置 JSON<textarea rows="12" spellcheck="false" aria-label="出站配置 JSON"></textarea></label>
           <p class="alert error" role="alert" data-outbound-error hidden></p><p class="field-editor-note" role="status" data-outbound-status></p>
-          <footer><p class="field-editor-note">${deleting ? "删除后按剩余路由重新规划统计出口。" : "保存时生成独立出口及 mark。"}校验不改变节点运行配置；部署会重启当前内核。</p><div><button class="button" type="button" data-outbound-cancel>取消</button><button class="button" type="submit" data-intent="validate">${deleting ? "删除" : "保存"}并校验</button><button class="button ${deleting ? "danger" : "primary"}" type="submit" data-intent="deploy">${deleting ? "删除" : "保存"}并部署</button></div></footer>
+          <footer><p class="field-editor-note">校验检查配置；部署应用修改并重启内核。</p><div><button class="button" type="button" data-outbound-cancel>取消</button><button class="button" type="submit" data-intent="validate">${deleting ? "删除" : "保存"}并校验</button><button class="button ${deleting ? "danger" : "primary"}" type="submit" data-intent="deploy">${deleting ? "删除" : "保存"}并部署</button></div></footer>
         </form></div></section>`;
-      body.querySelector("[data-bound-inbound]").textContent = `${inbound.tag} · :${inbound.port}`;
-      body.querySelector("[data-outbound-mark]").textContent = `mark · 0x${(0x51430000 | inbound.port).toString(16)}`;
-      updateFeedback(body.querySelector("[data-outbound-hint]"), deleting
+      body.querySelector("[data-bound-inbound]").textContent = inbound ? `${inbound.tag} · :${inbound.port}` : "公共出站";
+      updateFeedback(body.querySelector("[data-outbound-hint]"), standalone ? "公共出站可在路由中引用。" : deleting
         ? "删除此出站并移除当前入站绑定，入站将恢复全局路由。默认或共享出口不可在此删除。"
         : "绑定作为当前入站的兜底出口，已有条件分流和限制规则保持不变。修改仅限本入站独占的出站模板。");
-      body.querySelector("[data-outbound-state]").textContent = bound ? `当前绑定：${bound}` : "尚未绑定 · 当前按全局路由";
+      body.querySelector("[data-outbound-state]").textContent = standalone
+        ? entry ? `${entry.tag} · ${entry.index === 0 ? "默认出站" : `${referencesTo(draftContent, entry.index).length} 处引用`}` : "新出站"
+        : bound ? `当前绑定：${bound}` : "尚未绑定 · 当前按全局路由";
       const form = body.querySelector("form"), select = body.querySelector("select"), input = body.querySelector("textarea");
       for (const candidate of entries) select.add(new Option(candidate.tag, String(candidate.index), candidate.tag === bound, candidate.tag === bound));
       setVisible(body.querySelector("[data-outbound-select]"), selecting);
       let baseline;
       if (operation === "add") {
-        let tag = `exit-${inbound.port}`;
-        for (let suffix = 2; entries.some(entry => entry.tag === tag); suffix++) tag = `exit-${inbound.port}-${suffix}`;
+        const prefix = inbound ? `exit-${inbound.port}` : "exit";
+        let tag = prefix;
+        for (let suffix = 2; entries.some(entry => entry.tag === tag); suffix++) tag = `${prefix}-${suffix}`;
         baseline = JSON.stringify(engine === "xray" ? {tag, protocol:"freedom"} : {tag, type:"direct"}, null, 2);
       } else baseline = selecting ? entries.find(entry => entry.index === Number(select.value)).content : entry.content;
       baseline = formatConfigContent(baseline, "JSON");
       input.value = baseline;
+      input.name = "outbound_content"; select.name = "outbound_index";
       input.rows = Math.min(16, Math.max(6, baseline.split("\n").length + 1));
       input.readOnly = deleting || selecting;
       const selected = select.value;
@@ -280,6 +296,15 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         form, input, engine, agentId:agent.id, api, canReadPeers, active, onChange:syncDirty,
         initialMode:operation === "add" ? "preset" : "json",
       });
+      drafts = state.data.presetDrafts ||= createPresetDrafts();
+      draftScope = `${agent.id}|${engine}|${workspaceRecord?.sourceMode || "legacy"}|`;
+      draftKey = `${draftScope}outbound:${standalone ? "shared" : inbound.tag}:${operation}:${bound}`;
+      drafts.restore(workspaceRecord?.formDrafts);
+      drafts.bind(form, draftKey);
+      draftController = {capture() { if (workspaceRecord) workspaceRecord.formDrafts = drafts.serialize(draftScope); }, dirty:() => drafts.dirty(draftKey), busy:() => saving};
+      if (workspaceRecord) workspaceRecord.formEditor = draftController;
+      form.addEventListener("input", () => workspaces?.capture());
+      form.addEventListener("change", () => workspaces?.capture());
       bindEvent(body.querySelector("[data-outbound-cancel]"), "click", close);
       const submits = [...form.querySelectorAll("[type=submit]")], closeButtons = [...opened.querySelectorAll("[data-outbound-close], [data-outbound-cancel]")];
       const available = writable() && fresh.agent?.status === "online" && fresh.agent?.runtime?.[engine]?.installed;
@@ -306,31 +331,31 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         sync();
         let submitted = false;
         try {
-          if (dirty()) throw Error("配置源码有未保存修改，请先保存");
-          if (selectedInbound()?.tag !== inbound.tag || selectedInbound()?.port !== inbound.port) throw Error("所选入站已变化，请重新打开出站操作");
+          if (!standalone && (selectedInbound()?.tag !== inbound.tag || selectedInbound()?.port !== inbound.port)) throw Error("所选入站已变化，请重新打开出站操作");
           const fragment = preset ? preset.content() : input.value;
           const tag = selecting ? entries.find(entry => entry.index === Number(select.value)).tag : deleting ? entry.tag : JSON.parse(fragment).tag;
-          const content = changeInboundOutbound(fresh.config.content, engine, inbound, operation, entry?.index ?? -1, selecting ? tag : fragment);
+          const content = standalone ? mutateOutbound(draftContent, operation, entry?.index ?? -1, fragment) : changeInboundOutbound(draftContent, engine, inbound, operation, entry?.index ?? -1, selecting ? tag : fragment);
           if ((deleting || selecting && bound && tag !== bound || intent === "deploy") &&
-              !(await confirmAction(`${deleting ? "删除出站并恢复全局路由" : "保存出站绑定"}：${inbound.tag} :${inbound.port} → ${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
+              !(await confirmAction(`${deleting ? "删除出站" : "保存出站"}：${inbound ? `${inbound.tag} :${inbound.port} · ` : ""}${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
           if (!active()) return;
           if (intent === "deploy" && beforeDeploy) {
-            updateFeedback(status, "正在核验 Agent 当前配置…");
+            updateFeedback(status, "正在核验配置…");
             await beforeDeploy();
             if (!active()) return;
           }
-          updateFeedback(status, "正在保存配置并提交任务…");
+          updateFeedback(status, "正在提交…");
           submitted = true;
           const result = await api(`${base}/source`, {method:"POST", body:JSON.stringify({
             name:fresh.config.name, description:fresh.config.description, engine, version:fresh.config.version, content, intent,
           })});
           if (!active()) return;
-          dispose();
+          drafts.clear(draftScope);
+          dispose(true);
           await onSaved(result, inbound);
         } catch (error) {
           if (!active()) return;
           uncertain = submitted && (!error.status || error.status === 409 || error.status >= 500);
-          updateFeedback(errorBox, `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`);
+          updateFeedback(errorBox, redactDiagnostic(error.message) || "提交失败");
         } finally {
           saving = false;
           updateFeedback(status, "");
@@ -345,7 +370,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         const message = document.createElement("p");
         message.className = "alert error";
         message.setAttribute("role", "alert");
-        updateFeedback(message, diagnosticError(error.message));
+        updateFeedback(message, redactDiagnostic(error.message) || "配置加载失败");
         body.append(message);
       }
     }

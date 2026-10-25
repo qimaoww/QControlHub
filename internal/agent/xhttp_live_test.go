@@ -59,7 +59,14 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input.Listen, input.Port, input.ClientPort, input.ClientAddress = "::", singBoxFreePort(t), 0, "127.0.0.1"
+			publicListener := xhttpReservePort(t)
+			serverListeners := []net.Listener{publicListener}
+			var apiListener, tlsListener net.Listener
+			if !deployment.shared {
+				apiListener = xhttpReservePort(t)
+				serverListeners = append(serverListeners, apiListener)
+			}
+			input.Listen, input.Port, input.ClientPort, input.ClientAddress = "::", publicListener.Addr().(*net.TCPAddr).Port, 0, "127.0.0.1"
 			input.BlockMainlandDestination, input.BlockMainlandSource = false, false
 			input.CertificatePath, input.PrivateKeyPath = certPath, keyPath
 			input.TLSServerName, input.RealityServerName, input.XHTTPTLSAddress = "tls.example.test", "reality.example.test", "127.0.0.1"
@@ -68,7 +75,10 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 				if nginx == "" {
 					t.Skip("set QCH_NGINX_BINARY to verify managed combination")
 				}
-				input.XHTTPBackendPort, input.XHTTPTLSPort = singBoxFreePort(t), singBoxFreePort(t)
+				backendListener := xhttpReservePort(t)
+				tlsListener = xhttpReservePort(t)
+				serverListeners = append(serverListeners, backendListener)
+				input.XHTTPBackendPort, input.XHTTPTLSPort = backendListener.Addr().(*net.TCPAddr).Port, tlsListener.Addr().(*net.TCPAddr).Port
 			}
 			content, err := serverconfig.Generate(core.EngineXray, input)
 			if err != nil {
@@ -102,12 +112,16 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 				if output, err := exec.Command(nginx, append(args, "-t")...).CombinedOutput(); err != nil {
 					t.Fatalf("Nginx rejected generated config: %v %s", err, output)
 				}
+				if err := tlsListener.Close(); err != nil {
+					t.Fatal(err)
+				}
 				xhttpTestProcess(t, nginx, args, nil)
+				xhttpWaitPort(t, input.XHTTPTLSPort)
 			}
 			var accountingSource map[string]any
 			_ = json.Unmarshal([]byte(content), &accountingSource)
 			if !deployment.shared {
-				accountingSource["api"] = map[string]any{"tag": "qch-stat-api", "listen": net.JoinHostPort("127.0.0.1", strconv.Itoa(singBoxFreePort(t)))}
+				accountingSource["api"] = map[string]any{"tag": "qch-stat-api", "listen": apiListener.Addr().String()}
 			}
 			accountingJSON, _ := json.Marshal(accountingSource)
 			accounting, err := serverconfig.PlanPresetAccounting(core.EngineXray, string(accountingJSON))
@@ -128,7 +142,7 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 					t.Fatalf("shared quota endpoint: %+v %v", endpoints, err)
 				}
 			}
-			xhttpTestCore(t, xray, runtimeContent, certPath)
+			xhttpTestCore(t, xray, runtimeContent, certPath, serverListeners...)
 			profile, err := serverconfig.BuildClientProfile(input, "127.0.0.1", "")
 			if err != nil {
 				t.Fatal(err)
@@ -201,17 +215,45 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 	}
 }
 
+// Keep every fixture port bound until its process is ready to start. Releasing
+// ports as they are selected lets later listeners or client connections reuse them.
+func xhttpReservePort(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	return listener
+}
+
+func xhttpWaitPort(t *testing.T, port int) {
+	t.Helper()
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	var last error
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		connection, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			return
+		}
+		last = err
+	}
+	t.Fatalf("fixture listener %s did not start: %v", address, last)
+}
+
 func xhttpAssertClient(t *testing.T, binary, content, certPath string) {
 	t.Helper()
 	echo := singBoxEcho(t, "tcp")
-	port := singBoxFreePort(t)
+	listener := xhttpReservePort(t)
+	port := listener.Addr().(*net.TCPAddr).Port
 	var root map[string]any
 	if err := json.Unmarshal([]byte(content), &root); err != nil {
 		t.Fatal(err)
 	}
 	root["inbounds"] = []any{map[string]any{"tag": "local", "listen": "127.0.0.1", "port": port, "protocol": "tunnel", "settings": map[string]any{"address": "127.0.0.1", "port": echo, "network": "tcp"}}}
 	data, _ := json.Marshal(root)
-	xhttpTestCore(t, binary, string(data), certPath)
+	xhttpTestCore(t, binary, string(data), certPath, listener)
 	var last error
 	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); time.Sleep(40 * time.Millisecond) {
 		last = singBoxEchoRoundTrip("tcp", port)
@@ -222,7 +264,7 @@ func xhttpAssertClient(t *testing.T, binary, content, certPath string) {
 	t.Fatal("exported client failed TCP round trip", last)
 }
 
-func xhttpTestCore(t *testing.T, binary, content, certPath string) {
+func xhttpTestCore(t *testing.T, binary, content, certPath string, listeners ...net.Listener) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
@@ -233,7 +275,15 @@ func xhttpTestCore(t *testing.T, binary, content, certPath string) {
 	if output, err := check.CombinedOutput(); err != nil {
 		t.Fatalf("Xray rejected generated config: %v %s", err, output)
 	}
+	for _, listener := range listeners {
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	xhttpTestProcess(t, binary, []string{"run", "-config", path}, []string{"SSL_CERT_FILE=" + certPath})
+	for _, listener := range listeners {
+		xhttpWaitPort(t, listener.Addr().(*net.TCPAddr).Port)
+	}
 }
 
 func xhttpTestProcess(t *testing.T, binary string, args, env []string) {
@@ -331,7 +381,9 @@ func xhttpAssertMihomo(t *testing.T, binary, proxyJSON, certPath string) {
 	if err := yaml.Unmarshal([]byte(proxyJSON), &proxy); err != nil {
 		t.Fatal(err)
 	}
-	port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+	echo := singBoxEcho(t, "tcp")
+	listener := xhttpReservePort(t)
+	port := listener.Addr().(*net.TCPAddr).Port
 	content, _ := json.Marshal(map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "silent", "proxies": []any{proxy}, "rules": []string{"MATCH," + proxy["name"].(string)}})
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mihomo.json")
@@ -343,7 +395,11 @@ func xhttpAssertMihomo(t *testing.T, binary, proxyJSON, certPath string) {
 	if output, err := check.CombinedOutput(); err != nil {
 		t.Fatalf("Mihomo rejected export: %v %s", err, output)
 	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	xhttpTestProcess(t, binary, []string{"-d", dir, "-f", path}, []string{"SSL_CERT_FILE=" + certPath})
+	xhttpWaitPort(t, port)
 	var last error
 	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); time.Sleep(40 * time.Millisecond) {
 		last = func() error {

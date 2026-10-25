@@ -19,7 +19,7 @@ export async function testCommonConfigRuntime() {
     const structure = protectedStructure(test);
     test.selectCommon();
     assert(!document.querySelector("dialog"), "selecting public config must not automatically open an editor");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作", "public selection did not change the operation menu");
+    assert(document.querySelector("[data-config-operation-label]").textContent === "公共配置操作", "public selection did not change the operation menu");
     assert(!document.querySelector("[data-common-actions]").hidden &&
       document.querySelector('[data-inbound-action="modify"]').hidden, "public menu mixes common and inbound mutations");
     const add = document.querySelector('[data-inbound-action="add"]');
@@ -27,12 +27,7 @@ export async function testCommonConfigRuntime() {
       !add.closest(".config-inbound-menu") && document.querySelectorAll('[data-inbound-action="add"]').length === 1,
       "add inbound must always be a single standalone source-toolbar action");
     const preview = document.querySelector("[data-config-preview]");
-    if (preview) {
-      assert(add.nextElementSibling === preview, "add inbound must be immediately before merged preview");
-      const bounds = add.getBoundingClientRect(), previewBounds = preview.getBoundingClientRect();
-      assert(bounds.right <= previewBounds.left && Math.abs(bounds.top - previewBounds.top) <= 1,
-        "add inbound and merged preview must stay together on one row");
-    }
+    assert(preview?.closest("[data-config-objects]"), "complete preview must be part of object navigation");
     test.common("add");
     await waitFor(()=>form(), "common add form did not load");
     assert(document.querySelector("#config-inbound-title").textContent === "增加通用配置项", "common dialog title is incorrect");
@@ -75,7 +70,7 @@ export async function testCommonConfigRuntime() {
       !Object.hasOwn(test.writes[0], "install_if_missing"), "common add used wrong field, revision, or installation flow");
     assert(protectedStructure(test) === structure && JSON.parse(test.saved().content).dns.servers[0] === "1.1.1.1",
       "adding a common field altered inbounds or their paired exits");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作",
+    assert(document.querySelector("[data-config-operation-label]").textContent === "公共配置操作",
       "common save changed the current file selection");
     assert(test.confirmations.some(item=>item.title === "存在其他未保存修改"), "saving one common field silently discarded other field drafts");
 
@@ -99,15 +94,16 @@ export async function testCommonConfigRuntime() {
       assert(document.querySelector("[data-common-actions]").hidden &&
         document.querySelector('[data-common-action="modify"]').disabled, "merged preview is treated as common configuration");
       assert(!document.querySelector('[data-inbound-action="add"]').hidden, "merged preview hid the standalone add action");
-      document.querySelector("[data-config-preview]").click();
+      test.selectCommon();
     }
     test.selectCommon();
     assert(!document.querySelector("dialog"), "returning to common source opened a modal");
     const source = document.querySelector("[data-code-input]"), baseline = source.value;
-    source.value += "\n "; source.dispatchEvent(new Event("input"));
+    source.value = source.value.replace("{", '{"custom_common":18446744073709551615,'); source.dispatchEvent(new Event("input"));
     test.common("modify"); await pause();
-    assert(!document.querySelector("dialog") && test.notices.some(message=>message.includes("未保存修改")),
-      "common mutation ignored an unsaved source draft");
+    await waitFor(()=>form(), "common form could not use the complete current draft");
+    assert(source.value.includes("18446744073709551615"), "opening the common form discarded custom source");
+    document.querySelector("[data-inbound-close]").click(); await pause();
     source.value = baseline; source.dispatchEvent(new Event("input"));
     test.common("modify");
     await waitFor(()=>form(), "common modify form did not load");
@@ -174,7 +170,8 @@ export async function testCommonConfigRuntime() {
   nativeCommon.dispose();
   for (const options of [{readonly:true}, {noTasks:true}, {import:true}]) {
     const test = await fixture("xray", options);
-    assert(!document.querySelector('[data-inbound-action="add"]').hidden, "permission or source state should disable, not hide, the add action");
+    const add = document.querySelector('[data-inbound-action="add"]');
+    assert(!add || add.disabled, "permission or source state exposed an unavailable add action");
     for (const operation of ["add", "modify", "delete"]) {
       test.common(operation); await pause();
       assert(!document.querySelector("dialog") && !test.writes.length,
@@ -220,7 +217,7 @@ export async function testCommonConfigRuntime() {
   await isolated.reenter();
   isolated.common("delete");
   await waitFor(()=>form(), "common deletion did not reopen after navigation");
-  assert(form().elements.mutation.value === "delete" && form().elements.fragment.value === '{"level":"info"}',
+  assert(form().elements.mutation.value === "delete" && JSON.parse(form().elements.fragment.value).level === "info",
     "a modify draft leaked into the delete operation");
   isolated.dispose();
   const conflict = await fixture("xray");
@@ -229,7 +226,7 @@ export async function testCommonConfigRuntime() {
   form().elements.fragment.value = '{"level":"keep-this-draft"}';
   conflict.fail = true;
   form().querySelector("[data-field-intent=validate]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("草稿已保留"),
+  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.firstChild?.textContent === "fixture version conflict",
     "common save conflict did not preserve the draft");
   assert(form().elements.fragment.value.includes("keep-this-draft") && form().querySelector("[data-field-intent=validate]").disabled,
     "common conflict allowed stale resubmission or discarded inputs");

@@ -89,7 +89,8 @@ export function bindCodeEditors(root = document) {
       editor.dataset.dirty = dirty ? "1" : "0";
       editor.dataset.codeValid = result.valid ? "1" : "0";
       input.classList.toggle("is-invalid", !result.valid);
-      if (reset) reset.disabled = !(editor.configFileController?.currentDirty?.() ?? dirty) || input.readOnly;
+      if (reset) reset.disabled = !(editor.configFileController?.currentDirty?.() ?? dirty) || input.readOnly || input.disabled;
+      if (format) format.disabled = input.readOnly || input.disabled;
       if (!result.valid) {
         if (status) updateFeedback(status, result.status);
         if (validation) updateFeedback(validation, result.message);
@@ -97,7 +98,7 @@ export function bindCodeEditors(root = document) {
       } else if (dirty) {
         if (status) updateFeedback(status, "未保存");
         if (validation)
-          updateFeedback(validation, result.json
+          updateFeedback(validation, result.json && !editor.configFileController
             ? "JSON 语法有效；提交后仍会由节点内核校验。"
             : baseline().validation);
         if (statusDot) statusDot.style.background = "var(--amber)";
@@ -174,7 +175,7 @@ export function bindCodeEditors(root = document) {
         );
         if (formatted === input.value) {
           if (validation)
-            updateFeedback(validation, "内容已符合排版格式。");
+            updateFeedback(validation, editor.configFileController ? "无需格式化" : "内容已符合排版格式。");
           return;
         }
         if (new Blob([formatted]).size > maxBytes) {
@@ -195,7 +196,7 @@ export function bindCodeEditors(root = document) {
         update();
         input.dispatchEvent(new Event("input", { bubbles: true }));
         if (validation)
-          updateFeedback(validation, "已格式化；内容未保存，需提交校验。");
+          updateFeedback(validation, editor.configFileController ? "格式化成功" : "已格式化；内容未保存，需提交校验。");
         input.focus();
       } catch (error) {
         input.setSelectionRange(

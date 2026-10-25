@@ -65,8 +65,8 @@ try {
     bindCodeEditors: noop,
   });
   await pages.liveConfig();
-  assert.equal(dualMarkup.includes("QAgent 配置"), true);
-  assert.equal(dualMarkup.includes("系统服务配置"), true);
+  assert.equal(dualMarkup.includes('data-live-source="managed"'), true);
+  assert.equal(dualMarkup.includes('data-live-source="import"'), true);
   assert.equal(dualMarkup.includes('{"tag":"managed"}'), true);
   assert.equal(dualMarkup.includes("readonly"), false);
   assert.equal(dualMarkup.includes('data-live-intent="deploy"'), true);

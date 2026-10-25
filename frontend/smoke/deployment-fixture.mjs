@@ -59,8 +59,9 @@ export function createDeploymentFixture() {
 
   globalThis.setTimeout = (cb) => { cb(); return 1; };
   globalThis.FormData = class {
-    constructor(f) { this.f = f; }
-    get(n) { return this.f.elements.namedItem(n)?.value ?? null; }
+    constructor(f) { this.f = f; this.values = new Map(); }
+    get(n) { return this.values.has(n) ? this.values.get(n) : this.f.elements.namedItem(n)?.value ?? null; }
+    set(n, value) { this.values.set(n, value); }
   };
 
   const AGENT_ID = "test-agent";
@@ -136,8 +137,9 @@ export function createDeploymentFixture() {
   };
 
   const installForms = (ctx, forms = {}, lists = {}) => {
+    const workspace = {isConnected:true, querySelector:selector => forms[selector] ?? null, querySelectorAll:() => [], setAttribute() {}, removeAttribute() {}};
     globalThis.document = {
-      querySelector: (sel) => forms[sel] ?? null,
+      querySelector: (sel) => sel === ".live-config-workspace" ? workspace : forms[sel] ?? null,
       querySelectorAll: selector => lists[selector] || [],
       getElementById: () => null,
       createElement: () => {

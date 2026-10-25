@@ -1,10 +1,8 @@
 import { coreInstallBlockReason } from "./core-install-state.js";
-import { updateFeedback } from "./presence-motion.js";
-import { liveConfigEditorState } from "./live-config-state.js";
-import { diagnosticError } from "./errors.js";
+import { redactDiagnostic } from "./errors.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
-import { sharedAllocationText, sharedConfigPresentation } from "./shared-instance-state.js";
-
+import { sharedAllocationText } from "./shared-instance-state.js";
+import { renderConfigObjectActions, renderConfigWorkspaceTools } from "./config-workspace-toolbar.js";
 function liveEngineStatus(info = {}, online = true) {
   if (typeof info.installed !== "boolean") return { label: "状态未知", tone: "unknown" };
   if (!info.installed)
@@ -29,85 +27,44 @@ function liveEngineStatus(info = {}, online = true) {
   }
 }
 
-export function createLiveConfigView({ can, esc, engineName, conciseVersion, shell, bytes }) {
-  return ({ agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
-    sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
-    managedAvailable, emptyManaged, readAction }) => {
-  const language = engine === "mihomo" ? "YAML" : "JSON";
+export function configWorkspaceStatus({runtime, workspace, saved, source, importSource}) {
+  const instance = runtime.instance;
+  const deployed = workspace?.deployedVersion || instance?.deployed_version;
+  return {
+    saved:importSource ? "系统服务快照" : saved?.version ? `已保存 v${saved.version}` : "尚未保存",
+    deployed:importSource ? "待导入并迁移" : instance?.config_uncertain ? "部署版本待确认" : deployed ? `已部署 v${deployed}${saved?.version !== deployed ? ` · v${saved?.version || 0} 待部署` : ""}` : source?.agentContent && saved?.content === source.agentContent ? `节点内容与 v${saved.version} 一致` : saved?.version ? "部署状态待确认" : "尚未部署",
+  };
+}
 
-  const editorState = liveConfigEditorState({
-    existingAvailable: importSource,
-    canOperate: can("agent-config.write"),
-    sourceContent: source?.content,
-    formContent: current?.content,
-  });
-  const canExecute = can("tasks.execute") && !unsupportedReason && (importSource || managedAvailable);
-  const liveActions = !can("agent-config.write")
-    ? ""
-    : (privateWorkspace ? '<button class="button" type="submit" data-live-intent="save">保存草稿</button>' : "") +
-      (!canExecute ? "" : importSource
-        ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
-        : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
-        '<button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>');
-  let sourceSwitch = existingAvailable
-    ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
-    : "";
-  if (importSource && engine === "ss-rust") {
-    sourceSwitch += '<p class="validation-note">导入保留多端口、DNS、出站绑定、IPv6 优先及出站 ACL。install-ss-rust 的入站防火墙与重应用服务不迁移，修改端口前须另行处理。日志改为 QAgent info；无离线校验，启动失败会回滚。</p>';
-  }
-  if (privateWorkspace) {
-    sourceSwitch = agent.can_manage === false ? `<p class="validation-note">${esc(sharedAllocationText(agent, bytes))}</p>` : '<p class="validation-note">个人工作区；保存草稿后，需部署才能在本人的服务中生效。</p>';
-  }
-  if (privateAccount && agent.can_manage === true) {
-    sourceSwitch = `<nav class="live-config-source-switch" aria-label="配置来源"><button type="button" data-live-source="personal" class="${privateWorkspace ? "active" : ""}"><b>我的配置</b><small>个人工作区</small></button>${managedAvailable ? `<button type="button" data-live-source="managed" class="${sourceMode === "managed" ? "active" : ""}"><b>读取自有主机配置</b><small>当前托管文件</small></button>` : ""}${existingAvailable ? `<button type="button" data-live-source="import" class="${importSource ? "active" : ""}"><b>系统服务配置</b><small>可选导入</small></button>` : ""}</nav>` +
-      (privateWorkspace ? sourceSwitch : '<p class="validation-note">只允许读取自有主机且未被其他账号占用的配置；共享给他人不授予读取其配置的权限。</p>');
-  }
-  const liveConfigPhase = current
-    ? "ready"
-    : source?.error
-      ? "error"
-      : agent.status !== "online"
-        ? "offline"
-        : unsupportedReason
-          ? "unsupported"
-          : !importSource && !readAction
-            ? "upgrade"
-          : "loading";
-  const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
-    const info = agent.runtime?.[item] || {};
-    const active = item === engine;
-    const { label, tone } = sharedConfigPresentation(agent, item) || liveEngineStatus(info, agent.status === "online");
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${esc(label)}" title="${esc(label)}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${esc(label)}</small></button>`;
-  }).join("")}</nav>`;
-  const details = `<div class="live-config-details" role="group" aria-label="当前配置状态">
-    ${agentPresenceMarkup(agent.status, { nodeLabel: true })}
-    <span class="live-config-detail">${esc(conciseVersion(engine, runtime.version))}</span>
-    <span class="live-config-detail"><span class="live-config-detail-label">来源</span>${privateWorkspace ? "个人配置" : importSource ? "系统服务 · 只读快照" : "QAgent 托管"}</span>
-  </div>`;
-  shell(
-    `<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}" data-motion-region="config-source" data-motion-key="${esc(sourceMode)}" data-motion-ready="${liveConfigPhase !== "loading"}"><header class="editor-toolbar"><div><h2>${esc(agent.name)}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><b class="live-config-version">${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `配置 v${saved.version}` : "未保存"}</b></div></header>${details}${engineBar}${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "系统服务只读快照" : "QAgent 配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("agent-config.write") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !readAction ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取 QAgent 配置</span><p>升级后即可在不影响系统服务可选导入的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(diagnosticError(source.error))}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "系统服务配置" : "QAgent 配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
-    "配置",
-    { viewKey: `live-config-${agent.id}-${engine}` },
-  );
-  const workspaceElement = document.querySelector(".live-config-workspace");
-  if (emptyManaged) {
-    const hint = document.createElement("p");
-    hint.className = "config-install-hint";
-    const reason = coreInstallBlockReason(agent, engine, can, { automatic: true });
-    updateFeedback(hint, `${engineName(engine)} 未安装；${reason || (agent.can_manage === false ? "增加入站时将受控准备稳定版内核并初始化您的独立实例。" : "提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。")}`);
-    workspaceElement.querySelector(".live-config-details").after(hint);
-  } else if (source?.cached) {
-    const hint = document.createElement("p");
-    hint.className = "config-install-hint";
-    updateFeedback(hint, "最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。");
-    workspaceElement.querySelector(".live-config-details").after(hint);
-  } else if (source?.saved) {
-    const hint = document.createElement("p");
-    hint.className = "config-install-hint";
-    updateFeedback(hint, "已保存配置，部署成功后在节点生效。");
-    workspaceElement.querySelector(".live-config-details").after(hint);
-  }
-
-    return workspaceElement;
+export function createLiveConfigView({state, can, esc, engineName, conciseVersion, shell, bytes}) {
+  return ({agent, engine, runtime, installedEngines, privateAccount, privateWorkspace, sourceMode, importSource,
+    current, saved, source, unsupportedReason, existingAvailable, managedAvailable, emptyManaged, readAction, workspace}) => {
+    const language = engine === "mihomo" ? "YAML" : "JSON";
+    const writable = can("agent-config.write") && !importSource && !unsupportedReason;
+    const executable = writable && can("tasks.execute") && agent.status === "online" && managedAvailable;
+    const sourceOptions = [
+      ...(privateAccount ? [{key:"personal", title:"我的配置", detail:"个人"}] : []),
+      ...(!privateAccount || agent.can_manage === true ? [
+        ...(managedAvailable || emptyManaged ? [{key:"managed", title:"托管配置", detail:"QAgent"}] : []),
+        ...(existingAvailable ? [{key:"import", title:"系统服务", detail:"只读快照"}] : []),
+      ] : []),
+    ];
+    const sourceSwitch = `<nav class="live-config-source-switch" aria-label="配置来源">${sourceOptions.map(option => `<button type="button" data-live-source="${option.key}" class="${sourceMode === option.key ? "active" : ""}" aria-pressed="${sourceMode === option.key}"><b>${option.title}</b><small>${option.detail}</small></button>`).join("")}</nav>`;
+    const liveConfigPhase = current ? "ready" : source?.error ? "error" : agent.status !== "online" ? "offline" : unsupportedReason ? "unsupported" : !importSource && !readAction ? "upgrade" : "loading";
+    const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
+      const active = item === engine;
+      const status = liveEngineStatus(agent.runtime?.[item], agent.status === "online");
+      return `<button type="button" class="live-engine-tab${item === engine ? " active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${esc(status.label)}" title="${esc(status.label)}"${item === engine ? ' aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${status.tone}">${esc(status.label)}</small></button>`;
+    }).join("")}</nav>`;
+    const workspaceStatus = configWorkspaceStatus({runtime, workspace, saved, source, importSource});
+    const ownerLabel = importSource ? "节点系统服务" : state.session?.username || (privateAccount ? "当前用户" : "管理员");
+    const details = `<div class="live-config-details" role="group" aria-label="工作区状态">${agentPresenceMarkup(agent.status, {nodeLabel:true})}<span class="live-config-detail">${esc(conciseVersion(engine, runtime.version))}</span><span class="live-config-detail"><span class="live-config-detail-label">${importSource ? "配置归属" : "所属账号"}</span>${esc(ownerLabel)}</span><span class="live-config-detail" data-workspace-save-state>${esc(workspaceStatus.saved)}</span><span class="live-config-detail" data-workspace-deploy-state>${esc(workspaceStatus.deployed)}</span></div>`;
+    const actions = importSource
+      ? can("agent-config.write") && can("tasks.execute") && agent.status === "online" && !unsupportedReason ? '<button class="button primary" type="submit" data-live-intent="import">导入并迁移</button>' : ""
+      : writable ? `<button class="button" type="submit" data-live-intent="save">保存草稿</button>${executable ? '<button class="button" type="submit" data-live-intent="validate">保存并校验</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>' : ""}` : "";
+    const editor = current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-engine="${esc(engine)}"><nav class="config-file-buttons" aria-label="配置对象"><div class="config-file-list" data-config-objects data-refresh-scroll></div></nav><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><b>公共配置</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "只读快照" : "已保存"}</span><span data-code-bytes></span><span data-code-position>行 1，列 1</span><span data-config-object-count></span></div>${renderConfigObjectActions(can, sourceMode)}${writable ? '<div class="config-editor-actions" role="group" aria-label="当前对象源码操作"><button class="button code-reset" type="button" data-code-reset disabled>恢复当前对象</button><button class="button code-format" type="button" data-code-format>格式化</button></div>' : ""}</header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required${writable ? "" : " readonly"}>${esc(current.content)}</textarea></div><footer><span><span data-code-validation aria-live="polite"></span></span><span class="config-draft-summary" role="status"></span><div>${actions}</div><span data-workspace-result role="status" aria-live="polite"></span></footer></section><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description || "")}"><input type="hidden" name="version" value="${current.version}"></form>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>${liveConfigPhase === "offline" ? "节点离线" : liveConfigPhase === "unsupported" ? "检测到现有服务，但不可自动迁移" : liveConfigPhase === "upgrade" ? "需要升级 Agent 后读取配置" : liveConfigPhase === "error" ? "读取配置失败" : "正在读取配置"}</h2>${source?.error || unsupportedReason ? `<p class="status-label bad">${esc(redactDiagnostic(source?.error || unsupportedReason))}</p>` : ""}${liveConfigPhase === "error" ? '<button class="button" type="button" data-read-current>重新读取</button>' : ""}</section>`;
+    const hint = emptyManaged ? `${engineName(engine)} 未安装；${coreInstallBlockReason(agent, engine, can, {automatic:true}) || "增加入站时可准备稳定版内核。"}` : agent.can_manage === false ? sharedAllocationText(agent, bytes) : "";
+    shell(`<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}" data-motion-region="config-source" data-motion-key="${esc(sourceMode)}" data-motion-ready="${liveConfigPhase !== "loading"}"><header class="editor-toolbar"><div><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2></div><div class="editor-toolbar-state">${renderConfigWorkspaceTools({can, agent, engine, sourceMode, esc})}</div></header>${details}${engineBar}${sourceSwitch}${hint ? `<p class="config-install-hint">${esc(hint)}</p>` : ""}<div class="config-file-buttons"><span class="config-draft-summary">${esc(saved?.name || current?.name || "新配置")} · ${privateWorkspace ? "个人配置" : importSource ? "系统服务快照" : "节点托管配置"}</span><div class="config-file-actions">${writable ? '<button class="button" type="button" data-config-file-open>导入文件</button><input type="file" accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml,text/plain" data-config-file-input hidden aria-label="选择本地配置文件">' : ""}${can("agent-config.write") && can("tasks.execute") && !importSource && !unsupportedReason ? `<button class="button" type="button" data-inbound-action="add">增加入站</button>${["xray", "sing-box"].includes(engine) ? '<button class="button" type="button" data-outbound-action="create">增加出站</button>' : ""}` : ""}</div></div>${workspace?.conflict ? '<p class="alert error" role="alert">配置版本已变化</p>' : ""}${editor}</article>`, "配置", {viewKey:`live-config-${agent.id}-${engine}-${sourceMode}`});
+    return document.querySelector(".live-config-workspace");
   };
 }
