@@ -1,9 +1,0 @@
-=== RUN   TestTrafficDeploymentAcknowledgesDeletedArchive
-2026/10/18 02:16:01 INFO waiting for PostgreSQL migration lock backend_pid=41
-2026/10/18 02:16:01 INFO applying PostgreSQL schema migration from_version=0 to_version=78 hint="retained log indexes may take several minutes; readiness waits until migration commits"
-2026/10/18 02:16:01 INFO PostgreSQL schema migration committed from_version=0 to_version=78 elapsed=178.62949ms
-    traffic_discovery_test.go:35: deleted archive prevented deployment acknowledgement: no rows in result set
---- FAIL: TestTrafficDeploymentAcknowledgesDeletedArchive (0.42s)
-FAIL
-FAIL	github.com/qimaoww/qcontrolhub/internal/store	0.630s
-FAIL

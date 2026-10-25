@@ -1,9 +1,0 @@
-browser workers=2, CPUs=12, memory=20001MiB, modes=4
-browser timing {"mode":"traffic-layout-dense","startupMs":152.490825,"testMs":492.40739299999996,"cleanupMs":24.71144800000002,"passed":true,"elapsedMs":669.620727}
-browser timing {"mode":"capabilities-settings-mobile","startupMs":107.851338,"testMs":549.068523,"cleanupMs":36.400859999999966,"passed":true,"elapsedMs":693.342037}
-browser timing {"mode":"dashboard-limited","startupMs":143.632972,"testMs":433.533,"cleanupMs":24.4371349999999,"passed":true,"elapsedMs":601.6091789999999}
-agents browser runtime smoke passed
-browser timing {"mode":"traffic-layout-dense-mobile","startupMs":148.96164900000008,"testMs":497.984732,"cleanupMs":20.365583000000015,"passed":true,"elapsedMs":667.315461}
-agents browser runtime smoke passed
-browser suite elapsed=1.386s
-agents browser runtime smoke passed
