@@ -296,7 +296,14 @@ write_fixture
 update_external_services > "$test_root/platform.out"
 grep -Fq 'pull --platform linux/arm64 ' "$QCH_UPDATE_DOCKER_LOG"
 cmp "$test_root/expected.env" "$ENV_FILE"
-unset QCH_MOCK_COMPOSE_PLATFORM QCH_MOCK_IMAGE_PLATFORM DOCKER_DEFAULT_PLATFORM
+unset QCH_MOCK_COMPOSE_PLATFORM DOCKER_DEFAULT_PLATFORM
+export QCH_MOCK_ENV_PLATFORM=linux/arm64/v8
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-env-platform.log"
+write_fixture
+update_external_services > "$test_root/env-platform.out"
+grep -Fq 'pull --platform linux/arm64 ' "$QCH_UPDATE_DOCKER_LOG"
+cmp "$test_root/expected.env" "$ENV_FILE"
+unset QCH_MOCK_ENV_PLATFORM QCH_MOCK_IMAGE_PLATFORM
 
 export QCH_UPDATE_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
 export QCH_UPDATE_TARGET_WEB_ID=sha256:0000000000000000000000000000000000000000000000000000000000000005

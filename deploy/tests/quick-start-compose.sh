@@ -101,4 +101,19 @@ assert.equal(config.services['qcontrol-web'].ports[0].host_ip, '127.0.0.1');
 assert.equal(config.services['qcontrol-web'].ports[0].published, '18081');
 JS
 
-printf '%s\n' 'quick-start real Compose topology/environment regression passed'
+# Older Compose config omits project-level DOCKER_DEFAULT_PLATFORM from services.
+# Resolve it using the same extension used by the remote update planner.
+printf '\nDOCKER_DEFAULT_PLATFORM="linux/arm64/v8"\n' >> "$ENV_FILE"
+unset DOCKER_DEFAULT_PLATFORM
+rendered="$(run_compose "${COMPOSE_ARGS[@]}" -f - config --format json <<'YAML'
+x-qch-update-default-platform: ${DOCKER_DEFAULT_PLATFORM:-}
+YAML
+)"
+[ "$(jq -r '."x-qch-update-default-platform"' <<< "$rendered")" = linux/arm64/v8 ]
+rendered="$(DOCKER_DEFAULT_PLATFORM=linux/amd64 run_compose "${COMPOSE_ARGS[@]}" -f - config --format json <<'YAML'
+x-qch-update-default-platform: ${DOCKER_DEFAULT_PLATFORM:-}
+YAML
+)"
+[ "$(jq -r '."x-qch-update-default-platform"' <<< "$rendered")" = linux/amd64 ]
+
+printf '%s\n' 'quick-start real Compose topology/environment/platform regression passed'

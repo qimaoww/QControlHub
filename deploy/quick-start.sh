@@ -1283,15 +1283,23 @@ remote_update_image() (
 
 prepare_update_plan() {
     local config default_platform service platform ref current metadata i
+    local -a config_args
     require_update_tools
     if [ "$MODE" = bundled ]; then
-        config="$(run_compose -f "$REPO_ROOT/docker-compose.yml" config --format json)" || die "无法解析内置部署配置"
+        config_args=(-f "$REPO_ROOT/docker-compose.yml")
         UPDATE_IMAGE_SERVICES=(control-plane qcontrol-web postgres)
     else
-        config="$(compose config --format json)" || die "无法解析外部部署配置"
+        config_args=("${COMPOSE_ARGS[@]}")
         UPDATE_IMAGE_SERVICES=(control-plane qcontrol-web)
     fi
-    default_platform="${DOCKER_DEFAULT_PLATFORM:-}"
+    # Compose also reads DOCKER_DEFAULT_PLATFORM from the project's .env. Older
+    # config output omits it from services; resolve it through an extension so
+    # quoting, interpolation and shell precedence remain Compose's responsibility.
+    config="$(run_compose "${config_args[@]}" -f - config --format json <<'YAML'
+x-qch-update-default-platform: ${DOCKER_DEFAULT_PLATFORM:-}
+YAML
+    )" || die "无法解析部署镜像和平台配置"
+    default_platform="$(jq -er '."x-qch-update-default-platform" // "" | strings' <<< "$config")" || die "无法解析默认部署平台"
     if [ -z "$default_platform" ]; then
         default_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')" || die "无法读取 Docker Engine 平台"
     fi

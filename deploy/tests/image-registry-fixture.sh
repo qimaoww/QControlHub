@@ -76,7 +76,8 @@ mock_assert_comparison() {
 
 mock_compose_images() {
     local tag="${1:-latest}"
-    jq -cn --arg tag "$tag" --arg platform "${QCH_MOCK_COMPOSE_PLATFORM:-}" '{services:{
+    jq -cn --arg tag "$tag" --arg platform "${QCH_MOCK_COMPOSE_PLATFORM:-}" \
+        --arg default "${DOCKER_DEFAULT_PLATFORM:-${QCH_MOCK_ENV_PLATFORM:-}}" '{"x-qch-update-default-platform":$default,services:{
         "control-plane":{image:("ghcr.io/qimaoww/qcontrol-plane:"+$tag),platform:$platform},
         "qcontrol-web":{image:("ghcr.io/qimaoww/qcontrol-web:"+$tag),platform:$platform},
         postgres:{image:"postgres:17-alpine",platform:$platform}}} | walk(if type == "object" and .platform == "" then del(.platform) else . end)'
