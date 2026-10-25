@@ -86,6 +86,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
       try {
         await api("/traffic-policies", { method: "POST", body: JSON.stringify(requestFromForm(event.currentTarget)) });
         notify("端口流量配额已创建，正在同步到 Agent");
+        traffic.invalidate?.();
         await traffic({ resetCreate: true });
       } catch (error) { notify(error.message, "error"); }
     });
@@ -95,6 +96,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
         try {
           await api(`/traffic-policies/${encodeURIComponent(form.dataset.trafficEditForm)}`, { method: "PUT", body: JSON.stringify(requestFromForm(form)) });
           notify("端口流量配额已更新");
+          traffic.invalidate?.();
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       });
@@ -105,6 +107,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficReset)}/reset`, { method: "POST" });
           notify("当前周期流量已清零，正在同步解封");
+          traffic.invalidate?.();
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       };
@@ -115,6 +118,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficDelete)}`, { method: "DELETE" });
           notify("配额已取消，端口流量继续统计");
+          traffic.invalidate?.();
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       };
@@ -125,6 +129,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficMonitorDelete)}/monitoring`, { method: "DELETE" });
           notify("流量记录已删除");
+          traffic.invalidate?.();
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       };

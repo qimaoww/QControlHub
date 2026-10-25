@@ -75,6 +75,28 @@ export function mergeTrafficPorts(policies = [], endpoints = []) {
   ];
 }
 
+// The traffic workspace serves scope-only navigations from the last complete
+// read of the current account. The window stays below the 45s rate staleness
+// in trafficRateForDisplay, so reused rates are still truthful.
+export const trafficSnapshotTtl = 30_000;
+
+// A snapshot belongs to exactly one account scope. Identity decides, not
+// content: logout, an account switch and an authorization change replace
+// state.data or state.session, and this refuses the old snapshot outright.
+export function reusableTrafficSnapshot(
+  snapshot,
+  { data, session, canRead, epoch, now = Date.now() },
+) {
+  if (!snapshot) return null;
+  if (snapshot.data !== data || snapshot.session !== session) return null;
+  if (snapshot.canRead !== canRead) return null;
+  // A call inside one navigation is a live refresh (poll, save, batch, sync)
+  // and must read the current values instead of replaying the snapshot.
+  if (epoch <= snapshot.epoch) return null;
+  if (!(now - snapshot.at < trafficSnapshotTtl)) return null;
+  return snapshot;
+}
+
 export const gibibyte = 1024 ** 3;
 export const dateInputValue = (value = new Date()) => {
     const date = new Date(value);

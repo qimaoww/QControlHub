@@ -19,7 +19,8 @@ func TestSettingsDoesNotRepeatTheContextNavigation(t *testing.T) {
 }
 
 func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
-	appContent := frontendSources(t, "modules/shell-context.js", "modules/routes.js", "modules/shell-appearance.js")
+	// The directory markup lives in its focused owner; the shell only mounts it.
+	appContent := frontendSources(t, "modules/settings-nav.js", "modules/shell-context.js", "modules/routes.js", "modules/shell-appearance.js")
 	for _, required := range []string{
 		`href="#settings-engines"><span>01</span>默认内核能力`,
 		`href="#settings-basic"><span>02</span>基础设置`,
@@ -29,9 +30,11 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		`href="#settings-komari"><span>06</span>Komari 联动`,
 		`href="#settings-certificates"><span>08</span>证书申请`,
 		`href="#settings-deployment"><span>09</span>部署状态`,
+		`href="#settings-api-keys"><span>10</span>API Key`,
 		`"settings-engines": "settings"`,
 		`"settings-data": "settings"`,
 		`"settings-certificates": "settings"`,
+		`"settings-api-keys": "settings"`,
 	} {
 		if !strings.Contains(appContent, required) {
 			t.Errorf("core-log storage settings navigation is missing %q", required)

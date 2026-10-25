@@ -1,0 +1,396 @@
+{
+  "label": "after",
+  "repo": "/root/qcontrolhub/.agents/worktrees/worktree-833214fb-9c2b-4f02-8c85-59624443bdf9",
+  "base": "/root/qcontrolhub/.agents/worktrees/worktree-833214fb-9c2b-4f02-8c85-59624443bdf9",
+  "capturedAt": "2026-10-25T13:52:53.380Z",
+  "scenarios": {
+    "settingsDirect": {
+      "hash": "#settings-basic",
+      "route": "settings",
+      "title": "系统设置 · QControlHub Browser Smoke",
+      "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+      "activeHref": "#settings-basic",
+      "activeText": "02基础设置",
+      "activeAriaCurrent": "location",
+      "scrollerTop": 241,
+      "sectionTopInScroller": 6,
+      "focused": "BODY",
+      "sections": 10
+    },
+    "settingsApiKeys": {
+      "hash": "#settings-api-keys",
+      "route": "settings",
+      "title": "系统设置 · QControlHub Browser Smoke",
+      "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+      "activeHref": "#settings-api-keys",
+      "activeText": "10API Key",
+      "activeAriaCurrent": "location",
+      "scrollerTop": 3004,
+      "sectionTopInScroller": 613,
+      "focused": "BODY",
+      "apiKeySectionPresent": true,
+      "settingsFormPresent": true
+    },
+    "settingsInPageSwitch": {
+      "callsAfterSetup": [],
+      "callsDuringSwitch": [],
+      "after": {
+        "inputValue": "未保存草稿名称",
+        "sameFormNode": true,
+        "sameInputNode": true,
+        "focused": "BODY",
+        "stateBadge": "有未保存更改",
+        "ariaCurrent": "location"
+      },
+      "navigation": {
+        "hash": "#settings-runtime",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-runtime",
+        "activeText": "03任务与同步",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 624,
+        "sectionTopInScroller": 76,
+        "focused": "BODY"
+      }
+    },
+    "settingsHistory": {
+      "dataStep": {
+        "hash": "#settings-data",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-data",
+        "activeText": "04数据与日志",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 1107,
+        "sectionTopInScroller": 76,
+        "focused": "BODY"
+      },
+      "notifyStep": {
+        "hash": "#settings-notify",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-notify",
+        "activeText": "05事件通知",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 1705,
+        "sectionTopInScroller": 76,
+        "focused": "BODY"
+      },
+      "back": {
+        "hash": "#settings-data",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-data",
+        "activeText": "04数据与日志",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 1107,
+        "sectionTopInScroller": 76,
+        "focused": "BODY"
+      },
+      "forward": {
+        "hash": "#settings-notify",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-notify",
+        "activeText": "05事件通知",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 1705,
+        "sectionTopInScroller": 76,
+        "focused": "BODY"
+      }
+    },
+    "trafficFilters": {
+      "cardsBefore": [
+        "alpha:8443",
+        "delta:8446",
+        "bravo:8444",
+        "charlie:8445"
+      ],
+      "cardsFiltered": [
+        "alpha:8443"
+      ],
+      "callsDuringFilters": [
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order"
+      ],
+      "callsAfterReset": [
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order"
+      ],
+      "idleCalls": [
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order"
+      ],
+      "idleState": {
+        "scrollerTop": 0,
+        "focused": "engine",
+        "statusFilter": "metering",
+        "cards": 4
+      },
+      "initialCalls": [
+        "GET /api/v1/auth/session",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/overview",
+        "GET /api/v1/settings",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order",
+        "GET /api/v1/agents",
+        "GET /api/v1/traffic-policies",
+        "GET /api/v1/traffic-endpoints",
+        "GET /api/v1/preferences/node-order"
+      ]
+    },
+    "trafficDialogDrag": {
+      "orderBefore": [
+        "alpha:8443",
+        "delta:8446",
+        "bravo:8444",
+        "charlie:8445"
+      ],
+      "geometry": {
+        "x": 568,
+        "y": 216.609375,
+        "target": "P.eyebrow",
+        "gridCenterY": 712.59375,
+        "dialogOpen": true
+      },
+      "midDrag": {
+        "bodyClass": "app-body page-traffic",
+        "draggingNodes": 0,
+        "ghost": false,
+        "selection": "\n设置 VLESS-REALITY-8443 的配额\n流量统计不会因配额变更而停"
+      },
+      "afterDrag": {
+        "dialogStillOpen": true,
+        "bodyClass": "app-body page-traffic",
+        "order": [
+          "alpha:8443",
+          "delta:8446",
+          "bravo:8444",
+          "charlie:8445"
+        ],
+        "topCard": "alpha:8443"
+      },
+      "writes": [],
+      "storedOrder": [],
+      "selectionTest": {
+        "selectable": true,
+        "length": 4
+      },
+      "afterEscape": {
+        "dialogOpen": false,
+        "order": [
+          "alpha:8443",
+          "delta:8446",
+          "bravo:8444",
+          "charlie:8445"
+        ]
+      }
+    },
+    "trafficReentry": {
+      "sidebarStep": {
+        "hash": "#traffic-agent-alpha",
+        "route": "traffic",
+        "title": "流量配额 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 流量配额 管理员",
+        "activeHref": "#traffic-agent-alpha",
+        "activeText": "ALPHA1 个监控端口在线",
+        "activeAriaCurrent": null,
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "A"
+      },
+      "sidebarCalls": [
+        "GET /api/v1/preferences/node-order"
+      ],
+      "dashboardStep": {
+        "hash": "#dashboard",
+        "route": "dashboard",
+        "title": "总览 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 总览 管理员",
+        "activeHref": "#summary",
+        "activeText": "01运行概览",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "A"
+      },
+      "returnStep": {
+        "hash": "#traffic",
+        "route": "traffic",
+        "title": "流量配额 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 流量配额 管理员",
+        "activeHref": "#traffic-agent-alpha",
+        "activeText": "ALPHA1 个监控端口在线",
+        "activeAriaCurrent": null,
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "A"
+      },
+      "returnCalls": [
+        "GET /api/v1/preferences/node-order"
+      ],
+      "returnView": {
+        "cards": 1,
+        "engine": "",
+        "status": ""
+      }
+    },
+    "trafficRefreshDialog": {
+      "setup": {
+        "open": true,
+        "field": "name",
+        "value": "未保存配额草稿"
+      },
+      "after": {
+        "dialogStillOpen": true,
+        "sameDialogNode": true,
+        "value": "未保存配额草稿",
+        "focused": "name"
+      }
+    },
+    "topbar": {
+      "start": {
+        "hash": "#traffic-agent-alpha",
+        "route": "traffic",
+        "title": "流量配额 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 流量配额 管理员",
+        "activeHref": "#traffic-agent-alpha",
+        "activeText": "ALPHA1 个监控端口在线",
+        "activeAriaCurrent": null,
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "BODY"
+      },
+      "markup": {
+        "html": "<span><a href=\"#dashboard\">QControlHub Browser Smoke</a></span><i>/</i><b><a href=\"#traffic\">流量配额</a></b><i class=\"role-badge role-admin\">管理员</i>",
+        "links": [
+          "#dashboard|QControlHub Browser Smoke",
+          "#traffic|流量配额"
+        ]
+      },
+      "afterTitle": {
+        "hash": "#traffic",
+        "route": "traffic",
+        "title": "流量配额 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 流量配额 管理员",
+        "activeHref": "#traffic-agent-alpha",
+        "activeText": "ALPHA1 个监控端口在线",
+        "activeAriaCurrent": null,
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "A"
+      },
+      "afterHome": {
+        "hash": "#dashboard",
+        "route": "dashboard",
+        "title": "总览 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 总览 管理员",
+        "activeHref": "#summary",
+        "activeText": "01运行概览",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "BODY"
+      }
+    },
+    "topbarKeyboard": {
+      "setup": {
+        "link": true,
+        "tag": "A",
+        "focused": true,
+        "text": "系统设置"
+      },
+      "after": {
+        "hash": "#settings",
+        "route": "settings",
+        "title": "系统设置 · QControlHub Browser Smoke",
+        "crumb": "QControlHub Browser Smoke / 系统设置 管理员",
+        "activeHref": "#settings-engines",
+        "activeText": "01默认内核能力",
+        "activeAriaCurrent": "location",
+        "scrollerTop": 0,
+        "sectionTopInScroller": null,
+        "focused": "A"
+      }
+    },
+    "visual": [
+      {
+        "name": "desktop-light",
+        "theme": {
+          "background": "rgb(243, 245, 250)",
+          "themeAttr": "light",
+          "overflowX": false
+        }
+      },
+      {
+        "name": "desktop-dark",
+        "theme": {
+          "background": "rgb(13, 16, 24)",
+          "themeAttr": "dark",
+          "overflowX": false
+        }
+      },
+      {
+        "name": "mobile-light",
+        "theme": {
+          "background": "rgb(243, 245, 250)",
+          "themeAttr": "light",
+          "overflowX": false
+        }
+      },
+      {
+        "name": "tablet-dark",
+        "theme": {
+          "background": "rgb(13, 16, 24)",
+          "themeAttr": "dark",
+          "overflowX": false
+        }
+      },
+      {
+        "name": "settings-desktop-light"
+      },
+      {
+        "name": "settings-desktop-dark"
+      },
+      {
+        "name": "settings-mobile-light"
+      }
+    ]
+  },
+  "pageErrors": []
+}

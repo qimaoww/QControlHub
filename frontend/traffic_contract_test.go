@@ -37,3 +37,43 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 		t.Error("traffic cards must not use a narrower workspace than node settings cards")
 	}
 }
+
+// The traffic workspace keeps one complete read per account scope. Sidebar node
+// scope changes, the toolbar filters and returning to the page render that
+// snapshot instead of re-reading agents, policies and configured ports; only a
+// live refresh, an expired window, a quota write or an account change reads the
+// server again. Draft dialogs survive background polling because a background
+// render waits for the last unsaved quota dialog to close.
+func TestTrafficServesScopeChangesFromTheAccountSnapshot(t *testing.T) {
+	installer := frontendSources(t, "modules/traffic.js")
+	model := frontendSources(t, "modules/traffic-model.js")
+	forms := frontendSources(t, "modules/traffic-forms.js")
+	for _, required := range []string{
+		"reusableTrafficSnapshot(snapshot, { data, session, canRead, epoch })",
+		"const cached = background ? null : reusableSnapshot(epoch, data, session, canRead);",
+		"renderTraffic(cached.agents, cached.policies, cached.endpoints, resetCreate);",
+		"snapshot.data !== state.data || snapshot.session !== state.session",
+		`isCurrent: () => state.route === "traffic" &&`,
+		"traffic.invalidate = () => { snapshot = null; };",
+		"deferDraftTraffic([agents, policies, endpoints])",
+		"dialog[open]:not([data-refresh-live])",
+	} {
+		if !strings.Contains(installer, required) {
+			t.Errorf("traffic snapshot reuse is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		"export const trafficSnapshotTtl = 30_000;",
+		"export function reusableTrafficSnapshot(",
+		"if (snapshot.data !== data || snapshot.session !== session) return null;",
+		"if (epoch <= snapshot.epoch) return null;",
+		"if (!(now - snapshot.at < trafficSnapshotTtl)) return null;",
+	} {
+		if !strings.Contains(model, required) {
+			t.Errorf("traffic snapshot model is missing %q", required)
+		}
+	}
+	if !strings.Contains(forms, "traffic.invalidate?.();") {
+		t.Error("traffic writes must drop the cached snapshot before refreshing")
+	}
+}
