@@ -40,7 +40,7 @@ function renderPresetStatus() {
   if (operation.task?.id && can("tasks.read")) {
     const link = document.createElement("a");
     link.href = "#tasks";
-    link.textContent = "查看执行记录";
+    link.textContent = " 查看执行记录";
     status.append(link);
   }
   if (operation.reload) {

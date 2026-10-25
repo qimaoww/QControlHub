@@ -97,7 +97,7 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	// The jump-symbol cleanup removed the retired back-link, card-arrow and
 	// trailing row-affordance rules, so the reserved columns and the arrow
 	// spacing they depended on no longer exist.
-	const expected = "0675c56411a83789be9dad3fd442ebd32655322c5287f37e6da7c3e14196f376"
+	const expected = "0598a0ec3b7f421491ed6530d8249a3a662af447013ad638ad6f2a1ea17f8f8b"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}

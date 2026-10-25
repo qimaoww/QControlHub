@@ -85,14 +85,14 @@
 .dashboard-workspace .dashboard-traffic-actions{min-height:51px;margin-top:auto;padding:8px 18px;flex-wrap:wrap}
 .dashboard-workspace .dashboard-columns{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:16px;margin:0}
 .dashboard-workspace .dashboard-columns.single-panel{grid-template-columns:minmax(0,1fr)}
-.dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 64px 8px;gap:10px;min-height:78px;margin:0;padding:12px 18px;border-radius:0}
+.dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 64px;gap:10px;min-height:78px;margin:0;padding:12px 18px;border-radius:0}
 .dashboard-workspace .node-avatar{width:32px;height:32px;border-radius:9px;font-size:var(--text-caption);color:var(--green);background:var(--green-soft);box-shadow:none}
 .dashboard-workspace .node-avatar.bad{color:var(--muted);background:var(--surface-3)}
 .dashboard-workspace .fleet-overview-list time{text-align:right;font-size:var(--text-caption)}
 .fleet-node-info{min-width:0}
 .dashboard-workspace .fleet-overview-list strong,.dashboard-workspace .recent-tasks strong{font-size:var(--text-body);line-height:var(--leading-control);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dashboard-workspace .fleet-overview-list small{margin-top:3px;font-size:var(--text-caption)}
-.dashboard-workspace .recent-tasks>div>a{min-height:78px;grid-template-columns:8px minmax(0,1fr) auto 8px;gap:10px;margin:0;padding:12px 18px;border-radius:0}
+.dashboard-workspace .recent-tasks>div>a{min-height:78px;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;margin:0;padding:12px 18px;border-radius:0}
 .dashboard-workspace .recent-tasks small{margin-top:5px;font-size:var(--text-small);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dashboard-workspace .recent-tasks time{font-size:var(--text-caption);white-space:nowrap}
 .dashboard-workspace section[id]{scroll-margin-top:12px}
@@ -111,7 +111,7 @@
   .dashboard-workspace .dashboard-head p{max-width:210px;font-size:var(--text-caption)}
   .dashboard-traffic-summary{flex-wrap:wrap}
   .dashboard-traffic-summary dl{gap:18px}
-  .dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 8px}
+  .dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto}
   .dashboard-workspace .fleet-overview-list time{display:none}
 }
 @container dashboard (max-width:380px){
