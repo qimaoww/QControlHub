@@ -510,9 +510,8 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		}
 		// Updating an installed core must not bootstrap a missing main config
 		// or restart a working log backend before compatibility is established.
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
-			return "", err
-		}
+		// The transaction checks permissions for each configured service; a
+		// shared-only deployment need not have a main service to synchronize.
 		updater := e.Updater
 		if updater == nil {
 			updater = NewCoreUpdater()

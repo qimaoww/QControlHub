@@ -355,8 +355,11 @@ func (collector *CoreLogCollector) armSourceReadyLocked(engine core.Engine, kind
 }
 
 func coreLogTransportReady(status CoreLogSourceStatus) bool {
+	// OpenRC creates output_log on first service start. Its armed follower
+	// reads that newly created file from zero, so it must allow that start.
 	return status.Status == core.CoreLogStatusActive || status.Status == core.CoreLogStatusWaiting &&
-		(status.Error == core.CoreLogErrorAwaitingFirstLog || status.Error == core.CoreLogErrorServiceInactive || status.Error == "")
+		(status.Error == core.CoreLogErrorAwaitingFirstLog || status.Error == core.CoreLogErrorServiceInactive || status.Error == "" ||
+			status.Source == core.CoreLogSourceOpenRC && status.Error == core.CoreLogErrorSourceMissing)
 }
 
 func (collector *CoreLogCollector) isConsoleSourceLocked(engine core.Engine, kind string) bool {
@@ -366,7 +369,7 @@ func (collector *CoreLogCollector) isConsoleSourceLocked(engine core.Engine, kin
 }
 
 // Preserve the current working transport. An active alternative wins over an
-// armed-but-quiet reader, and a missing file never satisfies console readiness.
+// armed-but-quiet reader. An absent fallback never satisfies journal readiness.
 func (collector *CoreLogCollector) consoleSourceLocked(engine core.Engine) (string, CoreLogSourceStatus, bool) {
 	preferred := collector.preferredKind[engine]
 	if collector.isConsoleSourceLocked(engine, preferred) {

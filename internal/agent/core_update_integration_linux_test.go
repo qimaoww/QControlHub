@@ -50,6 +50,7 @@ func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 		shareStopped      bool
 		mainStopped       bool
 		noMain            bool
+		noMainUnit        bool
 		activationFault   bool
 		missingBinary     bool
 	}{
@@ -60,6 +61,7 @@ func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 		{name: "preserve stopped shared instance", shareStopped: true},
 		{name: "preserve stopped main instance", mainStopped: true},
 		{name: "upgrade shared-only deployment", noMain: true},
+		{name: "upgrade shared-only without main service", noMain: true, noMainUnit: true},
 		{name: "shared startup failure restores every instance", activationFault: true},
 		{name: "reject lost binary before service preparation", missingBinary: true},
 	} {
@@ -113,6 +115,27 @@ func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 			if test.noMain {
 				if err := os.Remove(base.ConfigPath); err != nil {
 					t.Fatal(err)
+				}
+				if test.noMainUnit {
+					unitPath := filepath.Join("/etc/systemd/system", base.Service)
+					original, err := os.ReadFile(unitPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := os.WriteFile(unitPath, original, 0o644); err != nil {
+							t.Error(err)
+						}
+						if _, err := run(context.Background(), systemctlPath, "daemon-reload"); err != nil {
+							t.Error(err)
+						}
+					})
+					if err := os.Remove(unitPath); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := run(ctx, systemctlPath, "daemon-reload"); err != nil {
+						t.Fatal(err)
+					}
 				}
 			} else if !test.mainStopped {
 				if output, err := serviceCommandAndVerifyWithManager(ctx, manager, base.Service, core.ActionStart); err != nil {
@@ -178,6 +201,11 @@ func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 			if test.noMain {
 				if _, err := os.Stat(base.ConfigPath); !os.IsNotExist(err) {
 					t.Fatalf("shared-only update created an unrequested main configuration: %v", err)
+				}
+				if test.noMainUnit {
+					if _, err := os.Stat(filepath.Join("/etc/systemd/system", base.Service)); !os.IsNotExist(err) {
+						t.Fatalf("shared-only update created an unrequested main service: %v", err)
+					}
 				}
 			}
 			version := binaryVersion(ctx, core.EngineSingBox, base.Binary)

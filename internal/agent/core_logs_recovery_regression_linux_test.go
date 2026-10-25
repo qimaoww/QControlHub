@@ -198,6 +198,37 @@ func TestHostJournalDeliveryReleasesConsoleReadiness(t *testing.T) {
 	}
 }
 
+func TestOpenRCMissingLogAllowsFirstStartWithoutLosingStartup(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := openRCCoreLogRoot
+	openRCCoreLogRoot = logRoot
+	t.Cleanup(func() { openRCCoreLogRoot = previous })
+	collector := NewCoreLogCollectorForServiceManager(&ServiceManager{kind: ServiceManagerOpenRC},
+		map[core.Engine]EngineSpec{core.EngineSingBox: {Service: "qagent-sing-box"}})
+	collector.serviceState = staticCoreLogServiceState("inactive")
+	runCoreLogCollector(t, collector)
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceOpenRC, core.CoreLogStatusWaiting)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := collector.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
+		t.Fatalf("OpenRC service cannot create its first log because the start barrier waits for that log: %v", err)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != core.CoreLogStatusWaiting || status.Error != core.CoreLogErrorSourceMissing {
+		t.Fatalf("a future output file was reported as already active: %+v", status)
+	}
+	path := filepath.Join(logRoot, "qagent-sing-box.log")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appendSingBoxTransitionLine(t, path, "openrc-first-start-before-reader-open")
+	if _, found := waitForLine(t, collector, "openrc-first-start-before-reader-open"); !found {
+		t.Fatal("the first startup line was skipped when the output file appeared")
+	}
+	if coreLogTransportReady(CoreLogSourceStatus{Source: core.CoreLogSourceFallback, Status: core.CoreLogStatusWaiting, Error: core.CoreLogErrorSourceMissing}) {
+		t.Fatal("an absent systemd fallback was treated as a proven journal replacement")
+	}
+}
+
 func TestFileRecoveryResumesUnreadOffset(t *testing.T) {
 	logRoot := t.TempDir()
 	previous := openRCCoreLogRoot
