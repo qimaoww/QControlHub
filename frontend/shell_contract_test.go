@@ -134,3 +134,46 @@ func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceRouteCrumbsLinkToModuleEntries(t *testing.T) {
+	content := frontendSources(t, "modules/shell-view.js")
+	for _, required := range []string{
+		`const homeRoute = can("overview.read") ? "dashboard" : "my-quota";`,
+		`const entryRoutes = { "agent-config": "live-config" };`,
+		`const entryRoute = entryRoutes[state.route] || state.route;`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("workspace route breadcrumb is missing entry routing contract %q", required)
+		}
+	}
+	start := strings.Index(content, `<div class="workspace-route">`)
+	if start < 0 {
+		t.Fatal("shell-view.js is missing the workspace route breadcrumb")
+	}
+	end := strings.Index(content[start:], `<div class="workspace-actions">`)
+	if end < 0 {
+		t.Fatal("workspace route breadcrumb has no closing boundary")
+	}
+	// The crumbs stay nested inside the existing span/b elements: the shell
+	// styles mute and hide them by element, so anchors inherit that
+	// presentation instead of needing link styles of their own.
+	crumbs := content[start : start+end]
+	for _, required := range []string{
+		`<span><a href="#${homeRoute}">${esc(panelName)}</a></span>`,
+		`<i>/</i>`,
+		`<b><a href="#${entryRoute}">${esc(title)}</a></b>`,
+		`<i class="role-badge role-${esc(state.session.role)}">`,
+	} {
+		if !strings.Contains(crumbs, required) {
+			t.Errorf("workspace route breadcrumb is missing navigable crumb %q", required)
+		}
+	}
+	for _, plain := range []string{
+		`<span>${esc(panelName)}</span>`,
+		`<b>${esc(title)}</b>`,
+	} {
+		if strings.Contains(crumbs, plain) {
+			t.Errorf("workspace route crumb %q must stay a link instead of plain text", plain)
+		}
+	}
+}

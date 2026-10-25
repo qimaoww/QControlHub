@@ -1,0 +1,21 @@
+{
+  "registeredAt": "2026-10-25T22:10:34+08:00",
+  "timeZone": "Asia/Hong_Kong",
+  "kind": "once",
+  "identifier": "automation_4ebc689f-fd19-4713-9a46-bb38218ed540",
+  "name": "清理 QControlHub PR #315 取证环境",
+  "scheduledFor": "2026-10-28T22:15:00+08:00",
+  "hoursAfterTests": 72,
+  "testsFinishedAt": "2026-10-25T22:08:00+08:00",
+  "registeredWith": "DSH automation (automation_create), one-shot run in workspace /root/qcontrolhub with danger-full-access",
+  "scope": [
+    "/tmp/qch-baseline (temporary before-change git worktree at 654a80b3, removed with git worktree remove --force then git worktree prune)",
+    "/tmp/qch-evidence (capture and recording scripts, raw screenshots and webm intermediates, matrix.log, pr-body.md)"
+  ],
+  "retained": [
+    "branch codex/settings-traffic-navigation and its worktree under /root/qcontrolhub/.agents/worktrees/worktree-833214fb-9c2b-4f02-8c85-59624443bdf9",
+    "docs/settings-traffic-navigation/README.md, evidence/*.png, evidence/*.mp4, evidence/measurements.json, evidence/capture-*.json, evidence/matrix.log",
+    "pull request #315"
+  ],
+  "note": "Earlier documents in this repository registered systemd timers. This session used the DSH automation tool instead, so the identifier above is a DSH automation id, not a unit name. The scheduled run holds the same scope and the same 72 hour delay."
+}
