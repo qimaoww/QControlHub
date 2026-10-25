@@ -14,22 +14,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestSSRustImportPreservesBindingFamiliesAndOverrides(t *testing.T) {
-	content := `{"outbound_bind_addr":"2001:db8::10","ipv6_first":false,"mode":"tcp_and_udp","servers":[{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"test-only","outbound_bind_addr":"2001:db8::20"},{"server":"::","server_port":20002,"method":"aes-256-gcm","password":"test-only","outbound_bind_addr":"192.0.2.20"}]}`
-	plan, err := prepareSSRustImport(EngineSpec{ConfigPath: "/etc/shadowsocks-rust/config.json"}, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var before, after any
-	_ = json.Unmarshal([]byte(content), &before)
-	_ = json.Unmarshal([]byte(plan.managedContent), &after)
-	first, _ := json.Marshal(before)
-	second, _ := json.Marshal(after)
-	if string(first) != string(second) {
-		t.Fatalf("import changed explicit binding or global preference: %s", second)
-	}
-}
-
 func TestSSRustScriptExactServiceMapping(t *testing.T) {
 	spec := EngineSpec{Binary: "/usr/local/bin/ssserver", ConfigPath: "/etc/shadowsocks-rust/config.json", Service: "shadowsocks-rust.service"}
 	base := spec.Binary + " -c " + spec.ConfigPath

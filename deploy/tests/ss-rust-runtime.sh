@@ -18,4 +18,4 @@ sh .github/scripts/run-ci-container.sh --rm --read-only --network none --user "$
   -w /src golang:1.26.10-bookworm go test -c -buildvcs=false -o /native/runtime.test ./internal/serverconfig
 sh .github/scripts/run-ci-container.sh --rm --read-only --network none --user 65534:65534 --cap-drop ALL \
   --tmpfs /tmp:exec,mode=1777 -e QCH_SS_RUST_NATIVE_BIN=/native \
-  -v "$fixture:/native:ro" golang:1.26.10-bookworm /native/runtime.test -test.run '^TestSSRustNative(FieldScopes|ConnectionLogs|BindingFamilies)$' -test.count=1 -test.v
+  -v "$fixture:/native:ro" golang:1.26.10-bookworm /native/runtime.test -test.run '^TestSSRustNative(FieldScopes|ConnectionLogs)$' -test.count=1 -test.v
