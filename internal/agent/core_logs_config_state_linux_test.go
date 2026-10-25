@@ -93,3 +93,46 @@ func TestRunningSingBoxWithoutHistoryStillReportsLostConfiguration(t *testing.T)
 		t.Fatalf("lost configuration without a history marker: %+v", status)
 	}
 }
+
+func TestMissingSingBoxErrorDoesNotMaskRestoredOrRemovedConfiguration(t *testing.T) {
+	for _, state := range []string{"invalid-restoration", "removed-installation", "disabled-engine"} {
+		t.Run(state, func(t *testing.T) {
+			directory := t.TempDir()
+			configPath, binary := filepath.Join(directory, "config.json"), filepath.Join(directory, "sing-box")
+			for path, content := range map[string]string{configPath: `{"log":{"level":"info"}}`, binary: "isolated-placeholder"} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			executor := &Executor{Specs: map[core.Engine]EngineSpec{core.EngineSingBox: {Binary: binary, ConfigPath: configPath, Service: "qagent-sing-box.service"}}}
+			collector := NewCoreLogCollectorForExecutor(executor)
+			if err := os.Remove(configPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+				t.Fatal("missing deployed config did not fail")
+			}
+			switch state {
+			case "invalid-restoration":
+				if err := os.WriteFile(configPath, []byte("invalid json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "removed-installation":
+				if err := os.Remove(binary); err != nil {
+					t.Fatal(err)
+				}
+			case "disabled-engine":
+				delete(executor.Specs, core.EngineSingBox)
+			}
+			err := collector.RefreshImportedSingBoxSource(executor)
+			status, exists := collector.Status()[core.EngineSingBox]
+			if state == "invalid-restoration" {
+				if err == nil || status.Status != core.CoreLogStatusFailed || status.Error != "config-invalid" {
+					t.Fatalf("old missing-config error masked the restored file error: %+v %v", status, err)
+				}
+			} else if err != nil || exists {
+				t.Fatalf("old missing-config error survived removal: %+v %v", status, err)
+			}
+		})
+	}
+}

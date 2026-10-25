@@ -36,6 +36,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 			collector.failImportedSingBoxSource("transition-state-invalid")
 			return errors.New("managed sing-box configuration disappeared during source transition")
 		}
+		collector.clearMissingSingBoxInstallation()
 		collector.replaceImportedSingBoxSource(nil)
 		return nil
 	}
@@ -43,6 +44,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, binaryErr := os.Lstat(spec.Binary); errors.Is(binaryErr, os.ErrNotExist) {
+				collector.clearMissingSingBoxInstallation()
 				collector.replaceImportedSingBoxSource(nil)
 				return nil
 			}
@@ -64,6 +66,9 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 		collector.failImportedSingBoxSource("config-unavailable")
 		return err
 	}
+	collector.mu.Lock()
+	collector.missingSingBoxConfig = false
+	collector.mu.Unlock()
 	file, _, err := openProtectedCoreMigrationFile(spec.ConfigPath, info, core.MaxConfigBytes)
 	if err != nil {
 		collector.failImportedSingBoxSource("config-unsafe")

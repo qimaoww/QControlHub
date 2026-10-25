@@ -115,3 +115,16 @@ func (collector *CoreLogCollector) rememberSingBoxConfiguration(executor *Execut
 	}
 	return err
 }
+
+func (collector *CoreLogCollector) clearMissingSingBoxInstallation() {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	if !collector.missingSingBoxConfig {
+		return
+	}
+	collector.missingSingBoxConfig = false
+	delete(collector.status, core.EngineSingBox)
+	delete(collector.statusKind, core.EngineSingBox)
+	delete(collector.kindStatus[core.EngineSingBox], core.CoreLogSourceFile)
+	collector.preferredKind[core.EngineSingBox] = collector.consoleKind[core.EngineSingBox]
+}
