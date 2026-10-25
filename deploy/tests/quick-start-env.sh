@@ -139,8 +139,8 @@ ENV_FILE="$test_root/external.env"
 write_external_compose
 grep -Fq 'image: ghcr.io/qimaoww/qcontrol-plane:latest' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'image: ghcr.io/qimaoww/qcontrol-web:latest' "$EXTERNAL_COMPOSE_FILE"
-grep -Fq 'QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}' "$EXTERNAL_COMPOSE_FILE"
-grep -Fq 'QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?QCH_CONFIG_ENCRYPTION_KEY required}' "$EXTERNAL_COMPOSE_FILE"
+grep -Fq 'QCH_DATABASE_URL: ${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}' "$EXTERNAL_COMPOSE_FILE"
+grep -Fq 'QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?必须设置 QCH_CONFIG_ENCRYPTION_KEY}' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}' "$EXTERNAL_COMPOSE_FILE"
 if grep -Eq '^[[:space:]]{2}postgres:|postgres-data|depends_on:[[:space:]]*postgres|127\.0\.0\.1:5432|QCH_IMAGE_TAG|^[[:space:]]+build:' "$EXTERNAL_COMPOSE_FILE"; then
     printf '%s\n' 'quick-start regression: external Compose contains a local database or mutable image source' >&2
@@ -154,7 +154,7 @@ fi
 # site-specific network name is baked into the generated Compose.
 update_env_file "QCH_DOCKER_NETWORK=shared-edge"
 write_external_compose
-grep -Fq 'name: ${QCH_DOCKER_NETWORK:?custom Docker network required}' "$EXTERNAL_COMPOSE_FILE"
+grep -Fq 'name: ${QCH_DOCKER_NETWORK:?必须设置自定义 Docker 网络}' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'external: true' "$EXTERNAL_COMPOSE_FILE"
 if grep -Fq 'ipv4_address:' "$EXTERNAL_COMPOSE_FILE" || grep -Fq '1panel-network' "$EXTERNAL_COMPOSE_FILE"; then
     printf '%s\n' 'quick-start regression: custom network inherited default or site-specific topology' >&2

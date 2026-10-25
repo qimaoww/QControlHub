@@ -27,20 +27,20 @@ validate_admin_token_digest() {
 read_secret_file() {
     local file="$1" value
     [ -f "$file" ] || return 0
-    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    [ ! -L "$file" ] || die "密钥文件不能是符号链接：$file"
     value="$(<"$file")"
     case "$value" in
-        *$'\n'*|*$'\r'*) die "secret 文件只能包含一行：$file" ;;
+        *$'\n'*|*$'\r'*) die "密钥文件只能包含一行：$file" ;;
     esac
     printf '%s' "$value"
 }
 
 write_secret_file() {
     local file="$1" value="$2" temp_file
-    [ ! -L "$SECRET_DIR" ] || die "secret 目录不能是符号链接：$SECRET_DIR"
+    [ ! -L "$SECRET_DIR" ] || die "密钥目录不能是符号链接：$SECRET_DIR"
     mkdir -p "$SECRET_DIR"
     chmod 0700 "$SECRET_DIR"
-    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    [ ! -L "$file" ] || die "密钥文件不能是符号链接：$file"
     umask 077
     temp_file="$(mktemp "$SECRET_DIR/.tmp.XXXXXX")"
     printf '%s\n' "$value" > "$temp_file"
@@ -57,7 +57,7 @@ backup_secret_file() {
     backup_file="${file}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
     cp -p -- "$file" "$backup_file"
     chmod 0600 "$backup_file"
-    echo "-> 已备份 secret：$backup_file"
+    echo "-> 已备份密钥：$backup_file"
 }
 
 prepare_admin_token() {
@@ -70,7 +70,7 @@ prepare_admin_token() {
         validate_admin_token_digest "$stored_digest"
         legacy_digest="$(sha256_hex "$legacy_token")"
         [ "$legacy_digest" = "$(printf '%s' "$stored_digest" | tr 'A-F' 'a-f')" ] || \
-            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员 token"
+            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员令牌"
     fi
     if [ "$FORCE" = true ]; then
         raw_token="${ADMIN_TOKEN:-$(random_hex)}"

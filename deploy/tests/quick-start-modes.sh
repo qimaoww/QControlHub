@@ -3,6 +3,8 @@ set -euo pipefail
 export COLUMNS=72
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_root/deploy/tests/image-registry-fixture.sh"
+export QCH_IMAGE_TEST_PREFIX=QCH_MODES
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-modes.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 umask 077
@@ -30,6 +32,11 @@ docker() {
     local image="${*: -1}"
     printf '%s\n' "$*" >> "$QCH_MODES_TEST_LOG"
     case " $* " in
+        *" buildx version "*) return 0 ;;
+        *" buildx imagetools inspect "*) mock_registry "$@" ;;
+        *" info --format "*) printf linux/amd64 ;;
+        *" config --format json "*) mock_compose_images "$(bundled_image_tag 2>/dev/null || printf latest)" ;;
+        *" image inspect --format {{.Id}} "*"@sha256:"*) mock_target_value "${*: -1}" ID ;;
         *" config --no-interpolate "*) cat "$QCH_INSTALL_DIR/docker-compose.external.yml" ;;
         *" config --images "*)
             printf '%s\n' \
@@ -40,7 +47,7 @@ docker() {
         *" ps -q control-plane "*) printf '%s\n' control-container ;;
         *" ps -q qcontrol-web "*) printf '%s\n' web-container ;;
         *" ps -q postgres "*) printf '%s\n' postgres-container ;;
-        *" pull "*) [ "${QCH_MODES_FAIL_PULL:-false}" = false ] ;;
+        *" pull "*) mock_assert_comparison || return 1; [ "${QCH_MODES_FAIL_PULL:-false}" = false ] ;;
         *" network inspect "*) return 0 ;;
         *" inspect "*)
             case "$image" in
@@ -48,47 +55,47 @@ docker() {
                     case "$*" in
                         *"{{.Config.Image}}"*) printf '%s\n' ghcr.io/qimaoww/qcontrol-plane:latest ;;
                         *org.opencontainers.image.version*) printf '%s\n' old-control-version ;;
-                        *) printf '%s\n' sha256:old-control ;;
+                        *) printf '%s\n' sha256:0000000000000000000000000000000000000000000000000000000000000001 ;;
                     esac
                     ;;
                 web-container)
                     case "$*" in
                         *"{{.Config.Image}}"*) printf '%s\n' ghcr.io/qimaoww/qcontrol-web:latest ;;
                         *org.opencontainers.image.version*) printf '%s\n' old-web-version ;;
-                        *) printf '%s\n' sha256:old-web ;;
+                        *) printf '%s\n' sha256:0000000000000000000000000000000000000000000000000000000000000002 ;;
                     esac
                     ;;
                 postgres-container)
                     case "$*" in
                         *"{{.Config.Image}}"*) printf '%s\n' postgres:17-alpine ;;
                         *org.opencontainers.image.version*) printf '%s\n' old-postgres-version ;;
-                        *) printf '%s\n' sha256:old-postgres ;;
+                        *) printf '%s\n' sha256:0000000000000000000000000000000000000000000000000000000000000003 ;;
                     esac
                     ;;
                 ghcr.io/qimaoww/qcontrol-plane:*)
                     case "$*" in
                         *org.opencontainers.image.version*) printf '%s\n' "${QCH_MODES_TARGET_CONTROL_VERSION:-new-control-version}" ;;
-                        *) printf '%s\n' "${QCH_MODES_TARGET_CONTROL_ID:-sha256:new-control}" ;;
+                        *) printf '%s\n' "${QCH_MODES_TARGET_CONTROL_ID:-sha256:0000000000000000000000000000000000000000000000000000000000000004}" ;;
                     esac
                     ;;
                 ghcr.io/qimaoww/qcontrol-web:*)
                     case "$*" in
                         *org.opencontainers.image.version*) printf '%s\n' "${QCH_MODES_TARGET_WEB_VERSION:-new-web-version}" ;;
-                        *) printf '%s\n' "${QCH_MODES_TARGET_WEB_ID:-sha256:new-web}" ;;
+                        *) printf '%s\n' "${QCH_MODES_TARGET_WEB_ID:-sha256:0000000000000000000000000000000000000000000000000000000000000005}" ;;
                     esac
                     ;;
                 postgres:17-alpine)
                     case "$*" in
                         *org.opencontainers.image.version*) printf '%s\n' "${QCH_MODES_TARGET_POSTGRES_VERSION:-old-postgres-version}" ;;
-                        *) printf '%s\n' "${QCH_MODES_TARGET_POSTGRES_ID:-sha256:old-postgres}" ;;
+                        *) printf '%s\n' "${QCH_MODES_TARGET_POSTGRES_ID:-sha256:0000000000000000000000000000000000000000000000000000000000000003}" ;;
                     esac
                     ;;
-                sha256:old-control) printf '%s\n' old-control-version ;;
-                sha256:old-web) printf '%s\n' old-web-version ;;
-                sha256:old-postgres) printf '%s\n' old-postgres-version ;;
-                sha256:new-control) printf '%s\n' new-control-version ;;
-                sha256:new-web) printf '%s\n' new-web-version ;;
-                sha256:new-postgres) printf '%s\n' new-postgres-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000001) printf '%s\n' old-control-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000002) printf '%s\n' old-web-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000003) printf '%s\n' old-postgres-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000004) printf '%s\n' new-control-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000005) printf '%s\n' new-web-version ;;
+                sha256:0000000000000000000000000000000000000000000000000000000000000006) printf '%s\n' new-postgres-version ;;
                 *) return 1 ;;
             esac
             ;;
@@ -109,9 +116,9 @@ grep -Fq -- "-f $repo_root/docker-compose.yml -f $QCH_INSTALL_DIR/docker-compose
 cp "$QCH_INSTALL_DIR/.env" "$test_root/bundled-before.env"
 cp "$QCH_INSTALL_DIR/.secrets/config-encryption-key" "$test_root/bundled-before.key"
 cp "$QCH_INSTALL_DIR/docker-compose.secrets.yml" "$test_root/bundled-before-compose.yml"
-export QCH_MODES_TARGET_CONTROL_ID=sha256:old-control
-export QCH_MODES_TARGET_WEB_ID=sha256:old-web
-export QCH_MODES_TARGET_POSTGRES_ID=sha256:old-postgres
+export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000001
+export QCH_MODES_TARGET_WEB_ID=sha256:0000000000000000000000000000000000000000000000000000000000000002
+export QCH_MODES_TARGET_POSTGRES_ID=sha256:0000000000000000000000000000000000000000000000000000000000000003
 export QCH_MODES_TARGET_CONTROL_VERSION=old-control-version
 export QCH_MODES_TARGET_WEB_VERSION=old-web-version
 export QCH_MODES_TARGET_POSTGRES_VERSION=old-postgres-version
@@ -123,86 +130,106 @@ grep -Fq old-control-version "$test_root/bundled-update.out"
 cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
 cmp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
 cmp "$test_root/bundled-before-compose.yml" "$QCH_INSTALL_DIR/docker-compose.secrets.yml"
-if grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
+if grep -Eq '(^pull | up -d)' "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'bundled update recreated containers with unchanged application images' >&2
     exit 1
 fi
-grep -Fq 'pull postgres:17-alpine' "$QCH_MODES_TEST_LOG"
+grep -Fq "inspect --raw postgres:17-alpine" "$QCH_MODES_TEST_LOG"
+
+# Explicit key rotation keeps its semantics without any layer pull.
+: > "$QCH_MODES_TEST_LOG"
+bash "$repo_root/deploy/quick-start.sh" -o update -f > "$test_root/bundled-force.out"
+grep -Fq '继续执行 -f 指定的密钥轮换' "$test_root/bundled-force.out"
+grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
+if grep -Eq '^pull ' "$QCH_MODES_TEST_LOG"; then exit 1; fi
+if cmp -s "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"; then exit 1; fi
+# Remaining cases start from the same original deployment fixture.
+cp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
+cp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
+
+: > "$QCH_MODES_TEST_LOG"
+if QCH_MODES_FAIL_REMOTE=true bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-remote-failure.out" 2>&1; then exit 1; fi
+grep -Fq '远程镜像检查失败' "$test_root/bundled-remote-failure.out"
+if grep -Eq '(^pull | up -d)' "$QCH_MODES_TEST_LOG"; then exit 1; fi
+cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
+cmp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
 
 # A pinned tag is a comparison target, not a claim about the latest release.
 : > "$QCH_MODES_TEST_LOG"
 QCH_IMAGE_TAG=release-test bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-pinned-no-update.out"
-grep -Eq 'control-plane[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
-grep -Eq 'qcontrol-web[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
-grep -Eq 'PostgreSQL[[:space:]]+目标标签：17-alpine' "$test_root/bundled-pinned-no-update.out"
+grep -Eq '控制面[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
+grep -Eq '网页服务[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
+grep -Eq 'PostgreSQL 数据库[[:space:]]+目标标签：17-alpine' "$test_root/bundled-pinned-no-update.out"
 grep -Fq '当前镜像与目标版本一致，无需更新' "$test_root/bundled-pinned-no-update.out"
-if grep -Fq '已是最新版本' "$test_root/bundled-pinned-no-update.out" || grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
+if grep -Fq '已是最新版本' "$test_root/bundled-pinned-no-update.out" || grep -Eq '(^pull | up -d)' "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'pinned bundled no-op reported latest or recreated containers' >&2
     exit 1
 fi
 
+export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
 # Even the first registry pull failing must leave current versions visible.
 : > "$QCH_MODES_TEST_LOG"
 if QCH_MODES_FAIL_PULL=true bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-pull-failure.out" 2>&1; then
     printf '%s\n' 'bundled update ignored a failed image pull' >&2
     exit 1
 fi
-grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/bundled-pull-failure.out"
-grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/bundled-pull-failure.out"
-grep -Eq 'PostgreSQL[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-pull-failure.out"
-grep -Fq '正在检查更新（拉取目标镜像）' "$test_root/bundled-pull-failure.out"
-if grep -Eq '目标版本：|无需更新' "$test_root/bundled-pull-failure.out" || grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
+grep -Eq '控制面[[:space:]]+当前版本：old-control-version' "$test_root/bundled-pull-failure.out"
+grep -Eq '网页服务[[:space:]]+当前版本：old-web-version' "$test_root/bundled-pull-failure.out"
+grep -Eq 'PostgreSQL 数据库[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-pull-failure.out"
+grep -Fq '正在检查远程镜像' "$test_root/bundled-pull-failure.out"
+grep -Fq '目标版本：old-control-version' "$test_root/bundled-pull-failure.out"
+grep -Fq '镜像拉取失败' "$test_root/bundled-pull-failure.out"
+if grep -Fq '无需更新' "$test_root/bundled-pull-failure.out" || grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'failed bundled check reported a result or recreated containers' >&2
     exit 1
 fi
 cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
 cmp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
 
-export QCH_MODES_TARGET_CONTROL_ID=sha256:new-control
+export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
 export QCH_MODES_TARGET_CONTROL_VERSION=new-control-version
 : > "$QCH_MODES_TEST_LOG"
-bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-new-version.out"
+export QCH_MOCK_OUTPUT="$test_root/bundled-new-version.out"
+bash "$repo_root/deploy/quick-start.sh" -o update > "$QCH_MOCK_OUTPUT"
+unset QCH_MOCK_OUTPUT
 grep -Fq old-control-version "$test_root/bundled-new-version.out"
 grep -Fq new-control-version "$test_root/bundled-new-version.out"
 grep -Fq '更新完成' "$test_root/bundled-new-version.out"
-control_pull_line="$(grep -nF 'pull ghcr.io/qimaoww/qcontrol-plane:latest' "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
-web_pull_line="$(grep -nF 'pull ghcr.io/qimaoww/qcontrol-web:latest' "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
-postgres_pull_line="$(grep -nF 'pull postgres:17-alpine' "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
+control_pull_line="$(grep -nF "pull --platform linux/amd64 $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:latest)" "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
+check_line="$(grep -nF 'inspect --raw postgres:17-alpine' "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
 up_line="$(grep -nF ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG" | cut -d: -f1)"
-if [ "$control_pull_line" -ge "$web_pull_line" ] || \
-    [ "$web_pull_line" -ge "$postgres_pull_line" ] || \
-    [ "$postgres_pull_line" -ge "$up_line" ]; then
-    printf '%s\n' 'bundled update pull/recreate order changed' >&2
-    exit 1
-fi
+[ "$check_line" -lt "$control_pull_line" ] && [ "$control_pull_line" -lt "$up_line" ]
+[ "$(grep -c '^pull ' "$QCH_MODES_TEST_LOG")" -eq 1 ]
+
 cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
 cmp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
 cmp "$test_root/bundled-before-compose.yml" "$QCH_INSTALL_DIR/docker-compose.secrets.yml"
 
 # A PostgreSQL-only image update must not be mistaken for an application
 # no-op; Compose needs to apply the new database image as well.
-export QCH_MODES_TARGET_CONTROL_ID=sha256:old-control
+export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000001
 export QCH_MODES_TARGET_CONTROL_VERSION=old-control-version
-export QCH_MODES_TARGET_POSTGRES_ID=sha256:new-postgres
+export QCH_MODES_TARGET_POSTGRES_ID=sha256:0000000000000000000000000000000000000000000000000000000000000006
 export QCH_MODES_TARGET_POSTGRES_VERSION=new-postgres-version
 : > "$QCH_MODES_TEST_LOG"
 bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-postgres-only.out"
-grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/bundled-postgres-only.out"
-grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/bundled-postgres-only.out"
-grep -Eq 'control-plane[[:space:]]+目标版本：old-control-version' "$test_root/bundled-postgres-only.out"
-grep -Eq 'qcontrol-web[[:space:]]+目标版本：old-web-version' "$test_root/bundled-postgres-only.out"
-grep -Eq 'PostgreSQL[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-postgres-only.out"
-grep -Eq 'PostgreSQL[[:space:]]+目标版本：new-postgres-version' "$test_root/bundled-postgres-only.out"
+grep -Eq '控制面[[:space:]]+当前版本：old-control-version' "$test_root/bundled-postgres-only.out"
+grep -Eq '网页服务[[:space:]]+当前版本：old-web-version' "$test_root/bundled-postgres-only.out"
+grep -Eq '控制面[[:space:]]+目标版本：old-control-version' "$test_root/bundled-postgres-only.out"
+grep -Eq '网页服务[[:space:]]+目标版本：old-web-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'PostgreSQL 数据库[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'PostgreSQL 数据库[[:space:]]+目标版本：new-postgres-version' "$test_root/bundled-postgres-only.out"
 grep -Fq '更新完成' "$test_root/bundled-postgres-only.out"
-grep -Fq 'pull postgres:17-alpine' "$QCH_MODES_TEST_LOG"
+[ "$(grep -c '^pull ' "$QCH_MODES_TEST_LOG")" -eq 1 ]
+grep -Fq "pull --platform linux/amd64 $(mock_pinned_ref postgres:17-alpine)" "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
 cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
 cmp "$test_root/bundled-before.key" "$QCH_INSTALL_DIR/.secrets/config-encryption-key"
 cmp "$test_root/bundled-before-compose.yml" "$QCH_INSTALL_DIR/docker-compose.secrets.yml"
 
-export QCH_MODES_TARGET_POSTGRES_ID=sha256:old-postgres
+export QCH_MODES_TARGET_POSTGRES_ID=sha256:0000000000000000000000000000000000000000000000000000000000000003
 export QCH_MODES_TARGET_POSTGRES_VERSION=old-postgres-version
-export QCH_MODES_TARGET_CONTROL_ID=sha256:new-control
+export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
 export QCH_MODES_TARGET_CONTROL_VERSION=new-control-version
 
 # An explicit local build bypasses the remote version check, while a custom
@@ -218,11 +245,11 @@ fi
 
 : > "$QCH_MODES_TEST_LOG"
 QCH_IMAGE_TAG=release-test bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-custom-tag.out"
-grep -Fq 'pull ghcr.io/qimaoww/qcontrol-plane:release-test' "$QCH_MODES_TEST_LOG"
-grep -Fq 'pull ghcr.io/qimaoww/qcontrol-web:release-test' "$QCH_MODES_TEST_LOG"
-grep -Fq 'image inspect --format {{.Id}} ghcr.io/qimaoww/qcontrol-plane:release-test' "$QCH_MODES_TEST_LOG"
+grep -Fq "pull --platform linux/amd64 $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:release-test)" "$QCH_MODES_TEST_LOG"
+grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-web:release-test" "$QCH_MODES_TEST_LOG"
+grep -Fq "image inspect --format {{.Id}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:release-test)" "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
-if grep -Fq 'pull ghcr.io/qimaoww/qcontrol-plane:latest' "$QCH_MODES_TEST_LOG"; then
+if grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-plane:latest" "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'custom tag bundled update pulled latest instead of the selected tag' >&2
     exit 1
 fi
@@ -235,9 +262,9 @@ sed -i 's/^QCH_IMAGE_TAG=latest$/QCH_IMAGE_TAG="quoted-release"/' "$QCH_INSTALL_
 cp "$QCH_INSTALL_DIR/.env" "$test_root/bundled-quoted-before.env"
 : > "$QCH_MODES_TEST_LOG"
 bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-quoted-tag.out"
-grep -Fq 'pull ghcr.io/qimaoww/qcontrol-plane:quoted-release' "$QCH_MODES_TEST_LOG"
-grep -Fq 'pull ghcr.io/qimaoww/qcontrol-web:quoted-release' "$QCH_MODES_TEST_LOG"
-grep -Fq 'image inspect --format {{.Id}} ghcr.io/qimaoww/qcontrol-plane:quoted-release' "$QCH_MODES_TEST_LOG"
+grep -Fq "pull --platform linux/amd64 $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:quoted-release)" "$QCH_MODES_TEST_LOG"
+grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-web:quoted-release" "$QCH_MODES_TEST_LOG"
+grep -Fq "image inspect --format {{.Id}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:quoted-release)" "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
 cmp "$test_root/bundled-quoted-before.env" "$QCH_INSTALL_DIR/.env"
 cp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
@@ -246,8 +273,8 @@ grep -Fq '已保留数据：Docker PostgreSQL 命名卷' "$test_root/bundled-uni
 cmp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
 
 for network in default shared-edge; do
-    export QCH_MODES_TARGET_CONTROL_ID=sha256:new-control
-    export QCH_MODES_TARGET_WEB_ID=sha256:new-web
+    export QCH_MODES_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
+    export QCH_MODES_TARGET_WEB_ID=sha256:0000000000000000000000000000000000000000000000000000000000000005
     export QCH_MODES_TARGET_CONTROL_VERSION=new-control-version
     export QCH_MODES_TARGET_WEB_VERSION=new-web-version
     export QCH_INSTALL_DIR="$test_root/external-$network"

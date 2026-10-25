@@ -99,7 +99,7 @@ qch_github_probe_network() (
             fi
         fi
     fi
-    printf 'GitHub network evidence ipv4_tls=%s ipv6_tls=%s network=%s\n' "$qch_v4" "$qch_v6" "$qch_github_mode" >&2
+    printf 'GitHub 网络检测：IPv4 TLS=%s，IPv6 TLS=%s，网络=%s\n' "$qch_v4" "$qch_v6" "$qch_github_mode" >&2
     printf '%s\n' "$qch_github_mode"
 )
 
@@ -110,16 +110,16 @@ qch_github_detect() {
     qch_ttl=300
     [ "$qch_github_mode" != unknown ] || qch_ttl=15
     qch_github_expires=$((qch_now + qch_ttl))
-    printf 'GitHub download network=%s accelerated=%s\n' "$qch_github_mode" "$( [ "$qch_github_mode" = ipv6-only ] && printf true || printf false )" >&2
+    printf 'GitHub 下载：网络=%s，加速=%s\n' "$qch_github_mode" "$( [ "$qch_github_mode" = ipv6-only ] && printf true || printf false )" >&2
 }
 
 qch_github_download() {
     qch_overall_deadline=$(( $(date +%s) + ${4:-90} ))
-    qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; return 1; }
+    qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' '拒绝不受信任的 GitHub 来源' >&2; return 1; }
     if ! qch_github_egress_proxy "$qch_checked_source"; then qch_github_detect "$qch_overall_deadline" || return 1; fi
     if (
         # A subshell isolates all state, traps and curl options from enrollment.
-        qch_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; exit 1; }
+        qch_source=$(qch_github_original "$1") || { printf '%s\n' '拒绝不受信任的 GitHub 来源' >&2; exit 1; }
         qch_destination=$2
         qch_limit=${3:-134217728}
         qch_deadline=$qch_overall_deadline
@@ -138,7 +138,7 @@ qch_github_download() {
             qch_hops=0
             while [ "$qch_hops" -le 5 ]; do
                 qch_remaining=$((qch_deadline - $(date +%s)))
-                [ "$qch_remaining" -gt 0 ] || { printf '%s\n' 'GitHub download attempt timed out' >&2; break; }
+                [ "$qch_remaining" -gt 0 ] || { printf '%s\n' 'GitHub 下载超时' >&2; break; }
                 qch_wire=$qch_next
                 set --
                 qch_explicit_proxy=false
@@ -159,7 +159,7 @@ qch_github_download() {
                             qch_reset=$(awk 'tolower($1) == "x-ratelimit-reset:" { gsub(/\r/, "", $2); if ($2 ~ /^[0-9]+$/) print $2 }' "$qch_headers" | tail -n 1)
                             if [ -n "$qch_reset" ]; then
                                 qch_reset_time=$(date -u -d "@$qch_reset" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf '%s' "$qch_reset")
-                                printf 'GitHub API quota exhausted: HTTP %s; retry after %s (shared upstream quota)\n' "$qch_status" "$qch_reset_time" >&2
+                                printf 'GitHub API 配额已耗尽：HTTP %s；请在 %s 后重试（共享配额）\n' "$qch_status" "$qch_reset_time" >&2
                                 exit 1
                             fi ;;
                     esac
@@ -172,12 +172,12 @@ qch_github_download() {
                             exit 0 ;;
                         301|302|303|307|308)
                             qch_next=$(qch_github_original "$(printf '%s\n' "$qch_result" | tail -n 1)") || {
-                                printf '%s\n' 'GitHub download rejected redirect outside public HTTPS GitHub sources' >&2; exit 1;
+                                printf '%s\n' 'GitHub 下载拒绝跳转到非公开 HTTPS GitHub 来源' >&2; exit 1;
                             }
                             qch_hops=$((qch_hops + 1))
                             continue ;;
                         408|425|429|5??) break ;;
-                        *) printf 'GitHub download response failed: HTTP %s; check repository, resource, GitHub API rate limits and channel availability\n' "$qch_status" >&2; exit 1 ;;
+                        *) printf 'GitHub 下载失败：HTTP %s；请检查资源、API 配额和网络\n' "$qch_status" >&2; exit 1 ;;
                     esac
                 else
                     qch_curl_status=$?
@@ -185,31 +185,31 @@ qch_github_download() {
                     qch_request_host=${qch_wire#https://}
                     qch_request_host=${qch_request_host%%/*}
                     qch_request_host=${qch_request_host%%\?*}
-                    printf 'GitHub download request failed: stage=dns-connect-transfer request=%s retry=%s network=%s curl_exit=%s host=%s\n' "$qch_request_count" "$qch_attempt" "${qch_github_mode:-unknown}" "$qch_curl_status" "$qch_request_host" >&2
+                    printf 'GitHub 下载请求失败：请求=%s，重试=%s，网络=%s，curl 状态=%s，主机=%s\n' "$qch_request_count" "$qch_attempt" "${qch_github_mode:-unknown}" "$qch_curl_status" "$qch_request_host" >&2
                     case "$qch_curl_status" in
                         6|7|28|52|56)
                             if "$qch_explicit_proxy"; then
-                                printf '%s\n' 'acceleration not attempted: explicit egress proxy preserved' >&2
+                                printf '%s\n' '保留指定的出口代理，不启用加速' >&2
                                 exit 69
                             fi
                             if [ "$qch_wire" = "$qch_next" ] && ! "$qch_use_channel"; then
-                                printf '%s\n' 'GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource' >&2
+                                printf '%s\n' 'GitHub 直连解析或连接失败，尝试加速下载' >&2
                                 qch_use_channel=true
                                 continue
                             fi
-                            printf '%s\n' 'acceleration failed: check DNS/HTTPS access to v6.gh-proxy.org; if both domains fail to resolve, configure a reachable IPv6 DNS resolver; existing files preserved' >&2
+                            printf '%s\n' '加速下载失败：请检查 v6.gh-proxy.org 的 DNS 和 HTTPS 连接；已保留原文件' >&2
                             exit 69 ;;
-                        *) printf '%s\n' 'permanent curl failure; acceleration not retried (check TLS verification, local output and size limit)' >&2; exit 1 ;;
+                        *) printf '%s\n' 'curl 请求失败，请检查 TLS、本地文件和大小限制；不再重试加速' >&2; exit 1 ;;
                     esac
                 fi
             done
-            [ "$qch_hops" -le 5 ] || { printf '%s\n' 'too many GitHub download redirects' >&2; exit 1; }
+            [ "$qch_hops" -le 5 ] || { printf '%s\n' 'GitHub 下载跳转次数过多' >&2; exit 1; }
             qch_remaining=$((qch_deadline - $(date +%s)))
             [ "$qch_remaining" -gt "$qch_attempt" ] || break
             [ "$qch_attempt" -ge 3 ] || sleep "$qch_attempt"
             qch_attempt=$((qch_attempt + 1))
         done
-        printf 'GitHub download failed: attempts=%s; total budget or retry limit exhausted; existing files preserved\n' "$qch_attempt" >&2
+        printf 'GitHub 下载失败：已尝试 %s 次，超过超时或重试限制；已保留原文件\n' "$qch_attempt" >&2
         exit 1
     ); then
         return 0

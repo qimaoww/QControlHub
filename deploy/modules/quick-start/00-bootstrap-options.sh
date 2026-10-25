@@ -74,20 +74,20 @@ usage() {
   uninstall           卸载服务，保留配置、密钥和数据库卷
 
 部署模式：
-  bundled             Docker Compose 内置 PostgreSQL + 控制面
-  external            仅部署控制面并连接已有 PostgreSQL
+  bundled             内置 PostgreSQL，部署控制面和网页服务
+  external            连接已有 PostgreSQL，部署控制面和网页服务
 
 选项：
   -m MODE             选择部署模式；省略时交互选择
   -o OPERATION        选择安装、更新或卸载；省略时交互选择
-  -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
+  -d DATABASE_URL     外部模式使用的 PostgreSQL 连接串
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
-  -n DOCKER_NETWORK   external 安装连接的已有 Docker 网络；省略时可交互选择或使用默认网络
-  -f                  bundled 模式显式轮换 token 与应用密钥；external 更新不支持
+  -n DOCKER_NETWORK   外部模式安装连接的已有 Docker 网络；省略时可交互选择或使用默认网络
+  -f                  内置模式显式轮换令牌 与应用密钥；外部模式更新不支持
   -t SECONDS          每阶段就绪检查超时时间（默认 360 秒，包含数据库迁移等待）
   -h                  显示帮助
 
-安装可选择 bundled 或 external；普通 external 更新逐字节保留 .env，不迁移凭据或轮换密钥。
+普通外部模式更新逐字节保留 .env，不迁移凭据或轮换密钥。
 交互式菜单中选择的安装目录会保存到当前用户配置；后续从远程一键命令运行时会自动复用。显式设置 QCH_INSTALL_DIR 时以该值为准。
 USAGE
 }
@@ -132,7 +132,7 @@ bootstrap_streamed_script() {
     [ ! -L "$marker_file" ] || die "一键安装标记不能是符号链接：$marker_file"
     bootstrap_ref="${QCH_BOOTSTRAP_REF:-main}"
     case "$bootstrap_ref" in
-        ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git ref" ;;
+        ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git 引用" ;;
     esac
     base_url="https://raw.githubusercontent.com/qimaoww/qcontrolhub/$bootstrap_ref"
 
@@ -148,7 +148,7 @@ bootstrap_streamed_script() {
                 *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
             esac
             branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-            [ "$branch" = "main" ] || die "旧版 Git 安装目录必须位于 main 分支，当前为：${branch:-detached}"
+            [ "$branch" = "main" ] || die "旧版 Git 安装目录必须位于 main 分支，当前为：${branch:-分离状态}"
             git -C "$install_dir" diff --quiet -- deploy/quick-start.sh docker-compose.yml || \
                 die "旧版 Git 安装目录的运行文件包含未提交修改，请先处理"
             git -C "$install_dir" diff --cached --quiet -- deploy/quick-start.sh docker-compose.yml || \
