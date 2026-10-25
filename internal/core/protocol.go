@@ -25,6 +25,10 @@ type SharedInstanceStatus struct {
 	Status        string    `json:"status"`
 	CoreLogStatus string    `json:"core_log_status,omitempty"`
 	CoreLogError  string    `json:"core_log_error,omitempty"`
+	// CoreLogSource and CoreLogLastAt report the shared instance's transport and
+	// its last delivered line, so per-instance health is attributable.
+	CoreLogSource string     `json:"core_log_source,omitempty"`
+	CoreLogLastAt *time.Time `json:"core_log_last_at,omitempty"`
 }
 
 const (

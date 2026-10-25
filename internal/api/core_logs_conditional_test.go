@@ -143,6 +143,55 @@ func TestCoreLogSharedSessionsAndPrivacy(t *testing.T) {
 			t.Fatal("admin source privacy")
 		}
 	}
+	// The directory exposes the transport and the last delivered line for both
+	// the main runtime snapshot and shared state rows. A non-failed status must
+	// drop a stale reason; not-configured passes through unchanged.
+	lastLogAt := time.Now().UTC().Add(-90 * time.Second)
+	if err := db.Heartbeat(ctx, host.ID, core.HeartbeatRequest{
+		Features: host.Features,
+		Runtime: map[core.Engine]core.RuntimeState{
+			core.EngineMihomo: {Installed: true, ServiceStatus: "active", CoreLogStatus: core.CoreLogStatusNotConfigured, CoreLogError: "config-missing", CoreLogSource: core.CoreLogSourceFile, CoreLogLastAt: &lastLogAt},
+			core.EngineXray:   {Installed: true, ServiceStatus: "active", CoreLogStatus: core.CoreLogStatusFailed, CoreLogError: "permission-denied", CoreLogSource: core.CoreLogSourceJournal, CoreLogLastAt: &lastLogAt},
+		},
+		SharedInstances: []core.SharedInstanceStatus{
+			{Engine: core.EngineMihomo, ShareID: shareIDs[0], Status: "active", CoreLogStatus: core.CoreLogStatusNotConfigured, CoreLogError: "config-missing", CoreLogSource: core.CoreLogSourceFile, CoreLogLastAt: &lastLogAt},
+			{Engine: core.EngineMihomo, ShareID: shareIDs[1], Status: "active", CoreLogStatus: core.CoreLogStatusActive, CoreLogError: "stale failure text", CoreLogSource: core.CoreLogSourceJournalHost, CoreLogLastAt: &lastLogAt},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	findSource := func(sources []store.CoreLogSource, instance string, engine core.Engine) *store.CoreLogSource {
+		t.Helper()
+		for index := range sources {
+			if sources[index].AgentID == host.ID && sources[index].InstanceID == instance && sources[index].Engine == engine {
+				return &sources[index]
+			}
+		}
+		t.Fatalf("missing source %s/%s: %+v", instance, engine, sources)
+		return nil
+	}
+	sources = nil
+	admin.call("GET", "/core-log-sources", nil, http.StatusOK, &sources)
+	main := findSource(sources, "main", core.EngineMihomo)
+	if main.Status != core.CoreLogStatusNotConfigured || main.Error != "" || main.Source != core.CoreLogSourceFile || main.LastLogAt == nil {
+		t.Fatalf("main not-configured source = %+v", main)
+	}
+	failed := findSource(sources, "main", core.EngineXray)
+	if failed.Status != core.CoreLogStatusFailed || failed.Error != "permission-denied" || failed.Source != core.CoreLogSourceJournal {
+		t.Fatalf("main failed source = %+v", failed)
+	}
+	sources = nil
+	alice.call("GET", "/core-log-sources", nil, http.StatusOK, &sources)
+	shared := findSource(sources, shareIDs[0], core.EngineMihomo)
+	if shared.Status != core.CoreLogStatusNotConfigured || shared.Error != "" || shared.Source != core.CoreLogSourceFile || shared.LastLogAt == nil || shared.LastLogAt.Sub(lastLogAt).Abs() > time.Second {
+		t.Fatalf("shared not-configured source = %+v", shared)
+	}
+	sources = nil
+	bob.call("GET", "/core-log-sources", nil, http.StatusOK, &sources)
+	shared = findSource(sources, shareIDs[1], core.EngineMihomo)
+	if shared.Status != core.CoreLogStatusActive || shared.Error != "" || shared.Source != core.CoreLogSourceJournalHost || shared.LastLogAt == nil {
+		t.Fatalf("shared active source = %+v", shared)
+	}
 	// Conditional refresh uses the same live authorization after grant revocation.
 	fetch := func(client configScopeAPIClient, tag string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", "/api/v1/core-logs", nil)

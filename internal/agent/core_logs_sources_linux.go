@@ -26,6 +26,7 @@ func managedOpenRCCoreServiceName(service string) bool {
 // log destination is not installed by QAgent and cannot be trusted.
 func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSource {
 	engines := make(map[string]core.Engine)
+	services := make(map[string]string)
 	ambiguous := make(map[string]bool)
 	for _, specs := range specSets {
 		for engine, spec := range specs {
@@ -39,15 +40,17 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 			}
 			if existing, ok := engines[path]; ok && existing != engine {
 				delete(engines, path)
+				delete(services, path)
 				ambiguous[path] = true
 				continue
 			}
 			engines[path] = engine
+			services[path] = spec.Service
 		}
 	}
 	sources := make([]coreLogFileSource, 0, len(engines))
 	for path, engine := range engines {
-		sources = append(sources, coreLogFileSource{path: path, root: openRCCoreLogRoot, engine: engine, kind: "openrc"})
+		sources = append(sources, coreLogFileSource{path: path, root: openRCCoreLogRoot, engine: engine, kind: "openrc", service: services[path]})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
 	return sources
@@ -55,6 +58,7 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 
 func systemdFallbackCoreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSource {
 	engines := make(map[string]core.Engine)
+	services := make(map[string]string)
 	ambiguous := make(map[string]bool)
 	for _, specs := range specSets {
 		for engine, spec := range specs {
@@ -67,15 +71,17 @@ func systemdFallbackCoreLogFileSources(specSets ...map[core.Engine]EngineSpec) [
 			}
 			if existing, ok := engines[path]; ok && existing != engine {
 				delete(engines, path)
+				delete(services, path)
 				ambiguous[path] = true
 				continue
 			}
 			engines[path] = engine
+			services[path] = spec.Service
 		}
 	}
 	sources := make([]coreLogFileSource, 0, len(engines))
 	for path, engine := range engines {
-		sources = append(sources, coreLogFileSource{path: path, root: systemdFallbackCoreLogRoot, engine: engine, kind: "systemd-fallback"})
+		sources = append(sources, coreLogFileSource{path: path, root: systemdFallbackCoreLogRoot, engine: engine, kind: "systemd-fallback", service: services[path]})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
 	return sources

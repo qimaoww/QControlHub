@@ -42,6 +42,27 @@ func TestCoreLogIdentityMigrationFromPreviousSchemas(t *testing.T) {
 			if err := db.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil || version != currentSchemaVersion {
 				t.Fatalf("migration version=%d: %v", version, err)
 			}
+			// The dropped state table must come back with the transport and last
+			// delivered line columns, and a retried startup must not duplicate them.
+			var stateColumns int
+			if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema=current_schema() AND table_name='core_log_source_states'
+				AND column_name IN ('source','last_at')`).Scan(&stateColumns); err != nil || stateColumns != 2 {
+				t.Fatalf("core log source state columns=%d: %v", stateColumns, err)
+			}
+			// Replaying the schema step (for example after an interrupted
+			// deployment) must keep the columns and must not fail.
+			if _, err := db.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations WHERE version=$1`, currentSchemaVersion); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.migrate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema=current_schema() AND table_name='core_log_source_states'
+				AND column_name IN ('source','last_at')`).Scan(&stateColumns); err != nil || stateColumns != 2 {
+				t.Fatalf("replayed core log source state columns=%d: %v", stateColumns, err)
+			}
 			if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM core_logs WHERE node_owner_id='unverified' AND owner_id='' AND instance_id='' AND message='old source without proof'`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("historical provenance count=%d: %v", count, err)
 			}

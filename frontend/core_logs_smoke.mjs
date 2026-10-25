@@ -61,6 +61,111 @@ try {
   assert.doesNotMatch(policyMarkup, /保存警告及以上|保留 \d+ 天/,
     "cached settings must not leak a policy after read permission is revoked");
 
+  // Collection state is reported per (node, engine, instance). A broken engine
+  // or shared instance is named in place; it never speaks for its siblings.
+  let statusMarkup = "";
+  const statusState = { data: { coreLogSources: [], coreLogPhase: "ready" } };
+  const statusView = createCoreLogView({
+    state: statusState, engines: ["xray", "sing-box", "ss-rust"],
+    can: () => true,
+    now: () => Date.parse("2026-09-07T00:05:00Z"),
+    esc: value => String(value ?? ""), engineName: String, date: String,
+    shell: markup => { statusMarkup = markup; },
+  });
+  const statusAgents = [
+    { id: "alpha", name: "ALPHA", status: "online", features: ["core-logs-v1", "core-log-status-v1"] },
+    { id: "beta", name: "BETA", status: "online", features: ["core-logs-v1", "core-log-status-v1"] },
+  ];
+  const source = (engine, patch) => ({ agent_id: "alpha", name: "ALPHA", instance_id: "main", engine, username: "主实例", grant_revision: "1", ...patch });
+  const healthy = { status: "active", source: "journal", last_log_at: "2026-09-07T00:03:00Z" };
+  const healthyEntry = [{ id: 1, agent_id: "alpha", engine: "xray", level: "info", message: "xray healthy", logged_at: "2026-09-07T00:04:00Z" }];
+  statusState.data.coreLogSources = [source("xray", healthy), source("sing-box", { status: "failed", error: "collector-failed" })];
+  statusView(healthyEntry, statusAgents, { agent_id: "alpha", engine: "xray" });
+  assert.match(statusMarkup, /xray healthy/, "a healthy engine keeps its rows while a sibling fails");
+  assert.doesNotMatch(statusMarkup, /采集失败/, "a sibling failure cannot fail the selected engine");
+  assert.doesNotMatch(statusMarkup, /core-log-source-notice/);
+  assert.match(statusMarkup, /来源 journal/);
+  assert.match(statusMarkup, /最近日志 2 分钟前/);
+  statusView(healthyEntry, statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /xray healthy/, "the aggregate scope still lists healthy rows");
+  assert.match(statusMarkup, /部分来源采集失败/);
+  assert.match(statusMarkup, /sing-box · 主实例 读取失败（collector-failed）/);
+  assert.doesNotMatch(statusMarkup, /<strong>日志采集失败<\/strong>/);
+  statusView([], statusAgents, { agent_id: "alpha", engine: "sing-box" });
+  assert.match(statusMarkup, /<strong>日志采集失败<\/strong>/, "the failing engine names its own empty state");
+  assert.match(statusMarkup, /sing-box · 主实例 读取失败（collector-failed）/);
+  statusState.data.coreLogSources = [source("sing-box", { status: "not-configured" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "sing-box" });
+  assert.match(statusMarkup, /<strong>未配置<\/strong>/, "an installed core without a managed config is not a collection failure");
+  assert.match(statusMarkup, /尚无托管配置，部署后自动采集/);
+  assert.doesNotMatch(statusMarkup, /采集失败/);
+  statusState.data.coreLogSources = [source("xray", { status: "waiting" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "xray" });
+  assert.match(statusMarkup, /<strong>等待日志<\/strong>/);
+  assert.match(statusMarkup, /已就绪，等待首条日志/);
+  statusState.data.coreLogSources = [source("ss-rust", { status: "active" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "ss-rust" });
+  assert.match(statusMarkup, /<strong>采集已就绪，尚未收到日志<\/strong>/, "an armed source that never delivered is not called healthy");
+  assert.doesNotMatch(statusMarkup, /采集正常|暂无匹配记录/);
+  assert.doesNotMatch(statusMarkup, /undefined|NaN/);
+  statusState.data.coreLogSources = [source("xray", { status: "active", core_log_source: "file", core_log_last_at: "2026-09-05T00:05:00Z" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "xray" });
+  assert.match(statusMarkup, /采集正常，最近日志 2 天前/);
+  assert.match(statusMarkup, /来源 日志文件/, "the reported transport is displayed when the source reports it");
+  statusState.data.coreLogSources = [source("xray", { status: "active", last_log_at: "not-a-date" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "xray" });
+  assert.match(statusMarkup, /采集已就绪，尚未收到日志/);
+  assert.doesNotMatch(statusMarkup, /NaN|undefined/);
+  statusState.data.coreLogSources = [source("xray", healthy)];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "xray", q: "missing" });
+  assert.match(statusMarkup, /<strong>没有匹配日志<\/strong>/, "a delivered source with no keyword match stays a filter result");
+  statusState.data.coreLogSources = [source("xray", { status: "waiting" })];
+  statusView([], statusAgents, { agent_id: "alpha", engine: "xray", q: "missing" });
+  assert.match(statusMarkup, /<strong>等待日志<\/strong>/, "a keyword cannot turn an empty source into a no-match result");
+  statusState.data.coreLogSources = [source("xray", healthy), source("sing-box", { status: "failed", error: "collector-failed" })];
+  statusView([], statusAgents, { agent_id: "alpha", q: "missing" });
+  assert.match(statusMarkup, /<strong>没有匹配日志<\/strong>/);
+  assert.match(statusMarkup, /sing-box · 主实例 读取失败（collector-failed）/,
+    "a filtered empty state still reports the broken sibling by name");
+  statusState.data.coreLogSources = [source("xray", healthy), source("sing-box", { status: "not-configured" })];
+  statusView([], statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /采集正常，最近日志 2 分钟前/);
+  assert.match(statusMarkup, /sing-box · 主实例 尚无托管配置/, "an unconfigured sibling stays visible beside a healthy source");
+  statusState.data.coreLogSources = [source("xray", healthy), source("ss-rust", { status: "not-installed" })];
+  statusView([], statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /采集正常，最近日志 2 分钟前/);
+  assert.doesNotMatch(statusMarkup, /内核尚未安装/,
+    "an uninstalled sibling must not banner over a healthy source");
+  statusState.data.coreLogSources = [
+    source("xray", { status: "failed", error: "config-unavailable" }),
+    source("sing-box", { status: "failed", error: "collector-failed" }),
+    source("ss-rust", { status: "failed", error: "permission-denied" }),
+  ];
+  statusView([], statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /另有 1 个来源读取失败/, "extra failures are summarized instead of truncated silently");
+  statusState.data.coreLogSources = [source("xray", healthy), {
+    agent_id: "beta", name: "BETA", instance_id: "main", engine: "sing-box", username: "主实例",
+    status: "failed", error: "config-unavailable", grant_revision: "1",
+  }];
+  statusView([], statusAgents, { agent_id: "alpha" });
+  assert.doesNotMatch(statusMarkup, /采集失败/, "a failed node outside the filter scope cannot fail the page");
+  assert.match(statusMarkup, /采集正常，最近日志 2 分钟前/);
+  statusView([], statusAgents, { agent_id: "beta" });
+  assert.match(statusMarkup, /<strong>日志采集失败<\/strong>/, "the failed node reports its own state");
+  statusState.data.coreLogSources = [
+    source("sing-box", { status: "failed", error: "config-unavailable" }),
+    { agent_id: "alpha", name: "ALPHA", instance_id: "shr_0123456789abcdef", engine: "sing-box", username: "alice", status: "active", grant_revision: "1" },
+  ];
+  statusView([], statusAgents, { agent_id: "alpha", instance_id: "shr_0123456789abcdef" });
+  assert.doesNotMatch(statusMarkup, /采集失败/, "a broken main instance cannot fail the selected shared instance");
+  statusState.data.coreLogSources = [{
+    agent_id: "alpha", name: "ALPHA", instance_id: "shr_0123456789abcdef", engine: "ss-rust",
+    username: "alice", status: "failed", error: "permission-denied", grant_revision: "1",
+  }];
+  statusView([], statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /ss-rust · alice · shr_0123456789abcdef 读取失败（permission-denied）/,
+    "shared instance failures locate the user and instance id");
+
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
   const sources = ["alpha", "beta", "gamma"].map(agent => ({agent_id: agent, name: agent.toUpperCase(), instance_id: "main", engine: "xray", owner_id: "self", username: "self", status: "active", features: ["core-logs-v1", "core-log-status-v1"], grant_revision: "1"}));
   const calls = [];

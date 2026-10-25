@@ -123,6 +123,9 @@ func (collector *CoreLogCollector) appendFileEntry(source coreLogFileSource, lin
 		service = strings.TrimSuffix(filepath.Base(source.path), ".log")
 	}
 	collector.append(core.CoreLogEntry{Engine: source.engine, InstanceID: "main", Service: service, Level: level, Message: message, LoggedAt: time.Now().UTC()})
+	// Only a published line proves the transport works. A systemd fallback that
+	// delivers a record is promoted here, matching the journal semantics.
+	collector.setFileSourceStatus(source, core.CoreLogStatusActive, "")
 }
 
 func truncateSystemdFallbackCoreLog(ctx context.Context, source coreLogFileSource) error {
