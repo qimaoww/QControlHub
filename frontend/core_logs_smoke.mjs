@@ -153,7 +153,7 @@ try {
       }
       statusView([], statusAgents, { agent_id: "alpha", engine: "xray" });
       assert.match(statusMarkup, /内核尚未安装/, "a real missing engine keeps its own state after switching");
-      statusView(historical, statusAgents, { agent_id: "alpha", engine: "ss-rust", instance_id: instance });
+      statusView(historical.map(row => ({ ...row, instance_id: instance })), statusAgents, { agent_id: "alpha", engine: "ss-rust", instance_id: instance });
       assert.doesNotMatch(statusMarkup, /内核尚未安装/, "switching back removes the missing engine's notice");
     }
   }
