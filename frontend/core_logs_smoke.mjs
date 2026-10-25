@@ -136,6 +136,40 @@ try {
   assert.match(statusMarkup, /采集正常，最近日志 2 分钟前/);
   assert.doesNotMatch(statusMarkup, /内核尚未安装/,
     "an uninstalled sibling must not banner over a healthy source");
+  const historical = [{ ...healthyEntry[0], engine: "ss-rust", instance_id: "main", message: "retained SS Rust connection error" }];
+  for (const instance of ["main", "shr_0123456789abcdef"]) {
+    for (const status of ["waiting", "pending", "not-configured", "active"]) {
+      statusState.data.coreLogSources = [
+        source("xray", { status: "not-installed" }),
+        source("ss-rust", { status, instance_id: instance, username: "alice" }),
+      ];
+      for (const rows of [[], historical.map(row => ({ ...row, instance_id: instance }))]) {
+        statusView(rows, statusAgents, { agent_id: "alpha" });
+        assert.doesNotMatch(statusMarkup, /内核尚未安装/, `${status}/${instance}: missing siblings cannot describe this scope`);
+        if (rows.length) {
+          assert.match(statusMarkup, /retained SS Rust connection error/);
+          assert.doesNotMatch(statusMarkup, /采集正常/, "history cannot establish collection health");
+        }
+      }
+      statusView([], statusAgents, { agent_id: "alpha", engine: "xray" });
+      assert.match(statusMarkup, /内核尚未安装/, "a real missing engine keeps its own state after switching");
+      statusView(historical.map(row => ({ ...row, instance_id: instance })), statusAgents, { agent_id: "alpha", engine: "ss-rust", instance_id: instance });
+      assert.doesNotMatch(statusMarkup, /内核尚未安装/, "switching back removes the missing engine's notice");
+    }
+  }
+  for (const status of ["not-installed", "offline", "failed", "waiting", "pending", "not-configured"]) {
+    statusState.data.coreLogSources = [source("ss-rust", { status, error: "collector-failed" })];
+    statusView(historical, statusAgents, { agent_id: "alpha" });
+    assert.match(statusMarkup, /retained SS Rust connection error/);
+    assert.doesNotMatch(statusMarkup, /采集正常/, "retained rows never override current state");
+    statusView(historical, statusAgents, { agent_id: "alpha", q: "no-match" });
+    assert.match(statusMarkup, /<strong>没有匹配日志<\/strong>/);
+    assert.doesNotMatch(statusMarkup, /采集正常/);
+  }
+  statusState.data.coreLogSources = [source("ss-rust", { status: "not-installed" })];
+  statusView(historical, statusAgents, { agent_id: "alpha" });
+  assert.match(statusMarkup, /内核尚未安装/);
+  assert.match(statusMarkup, /ALPHA · ss-rust · 主实例 未安装/);
   statusState.data.coreLogSources = [
     source("xray", { status: "failed", error: "config-unavailable" }),
     source("sing-box", { status: "failed", error: "collector-failed" }),
@@ -165,6 +199,24 @@ try {
   statusView([], statusAgents, { agent_id: "alpha" });
   assert.match(statusMarkup, /ss-rust · alice · shr_0123456789abcdef 读取失败（permission-denied）/,
     "shared instance failures locate the user and instance id");
+
+  const pollingState = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 100 } } };
+  let pollingStatus = "waiting", pollingMarkup = "";
+  const poll = installCoreLogs({
+    state: pollingState, engines: ["xray", "ss-rust"], can: () => true,
+    esc: value => String(value ?? ""), engineName: String, date: String,
+    shell: value => { pollingMarkup = value; }, setTimer: () => 1, clearTimer: () => {},
+    api: async path => path === "/core-log-sources"
+      ? [source("xray", { status: "not-installed" }), source("ss-rust", { status: pollingStatus })]
+      : historical,
+  });
+  for (const status of ["waiting", "not-installed", "pending", "not-configured", "waiting"]) {
+    pollingStatus = status;
+    await poll({ background: true });
+    assert.match(pollingMarkup, /retained SS Rust connection error/);
+    assert.equal(pollingMarkup.includes("内核尚未安装"), status === "not-installed",
+      "background refresh must update source status even when the historical rows do not change");
+  }
 
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
   const sources = ["alpha", "beta", "gamma"].map(agent => ({agent_id: agent, name: agent.toUpperCase(), instance_id: "main", engine: "xray", owner_id: "self", username: "self", status: "active", features: ["core-logs-v1", "core-log-status-v1"], grant_revision: "1"}));

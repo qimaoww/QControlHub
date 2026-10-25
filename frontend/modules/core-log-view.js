@@ -58,6 +58,11 @@ export function createCoreLogView(ctx) {
       sourceNoticeTitle = scopeStatus.noticeTitle;
       sourceNoticeDetail = scopeStatus.noticeDetail;
     }
+    if (!entries.length && (filters.q || filters.level) &&
+        sourceEntries.some(entry => !filters.engine || entry.engine === filters.engine)) {
+      emptyTitle = "没有匹配日志";
+      emptyDetail = sourceNoticeDetail || emptyDetail;
+    }
     const pageSize = 200;
     const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
     const scope = JSON.stringify([filters.agent_id || "", filters.instance_id || "", filters.engine || "", filters.level || "", filters.q || "", filters.limit || 1000]);
