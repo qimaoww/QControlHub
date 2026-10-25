@@ -1,8 +1,0 @@
-ok  	github.com/qimaoww/qcontrolhub/internal/core	0.022s
-ok  	github.com/qimaoww/qcontrolhub/internal/authn	1.687s
-ok  	github.com/qimaoww/qcontrolhub/internal/api	251.449s
---- FAIL: TestTrafficUsageUpdatesStayHeapOnly (1.12s)
-    performance_invariants_test.go:182: port_traffic_policies grew by 524288 bytes over 200 reports; hot updates are no longer staying on-page
-FAIL
-FAIL	github.com/qimaoww/qcontrolhub/internal/store	172.199s
-FAIL

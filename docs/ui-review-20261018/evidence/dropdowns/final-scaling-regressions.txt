@@ -1,8 +1,0 @@
-browser workers=2, CPUs=12, memory=20001MiB, modes=3
-browser timing {"mode":"select-menus","startupMs":283.196247,"testMs":1338.505627,"cleanupMs":77.83040000000005,"passed":true,"elapsedMs":1699.545596}
-browser timing {"mode":"select-menus-mobile","startupMs":251.1522500000001,"testMs":1176.8894799999998,"cleanupMs":102.46063200000026,"passed":true,"elapsedMs":1530.507717}
-agents browser runtime smoke passed
-browser timing {"mode":"config-inbounds-mobile","startupMs":328.491756,"testMs":28198.185487,"cleanupMs":53.29646100000173,"passed":true,"elapsedMs":28579.983986}
-agents browser runtime smoke passed
-browser suite elapsed=28.658s
-agents browser runtime smoke passed

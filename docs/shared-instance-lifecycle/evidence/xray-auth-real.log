@@ -1,4 +1,0 @@
---- PASS: TestXrayGeneratedAuthenticationRoundTrip (0.15s)
---- PASS: TestLegacyXrayUsersPresetCanBeRepairedWithoutLosingOtherInbounds (0.00s)
-PASS
-ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.149s

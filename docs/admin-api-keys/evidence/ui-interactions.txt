@@ -1,6 +1,0 @@
-### Result
-{"edited":true,"disabled":true,"reenabled":true,"revoked":true}
-### Ran Playwright code
-```js
-await (async(page)=>{await page.locator("#settings-api-keys").waitFor();await page.locator("[data-api-key-edit]").first().click();const input=page.locator(".api-key-dialog input[name=name]");await input.waitFor();await input.fill("AI 排查已编辑");await page.getByRole("button",{name:"保存授权",exact:true}).click();await page.locator(".api-key-dialog").waitFor({state:"detached"});await page.locator("#settings-api-keys").getByText("AI 排查已编辑",{exact:true}).waitFor();await page.locator("[data-api-key-toggle]").first().click();await page.locator("#settings-api-keys").getByText("已停用",{exact:true}).waitFor();await page.locator("[data-api-key-toggle]").first().click();await page.locator("#settings-api-keys").getByText("有效",{exact:true}).first().waitFor();await page.locator("[data-api-key-revoke]").first().click();await page.locator("[data-confirm-accept]").click();await page.locator("#settings-api-keys").getByText("已撤销",{exact:true}).waitFor();return {edited:true,disabled:true,reenabled:true,revoked:true};})(page);
-```

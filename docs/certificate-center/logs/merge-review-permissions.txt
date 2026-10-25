@@ -1,5 +1,0 @@
-=== RUN   TestCertificateOrdinaryUserIsolationSharingAndDeployment
-    certificates_integration_test.go:110: Real ordinary-user password/CSRF sessions: create -> share -> select -> shared-instance task -> version replacement -> revoke queued deployment; no secret in history
---- PASS: TestCertificateOrdinaryUserIsolationSharingAndDeployment (1.09s)
-PASS
-ok  	github.com/qimaoww/qcontrolhub/internal/api	1.309s

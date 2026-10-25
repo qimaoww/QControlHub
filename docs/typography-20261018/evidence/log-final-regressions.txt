@@ -1,9 +1,0 @@
-browser workers=2, CPUs=12, memory=20001MiB, modes=3
-PASS logs {"loaded":8000,"domRows":200,"initialMs":169,"expandedMs":50,"pageMs":9,"filterMs":10,"switchAckMs":6,"previewRenderMs":21,"cachedSwitchMs":30,"longPageMs":12}
-browser timing {"mode":"logs","startupMs":151.04183,"testMs":3212.414222,"cleanupMs":29.594673000000057,"passed":true,"elapsedMs":3393.0632689999998}
-agents browser runtime smoke passed
-browser timing {"mode":"logs-mobile","startupMs":150.062195,"testMs":3502.830187,"cleanupMs":45.53916600000002,"passed":true,"elapsedMs":3698.443374}
-browser timing {"mode":"logs-restore","startupMs":146.83834499999966,"testMs":569.1509370000003,"cleanupMs":28.164818999999625,"passed":true,"elapsedMs":744.1588999999994}
-agents browser runtime smoke passed
-browser suite elapsed=4.502s
-agents browser runtime smoke passed

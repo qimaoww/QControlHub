@@ -131,7 +131,7 @@ func main() {
 	input.Disabled = false
 	must(json.Unmarshal(call(admin, "PUT", "/settings/api-keys/"+key.ID, input, 200), &key))
 	call(secret, "GET", "/api-key", nil, 200)
-	command := exec.CommandContext(ctx, "sh", "docs/admin-api-keys/diagnose.sh", agent.ID, "mihomo")
+	command := exec.CommandContext(ctx, "sh", "docs/api-diagnose.sh", agent.ID, "mihomo")
 	command.Env = append(os.Environ(), "QCH_API_BASE="+base, "QCH_API_KEY="+secret)
 	diagnostic, err := command.Output()
 	must(err)
@@ -159,7 +159,7 @@ func main() {
 	}
 	must(os.WriteFile(filepath.Join(out, "diagnostic.jsonl"), diagnostic, 0600))
 	must(os.WriteFile(filepath.Join(out, "restart-key"), []byte(secret), 0600))
-	metadata, _ := json.MarshalIndent(map[string]any{"agent_id": agent.ID, "config_id": cfg.ID, "task_id": task.ID, "key_id": key.ID, "requests": report, "example": "docs/admin-api-keys/diagnose.sh", "example_exit": 0, "example_paths": examplePaths, "agent_mode": "simulated acknowledgement; actual HTTP API requests", "completed_at": time.Now().UTC()}, "", "  ")
+	metadata, _ := json.MarshalIndent(map[string]any{"agent_id": agent.ID, "config_id": cfg.ID, "task_id": task.ID, "key_id": key.ID, "requests": report, "example": "docs/api-diagnose.sh", "example_exit": 0, "example_paths": examplePaths, "agent_mode": "simulated acknowledgement; actual HTTP API requests", "completed_at": time.Now().UTC()}, "", "  ")
 	must(os.WriteFile(filepath.Join(out, "http-verification.json"), metadata, 0600))
 	fmt.Println(string(metadata))
 }

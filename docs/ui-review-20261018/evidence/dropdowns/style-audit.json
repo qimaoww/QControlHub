@@ -1,8 +1,0 @@
-{
-  "new_css_files": [],
-  "new_css_custom_property_definitions": [],
-  "source_open_braces_before": 4781,
-  "source_open_braces_after": 4776,
-  "adapter_has_inline_styles": false,
-  "menu_rule_note": "Existing configuration-menu rules extended; its old mobile positioning override moved to a shared non-popover override. No new rule block appended. Existing typography/size rule moved from client format to shared select control."
-}
