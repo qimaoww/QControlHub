@@ -180,3 +180,33 @@ empty scenarios through the mode matrix above.
 - Filter changes were verified as request-free by attribution over a 475 ms
   window and by comparing against the 6 s idle rate; the poll cadence itself is
   unchanged, so live metrics keep their 2 s latency.
+
+## Cleanup registration
+
+The temporary test environment is registered for deletion 72 hours after these
+tests finished. Identifier `automation_4ebc689f-fd19-4713-9a46-bb38218ed540`
+("清理 QControlHub PR #315 取证环境"), one-shot run scheduled for
+**2026-10-28 22:15 Asia/Hong_Kong**, created 2026-10-25 with the DSH automation
+tool in `/root/qcontrolhub` and `danger-full-access` so it can remove its own
+temporary paths and prune the git worktree.
+
+Scope: `/tmp/qch-baseline` (the temporary before-change worktree at `654a80b3`,
+removed through `git worktree remove --force` and `git worktree prune`) and
+`/tmp/qch-evidence` (capture and recording scripts plus raw intermediates).
+Retained separately and untouched by the cleanup: this directory's screenshots,
+recordings, measurements and logs, the branch and its worktree, and the pull
+request. Details: [cleanup.json](evidence/cleanup.json).
+
+Earlier documents in this repository registered systemd timers; this session used
+the DSH automation tool, so the identifier is an automation id rather than a unit
+name. A `systemd` timer was not registered, and no GitHub Actions workflow or
+gate was added.
+
+## Limits of the checks that did not run
+
+`make check` was not run as a whole. Its `test` target and the core-log browser
+check need a PostgreSQL instance - `TestCoreLogsBrowserSessions` failed to
+connect to `/tmp/.s.PGSQL.5432` - and `installer-test`, `agent-redeploy-test`
+and `quick-start-test` are host-level targets. Every non-database target of
+`make checks` plus `dock-navigation-browser-check`, `make multi-user-browser-check`
+and the full fixture browser matrix were run and passed.
