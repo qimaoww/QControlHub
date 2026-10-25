@@ -33,13 +33,13 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
     <details class="config-tools-menu"><summary class="button" aria-haspopup="menu">更多 <span aria-hidden="true">▾</span></summary>
       <div class="config-inbound-menu-items" role="menu" aria-label="配置工具">
         ${sharedDeploy ? '<button type="button" role="menuitem" data-config-refresh>刷新配置</button>' : ""}
-        ${shared ? `<a role="menuitem" href="#settings-node-${encodeURIComponent(agent.id)}">实例管理 ↗</a>` : ""}
+        ${shared ? `<a role="menuitem" href="#settings-node-${encodeURIComponent(agent.id)}">实例管理</a>` : ""}
         ${shared && can("tasks.execute") && can("agent-config.read") ? '<button type="button" role="menuitem" data-instance-read>读取实例文件</button>' : ""}
-        ${shared && can("core-logs.read") ? `<a role="menuitem" href="#core-logs?agent=${encodeURIComponent(agent.id)}&instance=${encodeURIComponent(agent.runtime?.[engine]?.instance?.id || "")}&engine=${encodeURIComponent(engine)}">实例日志 ↗</a>` : ""}
+        ${shared && can("core-logs.read") ? `<a role="menuitem" href="#core-logs?agent=${encodeURIComponent(agent.id)}&instance=${encodeURIComponent(agent.runtime?.[engine]?.instance?.id || "")}&engine=${encodeURIComponent(engine)}">实例日志</a>` : ""}
         <button type="button" role="menuitem" data-inbound-action="advanced">高级字段</button>
         ${can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="history">版本历史</button>' : ""}
         ${can("deployments.read") && can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="diff">配置差异</button>' : ""}
-        ${can("client-access.read") ? '<a role="menuitem" href="#client-access" data-config-client>客户端配置 ↗</a>' : ""}
+        ${can("client-access.read") ? '<a role="menuitem" href="#client-access" data-config-client>客户端配置</a>' : ""}
       </div>
     </details>`;
   const menu = tools.querySelector("details");

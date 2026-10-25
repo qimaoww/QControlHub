@@ -14,7 +14,7 @@ export function createAccessControlDialog({ state, engineName, confirmAction }, 
     dialog.append(header, body);
     const note = document.createElement("footer");
     note.className = "config-access-note";
-    note.innerHTML = '<span>修改后需保存并部署，规则才会在节点生效。</span><a href="#settings-cnip">CN IP 数据源设置 →</a>';
+    note.innerHTML = '<span>修改后需保存并部署，规则才会在节点生效。</span><a href="#settings-cnip">CN IP 数据源设置</a>';
     dialog.append(note);
     bindEvent(note.querySelector("a"), "click", async event => {
       event.preventDefault();

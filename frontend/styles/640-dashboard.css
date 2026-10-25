@@ -18,7 +18,6 @@
 .dashboard-workspace .ops-stats small{margin-bottom:6px;font-size:var(--text-small)}
 .dashboard-workspace .ops-stats strong{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .dashboard-workspace .ops-stats strong em{font-size:var(--text-small);letter-spacing:var(--tracking-normal);white-space:nowrap}
-.dashboard-stat>i{position:absolute;top:12px;right:12px;color:var(--muted);font-size:var(--text-small);font-style:normal}
 .dashboard-monitoring{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
 .dashboard-monitoring.has-two-panels{grid-template-columns:repeat(2,minmax(0,1fr))}
 .dashboard-workspace .workspace-panel,.dashboard-workspace .dashboard-traffic-history{min-width:0;margin:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none}
@@ -125,7 +124,6 @@
   .panel-metric-network dd{font-size:var(--text-small)}
   .dashboard-workspace .ops-stats>.dashboard-stat{grid-template-columns:32px minmax(0,1fr)}
   .dashboard-workspace .ops-stats>.dashboard-stat .stat-icon{width:32px;height:32px}
-  .dashboard-stat>i{display:none}
   .dashboard-workspace .dashboard-month-picker{width:136px}
   .dashboard-traffic-summary dl{justify-content:space-between;flex:1}
   .dashboard-workspace .dashboard-traffic-axis{font-size:var(--text-caption)}
