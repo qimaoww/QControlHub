@@ -204,9 +204,21 @@ gate was added.
 
 ## Limits of the checks that did not run
 
-`make check` was not run as a whole. Its `test` target and the core-log browser
-check need a PostgreSQL instance - `TestCoreLogsBrowserSessions` failed to
-connect to `/tmp/.s.PGSQL.5432` - and `installer-test`, `agent-redeploy-test`
-and `quick-start-test` are host-level targets. Every non-database target of
-`make checks` plus `dock-navigation-browser-check`, `make multi-user-browser-check`
-and the full fixture browser matrix were run and passed.
+`make check` was not run as a whole. Its `test` target, the core-log browser
+check and the multi-user/certificate browser sessions need a PostgreSQL instance:
+`TestCoreLogsBrowserSessions` fails to connect to `/tmp/.s.PGSQL.5432`, and
+`QCH_TEST_DATABASE_URL` is not configured here, so `make multi-user-browser-check`
+reported PASS with **both `TestMultiUserBrowserSessions` and
+`TestCertificateBrowserSessions` subtests skipped** instead of exercising the UI.
+`installer-test`, `agent-redeploy-test` and `quick-start-test` are shell suites
+that install services, agents and containers on the host, so they were left to
+CI as well.
+
+What was actually executed and passed here: every non-database target of
+`make checks` (`fmt-check`, `frontend-module-check`, `module-policy-test`,
+`ci-runner-test`, `browser-diagnostics-test`, `pr-policy-test`,
+`schema-policy-test`, `deploy-modules-check`, `styles-check`, `vet`),
+`make dock-navigation-browser-check`, the fixture browser matrix with all 85
+modes, and the fifteen touched modes listed above. The multi-user and certificate
+browser sessions are therefore **not** covered by this change's local evidence;
+CI runs them against a database.
