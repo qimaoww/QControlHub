@@ -1,8 +1,0 @@
-=== RUN   TestSingBoxFinalInboundDeletion
-=== RUN   TestSingBoxFinalInboundDeletion/ordinary
-=== RUN   TestSingBoxFinalInboundDeletion/shared
---- PASS: TestSingBoxFinalInboundDeletion (0.33s)
-    --- PASS: TestSingBoxFinalInboundDeletion/ordinary (0.22s)
-    --- PASS: TestSingBoxFinalInboundDeletion/shared (0.11s)
-PASS
-ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	0.330s

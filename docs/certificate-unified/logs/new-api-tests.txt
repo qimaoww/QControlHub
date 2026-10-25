@@ -1,3 +1,0 @@
-ok  	github.com/qimaoww/qcontrolhub/internal/agent	0.370s
-ok  	github.com/qimaoww/qcontrolhub/internal/store	0.670s
-ok  	github.com/qimaoww/qcontrolhub/internal/api	3.316s

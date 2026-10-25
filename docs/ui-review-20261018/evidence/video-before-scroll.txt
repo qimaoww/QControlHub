@@ -1,6 +1,0 @@
-### Result
-[{"scroll":64,"range":64},{"scroll":0,"range":64},{"scroll":64,"range":64}]
-### Ran Playwright code
-```js
-await (async(page)=>{const region=page.locator("[data-cert-modal-content]");const positions=[];await page.mouse.move(210,420);await page.waitForTimeout(600);for(const dy of [600,-600,600]){await page.mouse.wheel(0,dy);await page.waitForTimeout(650);positions.push(await region.evaluate(e=>({scroll:e.scrollTop,range:e.scrollHeight-e.clientHeight})));}return positions;})(page);
-```

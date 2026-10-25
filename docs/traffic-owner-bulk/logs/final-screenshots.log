@@ -1,9 +1,0 @@
-### Result
-[{"mobile":false,"theme":"light","cards":2,"overflow":false,"scope":"current"},{"mobile":false,"theme":"dark","cards":2,"overflow":false,"scope":"current"},{"mobile":true,"theme":"light","cards":2,"overflow":false,"scope":"current"},{"mobile":true,"theme":"dark","cards":2,"overflow":false,"scope":"current"}]
-### Ran Playwright code
-```js
-await (async page => { await page.goto("http://127.0.0.1:55592/#traffic");await page.waitForSelector(".traffic-policy-grid article");const cdp=await page.context().newCDPSession(page);let results=[];for(const mobile of [false,true]){await page.setViewportSize(mobile?{width:390,height:844}:{width:1440,height:1000});await cdp.send("Emulation.setTouchEmulationEnabled",{enabled:mobile});for(const theme of ["light","dark"]){await page.evaluate(theme=>{localStorage.setItem("qcontrolhub-color-theme",theme)},theme);await page.reload();await page.waitForSelector(".traffic-policy-grid article");await page.evaluate(()=>window.scrollTo(0,0));await page.waitForTimeout(700);await page.screenshot({path:`docs/traffic-owner-bulk/evidence/after-${mobile?"mobile":"desktop"}-${theme}.png`});results.push({mobile,theme,cards:await page.locator(".traffic-policy-grid article").count(),overflow:await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),scope:await page.locator("[data-traffic-filter=user_scope]").inputValue()})}}return results; })(page);
-```
-### Page
-- Page URL: http://127.0.0.1:55592/#traffic
-- Page Title: 流量配额 · QControlHub
