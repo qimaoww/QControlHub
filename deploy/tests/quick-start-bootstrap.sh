@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-real_curl="$(command -v curl)"
+real_curl="$(command -v curl)" || { printf '%s\n' '入口回归测试需要 curl' >&2; exit 1; }
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-bootstrap.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
