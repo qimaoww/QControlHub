@@ -173,3 +173,52 @@ func writeExecutable(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 }
+
+func TestManagedUnitHelperProtectedMulticallLink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "coreutils")
+	writeExecutable(t, target, "#!/bin/sh\nexit 0\n")
+	link := filepath.Join(root, "install")
+	if err := os.Symlink("coreutils", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManagedUnitHelper(link); err != nil {
+		t.Fatalf("protected distribution multicall link: %v", err)
+	}
+	if err := validatePrivilegedExecutable(link); err == nil {
+		t.Fatal("generic executable validation must still reject symlinks")
+	}
+	chain := filepath.Join(root, "chain")
+	if err := os.Symlink(link, chain); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManagedUnitHelper(chain); err == nil {
+		t.Fatal("accepted an indirect link")
+	}
+	if err := os.Chmod(target, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManagedUnitHelper(link); err == nil {
+		t.Fatal("accepted a writable executable target")
+	}
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Lchown(link, 65534, 65534); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateManagedUnitHelper(link); err == nil {
+			t.Fatal("accepted a foreign-owned helper link")
+		}
+		if err := os.Lchown(link, 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(root, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManagedUnitHelper(link); err == nil {
+		t.Fatal("accepted an unprotected helper directory")
+	}
+}

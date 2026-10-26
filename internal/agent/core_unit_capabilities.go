@@ -54,6 +54,36 @@ func defaultCoreUnitCapabilitySyncer() coreUnitCapabilitySyncer {
 	}
 }
 
+// Distribution coreutils may use direct symlinks to a multicall executable.
+// Keep the original command name (argv[0]), but accept only a protected link
+// directly to a protected regular executable, never another symlink chain.
+func validateManagedUnitHelper(path string) error {
+	if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return validatePrivilegedExecutable(path)
+	}
+	if err := validateOwner(info, "managed-unit helper link"); err != nil {
+		return err
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(target)); err != nil {
+		return err
+	}
+	return validatePrivilegedExecutable(target)
+}
+
 func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engine, spec EngineSpec, managers ...*ServiceManager) error {
 	manager := defaultSystemdServiceManager()
 	if len(managers) > 0 && managers[0] != nil {
@@ -100,7 +130,7 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 	if syncer.dropInRoot == "" || !filepath.IsAbs(syncer.dropInRoot) {
 		return errors.New("managed systemd drop-in root must be absolute")
 	}
-	if err := validatePrivilegedExecutable(syncer.systemctlPath); err != nil {
+	if err := validateManagedUnitHelper(syncer.systemctlPath); err != nil {
 		return fmt.Errorf("unsafe managed-unit helper %s: %w", syncer.systemctlPath, err)
 	}
 
@@ -111,7 +141,7 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 		return err
 	}
 	for _, executable := range []string{syncer.systemdRunPath, syncer.installPath, syncer.teePath, syncer.movePath, syncer.removePath} {
-		if err := validatePrivilegedExecutable(executable); err != nil {
+		if err := validateManagedUnitHelper(executable); err != nil {
 			return fmt.Errorf("unsafe managed-unit helper %s: %w", executable, err)
 		}
 	}
