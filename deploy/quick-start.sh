@@ -338,10 +338,17 @@ die() {
 bootstrap_streamed_script() {
     local script_path install_dir install_dir_source persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
-    case "$script_path" in
-        /dev/fd/*|/proc/self/fd/*) ;;
-        *) return 0 ;;
-    esac
+    if [ "${QCH_BOOTSTRAP:-}" != 1 ]; then
+        case "$script_path" in
+            /dev/fd/*|/proc/self/fd/*)
+                # Bash may still have unread source in the producer's pipe.
+                # Drain it before exec closes that pipe (curl would report 23).
+                cat -- "$script_path" >/dev/null || die "读取远程入口脚本失败"
+                ;;
+            *) return 0 ;;
+        esac
+    fi
+    unset QCH_BOOTSTRAP
 
     command -v curl >/dev/null 2>&1 || die "缺少依赖：curl"
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then
@@ -1149,7 +1156,7 @@ update_container_id() {
 }
 
 current_update_image_id() {
-    local service="$1" ids count image_id
+    local service="$1" identity="${2:-id}" ids count image_id metadata
     if [ "$MODE" = bundled ]; then
         # Older bundled installs may not have the generated secret override yet.
         ids="$(run_compose -f "$REPO_ROOT/docker-compose.yml" ps -q "$service")" || \
@@ -1160,7 +1167,12 @@ current_update_image_id() {
     count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
     [ "$count" -le 1 ] || die "更新前发现多个正在运行的 $(ui_service_name "$service") 容器"
     [ "$count" -eq 1 ] || return 0
-    image_id="$(docker inspect --format '{{.Image}}' "$ids")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+    metadata="$(docker inspect --format '{{json .}}' "$ids")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+    # With the containerd store .Image may identify an index. The container's
+    # descriptor records the exact platform manifest that was actually started.
+    image_id="$(jq -er --arg kind "$identity" '
+        (if $kind == "identity" then .ImageManifestDescriptor.digest // .Image else .Image end) |
+        strings | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$metadata")" || die "当前容器镜像身份无效"
     [ -n "$image_id" ] || die "无法读取 $(ui_service_name "$service") 当前镜像"
     printf '%s' "$image_id"
 }
@@ -1282,7 +1294,7 @@ remote_update_image() (
 )
 
 prepare_update_plan() {
-    local config default_platform service platform ref current metadata i
+    local config default_platform service platform ref current metadata local_id i
     local -a config_args
     require_update_tools
     if [ "$MODE" = bundled ]; then
@@ -1304,7 +1316,7 @@ YAML
         default_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')" || die "无法读取 Docker Engine 平台"
     fi
     UPDATE_IMAGE_REFS=() UPDATE_IMAGE_PLATFORMS=() UPDATE_IMAGE_CURRENT=()
-    UPDATE_IMAGE_TARGETS=() UPDATE_IMAGE_PINNED=() UPDATE_IMAGE_VERSIONS=()
+    UPDATE_IMAGE_TARGETS=() UPDATE_IMAGE_PINNED=() UPDATE_IMAGE_VERSIONS=() UPDATE_IMAGE_LOCAL_IDS=()
     UPDATE_IMAGES_CHANGED=false
     ui_section "正在检查远程镜像"
     for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
@@ -1319,9 +1331,16 @@ YAML
         else
             ref="$(jq -er --arg s "$service" '.services[$s].image | strings | select(length > 0)' <<< "$config")" || die "无法读取 $(ui_service_name "$service") 目标镜像"
         fi
-        current="$(current_update_image_id "$service")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+        local_id="$(current_update_image_id "$service")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+        current="$(current_update_image_id "$service" identity)" || die "无法读取 $(ui_service_name "$service") 当前平台镜像"
         metadata="$(remote_update_image "$ref" "$platform")" || die "$(ui_service_name "$service") 远程检查失败，已终止更新"
+        # Classic storage uses config IDs; containerd uses manifest descriptors.
+        # Normalize both to the checked config identity for comparison/display.
+        if [ "$current" = "$(jq -er '.ref | split("@") | .[1]' <<< "$metadata")" ]; then
+            current="$(jq -er .id <<< "$metadata")"
+        fi
         UPDATE_IMAGE_REFS+=("$ref") UPDATE_IMAGE_PLATFORMS+=("$platform") UPDATE_IMAGE_CURRENT+=("$current")
+        UPDATE_IMAGE_LOCAL_IDS+=("$local_id")
         UPDATE_IMAGE_TARGETS+=("$(jq -er .id <<< "$metadata")")
         UPDATE_IMAGE_PINNED+=("$(jq -er .ref <<< "$metadata")")
         UPDATE_IMAGE_VERSIONS+=("$(jq -er .version <<< "$metadata")")
@@ -1335,13 +1354,23 @@ YAML
 }
 
 pull_update_images() {
-    local i actual
+    local i actual metadata actual_platform
     for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
         [ "${UPDATE_IMAGE_CURRENT[$i]}" != "${UPDATE_IMAGE_TARGETS[$i]}" ] || continue
         ui_section "拉取镜像：${UPDATE_IMAGE_REFS[$i]}"
         docker pull --platform "${UPDATE_IMAGE_PLATFORMS[$i]}" "${UPDATE_IMAGE_PINNED[$i]}" || die "镜像拉取失败：${UPDATE_IMAGE_REFS[$i]}"
-        actual="$(docker image inspect --format '{{.Id}}' "${UPDATE_IMAGE_PINNED[$i]}")" || die "无法校验已拉取的镜像"
-        [ "$actual" = "${UPDATE_IMAGE_TARGETS[$i]}" ] || die "已拉取的镜像与检查结果不一致，已终止更新"
+        metadata="$(docker image inspect --format '{{json .}}' "${UPDATE_IMAGE_PINNED[$i]}")" || die "无法校验已拉取的镜像"
+        actual="$(jq -er '.Id | strings | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$metadata")" || die "已拉取的镜像身份无效"
+        [ "$actual" = "${UPDATE_IMAGE_TARGETS[$i]}" ] || \
+            [ "$actual" = "${UPDATE_IMAGE_PINNED[$i]##*@}" ] || die "已拉取的镜像与检查结果不一致，已终止更新"
+        actual_platform="$(jq -er '.Os + "/" + .Architecture + (if (.Variant // "") == "" then "" else "/" + .Variant end)' <<< "$metadata")" || die "已拉取的镜像平台信息无效"
+        actual_platform="$(normalize_update_platform "$actual_platform")" || die "已拉取的镜像平台无效"
+        # Legacy ARM configs omit the variant already verified in the registry.
+        if [[ "${UPDATE_IMAGE_PLATFORMS[$i]}" == "$actual_platform/"* ]]; then
+            actual_platform="${UPDATE_IMAGE_PLATFORMS[$i]}"
+        fi
+        [ "$actual_platform" = "${UPDATE_IMAGE_PLATFORMS[$i]}" ] || die "已拉取的镜像平台与检查结果不一致，已终止更新"
+        UPDATE_IMAGE_LOCAL_IDS[$i]="$actual"
     done
 }
 
@@ -1350,7 +1379,7 @@ write_update_compose_override() {
     printf 'services:\n'
     for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
         printf '  %s:\n    image: %s\n    platform: %s\n' "${UPDATE_IMAGE_SERVICES[$i]}" \
-            "${UPDATE_IMAGE_TARGETS[$i]}" "${UPDATE_IMAGE_PLATFORMS[$i]}"
+            "${UPDATE_IMAGE_LOCAL_IDS[$i]}" "${UPDATE_IMAGE_PLATFORMS[$i]}"
     done
 }
 

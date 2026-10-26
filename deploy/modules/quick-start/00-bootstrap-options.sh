@@ -100,10 +100,17 @@ die() {
 bootstrap_streamed_script() {
     local script_path install_dir install_dir_source persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
-    case "$script_path" in
-        /dev/fd/*|/proc/self/fd/*) ;;
-        *) return 0 ;;
-    esac
+    if [ "${QCH_BOOTSTRAP:-}" != 1 ]; then
+        case "$script_path" in
+            /dev/fd/*|/proc/self/fd/*)
+                # Bash may still have unread source in the producer's pipe.
+                # Drain it before exec closes that pipe (curl would report 23).
+                cat -- "$script_path" >/dev/null || die "读取远程入口脚本失败"
+                ;;
+            *) return 0 ;;
+        esac
+    fi
+    unset QCH_BOOTSTRAP
 
     command -v curl >/dev/null 2>&1 || die "缺少依赖：curl"
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then

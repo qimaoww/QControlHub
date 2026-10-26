@@ -34,6 +34,31 @@ mock_pinned_ref() {
     printf '%s@sha256:%s' "$repository" "$(mock_image_manifest "$1" | openssl dgst -sha256 | awk '{print $NF}')"
 }
 
+mock_local_image() {
+    local ref="$1" id platform arch variant
+    id="$(mock_target_value "$ref" ID)"
+    case "${QCH_MOCK_LOCAL_STORE:-classic}" in
+        containerd) id="${ref##*@}" ;;
+        mismatch) id="sha256:$(printf '%064d' 999)" ;;
+        unavailable) return 1 ;;
+    esac
+    platform="${QCH_MOCK_LOCAL_PLATFORM:-${QCH_MOCK_IMAGE_PLATFORM:-linux/amd64}}"
+    arch="${platform#*/}"; variant="${arch#*/}"; arch="${arch%%/*}"
+    [ "$variant" != "$arch" ] || variant=""
+    jq -cn --arg id "$id" --arg os "${platform%%/*}" --arg arch "$arch" --arg variant "$variant" \
+        '{Id:$id,Os:$os,Architecture:$arch,Variant:$variant}'
+}
+
+mock_current_image() {
+    local id="$1" ref="$2"
+    if [ "${QCH_MOCK_CURRENT_STORE:-classic}" = containerd ]; then
+        ref="$(mock_pinned_ref "$ref")"
+        jq -cn --arg id "$id" --arg digest "${ref##*@}" '{Image:$id,ImageManifestDescriptor:{digest:$digest}}'
+    else
+        jq -cn --arg id "$id" '{Image:$id}'
+    fi
+}
+
 mock_registry() {
     local ref="${*: -1}" key platform arch variant digest
     key="${QCH_IMAGE_TEST_PREFIX}_FAIL_REMOTE"
@@ -83,4 +108,4 @@ mock_compose_images() {
         postgres:{image:"postgres:17-alpine",platform:$platform}}} | walk(if type == "object" and .platform == "" then del(.platform) else . end)'
 }
 
-export -f mock_image_role mock_target_value mock_image_manifest mock_pinned_ref mock_registry mock_compose_images mock_assert_comparison
+export -f mock_image_role mock_target_value mock_image_manifest mock_pinned_ref mock_registry mock_compose_images mock_assert_comparison mock_local_image mock_current_image

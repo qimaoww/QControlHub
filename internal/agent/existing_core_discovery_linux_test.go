@@ -19,6 +19,12 @@ var existingDiscoveryCoreHelper []byte
 
 func TestMain(tests *testing.M) {
 	flag.Parse()
+	if os.Getenv("QCH_TEST_CORE_UPDATE_SANDBOX") == "1" && flag.Lookup("test.run").Value.String() == "^TestMihomoUpdateWithAgentServiceSandbox$" {
+		os.Exit(tests.Run())
+	}
+	if os.Getenv("QCH_TEST_CORE_UPDATE_OPENRC") == "1" && flag.Lookup("test.run").Value.String() == "^TestCoreUpdateOpenRCStatePreparation$" {
+		os.Exit(tests.Run())
+	}
 	if os.Getenv("QCH_LOG_LIVE") == "1" && flag.Lookup("test.run").Value.String() == "^TestSharedCoreLogLiveLifecycle$" {
 		os.Exit(tests.Run())
 	}

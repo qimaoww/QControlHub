@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+real_curl="$(command -v curl)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-bootstrap.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
@@ -16,6 +17,8 @@ printf '%s\n' "$*" >> "$QCH_BOOTSTRAP_TEST_LOG"
 case "$*" in *--head*) exit 1 ;; esac
 url=""
 output=""
+entry=false
+case " $* " in *" --max-time 60 "*) entry=true ;; esac
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o|--output) output="$2"; shift 2 ;;
@@ -23,12 +26,17 @@ while [ "$#" -gt 0 ]; do
         *) shift ;;
     esac
 done
+if [ "$entry" = true ]; then
+    cat "$QCH_BOOTSTRAP_TEST_SOURCE" > "$output"
+    exit "${QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS:-0}"
+fi
 case "$url" in
     */deploy/quick-start.sh)
         cat > "$output" <<'QUICK_START'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$QCH_BOOTSTRAP_TEST_ARGS"
 printf '%s\n' "${QCH_INSTALL_DIR:-}" > "$QCH_BOOTSTRAP_TEST_WORK_DIR"
+exit "${QCH_BOOTSTRAP_TEST_EXIT_STATUS:-0}"
 QUICK_START
         ;;
     */docker-compose.yml)
@@ -44,6 +52,7 @@ export QCH_BOOTSTRAP_TEST_LOG="$test_root/git.log"
 export QCH_BOOTSTRAP_TEST_ARGS="$test_root/quick-start.args"
 export QCH_BOOTSTRAP_TEST_WORK_DIR="$test_root/quick-start.work-dir"
 export XDG_CONFIG_HOME="$test_root/config"
+export QCH_BOOTSTRAP_TEST_SOURCE="$repo_root/deploy/quick-start.sh"
 
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" \
     bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
@@ -166,5 +175,31 @@ PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
 )
 [ ! -e "$install_dir/qcontrolhub" ]
 grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
+
+# A real, rate-limited curl producer must finish successfully before exec. The
+# old early exec closed this pipe with most of the source still unwritten.
+PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" \
+    bash <("$real_curl" --silent --show-error --limit-rate 64k "file://$repo_root/deploy/quick-start.sh" 2>"$test_root/producer.err") -m bundled
+producer=$!
+wait "$producer"
+[ ! -s "$test_root/producer.err" ]
+
+# Execute the exact documented download-first entry. A failed download may
+# leave partial source, but it must not be executed. Child exit status survives.
+entry="$(sed -n '/^(script=$(mktemp)/p' "$repo_root/README.md")"
+[ -n "$entry" ]
+for status in 0 37; do
+    export QCH_BOOTSTRAP_TEST_EXIT_STATUS="$status"
+    result=0
+    PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" bash -c "$entry" >"$test_root/entry-$status.out" 2>&1 || result=$?
+    [ "$result" -eq "$status" ]
+done
+unset QCH_BOOTSTRAP_TEST_EXIT_STATUS
+rm -f "$QCH_BOOTSTRAP_TEST_ARGS"
+result=0
+PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS=23 \
+    bash -c "$entry" >"$test_root/entry-download-failed.out" 2>&1 || result=$?
+[ "$result" -eq 23 ]
+[ ! -e "$QCH_BOOTSTRAP_TEST_ARGS" ]
 
 printf '%s\n' 'streamed quick-start bootstrap regression passed'

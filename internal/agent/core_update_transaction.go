@@ -104,6 +104,11 @@ func (update *managedCoreUpdate) Preflight(ctx context.Context, root *os.Root, c
 		return "", err
 	}
 	defer root.RemoveAll(workspace)
+	// The shipped Agent uses UMask=0077. The core identity must still be able
+	// to traverse this root-owned, non-writable candidate directory.
+	if err := root.Chmod(workspace, 0o755); err != nil {
+		return "", err
+	}
 	if err := copyFileInRoot(root, candidate, filepath.Join(workspace, filepath.Base(update.spec.Binary)), fileMetadata{mode: 0o755}); err != nil {
 		return "", err
 	}

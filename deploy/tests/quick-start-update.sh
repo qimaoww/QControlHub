@@ -67,7 +67,9 @@ docker() {
         *" buildx imagetools inspect "*) mock_registry "$@" ;;
         *" info --format "*) printf linux/amd64 ;;
         *" config --format json "*) mock_compose_images "$(bundled_image_tag 2>/dev/null || printf latest)" ;;
-        *" image inspect --format {{.Id}} "*"@sha256:"*) mock_target_value "${*: -1}" ID ;;
+        *" image inspect --format {{json .}} "*"@sha256:"*) mock_local_image "${*: -1}" ;;
+        *" inspect --format {{json .}} control-container "*) mock_current_image "sha256:$(printf '%064d' 1)" ghcr.io/qimaoww/qcontrol-plane:latest ;;
+        *" inspect --format {{json .}} web-container "*) mock_current_image "sha256:$(printf '%064d' 2)" ghcr.io/qimaoww/qcontrol-web:latest ;;
         *" config --no-interpolate "*)
             # The separate real-Compose regression validates this merge.
             sed 's/:previous/:latest/g' "$EXTERNAL_COMPOSE_FILE"
@@ -130,6 +132,12 @@ docker() {
                     return 0
                     ;;
                 *)
+                    if [ "${QCH_MOCK_LOCAL_STORE:-}" = containerd ]; then
+                        for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
+                            [ "${UPDATE_IMAGE_CURRENT[$i]}" != "${UPDATE_IMAGE_TARGETS[$i]}" ] || continue
+                            grep -Fq "image: ${UPDATE_IMAGE_PINNED[$i]##*@}" "$UPDATE_BACKUP_DIR/docker-compose.checked.yml" || return 1
+                        done
+                    fi
                     printf '%s\n' updated > "$QCH_UPDATE_PHASE"
                     [ "${QCH_UPDATE_FAIL_UP:-false}" = false ]
                     ;;
@@ -265,6 +273,44 @@ write_fixture
 update_external_services > "$test_root/index-noop.out"
 grep -Fq '无需更新' "$test_root/index-noop.out"
 if grep -Eq '(^pull | up -d)' "$QCH_UPDATE_DOCKER_LOG"; then exit 1; fi
+
+# containerd's running index ID differs from both the config and the selected
+# manifest. Compare the container's actual platform descriptor for a no-op.
+export QCH_MOCK_CURRENT_STORE=containerd
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-containerd-noop.log"
+write_fixture
+update_external_services > "$test_root/containerd-noop.out"
+grep -Fq '无需更新' "$test_root/containerd-noop.out"
+if grep -Eq '(^pull | up -d)' "$QCH_UPDATE_DOCKER_LOG"; then exit 1; fi
+unset QCH_MOCK_CURRENT_STORE
+
+# After a child-manifest pull, the checked local manifest ID (not the remote
+# config digest) must be the immutable ID passed to Compose.
+export QCH_MOCK_LOCAL_STORE=containerd
+export QCH_UPDATE_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000004
+export QCH_UPDATE_TARGET_WEB_ID=sha256:0000000000000000000000000000000000000000000000000000000000000005
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-containerd-update.log"
+write_fixture
+update_external_services > "$test_root/containerd-update.out"
+cmp "$test_root/expected.env" "$ENV_FILE"
+[ "$(grep -c '^pull ' "$QCH_UPDATE_DOCKER_LOG")" -eq 2 ]
+
+for failure in mismatch unavailable platform; do
+    export QCH_MOCK_LOCAL_STORE="$failure"
+    if [ "$failure" = platform ]; then
+        export QCH_MOCK_LOCAL_STORE=containerd QCH_MOCK_LOCAL_PLATFORM=linux/s390x
+    fi
+    export QCH_UPDATE_DOCKER_LOG="$test_root/docker-local-$failure.log"
+    write_fixture
+    if (update_external_services) > "$test_root/local-$failure.out" 2>&1; then exit 1; fi
+    if grep -Fq ' up -d' "$QCH_UPDATE_DOCKER_LOG"; then exit 1; fi
+    cmp "$test_root/expected.env" "$ENV_FILE"
+    cmp "$test_root/expected-compose.yml" "$EXTERNAL_COMPOSE_FILE"
+    unset QCH_MOCK_LOCAL_PLATFORM
+done
+unset QCH_MOCK_LOCAL_STORE
+export QCH_UPDATE_TARGET_CONTROL_ID=sha256:0000000000000000000000000000000000000000000000000000000000000001
+export QCH_UPDATE_TARGET_WEB_ID=sha256:0000000000000000000000000000000000000000000000000000000000000002
 
 # Missing, malformed, ambiguous and unavailable metadata always fail before pull.
 for failure in bad-json missing-id ambiguous missing-platform wrong-digest metadata-failure; do
