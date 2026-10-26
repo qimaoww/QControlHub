@@ -78,9 +78,11 @@ Agent 以 root 运行，内核服务使用非 root 的 `qcontrolhub-core` 用户
 首次下载脚本无法依赖尚未运行的网络检测，可使用：
 
 ```bash
-bash <(curl -q --fail --silent --show-error --proto '=https' \
+(script=$(mktemp) || exit; trap 'rm -f -- "$script"' EXIT
+curl -q --fail --silent --show-error --proto '=https' \
   --connect-timeout 10 --max-time 90 \
-  https://v6.gh-proxy.org/https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh)
+  https://v6.gh-proxy.org/https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh \
+  -o "$script" && QCH_BOOTSTRAP=1 bash "$script")
 ```
 
 脚本和 Agent 运行后自动选择公开 GitHub 资源的下载通道；IPv4、双栈和可用 NAT64 直连，确认仅 IPv6 时使用上述固定代理。检测不确定时先尝试直连，DNS/连接失败后验证代理通道。GHCR 镜像拉取、系统软件源及内核自行下载的规则资源使用各自网络配置。

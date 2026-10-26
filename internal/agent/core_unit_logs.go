@@ -99,7 +99,7 @@ func ensureManagedCoreLogStreamingInternal(ctx context.Context, specs map[core.E
 	base := defaultCoreUnitCapabilitySyncer()
 	base.dropInRoot = "/etc/systemd"
 	for _, executable := range []string{base.systemdRunPath, base.installPath, base.teePath, base.movePath, base.removePath, base.systemctlPath} {
-		if err := validatePrivilegedExecutable(executable); err != nil {
+		if err := validateManagedUnitHelper(executable); err != nil {
 			return fmt.Errorf("unsafe managed-log helper %s: %w", executable, err)
 		}
 	}

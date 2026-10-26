@@ -22,6 +22,7 @@ import (
 
 // Opt in only on a disposable systemd Docker node bootstrapped from deploy/.
 // Release responses use local copies whose official digests are pinned below.
+// QCH_TEST_CORE_HELPER points at the matching built qagent executable.
 func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 	if os.Getenv("QCH_TEST_CORE_UPDATE") != "1" {
 		t.Skip("set QCH_TEST_CORE_UPDATE=1 in an isolated systemd Docker node")
@@ -92,7 +93,7 @@ func TestCoreUpdateWithRealSharedServices(t *testing.T) {
 			mainContent := coreUpdateTestSingBoxContent(25191, test.mainIncompatible)
 			sharedContent := coreUpdateTestSingBoxContent(25192, test.shareIncompatible)
 			executor := &Executor{Specs: map[core.Engine]EngineSpec{core.EngineSingBox: base}, Services: manager,
-				Updater: coreUpdateRealTestUpdater(archive)}
+				Updater: coreUpdateRealTestUpdater(archive), coreStateHelperPath: os.Getenv("QCH_TEST_CORE_HELPER")}
 			if err := prepareSharedInstanceDirectory(core.EngineSingBox, shared, manager.Kind()); err != nil {
 				t.Fatal(err)
 			}
@@ -296,7 +297,7 @@ func TestSSRustRealUpdatePreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := DefaultSpecsForServiceManager(manager.Kind())[core.EngineShadowsocksRust]
-	executor := &Executor{Services: manager}
+	executor := &Executor{Services: manager, coreStateHelperPath: os.Getenv("QCH_TEST_CORE_HELPER")}
 	for _, method := range []string{"aes-256-gcm", "removed-cipher-for-isolated-test"} {
 		t.Run(method, func(t *testing.T) {
 			content := `{"server":"127.0.0.1","server_port":25195,"password":"isolated-private-test-password","method":"` + method + `","mode":"tcp_and_udp","manager_address":"127.0.0.1:25196"}`
@@ -335,7 +336,7 @@ func TestNativeCoreUpdateResourcePreflight(t *testing.T) {
 	verifyCoreUpdateTestArchive(t, filepath.Join(input, "Xray-linux-64.zip"), "0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978")
 	verifyCoreUpdateTestArchive(t, filepath.Join(input, "mihomo-linux-amd64-v1.19.33.gz"), "132f6f3edf9a65e62f04853aed3358472e0b2b7666daa8419edfa2ddf5bb6323")
 	manager := defaultSystemdServiceManager()
-	executor := &Executor{Services: manager}
+	executor := &Executor{Services: manager, coreStateHelperPath: os.Getenv("QCH_TEST_CORE_HELPER")}
 	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
 		t.Run(string(engine), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

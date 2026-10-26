@@ -23,12 +23,12 @@ func (e *Executor) validateCoreUpdateCandidate(ctx context.Context, engine core.
 	if err != nil {
 		return err
 	}
+	state := coreCertificateWorkingDirectory(engine, spec, e.serviceManager().Kind())
+	if err := e.prepareCoreUpdateStateDirectory(ctx, engine, spec); err != nil {
+		return fmt.Errorf("prepare service working directory: %w", err)
+	}
 	if err := e.verifyCoreCertificateAccess(ctx, engine, spec, content, identity); err != nil {
 		return err
-	}
-	state := coreCertificateWorkingDirectory(engine, spec, e.serviceManager().Kind())
-	if err := prepareSharedStateDirectory(state); err != nil {
-		return fmt.Errorf("prepare service working directory: %w", err)
 	}
 	environment := ""
 	var args []string

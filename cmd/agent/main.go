@@ -20,6 +20,15 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "prepare-core-state" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := agent.PrepareCoreStateDirectory(ctx, os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 4 && os.Args[1] == "tls-network-preflight" {
 		ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
 		defer cancel()

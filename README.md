@@ -16,7 +16,7 @@
 在 Linux 控制面主机执行，按菜单选择内置或外部 PostgreSQL：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh)
+(script=$(mktemp) || exit; trap 'rm -f -- "$script"' EXIT; curl -q --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh -o "$script" && QCH_BOOTSTRAP=1 bash "$script")
 ```
 
 默认安装到当前目录下的 `qcontrolhub`，可用 `QCH_INSTALL_DIR` 指定目录。安装器保存目录选择，后续运行会复用。管理员令牌只在创建或轮换时显示一次，请妥善保存。

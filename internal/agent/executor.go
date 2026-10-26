@@ -40,6 +40,7 @@ type Executor struct {
 	Services                 *ServiceManager
 	coreBootstrapper         *coreServiceBootstrapper
 	validationSystemdRunPath string
+	coreStateHelperPath      string
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex

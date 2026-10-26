@@ -36,7 +36,10 @@ docker() {
         *" buildx imagetools inspect "*) mock_registry "$@" ;;
         *" info --format "*) printf linux/amd64 ;;
         *" config --format json "*) mock_compose_images "$(bundled_image_tag 2>/dev/null || printf latest)" ;;
-        *" image inspect --format {{.Id}} "*"@sha256:"*) mock_target_value "${*: -1}" ID ;;
+        *" image inspect --format {{json .}} "*"@sha256:"*) mock_local_image "${*: -1}" ;;
+        *" inspect --format {{json .}} control-container "*) mock_current_image "sha256:$(printf '%064d' 1)" ghcr.io/qimaoww/qcontrol-plane:latest ;;
+        *" inspect --format {{json .}} web-container "*) mock_current_image "sha256:$(printf '%064d' 2)" ghcr.io/qimaoww/qcontrol-web:latest ;;
+        *" inspect --format {{json .}} postgres-container "*) mock_current_image "sha256:$(printf '%064d' 3)" postgres:17-alpine ;;
         *" config --no-interpolate "*) cat "$QCH_INSTALL_DIR/docker-compose.external.yml" ;;
         *" config --images "*)
             printf '%s\n' \
@@ -247,7 +250,7 @@ fi
 QCH_IMAGE_TAG=release-test bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-custom-tag.out"
 grep -Fq "pull --platform linux/amd64 $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:release-test)" "$QCH_MODES_TEST_LOG"
 grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-web:release-test" "$QCH_MODES_TEST_LOG"
-grep -Fq "image inspect --format {{.Id}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:release-test)" "$QCH_MODES_TEST_LOG"
+grep -Fq "image inspect --format {{json .}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:release-test)" "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
 if grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-plane:latest" "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'custom tag bundled update pulled latest instead of the selected tag' >&2
@@ -264,7 +267,7 @@ cp "$QCH_INSTALL_DIR/.env" "$test_root/bundled-quoted-before.env"
 bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-quoted-tag.out"
 grep -Fq "pull --platform linux/amd64 $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:quoted-release)" "$QCH_MODES_TEST_LOG"
 grep -Fq "inspect --raw ghcr.io/qimaoww/qcontrol-web:quoted-release" "$QCH_MODES_TEST_LOG"
-grep -Fq "image inspect --format {{.Id}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:quoted-release)" "$QCH_MODES_TEST_LOG"
+grep -Fq "image inspect --format {{json .}} $(mock_pinned_ref ghcr.io/qimaoww/qcontrol-plane:quoted-release)" "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"
 cmp "$test_root/bundled-quoted-before.env" "$QCH_INSTALL_DIR/.env"
 cp "$test_root/bundled-before.env" "$QCH_INSTALL_DIR/.env"
