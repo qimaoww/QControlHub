@@ -263,6 +263,22 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 			t.Fatal("audit credential leak")
 		}
 	})
+	t.Run("denied_ip_does_not_clear_failure_limit", func(t *testing.T) {
+		limited := input
+		limited.Name = "limited source"
+		limited.IPAllowlist = []string{"192.168.5.0/24"}
+		_, limitedSecret := create(config.AdminToken, limited)
+		const remote = "192.0.2.210:42"
+		invalidToken := "qch_key_" + strings.Repeat("a", 43)
+		for i := 0; i < 7; i++ {
+			call(invalidToken, "GET", "/api-key", nil, remote, "", 401)
+		}
+		// A valid credential from a denied source must not reset the shared
+		// per-IP failure counter.
+		call(limitedSecret, "GET", "/api-key", nil, remote, "", 403)
+		call(invalidToken, "GET", "/api-key", nil, remote, "", 401)
+		call(invalidToken, "GET", "/api-key", nil, remote, "", 429)
+	})
 }
 
 func TestAPIKeyDiagnosticResourceIsolationAndRedaction(t *testing.T) {
