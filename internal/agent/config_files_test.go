@@ -162,3 +162,16 @@ func TestManagedWireGuardConfigFilesPreserveV3AndRollbackV4(t *testing.T) {
 		t.Fatal("bundle staging must never activate the runtime configuration")
 	}
 }
+
+func TestValidateConfigFragmentPath(t *testing.T) {
+	for _, path := range []string{"../escape.json", "/etc/passwd", "inbounds/../../escape.json", "..", ""} {
+		if err := validateConfigFragmentPath(path); err == nil {
+			t.Errorf("accepted unsafe configuration fragment path %q", path)
+		}
+	}
+	for _, path := range []string{"config.json", "common.json", "inbounds/a.json", "endpoints/a.json", "outbounds/a.json"} {
+		if err := validateConfigFragmentPath(path); err != nil {
+			t.Errorf("rejected safe configuration fragment path %q: %v", path, err)
+		}
+	}
+}

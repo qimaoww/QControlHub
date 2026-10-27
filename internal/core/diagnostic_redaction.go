@@ -11,13 +11,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var diagnosticCredentialKey = regexp.MustCompile(`(?i)(?:^auth$|^pass$|^psk$|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|secret|token|credential|authorization|cookie|api[-_]?key|sudoku[-_]?client[-_]?key|decryption|mldsa65[-_]?seed|short[-_]?ids?|uuid|^authentication$)`)
+var diagnosticCredentialKey = regexp.MustCompile(`(?i)(?:^auth$|^pass$|^psk$|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|secret|token|credential|authorization|cookie|api[-_]?key|webhook[-_]?url|sudoku[-_]?client[-_]?key|decryption|mldsa65[-_]?seed|short[-_]?ids?|uuid|^authentication$)`)
 var diagnosticBearer = regexp.MustCompile(`(?i)\bBearer\s+[a-z0-9._~+/=-]+`)
 var diagnosticAPIKey = regexp.MustCompile(`qch_key_[A-Za-z0-9_-]{43}`)
 var diagnosticUUID = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 var diagnosticURLCredentials = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/@]+@`)
 var diagnosticURLSecret = regexp.MustCompile(`(?i)([?&](?:token|key|api_key|secret|password|access_token)=)[^\s&#"']+`)
-var diagnosticAssignments = regexp.MustCompile(`(?im)((?:["']?(?:pass|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|psk|key|decryption|secret|token|api[-_]?key|authorization|cookie|uuid|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
+var diagnosticAssignments = regexp.MustCompile(`(?im)((?:["']?(?:pass|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|psk|key|decryption|secret|token|api[-_]?key|webhook[-_]?url|authorization|cookie|uuid|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
 
 // RedactDiagnosticValue preserves resource IDs, versions, structure and error
 // context. Serialized configuration/fragment/file strings are parsed as JSON

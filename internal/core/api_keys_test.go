@@ -87,3 +87,20 @@ func TestDiagnosticRedactionNativeCredentialsAndFieldNames(t *testing.T) {
 		t.Error("field identifier was redacted")
 	}
 }
+
+func TestDiagnosticRedactionHidesWebhookURL(t *testing.T) {
+	const secret = "https://hooks.slack.com/services/T000/B000/WEBHOOKSECRET"
+	for _, value := range []any{
+		map[string]any{"webhook_url": secret},
+		"webhook_url: " + secret,
+		"webhook_url=" + secret,
+	} {
+		encoded, err := json.Marshal(RedactDiagnosticValue(value))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), "WEBHOOKSECRET") {
+			t.Fatalf("webhook credential leaked: %s", encoded)
+		}
+	}
+}
