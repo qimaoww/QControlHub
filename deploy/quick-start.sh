@@ -2,12 +2,12 @@
 # QControlHub 一键交互式部署脚本（Linux）
 #
 # 提供两种部署方式：
-#   bundled  — Docker Compose 内置 PostgreSQL + 控制面（从零开始）
-#   external — 连接已有 PostgreSQL，仅部署控制面容器
+#   bundled  — Docker Compose 内置 PostgreSQL + 控制面和网页服务（从零开始）
+#   external — 连接已有 PostgreSQL，部署控制面和网页服务
 #
 # 用法：
 #   ./deploy/quick-start.sh                          # 交互式选择部署方式
-#   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面）
+#   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面和网页服务）
 #   ./deploy/quick-start.sh -m external -d 'postgresql://user:pass@db:5432/qcontrolhub?sslmode=verify-full'
 
 set -euo pipefail
@@ -112,7 +112,7 @@ qch_github_probe_network() (
             fi
         fi
     fi
-    printf 'GitHub network evidence ipv4_tls=%s ipv6_tls=%s network=%s\n' "$qch_v4" "$qch_v6" "$qch_github_mode" >&2
+    printf 'GitHub 网络检测：IPv4 TLS=%s，IPv6 TLS=%s，网络=%s\n' "$qch_v4" "$qch_v6" "$qch_github_mode" >&2
     printf '%s\n' "$qch_github_mode"
 )
 
@@ -123,16 +123,16 @@ qch_github_detect() {
     qch_ttl=300
     [ "$qch_github_mode" != unknown ] || qch_ttl=15
     qch_github_expires=$((qch_now + qch_ttl))
-    printf 'GitHub download network=%s accelerated=%s\n' "$qch_github_mode" "$( [ "$qch_github_mode" = ipv6-only ] && printf true || printf false )" >&2
+    printf 'GitHub 下载：网络=%s，加速=%s\n' "$qch_github_mode" "$( [ "$qch_github_mode" = ipv6-only ] && printf true || printf false )" >&2
 }
 
 qch_github_download() {
     qch_overall_deadline=$(( $(date +%s) + ${4:-90} ))
-    qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; return 1; }
+    qch_checked_source=$(qch_github_original "$1") || { printf '%s\n' '拒绝不受信任的 GitHub 来源' >&2; return 1; }
     if ! qch_github_egress_proxy "$qch_checked_source"; then qch_github_detect "$qch_overall_deadline" || return 1; fi
     if (
         # A subshell isolates all state, traps and curl options from enrollment.
-        qch_source=$(qch_github_original "$1") || { printf '%s\n' 'refusing untrusted GitHub source' >&2; exit 1; }
+        qch_source=$(qch_github_original "$1") || { printf '%s\n' '拒绝不受信任的 GitHub 来源' >&2; exit 1; }
         qch_destination=$2
         qch_limit=${3:-134217728}
         qch_deadline=$qch_overall_deadline
@@ -151,7 +151,7 @@ qch_github_download() {
             qch_hops=0
             while [ "$qch_hops" -le 5 ]; do
                 qch_remaining=$((qch_deadline - $(date +%s)))
-                [ "$qch_remaining" -gt 0 ] || { printf '%s\n' 'GitHub download attempt timed out' >&2; break; }
+                [ "$qch_remaining" -gt 0 ] || { printf '%s\n' 'GitHub 下载超时' >&2; break; }
                 qch_wire=$qch_next
                 set --
                 qch_explicit_proxy=false
@@ -172,7 +172,7 @@ qch_github_download() {
                             qch_reset=$(awk 'tolower($1) == "x-ratelimit-reset:" { gsub(/\r/, "", $2); if ($2 ~ /^[0-9]+$/) print $2 }' "$qch_headers" | tail -n 1)
                             if [ -n "$qch_reset" ]; then
                                 qch_reset_time=$(date -u -d "@$qch_reset" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf '%s' "$qch_reset")
-                                printf 'GitHub API quota exhausted: HTTP %s; retry after %s (shared upstream quota)\n' "$qch_status" "$qch_reset_time" >&2
+                                printf 'GitHub API 配额已耗尽：HTTP %s；请在 %s 后重试（共享配额）\n' "$qch_status" "$qch_reset_time" >&2
                                 exit 1
                             fi ;;
                     esac
@@ -185,12 +185,12 @@ qch_github_download() {
                             exit 0 ;;
                         301|302|303|307|308)
                             qch_next=$(qch_github_original "$(printf '%s\n' "$qch_result" | tail -n 1)") || {
-                                printf '%s\n' 'GitHub download rejected redirect outside public HTTPS GitHub sources' >&2; exit 1;
+                                printf '%s\n' 'GitHub 下载拒绝跳转到非公开 HTTPS GitHub 来源' >&2; exit 1;
                             }
                             qch_hops=$((qch_hops + 1))
                             continue ;;
                         408|425|429|5??) break ;;
-                        *) printf 'GitHub download response failed: HTTP %s; check repository, resource, GitHub API rate limits and channel availability\n' "$qch_status" >&2; exit 1 ;;
+                        *) printf 'GitHub 下载失败：HTTP %s；请检查资源、API 配额和网络\n' "$qch_status" >&2; exit 1 ;;
                     esac
                 else
                     qch_curl_status=$?
@@ -198,31 +198,31 @@ qch_github_download() {
                     qch_request_host=${qch_wire#https://}
                     qch_request_host=${qch_request_host%%/*}
                     qch_request_host=${qch_request_host%%\?*}
-                    printf 'GitHub download request failed: stage=dns-connect-transfer request=%s retry=%s network=%s curl_exit=%s host=%s\n' "$qch_request_count" "$qch_attempt" "${qch_github_mode:-unknown}" "$qch_curl_status" "$qch_request_host" >&2
+                    printf 'GitHub 下载请求失败：请求=%s，重试=%s，网络=%s，curl 状态=%s，主机=%s\n' "$qch_request_count" "$qch_attempt" "${qch_github_mode:-unknown}" "$qch_curl_status" "$qch_request_host" >&2
                     case "$qch_curl_status" in
                         6|7|28|52|56)
                             if "$qch_explicit_proxy"; then
-                                printf '%s\n' 'acceleration not attempted: explicit egress proxy preserved' >&2
+                                printf '%s\n' '保留指定的出口代理，不启用加速' >&2
                                 exit 69
                             fi
                             if [ "$qch_wire" = "$qch_next" ] && ! "$qch_use_channel"; then
-                                printf '%s\n' 'GitHub channel switch direct -> acceleration: DNS/connection failure; validating actual public HTTPS resource' >&2
+                                printf '%s\n' 'GitHub 直连解析或连接失败，尝试加速下载' >&2
                                 qch_use_channel=true
                                 continue
                             fi
-                            printf '%s\n' 'acceleration failed: check DNS/HTTPS access to v6.gh-proxy.org; if both domains fail to resolve, configure a reachable IPv6 DNS resolver; existing files preserved' >&2
+                            printf '%s\n' '加速下载失败：请检查 v6.gh-proxy.org 的 DNS 和 HTTPS 连接；已保留原文件' >&2
                             exit 69 ;;
-                        *) printf '%s\n' 'permanent curl failure; acceleration not retried (check TLS verification, local output and size limit)' >&2; exit 1 ;;
+                        *) printf '%s\n' 'curl 请求失败，请检查 TLS、本地文件和大小限制；不再重试加速' >&2; exit 1 ;;
                     esac
                 fi
             done
-            [ "$qch_hops" -le 5 ] || { printf '%s\n' 'too many GitHub download redirects' >&2; exit 1; }
+            [ "$qch_hops" -le 5 ] || { printf '%s\n' 'GitHub 下载跳转次数过多' >&2; exit 1; }
             qch_remaining=$((qch_deadline - $(date +%s)))
             [ "$qch_remaining" -gt "$qch_attempt" ] || break
             [ "$qch_attempt" -ge 3 ] || sleep "$qch_attempt"
             qch_attempt=$((qch_attempt + 1))
         done
-        printf 'GitHub download failed: attempts=%s; total budget or retry limit exhausted; existing files preserved\n' "$qch_attempt" >&2
+        printf 'GitHub 下载失败：已尝试 %s 次，超过超时或重试限制；已保留原文件\n' "$qch_attempt" >&2
         exit 1
     ); then
         return 0
@@ -312,20 +312,20 @@ usage() {
   uninstall           卸载服务，保留配置、密钥和数据库卷
 
 部署模式：
-  bundled             Docker Compose 内置 PostgreSQL + 控制面
-  external            仅部署控制面并连接已有 PostgreSQL
+  bundled             内置 PostgreSQL，部署控制面和网页服务
+  external            连接已有 PostgreSQL，部署控制面和网页服务
 
 选项：
   -m MODE             选择部署模式；省略时交互选择
   -o OPERATION        选择安装、更新或卸载；省略时交互选择
-  -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
+  -d DATABASE_URL     外部模式使用的 PostgreSQL 连接串
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
-  -n DOCKER_NETWORK   external 安装连接的已有 Docker 网络；省略时可交互选择或使用默认网络
-  -f                  bundled 模式显式轮换 token 与应用密钥；external 更新不支持
+  -n DOCKER_NETWORK   外部模式安装连接的已有 Docker 网络；省略时可交互选择或使用默认网络
+  -f                  内置模式显式轮换令牌 与应用密钥；外部模式更新不支持
   -t SECONDS          每阶段就绪检查超时时间（默认 360 秒，包含数据库迁移等待）
   -h                  显示帮助
 
-安装可选择 bundled 或 external；普通 external 更新逐字节保留 .env，不迁移凭据或轮换密钥。
+普通外部模式更新逐字节保留 .env，不迁移凭据或轮换密钥。
 交互式菜单中选择的安装目录会保存到当前用户配置；后续从远程一键命令运行时会自动复用。显式设置 QCH_INSTALL_DIR 时以该值为准。
 USAGE
 }
@@ -338,10 +338,17 @@ die() {
 bootstrap_streamed_script() {
     local script_path install_dir install_dir_source persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
-    case "$script_path" in
-        /dev/fd/*|/proc/self/fd/*) ;;
-        *) return 0 ;;
-    esac
+    if [ "${QCH_BOOTSTRAP:-}" != 1 ]; then
+        case "$script_path" in
+            /dev/fd/*|/proc/self/fd/*)
+                # Bash may still have unread source in the producer's pipe.
+                # Drain it before exec closes that pipe (curl would report 23).
+                cat -- "$script_path" >/dev/null || die "读取远程入口脚本失败"
+                ;;
+            *) return 0 ;;
+        esac
+    fi
+    unset QCH_BOOTSTRAP
 
     command -v curl >/dev/null 2>&1 || die "缺少依赖：curl"
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then
@@ -370,7 +377,7 @@ bootstrap_streamed_script() {
     [ ! -L "$marker_file" ] || die "一键安装标记不能是符号链接：$marker_file"
     bootstrap_ref="${QCH_BOOTSTRAP_REF:-main}"
     case "$bootstrap_ref" in
-        ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git ref" ;;
+        ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git 引用" ;;
     esac
     base_url="https://raw.githubusercontent.com/qimaoww/qcontrolhub/$bootstrap_ref"
 
@@ -386,7 +393,7 @@ bootstrap_streamed_script() {
                 *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
             esac
             branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-            [ "$branch" = "main" ] || die "旧版 Git 安装目录必须位于 main 分支，当前为：${branch:-detached}"
+            [ "$branch" = "main" ] || die "旧版 Git 安装目录必须位于 main 分支，当前为：${branch:-分离状态}"
             git -C "$install_dir" diff --quiet -- deploy/quick-start.sh docker-compose.yml || \
                 die "旧版 Git 安装目录的运行文件包含未提交修改，请先处理"
             git -C "$install_dir" diff --cached --quiet -- deploy/quick-start.sh docker-compose.yml || \
@@ -524,20 +531,20 @@ validate_admin_token_digest() {
 read_secret_file() {
     local file="$1" value
     [ -f "$file" ] || return 0
-    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    [ ! -L "$file" ] || die "密钥文件不能是符号链接：$file"
     value="$(<"$file")"
     case "$value" in
-        *$'\n'*|*$'\r'*) die "secret 文件只能包含一行：$file" ;;
+        *$'\n'*|*$'\r'*) die "密钥文件只能包含一行：$file" ;;
     esac
     printf '%s' "$value"
 }
 
 write_secret_file() {
     local file="$1" value="$2" temp_file
-    [ ! -L "$SECRET_DIR" ] || die "secret 目录不能是符号链接：$SECRET_DIR"
+    [ ! -L "$SECRET_DIR" ] || die "密钥目录不能是符号链接：$SECRET_DIR"
     mkdir -p "$SECRET_DIR"
     chmod 0700 "$SECRET_DIR"
-    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    [ ! -L "$file" ] || die "密钥文件不能是符号链接：$file"
     umask 077
     temp_file="$(mktemp "$SECRET_DIR/.tmp.XXXXXX")"
     printf '%s\n' "$value" > "$temp_file"
@@ -554,7 +561,7 @@ backup_secret_file() {
     backup_file="${file}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
     cp -p -- "$file" "$backup_file"
     chmod 0600 "$backup_file"
-    echo "-> 已备份 secret：$backup_file"
+    echo "-> 已备份密钥：$backup_file"
 }
 
 prepare_admin_token() {
@@ -567,7 +574,7 @@ prepare_admin_token() {
         validate_admin_token_digest "$stored_digest"
         legacy_digest="$(sha256_hex "$legacy_token")"
         [ "$legacy_digest" = "$(printf '%s' "$stored_digest" | tr 'A-F' 'a-f')" ] || \
-            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员 token"
+            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员令牌"
     fi
     if [ "$FORCE" = true ]; then
         raw_token="${ADMIN_TOKEN:-$(random_hex)}"
@@ -739,7 +746,7 @@ services:
     image: ghcr.io/qimaoww/qcontrol-plane:latest
     restart: unless-stopped
     environment:
-      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}
       QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
@@ -764,7 +771,7 @@ YAML
 YAML
     if [ -n "$config_key" ]; then
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
-      QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?QCH_CONFIG_ENCRYPTION_KEY required}
+      QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?必须设置 QCH_CONFIG_ENCRYPTION_KEY}
 YAML
     else
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
@@ -858,7 +865,7 @@ networks:
 YAML
     if [ -n "$docker_network" ]; then
         cat >> "$EXTERNAL_COMPOSE_FILE" <<'YAML'
-    name: ${QCH_DOCKER_NETWORK:?custom Docker network required}
+    name: ${QCH_DOCKER_NETWORK:?必须设置自定义 Docker 网络}
     external: true
 YAML
     else
@@ -877,18 +884,18 @@ services:
   control-plane:
     environment:
       QCH_ADMIN_TOKEN: ""
-      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?administrator token digest required}
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?必须设置管理员令牌摘要}
       QCH_CONFIG_ENCRYPTION_KEY: ""
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ""
       QCH_CONFIG_ENCRYPTION_KEY_FILE: /run/secrets/qch-config-encryption-key
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE: /run/secrets/qch-config-encryption-previous-keys
     volumes:
       - type: bind
-        source: ${QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE:?configuration encryption key file required}
+        source: ${QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE:?必须设置配置加密密钥文件}
         target: /run/secrets/qch-config-encryption-key
         read_only: true
       - type: bind
-        source: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE:?previous configuration encryption keys file required}
+        source: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE:?必须设置旧配置加密密钥文件}
         target: /run/secrets/qch-config-encryption-previous-keys
         read_only: true
 YAML
@@ -951,7 +958,7 @@ services:
     image: ghcr.io/qimaoww/qcontrol-plane:latest
     restart: unless-stopped
     environment:
-      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?必须设置 QCH_DATABASE_URL}
       QCH_DATABASE_STARTUP_TIMEOUT: ${QCH_DATABASE_STARTUP_TIMEOUT:-5m}
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
@@ -983,7 +990,7 @@ show_diagnostics() {
         echo "-> 最近的 PostgreSQL 日志："
         compose logs --tail=40 postgres || true
     fi
-    echo "-> 最近的 SPA 日志："
+    echo "-> 最近的网页服务日志："
     compose logs --tail=40 qcontrol-web || true
 }
 
@@ -999,7 +1006,7 @@ start_services() {
         fi
     elif [ "$ACTION" = "update" ]; then
         echo "-> 使用已拉取的应用镜像启动 Docker Compose"
-        if ! compose up -d --no-build --pull never; then
+        if ! write_update_compose_override | compose -f - up -d --no-build --pull never; then
             show_diagnostics
             die "Docker Compose 启动失败；请检查镜像拉取和 Compose 配置"
         fi
@@ -1112,7 +1119,7 @@ validate_external_config_key_source() {
     config_source="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE)"
     previous_source="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE)"
     [ -n "$config_source" ] && [ -n "$previous_source" ] && [ -f "$SECRET_COMPOSE_FILE" ] || \
-        die "缺少原 QCH_CONFIG_ENCRYPTION_KEY 或既有 secret keyring，终止更新"
+        die "缺少原 QCH_CONFIG_ENCRYPTION_KEY 或既有密钥文件组，终止更新"
     case "$config_source" in
         /*) ;;
         *) config_source="$WORK_DIR/$config_source" ;;
@@ -1122,7 +1129,7 @@ validate_external_config_key_source() {
         *) previous_source="$WORK_DIR/$previous_source" ;;
     esac
     [ -f "$config_source" ] && [ -f "$previous_source" ] || \
-        die "原配置加密 secret keyring 文件不完整，终止更新"
+        die "原配置加密密钥文件组文件不完整，终止更新"
 }
 
 validate_external_network() {
@@ -1144,24 +1151,29 @@ update_container_id() {
     local service="$1" ids count
     ids="$(compose ps -q "$service")"
     count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
-    [ "$count" -eq 1 ] || die "更新前必须有且仅有一个正在运行的 $service 容器"
+    [ "$count" -eq 1 ] || die "更新前必须有且仅有一个正在运行的 $(ui_service_name "$service") 容器"
     printf '%s' "$ids"
 }
 
 current_update_image_id() {
-    local service="$1" ids count image_id
+    local service="$1" identity="${2:-id}" ids count image_id metadata
     if [ "$MODE" = bundled ]; then
         # Older bundled installs may not have the generated secret override yet.
         ids="$(run_compose -f "$REPO_ROOT/docker-compose.yml" ps -q "$service")" || \
-            die "无法读取 $service 当前容器"
+            die "无法读取 $(ui_service_name "$service") 当前容器"
     else
-        ids="$(compose ps -q "$service")" || die "无法读取 $service 当前容器"
+        ids="$(compose ps -q "$service")" || die "无法读取 $(ui_service_name "$service") 当前容器"
     fi
     count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
-    [ "$count" -le 1 ] || die "更新前发现多个正在运行的 $service 容器"
+    [ "$count" -le 1 ] || die "更新前发现多个正在运行的 $(ui_service_name "$service") 容器"
     [ "$count" -eq 1 ] || return 0
-    image_id="$(docker inspect --format '{{.Image}}' "$ids")" || die "无法读取 $service 当前镜像"
-    [ -n "$image_id" ] || die "无法读取 $service 当前镜像"
+    metadata="$(docker inspect --format '{{json .}}' "$ids")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+    # With the containerd store .Image may identify an index. The container's
+    # descriptor records the exact platform manifest that was actually started.
+    image_id="$(jq -er --arg kind "$identity" '
+        (if $kind == "identity" then .ImageManifestDescriptor.digest // .Image else .Image end) |
+        strings | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$metadata")" || die "当前容器镜像身份无效"
+    [ -n "$image_id" ] || die "无法读取 $(ui_service_name "$service") 当前镜像"
     printf '%s' "$image_id"
 }
 
@@ -1189,8 +1201,8 @@ update_image_version() {
 
 show_current_application_versions() {
     local control_version web_version
-    control_version="$(update_image_version "$1")" || die "无法读取 control-plane 当前版本"
-    web_version="$(update_image_version "$2")" || die "无法读取 qcontrol-web 当前版本"
+    control_version="$(update_image_version "$1")" || die "无法读取控制面当前版本"
+    web_version="$(update_image_version "$2")" || die "无法读取网页服务当前版本"
     ui_section "当前运行版本"
     ui_service_row control-plane "当前版本：$control_version"
     ui_service_row qcontrol-web "当前版本：$web_version"
@@ -1217,19 +1229,158 @@ show_target_image_version() {
     ui_service_row "$service" "目标版本：$version [$status]"
 }
 
-application_update_available() {
-    local control_ref="$1" web_ref="$2" current_control="$3" current_web="$4" target_control target_web
-    target_control="$(docker image inspect --format '{{.Id}}' "$control_ref")" || die "无法读取目标镜像：$control_ref"
-    target_web="$(docker image inspect --format '{{.Id}}' "$web_ref")" || die "无法读取目标镜像：$web_ref"
-    [ -n "$target_control" ] && [ -n "$target_web" ] || die "目标镜像 ID 为空，无法判断是否有更新"
+require_update_tools() {
+    command -v jq >/dev/null 2>&1 || die "远程镜像检查需要 jq，请先安装 jq"
+    docker buildx version >/dev/null 2>&1 || die "远程镜像检查需要 Docker Buildx，请先安装 Buildx 插件"
+}
 
-    local target_control_version target_web_version
-    target_control_version="$(update_image_version "$target_control")" || die "无法读取 control-plane 目标版本"
-    target_web_version="$(update_image_version "$target_web")" || die "无法读取 qcontrol-web 目标版本"
+normalize_update_platform() {
+    local platform="$1"
+    case "$platform" in
+        linux/x86_64) platform=linux/amd64 ;;
+        linux/aarch64|linux/arm64/v8) platform=linux/arm64 ;;
+        linux/armhf|linux/armv7l) platform=linux/arm/v7 ;;
+        linux/armel|linux/armv6l) platform=linux/arm/v6 ;;
+    esac
+    [[ "$platform" =~ ^linux/[a-z0-9_]+(/[a-zA-Z0-9_.-]+)?$ ]] || die "无法确定部署平台：$platform"
+    printf '%s' "$platform"
+}
+
+# No layer downloads. Hash the exact manifest bytes, then keep every subsequent
+# registry request and pull on that immutable reference, including single images.
+remote_update_image() (
+    local ref="$1" platform="$2" manifest_file repository digest pinned metadata config_id actual_platform version indexed=false
+    umask 077
+    manifest_file="$(mktemp)" || die "无法创建镜像检查临时文件"
+    trap 'rm -f -- "$manifest_file"' EXIT
+    trap 'exit 130' HUP INT TERM
+    docker buildx imagetools inspect --raw "$ref" > "$manifest_file" || die "远程镜像检查失败：$ref"
+    repository="${ref%%@*}"
+    # Strip a tag, retaining a registry's optional port.
+    if [[ "${repository##*/}" == *:* ]]; then repository="${repository%:*}"; fi
+    if jq -e '.manifests | type == "array"' "$manifest_file" >/dev/null 2>&1; then
+        digest="$(jq -er --arg platform "$platform" '
+            [.manifests[] | select(.platform != null) |
+             select((.platform.os + "/" + .platform.architecture +
+                (if (.platform.variant // "") == "" or
+                    (.platform.architecture == "arm64" and .platform.variant == "v8")
+                 then "" else "/" + .platform.variant end)) == $platform)] |
+            if length == 1 then .[0].digest else error("平台缺失或不唯一") end
+        ' "$manifest_file")" || die "目标镜像缺少唯一的 $platform 平台：$ref"
+        [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "目标镜像摘要无效：$ref"
+        indexed=true
+        pinned="$repository@$digest"
+        docker buildx imagetools inspect --raw "$pinned" > "$manifest_file" || die "远程平台镜像检查失败：$pinned"
+        [ "sha256:$(openssl dgst -sha256 "$manifest_file" | awk '{print $NF}')" = "$digest" ] || die "远程平台镜像摘要不匹配：$ref"
+    else
+        digest="sha256:$(openssl dgst -sha256 "$manifest_file" | awk '{print $NF}')"
+        pinned="$repository@$digest"
+    fi
+    config_id="$(jq -er 'select(.schemaVersion == 2) | .config.digest | select(test("^sha256:[0-9a-f]{64}$"))' "$manifest_file")" || \
+        die "目标镜像身份信息不完整：$ref"
+    metadata="$(docker buildx imagetools inspect --format '{{json .Image}}' "$pinned")" || die "无法读取目标镜像版本和平台：$ref"
+    actual_platform="$(jq -er '.os + "/" + .architecture + (if (.variant // "") == "" then "" else "/" + .variant end)' <<< "$metadata")" || \
+        die "目标镜像平台信息不完整：$ref"
+    actual_platform="$(normalize_update_platform "$actual_platform")" || exit 1
+    # Older ARM image configs omit the variant carried by their index entry.
+    if [ "$indexed" = true ] && [[ "$platform" == "$actual_platform/"* ]]; then
+        actual_platform="$platform"
+    fi
+    [ "$platform" = "$actual_platform" ] || die "目标镜像平台不匹配：$ref（需要 $platform，实际 $actual_platform）"
+    version="$(jq -er '.config.Labels["org.opencontainers.image.version"] // "" | strings | select(test("[[:cntrl:]]") | not)' <<< "$metadata")" || die "目标镜像版本信息无效：$ref"
+    if [ -z "$version" ]; then version="镜像 ${config_id:7:12}"; fi
+    if [[ "$version" =~ ^[0-9a-fA-F]{40}$ ]]; then version="${version:0:12}"; fi
+    jq -cn --arg id "$config_id" --arg ref "$pinned" --arg version "$version" '{id:$id, ref:$ref, version:$version}'
+)
+
+prepare_update_plan() {
+    local config default_platform service platform ref current metadata local_id i
+    local -a config_args
+    require_update_tools
+    if [ "$MODE" = bundled ]; then
+        config_args=(-f "$REPO_ROOT/docker-compose.yml")
+        UPDATE_IMAGE_SERVICES=(control-plane qcontrol-web postgres)
+    else
+        config_args=("${COMPOSE_ARGS[@]}")
+        UPDATE_IMAGE_SERVICES=(control-plane qcontrol-web)
+    fi
+    # Compose also reads DOCKER_DEFAULT_PLATFORM from the project's .env. Older
+    # config output omits it from services; resolve it through an extension so
+    # quoting, interpolation and shell precedence remain Compose's responsibility.
+    config="$(run_compose "${config_args[@]}" -f - config --format json <<'YAML'
+x-qch-update-default-platform: ${DOCKER_DEFAULT_PLATFORM:-}
+YAML
+    )" || die "无法解析部署镜像和平台配置"
+    default_platform="$(jq -er '."x-qch-update-default-platform" // "" | strings' <<< "$config")" || die "无法解析默认部署平台"
+    if [ -z "$default_platform" ]; then
+        default_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')" || die "无法读取 Docker Engine 平台"
+    fi
+    UPDATE_IMAGE_REFS=() UPDATE_IMAGE_PLATFORMS=() UPDATE_IMAGE_CURRENT=()
+    UPDATE_IMAGE_TARGETS=() UPDATE_IMAGE_PINNED=() UPDATE_IMAGE_VERSIONS=() UPDATE_IMAGE_LOCAL_IDS=()
+    UPDATE_IMAGES_CHANGED=false
+    ui_section "正在检查远程镜像"
+    for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
+        service="${UPDATE_IMAGE_SERVICES[$i]}"
+        platform="$(jq -er --arg s "$service" --arg p "$default_platform" '.services[$s] | .platform // $p | strings | select(length > 0)' <<< "$config")" || die "无法读取 $(ui_service_name "$service") 部署平台"
+        platform="$(normalize_update_platform "$platform")" || die "无法确定 $(ui_service_name "$service") 部署平台"
+        if [ "$MODE" = external ]; then
+            case "$service" in
+                control-plane) ref=ghcr.io/qimaoww/qcontrol-plane:latest ;;
+                qcontrol-web) ref=ghcr.io/qimaoww/qcontrol-web:latest ;;
+            esac
+        else
+            ref="$(jq -er --arg s "$service" '.services[$s].image | strings | select(length > 0)' <<< "$config")" || die "无法读取 $(ui_service_name "$service") 目标镜像"
+        fi
+        local_id="$(current_update_image_id "$service")" || die "无法读取 $(ui_service_name "$service") 当前镜像"
+        current="$(current_update_image_id "$service" identity)" || die "无法读取 $(ui_service_name "$service") 当前平台镜像"
+        metadata="$(remote_update_image "$ref" "$platform")" || die "$(ui_service_name "$service") 远程检查失败，已终止更新"
+        # Classic storage uses config IDs; containerd uses manifest descriptors.
+        # Normalize both to the checked config identity for comparison/display.
+        if [ "$current" = "$(jq -er '.ref | split("@") | .[1]' <<< "$metadata")" ]; then
+            current="$(jq -er .id <<< "$metadata")"
+        fi
+        UPDATE_IMAGE_REFS+=("$ref") UPDATE_IMAGE_PLATFORMS+=("$platform") UPDATE_IMAGE_CURRENT+=("$current")
+        UPDATE_IMAGE_LOCAL_IDS+=("$local_id")
+        UPDATE_IMAGE_TARGETS+=("$(jq -er .id <<< "$metadata")")
+        UPDATE_IMAGE_PINNED+=("$(jq -er .ref <<< "$metadata")")
+        UPDATE_IMAGE_VERSIONS+=("$(jq -er .version <<< "$metadata")")
+        [ "$current" = "${UPDATE_IMAGE_TARGETS[$i]}" ] || UPDATE_IMAGES_CHANGED=true
+    done
     ui_section "镜像对比结果"
-    show_target_image_version control-plane "$current_control" "$target_control" "$target_control_version"
-    show_target_image_version qcontrol-web "$current_web" "$target_web" "$target_web_version"
-    [ "$current_control" != "$target_control" ] || [ "$current_web" != "$target_web" ]
+    for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
+        show_target_image_version "${UPDATE_IMAGE_SERVICES[$i]}" "${UPDATE_IMAGE_CURRENT[$i]}" \
+            "${UPDATE_IMAGE_TARGETS[$i]}" "${UPDATE_IMAGE_VERSIONS[$i]}"
+    done
+}
+
+pull_update_images() {
+    local i actual metadata actual_platform
+    for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
+        [ "${UPDATE_IMAGE_CURRENT[$i]}" != "${UPDATE_IMAGE_TARGETS[$i]}" ] || continue
+        ui_section "拉取镜像：${UPDATE_IMAGE_REFS[$i]}"
+        docker pull --platform "${UPDATE_IMAGE_PLATFORMS[$i]}" "${UPDATE_IMAGE_PINNED[$i]}" || die "镜像拉取失败：${UPDATE_IMAGE_REFS[$i]}"
+        metadata="$(docker image inspect --format '{{json .}}' "${UPDATE_IMAGE_PINNED[$i]}")" || die "无法校验已拉取的镜像"
+        actual="$(jq -er '.Id | strings | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$metadata")" || die "已拉取的镜像身份无效"
+        [ "$actual" = "${UPDATE_IMAGE_TARGETS[$i]}" ] || \
+            [ "$actual" = "${UPDATE_IMAGE_PINNED[$i]##*@}" ] || die "已拉取的镜像与检查结果不一致，已终止更新"
+        actual_platform="$(jq -er '.Os + "/" + .Architecture + (if (.Variant // "") == "" then "" else "/" + .Variant end)' <<< "$metadata")" || die "已拉取的镜像平台信息无效"
+        actual_platform="$(normalize_update_platform "$actual_platform")" || die "已拉取的镜像平台无效"
+        # Legacy ARM configs omit the variant already verified in the registry.
+        if [[ "${UPDATE_IMAGE_PLATFORMS[$i]}" == "$actual_platform/"* ]]; then
+            actual_platform="${UPDATE_IMAGE_PLATFORMS[$i]}"
+        fi
+        [ "$actual_platform" = "${UPDATE_IMAGE_PLATFORMS[$i]}" ] || die "已拉取的镜像平台与检查结果不一致，已终止更新"
+        UPDATE_IMAGE_LOCAL_IDS[$i]="$actual"
+    done
+}
+
+write_update_compose_override() {
+    local i
+    printf 'services:\n'
+    for i in "${!UPDATE_IMAGE_SERVICES[@]}"; do
+        printf '  %s:\n    image: %s\n    platform: %s\n' "${UPDATE_IMAGE_SERVICES[$i]}" \
+            "${UPDATE_IMAGE_LOCAL_IDS[$i]}" "${UPDATE_IMAGE_PLATFORMS[$i]}"
+    done
 }
 
 capture_update_image() {
@@ -1237,9 +1388,9 @@ capture_update_image() {
     container_id="$(update_container_id "$service")"
     image_id="$(docker inspect --format '{{.Image}}' "$container_id")"
     image_ref="$(docker inspect --format '{{.Config.Image}}' "$container_id")"
-    [ -n "$image_id" ] && [ -n "$image_ref" ] || die "无法读取 $service 当前镜像"
+    [ -n "$image_id" ] && [ -n "$image_ref" ] || die "无法读取 $(ui_service_name "$service") 当前镜像"
     backup_tag="qcontrolhub-update-rollback/$service:$(date +%Y%m%d%H%M%S)-$$"
-    docker image tag "$image_id" "$backup_tag" || die "无法保存 $service 当前镜像"
+    docker image tag "$image_id" "$backup_tag" || die "无法保存 $(ui_service_name "$service") 当前镜像"
     case "$service" in
         control-plane)
             UPDATE_CONTROL_IMAGE="$image_id"
@@ -1308,6 +1459,7 @@ cleanup_external_update_backup() {
             "$UPDATE_BACKUP_DIR/docker-compose.secrets.yml" \
             "$UPDATE_BACKUP_DIR/docker-compose.update.yml" \
             "$UPDATE_BACKUP_DIR/docker-compose.next.yml" \
+            "$UPDATE_BACKUP_DIR/docker-compose.checked.yml" \
             "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml"
         rmdir -- "$UPDATE_BACKUP_DIR" 2>/dev/null || true
     fi
@@ -1327,7 +1479,7 @@ rollback_external_update() {
     fi
     if [ "$UPDATE_HAD_SECRET_COMPOSE" = true ]; then
         if ! cp -p -- "$UPDATE_BACKUP_DIR/docker-compose.secrets.yml" "$SECRET_COMPOSE_FILE"; then
-            echo "错误：旧 secret 配置恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
+            echo "错误：旧密钥配置恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
             return 1
         fi
     fi
@@ -1396,18 +1548,15 @@ update_external_services() (
 
     show_current_application_versions "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"
     show_update_targets ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest
-    ui_section "正在检查更新（拉取目标镜像）..."
-    docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
-    docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
-    if ! application_update_available \
-        ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest \
-        "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"; then
+    prepare_update_plan
+    if [ "$UPDATE_IMAGES_CHANGED" = false ]; then
         show_no_update_result
         UPDATE_ROLLBACK_ARMED=false
         trap - EXIT HUP INT TERM
         cleanup_external_update_backup
         return 0
     fi
+    pull_update_images
 
     echo "-> 检测到镜像变化，开始更新"
     echo "-> 保留现有拓扑并更新 $EXTERNAL_COMPOSE_FILE 中的应用配置"
@@ -1416,7 +1565,8 @@ update_external_services() (
 
     compose config --quiet || die "Docker Compose 配置校验失败"
     UPDATE_SERVICES_CHANGED=true
-    if ! start_application_services "${COMPOSE_ARGS[@]}"; then
+    write_update_compose_override > "$UPDATE_BACKUP_DIR/docker-compose.checked.yml"
+    if ! start_application_services "${COMPOSE_ARGS[@]}" -f "$UPDATE_BACKUP_DIR/docker-compose.checked.yml"; then
         show_diagnostics
         die "使用新镜像重建应用容器失败"
     fi
@@ -1672,13 +1822,62 @@ prepare_external_env() {
 
 # Presentation stays independent of Docker so menus can be previewed safely.
 ui_text() {
-    local style="$1"
+    local style="$1" literal=false
     shift
-    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
-        printf '\033[%sm%s\033[0m\n' "$style" "$*"
-    else
-        printf '%s\n' "$*"
+    if [ "${1:-}" = --literal ]; then
+        literal=true
+        shift
     fi
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
+        printf '\033[%sm' "$style"
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
+        printf '\033[0m'
+    else
+        if [ "$literal" = true ]; then printf '%s\n' "$*"; else ui_wrap "$*"; fi
+    fi
+}
+
+# Bash's printf pads bytes. Count terminal cells for the Chinese labels and
+# punctuation used here; use a UTF-8 locale even when the caller uses LC_ALL=C.
+ui_char_width() {
+    local LC_ALL=C.UTF-8 code
+    printf -v code '%d' "'$1"
+    if (( (code >= 0x2e80 && code <= 0xa4cf) ||
+          (code >= 0xac00 && code <= 0xd7a3) ||
+          (code >= 0xf900 && code <= 0xfaff) ||
+          (code >= 0xfe10 && code <= 0xfe6f) ||
+          (code >= 0xff01 && code <= 0xff60) )); then
+        printf 2
+    else
+        printf 1
+    fi
+}
+
+ui_wrap() {
+    local LC_ALL=C.UTF-8 text="$1" width cells=0 char size i
+    width="$(ui_width)"
+    for ((i=0; i<${#text}; i++)); do
+        char="${text:i:1}"
+        if [ "$char" = $'\n' ]; then
+            printf '\n'; cells=0; continue
+        fi
+        size="$(ui_char_width "$char")"
+        if [ "$cells" -gt 0 ] && [ "$((cells + size))" -gt "$width" ]; then
+            printf '\n'; cells=0
+        fi
+        printf '%s' "$char"
+        cells=$((cells + size))
+    done
+    printf '\n'
+}
+
+ui_service_name() {
+    case "$1" in
+        control-plane) printf '控制面' ;;
+        qcontrol-web) printf '网页服务' ;;
+        postgres|PostgreSQL) printf 'PostgreSQL 数据库' ;;
+        *) printf '%s' "$1" ;;
+    esac
 }
 
 ui_width() {
@@ -1708,39 +1907,46 @@ ui_section() {
 
 ui_detail() {
     ui_text 2 "  $1"
-    printf '    %s\n' "$2"
+    # Preserve copyable values; the terminal can soft-wrap their visual lines.
+    ui_text 0 --literal "    $2"
 }
 
-# Only ASCII service names use padding; Chinese labels stay unpadded.
 ui_service_row() {
+    local LC_ALL=C.UTF-8 name cells=0 i padding
+    name="$(ui_service_name "$1")"
     if [ "$(ui_width)" -lt 60 ]; then
-        ui_detail "$1" "$2"
+        ui_detail "$name" "$2"
     else
-        printf '  %-16s %s\n' "$1" "$2"
+        for ((i=0; i<${#name}; i++)); do
+            cells=$((cells + $(ui_char_width "${name:i:1}")))
+        done
+        printf -v padding '%*s' "$((18 - cells))" ''
+        ui_text 0 "  $name$padding $2"
     fi
 }
 
 show_action_menu() {
     ui_heading "管理菜单"
     ui_section "工作目录"
-    printf '  %s\n' "$WORK_DIR"
+    ui_text 0 --literal "  $WORK_DIR"
     ui_section "部署管理"
-    printf '  [1] 安装 / 重新配置\n'
-    printf '  [2] 更新现有部署\n'
+    ui_text 0 "  [1] 安装 / 重新配置"
+    ui_text 0 "  [2] 更新现有部署"
     ui_text 2 "      检查镜像版本，无变化时跳过更新"
     ui_section "维护选项"
-    printf '  [3] 卸载服务\n'
+    ui_text 0 "  [3] 卸载服务"
     ui_text 2 "      保留配置、密钥和数据库卷"
-    printf '  [4] 设置目录\n'
+    ui_text 0 "  [4] 设置目录"
     printf '\n'
 }
 
 show_mode_menu() {
     ui_heading "数据库模式"
     ui_section "选择部署方式"
-    printf '  [1] 内置 PostgreSQL（推荐）\n'
+    ui_text 0 "  [1] 内置 PostgreSQL（推荐）"
     ui_text 2 "      自动部署数据库和应用，适合从零安装"
-    printf '\n  [2] 连接外部 PostgreSQL\n'
+    printf '\n'
+    ui_text 0 "  [2] 连接外部 PostgreSQL"
     ui_text 2 "      复用已有数据库，仅部署应用"
     printf '\n'
 }
@@ -1748,7 +1954,6 @@ show_mode_menu() {
 show_no_update_result() {
     ui_heading "检查完成"
     ui_text '1;32' "  当前镜像与目标版本一致，无需更新"
-    ui_text 2 "  保留当前运行容器和部署配置"
     printf '\n'
 }
 
@@ -1756,7 +1961,7 @@ show_result() {
     local result_name="$1" url="$2" stop_cmd="$3"
     ui_heading "$result_name"
     ui_section "访问面板"
-    ui_text '1;32' "  $url"
+    ui_text '1;32' --literal "  $url"
     ui_text 2 "  登录方式：用户名 + 密码 / 管理令牌"
     ui_section "部署文件"
     ui_detail "配置文件" "$ENV_FILE"
@@ -1785,7 +1990,7 @@ local_panel_url() {
 
 show_admin_token_once() {
     [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
-    ui_heading "管理员 token（仅本次显示）"
+    ui_heading "管理员令牌（仅本次显示）"
     printf '\n  %s\n\n' "$ADMIN_TOKEN_TO_DISPLAY"
     ui_text '1;33' "  请立即保存到密码管理器。"
     ui_text 2 "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"
@@ -1947,8 +2152,8 @@ case "$MODE" in
             ui_text 2 "  更新内置 PostgreSQL 部署并复用现有配置"
             [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
             resolve_bundled_image_refs
-            current_control_image="$(current_update_image_id control-plane)" || die "无法读取 control-plane 当前镜像"
-            current_web_image="$(current_update_image_id qcontrol-web)" || die "无法读取 qcontrol-web 当前镜像"
+            current_control_image="$(current_update_image_id control-plane)" || die "无法读取控制面当前镜像"
+            current_web_image="$(current_update_image_id qcontrol-web)" || die "无法读取网页服务当前镜像"
             current_postgres_image="$(current_update_image_id postgres)" || die "无法读取 PostgreSQL 当前镜像"
             show_current_application_versions "$current_control_image" "$current_web_image"
             current_postgres_version="$(update_image_version "$current_postgres_image")" || die "无法读取 PostgreSQL 当前版本"
@@ -1957,21 +2162,8 @@ case "$MODE" in
             if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
                 echo "-> 本地构建模式无法检查远程镜像版本，将重新构建"
             else
-                ui_section "正在检查更新（拉取目标镜像）..."
-                docker pull "$BUNDLED_CONTROL_IMAGE_REF" || die "拉取 $BUNDLED_CONTROL_IMAGE_REF 失败"
-                docker pull "$BUNDLED_WEB_IMAGE_REF" || die "拉取 $BUNDLED_WEB_IMAGE_REF 失败"
-                docker pull "$BUNDLED_POSTGRES_IMAGE_REF" || die "拉取 $BUNDLED_POSTGRES_IMAGE_REF 失败"
-                app_changed=false
-                if application_update_available "$BUNDLED_CONTROL_IMAGE_REF" "$BUNDLED_WEB_IMAGE_REF" \
-                    "$current_control_image" "$current_web_image"; then
-                    app_changed=true
-                fi
-                target_postgres_image="$(docker image inspect --format '{{.Id}}' "$BUNDLED_POSTGRES_IMAGE_REF")" || \
-                    die "无法读取 PostgreSQL 目标镜像"
-                [ -n "$target_postgres_image" ] || die "PostgreSQL 目标镜像 ID 为空"
-                target_postgres_version="$(update_image_version "$target_postgres_image")" || die "无法读取 PostgreSQL 目标版本"
-                show_target_image_version PostgreSQL "$current_postgres_image" "$target_postgres_image" "$target_postgres_version"
-                if [ "$app_changed" = false ] && [ "$current_postgres_image" = "$target_postgres_image" ]; then
+                prepare_update_plan
+                if [ "$UPDATE_IMAGES_CHANGED" = false ]; then
                     if [ "$FORCE" = false ]; then
                         show_no_update_result
                         exit 0
@@ -1979,6 +2171,7 @@ case "$MODE" in
                     echo "-> 镜像无变化，继续执行 -f 指定的密钥轮换"
                 else
                     echo "-> 检测到镜像变化，开始更新"
+                    pull_update_images
                 fi
             fi
         elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then

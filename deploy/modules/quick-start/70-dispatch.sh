@@ -46,8 +46,8 @@ case "$MODE" in
             ui_text 2 "  更新内置 PostgreSQL 部署并复用现有配置"
             [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
             resolve_bundled_image_refs
-            current_control_image="$(current_update_image_id control-plane)" || die "无法读取 control-plane 当前镜像"
-            current_web_image="$(current_update_image_id qcontrol-web)" || die "无法读取 qcontrol-web 当前镜像"
+            current_control_image="$(current_update_image_id control-plane)" || die "无法读取控制面当前镜像"
+            current_web_image="$(current_update_image_id qcontrol-web)" || die "无法读取网页服务当前镜像"
             current_postgres_image="$(current_update_image_id postgres)" || die "无法读取 PostgreSQL 当前镜像"
             show_current_application_versions "$current_control_image" "$current_web_image"
             current_postgres_version="$(update_image_version "$current_postgres_image")" || die "无法读取 PostgreSQL 当前版本"
@@ -56,21 +56,8 @@ case "$MODE" in
             if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
                 echo "-> 本地构建模式无法检查远程镜像版本，将重新构建"
             else
-                ui_section "正在检查更新（拉取目标镜像）..."
-                docker pull "$BUNDLED_CONTROL_IMAGE_REF" || die "拉取 $BUNDLED_CONTROL_IMAGE_REF 失败"
-                docker pull "$BUNDLED_WEB_IMAGE_REF" || die "拉取 $BUNDLED_WEB_IMAGE_REF 失败"
-                docker pull "$BUNDLED_POSTGRES_IMAGE_REF" || die "拉取 $BUNDLED_POSTGRES_IMAGE_REF 失败"
-                app_changed=false
-                if application_update_available "$BUNDLED_CONTROL_IMAGE_REF" "$BUNDLED_WEB_IMAGE_REF" \
-                    "$current_control_image" "$current_web_image"; then
-                    app_changed=true
-                fi
-                target_postgres_image="$(docker image inspect --format '{{.Id}}' "$BUNDLED_POSTGRES_IMAGE_REF")" || \
-                    die "无法读取 PostgreSQL 目标镜像"
-                [ -n "$target_postgres_image" ] || die "PostgreSQL 目标镜像 ID 为空"
-                target_postgres_version="$(update_image_version "$target_postgres_image")" || die "无法读取 PostgreSQL 目标版本"
-                show_target_image_version PostgreSQL "$current_postgres_image" "$target_postgres_image" "$target_postgres_version"
-                if [ "$app_changed" = false ] && [ "$current_postgres_image" = "$target_postgres_image" ]; then
+                prepare_update_plan
+                if [ "$UPDATE_IMAGES_CHANGED" = false ]; then
                     if [ "$FORCE" = false ]; then
                         show_no_update_result
                         exit 0
@@ -78,6 +65,7 @@ case "$MODE" in
                     echo "-> 镜像无变化，继续执行 -f 指定的密钥轮换"
                 else
                     echo "-> 检测到镜像变化，开始更新"
+                    pull_update_images
                 fi
             fi
         elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then

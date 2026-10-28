@@ -32,6 +32,11 @@ type RuntimeState struct {
 	ExistingConfigUnsupportedReason string                 `json:"existing_config_unsupported_reason,omitempty"`
 	CoreLogStatus                   string                 `json:"core_log_status,omitempty"`
 	CoreLogError                    string                 `json:"core_log_error,omitempty"`
+	// CoreLogSource names the transport behind CoreLogStatus and CoreLogLastAt
+	// is the last line the Agent delivered from it, which separates "quiet" from
+	// "never delivered".
+	CoreLogSource string     `json:"core_log_source,omitempty"`
+	CoreLogLastAt *time.Time `json:"core_log_last_at,omitempty"`
 }
 
 // Configuration metadata is projected without reading or decrypting bodies.

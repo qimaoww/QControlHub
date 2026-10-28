@@ -37,6 +37,7 @@ const routeAliases = Object.freeze({
   "settings-cnip": "settings",
   "settings-certificates": "settings",
   "settings-deployment": "settings",
+  "settings-api-keys": "settings",
   "preset-node": "live-config",
   "settings-node": "node-settings",
   "new-config": "archive-config",
@@ -57,6 +58,9 @@ export function routeForHash(value) {
   if (hash.startsWith("preset-node-")) return "live-config";
   if (hash.startsWith("settings-node-") || hash.startsWith("node-"))
     return "node-settings";
+  // Every settings section keeps its own hash; an unknown suffix still belongs
+  // to the settings page instead of falling through to the dashboard.
+  if (hash.startsWith("settings-")) return "settings";
   if (hash.startsWith("traffic-agent-")) return "traffic";
   if (hash.startsWith("access-control-agent-")) return "access-control";
   if (hash.startsWith("config-")) return "archive-config";

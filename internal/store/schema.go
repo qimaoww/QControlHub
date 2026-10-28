@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 82
+const currentSchemaVersion = 83
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS traffic_batch_requests (
@@ -117,6 +117,10 @@ CREATE TABLE IF NOT EXISTS core_log_source_states (
  engine text NOT NULL, instance_id text NOT NULL, status text NOT NULL, error text NOT NULL DEFAULT '',
  updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(agent_id,engine,instance_id)
 );
+-- The transport that produced the status and the last line it delivered. They
+-- are separate from status so a quiet source still carries evidence of life.
+ALTER TABLE core_log_source_states ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT '';
+ALTER TABLE core_log_source_states ADD COLUMN IF NOT EXISTS last_at timestamptz;
 
 -- Node windows require (agent_id,engine,id); fleet windows require (engine,id).
 -- The node index cannot supply fleet recency order, especially for a quiet

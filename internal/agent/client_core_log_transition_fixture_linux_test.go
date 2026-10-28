@@ -181,6 +181,25 @@ func waitForCoreLogSourceStatus(t *testing.T, collector *CoreLogCollector, engin
 	t.Fatalf("core log source status = %+v, want %q", collector.Status()[engine], want)
 }
 
+// waitForArmedCoreLogFile waits until a file reader has fixed its start offset.
+// The initial "source-missing" waiting state is reported before the reader
+// starts, so an armed source is the first waiting state with any other code.
+func waitForArmedCoreLogFile(t *testing.T, collector *CoreLogCollector, engine core.Engine) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := collector.Status()[engine]
+		if status.Status == core.CoreLogStatusActive {
+			return
+		}
+		if status.Status == core.CoreLogStatusWaiting && status.Error != core.CoreLogErrorSourceMissing {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("core log file source was not armed: %+v", collector.Status()[engine])
+}
+
 func collectCoreLogTransitionToken(t *testing.T, collector *CoreLogCollector, token string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

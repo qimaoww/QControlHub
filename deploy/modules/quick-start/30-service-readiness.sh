@@ -8,7 +8,7 @@ show_diagnostics() {
         echo "-> 最近的 PostgreSQL 日志："
         compose logs --tail=40 postgres || true
     fi
-    echo "-> 最近的 SPA 日志："
+    echo "-> 最近的网页服务日志："
     compose logs --tail=40 qcontrol-web || true
 }
 
@@ -24,7 +24,7 @@ start_services() {
         fi
     elif [ "$ACTION" = "update" ]; then
         echo "-> 使用已拉取的应用镜像启动 Docker Compose"
-        if ! compose up -d --no-build --pull never; then
+        if ! write_update_compose_override | compose -f - up -d --no-build --pull never; then
             show_diagnostics
             die "Docker Compose 启动失败；请检查镜像拉取和 Compose 配置"
         fi
@@ -137,7 +137,7 @@ validate_external_config_key_source() {
     config_source="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE)"
     previous_source="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE)"
     [ -n "$config_source" ] && [ -n "$previous_source" ] && [ -f "$SECRET_COMPOSE_FILE" ] || \
-        die "缺少原 QCH_CONFIG_ENCRYPTION_KEY 或既有 secret keyring，终止更新"
+        die "缺少原 QCH_CONFIG_ENCRYPTION_KEY 或既有密钥文件组，终止更新"
     case "$config_source" in
         /*) ;;
         *) config_source="$WORK_DIR/$config_source" ;;
@@ -147,7 +147,7 @@ validate_external_config_key_source() {
         *) previous_source="$WORK_DIR/$previous_source" ;;
     esac
     [ -f "$config_source" ] && [ -f "$previous_source" ] || \
-        die "原配置加密 secret keyring 文件不完整，终止更新"
+        die "原配置加密密钥文件组文件不完整，终止更新"
 }
 
 validate_external_network() {

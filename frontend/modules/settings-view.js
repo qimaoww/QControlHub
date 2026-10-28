@@ -21,7 +21,7 @@ export function createSettingsView({ esc, can, shell }) {
 
     shell(`<div class="settings-workspace settings-overview">
       <form class="settings-form" id="settings-form">
-        ${section("settings-engines", "01", "默认内核能力", "仅用于新 Agent；已有节点在“节点设置 → Agent”调整。全部关闭为纯监控节点。", engineCapabilityToggles(item.default_agent_engines ?? ["mihomo", "xray", "sing-box", "ss-rust"], { writable }))}
+        ${section("settings-engines", "01", "默认内核能力", "仅用于新 Agent；已有节点在节点设置的 Agent 分区调整。全部关闭为纯监控节点。", engineCapabilityToggles(item.default_agent_engines ?? ["mihomo", "xray", "sing-box", "ss-rust"], { writable }))}
         ${section("settings-basic", "02", "基础设置", "", `<div class="settings-grid">
           ${field("panel_name", "面板名称", `<input name="panel_name" value="${esc(item.panel_name)}" maxlength="40" required ${disabled}>`)}
           ${field("panel_description", "面板说明", `<input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${disabled}>`)}

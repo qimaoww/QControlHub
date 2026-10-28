@@ -86,7 +86,7 @@ export function createDashboardView(ctx, panelMetrics) {
       <div data-dashboard-trend="peak"><dt>${trend.isCurrentMonth ? "本月" : "当月"}峰值日</dt><dd><strong>${trend.peakDay ? `${Number(trend.peakDay.slice(5, 7))}月${Number(trend.peakDay.slice(8))}日` : "—"}</strong><small>${trend.peakDay ? `${bytes(trend.peakBytes)} · 单日用量` : "暂无流量"}</small></dd></div>
     </dl>
     <div class="traffic-month-chart dashboard-traffic-chart" data-motion-region="dashboard-month" data-motion-key="${esc(trafficMonth)}"><svg viewBox="0 0 ${trafficChartWidth} ${trafficChartHeight}" preserveAspectRatio="none" role="img" aria-label="${esc(trafficMonth)} 每日接收和发送流量图">${trafficBars}</svg>${usedTraffic ? "" : '<span class="dashboard-traffic-empty">当月暂无流量记录</span>'}</div><div class="dashboard-traffic-axis" aria-hidden="true">${trafficAxis}</div>
-    <footer class="dashboard-traffic-actions"><button class="button small" type="button" data-dashboard-traffic-details>查看 ${dailyTraffic.length} 天明细</button><a href="#traffic">管理流量配额 →</a></footer>
+    <footer class="dashboard-traffic-actions"><button class="button small" type="button" data-dashboard-traffic-details>查看 ${dailyTraffic.length} 天明细</button><a href="#traffic">管理流量配额</a></footer>
     <dialog class="traffic-edit-dialog dashboard-traffic-dialog" data-dashboard-traffic-dialog aria-labelledby="dashboard-traffic-dialog-title"><header><span class="traffic-edit-icon" aria-hidden="true">↕</span><div><p class="eyebrow">每日用量</p><h2 id="dashboard-traffic-dialog-title">${esc(trafficMonth)} 流量明细</h2><p>接收、发送和峰值按 UTC 自然日汇总</p></div><button class="deploy-command-close" type="button" data-dashboard-traffic-close aria-label="关闭流量明细弹窗">×</button></header><div class="dashboard-traffic-detail-body"><table><thead><tr><th>日期</th><th>接收</th><th>发送</th><th>合计</th><th>接收 / 发送峰值</th></tr></thead><tbody>${trafficDetailRows}</tbody></table></div><footer class="dashboard-traffic-dialog-actions"><span>共 ${dailyTraffic.length} 个自然日</span><button class="button" type="button" data-dashboard-traffic-close>关闭</button></footer></dialog>
   </section>` : "";
   const fleet =
@@ -94,7 +94,7 @@ export function createDashboardView(ctx, panelMetrics) {
       .slice(0, 7)
       .map(
         (agent) =>
-          `<a href="#settings-node-${esc(agent.id)}" data-dashboard-agent="${esc(agent.id)}"><span class="node-avatar ${statusTone(agent.status)}" aria-hidden="true">●</span><span class="fleet-node-info"><strong title="${esc(agent.name)}">${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small><span class="fleet-engines">${(agent.capabilities || []).map((engine) => `<em class="${esc(engine)}">${esc(engineName(engine))}</em>`).join("")}</span></span>${agentPresenceMarkup(agent.status)}<time>${esc(heartbeat(agent.last_seen))}</time><i aria-hidden="true">›</i></a>`,
+          `<a href="#settings-node-${esc(agent.id)}" data-dashboard-agent="${esc(agent.id)}"><span class="node-avatar ${statusTone(agent.status)}" aria-hidden="true">●</span><span class="fleet-node-info"><strong title="${esc(agent.name)}">${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small><span class="fleet-engines">${(agent.capabilities || []).map((engine) => `<em class="${esc(engine)}">${esc(engineName(engine))}</em>`).join("")}</span></span>${agentPresenceMarkup(agent.status)}<time>${esc(heartbeat(agent.last_seen))}</time></a>`,
       )
       .join("") ||
     '<div class="empty compact"><strong>还没有节点</strong></div>';
@@ -105,7 +105,7 @@ export function createDashboardView(ctx, panelMetrics) {
         ({ task, count }) => {
           const taskEngineLabel = task.action === "upgrade-agent" ? "QAgent" : engineName(task.engine);
           const agentLabel = agentNames.get(task.agent_id) || short(task.agent_id);
-          return `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status)}"></i><span><strong>${esc(actionName(task.action))}</strong><small title="${esc(agentLabel)}">${esc(agentLabel)} · ${esc(taskEngineLabel)}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time><b aria-hidden="true">›</b></a>`;
+          return `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status)}"></i><span><strong>${esc(actionName(task.action))}</strong><small title="${esc(agentLabel)}">${esc(agentLabel)} · ${esc(taskEngineLabel)}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time></a>`;
         },
       )
       .join("") ||
@@ -117,12 +117,12 @@ export function createDashboardView(ctx, panelMetrics) {
     { label: "失败任务", value: esc(overview.tasks_failed || 0), href: "#tasks", permission: "tasks.read", status: "failed", tone: "red", icon: '<path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/>' },
   ].map((stat) => {
     const allowed = can(stat.permission);
-    return `<${allowed ? "a" : "div"} class="dashboard-stat"${allowed ? ` href="${stat.href}" aria-label="查看${stat.label}"${stat.status ? ` data-dashboard-status="${stat.status}"` : ""}` : ""}><span class="stat-icon ${stat.tone}"><svg viewBox="0 0 24 24" aria-hidden="true">${stat.icon}</svg></span><div><small>${stat.label}</small><strong>${stat.value}</strong></div>${allowed ? '<i aria-hidden="true">↗</i>' : ""}</${allowed ? "a" : "div"}>`;
+    return `<${allowed ? "a" : "div"} class="dashboard-stat"${allowed ? ` href="${stat.href}" aria-label="查看${stat.label}"${stat.status ? ` data-dashboard-status="${stat.status}"` : ""}` : ""}><span class="stat-icon ${stat.tone}"><svg viewBox="0 0 24 24" aria-hidden="true">${stat.icon}</svg></span><div><small>${stat.label}</small><strong>${stat.value}</strong></div></${allowed ? "a" : "div"}>`;
   }).join("");
   const host = can("panel-metrics.read") ? panelMetrics.render() : "";
   const monitoring = host || trafficHistory ? `<div class="dashboard-monitoring${host && trafficHistory ? " has-two-panels" : ""}">${host}${trafficHistory}</div>` : "";
-  const fleetPanel = can("agents.read") ? `<section class="workspace-panel fleet-overview" id="fleet"><header><div class="dashboard-section-heading"><h3>节点状态</h3></div><a href="#node-settings">全部 ${esc(overview.agents || 0)} 个 →</a></header><div class="fleet-overview-list">${fleet}</div></section>` : "";
-  const activityPanel = can("tasks.read") ? `<section class="workspace-panel recent-tasks" id="activity"><header><div class="dashboard-section-heading"><h3>最近任务</h3></div><a href="#tasks">全部 →</a></header><div>${activity}</div></section>` : "";
+  const fleetPanel = can("agents.read") ? `<section class="workspace-panel fleet-overview" id="fleet"><header><div class="dashboard-section-heading"><h3>节点状态</h3></div><a href="#node-settings">全部 ${esc(overview.agents || 0)} 个</a></header><div class="fleet-overview-list">${fleet}</div></section>` : "";
+  const activityPanel = can("tasks.read") ? `<section class="workspace-panel recent-tasks" id="activity"><header><div class="dashboard-section-heading"><h3>最近任务</h3></div><a href="#tasks">全部</a></header><div>${activity}</div></section>` : "";
   shell(`<div class="dashboard-workspace">
     <section class="dashboard-head" id="summary"><div><h2>运行总览</h2></div><span class="trust-badge ${!overview.agents ? "inactive" : overview.agents_online === overview.agents ? "" : "warn"}"><i></i>${!overview.agents ? "等待节点接入" : overview.agents_online === overview.agents ? "全部在线" : `${esc(overview.agents_online)} / ${esc(overview.agents)} 在线`}</span></section>
     <nav class="ops-stats" aria-label="运行概览快捷入口">${stats}</nav>

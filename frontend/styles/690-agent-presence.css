@@ -332,27 +332,6 @@
 .node-settings-page:has(> .node-settings-stack) {
   max-width: 1260px;
 }
-.node-back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  margin: 0 0 10px;
-  padding: 4px 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--ink-2);
-  font-size: calc(10px * var(--ui-font-scale));
-  font-weight: 700;
-  box-shadow: var(--shadow);
-  transition: border-color var(--motion-fast) ease, color var(--motion-fast) ease, background-color var(--motion-fast) ease;
-}
-.node-back-link:hover {
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
-  background: var(--accent-soft);
-  color: var(--accent);
-}
 .node-operations-workspace {
   display: flex;
   flex-direction: column;
@@ -2342,7 +2321,6 @@ dialog[open],
 }
 
 @media (pointer: coarse) {
-  .node-back-link,
   .node-operations-actions .button,
   .node-settings-tabs button,
   .node-subtab-btn,

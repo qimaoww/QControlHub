@@ -34,6 +34,8 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 			state := runtimeState[engine]
 			state.CoreLogStatus = logState.Status
 			state.CoreLogError = logState.Error
+			state.CoreLogSource = logState.Source
+			state.CoreLogLastAt = logState.LastAt
 			runtimeState[engine] = state
 		}
 	}
@@ -50,6 +52,8 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 			if state, ok := logStates[string(sharedInstances[i].Engine)+"/"+sharedInstances[i].ShareID]; ok {
 				sharedInstances[i].CoreLogStatus = state.CoreLogStatus
 				sharedInstances[i].CoreLogError = state.CoreLogError
+				sharedInstances[i].CoreLogSource = state.CoreLogSource
+				sharedInstances[i].CoreLogLastAt = state.CoreLogLastAt
 			}
 		}
 	}

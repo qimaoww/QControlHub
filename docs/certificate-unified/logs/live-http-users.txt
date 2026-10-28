@@ -1,8 +1,0 @@
-Two ordinary users issued concurrent independent HTTP-01 certificates through Caddy port 80
-Foreign resource, unauthorized SAN and forged owner grant rejected
-Panel HTTP-01 renewal reused current shared-node authority
-cancel: staged challenge removed; other users and Caddy business service retained
-revoke: staged challenge removed; other users and Caddy business service retained
-disable: staged challenge removed; other users and Caddy business service retained
-unshare: staged challenge removed; other users and Caddy business service retained
-Synthetic DNS overrides restored; no temporary HTTP challenge rows remain

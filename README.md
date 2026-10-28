@@ -1,105 +1,54 @@
 # QControlHub
 
-QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制面、Go Agent、静态 Web 控制台和 PostgreSQL 组成，用于集中管理代理内核、配置、任务与运行状态。节点服务支持 systemd 和 Alpine OpenRC。
+面向 Linux 节点的配置与远程运维平台，由 Go 控制面、Go Agent、Web 控制台和 PostgreSQL 组成。节点支持 systemd 和 Alpine OpenRC。
 
-> **安全提示：** QControlHub 可以下发敏感配置、控制系统服务并管理端口流量规则，属于高权限基础设施。生产环境必须使用 HTTPS、限制管理入口、妥善保管凭据并定期验证备份。
+## 主要能力
 
-## 核心能力
+- 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的安装、配置版本、校验、部署与服务状态。
+- 通过出站 WSS 接入节点，集中查看运行指标、任务、审计、实时日志和 IPQuality 报告。
+- 生成客户端接入参数、分享链接和原生配置，支持按账号同步到 Sub-Store。
+- 提供多用户工作区、节点共享、独立内核实例、端口授权和流量配额。
+- 管理证书申请、导入、授权、续期与实例同步。
+- 支持端口流量统计、超额封禁、Webhook 和 Komari 集成。
 
-### 节点与任务
+## 安装
 
-- 通过出站 WSS 接入 Linux Agent，使用 Ed25519 身份、签名时间窗和持久化 nonce 防止握手重放。
-- 集中查看节点在线状态、CPU、内存、磁盘、网络与流量趋势，并保留任务结果和审计记录。
-- 在节点详情的“Agent 与身份”自定义节点显示名称，不改变身份、连接或已有安装命令。
-- 远程执行配置校验与部署、服务启停、状态查询、配置读取和内核安装；节点侧任务均为真实执行。
-- 内核安装、部署及启停结束后 Agent 主动重新上报真实运行状态；节点设置自动刷新状态、版本和操作按钮，配置页在任务完成后刷新并保护未保存的输入。旧 Agent 仍会在正常心跳后刷新。
-- 通过 IPQuality 检测查看节点双栈出口、各数据库风险、媒体与邮件结果；默认展示各节点最近一次检测及实际检测时间，重新检测期间保留上次成功报告。历史月历仅允许选择有检测记录的本地提交日，无记录日期置灰；支持立即检测和默认关闭的每日计划。更新 Agent 后，新装及已有节点会自动检查并补齐依赖，检测会访问第三方服务。支持范围及故障诊断见 [IPQuality 自动依赖准备](docs/ip-quality-dependencies.md)。
-
-### 配置与内核
-
-- 面板首次安装可选择 Mihomo、Xray、sing-box、Shadowsocks Rust 默认能力；系统设置可修改本账号新 Agent 的默认值，节点设置可独立开启或关闭内核。关闭会停止服务，重新开启会恢复管理能力并启动已安装内核；共享或配置状态不明的内核只恢复管理能力，需重新部署后运行。未安装内核仅切换能力，不卸载内核、不删除配置，重装保留节点选择。
-
-- 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的节点配置、版本修订、差异与模板。
-- Xray XHTTP 支持原生 Reality / TLS 独立部署、双栈与双端点分离、两个混合方向和同端口五合一；提供完整客户端 JSON。部署依赖、版本及验证记录见 [XHTTP 使用说明](docs/xray-xhttp-presets.md)。
-- sing-box 原生预设完整覆盖 233boy 上游的 21 项方案，包括 HTTP/H2、HTTPUpgrade、QUIC、Reality、七种 Shadowsocks 方法及认证 Socks；支持编辑回读、TLS 信任及客户端导出。逐项版本、兼容性与连接验收见 [sing-box 预设对照清单](docs/sing-box-upstream-presets.md)。
-- 支持多用户共用一台主机：每位用户拥有独立的节点工作区、配置档案与模板，可保存多份配置，普通用户不能查看、选择或部署其他用户的配置。共享节点在新版 Agent 上为每位接收者创建独立的 Mihomo、Xray、sing-box 或 Shadowsocks Rust 服务实例，因此同一内核的多个用户配置可以同时运行；端口仍须分别分配且不能冲突。用户自行安装的节点继续按原有方式管理，不受共享实例限制。
-- 预设功能集中到配置页：保留节点侧栏、内核栏、文件切换及源码编辑；“＋ 增加入站”始终显示在“合并预览”左侧。选中公共配置后，可在“限制”旁的菜单增加、修改或删除通用配置项，选中入站则修改或删除该入站。点击文件只切换源码，不自动弹窗；高级字段、版本历史、差异和客户端入口也在此页。
-- 增加入站时若内核未安装，自动安装最新稳定版后继续校验或部署；已有内核不切换版本。自有节点需任务执行权限及声明 `preset-auto-install-v1` 的 Agent；共享用户需已接受的内核与端口授权，以及声明 `shared-core-instances-v1`、`shared-core-prepare-v1` 的新版 Agent，仅准备独立实例，不启停宿主服务。共享用户也可在内核页手动安装缺少的稳定版，已有版本直接复用，不能卸载或启停服务；版本切换仍由所有者在节点设置处理，任务查看另需 `tasks.read`。[首次安装权限、验证与回滚说明](docs/core-first-install.md)。
-- 所有预设使用按端口独立出口；Xray / sing-box 手动配置将每个入站与其专属出口放在同一文件，支持公共配置切换和合并预览，整体作为一个加密版本入库；Mihomo / SS Rust 保持单文件。
-- 入站、通用配置项与高级字段保存、任务创建使用同一事务，任务锁定本次配置版本；自动安装并入同一持久化任务，不依赖页面保持打开。源码编辑仍保留单独的保存与提交任务流程。未保存源码或节点快照与已保存版本不同会阻止表单操作，版本冲突保留弹窗草稿。节点与内核可通过旧链接或配置页链接恢复，草稿凭据不写入浏览器存储或 URL。
-- 预设字段按工作区版本复用读取结果，连续切换以最后一次选择为准；任务状态使用轻量轮询、断网重试与后台降频。入站重命名、删除时同步处理明确的路由/DNS 引用，复杂引用要求在源码中联合调整。
-- Agent 通过受限路径、原子替换、备份和失败回滚部署配置与内核二进制，并通过专用 systemd/OpenRC 服务管理进程。
-
-### 接入、日志与流量
-
-- systemd 节点从 volatile journal namespace 汇集托管内核日志，OpenRC 节点从 `supervise-daemon` 日志文件跟踪同样的实时日志流；主控可按最低严重级别保存或停止保存新日志。两种节点都从已认证的 Agent 通道刷新运行指标和服务状态。
-- 根据节点配置生成带遮罩的客户端分享值与逐项接入参数。
-- Sub-Store 后端连接与同步组按账号独立，每组可选择 URL 或 Mihomo 格式，以及增量或完全托管模式；只从用户可见的实际部署版本生成节点，源配置被替换后需重新选择。
-- 客户端显示名称按内核和监听端口独立保存，修改一个端口不再影响其他端口；连接地址与协议栈仍为节点共用设置。
-- 使用 QAgent 专用 nftables 表统计端口收发流量，由控制面持久化每日用量并提供月度图表、节点/内核/端口筛选、周期配额和可选的超额封禁。
-- 端口计量使用持久化采样基线与命名计数器，防止规则刷新丢量、重复上报计量和网络延迟造成速率尖峰。
-- 可选联动 Komari：在系统设置填写 Komari 地址/API Key，在节点设置绑定 Komari 服务器 UUID；节点卡片网络区显示当前周期日期、流量用量和额度进度。
-
-### 权限与数据
-
-- PostgreSQL 持久化节点、配置、任务、指标、流量策略和审计数据。
-- 管理 API 使用 Bearer 令牌；Web 控制台使用服务端会话、HttpOnly Cookie 和 CSRF 防护，并支持按能力授权的管理员与用户账号。
-- 默认 `admin` 可使用环境管理员令牌（`QCH_ADMIN_TOKEN_SHA256`，兼容 `QCH_ADMIN_TOKEN`）登录。这是独立的系统管理员入口，没有数据库用户 ID，不出现在账号列表中；通过部署配置或安装器轮换令牌。数据库中同名 `admin` 使用账号密码登录时仍是独立账号，界面会显示实际登录身份。
-- 面板重启或升级后需要重新登录，数据库账号应继续使用原密码（包括首尾空白）；排查与恢复流程见 [升级后账号认证](docs/account-upgrade-authentication.md)。
-- 账号停用保留数据；永久删除沿用 purge 流程，撤销会话、安装凭据和未完成任务，清理个人数据，将节点、配置与模板移交管理员公共范围，保留流量历史和其他账号数据。当前数据库登录账号不能删除或停用；仅当服务器实际仍有有效环境管理员令牌入口或其他启用的数据库管理员时，才允许删除、停用或降级管理员账号。
-- 普通用户可按权限自行添加和管理 Agent，配置、设置及集成始终独立。节点所有者可按用户名邀请共享，分配监听端口和累计 GiB 额度；接收者可接受或拒绝，接受后才生效，也可退出共享。共享不授予主机管理权，多端口共用额度，超额由 Agent 本地阻断。共享实例部署前核验每个入站的独立出口，并按分配端口单独计量；出口归属或计量保障失效时 Agent 停止对应实例。systemd 与 OpenRC 节点均支持独立实例。
-- 可选用 AES-256-GCM 加密配置正文与修订，并通过 HMAC-SHA256 签名 Webhook 通知。
-
-## 生产部署与 Agent 接入
-
-### 生产部署
-
-在 Linux 控制面主机运行以下一键命令。脚本提供安装、更新和卸载菜单；安装时可选择内置或外部 PostgreSQL，并自动完成密钥生成、Compose 服务启动和就绪检查：
+在 Linux 控制面主机执行，按菜单选择内置或外部 PostgreSQL：
 
 ```bash
-bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
+(script=$(mktemp) || exit; trap 'rm -f -- "$script"' EXIT; curl -q --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh -o "$script" && QCH_BOOTSTRAP=1 bash "$script")
 ```
 
-Agent 与运行中的安装脚本会在确认仅 IPv6 出站后，自动为公开 GitHub API、Release 和 Raw 下载添加 `https://v6.gh-proxy.org/` 前缀。首次获取一键脚本时尚未运行检测逻辑，仅 IPv6 主机可使用[首个脚本下载命令及网络检测说明](docs/github-downloads.md)。该说明也列出了实测结果、API 配额限制和回滚方式。
+默认安装到当前目录下的 `qcontrolhub`，可用 `QCH_INSTALL_DIR` 指定目录。安装器保存目录选择，后续运行会复用。管理员令牌只在创建或轮换时显示一次，请妥善保存。
 
-该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时会直接复用为一键安装目录。已保存目录中已有的 `.env`、`.secrets` 和数据会保留，只更新运行脚本与生产 Compose 文件。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请完成全部生产部署步骤并核对安全基线。
+生产环境需配置 HTTPS 反向代理；部署参数、仅 IPv6 主机的下载方式和备份要求见[部署与维护](docs/deployment.md)。
 
-内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络。选择“更新”时，脚本先显示当前版本和目标标签，再拉取目标镜像并比较镜像 ID；目标镜像都未变化时提示“当前镜像与目标版本一致，无需更新”并跳过服务重建，有变化时才更新。固定标签只与该标签比较。内置模式按 Compose 最终解析的 `QCH_IMAGE_TAG` 检查两个应用镜像及 PostgreSQL 镜像；`local` 模式仍会重新构建。外部模式更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，先等待控制面完成迁移，再启动前端；失败时尝试恢复旧 Compose 与镜像。数据库启动预算默认 5 分钟，安装器每阶段就绪等待默认 360 秒，详见[数据库迁移与更新健康检查](docs/postgres-upgrade-readiness.md)。更新前仍须备份数据库；应用镜像回滚不等于数据库降级。
+## 更新
 
-### Agent 接入
+重新运行安装命令并选择“更新”，或在安装目录执行：
 
-控制面可用后，在 Web 控制台为目标节点生成添加命令，并在受控 Linux 节点执行。安装器使用 POSIX `sh`，会下载受凭据保护的 Agent 与配套资源、写入受限环境文件，并且只安装 systemd `qagent.service` 或 Alpine OpenRC `qagent`。四个内核的配置和 `qagent-*` 服务不会在接入节点时预创建；从面板明确安装某个内核时，Agent 才按需创建该内核的最小配置和专用服务。
+```sh
+bash deploy/quick-start.sh -o update
+```
 
-Alpine 会自动安装 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，使用 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 和 default runlevel。没有 `sudo` 的 Alpine 主机应先切换为 root，再执行控制台生成的同一条 `sh` 命令。Alpine 上的 Shadowsocks Rust 版本切换会选择官方 musl 资产。
+更新前备份数据库、`.env` 和 `.secrets/`。更新保留配置和数据；未变化的镜像跳过重建。数据库迁移后的恢复要求见[部署与维护](docs/deployment.md#更新与备份)。
 
-一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。Agent 启动时还可识别 systemd 下由 `install-ss-rust` 安装的 SS Rust，保留多端口及出站 ACL。现有配置不会在注册时自动切换服务，管理员可在“配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务。无法精确识别时，安装器保留原服务并继续接入 QAgent，面板只禁用该内核的远程任务，不影响节点管理和其他内核。
+## 节点接入
 
-手工部署可运行 `sudo sh deploy/bootstrap-core-services.sh <内核>`，其中内核是 `mihomo`、`xray`、`sing-box` 或 `shadowsocks-rust`；省略参数仍可一次准备全部四个。脚本创建非 root 的 `qcontrolhub-core` 用户、所选 `qagent-*` 服务和只在缺失时写入的最小回环配置，不会迁移通用服务或覆盖已有配置。
+登录 Web 控制台，在节点管理中生成添加命令，并在目标 Linux 节点以 root 执行。安装器支持 systemd 和 Alpine OpenRC，接入后从面板安装所需内核。
 
-Agent 以高权限 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。systemd unit 提供更强的文件系统沙箱；OpenRC 没有同等级的 `ProtectSystem` 隔离，应只在专用节点使用。
+Agent 会执行配置、服务和流量规则操作。共享、配置部署及日常操作见[使用指南](docs/usage.md)。
 
-## 开发与验证
+## 文档
 
-无需 Docker 即可在本地预览部署脚本的菜单、更新检查和完成页面；输出使用示例数据，不执行部署或修改配置：
-
-~~~bash
-bash scripts/preview-quick-start.sh all
-COLUMNS=40 NO_COLOR=1 bash scripts/preview-quick-start.sh update
-~~~
-
-省略参数只显示管理菜单，也可指定 menu、mode、update、unchanged 或 result。终端输出支持颜色，重定向日志、TERM=dumb 或设置非空 NO_COLOR 时自动使用纯文本。
-
-| 命令 | 用途 |
+| 文档 | 内容 |
 | --- | --- |
-| `make build` | 构建 `bin/qcontrol-plane` 和 `bin/qagent` |
-| `make test` | 运行 Go 测试 |
-| `make check` | 检查 gofmt，运行前端模块 smoke、`go vet ./...` 和 `go test ./...` |
-| `make compose-config` | 校验 Compose 渲染结果；需要先初始化 `.env` |
-
-开发环境需要 Go、Node.js 和 PostgreSQL 测试库（`QCH_TEST_DATABASE_URL`）。
-
-多用户权限矩阵、已复现缺陷、并发 / 升级 / 浏览器回归和截图见 [多用户排查与回归记录](docs/multi-user-regression.md)。
+| [部署与维护](docs/deployment.md) | 安装、HTTPS、环境配置、更新、备份与故障定位 |
+| [使用指南](docs/usage.md) | 配置、节点共享、流量、证书与日志 |
+| [协议与客户端](docs/protocols.md) | sing-box 预设、Xray XHTTP、TLS 与导出限制 |
+| [只读 API](docs/api.md) | API Key、接口、分页与诊断示例 |
+| [开发指南](docs/development.md) | 本地开发、生成文件和验证命令 |
 
 ## License
 
-QControlHub 依据 [GNU General Public License version 3](LICENSE) 发布，SPDX 标识为 `GPL-3.0-only`。
+依据 [GNU General Public License version 3](LICENSE) 发布，SPDX：`GPL-3.0-only`。相关来源与归属见[协议与客户端](docs/protocols.md#来源与许可)。

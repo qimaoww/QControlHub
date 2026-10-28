@@ -1,5 +1,0 @@
-=== RUN   TestCertificatePairAtomicSwitchIsolationAndRollback
-    panel_certificates_linux_test.go:116: Real protected paths: root:service 0750/0640, non-root read, independent instance copies, immutable versions, paired config rollback, mismatch/symlink rejection
---- PASS: TestCertificatePairAtomicSwitchIsolationAndRollback (0.01s)
-PASS
-ok  	github.com/qimaoww/qcontrolhub/internal/agent	2.609s

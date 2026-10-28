@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 			collector.failImportedSingBoxSource("transition-state-invalid")
 			return errors.New("managed sing-box configuration disappeared during source transition")
 		}
+		collector.clearMissingSingBoxInstallation()
 		collector.replaceImportedSingBoxSource(nil)
 		return nil
 	}
@@ -42,13 +44,31 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, binaryErr := os.Lstat(spec.Binary); errors.Is(binaryErr, os.ErrNotExist) {
+				collector.clearMissingSingBoxInstallation()
 				collector.replaceImportedSingBoxSource(nil)
 				return nil
 			}
+			known, historyErr := collector.singBoxConfigurationKnown(executor, spec)
+			if historyErr != nil {
+				collector.failImportedSingBoxSource("config-state-unavailable")
+				return historyErr
+			}
+			if known || succeeded != nil {
+				collector.mu.Lock()
+				collector.missingSingBoxConfig = true
+				collector.mu.Unlock()
+				collector.failImportedSingBoxSource(core.CoreLogErrorConfigMissing)
+				return fmt.Errorf("previously configured sing-box configuration is missing: %w", err)
+			}
+			collector.markImportedSingBoxSourceNotConfigured()
+			return nil
 		}
 		collector.failImportedSingBoxSource("config-unavailable")
 		return err
 	}
+	collector.mu.Lock()
+	collector.missingSingBoxConfig = false
+	collector.mu.Unlock()
 	file, _, err := openProtectedCoreMigrationFile(spec.ConfigPath, info, core.MaxConfigBytes)
 	if err != nil {
 		collector.failImportedSingBoxSource("config-unsafe")
@@ -86,6 +106,9 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 		collector.failImportedSingBoxSource("config-invalid")
 		return err
 	}
+	if err := collector.rememberSingBoxConfiguration(executor, spec); err != nil {
+		slog.Warn("persist managed sing-box configuration history", "error", err)
+	}
 	if destination != singBoxLogDestinationFile {
 		if transition != nil {
 			collector.completeImportedSingBoxSource(nil)
@@ -106,7 +129,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 		return err
 	}
 	source := coreLogFileSource{
-		path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "file",
+		path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "file", service: spec.Service,
 		configPath: spec.ConfigPath, configDigest: configDigest, markerPrefix: executor.MigrationMarkerPrefix,
 		executor: executor, ownership: ownership,
 	}
@@ -300,18 +323,18 @@ func (collector *CoreLogCollector) waitAndRestoreFileSource(run *coreLogFileRun,
 func (collector *CoreLogCollector) waitForConsoleSource(ctx context.Context, engine core.Engine) error {
 	collector.mu.Lock()
 	ready := collector.sourceReady[engine]
-	kind := collector.consoleKind[engine]
+	kind, status, armed := collector.consoleSourceLocked(engine)
 	if kind == "" {
 		collector.mu.Unlock()
 		return fmt.Errorf("managed %s log source is unsupported", engine)
 	}
-	if ready == nil {
-		status := collector.kindStatus[engine][kind]
+	if armed {
 		collector.mu.Unlock()
-		if status.Status == "failed" {
-			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
-		}
 		return nil
+	}
+	if ready == nil {
+		collector.mu.Unlock()
+		return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
 	}
 	collector.mu.Unlock()
 	waitContext, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -319,16 +342,19 @@ func (collector *CoreLogCollector) waitForConsoleSource(ctx context.Context, eng
 	select {
 	case <-ready:
 		collector.mu.Lock()
-		status := collector.kindStatus[engine][kind]
+		_, status, armed := collector.consoleSourceLocked(engine)
 		collector.mu.Unlock()
-		if status.Status == "failed" {
+		if !armed {
 			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
 		}
 		return nil
 	case <-waitContext.Done():
 		collector.mu.Lock()
-		status := collector.kindStatus[engine][kind]
+		_, status, armed := collector.consoleSourceLocked(engine)
 		collector.mu.Unlock()
+		if armed {
+			return nil
+		}
 		if status.Status == "failed" {
 			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
 		}
@@ -388,12 +414,28 @@ func (collector *CoreLogCollector) importedSourceEpochLocked(source coreLogFileS
 
 func (collector *CoreLogCollector) selectConsoleSource(engine core.Engine) {
 	collector.mu.Lock()
-	kind := collector.consoleKind[engine]
-	collector.mu.Unlock()
+	defer collector.mu.Unlock()
+	kind, status, _ := collector.consoleSourceLocked(engine)
 	if kind == "" {
 		kind = "journal"
 	}
-	collector.selectSourceKind(engine, kind, CoreLogSourceStatus{Status: "waiting", Error: "collector-starting"})
+	if status.Status == "" {
+		status = CoreLogSourceStatus{Status: core.CoreLogStatusWaiting, Error: "collector-starting", Source: kind}
+	}
+	collector.preferredKind[engine] = kind
+	collector.status[engine] = status
+	collector.statusKind[engine] = kind
+}
+
+// markImportedSingBoxSourceNotConfigured reports an installed kernel with no
+// managed configuration. The file transport is named because that is where the
+// managed sing-box logs would live, and any previous error is replaced.
+func (collector *CoreLogCollector) markImportedSingBoxSourceNotConfigured() {
+	collector.mu.Lock()
+	delete(collector.transitions, core.EngineSingBox)
+	collector.mu.Unlock()
+	collector.replaceImportedSingBoxSource(nil)
+	collector.selectSourceStatus(core.EngineSingBox, core.CoreLogSourceFile, core.CoreLogStatusNotConfigured, core.CoreLogErrorConfigMissing)
 }
 
 func (collector *CoreLogCollector) failImportedSingBoxSource(code string) {

@@ -214,6 +214,12 @@ export function bindCardMove({ grid, selector, gripSelector, cardInteractions, s
   });
   on(grid, "pointerdown", event => {
     if (event.button !== 0 || !event.isPrimary || drag || cards().length < 2) return;
+    // A dialog keeps its DOM position inside the card it belongs to, so its
+    // presses still bubble here. Leave the top layer, and any inert layer such
+    // as a retired dialog or the drag preview, to native behaviour: no gesture,
+    // no pointer capture and no preventDefault, which keeps text selection,
+    // control focus, scrolling and backdrop dismissal intact.
+    if (event.target.closest("dialog,[inert]")) return;
     const card = event.target.closest(selector), handle = event.target.closest(gripSelector);
     if (!card || !grid.contains(card)) return;
     // Touch content remains scrollable. Mouse/pen can also grab non-control

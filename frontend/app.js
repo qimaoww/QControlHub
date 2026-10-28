@@ -253,6 +253,8 @@ async function renderOnce() {
     history.replaceState(null, "", `#live-config${params.size ? `?${params}` : ""}`);
   }
   state.route = routeForHash(hash);
+  // A background refresh must not jump back to the anchor the reader reached.
+  const anchorChanged = state.anchor !== hash;
   state.anchor = hash;
   if (state.route !== previousRoute) {
     resetFeedback();
@@ -345,7 +347,7 @@ async function renderOnce() {
     scheduleRouteWarmup(route);
     if (state.anchor === "new-config")
       document.querySelector("#new-config")?.click();
-    else if (state.anchor && state.anchor !== state.route)
+    else if (anchorChanged && state.anchor && state.anchor !== state.route)
       requestAnimationFrame(() => {
         if (renderSignal.aborted || state.routeSignal !== renderSignal) return;
         document
@@ -391,7 +393,21 @@ function primeRouteTransition() {
   main.classList.add("is-route-pending");
   main.setAttribute("aria-busy", "true");
 }
+// A settings section link only moves inside the rendered page: keep the loaded
+// form, its draft, focus and scroll position instead of reloading the route.
+function focusRenderedSettingsSection() {
+  const hash = location.hash.slice(1);
+  if (!hash || hash === state.anchor) return false;
+  const main = app.querySelector(".workspace-main");
+  const renderedRoute = document.body.className.match(
+    /(?:^|\s)page-([^\s]+)/,
+  )?.[1];
+  if (renderedRoute !== "settings" || !main || main.classList.contains("is-route-pending")) return false;
+  if (routeForHash(hash) !== "settings") return false;
+  return routeModules.peek("settings")?.focusSection?.(hash) === true;
+}
 const render = () => {
+  if (focusRenderedSettingsSection()) return Promise.resolve();
   stopRouteWarmup();
   routeModules.peek("configs")?.capturePresetDrafts();
   routeModules.peek("users")?.captureDraft();

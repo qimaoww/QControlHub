@@ -30,7 +30,7 @@ const assertSharedStatusOrder = (root) => {
   const sharedCard = document.querySelector('.node-card[data-agent-node="alpha"]');
   assertSharedStatusOrder(sharedCard);
   assert.equal(sharedCard.getAttribute("href"), "#settings-node-alpha", "共享节点卡片绕过了节点管理");
-  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点 →");
+  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点");
   assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
   sharedCard.click();
   await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
@@ -65,7 +65,7 @@ const assertSharedStatusOrder = (root) => {
     assert.ok(card.querySelector("[data-core-uninstall]"), "手机自有节点缺少卸载入口");
     assert.ok(actions.scrollWidth <= actions.clientWidth + 1 && card.scrollWidth <= card.clientWidth + 1,
       "手机自有节点内核操作被裁切");
-    for (const selector of [".node-back-link", '[data-node-tab="cores"]', '[data-node-panel="cores"] [data-node-subtab]', ".core-action", '[data-core-uninstall]']) {
+    for (const selector of ['[data-node-tab="cores"]', '[data-node-panel="cores"] [data-node-subtab]', ".core-action", '[data-core-uninstall]']) {
       const targetEl = document.querySelector(selector);
       assert.ok(targetEl && targetEl.getBoundingClientRect().height >= 42, `触屏主要按钮触控高度不足：${selector}`);
     }

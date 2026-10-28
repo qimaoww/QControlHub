@@ -51,6 +51,9 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 			return err
 		}
 		for _, file := range files {
+			if err := validateConfigFragmentPath(file.Path); err != nil {
+				return err
+			}
 			path := filepath.Join(name, file.Path)
 			info, err := root.Lstat(path)
 			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o027 != 0 {
@@ -98,6 +101,9 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 		return err
 	}
 	for _, file := range files {
+		if err := validateConfigFragmentPath(file.Path); err != nil {
+			return err
+		}
 		path := filepath.Join(stage, file.Path)
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
@@ -145,6 +151,16 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 		return fmt.Errorf("publish configuration bundle: %w", err)
 	}
 	return syncRootDirectory(root)
+}
+
+// validateConfigFragmentPath keeps every derived bundle member inside its
+// bundle root even if a future splitter change introduces an absolute or
+// parent-relative segment.
+func validateConfigFragmentPath(path string) error {
+	if !filepath.IsLocal(path) {
+		return fmt.Errorf("unsafe configuration fragment path %q", path)
+	}
+	return nil
 }
 
 func repairBundleMetadata(root *os.Root, path string, directory bool, metadata fileMetadata) error {

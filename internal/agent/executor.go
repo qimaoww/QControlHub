@@ -40,6 +40,7 @@ type Executor struct {
 	Services                 *ServiceManager
 	coreBootstrapper         *coreServiceBootstrapper
 	validationSystemdRunPath string
+	coreStateHelperPath      string
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex
@@ -487,22 +488,37 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return "", err
 		}
-		if err := e.prepareManagedCoreService(ctx, task.Engine, spec, false); err != nil {
-			return "", err
-		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
-			return "", err
-		}
 		_, statErr := os.Lstat(spec.Binary)
 		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 			return "", fmt.Errorf("inspect managed core binary before installation: %w", statErr)
 		}
 		freshInstall := errors.Is(statErr, os.ErrNotExist)
+		if freshInstall {
+			if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
+				status, err := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
+				if err != nil {
+					return "", fmt.Errorf("inspect service before first installation: %w", err)
+				}
+				if status == "active" {
+					return "", fmt.Errorf("service %s is running without its installed binary; restore that binary before updating so rollback remains possible", spec.Service)
+				}
+			}
+			if err := e.prepareManagedCoreService(ctx, task.Engine, spec, false); err != nil {
+				return "", err
+			}
+		} else if err := ensureManagedCoreBinaryAccess(task.Engine, spec, e.serviceManager()); err != nil {
+			return "", err
+		}
+		// Updating an installed core must not bootstrap a missing main config
+		// or restart a working log backend before compatibility is established.
+		// The transaction checks permissions for each configured service; a
+		// shared-only deployment need not have a main service to synchronize.
 		updater := e.Updater
 		if updater == nil {
 			updater = NewCoreUpdater()
 		}
-		output, err := updater.Install(ctx, task.Engine, spec, version, source, e.serviceManager())
+		output, err := updater.installWithTransaction(ctx, task.Engine, spec, version, source, e.serviceManager(), true,
+			managedCoreUpdateTransaction(e, task.Engine, spec, e.serviceManager()))
 		if err != nil {
 			return output, err
 		}

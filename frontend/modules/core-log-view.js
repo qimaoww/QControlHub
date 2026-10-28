@@ -2,11 +2,11 @@ import { coreLogScopeKey } from "./core-log-scope.js";
 import { coreLogFilterLimits } from "./core-log-preferences.js";
 import { redactDiagnostic } from "./errors.js";
 import { levelName, storagePolicyName } from "./core-log-model.js";
-import { coreLogSourceStatus } from "./core-log-source-status.js";
+import { coreLogGuardStatus, coreLogInstanceName, coreLogSourceStatus } from "./core-log-source-status.js";
 import { createCoreLogProjection } from "./core-log-projection.js";
 import { createCoreLogDOM } from "./core-log-dom.js";
 export function createCoreLogView(ctx) {
-  const { state, engines, can, esc, engineName, date } = ctx;
+  const { state, engines, can, esc, engineName, date, now = Date.now } = ctx;
   const project = createCoreLogProjection(engines);
   const render = createCoreLogDOM(ctx);
   const rowMarkup = new WeakMap();
@@ -16,7 +16,7 @@ export function createCoreLogView(ctx) {
     const instances = [...new Map(available.map(source => [source.instance_id, source])).values()];
     const selectedSources = available.filter(source => !filters.instance_id || source.instance_id === filters.instance_id);
     const allowedEngines = engines.filter(engine => selectedSources.some(source => source.engine === engine));
-    const instanceName = source => source.instance_id === "main" ? "主实例" : `${source.username} · ${source.instance_id}`;
+    const instanceName = coreLogInstanceName;
     const option = (value, label, selected) => `<option value="${esc(value)}" ${value === (selected || "") ? "selected" : ""}>${esc(label)}</option>`;
     const scopeFilters = `<label class="core-log-scope-filter">节点<select name="agent_id" aria-label="日志节点">${option("", "全部授权节点", filters.agent_id)}${agents.map(agent => option(agent.id, agent.name, filters.agent_id)).join("")}</select></label><label class="core-log-scope-filter">使用用户 / 实例<select name="instance_id" aria-label="使用用户 / 实例">${option("", "全部授权实例", filters.instance_id)}${instances.map(source => option(source.instance_id, instanceName(source), filters.instance_id)).join("")}</select></label>`;
     const { entries, counts } = project(sourceEntries, filters);
@@ -26,26 +26,43 @@ export function createCoreLogView(ctx) {
     state.data.coreLogDataScope = coreLogScopeKey(filters);
     const agentsByID = new Map(agents.map((agent) => [agent.id, agent]));
     const selectedAgent = agentsByID.get(filters.agent_id || "");
-    let { emptyTitle, emptyDetail, sourceNoticeTitle, sourceNoticeDetail } = coreLogSourceStatus(selectedAgent, filters, can);
     const relevant = selectedSources.filter(source => !filters.engine || source.engine === filters.engine);
-    const failing = relevant.find(source => source.status === "failed");
-    const unsupported = relevant.some(source => source.status === "unsupported");
-    const waiting = relevant.some(source => ["waiting", "pending"].includes(source.status));
-    const statusUnavailable = relevant.some(source => source.status === "status-unavailable");
-    const notInstalled = relevant.length && relevant.every(source => source.status === "not-installed");
-    const offline = relevant.some(source => source.status === "offline");
-    if (sources.length) {
-      emptyTitle = filters.q || filters.level ? "没有匹配日志" : filters.agent_id || filters.instance_id || filters.engine ? "当前实例尚未产生日志" : "暂无日志";
-      emptyDetail = filters.agent_id || filters.instance_id || filters.engine ? "采集正常，等待新的日志。" : "";
-      sourceNoticeTitle = ""; sourceNoticeDetail = "";
-      if (failing) { emptyTitle = "日志采集失败"; emptyDetail = `来源读取失败（${failing.error || "collector-failed"}），请检查 Agent 诊断日志。`; }
-      else if (unsupported) { emptyTitle = "Agent 功能不足"; emptyDetail = "请升级 Agent 以采集并区分共享实例日志。"; }
-      else if (offline) { emptyTitle = "节点离线"; emptyDetail = "采集已暂停，可查看保留期内的历史日志。"; }
-      else if (statusUnavailable) { emptyTitle = "日志状态能力不可用"; emptyDetail = "此 Agent 无法核验来源状态，请升级 Agent。"; }
-      else if (notInstalled) { emptyTitle = "内核尚未安装"; emptyDetail = "安装后可采集此实例的日志。"; }
-      else if (waiting) { emptyTitle = "日志采集等待中"; emptyDetail = "等待实例日志来源或 Agent 上报采集状态。"; }
-      if (failing || unsupported || waiting || offline || statusUnavailable || notInstalled) {sourceNoticeTitle = emptyTitle; sourceNoticeDetail = emptyDetail;}
-    } else if (state.data.coreLogPhase !== "loading") {emptyTitle = "没有获授权的日志实例"; emptyDetail = "当前账号无可访问的节点或实例。";}
+    const guard = coreLogGuardStatus(selectedAgent, filters, can);
+    const scopeStatus = coreLogSourceStatus(relevant, {
+      now: now(), engineName, filtered: Boolean(filters.q || filters.level),
+    });
+    let emptyTitle = "";
+    let emptyDetail = "";
+    let sourceNoticeTitle = "";
+    let sourceNoticeDetail = "";
+    // The source directory reports collection per node/engine/instance, so its
+    // scoped states speak for the page; agent-level guards only answer what no
+    // source row can (missing grants or an unknown node).
+    if (!sources.length) {
+      emptyTitle = guard.title;
+      emptyDetail = guard.detail;
+      sourceNoticeTitle = guard.title;
+      sourceNoticeDetail = guard.detail;
+      if (!guard.title && state.data.coreLogPhase !== "loading") {
+        emptyTitle = "没有获授权的日志实例";
+        emptyDetail = "当前账号无可访问的节点或实例。";
+      }
+    } else if (filters.agent_id && !selectedAgent) {
+      emptyTitle = guard.title || "节点状态不可用";
+      emptyDetail = guard.detail || "无法读取所选节点状态；历史日志仍可查看。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else {
+      emptyTitle = scopeStatus.emptyTitle || (filters.agent_id || filters.instance_id || filters.engine ? "当前实例尚未产生日志" : "暂无日志");
+      emptyDetail = scopeStatus.emptyDetail;
+      sourceNoticeTitle = scopeStatus.noticeTitle;
+      sourceNoticeDetail = scopeStatus.noticeDetail;
+    }
+    if (!entries.length && (filters.q || filters.level) &&
+        sourceEntries.some(entry => !filters.engine || entry.engine === filters.engine)) {
+      emptyTitle = "没有匹配日志";
+      emptyDetail = sourceNoticeDetail || emptyDetail;
+    }
     const pageSize = 200;
     const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
     const scope = JSON.stringify([filters.agent_id || "", filters.instance_id || "", filters.engine || "", filters.level || "", filters.q || "", filters.limit || 1000]);
@@ -124,9 +141,12 @@ export function createCoreLogView(ctx) {
           Number.isInteger(retentionDays) && retentionDays > 0 ? `保留 ${retentionDays} 天` : "",
         ].filter(Boolean).join(" · ")
       : "保存策略不可见";
+    // Show the selected scope's transport and newest delivery only when the
+    // source reported them; missing fields add nothing.
+    const statusMeta = scopeStatus.meta ? ` · ${esc(scopeStatus.meta)}` : "";
     const header = `<header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header>`;
     const filtersMarkup = `<section class="core-log-filters" id="core-log-filters" aria-label="日志筛选">${scopeFilters}<div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容" autocomplete="off"></label><label class="core-log-limit" title="每种内核分别取最新日志，不共用总条数上限">每内核上限<select name="limit">${coreLogFilterLimits.map((limit) => `<option value="${limit}" ${Number(filters.limit || 1000) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section>`;
-    const status = `<div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果 · 已加载 ${sourceEntries.length} 条${entries.length > pageSize ? ` · 每页 ${pageSize} 条` : ""}</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${refreshLabel}</span></span><span>${esc(storagePolicy)}</span></span></div>`;
+    const status = `<div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果 · 已加载 ${sourceEntries.length} 条${entries.length > pageSize ? ` · 每页 ${pageSize} 条` : ""}${statusMeta}</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${refreshLabel}</span></span><span>${esc(storagePolicy)}</span></span></div>`;
     const toolbar = `<div class="core-log-result-toolbar"><span data-motion-region="core-log-results" data-motion-key="${esc(JSON.stringify([scope, page]))}" data-motion-live data-motion-ready="${!["loading", "preview", "cached"].includes(phase)}">${entries.length ? `当前 ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, entries.length)} 条` : ""}</span>${pagination}</div>`;
     const stream = `<section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll data-refresh-key="core-log-results" data-motion-key="${esc(JSON.stringify([scope, page]))}"><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong>${emptyDetail ? `<span>${esc(emptyDetail)}</span>` : ""}</div>`}</section>`;
     const footer = `<footer class="core-log-result-footer"${pagination ? "" : " hidden"}>${pagination}</footer>`;

@@ -277,6 +277,68 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
     assert.equal(document.querySelector(".card-move-layer"), null, "settled movement removes its viewport layer");
   }
 
+  // A card's own dialog stays a DOM child of the card, so its presses still
+  // bubble to the grid. They must remain native: no preview, no drop slot, no
+  // saved order, and no preventDefault that would swallow text selection or a
+  // dialog control. Presses on the card surface outside the dialog must still
+  // arm the drag controller, which is covered right after the dialogs close.
+  grid = document.querySelector(".traffic-policy-grid");
+  const dialogBefore = keys(), dialogSaved = accountStorage.getItem("qcontrolhub:traffic-card-order");
+  for (const [name, opener, openSelector, closer] of [
+    ["quota", "[data-traffic-edit-open]", "[data-traffic-edit-dialog][open]", "[data-traffic-edit-close]"],
+    ["status", "[data-traffic-status-open]", "[data-traffic-status-dialog][open]", "[data-traffic-status-close]"],
+  ]) {
+    const launcher = grid.querySelector(opener);
+    assert.ok(launcher, `${name} dialog launcher missing from the traffic fixture`);
+    launcher.click();
+    const dialog = await waitFor(() => document.querySelector(openSelector), `${name} dialog did not open`);
+    assert.ok(dialog.closest("[data-traffic-card-key]"), `${name} dialog must stay inside its card`);
+    const frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await frames();
+    for (const animation of dialog.getAnimations()) animation.finish();
+    await frames();
+    const heading = dialog.querySelector("header h2").getBoundingClientRect();
+    assert.ok(heading.width > 20 && heading.height > 8, `${name} dialog header must be painted`);
+    const press = { x: heading.left + 4, y: heading.top + heading.height / 2 }, presses = [];
+    const record = event => { if (event.target.closest("dialog")) presses.push(event.defaultPrevented); };
+    document.addEventListener("pointerdown", record);
+    try {
+      await gesture(press, [{ x: press.x + 40, y: press.y + 2 }], "drop", async () => {
+        assert.equal(document.querySelector(".card-move-ghost"), null, `${name} dialog press cannot pick up a card`);
+        assert.equal(grid.querySelector(".drop-target"), null, `${name} dialog press cannot claim a drop slot`);
+      });
+    } finally { document.removeEventListener("pointerdown", record); }
+    assert.ok(presses.length && presses.every(prevented => prevented === false), `${name} dialog press keeps native selection and focus`);
+    equalOrder(keys(), dialogBefore, `${name} dialog press cannot change the card order`);
+    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), dialogSaved, `${name} dialog press cannot save a card order`);
+    assert.equal(document.body.classList.contains("card-moving"), false, `${name} dialog press cannot start a drag state`);
+    dialog.querySelector(closer).click();
+    await waitFor(() => !document.querySelector(openSelector), `${name} dialog did not close`);
+  }
+  // Mouse/pen presses on the card surface still arm the controller, so the
+  // dialog exclusion is scoped to dialogs and pointer ordering keeps working.
+  if (!mobile) {
+    const dialogCard = grid.querySelector("[data-traffic-edit-dialog]")?.closest("[data-traffic-card-key]");
+    assert.ok(dialogCard, "the quota dialog must belong to a traffic card");
+    dialogCard.scrollIntoView({ block: "center", behavior: "instant" });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const facts = dialogCard.querySelector(".traffic-card-facts")?.getBoundingClientRect();
+    assert.ok(facts && facts.width > 24, "the dialog card must paint its facts block");
+    const surface = { x: facts.left + 12, y: facts.top + Math.min(facts.height / 2, 20) }, surfacePresses = [];
+    // The controller stops propagation while it arms, so keep the native event
+    // and read defaultPrevented after dispatch.
+    const capture = { capture: true }, recordArm = event => surfacePresses.push(event);
+    document.addEventListener("pointerdown", recordArm, capture);
+    try {
+      await gesture(surface, [surface], "drop", async () => {
+        assert.equal(document.querySelector(".card-move-ghost"), null, "a below-threshold card press cannot pick up a card");
+      });
+    } finally { document.removeEventListener("pointerdown", recordArm, capture); }
+    assert.ok(surfacePresses.some(event => event.defaultPrevented), "card surface presses still belong to the drag controller");
+    equalOrder(keys(), dialogBefore, "a below-threshold card press cannot change the card order");
+    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), dialogSaved, "a below-threshold card press cannot save a card order");
+  }
+
   grid = await route("#node-settings", ".node-card-grid");
   const grip = grid.querySelector(".node-card-grip"), card = grip.closest(".node-card");
   const scroller = mobile ? document.scrollingElement : document.querySelector(".workspace-main");
@@ -300,5 +362,5 @@ export async function testCardMoveRuntime({ mode, testAPI }, preview) {
   assert.equal(document.querySelector(".card-move-layer"), null, "route exit must remove the viewport layer");
   assert.equal(document.body.classList.contains("card-moving"), false);
   assert.equal(JSON.stringify(JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order"))), beforeLeave, "route exit cannot commit an unfinished drag");
-  window.cardMovementResult = `${mobile ? "touch" : "mouse"}; light+dark; ${reduced ? "reduced" : "full"} motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/edge/leave`;
+  window.cardMovementResult = `${mobile ? "touch" : "mouse"}; light+dark; ${reduced ? "reduced" : "full"} motion; threshold/reversal/polling/keyboard/cancel/failure/reload/filter/dialog/edge/leave`;
 }

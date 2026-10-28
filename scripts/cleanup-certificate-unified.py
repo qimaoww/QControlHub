@@ -2,7 +2,7 @@
 """Remove only this task's retained fixtures after the recorded 72-hour hold.
 
 Install a root-owned copy and manifest under ROOT, and invoke it from the
-persistent systemd timer described in docs/certificate-unified/README.md.
+persistent systemd timer registered for this fixture.
 --check validates identities and scope without stopping/removing resources.
 """
 import datetime

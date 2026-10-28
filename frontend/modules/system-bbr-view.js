@@ -13,7 +13,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
 
   function dialogButton(agent, kind) {
     const shortTitle = kind === "editor" ? "编辑参数" : "参数详情";
-    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-label="${shortTitle} · ${esc(agent.name)}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${shortTitle}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
+    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-label="${shortTitle} · ${esc(agent.name)}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${shortTitle}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有草稿</small>` : ""}</span></button>`;
   }
 
   function editor(agent, disabled) {
@@ -86,7 +86,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
           ${status.qdisc_error ? `<p class="bbr-note">${esc(diagnosticError(status.qdisc_error))}</p>` : ""}
         </div><footer class="bbr-dialog-footer"><small>参数采集：${status.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small><button class="button small" type="button" data-bbr-dialog-close>关闭</button></footer>`)}` : `<div class="empty bbr-empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "升级 Agent 后可管理 TCP 参数"}</strong></div>`}
         ${editor(agent, disabled)}
-        ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录 →</a>` : ""}${task.error ? `<p>${esc(diagnosticError(task.error))}</p>` : ""}</div>` : ""}
+        ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录</a>` : ""}${task.error ? `<p>${esc(diagnosticError(task.error))}</p>` : ""}</div>` : ""}
         <footer>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${disabledReason ? `title="${esc(disabledReason)}" data-disabled-reason="${esc(disabledReason)}"` : ""} ${presetDisabled ? "disabled" : ""}>切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${disabledReason ? `title="${esc(disabledReason)}" data-disabled-reason="${esc(disabledReason)}"` : ""} ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");

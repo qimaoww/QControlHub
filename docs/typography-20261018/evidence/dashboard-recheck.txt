@@ -1,5 +1,0 @@
-browser workers=1, CPUs=12, memory=20001MiB, modes=1
-browser timing {"mode":"dashboard-mobile","startupMs":130.914782,"testMs":8053.7983699999995,"cleanupMs":59.23226000000068,"passed":true,"elapsedMs":8243.962028}
-agents browser runtime smoke passed
-browser suite elapsed=8.295s
-agents browser runtime smoke passed

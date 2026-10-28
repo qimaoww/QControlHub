@@ -120,12 +120,15 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 	ctx := context.WithValue(r.Context(), validatedSessionKey{}, v)
 	ctx = context.WithValue(ctx, apiKeyContextKey{}, k)
 	r = r.WithContext(store.WithConfigScope(ctx, k.OwnerID, true))
-	s.adminLimiter.Success(ip)
 	if !core.IPAllowed(k.IPAllowlist, ip) {
 		s.recordAudit(r, "api_key.request", k.ID, "IP allowlist denied: 403 "+r.Method+" "+r.Pattern)
 		writeError(w, 403, "来源 IP 不在 API Key 白名单内")
 		return r, false
 	}
+	// Reset failures only after every credential check has passed. A valid key
+	// from a denied source must not clear the shared IP failure counter that
+	// throttles other authentication paths.
+	s.adminLimiter.Success(ip)
 	return r, true
 }
 
