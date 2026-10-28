@@ -1,0 +1,112 @@
+import { assert } from "./assertions.mjs";
+import { createCoreLogView } from "../modules/core-log-view.js";
+import { createCoreLogBindings } from "../modules/core-log-bindings.js";
+
+// Render the production toolbar before app startup, with isolated synthetic
+// sources and records. No network, account preferences or live data are used.
+export async function testCoreLogFilterLayout() {
+  const app = document.querySelector("#app");
+  const root = document.createElement("main");
+  root.className = "workspace-main";
+  root.style.fontSize = "var(--text-body)";
+  app.replaceChildren(root);
+  const bodyClass = document.body.className;
+  const theme = document.documentElement.getAttribute("data-theme");
+  document.body.className = "app-body page-core-logs";
+  const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
+  const names = { mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS Rust" };
+  const agent = { id: "fixture", name: "Fixture", status: "online" };
+  const state = { route: "core-logs", data: { coreLogAutoRefresh: false, coreLogPhase: "ready", coreLogFilters: {} } };
+  const ctx = {
+    state, engines, can: () => false, esc: String, engineName: engine => names[engine], date: String,
+    shell: markup => { root.innerHTML = markup; },
+  };
+  const view = createCoreLogView(ctx);
+  const render = () => {
+    view(state.data.coreLogEntries || [], [agent], state.data.coreLogFilters);
+    bind(state.data.coreLogFilters);
+  };
+  const bind = createCoreLogBindings(ctx, {
+    renderCoreLogs: render, rememberSelection() {},
+    coreLogs() { assert.fail("local filters must not fetch"); }, poller: { start() {}, stop() {} },
+  });
+  const sources = available => {
+    state.data.coreLogSources = available.map(engine => ({ agent_id: agent.id, instance_id: "main", engine, status: "active" }));
+  };
+  const records = counts => {
+    state.data.coreLogEntries = engines.flatMap((engine, index) => Array.from({ length: counts[index] }, (_, row) => ({
+      id: index * 10000 + row, agent_id: agent.id, instance_id: "main", engine, level: "info",
+      message: "Synthetic layout fixture", logged_at: "2026-10-28T00:00:00Z",
+    })));
+    render();
+  };
+  const buttons = () => [...root.querySelectorAll("[data-core-log-engine]")];
+  const boxes = () => buttons().map(button => {
+    const { x, y, width, height } = button.getBoundingClientRect();
+    return [x, y, width, height];
+  });
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  try {
+    sources(engines);
+    records([317, 6, 11, 1000]);
+    assert.equal(buttons().map(button => button.querySelector("b").textContent).join(","), "1334,317,6,11,1000");
+    for (const color of ["light", "dark"]) {
+      document.documentElement.dataset.theme = color;
+      for (const scale of [1, 1.5]) {
+        root.style.setProperty("--ui-font-scale", scale);
+        for (const width of [320, 390, 540, 680, 960]) {
+          root.style.width = `${Math.min(width, innerWidth)}px`;
+          await frame();
+          const group = root.querySelector(".core-log-engine-filter>div").getBoundingClientRect();
+          const geometry = boxes();
+          for (const [index, button] of buttons().entries()) {
+            const [x, y, w, h] = geometry[index];
+            assert.ok(x >= group.left - 1 && x + w <= group.right + 1, "engine option escapes its container");
+            assert.equal(h, geometry[0][3], "engine option heights differ");
+            const label = button.querySelector("span").getBoundingClientRect();
+            const count = button.querySelector("b").getBoundingClientRect();
+            assert.ok(label.right <= count.left && count.right <= x + w - 1 && label.left >= x, "engine label/count overlap or clip");
+            assert.ok(Math.abs(label.top + label.height / 2 - count.top - count.height / 2) < 1, "label/count alignment differs");
+            if (index && y > geometry[index - 1][1]) assert.ok(Math.abs(x - group.left - 5) < 1, "wrapped row must start at the leading edge");
+          }
+          const toolbar = root.querySelector(".core-log-filters").getBoundingClientRect();
+          for (const control of root.querySelector(".core-log-filters").children) {
+            const rect = control.getBoundingClientRect();
+            assert.ok(rect.left >= toolbar.left && rect.right <= toolbar.right, "neighboring filter overflows");
+          }
+          const selected = buttons()[1];
+          selected.click();
+          selected.focus({ preventScroll: true });
+          const selectedBoxes = boxes();
+          for (const count of [0, 1, 9, 10, 99, 100, 999, 1000]) {
+            const scroll = root.scrollTop;
+            records([0, 0, 0, count]);
+            await frame();
+            assert.equal(document.activeElement, selected, "count updates must preserve the focused button");
+            assert.equal(root.scrollTop, scroll, "count updates must preserve scroll position");
+            assert.equal(state.data.coreLogFilters.engine, "mihomo");
+            assert.equal(selected.getAttribute("aria-pressed"), "true");
+            assert.equal(JSON.stringify(boxes()), JSON.stringify(selectedBoxes), "one-to-four-digit counts must not move or resize controls");
+          }
+          await Promise.all(selected.getAnimations().map(animation => animation.finished.catch(() => {})));
+          assert.match(getComputedStyle(selected).boxShadow, /0px -2px 0px/, "selection needs a persistent shape cue");
+        }
+      }
+    }
+    for (const available of [[], ["xray"], ["xray", "ss-rust"], engines]) {
+      sources(available);
+      state.data.coreLogFilters = {};
+      records([0, 0, 0, 0]);
+      assert.equal(buttons().map(button => button.value).join(","), ["", ...available].join(","), "options must follow authorized sources, including zero counts");
+      buttons().at(-1).click();
+      assert.equal(buttons().filter(button => button.getAttribute("aria-pressed") === "true").length, 1);
+      root.querySelector("[data-reset-core-logs]").click();
+      assert.equal(buttons()[0].getAttribute("aria-pressed"), "true");
+    }
+  } finally {
+    app.replaceChildren();
+    document.body.className = bodyClass;
+    if (theme === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+  }
+}

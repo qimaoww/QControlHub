@@ -63,6 +63,10 @@ try {
     const {testConfigMigrationRuntime} = await import("./config_migration_browser_runtime.mjs");
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
+    if (mode === "logs" || mode === "logs-mobile") {
+      const { testCoreLogFilterLayout } = await import("./browser/core-log-filter-layout.mjs");
+      await testCoreLogFilterLayout();
+    }
     await import("./app.js");
     if (mode === "tasks-preview" && new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
     else if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
