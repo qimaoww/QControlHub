@@ -271,7 +271,7 @@
 /* Keep the existing controls; share tracks within the two toolbar rows. */
 .core-log-filter-fields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));align-items:end;gap:12px;min-width:0}
 .core-log-filter-group>span{line-height:var(--leading-caption)}
-.core-log-filter-tools{display:grid;grid-template-columns:minmax(0,1fr) max(104px,7.5em) auto;align-items:end;gap:12px;min-width:0}
+.core-log-filter-tools{display:grid;grid-template-columns:minmax(0,24em) max(104px,7.5em) max-content;justify-content:start;align-items:end;gap:12px;min-width:0}
 .core-log-filters .core-log-scope-filter{grid-column:span 6}
 .core-log-engine-filter,.core-log-level-filter{grid-column:1/-1}
 .core-log-limit,.core-log-reset{min-width:0;width:auto}

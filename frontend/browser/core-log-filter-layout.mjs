@@ -87,7 +87,9 @@ export async function testCoreLogFilterLayout() {
           const tools = [...root.querySelector(".core-log-filter-tools").children];
           if (workspace.clientWidth > 44 * em) {
             assert.ok(tools.every(tool => Math.abs(tool.getBoundingClientRect().bottom - tools[0].getBoundingClientRect().bottom) < 1), "search, limit and reset must align on one row");
-            assert.ok(tools[0].getBoundingClientRect().width > tools[1].getBoundingClientRect().width && tools[0].getBoundingClientRect().width > tools[2].getBoundingClientRect().width, "search should fill the space beside compact limit/reset controls");
+            assert.ok(tools[0].getBoundingClientRect().width > tools[1].getBoundingClientRect().width && tools[0].getBoundingClientRect().width > tools[2].getBoundingClientRect().width, "search should stay wider than limit/reset controls");
+            assert.ok(tools[0].getBoundingClientRect().width <= 24 * em + 1, "keyword search must stay compact on wide workspaces");
+            assert.ok(tools[1].getBoundingClientRect().left - tools[0].getBoundingClientRect().right <= 13, "limit should remain beside keyword search");
           }
           const selected = buttons()[1];
           selected.click();

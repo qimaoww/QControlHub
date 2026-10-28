@@ -130,7 +130,7 @@ func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
 		`@media(pointer:fine){.app-body.page-core-logs .desktop-app{min-width:0}}`,
 		`.core-log-workspace{min-width:0;container-type:inline-size}`,
 		`.core-log-filter-fields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr))`,
-		`.core-log-filter-tools{display:grid;grid-template-columns:minmax(0,1fr) max(104px,7.5em) auto`,
+		`.core-log-filter-tools{display:grid;grid-template-columns:minmax(0,24em) max(104px,7.5em) max-content`,
 		`.core-log-stream{--core-log-grid:minmax(130px,.85fr)`,
 		`width:100%;max-width:100%;min-width:0`,
 		`@container(max-width:840px){.core-log-columns{display:none}`,
