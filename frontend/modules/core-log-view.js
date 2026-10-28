@@ -18,7 +18,7 @@ export function createCoreLogView(ctx) {
     const allowedEngines = engines.filter(engine => selectedSources.some(source => source.engine === engine));
     const instanceName = coreLogInstanceName;
     const option = (value, label, selected) => `<option value="${esc(value)}" ${value === (selected || "") ? "selected" : ""}>${esc(label)}</option>`;
-    const scopeFilters = `<label class="core-log-scope-filter">节点<select name="agent_id" aria-label="日志节点">${option("", "全部授权节点", filters.agent_id)}${agents.map(agent => option(agent.id, agent.name, filters.agent_id)).join("")}</select></label><label class="core-log-scope-filter">使用用户 / 实例<select name="instance_id" aria-label="使用用户 / 实例">${option("", "全部授权实例", filters.instance_id)}${instances.map(source => option(source.instance_id, instanceName(source), filters.instance_id)).join("")}</select></label>`;
+    const scopeFilters = `<label class="core-log-scope-filter">使用用户 / 实例<select name="instance_id" aria-label="使用用户 / 实例">${option("", "全部授权实例", filters.instance_id)}${instances.map(source => option(source.instance_id, instanceName(source), filters.instance_id)).join("")}</select></label>`;
     const { entries, counts } = project(sourceEntries, filters);
     state.data.coreLogEntries = sourceEntries;
     state.data.coreLogs = entries;

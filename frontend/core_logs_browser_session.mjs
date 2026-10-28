@@ -144,8 +144,8 @@ try {
   }
   const choose=async(page,field,value)=>evaluate(page,`(()=>{const select=document.querySelector('#core-log-filters select[name=${field}]');select.value=${JSON.stringify(value)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   const rows=page=>evaluate(page,"[...document.querySelectorAll('.core-log-row pre')].map(el=>el.textContent)");
-  await choose(a,"agent_id",host);
-  await wait(a,`document.querySelector('#core-log-filters select[name=agent_id]').value===${JSON.stringify(host)} && [...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].length===2 && document.querySelector('.core-log-row')`);
+  await evaluate(a,`document.querySelector('[data-core-log-agent="${host}"]').click()`);
+  await wait(a,`document.querySelector('[data-core-log-agent="${host}"]').classList.contains('active') && [...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].length===2 && document.querySelector('.core-log-row')`);
   assert.deepEqual(await evaluate(a,"[...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].map(option=>option.value)"),["",shareA]);
   assert.ok((await rows(a)).every(message=>message.startsWith("alice")));
   await screenshot(a,"ordinary-authorized");

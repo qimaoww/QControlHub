@@ -272,7 +272,7 @@
 .core-log-filter-fields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));align-items:end;gap:12px;min-width:0}
 .core-log-filter-group>span{line-height:var(--leading-caption)}
 .core-log-filter-tools{display:grid;grid-template-columns:minmax(0,24em) max(104px,7.5em) max-content;justify-content:start;align-items:end;gap:12px;min-width:0}
-.core-log-filters .core-log-scope-filter{grid-column:span 6}
+.core-log-filters .core-log-scope-filter{grid-column:1/-1}
 .core-log-engine-filter,.core-log-level-filter{grid-column:1/-1}
 .core-log-limit,.core-log-reset{min-width:0;width:auto}
 .core-log-reset{justify-self:stretch}
@@ -280,8 +280,8 @@
 @media(hover:hover) and (pointer:fine){.core-log-engine-filter button:hover{background:var(--surface-3)}}
 .core-log-engine-filter button:active{background:var(--accent-soft)}
 @media(pointer:coarse){.core-log-filters .core-log-filter-group button{min-height:44px}.core-log-filters .core-log-scope-filter select{min-height:54px}}
-@container(min-width:84em){.core-log-engine-filter{grid-column:span 8}.core-log-level-filter{grid-column:span 4}}
-@container(min-width:112em){.core-log-filters .core-log-scope-filter{grid-column:span 2}.core-log-engine-filter{grid-column:span 5}.core-log-level-filter{grid-column:span 3}}
+@container(min-width:84em){.core-log-engine-filter{grid-column:1/span 8}.core-log-level-filter{grid-column:9/span 4}}
+@container(min-width:112em){.core-log-filters .core-log-scope-filter{grid-column:1/span 3}.core-log-engine-filter{grid-column:4/span 6}.core-log-level-filter{grid-column:10/span 3}}
 @container(max-width:44em){
   .core-log-filters .core-log-scope-filter{grid-column:1/-1}
   .core-log-filter-tools{grid-template-columns:repeat(2,minmax(0,1fr))}

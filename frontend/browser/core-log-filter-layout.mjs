@@ -66,6 +66,8 @@ export async function testCoreLogFilterLayout() {
         for (const width of [320, 390, 540, 680, 960, 1280, 1680]) {
           root.style.width = `${width}px`;
           await frame();
+          assert.equal(root.querySelector('#core-log-filters select[name="agent_id"]'), null, "the workspace must not duplicate the sidebar node selector");
+          assert.ok(root.querySelector('#core-log-filters select[name="instance_id"]'), "the workspace keeps the user/instance selector");
           const group = root.querySelector(".core-log-engine-filter>div").getBoundingClientRect();
           const geometry = boxes();
           for (const [index, button] of buttons().entries()) {
@@ -94,9 +96,10 @@ export async function testCoreLogFilterLayout() {
           const em = parseFloat(getComputedStyle(workspace).fontSize);
           const fields = [...root.querySelector(".core-log-filter-fields").children];
           if (workspace.clientWidth >= 112 * em) {
-            assert.ok(fields.every(field => Math.abs(field.getBoundingClientRect().top - fields[0].getBoundingClientRect().top) < 1), `wide toolbar fields must align (${width}px, ${scale}x, ${color})`);
+            assert.ok(fields.every(field => Math.abs(field.getBoundingClientRect().top - fields[0].getBoundingClientRect().top) < 1), `wide toolbar fields must align (${JSON.stringify({width,scale,color,clientWidth:workspace.clientWidth,em,fields:fields.map(field=>({class:field.className,gridColumn:getComputedStyle(field).gridColumn,top:field.getBoundingClientRect().top,height:field.getBoundingClientRect().height}))})})`);
           } else if (workspace.clientWidth >= 84 * em) {
-            assert.ok(Math.abs(fields[2].getBoundingClientRect().top - fields[3].getBoundingClientRect().top) < 1, "medium toolbar engine/level fields must align");
+            const [scope, engine, level] = fields.map(field => field.getBoundingClientRect());
+            assert.ok(engine.top > scope.top && Math.abs(engine.top - level.top) < 1, `medium toolbar must place the instance first and align engine/level (${JSON.stringify({width,scale,color,clientWidth:workspace.clientWidth,em,fields:fields.map(field=>({class:field.className,gridColumn:getComputedStyle(field).gridColumn,top:field.getBoundingClientRect().top,height:field.getBoundingClientRect().height}))})})`);
           }
           const tools = [...root.querySelector(".core-log-filter-tools").children];
           if (workspace.clientWidth > 44 * em) {
