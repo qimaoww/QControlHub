@@ -54,8 +54,8 @@ export async function testCoreLogFilterLayout() {
       document.documentElement.dataset.theme = color;
       for (const scale of [1, 1.5]) {
         root.style.setProperty("--ui-font-scale", scale);
-        for (const width of [320, 390, 540, 680, 960]) {
-          root.style.width = `${Math.min(width, innerWidth)}px`;
+        for (const width of [320, 390, 540, 680, 960, 1280, 1680]) {
+          root.style.width = `${width}px`;
           await frame();
           const group = root.querySelector(".core-log-engine-filter>div").getBoundingClientRect();
           const geometry = boxes();
@@ -63,16 +63,31 @@ export async function testCoreLogFilterLayout() {
             const [x, y, w, h] = geometry[index];
             assert.ok(x >= group.left - 1 && x + w <= group.right + 1, "engine option escapes its container");
             assert.equal(h, geometry[0][3], "engine option heights differ");
-            const label = button.querySelector("span").getBoundingClientRect();
+            const name = button.querySelector("span");
+            assert.ok(name.scrollWidth <= name.clientWidth + 1, `engine name must stay complete (${width}px, ${scale}x, ${color}, ${name.textContent}: ${name.clientWidth}/${name.scrollWidth})`);
+            const label = name.getBoundingClientRect();
             const count = button.querySelector("b").getBoundingClientRect();
             assert.ok(label.right <= count.left && count.right <= x + w - 1 && label.left >= x, "engine label/count overlap or clip");
             assert.ok(Math.abs(label.top + label.height / 2 - count.top - count.height / 2) < 1, "label/count alignment differs");
             if (index && y > geometry[index - 1][1]) assert.ok(Math.abs(x - group.left - 5) < 1, "wrapped row must start at the leading edge");
           }
           const toolbar = root.querySelector(".core-log-filters").getBoundingClientRect();
-          for (const control of root.querySelector(".core-log-filters").children) {
+          for (const control of root.querySelectorAll(".core-log-filter-fields>*,.core-log-filter-tools>*")) {
             const rect = control.getBoundingClientRect();
             assert.ok(rect.left >= toolbar.left && rect.right <= toolbar.right, "neighboring filter overflows");
+          }
+          const workspace = root.querySelector(".core-log-workspace");
+          const em = parseFloat(getComputedStyle(workspace).fontSize);
+          const fields = [...root.querySelector(".core-log-filter-fields").children];
+          if (workspace.clientWidth >= 112 * em) {
+            assert.ok(fields.every(field => Math.abs(field.getBoundingClientRect().top - fields[0].getBoundingClientRect().top) < 1), `wide toolbar fields must align (${width}px, ${scale}x, ${color})`);
+          } else if (workspace.clientWidth >= 84 * em) {
+            assert.ok(Math.abs(fields[2].getBoundingClientRect().top - fields[3].getBoundingClientRect().top) < 1, "medium toolbar engine/level fields must align");
+          }
+          const tools = [...root.querySelector(".core-log-filter-tools").children];
+          if (workspace.clientWidth > 44 * em) {
+            assert.ok(tools.every(tool => Math.abs(tool.getBoundingClientRect().bottom - tools[0].getBoundingClientRect().bottom) < 1), "search, limit and reset must align on one row");
+            assert.ok(tools[0].getBoundingClientRect().width > tools[1].getBoundingClientRect().width && tools[0].getBoundingClientRect().width > tools[2].getBoundingClientRect().width, "search should fill the space beside compact limit/reset controls");
           }
           const selected = buttons()[1];
           selected.click();
@@ -89,7 +104,13 @@ export async function testCoreLogFilterLayout() {
             assert.equal(JSON.stringify(boxes()), JSON.stringify(selectedBoxes), "one-to-four-digit counts must not move or resize controls");
           }
           await Promise.all(selected.getAnimations().map(animation => animation.finished.catch(() => {})));
-          assert.match(getComputedStyle(selected).boxShadow, /0px -2px 0px/, "selection needs a persistent shape cue");
+          const levelSelected = root.querySelector('[data-core-log-level][aria-pressed=true]');
+          for (const property of ["border", "borderRadius", "boxShadow", "backgroundColor"]) {
+            assert.equal(getComputedStyle(selected)[property], getComputedStyle(levelSelected)[property], `engine selection must reuse the existing button ${property}`);
+          }
+          for (const property of ["padding", "borderRadius", "fontWeight", "backgroundColor", "color"]) {
+            assert.equal(getComputedStyle(selected.querySelector("b"))[property], getComputedStyle(levelSelected.querySelector("b"))[property], `engine counts must reuse the existing badge ${property}`);
+          }
         }
       }
     }
