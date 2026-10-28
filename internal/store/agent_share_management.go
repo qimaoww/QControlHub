@@ -48,7 +48,10 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		}
 		result.Shares = append(result.Shares, share)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	return result, s.populateShareEngineRuntimes(ctx, result.Shares)
 }
 
 func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request core.AgentAccessRequest) (core.AgentAccess, error) {

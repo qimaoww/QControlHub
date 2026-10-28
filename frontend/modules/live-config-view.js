@@ -3,30 +3,13 @@ import { updateFeedback } from "./presence-motion.js";
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
+import { describeCoreRuntime } from "./status-controls.js";
 import { sharedAllocationText, sharedConfigPresentation } from "./shared-instance-state.js";
 
 function liveEngineStatus(info = {}, online = true) {
   if (typeof info.installed !== "boolean") return { label: "状态未知", tone: "unknown" };
-  if (!info.installed)
-    return { label: info.existing_config_available ? "待导入" : "未安装", tone: "uninstalled" };
-  if (!online)
-    return { label: "状态未知", tone: "unknown" };
-  switch (info.service_status) {
-    case "active":
-    case "running":
-      return { label: "正在运行", tone: "running" };
-    case "inactive":
-    case "stopped":
-      return { label: "已停止", tone: "stopped" };
-    case "activating":
-      return { label: "启动中", tone: "pending" };
-    case "deactivating":
-      return { label: "停止中", tone: "pending" };
-    case "failed":
-      return { label: "运行失败", tone: "failed" };
-    default:
-      return { label: "状态未知", tone: "unknown" };
-  }
+  const state = describeCoreRuntime("", info, { online });
+  return { label: state.liveLabel, tone: state.liveTone };
 }
 
 export function createLiveConfigView({ can, esc, engineName, conciseVersion, shell, bytes }) {

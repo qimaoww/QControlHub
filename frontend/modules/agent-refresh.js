@@ -3,6 +3,13 @@ import { coreInstallBlockReason } from "./core-install-state.js";
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
 import { updateAgentPresence } from "./agent-presence.js";
+import {
+  describeConnectionState,
+  describeCoreRuntime,
+  describeNodeMetrics,
+  describeServiceAction,
+  resolveRetainedNodeMetrics,
+} from "./status-controls.js";
 import { sharedInstancePresentation, sharedAllocationText, updateSharedInstanceMarkup } from "./shared-instance-state.js";
 
 export function agentStructureSignature(agents = []) {
@@ -14,6 +21,20 @@ export function agentStructureSignature(agents = []) {
         [...(agent.capabilities || [])].sort(),
         [...(agent.supported_capabilities || agent.capabilities || [])].sort(),
         Object.entries(agent.capability_transitions || {}).map(([engine, task]) => [engine, task.task_id, task.status]).sort(),
+        Object.entries(agent.runtime || {})
+          .filter(([, rt]) => Array.isArray(rt?.shared_instances) && rt.shared_instances.length > 0)
+          .map(([engine, rt]) => [
+            engine,
+            rt.shared_instances.map((item) => [
+              item.share_id,
+              item.username,
+              item.service_status,
+              item.config_version,
+              item.running,
+              item.uncertain,
+            ]),
+          ])
+          .sort(),
       ]))
       .sort((left, right) => left.localeCompare(right)),
   );
@@ -23,7 +44,7 @@ export function agentStructureSignature(agents = []) {
 // Roster changes, service structure, and metrics share one interaction-aware
 // refresh lifecycle. Only a successful render advances the structural markers.
 export function createAgentRefresh(ctx, { can, cardInteractions, renderAgentPage, syncBatchSnapshot, loadRegionDisplay }) {
-  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, date, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
+  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, date, ago, percent, bytes, conciseVersion, rate, actionName, engineName, serviceActionDisabled, trafficChart, notify } = ctx;
   const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
     isCurrent: agentPageActive,
@@ -118,7 +139,26 @@ function updateAgentMetrics(item) {
     );
     if (commandShouldExist !== commandExists) requestAgentStructureRefresh();
   }
-  const metrics = item.metrics || {};
+  const online = item.status === "online";
+  if (state?.data) state.data.lastKnownAgentMetrics ||= {};
+  const { metrics, retained: metricsRetained } = online
+    ? (() => {
+        const incoming = item.metrics || {};
+        if (incoming.collected_at && state?.data?.lastKnownAgentMetrics && item.id) {
+          state.data.lastKnownAgentMetrics[item.id] = { ...incoming };
+        }
+        return { metrics: incoming, retained: false };
+      })()
+    : resolveRetainedNodeMetrics(item, state?.data?.lastKnownAgentMetrics);
+  const metricInfo = describeNodeMetrics(item, metrics, {
+    bytes,
+    rate,
+    percent,
+    ago,
+    date,
+    retained: metricsRetained,
+  });
+  const connInfo = describeConnectionState(item.status, item.last_seen, { ago, date });
   const setText = (name, value) => {
     const element = root.querySelector(`[data-metric-text="${name}"]`);
     if (element) element.textContent = value;
@@ -136,23 +176,26 @@ function updateAgentMetrics(item) {
           ? "warn"
           : "normal";
   };
-  const online = item.status === "online";
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";
+  root.dataset.state = online ? "online" : "offline";
   root.dataset.available = metrics.collected_at ? "1" : "0";
+  root.dataset.freshness = metricInfo.freshnessState;
   updateAgentPresence(root, item.status);
   const lastSeen = root.querySelector("[data-agent-heartbeat]");
   if (lastSeen) {
     const text = heartbeat(item.last_seen);
     if (lastSeen.textContent !== text) lastSeen.textContent = text;
-    lastSeen.title = item.last_seen ? `上次心跳：${date(item.last_seen)}` : "尚未收到心跳";
+    lastSeen.title = connInfo.heartbeatTitle;
   }
   root
     .querySelectorAll("[data-agent-version]")
     .forEach((element) => (element.textContent = item.version || "未知"));
-  setText(
-    "stamp",
-    metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据",
-  );
+  const stampElement = root.querySelector('[data-metric-text="stamp"]');
+  if (stampElement) {
+    stampElement.textContent = metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据";
+    stampElement.title = metricInfo.stampTitle;
+    if (stampElement.dataset) stampElement.dataset.freshness = metricInfo.freshnessState;
+  }
   setText(
     "cpu",
     metrics.cpu_available
@@ -222,8 +265,20 @@ function updateAgentMetrics(item) {
       requestAgentStructureRefresh();
       return;
     }
-    if (card && card.dataset.runtimeStructure !== "full")
-      card.dataset.coreInstalled = installedMarker;
+    const coreInfo = describeCoreRuntime(engine, runtime, {
+      capabilityEnabled,
+      online,
+      isShared: item.can_manage === false,
+      conciseVersion,
+      serviceStatusName,
+      statusTone,
+    });
+    if (card) {
+      if (card.dataset.runtimeStructure !== "full") {
+        card.dataset.coreInstalled = installedMarker;
+      }
+      if (card.dataset) card.dataset.runtimeState = coreInfo.runtimeState;
+    }
     const version = root.querySelector(
       `[data-core-version="${CSS.escape(engine)}"]`,
     );
@@ -231,33 +286,108 @@ function updateAgentMetrics(item) {
       version.textContent = runtime.installed
         ? conciseVersion(engine, runtime.version)
         : installedKnown ? "尚未安装" : "安装状态未知";
+    const instanceState = sharedInstancePresentation(item, engine);
+    updateSharedInstanceMarkup(root, item, engine, date);
+    const effectiveServiceState = (item.can_manage === false && runtime.instance)
+      ? instanceState.label
+      : (!installedKnown ? "状态未知" : coreInfo.serviceState);
+    const effectiveServiceTone = (item.can_manage === false && runtime.instance)
+      ? instanceState.tone
+      : (!installedKnown ? "muted" : coreInfo.serviceTone);
+    const userInstanceEl = root.querySelector(
+      `[data-core-user-instance="${CSS.escape(engine)}"]`,
+    );
+    if (userInstanceEl) {
+      userInstanceEl.textContent = (item.can_manage === false && runtime.instance)
+        ? instanceState.version
+        : `${coreInfo.userInstanceLabel}${coreInfo.userConfigVersion ? ` · v${coreInfo.userConfigVersion}` : ""}`;
+      userInstanceEl.className = `tone-${(item.can_manage === false && runtime.instance) ? effectiveServiceTone : coreInfo.userInstanceTone}`;
+    }
+    const hostStateEl = root.querySelector(
+      `[data-core-host-state="${CSS.escape(engine)}"]`,
+    );
+    if (hostStateEl) {
+      hostStateEl.textContent = coreInfo.hostInstallLabel;
+      hostStateEl.className = `tone-${coreInfo.hostInstallTone}`;
+    }
+    const hostInstanceEl = root.querySelector(
+      `[data-core-host-instance="${CSS.escape(engine)}"]`,
+    );
+    if (hostInstanceEl) {
+      hostInstanceEl.textContent = effectiveServiceState;
+      hostInstanceEl.className = `tone-${effectiveServiceTone}`;
+    }
+    const sharedSummaryEl = root.querySelector(
+      `[data-core-shared-summary="${CSS.escape(engine)}"]`,
+    );
+    if (sharedSummaryEl && coreInfo.shared.hasShared) {
+      sharedSummaryEl.textContent = coreInfo.shared.summaryLabel;
+      sharedSummaryEl.className = `core-multiuser-pill ${coreInfo.shared.summaryTone}`;
+    }
+    const sharedCountsEl = root.querySelector(
+      `[data-core-shared-counts="${CSS.escape(engine)}"]`,
+    );
+    if (sharedCountsEl && coreInfo.shared.hasShared) {
+      sharedCountsEl.textContent = coreInfo.shared.summaryDetail || `${coreInfo.shared.runningCount}/${coreInfo.shared.totalCount} 运行中`;
+    }
+    const chipSharedEl = root.querySelector(
+      `[data-core-chip-shared="${CSS.escape(engine)}"]`,
+    );
+    if (chipSharedEl && coreInfo.shared.hasShared) {
+      chipSharedEl.textContent = coreInfo.shared.chipLabel;
+      chipSharedEl.className = `core-chip-shared ${coreInfo.shared.summaryTone}`;
+    }
     const service = root.querySelector(
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
-    const instanceState = sharedInstancePresentation(item, engine);
-    updateSharedInstanceMarkup(root, item, engine, date);
     if (service) {
-      service.textContent = instanceState?.label || (existingUnsupportedReason
-        ? "检测到但不可迁移"
-        : !capabilityEnabled
-        ? "能力已关闭"
-        : installed
-        ? online ? serviceStatusName(runtime.service_status) : "状态未知"
-        : installedKnown ? "未安装" : "状态未知");
+      service.textContent = effectiveServiceState;
       service.closest(".engine-state").className =
-        `engine-state ${instanceState?.tone || (existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed && online ? statusTone(runtime.service_status) : "muted")}`;
+        `engine-state ${effectiveServiceTone}`;
+      const reasonEl = service.closest(".service-card")?.querySelector("[data-core-action-reason]");
+      if (reasonEl) {
+        const uninstallPending = Boolean(state.data.coreUninstallTasks?.[`${item.id}|${engine}`]);
+        const reasonCoreInfo = describeCoreRuntime(engine, runtime, {
+          capabilityEnabled,
+          online,
+          uninstallPending,
+          conciseVersion,
+          serviceStatusName,
+          statusTone,
+        });
+        const hint = reasonCoreInfo.actionHint || (!can("operator") ? "只读权限" : "");
+        reasonEl.textContent = hint;
+        reasonEl.hidden = !hint;
+      }
       service
         .closest(".service-card")
         ?.querySelectorAll("[data-service-action]")
         .forEach((button) => {
-          button.disabled = serviceActionDisabled(
-            button.dataset.serviceAction,
+          const action = button.dataset.serviceAction;
+          const isDisabled = serviceActionDisabled(
+            action,
             online,
             installed,
             runtime.service_status,
             item,
             engine,
-          ) || Boolean(state.data.instanceTasks?.[`${item.id}|${engine}`]) || !capabilityEnabled || (item.can_manage !== false && button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
+          ) || Boolean(state.data.instanceTasks?.[`${item.id}|${engine}`]) || !capabilityEnabled || (item.can_manage !== false && action !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
+          button.disabled = isDisabled;
+          const actionInfo = describeServiceAction(action, {
+            online,
+            installed,
+            capabilityEnabled,
+            serviceStatus: runtime.service_status,
+            agent: item,
+            can,
+            existingUnsupportedReason,
+            serviceActionDisabled,
+            actionName: actionName || ((a) => a),
+            engineName: engineName || ((e) => e),
+            engine,
+          });
+          if (actionInfo.title) button.title = isDisabled ? actionInfo.title : (actionName ? actionName(action) : action);
+          if (button.dataset) button.dataset.disabledReason = actionInfo.reason || "";
         });
     }
   });
@@ -267,7 +397,8 @@ function updateAgentMetrics(item) {
       (engine) => item.runtime?.[engine]?.installed,
     ).length;
     const installationUnknown = (item.capabilities || []).some(engine => typeof item.runtime?.[engine]?.installed !== "boolean");
-    installedSummary.textContent = item.can_manage === false ? sharedAllocationText(item, bytes) : `${item.os || ""} / ${item.arch || ""} · ${
+    const allocationSummary = item.can_manage === false ? sharedAllocationText(item, bytes) : "";
+    installedSummary.textContent = allocationSummary || `${item.os || ""} / ${item.arch || ""} · ${
       installedCount
         ? `${installedCount}/${(item.capabilities || []).length} 内核已安装`
         : installationUnknown ? "安装状态未知" : "尚未安装内核"
@@ -316,6 +447,10 @@ function updateAgentMetrics(item) {
       Boolean(runtime.existing_config_unsupported_reason) ||
       serviceActionDisabled("uninstall", online, Boolean(runtime.installed), runtime.service_status, item);
   });
+  const ipStrip = root.querySelector(".node-card-ips");
+  if (ipStrip && ipStrip.dataset) {
+    ipStrip.dataset.ipPlaceholder = online ? "公网地址待探测 · 自动同步" : "节点离线 · 尚未上报公网地址";
+  }
   updatePublicIPDisplays(root, metrics, item.labels || {}, item.features || []);
 }
 

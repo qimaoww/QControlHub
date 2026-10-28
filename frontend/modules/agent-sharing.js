@@ -3,7 +3,7 @@ import { enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import { updateFeedback, removePresented } from "./presence-motion.js";
 import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./user-model.js";
-import { sharedEngineChoices } from "./engine-capabilities.js";
+import { sharedEngineChoices, sharedEngineRuntimeBadges } from "./engine-capabilities.js";
 
 export function createAgentSharing(ctx, interactions) {
   const { api, state, can, esc, notify, confirmAction, bytes = value => `${sharedLimitGiB(value)} GiB` } = ctx;
@@ -28,6 +28,7 @@ export function createAgentSharing(ctx, interactions) {
       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
     </div>
     ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
+    ${sharedEngineRuntimeBadges(share, agent, esc)}
     <label class="settings-field plan-fields one"><span>HTTP-01 允许域名</span><textarea name="http_domains" rows="2" placeholder="auth.example.com&#10;api.example.com">${esc(share.http_domains_text ?? (share.http_domains || []).join("\n"))}</textarea><small>每行一个完整域名；留空不授权，接受共享后生效。</small></label>
     <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
   </div>`;

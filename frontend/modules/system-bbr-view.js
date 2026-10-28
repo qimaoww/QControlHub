@@ -24,7 +24,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
       let unavailable = "";
       try { prepareTCPPreset(preset.id, lifecycle.rules, current); }
       catch (error) { unavailable = error.message; }
-      return `<div class="bbr-preset"><div><strong>${esc(preset.name)}</strong><small>填入 ${Object.keys(preset.settings).length} 项，保留其他选择</small>${unavailable ? `<p class="bbr-preset-unavailable">${esc(unavailable)}</p>` : ""}</div><button class="button small" type="button" data-tcp-preset="${esc(preset.id)}" ${disabled || unavailable ? "disabled" : ""}>填入预设</button></div>`;
+      return `<div class="bbr-preset"><div><strong>${esc(preset.name)}</strong><small>填入 ${Object.keys(preset.settings).length} 项，保留其他选择</small>${unavailable ? `<p class="bbr-preset-unavailable">${esc(unavailable)}</p>` : ""}</div><button class="button small" type="button" data-tcp-preset="${esc(preset.id)}" ${disabled || unavailable ? `disabled title="${esc(unavailable || "当前不可填入预设")}"` : ""}>填入预设</button></div>`;
     }).join("");
     const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><section class="bbr-presets" aria-label="BBR 参数预设">${presets}</section><p class="bbr-note">仅应用勾选项；关闭保留草稿，刷新页面清空。</p><div class="bbr-fields">${lifecycle.rules.map((rule) => {
       const available = hasTCPParameter(current, rule.key);
@@ -55,13 +55,26 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
       const disabled = !editable(agent) || !info.controllable || busy;
       const presetDisabled = disabled || !hasTCPParameter(status?.parameters, "net.core.default_qdisc") || !hasTCPParameter(status?.parameters, "net.ipv4.tcp_congestion_control");
       const hasFeature = (agent.features || []).includes(systemBBRFeature);
+      const disabledReason = !editable(agent)
+        ? "只读权限"
+        : !hasFeature
+          ? "需升级 Agent 后可管理 TCP 参数"
+          : agent.status !== "online"
+            ? "节点当前离线，上线后可调整 TCP 参数"
+            : busy
+              ? "TCP 调优任务执行中，请等待完成"
+              : !info.controllable
+                ? info.text
+                : presetDisabled
+                  ? "缺少默认队列或拥塞控制参数上报"
+                  : "";
       const value = (entry) => esc(entry || "未上报");
       const persistence = status?.persistence === "managed"
         ? `托管 ${Object.keys(status.configured_parameters || {}).length} 项`
         : status?.persistence === "error" ? "配置冲突" : "未托管";
       const drift = status?.persistence === "managed" && Object.entries(status.configured_parameters || {}).some(([key, value]) => String(status.parameters?.[key] || "").trim().replace(/\s+/g, " ") !== value);
-      return `<article class="bbr-card" data-refresh-key="bbr-${esc(agent.id)}" aria-busy="${busy}">
-        <header><div><h2>${esc(agent.name)}</h2><span>${value(status?.kernel_release)} · ${esc(agent.os)} / ${esc(agent.arch)}</span></div><span class="status-label ${info.tone}">${esc(info.text)}</span></header>
+      return `<article class="bbr-card" data-refresh-key="bbr-${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" aria-busy="${busy}">
+        <header><div><h2 title="${esc(agent.name)}">${esc(agent.name)}</h2><span>${value(status?.kernel_release)} · ${esc(agent.os)} / ${esc(agent.arch)}</span></div><span class="status-label ${info.tone}">${esc(info.text)}</span></header>
         ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>默认算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>默认队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>持久配置</dt><dd>${esc(persistence)}</dd></div></dl>
         ${drift ? '<p class="bbr-warning" role="status">当前生效参数与已保存配置不一致，请核对其他系统配置是否覆盖。</p>' : ""}
         ${status.error ? `<p class="bbr-warning" role="status">${esc(diagnosticError(status.error))}</p>` : ""}
@@ -74,7 +87,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
         </div><footer class="bbr-dialog-footer"><small>参数采集：${status.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small><button class="button small" type="button" data-bbr-dialog-close>关闭</button></footer>`)}` : `<div class="empty bbr-empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "升级 Agent 后可管理 TCP 参数"}</strong></div>`}
         ${editor(agent, disabled)}
         ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录</a>` : ""}${task.error ? `<p>${esc(diagnosticError(task.error))}</p>` : ""}</div>` : ""}
-        <footer>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
+        <footer>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${disabledReason ? `title="${esc(disabledReason)}" data-disabled-reason="${esc(disabledReason)}"` : ""} ${presetDisabled ? "disabled" : ""}>切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${disabledReason ? `title="${esc(disabledReason)}" data-disabled-reason="${esc(disabledReason)}"` : ""} ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");
     shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${lifecycle.refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid" data-motion-region="tcp-results" data-motion-key="${esc(selectedID())}">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: "system-bbr" });
