@@ -45,6 +45,15 @@ export async function testCoreLogFilterLayout() {
     const { x, y, width, height } = button.getBoundingClientRect();
     return [x, y, width, height];
   });
+  // A zero-size inline box exposes the text baseline, not its line-box center.
+  const baseline = element => {
+    const probe = document.createElement("i");
+    probe.style.cssText = "display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline;font-size:0;line-height:0";
+    element.append(probe);
+    const y = probe.getBoundingClientRect().top;
+    probe.remove();
+    return y;
+  };
   const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
   try {
     sources(engines);
@@ -68,8 +77,13 @@ export async function testCoreLogFilterLayout() {
             const label = name.getBoundingClientRect();
             const count = button.querySelector("b").getBoundingClientRect();
             assert.ok(label.right <= count.left && count.right <= x + w - 1 && label.left >= x, "engine label/count overlap or clip");
-            assert.ok(Math.abs(label.top + label.height / 2 - count.top - count.height / 2) < 1, "label/count alignment differs");
             if (index && y > geometry[index - 1][1]) assert.ok(Math.abs(x - group.left - 5) < 1, "wrapped row must start at the leading edge");
+          }
+          const firstBaseline = baseline(buttons()[0].querySelector("span")) - geometry[0][1];
+          for (const button of root.querySelectorAll("[data-core-log-engine],[data-core-log-level]")) {
+            const nameBaseline = baseline(button.querySelector("span"));
+            assert.ok(Math.abs(nameBaseline - baseline(button.querySelector("b"))) < .1, "filter name/count text baselines must align");
+            assert.ok(Math.abs(nameBaseline - button.getBoundingClientRect().top - firstBaseline) < .1, "engine/level buttons must share the same text baseline offset");
           }
           const toolbar = root.querySelector(".core-log-filters").getBoundingClientRect();
           for (const control of root.querySelectorAll(".core-log-filter-fields>*,.core-log-filter-tools>*")) {
