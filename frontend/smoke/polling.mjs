@@ -65,7 +65,7 @@ try {
   assert.equal(coreRenders, 3, "initial loading, metadata, and ready states render once each");
   assert.equal(coreTimers.size, 1, "log polling owns one timer");
   assert.equal(coreMarkup.includes('data-refresh-key="core-log-1"'), true);
-  assert.equal(coreMarkup.includes('name="agent_id"'), true, "the node filter is directly accessible on mobile");
+  assert.equal(coreMarkup.includes('name="agent_id"'), false, "the workspace omits the node selector provided by the mobile sidebar");
   assert.equal(coreMarkup.includes("data-core-log-engine"), true, "engines render as immediate filter buttons");
   assert.equal(coreMarkup.includes("data-core-log-level"), true, "levels render as immediate filter buttons");
   assert.equal(coreMarkup.includes('type="submit"'), false, "core log filters do not require an apply action");

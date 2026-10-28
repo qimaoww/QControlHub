@@ -244,7 +244,7 @@ try {
   full.resolve(entries("alpha", 2000)); await first;
   assert.equal(state.data.coreLogEntries.length, 2000);
   assert.equal((markup.match(/class="core-log-row /g) || []).length, 200);
-  assert.match(markup, /日志节点/);
+  assert.doesNotMatch(markup, /name="agent_id"/, "node selection stays in the sidebar instead of duplicating the workspace control");
   assert.match(markup, /使用用户 \/ 实例/);
   assert.equal(state.data.coreLogAgents.length, 3);
 

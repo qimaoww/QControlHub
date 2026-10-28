@@ -29,6 +29,14 @@ func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
 func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	module := []byte(frontendFeatureSources(t, "modules/core-logs.js"))
 	content := string(module)
+	view := frontendSources(t, "modules/core-log-view.js")
+	sidebar := frontendSources(t, "modules/shell-context.js")
+	if strings.Contains(view, `select name="agent_id"`) {
+		t.Error("core-log filters must not duplicate the node selector in the sidebar")
+	}
+	if !strings.Contains(view, `select name="instance_id"`) || !strings.Contains(sidebar, `data-core-log-agent`) {
+		t.Error("core-log instance filter and sidebar node selection must both remain available")
+	}
 	for _, required := range []string{
 		`data-core-log-engine`,
 		`data-core-log-level`,
@@ -129,7 +137,8 @@ func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
 	for _, required := range []string{
 		`@media(pointer:fine){.app-body.page-core-logs .desktop-app{min-width:0}}`,
 		`.core-log-workspace{min-width:0;container-type:inline-size}`,
-		`.core-log-filters{display:flex;align-items:flex-end;flex-wrap:wrap}`,
+		`.core-log-filter-fields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr))`,
+		`.core-log-filter-tools{display:grid;grid-template-columns:minmax(0,24em) max(104px,7.5em) max-content`,
 		`.core-log-stream{--core-log-grid:minmax(130px,.85fr)`,
 		`width:100%;max-width:100%;min-width:0`,
 		`@container(max-width:840px){.core-log-columns{display:none}`,

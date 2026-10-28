@@ -25,7 +25,7 @@ export function createCoreLogBindings({ state }, { renderCoreLogs, rememberSelec
         state.data.coreLogFilters,
       );
     };
-    for (const field of ["agent_id", "instance_id"]) {
+    for (const field of ["instance_id"]) {
       bindEvent(document.querySelector(`#core-log-filters select[name="${field}"]`), "change", async event => {
         state.data.coreLogFilters = { ...state.data.coreLogFilters, [field]: event.currentTarget.value };
         rememberSelection();
