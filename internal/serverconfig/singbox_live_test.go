@@ -344,13 +344,23 @@ func singBoxRun(t *testing.T, binary, name, content string) func() string {
 
 func singBoxFreePort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// These fixtures use the same allocator for TCP and UDP listeners. A
+	// TCP-only probe can select a port held by an existing QUIC UDP socket.
+	for attempt := 0; attempt < 32; attempt++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		packet, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		_ = listener.Close()
+		if err == nil {
+			_ = packet.Close()
+			return port
+		}
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
-	return port
+	t.Fatal("no test port available for both TCP and UDP")
+	return 0
 }
 
 func singBoxEcho(t *testing.T, network string) int {

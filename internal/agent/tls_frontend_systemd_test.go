@@ -39,7 +39,7 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		}
 		t.Log("reproduced read-only TLS configuration directory in the long-running Agent sandbox")
 	}
-	protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, "vmess-ws-tls")
 	input, err := serverconfig.NewPlan(protocol)
 	if err != nil {
 		t.Fatal(err)
@@ -234,6 +234,19 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		t.Fatalf("last Xray target not stopped: %s %v", status, err)
 	}
 	t.Log("XHTTP local targets validated, deployed, isolated, rolled back, restarted and removed as non-root on " + kind)
+	// Exercise automatic issuance/renewal with real proxies and an isolated CA,
+	// through the same fixed helper sandbox (never a public certificate order).
+	if kind == ServiceManagerSystemd {
+		args := ipQualityDependencyHelperArguments("/usr/local/lib/qagent/tls.test", "qagent-tls-acme-fixture.service")
+		args = append(args[:len(args)-3], "--setenv=QCH_TEST_NGINX_ACME=1", "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSNginxACMESandbox$", "-test.v")
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", args); err != nil {
+			t.Fatalf("Nginx ACME: %v\n%s", err, output)
+		}
+	} else {
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", []string{"QCH_TEST_NGINX_ACME=1", "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSNginxACMESandbox$", "-test.v"}); err != nil {
+			t.Fatalf("Nginx ACME: %v\n%s", err, output)
+		}
+	}
 	t.Log("managed TLS installed, validated, reloaded, preserved shared routes, rejected conflicts, stopped and restarted under the shipped Agent sandbox")
 }
 

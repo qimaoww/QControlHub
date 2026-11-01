@@ -82,9 +82,9 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 					serverLog := singBoxRun(t, binary, "backend", string(checked))
 					dir := t.TempDir()
 					f := frontends[0]
-					if transport == "h2" {
+					if transport == "h2" || f.AutomaticCertificate {
 						fixture := input
-						fixture.Protocol, fixture.Transport, fixture.TLSMode = base+"-ws-tls", "websocket", "nginx"
+						fixture.Protocol, fixture.Transport, fixture.TLSMode = "vmess-ws-tls", "websocket", "nginx"
 						local, err := serverconfig.MarshalClientMetadataWithPrevious(fixture, "")
 						if err != nil {
 							t.Fatal(err)
@@ -99,7 +99,7 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 						out["tls"].(map[string]any)["certificate"] = []string{f.Certificate}
 						outbound, _ = json.Marshal(out)
 					}
-					f.Mode = mode
+					f.Mode, f.AutomaticCertificate = mode, false // isolated certificate fixture; automatic issuance has its own sandbox test
 					cert := filepath.Join(dir, frontendKey(f)+".crt")
 					key := filepath.Join(dir, frontendKey(f)+".key")
 					_ = os.WriteFile(cert, []byte(f.Certificate), 0600)
@@ -256,13 +256,23 @@ func singBoxRun(t *testing.T, binary, name, content string) func() string {
 
 func singBoxFreePort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// These fixtures use the same allocator for TCP and UDP listeners. A
+	// TCP-only probe can select a port held by an existing QUIC UDP socket.
+	for attempt := 0; attempt < 32; attempt++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		packet, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		_ = listener.Close()
+		if err == nil {
+			_ = packet.Close()
+			return port
+		}
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
-	return port
+	t.Fatal("no test port available for both TCP and UDP")
+	return 0
 }
 
 func singBoxEcho(t *testing.T, network string) int {

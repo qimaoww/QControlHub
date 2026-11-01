@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,21 +17,49 @@ import (
 )
 
 func (m *tlsFrontendManager) hasValidCertificate(domain string) bool {
+	_, _, err := m.storedCertificate(domain)
+	return err == nil
+}
+
+// Use the newest unexpired, hostname-verified chain. Caddy may retain an older
+// issuer's certificate after failover; a storage filename alone is not trust.
+func (m *tlsFrontendManager) storedCertificate(domain string, roots ...*x509.CertPool) (string, string, error) {
 	root, err := os.OpenRoot(filepath.Join(m.state, "caddy", "certificates"))
 	if err != nil {
-		return false
+		return "", "", err
 	}
 	defer root.Close()
-	found := false
-	_ = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
-		if found || err != nil || !entry.Type().IsRegular() || !strings.HasSuffix(path, ".crt") {
+	var certificate, privateKey string
+	var newest time.Time
+	visited := 0
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		visited++
+		if visited > 4096 {
+			return fmt.Errorf("受管证书目录超过扫描限制")
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.Type().IsRegular() || !strings.HasSuffix(path, ".crt") {
 			return nil
 		}
-		cert, err := root.ReadFile(path)
+		read := func(name string) ([]byte, error) {
+			file, err := root.Open(name)
+			if err != nil {
+				return nil, err
+			}
+			defer file.Close()
+			info, err := file.Stat()
+			if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+				return nil, fmt.Errorf("无效证书文件")
+			}
+			return io.ReadAll(io.LimitReader(file, 1<<20))
+		}
+		cert, err := read(path)
 		if err != nil {
 			return nil
 		}
-		key, err := root.ReadFile(strings.TrimSuffix(path, ".crt") + ".key")
+		key, err := read(strings.TrimSuffix(path, ".crt") + ".key")
 		if err != nil {
 			return nil
 		}
@@ -39,20 +68,30 @@ func (m *tlsFrontendManager) hasValidCertificate(domain string) bool {
 			return nil
 		}
 		leaf, err := x509.ParseCertificate(pair.Certificate[0])
-		if err != nil {
+		if err != nil || !leaf.NotAfter.After(newest) {
 			return nil
 		}
-		intermediates := x509.NewCertPool()
+		options := x509.VerifyOptions{DNSName: domain, Intermediates: x509.NewCertPool()}
+		if len(roots) > 0 {
+			options.Roots = roots[0]
+		}
 		for _, data := range pair.Certificate[1:] {
 			if c, err := x509.ParseCertificate(data); err == nil {
-				intermediates.AddCert(c)
+				options.Intermediates.AddCert(c)
 			}
 		}
-		_, err = leaf.Verify(x509.VerifyOptions{DNSName: domain, Intermediates: intermediates})
-		found = err == nil
+		if _, err = leaf.Verify(options); err == nil {
+			certificate, privateKey, newest = string(cert), string(key), leaf.NotAfter
+		}
 		return nil
 	})
-	return found
+	if err != nil {
+		return "", "", err
+	}
+	if certificate == "" {
+		return "", "", fmt.Errorf("%s 尚无有效公开可信证书", domain)
+	}
+	return certificate, privateKey, nil
 }
 
 // While obtaining certificates, retain every old route (including this user's
@@ -82,7 +121,7 @@ func certificatePreparationRoutes(content string, previous []core.TLSFrontend, s
 func (m *tlsFrontendManager) prepareCertificates(ctx context.Context, previous, next tlsDeployments, service string) error {
 	needed := false
 	for _, f := range next[service].Frontends {
-		needed = needed || f.Mode == "caddy" && !m.hasValidCertificate(f.Domain)
+		needed = needed || f.UsesACME() && !m.hasValidCertificate(f.Domain)
 	}
 	if !needed {
 		return nil
@@ -98,7 +137,7 @@ func (m *tlsFrontendManager) prepareCertificates(ctx context.Context, previous, 
 	}
 	if err != nil {
 		for _, f := range next[service].Frontends {
-			if f.Mode == "caddy" {
+			if f.UsesACME() {
 				err = m.withFrontendDiagnostics(err, f, started)
 				break
 			}
@@ -133,7 +172,14 @@ func (m *tlsFrontendManager) prepareStagedCertificates(ctx context.Context, serv
 	if _, err := activeTLSFrontends(next); err != nil {
 		return err
 	}
-	return m.prepareCertificates(ctx, previous, next, service)
+	if err := m.prepareCertificates(ctx, previous, next, service); err != nil {
+		return err
+	}
+	active, err := activeTLSFrontends(next)
+	if err != nil {
+		return err
+	}
+	return m.validateConfigs(ctx, active)
 }
 
 func (m *tlsFrontendManager) waitStoredCertificate(ctx context.Context, domain string) error {

@@ -104,6 +104,7 @@ func (c *Client) Run(ctx context.Context) error {
 	// The panel policy will expand this fail-safe minimum after authentication;
 	// until then an Agent restart must not retain a larger prior allocation.
 	c.logs.ApplyPolicy(core.AgentPolicy{CoreLogMaxMiB: 1, CoreLogRotateCount: 0})
+	go c.executor.maintainTLSCertificates(ctx)
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
 	c.executor.migrateNativeAccounting(ctx)

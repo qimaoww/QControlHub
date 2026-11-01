@@ -12,12 +12,12 @@ export function managedTLSPlanFields(protocol, plan, esc) {
       <p class="tls-help" data-managed-tls-route></p>
     </section>
     <section class="builder-section">
-      <details class="preset-option-panel" data-tls-advanced ${native ? "open" : ""}>
+      <details class="preset-option-panel" data-tls-advanced ${native || protocol.key === "vless-ws-tls" ? "open" : ""}>
         <summary><b>高级设置</b><small>反代方式 · 内部端口 · 路径 · 凭据</small></summary>
         <div class="tls-settings" data-native-tls>
-          <div class="plan-fields one"><label>证书方式<select name="tls_mode">
+          <div class="plan-fields one"><label>证书方式<select name="tls_mode" ${protocol.key === "vless-ws-tls" ? 'data-nginx-acme="1"' : ""}>
             <option value="caddy" ${plan.tls_mode === "caddy" ? "selected" : ""}>Caddy 自动证书（默认）</option>
-            ${plan.transport !== "http" ? `<option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx 自签证书</option>` : ""}
+            ${plan.transport !== "http" ? `<option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx ${protocol.key === "vless-ws-tls" ? "自动证书" : "自签证书"}</option>` : ""}
             <option value="external" ${plan.tls_mode === "external" ? "selected" : ""}>外部反代 · 自行管理 TLS</option>
             <option value="native" ${native ? "selected" : ""}>已有证书 · 原生 TLS</option>
           </select></label></div>

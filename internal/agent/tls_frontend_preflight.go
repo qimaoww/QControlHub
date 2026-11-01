@@ -91,7 +91,7 @@ func validateTLSAddresses(addresses []netip.Addr) error {
 func (m *tlsFrontendManager) preflight(ctx context.Context, frontends []core.TLSFrontend) error {
 	seen := map[string]bool{}
 	for _, f := range frontends {
-		if f.Mode != "caddy" || seen[f.Domain] {
+		if !f.UsesACME() || seen[f.Domain] {
 			continue
 		}
 		seen[f.Domain] = true

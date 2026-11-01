@@ -67,6 +67,22 @@ func TestTLSFrontendIsolationAndRendering(t *testing.T) {
 	}
 }
 
+func TestTLSFrontendRejectsMixedNginxTrustOnSameSNI(t *testing.T) {
+	a := core.TLSFrontend{Tag: "auto", Mode: "nginx", AutomaticCertificate: true, Domain: "tls.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/auto"}
+	b := a
+	b.Tag, b.Path, b.BackendPort = "legacy", "/legacy", 23457
+	b.AutomaticCertificate, b.Certificate, b.PrivateKey = false, "legacy", "key"
+	deployments := tlsDeployments{"one": {Frontends: []core.TLSFrontend{a, b}}}
+	if _, err := activeTLSFrontends(deployments); err == nil {
+		t.Fatal("mixed public/system and legacy/custom trust accepted for one SNI")
+	}
+	b.Domain = "legacy.example.test"
+	deployments["one"] = tlsDeployment{Frontends: []core.TLSFrontend{a, b}}
+	if _, err := activeTLSFrontends(deployments); err != nil {
+		t.Fatal("independent SNI certificates rejected", err)
+	}
+}
+
 func TestCaddyIssuerFallbackAndAccounts(t *testing.T) {
 	a := core.TLSFrontend{Tag: "a", Mode: "caddy", Domain: "a.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/a", ACMEEmail: "certs@example.test"}
 	b := a
