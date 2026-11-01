@@ -24,7 +24,7 @@ import (
 // Minimal local ACME fixture. It exercises directory discovery, account/order
 // persistence, HTTP-01 presentation, CSR finalization and certificate download.
 // JWS signature validation belongs to the CA; this fixture checks client flow.
-func mockTLSACME(t *testing.T, domain string, challengePort int) (*httptest.Server, []byte, *atomic.Int32) {
+func mockTLSACME(t *testing.T, domain string, challengePort int, firstLifetime ...time.Duration) (*httptest.Server, []byte, *atomic.Int32) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -109,7 +109,13 @@ func mockTLSACME(t *testing.T, domain string, challengePort int) (*httptest.Serv
 				http.Error(w, "invalid CSR or challenge", 400)
 				return
 			}
-			leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: csr.DNSNames, Subject: csr.Subject, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+			leaf := &x509.Certificate{SerialNumber: big.NewInt(int64(orders.Load()) + 1), DNSNames: csr.DNSNames, Subject: csr.Subject, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+			if len(firstLifetime) > 0 {
+				leaf.NotBefore = time.Now().Add(-time.Second)
+				if orders.Load() == 1 {
+					leaf.NotAfter = time.Now().Add(firstLifetime[0])
+				}
+			}
 			der, err := x509.CreateCertificate(rand.Reader, leaf, ca, csr.PublicKey, key)
 			if err != nil {
 				http.Error(w, err.Error(), 500)

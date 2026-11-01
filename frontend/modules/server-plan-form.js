@@ -158,7 +158,7 @@ export function readServerPlanInput(form, protocol) {
     transport_host: ["http", "httpupgrade", "websocket", "xhttp"].includes(values.get("transport")) ? values.get("transport_host") || "" : "",
     transport_http_method: values.get("transport") === "http" ? values.get("transport_http_method") || "" : "",
     tls_mode: tlsEnabled && protocol.supports_managed_tls ? values.get("tls_mode") || "native" : "",
-    tls_acme_email: tlsEnabled && protocol.supports_managed_tls && values.get("tls_mode") === "caddy" ? (values.get("tls_acme_email") || "").trim() : "",
+    tls_acme_email: tlsEnabled && protocol.supports_managed_tls && (values.get("tls_mode") === "caddy" || protocol.key === "vless-ws-tls" && values.get("tls_mode") === "nginx") ? (values.get("tls_acme_email") || "").trim() : "",
     tls_public_port: tlsEnabled && ["caddy", "nginx", "external"].includes(values.get("tls_mode")) ? Number(values.get("tls_public_port") || 443) : 0,
     tls_server_name: values.get("tls_server_name") || "",
     tls_alpn: values.get("tls_alpn") || "",
@@ -307,11 +307,12 @@ function bindProtocolOptionVisibility(form) {
     currentTLSMode = nextTLSMode;
     const managed = tls?.checked && ["caddy", "nginx", "external"].includes(tlsMode?.value);
     form.querySelectorAll("[data-managed-tls]").forEach(el => { setVisible(el, managed); el.querySelectorAll("input").forEach(control => { control.disabled = !managed; control.required = managed; }); });
+    const automaticNginx = tlsMode?.value === "nginx" && tlsMode.dataset.nginxAcme === "1";
     const acme = form.querySelector("[data-caddy-acme]");
-    if (acme) { const active = Boolean(tls?.checked && tlsMode?.value === "caddy"); setVisible(acme, active); acme.querySelectorAll("input").forEach(control => control.disabled = !active); }
+    if (acme) { const active = Boolean(tls?.checked && (tlsMode?.value === "caddy" || automaticNginx)); setVisible(acme, active); acme.querySelectorAll("input").forEach(control => control.disabled = !active); }
     const hint = form.querySelector("[data-managed-tls-hint]");
     if (hint) hint.textContent = tlsMode?.value === "nginx"
-      ? "面板生成自签证书，客户端通过导出的公共证书验证。请放行所选公网端口。"
+      ? automaticNginx ? "域名解析到节点，放行 TCP 80 和所选公网端口；自动申请并续期公开可信证书。" : "面板生成自签证书，客户端通过导出的公共证书验证。请放行所选公网端口。"
       : tlsMode?.value === "external"
         ? "自行配置可信 TLS 证书和公网反代，回源到本机内部端口与路径；HTTP/H2 使用 h2c，WS/HTTPUpgrade 使用 HTTP/1.1 Upgrade。节点检查不验证外部入口。"
       : tlsMode?.value === "caddy"

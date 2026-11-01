@@ -91,6 +91,7 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 	paths := map[string]bool{}
 	backends := map[int]bool{}
 	emails := map[string]string{}
+	certificateModes := map[string]bool{}
 	services := make([]string, 0, len(deployments))
 	for service := range deployments {
 		services = append(services, service)
@@ -113,7 +114,7 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			}
 			localPorts[f.PublicPort] = localPorts[f.PublicPort] || f.LocalOnly
 			localBackends[f.BackendPort] = localBackends[f.BackendPort] || f.LocalOnly
-			if f.Mode == "caddy" && f.ACMEEmail != "" {
+			if f.UsesACME() && f.ACMEEmail != "" {
 				if email := emails[f.Domain]; email != "" && email != f.ACMEEmail {
 					return nil, fmt.Errorf("域名 %s 的 ACME 邮箱不一致，请使用同一证书账户", f.Domain)
 				}
@@ -121,6 +122,13 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			}
 			if mode := owners[f.PublicPort]; mode != "" && mode != f.Mode {
 				return nil, fmt.Errorf("公网端口 %d 已用于 %s，不能同时用于 %s", f.PublicPort, mode, f.Mode)
+			}
+			if f.Mode == "nginx" {
+				identity := strconv.Itoa(f.PublicPort) + "/" + f.Domain
+				if automatic, exists := certificateModes[identity]; exists && automatic != f.AutomaticCertificate {
+					return nil, fmt.Errorf("域名 %s 在端口 %d 上的 Nginx 证书方式不一致，请统一为自动证书或使用不同域名", f.Domain, f.PublicPort)
+				}
+				certificateModes[identity] = f.AutomaticCertificate
 			}
 			route := strconv.Itoa(f.PublicPort) + f.Path
 			if paths[route] {
@@ -141,7 +149,7 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 		}
 	}
 	for _, f := range result {
-		if f.Mode == "caddy" && owners[80] != "" {
+		if f.UsesACME() && owners[80] != "" {
 			return nil, errors.New("端口 80 已用于 TLS 反代，Caddy HTTP 证书验证无法使用")
 		}
 	}
@@ -157,11 +165,14 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 	domains := map[string]string{}
 	byPort := map[int][]any{}
 	for _, f := range frontends {
-		if f.Mode != "caddy" {
+		if !f.UsesACME() {
 			continue
 		}
 		if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
 			domains[f.Domain] = f.ACMEEmail
+		}
+		if f.Mode != "caddy" {
+			continue // Nginx owns HTTPS; Caddy only automates this certificate.
 		}
 		versions := []string{"1.1"}
 		if f.Transport == "http" {
@@ -255,7 +266,7 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, mana
 	}
 	hasCaddy, hasHTTPPort := false, false
 	for _, f := range frontends {
-		hasCaddy = hasCaddy || f.Mode == "caddy"
+		hasCaddy = hasCaddy || f.UsesACME()
 		hasHTTPPort = hasHTTPPort || f.PublicPort == 80
 	}
 	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && len(managedHTTP) > 0 && managedHTTP[0] {
@@ -347,14 +358,18 @@ func (m *tlsFrontendManager) checkPorts(previous, next []core.TLSFrontend) error
 	owned := map[int]bool{}
 	for _, f := range previous {
 		owned[f.PublicPort] = true
-		if f.Mode == "caddy" {
+		if f.UsesACME() {
 			owned[80] = true
+		}
+		if f.Mode == "nginx" {
+			stored, _ := os.ReadFile(filepath.Join(m.root, "nginx.conf"))
+			owned[80] = owned[80] || strings.Contains(string(stored), "# qch-managed-http-challenges-v1")
 		}
 	}
 	ports := map[int]bool{}
 	for _, f := range next {
 		ports[f.PublicPort] = true
-		if f.Mode == "caddy" {
+		if f.UsesACME() {
 			ports[80] = true
 		}
 	}
@@ -381,12 +396,15 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
+		if f.UsesACME() {
+			modes["caddy"] = true
+		}
 		if f.Mode == "nginx" && f.Transport == "xhttp" {
 			if err := validateXHTTPCertificate(ctx, f); err != nil {
 				return err
 			}
 		}
-		if f.Mode == "nginx" && f.Transport != "xhttp" {
+		if f.Mode == "nginx" && f.Transport != "xhttp" && !f.AutomaticCertificate {
 			if _, err := tls.X509KeyPair([]byte(f.Certificate), []byte(f.PrivateKey)); err != nil {
 				return fmt.Errorf("托管 Nginx 证书无效：%w", err)
 			}
@@ -397,6 +415,9 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 				return err
 			}
 		}
+	}
+	if _, err := m.copyAutomaticNginxCertificates(frontends, true); err != nil {
+		return err
 	}
 	for mode := range modes {
 		if err := m.ensureDependency(ctx, mode); err != nil {
@@ -414,12 +435,24 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	return nil
 }
 
-func (m *tlsFrontendManager) validateConfigs(ctx context.Context, frontends []core.TLSFrontend) error {
+func (m *tlsFrontendManager) validateConfigs(ctx context.Context, frontends []core.TLSFrontend, allowMissing ...bool) error {
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
+		if f.UsesACME() {
+			modes["caddy"] = true
+		}
 	}
 	for mode := range modes {
+		if mode == "nginx" && len(allowMissing) > 0 && allowMissing[0] {
+			missing := false
+			for _, f := range frontends {
+				missing = missing || f.AutomaticCertificate && !m.hasValidCertificate(f.Domain)
+			}
+			if missing {
+				continue // Validated after issuance, before any business configuration is replaced.
+			}
+		}
 		content := renderNginxFrontends(frontends, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
 			var err error
@@ -478,7 +511,7 @@ func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontend
 	if err = m.prepare(environment, next); err != nil {
 		return err
 	}
-	if err = m.validateConfigs(environment, next); err != nil {
+	if err = m.validateConfigs(environment, next, true); err != nil {
 		return tlsPhaseError("配置生成及校验", err)
 	}
 	if err = m.preflight(environment, frontends); err != nil {
@@ -503,12 +536,12 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		}
 		domains := map[string]bool{}
 		for _, f := range frontends {
-			if f.Mode == "caddy" {
+			if f.UsesACME() {
 				domains[f.Domain] = true
 			}
 		}
 		for _, f := range old {
-			if f.Mode == "caddy" && !domains[f.Domain] {
+			if f.UsesACME() && !domains[f.Domain] {
 				frontends = append(frontends, f)
 				domains[f.Domain] = true
 			}
@@ -517,6 +550,9 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
+		if f.UsesACME() {
+			modes["caddy"] = true
+		}
 	}
 	for _, mode := range []string{"caddy", "nginx"} {
 		if len(certificateRoutes) > 0 && mode != "caddy" {
@@ -539,6 +575,18 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		}
 	}
 	// Release ports owned by an outgoing provider before starting its replacement.
+	if modes["caddy"] {
+		routes := frontends
+		if len(certificateRoutes) > 0 {
+			routes, err = activeTLSFrontends(certificateRoutes[0])
+			if err != nil {
+				return err
+			}
+		}
+		if err = m.releaseNginxChallengePort(ctx, routes); err != nil {
+			return err
+		}
+	}
 	for _, mode := range []string{"caddy", "nginx"} {
 		if len(certificateRoutes) > 0 && mode != "caddy" {
 			continue
@@ -578,7 +626,7 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		status, _ := m.services.status(ctx, service)
 		referencedCertificates := false
 		for _, f := range frontends {
-			referencedCertificates = referencedCertificates || f.Mode == mode && f.Transport == "xhttp"
+			referencedCertificates = referencedCertificates || f.Mode == mode && (f.Transport == "xhttp" || f.AutomaticCertificate)
 		}
 		if status == "active" && string(stored) == content && !referencedCertificates {
 			continue
@@ -689,7 +737,7 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	}
 	if err != nil {
 		for _, f := range next[service].Frontends {
-			if f.Mode == "caddy" {
+			if f.UsesACME() {
 				err = m.withFrontendDiagnostics(err, f, started)
 				break
 			}
@@ -720,7 +768,7 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend, protocol ...bool)
 		if !config.RootCAs.AppendCertsFromPEM(data) {
 			return errors.New("XHTTP 本地目标证书无效")
 		}
-	} else if f.Mode == "nginx" {
+	} else if f.Mode == "nginx" && !f.AutomaticCertificate {
 		config.RootCAs = x509.NewCertPool()
 		if !config.RootCAs.AppendCertsFromPEM([]byte(f.Certificate)) {
 			return errors.New("Nginx 公共证书无效")

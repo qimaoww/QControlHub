@@ -13,6 +13,7 @@ import (
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
 const AgentFeatureManagedTLSH2 = "managed-tls-h2-v1"
+const AgentFeatureNginxACME = "managed-tls-nginx-acme-v1"
 const AgentFeatureACMEFallback = "managed-tls-acme-fallback-v1"
 
 // Includes optional core installation, environment checks, both issuers and independent recovery.
@@ -22,26 +23,36 @@ const ManagedTLSLeaseTimeout = 12 * time.Minute
 // TLSFrontend is delivered only in the encrypted execution snapshot. PrivateKey
 // must never be returned by panel task APIs or included in client exports.
 type TLSFrontend struct {
-	LocalOnly       bool     `json:"local_only,omitempty"`
-	RealityNames    []string `json:"reality_names,omitempty"`
-	RealityName     string   `json:"reality_name,omitempty"`
-	CertificatePath string   `json:"certificate_path,omitempty"`
-	PrivateKeyPath  string   `json:"private_key_path,omitempty"`
-	Tag             string   `json:"tag"`
-	Mode            string   `json:"mode"`
-	Domain          string   `json:"domain"`
-	PublicPort      int      `json:"public_port"`
-	BackendPort     int      `json:"backend_port"`
-	Transport       string   `json:"transport"`
-	Path            string   `json:"path"`
-	Host            string   `json:"host,omitempty"`
-	Method          string   `json:"method,omitempty"`
-	Certificate     string   `json:"certificate,omitempty"`
-	PrivateKey      string   `json:"private_key,omitempty"`
-	ACMEEmail       string   `json:"acme_email,omitempty"`
+	AutomaticCertificate bool     `json:"automatic_certificate,omitempty"`
+	LocalOnly            bool     `json:"local_only,omitempty"`
+	RealityNames         []string `json:"reality_names,omitempty"`
+	RealityName          string   `json:"reality_name,omitempty"`
+	CertificatePath      string   `json:"certificate_path,omitempty"`
+	PrivateKeyPath       string   `json:"private_key_path,omitempty"`
+	Tag                  string   `json:"tag"`
+	Mode                 string   `json:"mode"`
+	Domain               string   `json:"domain"`
+	PublicPort           int      `json:"public_port"`
+	BackendPort          int      `json:"backend_port"`
+	Transport            string   `json:"transport"`
+	Path                 string   `json:"path"`
+	Host                 string   `json:"host,omitempty"`
+	Method               string   `json:"method,omitempty"`
+	Certificate          string   `json:"certificate,omitempty"`
+	PrivateKey           string   `json:"private_key,omitempty"`
+	ACMEEmail            string   `json:"acme_email,omitempty"`
+}
+
+// UsesACME includes Nginx frontends whose certificates are managed by the
+// certificate-only Caddy service. Legacy Nginx and local XHTTP remain unchanged.
+func (f TLSFrontend) UsesACME() bool {
+	return f.Mode == "caddy" || f.Mode == "nginx" && f.AutomaticCertificate
 }
 
 func (f TLSFrontend) Validate() error {
+	if f.AutomaticCertificate && (f.Mode != "nginx" || f.Transport != "websocket" || f.LocalOnly || f.Certificate != "" || f.PrivateKey != "") {
+		return fmt.Errorf("Nginx 自动证书仅支持公网 WebSocket，不能同时指定证书或私钥")
+	}
 	if f.Transport == "xhttp" {
 		if !f.LocalOnly || f.Mode != "nginx" || f.RealityName == "" || f.PublicPort < 1024 || f.BackendPort < 1024 || f.Domain == f.RealityName {
 			return fmt.Errorf("XHTTP 组合需独立本地 Nginx TLS 目标及不同 SNI")
@@ -102,11 +113,11 @@ func (f TLSFrontend) Validate() error {
 			}
 		}
 	}
-	if f.Mode == "caddy" && (f.PublicPort == 80 || f.BackendPort == 80) {
-		return fmt.Errorf("Caddy 自动证书需要独立 HTTP 验证端口 80，请使用其他公网 HTTPS 与内部端口")
+	if f.UsesACME() && (f.PublicPort == 80 || f.BackendPort == 80) {
+		return fmt.Errorf("自动证书需要独立 HTTP 验证端口 80，请使用其他公网 HTTPS 与内部端口")
 	}
-	if f.Mode == "caddy" && (net.ParseIP(f.Domain) != nil || !strings.Contains(f.Domain, ".")) {
-		return fmt.Errorf("Caddy 自动证书需要指向节点的公网域名")
+	if f.UsesACME() && (net.ParseIP(f.Domain) != nil || !strings.Contains(f.Domain, ".")) {
+		return fmt.Errorf("自动证书需要指向节点的公网域名")
 	}
 	if f.Transport != "websocket" && f.Transport != "httpupgrade" && !(f.Transport == "http" && f.Mode == "caddy") {
 		return fmt.Errorf("托管 TLS 反代当前支持 WebSocket、HTTPUpgrade 和 Caddy HTTP/H2；其他传输请选择原生 TLS")
@@ -114,7 +125,7 @@ func (f TLSFrontend) Validate() error {
 	if !strings.HasPrefix(f.Path, "/") || len(f.Path) > 256 || strings.ContainsAny(f.Path, "\r\n\t \"'`$\\{};#?*%") {
 		return fmt.Errorf("反代路径必须以 / 开头，不得包含查询参数、空白或配置控制字符")
 	}
-	if f.Mode == "nginx" && (f.Certificate == "" || f.PrivateKey == "") {
+	if f.Mode == "nginx" && !f.AutomaticCertificate && (f.Certificate == "" || f.PrivateKey == "") {
 		return fmt.Errorf("Nginx 托管证书缺少证书或私钥")
 	}
 	return nil

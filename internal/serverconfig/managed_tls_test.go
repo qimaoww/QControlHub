@@ -95,7 +95,7 @@ func TestManagedTLSLifecycle(t *testing.T) {
 					}
 					input.TLSALPN = "http/1.1"
 					input.TLSMode = mode
-					if mode == "caddy" {
+					if mode == "caddy" || input.Protocol == "vless-ws-tls" {
 						input.TLSACMEEmail = "certs@example.test"
 					}
 					input.TLSPublicPort = 8443
@@ -144,8 +144,18 @@ func TestManagedTLSLifecycle(t *testing.T) {
 					if strings.Contains(string(out), "PRIVATE KEY") {
 						t.Fatal("server key leaked")
 					}
-					if mode == "nginx" && (!strings.Contains(string(out), "CERTIFICATE") || parsed.TLSClientCertificate == "") {
+					if mode == "nginx" && input.Protocol != "vless-ws-tls" && (!strings.Contains(string(out), "CERTIFICATE") || parsed.TLSClientCertificate == "") {
 						t.Fatal("trust certificate absent")
+					}
+					if mode == "nginx" && input.Protocol == "vless-ws-tls" {
+						f := frontends[0]
+						if !f.AutomaticCertificate || !f.UsesACME() || f.Certificate != "" || f.PrivateKey != "" || parsed.TLSClientCertificate != "" || strings.Contains(string(out), "CERTIFICATE") {
+							t.Fatal("automatic Nginx certificate retained private material or custom trust")
+						}
+						clientTLS := outbound["tls"].(map[string]any)
+						if clientTLS["server_name"] != input.TLSServerName || clientTLS["insecure"] == true || clientTLS["certificate"] != nil {
+							t.Fatal("automatic Nginx client does not use hostname and system trust", string(out))
+						}
 					}
 					encodedAgain, err := MarshalClientMetadataWithPrevious(parsed, encoded)
 					if err != nil {
@@ -176,7 +186,7 @@ func TestManagedTLSLifecycle(t *testing.T) {
 }
 
 func TestManagedTLSAuthoritySharedAcrossInbounds(t *testing.T) {
-	protocol, _ := FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	protocol, _ := FindProtocol(core.EngineSingBox, "vmess-ws-tls")
 	a, _ := NewPlan(protocol)
 	a.TLSMode = "nginx"
 	a.TLSServerName = "one.example.test"
@@ -211,7 +221,7 @@ func TestManagedTLSAuthoritySharedAcrossInbounds(t *testing.T) {
 }
 
 func TestManagedTLSModeSwitchClearsGeneratedNginxTrust(t *testing.T) {
-	protocol, _ := FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	protocol, _ := FindProtocol(core.EngineSingBox, "vmess-ws-tls")
 	nginx, _ := NewPlan(protocol)
 	nginx.TLSMode, nginx.TLSServerName = "nginx", "tls.example.test"
 	nginxMetadata, err := MarshalClientMetadataWithPrevious(nginx, "")
@@ -223,7 +233,14 @@ func TestManagedTLSModeSwitchClearsGeneratedNginxTrust(t *testing.T) {
 		t.Fatalf("Nginx trust material missing: %v", err)
 	}
 
-	for _, mode := range []string{"caddy", "external", "native"} {
+	// Reconstruct a pre-upgrade VLESS Nginx preset using the legacy signer.
+	original.Protocol, nginx.Protocol = "vless-ws-tls", "vless-ws-tls"
+	legacy, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nginxMetadata = string(legacy)
+	for _, mode := range []string{"nginx", "caddy", "external", "native"} {
 		t.Run(mode, func(t *testing.T) {
 			next := nginx
 			next.TLSMode = mode
@@ -244,6 +261,10 @@ func TestManagedTLSModeSwitchClearsGeneratedNginxTrust(t *testing.T) {
 				t.Fatal("previous Nginx trust material survived a frontend mode change")
 			}
 			switch mode {
+			case "nginx":
+				if metadata.Frontend == nil || !metadata.Frontend.AutomaticCertificate || metadata.Frontend.Certificate != "" || metadata.Frontend.PrivateKey != "" {
+					t.Fatal("legacy certificate survived ACME migration")
+				}
 			case "caddy":
 				if metadata.Frontend == nil || metadata.Frontend.Mode != "caddy" || metadata.ExternalFrontend != nil {
 					t.Fatalf("Caddy metadata mismatch: %+v", metadata)

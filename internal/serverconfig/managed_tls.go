@@ -24,7 +24,8 @@ func proxiedTLS(input Input) bool { return managedTLS(input) || input.TLSMode ==
 
 func frontendFor(input Input) core.TLSFrontend {
 	f := core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath, Host: input.TransportHost, Method: input.TransportHTTPMethod}
-	if input.TLSMode == "caddy" {
+	f.AutomaticCertificate = input.Protocol == "vless-ws-tls" && input.TLSMode == "nginx"
+	if f.UsesACME() {
 		f.ACMEEmail = input.TLSACMEEmail
 	}
 	return f
@@ -42,7 +43,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 	}
 	f := frontendFor(input)
 	// Certificate generation happens after validating the logical plan.
-	if f.Mode == "nginx" {
+	if f.Mode == "nginx" && !f.AutomaticCertificate {
 		f.Certificate, f.PrivateKey = "pending", "pending"
 	}
 	if input.TLSMode == "external" {
@@ -66,7 +67,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 func MarshalClientMetadataWithPrevious(input Input, previous string) (string, error) {
 	var old clientMetadata
 	oldValid := json.Unmarshal([]byte(previous), &old) == nil
-	if oldValid && old.Frontend != nil && old.Frontend.Mode == "nginx" && input.TLSMode != "nginx" && input.TLSClientCertificate == old.TLSClientCertificate {
+	if oldValid && old.Frontend != nil && old.Frontend.Mode == "nginx" && (input.TLSMode != "nginx" || frontendFor(input).AutomaticCertificate) && input.TLSClientCertificate == old.TLSClientCertificate {
 		input.TLSClientCertificate = ""
 	}
 	encoded, err := MarshalClientMetadata(input)
@@ -84,10 +85,10 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 		data, err := json.Marshal(metadata)
 		return string(data), err
 	}
-	if oldValid && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain {
+	if oldValid && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain && !f.AutomaticCertificate {
 		f.Certificate, f.PrivateKey = old.Frontend.Certificate, old.Frontend.PrivateKey
 	}
-	if f.Mode == "nginx" {
+	if f.Mode == "nginx" && !f.AutomaticCertificate {
 		authority, authorityKey := old.TLSClientCertificate, old.TLSAuthorityKey
 		if authorityKey == "" {
 			authority, authorityKey, err = newFrontendAuthority()
@@ -108,7 +109,7 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 			}
 		}
 	} else {
-		metadata.TLSClientCertificate = ""
+		metadata.TLSClientCertificate, metadata.TLSAuthorityKey = "", ""
 	}
 	if err = f.Validate(); err != nil {
 		return "", err
@@ -124,7 +125,7 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 func PreviousManagedTLSMetadata(input Input, values map[string]string, originalTag string) string {
 	if original := values[originalTag]; original != "" {
 		var m clientMetadata
-		if input.TLSMode != "nginx" || json.Unmarshal([]byte(original), &m) == nil && m.TLSAuthorityKey != "" {
+		if frontendFor(input).AutomaticCertificate || input.TLSMode != "nginx" || json.Unmarshal([]byte(original), &m) == nil && m.TLSAuthorityKey != "" {
 			return original
 		}
 	}

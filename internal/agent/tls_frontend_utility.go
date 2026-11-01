@@ -106,6 +106,13 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		defer cancel()
 	}
 	if request.Action == core.ActionStatus {
+		if request.Certificates {
+			deployments, err := manager.load()
+			if err != nil {
+				return err
+			}
+			return manager.refreshNginxCertificates(ctx, deployments)
+		}
 		return manager.repairRuntime(ctx)
 	}
 	if request.Certificates {

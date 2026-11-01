@@ -18,7 +18,7 @@ func TestManagedTLSDomainOnlyCaddyAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "domain-only Caddy", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineSingBox}, Features: []string{core.AgentFeatureIndependentEgress, core.AgentFeatureManagedTLS}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "domain-only Caddy", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineSingBox}, Features: []string{core.AgentFeatureIndependentEgress, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +101,13 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 	plan.TLSServerName = "tls.example.test"
 	plan.TLSALPN = "http/1.1"
 	plan.TransportHost = "host.example.test"
+	// Older Agents must reject the new certificate mode before committing a
+	// revision; advertising support permits the same unchanged draft to deploy.
+	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusConflict, nil)
+	agent.Features = append(agent.Features, core.AgentFeatureNginxACME)
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features}); err != nil {
+		t.Fatal(err)
+	}
 	var saved configMutationResult
 	response := admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
 	if strings.Contains(string(response), "PRIVATE KEY") || len(saved.Task.TLSFrontends) > 0 {
@@ -114,7 +121,7 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 		t.Fatal("workspace")
 	}
 	restored := workspace.Inbounds[0]
-	if restored.Protocol != plan.Protocol || restored.TLSMode != "nginx" || restored.TLSPublicPort != 9443 || restored.TLSALPN != "http/1.1" || restored.TLSClientCertificate == "" || restored.TLSServerName != plan.TLSServerName || restored.TransportHost != plan.TransportHost {
+	if restored.Protocol != plan.Protocol || restored.TLSMode != "nginx" || restored.TLSPublicPort != 9443 || restored.TLSALPN != "http/1.1" || restored.TLSClientCertificate != "" || restored.TLSServerName != plan.TLSServerName || restored.TransportHost != plan.TransportHost {
 		t.Fatalf("lost managed frontend parameters: %+v", restored)
 	}
 	if strings.Contains(string(response), "PRIVATE KEY") {
@@ -123,6 +130,9 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 	claimed, err := db.ClaimTask(ctx, agent.ID)
 	if err != nil || claimed == nil {
 		t.Fatal(err)
+	}
+	if len(claimed.TLSFrontends) != 1 || !claimed.TLSFrontends[0].AutomaticCertificate || claimed.TLSFrontends[0].Certificate != "" || claimed.TLSFrontends[0].PrivateKey != "" {
+		t.Fatal("missing Nginx ACME deployment metadata")
 	}
 	if err = db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: false, Error: "fixture deployment error"}); err != nil {
 		t.Fatal(err)
@@ -152,7 +162,7 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 func TestManagedTLSSharedDomainOnlyPortsAPI(t *testing.T) {
 	db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-domain-only", core.EngineSingBox)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances)
+	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}

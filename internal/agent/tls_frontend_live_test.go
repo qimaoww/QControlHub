@@ -82,9 +82,9 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 					serverLog := singBoxRun(t, binary, "backend", string(checked))
 					dir := t.TempDir()
 					f := frontends[0]
-					if transport == "h2" {
+					if transport == "h2" || f.AutomaticCertificate {
 						fixture := input
-						fixture.Protocol, fixture.Transport, fixture.TLSMode = base+"-ws-tls", "websocket", "nginx"
+						fixture.Protocol, fixture.Transport, fixture.TLSMode = "vmess-ws-tls", "websocket", "nginx"
 						local, err := serverconfig.MarshalClientMetadataWithPrevious(fixture, "")
 						if err != nil {
 							t.Fatal(err)
@@ -99,7 +99,7 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 						out["tls"].(map[string]any)["certificate"] = []string{f.Certificate}
 						outbound, _ = json.Marshal(out)
 					}
-					f.Mode = mode
+					f.Mode, f.AutomaticCertificate = mode, false // isolated certificate fixture; automatic issuance has its own sandbox test
 					cert := filepath.Join(dir, frontendKey(f)+".crt")
 					key := filepath.Join(dir, frontendKey(f)+".key")
 					_ = os.WriteFile(cert, []byte(f.Certificate), 0600)

@@ -345,11 +345,12 @@ export async function testPresetsRuntime(preview = false) {
     assert(control("tls_server_name").value === "proxy.example.test" && control("tls_mode").checkVisibility() && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy settings or visible TLS selector did not survive reload");
 
     edit("tls_mode", "nginx");
-    assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("自签证书") && form().querySelector("[data-managed-tls-route]").textContent.startsWith("Nginx：") && control("listen").value === "127.0.0.1", "Nginx mode did not update trust guidance or route preview");
+    edit("tls_acme_email", "certs@example.test");
+    assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("公开可信证书") && !control("tls_acme_email").disabled && form().querySelector("[data-managed-tls-route]").textContent.startsWith("Nginx：") && control("listen").value === "127.0.0.1", "Nginx mode did not update trust guidance or route preview");
     button("deploy").click();
     await waitFor(() => test.saved?.version === 2 && !button("deploy").disabled, "Nginx deployment stalled");
     let modeSave = submissions(test).at(-1).body.input;
-    assert(modeSave.tls_mode === "nginx" && modeSave.tls_public_port === 443 && modeSave.listen === "127.0.0.1" && !modeSave.tls_acme_email && !modeSave.certificate_path && !modeSave.private_key_path, "Nginx deployment retained Caddy or native certificate fields");
+    assert(modeSave.tls_mode === "nginx" && modeSave.tls_public_port === 443 && modeSave.listen === "127.0.0.1" && modeSave.tls_acme_email === "certs@example.test" && !modeSave.certificate_path && !modeSave.private_key_path, "Nginx deployment retained Caddy or native certificate fields");
     assert(control("tls_mode").value === "nginx" && control("tls_server_name").value === "proxy.example.test" && control("transport_path").value === modeSave.transport_path && control("credential").value === modeSave.credential, "Nginx mode or connection settings did not survive reload");
 
     edit("tls_mode", "caddy");
@@ -410,10 +411,10 @@ export async function testPresetsRuntime(preview = false) {
       edit("tls_public_port", "8443");
       const proxyMode = actual.plan.transport === "http" ? "external" : "nginx";
       edit("tls_mode", proxyMode);
-      assert(control("tls_acme_email").disabled && control("tls_acme_email").closest("[data-caddy-acme]").hidden, "ACME email remained active for Nginx");
+      assert(control("tls_acme_email").disabled === !expanded && control("tls_acme_email").closest("[data-caddy-acme]").hidden === !expanded, "ACME email visibility does not match certificate mode");
       assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
       assert(control("tls_mode").closest(".plan-fields") && control("tls_public_port").closest(".plan-fields") && control("tls_client_certificate").closest(".plan-fields"), "new TLS controls bypass the standard form grid");
-      assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : "自签证书") && !form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80"), "TLS help did not follow selected certificate mode");
+      assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : expanded ? "公开可信证书" : "自签证书") && form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80") === expanded, "TLS help did not follow selected certificate mode");
       test.portConflict = "tls_public_port";
       button("validate").click();
       await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "public HTTPS port conflict blocked retry");
@@ -465,7 +466,7 @@ export async function testPresetsRuntime(preview = false) {
     if (actual.engine === "sing-box") {
       const saved = submissions(test)[0].body.input;
       assert(saved.transport === actual.plan.transport, "native transport changed during save");
-      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === (actual.plan.transport === "http" ? "external" : "nginx") && !saved.tls_acme_email && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
+      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === (actual.plan.transport === "http" ? "external" : "nginx") && saved.tls_acme_email === (actual.protocol.key === "vless-ws-tls" ? "certs@example.test" : "") && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
       if (actual.plan.tls_enabled) assert(saved.tls_server_name === "tls.example.test" && control("tls_server_name").value === saved.tls_server_name && control("tls_alpn").value === saved.tls_alpn, "native TLS values were lost on reopen");
       if (control("transport_host") && !control("transport_host").disabled) assert(saved.transport_host === "http.example.test" && control("transport_host").value === saved.transport_host, "HTTP Host was conflated with TLS SNI");
       if (saved.transport === "http") assert(saved.transport_http_method === "POST" && control("transport_http_method").value === "POST", "HTTP Method was lost on reopen");

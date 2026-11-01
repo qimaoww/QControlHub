@@ -21,7 +21,7 @@ func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeplo
 	primary, cancel := context.WithTimeout(ctx, tlsIssuerBudget)
 	var err error
 	for _, f := range frontends {
-		if len(certificateRoutes) > 0 && f.Mode != "caddy" {
+		if len(certificateRoutes) > 0 && !f.UsesACME() {
 			continue
 		}
 		if len(certificateRoutes) > 0 {
@@ -38,7 +38,7 @@ func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeplo
 		return nil
 	}
 	for _, f := range frontends {
-		if f.Mode == "caddy" && f.ACMEEmail != "" {
+		if f.UsesACME() && f.ACMEEmail != "" {
 			fallback[f.Domain] = true
 		}
 	}
@@ -51,7 +51,7 @@ func (m *tlsFrontendManager) waitReady(ctx context.Context, deployments tlsDeplo
 	backup, cancel := context.WithTimeout(ctx, tlsIssuerBudget)
 	defer cancel()
 	for _, f := range frontends {
-		if len(certificateRoutes) > 0 && f.Mode != "caddy" {
+		if len(certificateRoutes) > 0 && !f.UsesACME() {
 			continue
 		}
 		if len(certificateRoutes) > 0 {
