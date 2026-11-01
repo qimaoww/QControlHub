@@ -59,7 +59,7 @@ func TestManagedTLSAccountDefaultForSharedDeployments(t *testing.T) {
 	setEmail(owner, "owner@example.test")
 	setEmail(recipient, "recipient@example.test")
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "acme-shared", core.EngineSingBox)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureACMEFallback, core.AgentFeatureSharedCoreInstances)
+	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureACMEFallback, core.AgentFeatureSharedCoreInstances)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +99,6 @@ func TestManagedTLSAccountDefaultForSharedDeployments(t *testing.T) {
 		plan.TLSMode, plan.TLSACMEEmail = mode, "override@example.test"
 		recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "modify", "original_tag": plan.Tag, "expected_version": saved.Config.Version, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
 		want := "override@example.test"
-		if mode == "nginx" {
-			want = ""
-		}
 		claim(saved.Task, want)
 	}
 	features := []string{}

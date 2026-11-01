@@ -48,6 +48,9 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 			return fmt.Errorf("Agent 不再支持托管 TLS 反代（managed-tls-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
 		}
 		for _, frontend := range task.TLSFrontends {
+			if frontend.AutomaticCertificate && !containsFeature(features, core.AgentFeatureNginxACME) {
+				return fmt.Errorf("Agent 不再支持 Nginx 自动申请和续期证书（managed-tls-nginx-acme-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
+			}
 			if frontend.Transport == "http" && !containsFeature(features, core.AgentFeatureManagedTLSH2) {
 				return fmt.Errorf("Agent 不再支持 Caddy HTTP/H2 托管反代（managed-tls-h2-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
 			}

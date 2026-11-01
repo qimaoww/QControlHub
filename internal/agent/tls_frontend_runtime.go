@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -69,6 +71,9 @@ func (m *tlsFrontendManager) repairRuntime(ctx context.Context) error {
 	for _, d := range deployments {
 		for _, f := range d.Frontends {
 			modes[f.Mode] = true
+			if f.UsesACME() {
+				modes["caddy"] = true
+			}
 		}
 	}
 	for mode := range modes {
@@ -80,7 +85,10 @@ func (m *tlsFrontendManager) repairRuntime(ctx context.Context) error {
 			return err
 		}
 	}
-	return m.upgradeHTTPChallengeRoutes(ctx, deployments)
+	if err := m.upgradeHTTPChallengeRoutes(ctx, deployments); err != nil {
+		return err
+	}
+	return m.refreshNginxCertificates(ctx, deployments)
 }
 
 func (e *Executor) repairTLSRuntime(ctx context.Context) error {
@@ -116,6 +124,9 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 	modes := map[string]bool{}
 	for _, f := range active {
 		modes[f.Mode] = true
+		if f.UsesACME() {
+			modes["caddy"] = true
+		}
 	}
 	for mode := range modes {
 		service := "qagent-tls-" + mode
@@ -209,4 +220,24 @@ func upgradeCaddyHTTPChallengeConfig(stored string) (string, error) {
 	}
 	data, err := json.MarshalIndent(root, "", "  ")
 	return string(data), err
+}
+
+// Keep certificate reloads independent of the control-plane connection. The
+// helper serializes them with deployments and never starts stopped services.
+func (e *Executor) maintainTLSCertificates(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check, cancel := context.WithTimeout(ctx, 30*time.Second)
+			spec := DefaultSpecsForServiceManager(e.serviceManager().Kind())[core.EngineSingBox]
+			if err := e.executeTLSFrontendRequest(check, spec, core.Task{Engine: core.EngineSingBox, Action: core.ActionStatus}, false, true); err != nil && ctx.Err() == nil {
+				slog.Warn("refresh managed Nginx certificates", "error", err)
+			}
+			cancel()
+		}
+	}
 }

@@ -115,6 +115,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedTLSH2,
 		core.AgentFeatureXHTTP,
 		core.AgentFeatureACMEFallback,
+		core.AgentFeatureNginxACME,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,

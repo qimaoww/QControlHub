@@ -46,6 +46,10 @@ async function fixture(engine, readOnly = false, actual) {
     const body = options.body ? JSON.parse(options.body) : undefined;
     test.calls.push({ path, method: options.method || "GET", body });
     path = path.replace(/\?view=status$/, "");
+    if (path === "/certificates") {
+      if (actual?.certificateGate) await actual.certificateGate;
+      return { items: actual?.certificates || [] };
+    }
     if (path.endsWith("/workspace")) {
       if (test.workspaceFailure) throw new Error("模拟页面刷新失败");
       return { agent, config: test.saved, inbounds: structuredClone(test.inbounds), protocols,
@@ -328,7 +332,10 @@ export async function testPresetsRuntime(preview = false) {
   const catalog = await catalogResponse.json();
   const caddyPreset = catalog.find(entry => entry.engine === "sing-box" && entry.protocol.key === "vless-ws-tls");
   for (const shared of [false, true]) {
-    const test = await fixture("sing-box", false, {...caddyPreset, shared});
+    const test = await fixture("sing-box", false, {...caddyPreset, shared, certificates: [{id:"crt_fixture",name:"原生 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"}]});
+    const advanced = form().querySelector("[data-tls-advanced]");
+    assert(advanced.open && control("tls_mode").checkVisibility() && control("tls_mode").closest("[data-tls-advanced]") === advanced, "existing TLS selector must be visible in its original settings section");
+    assert(form().querySelectorAll('[name="tls_mode"]').length === 1 && form().querySelector("#connection .plan-fields.two")?.textContent.includes("公网 HTTPS 端口") && !control("tls_mode").closest("#connection"), "TLS switching changed the original field grouping or duplicated its selector");
     edit("tls_server_name", "proxy.example.test");
     const previousPort = control("port").value;
     form().querySelector(".builder-actions [data-regenerate]").click();
@@ -339,8 +346,62 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => test.saved?.version === 1 && !button("deploy").disabled, "domain-only Caddy deployment stalled");
     const saved = submissions(test)[0].body.input;
     assert(saved.tls_mode === "caddy" && saved.listen === "127.0.0.1" && saved.tls_public_port === 443 && String(saved.port) === backendPort && !saved.certificate_path && !saved.private_key_path, "Caddy deployment did not use a generated loopback backend");
-    assert(control("tls_server_name").value === "proxy.example.test" && !form().querySelector("[data-tls-advanced]").open && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy domain-only settings did not survive reload");
+    assert(control("tls_server_name").value === "proxy.example.test" && control("tls_mode").checkVisibility() && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy settings or visible TLS selector did not survive reload");
+
+    edit("tls_mode", "nginx");
+    edit("tls_acme_email", "certs@example.test");
+    assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("公开可信证书") && !control("tls_acme_email").disabled && form().querySelector("[data-managed-tls-route]").textContent.startsWith("Nginx：") && control("listen").value === "127.0.0.1", "Nginx mode did not update trust guidance or route preview");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 2 && !button("deploy").disabled, "Nginx deployment stalled");
+    let modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "nginx" && modeSave.tls_public_port === 443 && modeSave.listen === "127.0.0.1" && modeSave.tls_acme_email === "certs@example.test" && !modeSave.certificate_path && !modeSave.private_key_path, "Nginx deployment retained Caddy or native certificate fields");
+    assert(control("tls_mode").value === "nginx" && control("tls_server_name").value === "proxy.example.test" && control("transport_path").value === modeSave.transport_path && control("credential").value === modeSave.credential, "Nginx mode or connection settings did not survive reload");
+
+    edit("tls_mode", "caddy");
+    assert(!form().querySelector("[data-caddy-acme]").hidden && form().querySelector("[data-managed-tls-route]").textContent.startsWith("Caddy："), "Caddy mode did not restore its ACME fields and route preview");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 3 && !button("deploy").disabled, "Caddy redeployment stalled");
+    modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "caddy" && control("tls_mode").value === "caddy" && !modeSave.tls_client_certificate, "switching back to Caddy retained Nginx trust data");
+
+    edit("tls_mode", "nginx");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 4 && !button("deploy").disabled, "second Nginx deployment stalled");
+    control("tls_client_certificate").value = "generated-nginx-trust";
+    edit("tls_mode", "external");
+    assert(control("tls_client_certificate").value === "" && form().querySelector("[data-managed-tls-route]").textContent.startsWith("外部反代："), "Nginx trust data or route remained active for external TLS");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 5 && !button("deploy").disabled, "external proxy deployment stalled");
+    modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "external" && modeSave.listen === "127.0.0.1" && !modeSave.tls_client_certificate && !modeSave.certificate_path && !modeSave.private_key_path, "external mode retained managed or native certificate state");
+
+    edit("tls_mode", "native");
+    control("certificate_path").value = "/etc/qcontrolhub/tls/server.crt";
+    control("private_key_path").value = "/etc/qcontrolhub/tls/server.key";
+    assert(form().querySelector("[data-managed-tls-route]").hidden && !control("certificate_path").disabled && control("listen").value === "0.0.0.0", "native mode did not reveal certificate inputs or clear the managed route");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 6 && !button("deploy").disabled, "native TLS deployment stalled");
+    modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "native" && modeSave.tls_public_port === 0 && modeSave.listen === "0.0.0.0" && modeSave.certificate_path.endsWith("server.crt") && modeSave.private_key_path.endsWith("server.key") && !modeSave.tls_client_certificate, "native TLS deployment retained managed frontend state");
+    await waitFor(() => control("panel_certificate_id")?.options.length > 1, "certificate catalog did not load");
+    edit("panel_certificate_id", "crt_fixture");
+    assert(control("tls_mode").value === "native" && !control("panel_certificate_id").disabled && control("certificate_path").readOnly, "native certificate selection failed");
+    assert(readServerPlanInput(form(), caddyPreset.protocol).panel_certificate_id === "crt_fixture", "native certificate binding lost");
+    edit("tls_mode", "nginx");
+    assert(control("panel_certificate_id").disabled && control("panel_certificate_id").closest("[data-panel-certificate]").hidden, "native certificate selector conflicts with Nginx mode");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 7 && !button("deploy").disabled, "Nginx deployment after panel certificate selection stalled");
+    modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "nginx" && !modeSave.panel_certificate_id && !modeSave.certificate_path && !modeSave.private_key_path, "native certificate binding overrode selected Nginx mode");
   }
+  const certificateGate = deferred();
+  await fixture("sing-box", false, {...caddyPreset, certificateGate: certificateGate.promise,
+    plan: {...caddyPreset.plan, tls_mode:"native", listen:"0.0.0.0", tls_server_name:"proxy.example.test", certificate_path:"/etc/qcontrolhub/panel-certificates/crt_fixture/cert.pem", private_key_path:"/etc/qcontrolhub/panel-certificates/crt_fixture/key.pem"},
+    certificates:[{id:"crt_fixture",name:"加载中的证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"}]});
+  edit("tls_mode", "nginx");
+  certificateGate.resolve();
+  await waitFor(() => control("panel_certificate_id")?.options.length > 1, "delayed certificate catalog did not finish");
+  assert(control("tls_mode").value === "nginx" && control("panel_certificate_id").disabled && !readServerPlanInput(form(), caddyPreset.protocol).panel_certificate_id, "delayed native certificate response overrode the selected Nginx mode");
   const covered = new Set();
   const cases = [...catalog, ...catalog.filter(actual => actual.engine === "xray" && actual.plan.transport === "xhttp").map(actual => ({...actual, shared: true}))];
   for (const actual of cases) {
@@ -348,9 +409,11 @@ export async function testPresetsRuntime(preview = false) {
     covered.add(actual.engine);
     if (actual.protocol.supports_managed_tls) {
       assert(!form().querySelector("[data-builder-step]"), "managed TLS still requires the four-tab workflow");
-      assert(!form().querySelector("[data-tls-advanced]").open, "generated settings should start collapsed");
+      const expanded = actual.protocol.key === "vless-ws-tls";
+      assert(form().querySelector("[data-tls-advanced]").open === expanded, "only VLESS WebSocket TLS settings should start expanded");
       const basic = [...form().querySelectorAll("input,select,textarea")].filter(input => input.willValidate && input.checkVisibility());
-      assert(basic.every(input => ["operation", "tls_server_name", "tls_public_port"].includes(input.name)), "managed TLS asks for generated settings in the basic flow");
+      if (!expanded) assert(basic.every(input => ["operation", "tls_server_name", "tls_public_port"].includes(input.name)), "other managed TLS presets changed their domain-only flow");
+      else assert(control("tls_mode").checkVisibility() && control("tls_mode").closest("[data-tls-advanced]"), "VLESS WebSocket TLS selector is hidden or moved from its original section");
       assert(control("tls_mode").value === "caddy" && control("tls_public_port").value === "443", "managed TLS defaults lost");
       assert(control("listen").value === "127.0.0.1" && control("listen").readOnly, "managed backend is not loopback");
       assert(control("tls_server_name").required && !control("tls_server_name").checkValidity(), "managed domain must be supplied");
@@ -370,10 +433,10 @@ export async function testPresetsRuntime(preview = false) {
       edit("tls_public_port", "8443");
       const proxyMode = actual.plan.transport === "http" ? "external" : "nginx";
       edit("tls_mode", proxyMode);
-      assert(control("tls_acme_email").disabled && control("tls_acme_email").closest("[data-caddy-acme]").hidden, "ACME email remained active for Nginx");
+      assert(control("tls_acme_email").disabled === !expanded && control("tls_acme_email").closest("[data-caddy-acme]").hidden === !expanded, "ACME email visibility does not match certificate mode");
       assert(control("certificate_path").disabled && control("private_key_path").disabled, "managed certificate paths must be disabled");
       assert(control("tls_mode").closest(".plan-fields") && control("tls_public_port").closest(".plan-fields") && control("tls_client_certificate").closest(".plan-fields"), "new TLS controls bypass the standard form grid");
-      assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : "自签证书") && !form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80"), "TLS help did not follow selected certificate mode");
+      assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : expanded ? "公开可信证书" : "自签证书") && form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80") === expanded, "TLS help did not follow selected certificate mode");
       test.portConflict = "tls_public_port";
       button("validate").click();
       await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "public HTTPS port conflict blocked retry");
@@ -425,7 +488,7 @@ export async function testPresetsRuntime(preview = false) {
     if (actual.engine === "sing-box") {
       const saved = submissions(test)[0].body.input;
       assert(saved.transport === actual.plan.transport, "native transport changed during save");
-      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === (actual.plan.transport === "http" ? "external" : "nginx") && !saved.tls_acme_email && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
+      if (actual.protocol.supports_managed_tls) assert(saved.tls_mode === (actual.plan.transport === "http" ? "external" : "nginx") && saved.tls_acme_email === (actual.protocol.key === "vless-ws-tls" ? "certs@example.test" : "") && saved.tls_public_port === 8443 && saved.listen === "127.0.0.1" && control("tls_public_port").value === "8443", "managed TLS public port or provider lost after save/reopen");
       if (actual.plan.tls_enabled) assert(saved.tls_server_name === "tls.example.test" && control("tls_server_name").value === saved.tls_server_name && control("tls_alpn").value === saved.tls_alpn, "native TLS values were lost on reopen");
       if (control("transport_host") && !control("transport_host").disabled) assert(saved.transport_host === "http.example.test" && control("transport_host").value === saved.transport_host, "HTTP Host was conflated with TLS SNI");
       if (saved.transport === "http") assert(saved.transport_http_method === "POST" && control("transport_http_method").value === "POST", "HTTP Method was lost on reopen");

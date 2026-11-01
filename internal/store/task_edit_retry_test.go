@@ -54,8 +54,9 @@ func TestEditedRetryIsAtomicAndVersioned(t *testing.T) {
 }
 
 func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
-	for _, variant := range []string{"nginx", "caddy", "caddy-h2"} {
-		mode := strings.TrimSuffix(variant, "-h2")
+	for _, variant := range []string{"nginx", "nginx-pending", "nginx-legacy", "caddy", "caddy-h2"} {
+		mode := strings.SplitN(variant, "-", 2)[0]
+		automatic := mode == "nginx" && variant != "nginx-legacy"
 		t.Run(variant, func(t *testing.T) {
 			db, ctx, _ := isolatedConfigScopeStore(t)
 			agent, _ := enrollTaskTestAgent(t, ctx, db)
@@ -66,13 +67,16 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 			if variant == "caddy-h2" {
 				protocolKey = "vless-h2-tls"
 			}
+			if variant == "nginx-legacy" {
+				protocolKey = "vmess-ws-tls"
+			}
 			protocol, _ := serverconfig.FindProtocol(core.EngineSingBox, protocolKey)
 			input, err := serverconfig.NewPlan(protocol)
 			if err != nil {
 				t.Fatal(err)
 			}
 			input.TLSMode = mode
-			if mode == "caddy" {
+			if mode == "caddy" || automatic {
 				input.TLSACMEEmail = "certs@example.test"
 			}
 			input.TLSServerName = "tls.example.test"
@@ -104,7 +108,18 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if mode == "caddy" {
+			if automatic {
+				if _, _, err = db.SaveAgentConfigAndTask(ctx, config, 0, options); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), core.AgentFeatureNginxACME) {
+					t.Fatalf("old agent accepted automatic Nginx certificates: %v", err)
+				}
+				if _, err = db.AgentConfig(ctx, agent.ID, core.EngineSingBox); !errors.Is(err, ErrNotFound) {
+					t.Fatalf("automatic-certificate rejection persisted config: %v", err)
+				}
+				if _, err = db.pool.Exec(ctx, `UPDATE agents SET features=features||jsonb_build_array($2::text) WHERE id=$1`, agent.ID, core.AgentFeatureNginxACME); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "caddy" || automatic {
 				if _, _, err = db.SaveAgentConfigAndTask(ctx, config, 0, options); !errors.Is(err, ErrConflict) {
 					t.Fatalf("old agent silently accepted ACME fallback: %v", err)
 				}
@@ -126,12 +141,18 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 			if strings.Contains(stored, "PRIVATE KEY") || strings.Contains(stored, input.Credential) {
 				t.Fatal("snapshot is not encrypted")
 			}
-			claimed, err := db.ClaimTask(ctx, agent.ID)
-			if err != nil || claimed == nil {
-				t.Fatalf("claim: %+v %v", claimed, err)
-			}
-			if claimed.ConfigContent != saved.Content || len(claimed.TLSFrontends) != 1 || claimed.TLSFrontends[0].PublicPort != 8443 || mode == "nginx" && claimed.TLSFrontends[0].PrivateKey == "" || claimed.TLSFrontends[0].ACMEEmail != input.TLSACMEEmail {
-				t.Fatalf("lost execution snapshot: %+v", claimed)
+			if variant != "nginx-pending" {
+				claimed, err := db.ClaimTask(ctx, agent.ID)
+				if err != nil || claimed == nil {
+					t.Fatalf("claim: %+v %v", claimed, err)
+				}
+				if claimed.ConfigContent != saved.Content || len(claimed.TLSFrontends) != 1 || claimed.TLSFrontends[0].PublicPort != 8443 || claimed.TLSFrontends[0].ACMEEmail != input.TLSACMEEmail {
+					t.Fatalf("lost execution snapshot: %+v", claimed)
+				}
+				frontend := claimed.TLSFrontends[0]
+				if frontend.AutomaticCertificate != automatic || automatic && (frontend.PrivateKey != "" || frontend.Certificate != "") || variant == "nginx-legacy" && frontend.PrivateKey == "" {
+					t.Fatalf("incorrect certificate execution snapshot: %+v", frontend)
+				}
 			}
 			feature := core.AgentFeatureManagedTLS
 			if mode == "caddy" {
@@ -140,12 +161,19 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 			if variant == "caddy-h2" {
 				feature = core.AgentFeatureManagedTLSH2
 			}
+			if automatic {
+				feature = core.AgentFeatureNginxACME
+			}
 			if _, err = db.pool.Exec(ctx, `UPDATE agents SET features=features-$2 WHERE id=$1`, agent.ID, feature); err != nil {
 				t.Fatal(err)
 			}
-			running, err := db.RunningTask(ctx, agent.ID)
+			readTask := db.RunningTask
+			if variant == "nginx-pending" {
+				readTask = db.ClaimTask
+			}
+			running, err := readTask(ctx, agent.ID)
 			if err != nil || running != nil {
-				t.Fatalf("downgraded agent resumed: %+v %v", running, err)
+				t.Fatalf("downgraded agent received task: %+v %v", running, err)
 			}
 			var status, errorText string
 			var snapshot, lease *string

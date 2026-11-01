@@ -16,7 +16,7 @@ const letsEncryptDirectory = "https://acme-v02.api.letsencrypt.org/directory"
 const zeroSSLDirectory = "https://acme.zerossl.com/v2/DV90"
 
 func (m *tlsFrontendManager) withFrontendDiagnostics(cause error, frontend core.TLSFrontend, since time.Time) error {
-	if frontend.Mode != "caddy" {
+	if !frontend.UsesACME() {
 		return cause
 	}
 	// The deployment deadline may already have expired. Capture the actual

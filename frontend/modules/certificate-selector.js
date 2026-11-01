@@ -17,6 +17,15 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   const target = form.querySelector("[data-native-certificate]") || form.querySelector("[data-native-tls]");
   if (!target) return; target.before(field);
   if (form.closest(".config-inbound-dialog")) preparePresetFields(field);
+  if (protocol.key === "vless-ws-tls") {
+    const mode = form.elements.namedItem("tls_mode");
+    const updateMode = () => {
+      field.hidden = ["caddy", "nginx", "external"].includes(mode?.value);
+      select.disabled = field.hidden;
+    };
+    mode?.addEventListener("change", updateMode);
+    updateMode();
+  }
   const initial = form.elements.namedItem("certificate_path").value;
   const selected = initial.startsWith(prefix) ? initial.slice(prefix.length).split("/")[0] : "";
   const localPaths = new Map(["certificate_path", "private_key_path"].map(name => { const value=form.elements.namedItem(name)?.value||"";return [name,value.startsWith(prefix)?"":value]; }));
@@ -33,13 +42,13 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     select.append(group);
   }
   select.value = selected;
-  const update = () => {
+  const update = (event) => {
     const active = Boolean(select.value);
     const cert=items.find(item=>item.id===select.value);
     summary.hidden=!cert;summary.textContent=cert?`${cert.domains.join(" · ")} · v${cert.version}`:"";
     const sni=form.elements.namedItem("tls_server_name");if(active&&cert?.domains.length===1&&!cert.domains[0].startsWith("*.")&&sni&&!sni.value)sni.value=cert.domains[0];
     const mode = form.elements.namedItem("tls_mode");
-    if (active && mode) { mode.value = "native"; mode.dispatchEvent(new Event("change", { bubbles: true })); }
+    if (active && mode && (event || protocol.key !== "vless-ws-tls")) { mode.value = "native"; mode.dispatchEvent(new Event("change", { bubbles: true })); }
     const tls = form.elements.namedItem("tls_enabled");
     if (active && tls && !tls.checked) { tls.checked = true; tls.dispatchEvent(new Event("change", { bubbles: true })); }
     for (const [name, file] of [["certificate_path", "cert.pem"], ["private_key_path", "key.pem"]]) {

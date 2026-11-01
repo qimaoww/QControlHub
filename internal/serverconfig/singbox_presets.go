@@ -75,6 +75,9 @@ func singBoxPresetProtocols() []Protocol {
 			dependency = "；原生 TLS，需证书及匹配 SNI"
 			if preset.transport == "websocket" || preset.transport == "httpupgrade" || preset.transport == "http" {
 				dependency = "；默认 Caddy 自动证书反代，可选 Nginx 自签证书或原生 TLS"
+				if preset.key == "vless-ws-tls" {
+					dependency = "；默认 Caddy，可选 Nginx 自动证书反代或原生 TLS"
+				}
 			}
 			if preset.transport == "http" {
 				dependency = "；默认 Caddy 自动证书反代（h2c 回源），可选外部反代或原生 TLS"
