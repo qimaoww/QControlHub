@@ -36,6 +36,13 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   assert.equal(input.value, "Europe/Paris", "未编辑的输入未显示远端保存的时区");
   assert.equal(document.activeElement, input, "远端更新导致焦点丢失");
   assert.equal(form.dataset.timezoneRevision, "3", "远端更新未同步提交版本");
+  agent.time_zone = { ...agent.time_zone, time_zone: "Europe/Berlin", applied_time_zone: "Europe/Berlin", revision: 4 };
+  agent.capabilities = [...agent.capabilities, "ss-rust"];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector('[data-engine-capability="ss-rust"]').checked, "未编辑表单的页面结构未刷新");
+  assert.equal(input.value, "Europe/Berlin", "页面刷新未同步远端时区");
+  assert.equal(form.dataset.timezoneRevision, "4", "页面刷新未同步远端提交版本");
+  assert.equal(document.activeElement, input, "未编辑表单刷新丢失了焦点");
 
   assert.equal(modeInput.value, "custom", "键盘操作改变了尚未提交的模式");
   assert.equal(input.disabled, false, "键盘切换到自定义模式后输入未启用");
@@ -51,7 +58,7 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   update.updateAgentTimeZone(document, {
     id: "alpha", status: "online",
     metrics: { clock_sync: { status: "unsynchronized", offset_milliseconds: 0.25 } },
-    time_zone: { mode: "custom", time_zone: "Pacific/Apia", applied_time_zone: "America/New_York", status: "applying", revision: 3 },
+    time_zone: { mode: "custom", time_zone: "Pacific/Apia", applied_time_zone: "America/New_York", status: "applying", revision: 4 },
   });
   assert.equal(document.activeElement, input, "轮询状态更新导致键盘焦点丢失");
   assert.equal(input.value, "Pacific/Apia", "状态轮询覆盖了用户输入");
@@ -60,9 +67,21 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   assert.equal(section.querySelector("[data-clock-sync-status]").textContent, "未同步");
   assert.equal(section.querySelector("[data-clock-sync-offset]").textContent, "+0.250 ms");
 
+  let finishSave;
+  testAPI.timeZoneSaveGate = new Promise((resolve) => { finishSave = resolve; });
   form.requestSubmit(submit);
+  agent.capabilities = [...agent.capabilities, "xray"];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector('[data-engine-capability="xray"]').checked, "保存期间内核能力变化未刷新页面");
+  assert.ok(modeInput.disabled && input.disabled && submit.disabled, "页面刷新解除了保存中的禁用状态");
+  assert.equal(input.value, "Pacific/Apia", "页面刷新丢失了正在保存的时区");
+  assert.equal(section.querySelector("[data-timezone-status]").textContent, "保存中");
+  form.requestSubmit(submit);
+  assert.equal(testAPI.calls.filter((call) => call.method === "PUT" && call.path === "/agents/alpha/time-zone").length, 1, "页面刷新允许重复提交时区");
+  testAPI.timeZoneSaveGate = null;
+  finishSave();
   await waitFor(() => testAPI.timeZoneSaves.length === 1 && !submit.disabled, "自定义时区保存没有完成");
-  assert.equal(JSON.stringify(testAPI.timeZoneSaves[0]), JSON.stringify({ agentID: "alpha", mode: "custom", time_zone: "Pacific/Apia", revision: 3, retry: false }));
+  assert.equal(JSON.stringify(testAPI.timeZoneSaves[0]), JSON.stringify({ agentID: "alpha", mode: "custom", time_zone: "Pacific/Apia", revision: 4, retry: false }));
   assert.equal(input.value, "Pacific/Apia");
   assert.equal(section.querySelector("[data-timezone-status]").textContent, "应用中");
   assert.equal(section.querySelector("[data-clock-sync-status]").textContent, "已同步", "保存后丢失了时钟同步状态");
@@ -108,11 +127,25 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   update.updateAgentTimeZone(document, agent);
   assert.equal(modeInput.value, "custom", "自动检测覆盖了未保存的自定义模式");
   assert.equal(input.value, "Australia/Sydney", "自动检测覆盖了未保存的自定义时区");
+  const draftRevision = form.dataset.timezoneRevision;
+  agent.capabilities = agent.capabilities.filter((engine) => engine !== "xray");
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => !document.querySelector('[data-engine-capability="xray"]').checked, "内核能力变化未刷新页面结构");
+  assert.equal(document.querySelector('[data-agent-timezone-form="alpha"]'), form, "页面刷新替换了时区表单");
+  assert.equal(modeInput.value, "custom", "页面刷新覆盖了自定义模式草稿");
+  assert.equal(input.value, "Australia/Sydney", "页面刷新覆盖了自定义时区草稿");
+  assert.equal(document.activeElement, input, "页面刷新丢失了草稿焦点");
+  assert.equal(form.dataset.timezoneRevision, draftRevision, "页面刷新改变了草稿的提交版本");
   form.requestSubmit(submit);
   await waitFor(() => !submit.disabled && section.querySelector("[data-timezone-status]").textContent.includes("冲突"), "并发修改未显示冲突");
   assert.equal(input.value, "Australia/Sydney", "并发冲突丢失了输入");
   assert.equal(document.activeElement, input, "并发冲突导致焦点丢失");
   assert.equal(testAPI.timeZoneSaves.length, 3, "并发修改覆盖了较新设置");
+  agent.capabilities = [...agent.capabilities, "xray"];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector('[data-engine-capability="xray"]').checked, "并发冲突后的页面结构未刷新");
+  assert.ok(section.querySelector("[data-timezone-status]").textContent.includes("冲突"), "页面刷新清除了并发冲突反馈");
+  assert.equal(form.dataset.timezoneRevision, draftRevision, "并发冲突后的刷新改变了提交版本");
 
   const panel = section.closest("[data-node-panel]");
   const rect = section.getBoundingClientRect();

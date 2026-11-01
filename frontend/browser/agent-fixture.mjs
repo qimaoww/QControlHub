@@ -102,6 +102,7 @@ const testAPI = {
   renameGate: null,
   timeZoneSaves: [],
   timeZoneSaveFailure: false,
+  timeZoneSaveGate: null,
   profileNames: {},
   profileModes: {},
   profileAddresses: {},
@@ -550,6 +551,7 @@ window.fetch = async (input, options = {}) => {
     return json({ name });
   }
   if (method === "PUT" && /^\/agents\/[^/]+\/time-zone$/.test(path)) {
+    if (testAPI.timeZoneSaveGate) await testAPI.timeZoneSaveGate;
     if (testAPI.timeZoneSaveFailure) return json({ error: "temporary time zone failure" }, 503);
     const agentID = decodeURIComponent(path.split("/")[2]);
     const input = JSON.parse(String(options.body || "{}"));
