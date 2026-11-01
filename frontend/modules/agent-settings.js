@@ -191,7 +191,6 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
       if (!canManage() || local.busy) return;
-      const agent = currentAgent();
       const mode = modeInput.value;
       const zone = String(timezoneInput.value || "").trim();
       if (mode === "custom" && !zone) {
@@ -207,7 +206,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       syncMode();
       status.textContent = mode === "auto" ? "检测中" : "保存中";
       try {
-        const saved = await api(`/agents/${encodeURIComponent(agentID)}/time-zone`, {
+        const received = await api(`/agents/${encodeURIComponent(agentID)}/time-zone`, {
           method: "PUT",
           body: JSON.stringify({
             mode,
@@ -217,6 +216,12 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
           }),
           signal: AbortSignal.timeout(12000),
         });
+        const agent = currentAgent();
+        const live = agent?.time_zone;
+        const newer = Number(live?.revision) > Number(received.revision);
+        const confirmed = live?.revision === received.revision && live?.status === "applied" &&
+          live.mode === received.mode && live.time_zone === received.time_zone;
+        const saved = newer || confirmed ? live : received;
         if (agent) agent.time_zone = saved;
         local.error = "";
         updateAgentTimeZone(document, { ...agent, id: agentID, time_zone: saved }, { force: true });

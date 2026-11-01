@@ -78,19 +78,33 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   assert.equal(section.querySelector("[data-timezone-status]").textContent, "保存中");
   form.requestSubmit(submit);
   assert.equal(testAPI.calls.filter((call) => call.method === "PUT" && call.path === "/agents/alpha/time-zone").length, 1, "页面刷新允许重复提交时区");
+  agent.time_zone = { ...agent.time_zone, time_zone: "Europe/Oslo", applied_time_zone: "Europe/Oslo", status: "applied", revision: agent.time_zone.revision + 1 };
+  agent.capabilities = agent.capabilities.filter((engine) => engine !== "ss-rust");
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => !document.querySelector('[data-engine-capability="ss-rust"]').checked, "保存期间的远端修改未刷新");
   testAPI.timeZoneSaveGate = null;
   finishSave();
   await waitFor(() => testAPI.timeZoneSaves.length === 1 && !submit.disabled, "自定义时区保存没有完成");
   assert.equal(JSON.stringify(testAPI.timeZoneSaves[0]), JSON.stringify({ agentID: "alpha", mode: "custom", time_zone: "Pacific/Apia", revision: 4, retry: false }));
-  assert.equal(input.value, "Pacific/Apia");
-  assert.equal(section.querySelector("[data-timezone-status]").textContent, "应用中");
+  assert.equal(input.value, "Europe/Oslo", "迟到的保存响应覆盖了较新的远端设置");
+  assert.equal(section.querySelector("[data-timezone-status]").textContent, "已生效");
+  assert.equal(Number(form.dataset.timezoneRevision), agent.time_zone.revision, "迟到的保存响应回退了提交版本");
   assert.equal(section.querySelector("[data-clock-sync-status]").textContent, "已同步", "保存后丢失了时钟同步状态");
   assert.equal(section.querySelector("[data-clock-sync-offset]").textContent, "-1.375 ms");
 
   modeInput.focus();
+  let finishAcknowledgedSave;
+  testAPI.timeZoneSaveGate = new Promise((resolve) => { finishAcknowledgedSave = resolve; });
   form.requestSubmit(submit);
+  agent.time_zone = { ...agent.time_zone, status: "applied", applied_time_zone: agent.time_zone.time_zone };
+  agent.capabilities = [...agent.capabilities, "ss-rust"];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector('[data-engine-capability="ss-rust"]').checked, "Agent 生效回执未刷新");
+  testAPI.timeZoneSaveGate = null;
+  finishAcknowledgedSave();
   await waitFor(() => testAPI.timeZoneSaves.length === 2 && !submit.disabled, "键盘提交没有完成");
   assert.equal(document.activeElement, modeInput, "保存后模式控件的焦点丢失");
+  assert.equal(section.querySelector("[data-timezone-status]").textContent, "已生效", "保存响应回退了同一版本的生效回执");
 
   testAPI.timeZoneSaveFailure = true;
   input.value = "Asia/Tokyo";

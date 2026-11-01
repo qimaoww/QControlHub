@@ -551,7 +551,6 @@ window.fetch = async (input, options = {}) => {
     return json({ name });
   }
   if (method === "PUT" && /^\/agents\/[^/]+\/time-zone$/.test(path)) {
-    if (testAPI.timeZoneSaveGate) await testAPI.timeZoneSaveGate;
     if (testAPI.timeZoneSaveFailure) return json({ error: "temporary time zone failure" }, 503);
     const agentID = decodeURIComponent(path.split("/")[2]);
     const input = JSON.parse(String(options.body || "{}"));
@@ -564,7 +563,9 @@ window.fetch = async (input, options = {}) => {
       applied_time_zone: agent.time_zone?.applied_time_zone || "", status: "applying", error: "",
       revision: (agent.time_zone?.revision || 0) + 1,
     };
-    return json(agent.time_zone);
+    const saved = structuredClone(agent.time_zone);
+    if (testAPI.timeZoneSaveGate) await testAPI.timeZoneSaveGate;
+    return json(saved);
   }
   if (method === "DELETE" && /^\/agents\/[^/]+$/.test(path)) {
     if (testAPI.deleteHang) {
