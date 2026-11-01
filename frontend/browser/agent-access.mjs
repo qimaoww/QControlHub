@@ -50,6 +50,7 @@ const assertSharedStatusOrder = (root) => {
     }
   }
   document.querySelector('[data-node-tab="agent"]').click();
+  assert.equal(document.querySelector("[data-agent-timezone]"), null, "共享节点显示了宿主时区控件");
   assert.ok(document.querySelector('[data-node-panel="agent"] a[href="#my-quota"]'), "共享身份页缺少分配入口");
   assert.ok(document.querySelector(".node-operations-workspace").scrollWidth <= document.querySelector(".node-operations-workspace").clientWidth + 1, "共享节点详情横向溢出");
   location.hash = "#settings-node-bravo";

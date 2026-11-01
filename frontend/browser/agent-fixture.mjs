@@ -102,6 +102,7 @@ const testAPI = {
   renameGate: null,
   timeZoneSaves: [],
   timeZoneSaveFailure: false,
+  timeZoneSaveGate: null,
   profileNames: {},
   profileModes: {},
   profileAddresses: {},
@@ -553,14 +554,18 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.timeZoneSaveFailure) return json({ error: "temporary time zone failure" }, 503);
     const agentID = decodeURIComponent(path.split("/")[2]);
     const input = JSON.parse(String(options.body || "{}"));
-    testAPI.timeZoneSaves.push({ agentID, ...input });
     const agent = testAPI.agents.find((item) => item.id === agentID);
+    const same = input.mode === agent.time_zone?.mode && (input.mode === "auto" || input.time_zone === agent.time_zone?.time_zone);
+    if (input.revision !== (agent.time_zone?.revision || 0) && !same) return json({ error: "Agent time zone settings changed; reload and retry" }, 409);
+    testAPI.timeZoneSaves.push({ agentID, ...input });
     agent.time_zone = {
       mode: input.mode, time_zone: input.time_zone || agent.time_zone?.time_zone || "",
       applied_time_zone: agent.time_zone?.applied_time_zone || "", status: "applying", error: "",
       revision: (agent.time_zone?.revision || 0) + 1,
     };
-    return json(agent.time_zone);
+    const saved = structuredClone(agent.time_zone);
+    if (testAPI.timeZoneSaveGate) await testAPI.timeZoneSaveGate;
+    return json(saved);
   }
   if (method === "DELETE" && /^\/agents\/[^/]+$/.test(path)) {
     if (testAPI.deleteHang) {

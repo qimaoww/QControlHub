@@ -13,11 +13,23 @@ function agentTimeZoneSettings(agent, esc, writable) {
   const setting = agent.time_zone || { mode: "auto" };
   const mode = setting.mode === "custom" ? "custom" : "auto";
   const value = setting.time_zone || "";
-  const selected = (candidate) => mode === candidate ? "checked" : "";
+  const selected = (candidate) => mode === candidate ? "selected" : "";
   const disabled = writable ? "" : "disabled";
   const statusAgent = { ...agent, time_zone: setting };
   const clockSync = agentClockSyncPresentation(agent.metrics?.clock_sync);
-  return `<section class="node-name-settings" aria-label="Agent 时区" data-agent-timezone="${esc(agent.id)}"><header><div><b>Agent 时区</b><small>仅影响 Agent 进程，应用时会短暂重连</small></div></header><dl class="identity-list node-identity-list"><div><dt>当前配置</dt><dd><code data-timezone-configured>${esc(value || "等待检测")}</code></dd></div><div><dt>Agent 当前时区</dt><dd><code data-timezone-applied>${esc(agentTimeZoneEffective(setting))}</code></dd></div><div><dt>系统时钟同步</dt><dd><span data-clock-sync-status>${esc(clockSync.status)}</span><code data-clock-sync-offset>${esc(clockSync.offset)}</code></dd></div></dl><form data-agent-timezone-form="${esc(agent.id)}"><fieldset class="release-channel-fieldset"><legend>设置方式</legend><div class="release-channel-options"><label><input type="radio" name="time_zone_mode_${esc(agent.id)}" value="auto" data-timezone-mode ${selected("auto")} ${disabled}><span>自动匹配公网 IP</span></label><label><input type="radio" name="time_zone_mode_${esc(agent.id)}" value="custom" data-timezone-mode ${selected("custom")} ${disabled}><span>自定义 IANA 时区</span></label></div></fieldset><label><span>IANA 时区</span><input name="time_zone" list="agent-timezone-options-${esc(agent.id)}" value="${esc(value)}" maxlength="128" autocomplete="off" spellcheck="false" placeholder="例如 Asia/Shanghai" data-timezone-input ${mode === "custom" && writable ? "" : "disabled"} ${disabled}><datalist id="agent-timezone-options-${esc(agent.id)}"><option value="UTC"><option value="Asia/Shanghai"><option value="Asia/Hong_Kong"><option value="Asia/Tokyo"><option value="Asia/Singapore"><option value="Europe/London"><option value="Europe/Berlin"><option value="America/New_York"><option value="America/Los_Angeles"><option value="Australia/Sydney"></datalist></label><button class="button small" type="submit" data-timezone-submit ${disabled}>${mode === "custom" ? "保存并应用" : mode === setting.mode && value ? "重新检测并应用" : "启用自动匹配"}</button><p class="node-capability-note"><span>时区同步状态：</span><span data-timezone-status role="status" aria-live="polite">${esc(agentTimeZoneStatus(statusAgent))}</span></p></form></section>`;
+  const effective = agentTimeZoneEffective(setting);
+  return `<section class="node-capability-settings settings-form" aria-label="Agent 时区" data-agent-timezone="${esc(agent.id)}">
+    <header><div class="agent-share-meta"><span><b>Agent 进程时区</b> <small data-timezone-status role="status" aria-live="polite">${esc(agentTimeZoneStatus(statusAgent))}</small></span><small>时钟 <span data-clock-sync-status>${esc(clockSync.status)}</span> <code data-clock-sync-offset>${esc(clockSync.offset)}</code></small></div></header>
+    <form class="agent-share-fields node-identity-panel" data-agent-timezone-form="${esc(agent.id)}" data-timezone-saved-mode="${mode}" data-timezone-saved-value="${esc(value)}" data-timezone-revision="${Number(setting.revision) || 0}">
+      <label class="settings-field"><span>模式</span><select name="time_zone_mode" data-timezone-mode ${disabled}><option value="auto" ${selected("auto")}>自动（公网 IP）</option><option value="custom" ${selected("custom")}>自定义</option></select></label>
+      <div class="agent-share-recipient-head">
+        <label class="settings-field"><span>IANA 时区</span><input aria-label="IANA 时区" name="time_zone" list="agent-timezone-options-${esc(agent.id)}" value="${esc(value)}" maxlength="128" autocomplete="off" spellcheck="false" placeholder="${mode === "auto" ? "等待检测" : "Asia/Shanghai"}" data-timezone-input ${mode === "custom" && writable ? "" : "disabled"}></label>
+        <button class="button" type="submit" data-timezone-submit ${disabled}>${mode === "auto" && mode === setting.mode && value ? "重新检测" : "应用"}</button>
+      </div>
+    </form>
+    <datalist id="agent-timezone-options-${esc(agent.id)}"><option value="UTC"><option value="Asia/Shanghai"><option value="Asia/Hong_Kong"><option value="Asia/Tokyo"><option value="Asia/Singapore"><option value="Europe/London"><option value="Europe/Berlin"><option value="America/New_York"><option value="America/Los_Angeles"><option value="Australia/Sydney"></datalist>
+    <p class="settings-hint" data-timezone-applied ${effective ? "" : "hidden"}>${esc(effective)}</p>
+  </section>`;
 }
 
 function mihomoDevelopmentSourceFieldset(canMirror) {

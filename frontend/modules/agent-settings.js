@@ -1,8 +1,8 @@
 import { bindEvent } from "./refresh.js";
-import { agentTimeZoneStatus, updateAgentTimeZone } from "./agent-time-zone.js";
+import { agentTimeZoneFormState, updateAgentTimeZone } from "./agent-time-zone.js";
 
 // In-flight settings writes survive a render and keep newer user input intact.
-export function createAgentSettings({ api, can: permission, engineName, notify, confirmAction }, { refreshAgentPage }) {
+export function createAgentSettings({ api, can: permission, engineName, notify, confirmAction, state }, { refreshAgentPage }) {
   const pendingAgentNames = new Set();
   const pendingEngineCapabilities = new Set();
   const pendingAgentDeletes = new Map();
@@ -162,24 +162,36 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
   });
   document.querySelectorAll("[data-agent-timezone-form]").forEach((form) => {
     const agentID = form.dataset.agentTimezoneForm;
-    const agent = agentsByID.get(agentID);
-    const radios = [...form.querySelectorAll("[data-timezone-mode]")];
+    const section = form.closest("[data-agent-timezone]");
+    const modeInput = form.querySelector("[data-timezone-mode]");
     const timezoneInput = form.querySelector("[data-timezone-input]");
     const submit = form.querySelector("[data-timezone-submit]");
-    const status = form.querySelector("[data-timezone-status]");
-    const canManage = () => permission("agents.manage", agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
+    const status = section.querySelector("[data-timezone-status]");
+    const local = agentTimeZoneFormState(form);
+    const currentAgent = () => state?.data?.agents?.find((item) => item.id === agentID) || agentsByID.get(agentID);
+    const canManage = () => permission("agents.manage", currentAgent()) && currentAgent()?.can_manage !== false;
     const syncMode = () => {
-      const mode = radios.find((radio) => radio.checked)?.value || "auto";
-      timezoneInput.disabled = mode !== "custom" || !canManage() || form.dataset.busy === "1";
-      submit.textContent = mode === "custom" ? "保存并应用" : mode === agent?.time_zone?.mode && agent?.time_zone?.time_zone ? "重新检测并应用" : "启用自动匹配";
-      submit.disabled = !canManage() || form.dataset.busy === "1";
+      agentTimeZoneFormState(form);
+      const mode = modeInput.value;
+      modeInput.disabled = !canManage() || local.busy;
+      timezoneInput.disabled = mode !== "custom" || !canManage() || local.busy;
+      timezoneInput.placeholder = mode === "auto" ? "等待检测" : "Asia/Shanghai";
+      submit.textContent = mode === "auto" && mode === local.mode && local.value ? "重新检测" : "应用";
+      submit.disabled = !canManage() || local.busy;
     };
-    radios.forEach((radio) => bindEvent(radio, "change", syncMode));
+    if (local.pending) {
+      modeInput.value = local.pending.mode;
+      timezoneInput.value = local.pending.value;
+    }
+    if (local.busy) status.textContent = local.pending.mode === "auto" ? "检测中" : "保存中";
+    else if (local.error) status.textContent = local.error;
+    bindEvent(modeInput, "change", syncMode);
     syncMode();
+    updateAgentTimeZone(document, currentAgent());
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
-      if (!canManage() || form.dataset.busy === "1") return;
-      const mode = radios.find((radio) => radio.checked)?.value || "auto";
+      if (!canManage() || local.busy) return;
+      const mode = modeInput.value;
       const zone = String(timezoneInput.value || "").trim();
       if (mode === "custom" && !zone) {
         timezoneInput.setCustomValidity("请输入 IANA 时区，例如 Asia/Shanghai");
@@ -188,36 +200,42 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
         return;
       }
       const focusTarget = document.activeElement;
-      form.dataset.busy = "1";
-      delete form.dataset.error;
-      radios.forEach((radio) => { radio.disabled = true; });
+      local.busy = true;
+      local.error = "";
+      local.pending = { mode, value: timezoneInput.value };
       syncMode();
-      status.textContent = mode === "auto" ? "正在检测公网 IP 时区" : "正在保存时区";
+      status.textContent = mode === "auto" ? "检测中" : "保存中";
       try {
-        const saved = await api(`/agents/${encodeURIComponent(agentID)}/time-zone`, {
+        const received = await api(`/agents/${encodeURIComponent(agentID)}/time-zone`, {
           method: "PUT",
           body: JSON.stringify({
             mode,
             time_zone: mode === "custom" ? zone : "",
-            revision: agent?.time_zone?.revision || 0,
+            revision: local.revision,
             retry: mode === "auto",
           }),
           signal: AbortSignal.timeout(12000),
         });
+        const agent = currentAgent();
+        const live = agent?.time_zone;
+        const newer = Number(live?.revision) > Number(received.revision);
+        const confirmed = live?.revision === received.revision && live?.status === "applied" &&
+          live.mode === received.mode && live.time_zone === received.time_zone;
+        const saved = newer || confirmed ? live : received;
         if (agent) agent.time_zone = saved;
-        delete form.dataset.error;
-        updateAgentTimeZone(document, { id: agentID, status: agent?.status, time_zone: saved }, { force: true });
+        local.error = "";
+        updateAgentTimeZone(document, { ...agent, id: agentID, time_zone: saved }, { force: true });
         notify(saved.status === "failed" ? saved.error || "时区检测失败" : saved.status === "unsupported" ? "当前 Agent 不支持时区设置" : saved.status === "pending" && agent?.status !== "online" ? "已保存，Agent 上线后生效" : "时区设置已保存");
       } catch (error) {
-        form.dataset.error = error.message || "时区设置失败，请重试";
-        status.textContent = form.dataset.error;
+        local.error = error.message || "时区设置失败，请重试";
+        status.textContent = local.error;
         notify(error.message, "error");
       } finally {
-        delete form.dataset.busy;
-        radios.forEach((radio) => { radio.disabled = !canManage(); });
+        local.busy = false;
+        local.pending = null;
         syncMode();
-        if (focusTarget?.isConnected && form.contains(focusTarget) &&
-            (document.activeElement === document.body || !form.contains(document.activeElement))) {
+        if (focusTarget?.isConnected && section.contains(focusTarget) &&
+            (document.activeElement === document.body || !section.contains(document.activeElement))) {
           focusTarget.focus();
         }
       }
