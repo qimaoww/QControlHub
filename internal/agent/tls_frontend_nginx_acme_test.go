@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -169,9 +170,36 @@ func TestManagedTLSNginxACMESandbox(t *testing.T) {
 		pair, _ := tls.X509KeyPair([]byte(certificate), []byte(key))
 		return len(pair.Certificate) > 0 && string(pair.Certificate[0]) != initial
 	})
-	// A failed validation must restore the old on-disk pair and leave the
-	// current workers serving. A subsequent retry installs the renewal.
+	// Both successful validation and a later business-validation failure must
+	// preserve the installed pair so the periodic refresh still sees renewal.
 	oldCert, _ := os.ReadFile(filepath.Join(root, frontendKey(f)+".crt"))
+	oldKey, _ := os.ReadFile(filepath.Join(root, frontendKey(f)+".key"))
+	validationFailure := errors.New("fixture business validation failed")
+	for _, fail := range []bool{false, true} {
+		err := m.withAutomaticNginxCertificates([]core.TLSFrontend{f}, false, func() error {
+			staged, _ := os.ReadFile(filepath.Join(root, frontendKey(f)+".crt"))
+			if string(staged) == string(oldCert) {
+				return errors.New("renewal was not staged for validation")
+			}
+			if err := m.validateFrontendConfigs(ctx, []core.TLSFrontend{f}); err != nil {
+				return err
+			}
+			if fail {
+				return validationFailure
+			}
+			return nil
+		}, roots)
+		if !fail && err != nil || fail && !errors.Is(err, validationFailure) {
+			t.Fatalf("staged validation fail=%t: %v", fail, err)
+		}
+		afterCert, _ := os.ReadFile(filepath.Join(root, frontendKey(f)+".crt"))
+		afterKey, _ := os.ReadFile(filepath.Join(root, frontendKey(f)+".key"))
+		if string(afterCert) != string(oldCert) || string(afterKey) != string(oldKey) {
+			t.Fatal("validation changed the installed certificate pair")
+		}
+	}
+	// A failed reload validation restores the old pair; the retry must still
+	// install the renewal after the staged validations above.
 	if err := m.writeConfig(nginxPath, nginx+"\ninvalid_fixture_directive;\n", false); err != nil {
 		t.Fatal(err)
 	}
@@ -197,5 +225,5 @@ func TestManagedTLSNginxACMESandbox(t *testing.T) {
 	if err := m.refreshNginxCertificates(ctx, deployments, roots); err != nil {
 		t.Fatal("stopped deployment refreshed", err)
 	}
-	t.Log(fmt.Sprintf("Nginx automatic HTTP-01 issuance, renewal, trusted TLS/WebSocket Host/path, rollback and retry passed (%d local CA orders)", orders.Load()))
+	t.Log(fmt.Sprintf("Nginx automatic HTTP-01 issuance, renewal, trusted TLS/WebSocket Host/path, staged validation preservation, rollback and retry passed (%d local CA orders)", orders.Load()))
 }

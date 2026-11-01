@@ -416,9 +416,6 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 			}
 		}
 	}
-	if _, err := m.copyAutomaticNginxCertificates(frontends, true); err != nil {
-		return err
-	}
 	for mode := range modes {
 		if err := m.ensureDependency(ctx, mode); err != nil {
 			return tlsPhaseError("依赖和环境检查", err)
@@ -436,6 +433,12 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 }
 
 func (m *tlsFrontendManager) validateConfigs(ctx context.Context, frontends []core.TLSFrontend, allowMissing ...bool) error {
+	return m.withAutomaticNginxCertificates(frontends, len(allowMissing) > 0 && allowMissing[0], func() error {
+		return m.validateFrontendConfigs(ctx, frontends, allowMissing...)
+	})
+}
+
+func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, frontends []core.TLSFrontend, allowMissing ...bool) error {
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
@@ -715,6 +718,10 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	if err != nil {
 		return err
 	}
+	certificates, err := m.copyAutomaticNginxCertificates(newActive, false)
+	if err != nil {
+		return err
+	}
 	started := time.Now()
 	err = m.sync(ctx, next)
 	if err == nil && action != core.ActionStop && action != core.ActionUninstall {
@@ -744,7 +751,8 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 		}
 		recovery, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		rollbackErr := m.restoreRuntime(recovery, previous, snapshots)
+		certificateErr := m.restoreNginxCertificates(certificates)
+		rollbackErr := errors.Join(certificateErr, m.restoreRuntime(recovery, previous, snapshots))
 		if rollbackErr != nil {
 			return fmt.Errorf("托管 TLS 部署失败：%w；反代恢复失败：%v", err, rollbackErr)
 		}

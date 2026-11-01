@@ -179,9 +179,6 @@ func (m *tlsFrontendManager) prepareStagedCertificates(ctx context.Context, serv
 	if err != nil {
 		return err
 	}
-	if _, err = m.copyAutomaticNginxCertificates(active, false); err != nil {
-		return err
-	}
 	return m.validateConfigs(ctx, active)
 }
 

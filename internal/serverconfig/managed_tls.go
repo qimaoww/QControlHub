@@ -67,7 +67,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 func MarshalClientMetadataWithPrevious(input Input, previous string) (string, error) {
 	var old clientMetadata
 	oldValid := json.Unmarshal([]byte(previous), &old) == nil
-	if oldValid && old.Frontend != nil && old.Frontend.Mode == "nginx" && (input.TLSMode != "nginx" || frontendFor(input).AutomaticCertificate) && input.TLSClientCertificate == old.TLSClientCertificate {
+	if input.Protocol == "vless-ws-tls" && oldValid && old.Frontend != nil && old.Frontend.Mode == "nginx" && (input.TLSMode != "nginx" || frontendFor(input).AutomaticCertificate) && input.TLSClientCertificate == old.TLSClientCertificate {
 		input.TLSClientCertificate = ""
 	}
 	encoded, err := MarshalClientMetadata(input)

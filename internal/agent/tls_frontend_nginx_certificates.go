@@ -119,6 +119,18 @@ func (m *tlsFrontendManager) copyAutomaticNginxCertificates(frontends []core.TLS
 	return files, nil
 }
 
+// Validation must leave the installed pair unchanged. Otherwise a later
+// renewal check can mistake staged files for a certificate already reloaded
+// by the running Nginx workers.
+func (m *tlsFrontendManager) withAutomaticNginxCertificates(frontends []core.TLSFrontend, allowMissing bool, validate func() error, roots ...*x509.CertPool) (result error) {
+	files, err := m.copyAutomaticNginxCertificates(frontends, allowMissing, roots...)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, m.restoreNginxCertificates(files)) }()
+	return validate()
+}
+
 // Caddy renews independently of panel connectivity. The Agent periodically
 // installs verified renewals and gracefully reloads only an active Nginx.
 func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deployments tlsDeployments, roots ...*x509.CertPool) error {

@@ -300,7 +300,7 @@ function bindProtocolOptionVisibility(form) {
   let currentTLSMode = tlsMode?.value || "";
   const updateTLSMode = () => {
     const nextTLSMode = tlsMode?.value || "";
-    if (currentTLSMode === "nginx" && nextTLSMode !== "nginx") {
+    if (tlsMode?.dataset.nginxAcme === "1" && currentTLSMode === "nginx" && nextTLSMode !== "nginx") {
       const trustCertificate = form.elements.namedItem("tls_client_certificate");
       if (trustCertificate) trustCertificate.value = "";
     }
