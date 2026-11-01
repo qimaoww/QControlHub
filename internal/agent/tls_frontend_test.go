@@ -83,6 +83,24 @@ func TestTLSFrontendRejectsMixedNginxTrustOnSameSNI(t *testing.T) {
 	}
 }
 
+func TestTLSFrontendIndependentNginxChallenges(t *testing.T) {
+	f := core.TLSFrontend{Tag: "auto", Mode: "nginx", AutomaticCertificate: true, Domain: "auto.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/auto"}
+	nginx := renderNginxFrontends([]core.TLSFrontend{f}, "/tls", "/state", false)
+	if !strings.Contains(nginx, "listen 80;") || !strings.Contains(nginx, "127.0.0.1:9080") {
+		t.Fatal("independent Nginx cannot serve HTTP-01 challenges")
+	}
+	caddy := f
+	caddy.Tag, caddy.Mode, caddy.Domain, caddy.PublicPort, caddy.BackendPort, caddy.Path, caddy.AutomaticCertificate = "shared", "caddy", "shared.example.test", 8443, 23457, "/shared", false
+	frontends := []core.TLSFrontend{f, caddy}
+	if nginx = renderNginxFrontends(frontends, "/tls", "/state", true); strings.Contains(nginx, "listen 80;") {
+		t.Fatal("Nginx stole a shared Caddy challenge listener")
+	}
+	config, err := renderCaddyFrontends(frontends, "/state")
+	if err != nil || strings.Contains(config, f.Domain) || !strings.Contains(config, caddy.Domain) {
+		t.Fatal("Caddy still manages automatic Nginx certificates or lost a shared inbound", err)
+	}
+}
+
 func TestCaddyIssuerFallbackAndAccounts(t *testing.T) {
 	a := core.TLSFrontend{Tag: "a", Mode: "caddy", Domain: "a.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/a", ACMEEmail: "certs@example.test"}
 	b := a

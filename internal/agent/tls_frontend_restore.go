@@ -39,9 +39,27 @@ func (m *tlsFrontendManager) snapshotRuntime(ctx context.Context) ([]tlsRuntimeS
 	return result, nil
 }
 
-func (m *tlsFrontendManager) restoreRuntime(ctx context.Context, previous tlsDeployments, snapshots []tlsRuntimeSnapshot) error {
-	if err := m.sync(ctx, previous); err != nil {
-		return err
+func (m *tlsFrontendManager) restoreRuntime(ctx context.Context, _ tlsDeployments, snapshots []tlsRuntimeSnapshot) error {
+	// Restore exact runtime snapshots: an older manifest may describe automatic
+	// Nginx whose HTTP listener still belonged to a certificate-only Caddy.
+	// Rendering that manifest with the new implementation would steal port 80
+	// before the old Caddy service can be restored.
+	for _, snapshot := range snapshots {
+		path := filepath.Join(m.root, snapshot.mode+".conf")
+		current, _ := os.ReadFile(path)
+		active := snapshot.status == "active" || snapshot.status == "activating" || snapshot.status == "reloading"
+		if active && string(current) == snapshot.content {
+			continue
+		}
+		_, unit, _ := m.serviceDefinition(snapshot.mode, false)
+		if _, err := os.Stat(unit); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if output, err := m.services.command(ctx, snapshot.service, core.ActionStop); err != nil {
+			return fmt.Errorf("停止待恢复的 %s：%w；%s", snapshot.service, err, output)
+		}
 	}
 	for _, snapshot := range snapshots {
 		path := filepath.Join(m.root, snapshot.mode+".conf")

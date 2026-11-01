@@ -72,6 +72,7 @@ func mockTLSACME(t *testing.T, domain string, challengePort int, firstLifetime .
 			value = map[string]any{"status": "valid", "contact": []string{"mailto:certs@example.test"}, "orders": server.URL + "/orders"}
 		case "/new-order":
 			orders.Add(1)
+			authorized, certificate = false, ""
 			w.Header().Set("Location", server.URL+"/order")
 			w.WriteHeader(201)
 			value = order("pending")

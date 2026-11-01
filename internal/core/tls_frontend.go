@@ -13,7 +13,7 @@ import (
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
 const AgentFeatureManagedTLSH2 = "managed-tls-h2-v1"
-const AgentFeatureNginxACME = "managed-tls-nginx-acme-v1"
+const AgentFeatureNginxACME = "managed-tls-nginx-acme-v2"
 const AgentFeatureACMEFallback = "managed-tls-acme-fallback-v1"
 
 // Includes optional core installation, environment checks, both issuers and independent recovery.
@@ -43,8 +43,8 @@ type TLSFrontend struct {
 	ACMEEmail            string   `json:"acme_email,omitempty"`
 }
 
-// UsesACME includes Nginx frontends whose certificates are managed by the
-// certificate-only Caddy service. Legacy Nginx and local XHTTP remain unchanged.
+// UsesACME includes independently managed automatic Nginx certificates.
+// Legacy self-signed Nginx and local XHTTP remain unchanged.
 func (f TLSFrontend) UsesACME() bool {
 	return f.Mode == "caddy" || f.Mode == "nginx" && f.AutomaticCertificate
 }

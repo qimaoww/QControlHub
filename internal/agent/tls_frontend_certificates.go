@@ -119,9 +119,12 @@ func certificatePreparationRoutes(content string, previous []core.TLSFrontend, s
 }
 
 func (m *tlsFrontendManager) prepareCertificates(ctx context.Context, previous, next tlsDeployments, service string) error {
+	if err := m.ensureNginxCertificates(ctx, next[service].Frontends, false); err != nil {
+		return tlsPhaseError("证书准备", err)
+	}
 	needed := false
 	for _, f := range next[service].Frontends {
-		needed = needed || f.UsesACME() && !m.hasValidCertificate(f.Domain)
+		needed = needed || f.Mode == "caddy" && !m.hasValidCertificate(f.Domain)
 	}
 	if !needed {
 		return nil
@@ -137,7 +140,7 @@ func (m *tlsFrontendManager) prepareCertificates(ctx context.Context, previous, 
 	}
 	if err != nil {
 		for _, f := range next[service].Frontends {
-			if f.UsesACME() {
+			if f.Mode == "caddy" {
 				err = m.withFrontendDiagnostics(err, f, started)
 				break
 			}

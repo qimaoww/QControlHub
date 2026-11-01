@@ -71,9 +71,6 @@ func (m *tlsFrontendManager) repairRuntime(ctx context.Context) error {
 	for _, d := range deployments {
 		for _, f := range d.Frontends {
 			modes[f.Mode] = true
-			if f.UsesACME() {
-				modes["caddy"] = true
-			}
 		}
 	}
 	for mode := range modes {
@@ -84,6 +81,9 @@ func (m *tlsFrontendManager) repairRuntime(ctx context.Context) error {
 		if err = m.ensureService(ctx, mode); err != nil {
 			return err
 		}
+	}
+	if err := m.retireCaddyCertificateHelper(ctx, deployments); err != nil {
+		return err
 	}
 	if err := m.upgradeHTTPChallengeRoutes(ctx, deployments); err != nil {
 		return err
@@ -124,9 +124,6 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 	modes := map[string]bool{}
 	for _, f := range active {
 		modes[f.Mode] = true
-		if f.UsesACME() {
-			modes["caddy"] = true
-		}
 	}
 	for mode := range modes {
 		service := "qagent-tls-" + mode
@@ -232,7 +229,7 @@ func (e *Executor) maintainTLSCertificates(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			check, cancel := context.WithTimeout(ctx, 30*time.Second)
+			check, cancel := context.WithTimeout(ctx, 3*time.Minute)
 			spec := DefaultSpecsForServiceManager(e.serviceManager().Kind())[core.EngineSingBox]
 			if err := e.executeTLSFrontendRequest(check, spec, core.Task{Engine: core.EngineSingBox, Action: core.ActionStatus}, false, true); err != nil && ctx.Err() == nil {
 				slog.Warn("refresh managed Nginx certificates", "error", err)

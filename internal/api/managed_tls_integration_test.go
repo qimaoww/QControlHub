@@ -103,6 +103,10 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 	plan.TransportHost = "host.example.test"
 	// Older Agents must reject the new certificate mode before committing a
 	// revision; advertising support permits the same unchanged draft to deploy.
+	agent.Features = append(agent.Features, "managed-tls-nginx-acme-v1")
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features}); err != nil {
+		t.Fatal(err)
+	}
 	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusConflict, nil)
 	agent.Features = append(agent.Features, core.AgentFeatureNginxACME)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features}); err != nil {
