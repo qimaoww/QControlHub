@@ -310,6 +310,10 @@ func (s *Store) ImportManagedCertificate(ctx context.Context, agentID string, re
 		if item.Source != n.Source || item.SourceID != n.ID {
 			return fail("证书已解除来源关联，自动同步已阻断")
 		}
+		// Keep the same domain coverage invariant as manual replacements.
+		if n.Source == "node" && certificates.Covers(pair, item.Domains) != nil {
+			return fail("替换证书必须覆盖原有全部域名；保留现有版本")
+		}
 		if item.Fingerprint == info.Fingerprint {
 			_, err = tx.Exec(ctx, `UPDATE managed_certificate_sources SET status='synced',error='',last_synced=now() WHERE id=$1`, n.ID)
 			if err != nil {

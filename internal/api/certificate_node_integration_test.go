@@ -141,7 +141,7 @@ func TestNodeCertificateExplicitEnrollmentAndVersions(t *testing.T) {
 			if err != nil || len(requests) != 0 {
 				t.Fatal("private material requested without consent")
 			}
-			pair, err := certificates.SelfSigned([]string{"edge.example.test"}, "ecdsa256", 90)
+			pair, err := certificates.SelfSigned([]string{"edge.example.test", "alternate.example.test"}, "ecdsa256", 90)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +185,7 @@ func TestNodeCertificateExplicitEnrollmentAndVersions(t *testing.T) {
 				}
 			}
 			check(1, "synced")
-			newer, _ := certificates.SelfSigned([]string{"edge.example.test"}, "ecdsa256", 91)
+			newer, _ := certificates.SelfSigned([]string{"edge.example.test", "alternate.example.test"}, "ecdsa256", 91)
 			invalid := report
 			invalid.PrivateKey = newer.PrivateKey
 			if err = db.ImportManagedCertificate(ctx, node.ID, invalid); err != nil {
@@ -194,6 +194,14 @@ func TestNodeCertificateExplicitEnrollmentAndVersions(t *testing.T) {
 			check(1, "blocked")
 			foreign, _ := certificates.SelfSigned([]string{"foreign.example.test"}, "ecdsa256", 92)
 			invalid.Certificate, invalid.PrivateKey = foreign.Certificate, foreign.PrivateKey
+			if err = db.ImportManagedCertificate(ctx, node.ID, invalid); err != nil {
+				t.Fatal(err)
+			}
+			check(1, "blocked")
+			// A source may still match while a replacement drops another SAN
+			// already available to existing certificate bindings or grantees.
+			narrowed, _ := certificates.SelfSigned([]string{"edge.example.test"}, "ecdsa256", 92)
+			invalid.Certificate, invalid.PrivateKey = narrowed.Certificate, narrowed.PrivateKey
 			if err = db.ImportManagedCertificate(ctx, node.ID, invalid); err != nil {
 				t.Fatal(err)
 			}
