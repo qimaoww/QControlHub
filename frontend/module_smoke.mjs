@@ -61,3 +61,4 @@ Object.assign(fixtures, await (await import("./smoke/public-address-runtime.mjs"
 await import("./route_modules_smoke.mjs");
 await import("./ip_quality_smoke.mjs");
 await import("./session_watch_smoke.mjs");
+await (await import("./smoke/agent-time-zone.mjs")).run();

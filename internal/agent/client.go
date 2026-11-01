@@ -73,6 +73,10 @@ type Client struct {
 	executionsMu      sync.Mutex
 	executions        map[string]*taskExecution
 	restartAfterTask  string
+	timeZoneRevision  int64
+	timeZone          string
+	clockSyncMu       sync.Mutex
+	clockSync         *core.ClockSyncStatus
 	taskLifecycleMu   sync.Mutex
 	upgradePending    bool
 	upgradeCommitted  *agentUpgradeTransaction

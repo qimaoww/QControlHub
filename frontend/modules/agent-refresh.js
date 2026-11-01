@@ -4,6 +4,7 @@ import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
 import { updateAgentPresence } from "./agent-presence.js";
 import { sharedInstancePresentation, sharedAllocationText, updateSharedInstanceMarkup } from "./shared-instance-state.js";
+import { updateAgentTimeZone } from "./agent-time-zone.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -140,6 +141,7 @@ function updateAgentMetrics(item) {
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";
   root.dataset.available = metrics.collected_at ? "1" : "0";
   updateAgentPresence(root, item.status);
+  updateAgentTimeZone(root, item);
   const lastSeen = root.querySelector("[data-agent-heartbeat]");
   if (lastSeen) {
     const text = heartbeat(item.last_seen);

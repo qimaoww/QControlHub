@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 83
+const currentSchemaVersion = 84
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS traffic_batch_requests (
@@ -59,8 +59,20 @@ CREATE TABLE IF NOT EXISTS agents (
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS sharing_revision bigint NOT NULL DEFAULT 1;
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone_mode varchar(16) NOT NULL DEFAULT 'auto';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone varchar(128) NOT NULL DEFAULT '';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS applied_time_zone varchar(128) NOT NULL DEFAULT '';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone_status varchar(16) NOT NULL DEFAULT 'pending';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone_error varchar(200) NOT NULL DEFAULT '';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone_revision bigint NOT NULL DEFAULT 0;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS time_zone_auto_address_hash varchar(64) NOT NULL DEFAULT '';
+	ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_time_zone_mode_check;
+	ALTER TABLE agents ADD CONSTRAINT agents_time_zone_mode_check CHECK (time_zone_mode IN ('auto','custom'));
+	ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_time_zone_status_check;
+	ALTER TABLE agents ADD CONSTRAINT agents_time_zone_status_check CHECK (time_zone_status IN ('pending','applying','applied','failed','unsupported'));
 	CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents(owner_id);
 	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
+	COMMENT ON COLUMN agents.time_zone_auto_address_hash IS 'SHA-256 change detector for the selected trusted Agent public IP; never a stored IP address.';
 	ALTER TABLE agents SET (fillfactor = 70);
 
 -- Persist deletion cleanup independently of the HTTP request and process lifetime.

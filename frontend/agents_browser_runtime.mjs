@@ -20,6 +20,7 @@ import { testCardMoveRuntime } from "./browser/card-movement.mjs";
 import { testMotionRuntime } from "./browser/motion.mjs";
 import { testPopupRuntime } from "./browser/popups.mjs";
 import { assert, waitFor } from "./browser/assertions.mjs";
+import { testAgentTimeZoneLayout } from "./browser/agent-time-zone-layout.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
@@ -69,6 +70,7 @@ try {
     }
     await import("./app.js");
     if (mode === "tasks-preview" && new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    else if (mode.startsWith("agent-time-zone-layout")) await testAgentTimeZoneLayout({ testAPI: scenario.testAPI || window.__agentsBrowserTestAPI, mode });
     else if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-cards")) await testCardMoveRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("motion-selection")) await testSelectionRuntime(scenario, new URLSearchParams(location.search).has("preview"));

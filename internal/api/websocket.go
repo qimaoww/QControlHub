@@ -57,6 +57,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	trafficRefresh := s.registerConnection(id, connectionID, cancelConnection)
+	timeZoneRefresh := s.agentTimeZoneRefreshChannel(id, connectionID)
 	defer s.unregisterConnection(id, connectionID)
 	if err := s.store.UpdateAgentObservedPublicIP(ctx, id, observedPublicIP); err != nil {
 		// Address discovery is best-effort and must never take an authenticated
@@ -120,7 +121,19 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	var lastManagedScan time.Time
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
+	var managedProcessTimeZone bool
 	var sharedEnginesSupported, independentEgressSupported bool
+	var timeZoneAckRevision int64
+	var timeZoneAckDeadline time.Time
+	var lastTimeZoneAddressHash string
+	defer func() {
+		if timeZoneAckDeadline.IsZero() {
+			return
+		}
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = s.store.ResetAgentTimeZoneApplication(cleanupContext, id, timeZoneAckRevision)
+	}()
 	publicIPProbeTrust := func() store.PublicIPProbeTrust {
 		if !heartbeatReceived || !managedPublicIPProbe {
 			return store.PublicIPProbeTrust{}
@@ -129,6 +142,57 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			ControlPlaneIPv4: strings.TrimSpace(effectivePublicIPProbe.IPv4Endpoint) != "",
 			ControlPlaneIPv6: strings.TrimSpace(effectivePublicIPProbe.IPv6Endpoint) != "",
 		}
+	}
+	sendAgentTimeZone := func(force bool) error {
+		if !heartbeatReceived {
+			return nil
+		}
+		state, err := s.store.GetAgentTimeZone(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !managedProcessTimeZone {
+			if state.TimeZone != "" {
+				_ = s.store.SetAgentTimeZoneStatus(ctx, id, state.Revision, "unsupported", "请升级 Agent 后再应用时区")
+			}
+			return nil
+		}
+		if state.Status == "unsupported" {
+			if err := s.store.SetAgentTimeZoneStatus(ctx, id, state.Revision, "pending", ""); err != nil {
+				return err
+			}
+			state.Status = "pending"
+		}
+		if !agentTimeZoneCommandNeeded(state, timeZoneAckRevision, force) {
+			return nil
+		}
+		if err := s.store.SetAgentTimeZoneStatus(ctx, id, state.Revision, "applying", ""); err != nil {
+			return err
+		}
+		command := core.AgentTimeZoneCommand{Revision: state.Revision, TimeZone: state.TimeZone}
+		// Record the in-flight revision before writing. If the socket write
+		// fails, the connection cleanup can move applying back to pending.
+		timeZoneAckRevision = state.Revision
+		timeZoneAckDeadline = time.Now().Add(15 * time.Second)
+		if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireAgentTimeZone, AgentTimeZone: &command}); err != nil {
+			return err
+		}
+		return nil
+	}
+	reconcileTimeZoneMetrics := func(metrics *core.HostMetrics) error {
+		if !heartbeatReceived || metrics == nil {
+			return nil
+		}
+		addressHash := timeZoneAddressHash(agentTimeZoneAddress(core.Agent{Metrics: *metrics}))
+		if addressHash == lastTimeZoneAddressHash {
+			return nil
+		}
+		if _, err := s.resolveAgentTimeZone(ctx, id, false); err != nil {
+			slog.Warn("reconcile agent process time zone", "agent_id", id, "error", err)
+			return nil
+		}
+		lastTimeZoneAddressHash = addressHash
+		return sendAgentTimeZone(false)
 	}
 	resumeRunning := true
 	dispatchTask := func() error {
@@ -184,6 +248,10 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return
 			}
+		case <-timeZoneRefresh:
+			if err := sendAgentTimeZone(false); err != nil {
+				return
+			}
 		case <-ctx.Done():
 			return
 		case err := <-readErrors:
@@ -216,10 +284,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				agentHasManagedCertificates = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCaddyCertificates)
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
+				reportedProcessTimeZone := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureProcessTimeZone)
 				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
 				reportedIndependentEgress := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureIndependentEgress)
 				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe ||
-					reportedManagedAgentPolicy != managedAgentPolicy || reportedSharedEngines != sharedEnginesSupported ||
+					reportedManagedAgentPolicy != managedAgentPolicy || reportedProcessTimeZone != managedProcessTimeZone || reportedSharedEngines != sharedEnginesSupported ||
 					reportedIndependentEgress != independentEgressSupported)
 				trust := publicIPProbeTrust()
 				if !heartbeatReceived || capabilityChanged {
@@ -238,6 +307,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					heartbeatReceived = true
 					managedPublicIPProbe = reportedManagedPublicIPProbe
 					managedAgentPolicy = reportedManagedAgentPolicy
+					managedProcessTimeZone = reportedProcessTimeZone
 					sharedEnginesSupported = reportedSharedEngines
 					independentEgressSupported = reportedIndependentEgress
 					// Until this heartbeat, cached features could have belonged
@@ -264,10 +334,21 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 							return
 						}
 					}
+					if _, err := s.resolveAgentTimeZone(ctx, id, false); err != nil {
+						slog.Warn("reconcile agent process time zone", "agent_id", id, "error", err)
+					}
+					if agent, err := s.store.GetAgent(ctx, id); err == nil {
+						lastTimeZoneAddressHash = timeZoneAddressHash(agentTimeZoneAddress(agent))
+					}
+					if err := sendAgentTimeZone(true); err != nil {
+						return
+					}
 					if err := dispatchTask(); err != nil {
 						slog.Error("dispatch after first heartbeat", "agent_id", id, "error", err)
 						return
 					}
+				} else if err := reconcileTimeZoneMetrics(message.Heartbeat.Metrics); err != nil {
+					return
 				}
 			case core.WireMetrics:
 				if message.Metrics == nil {
@@ -277,6 +358,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				message.Metrics.ObservedPublicIP = observedPublicIP
 				if err := s.store.UpdateAgentMetricsWithPublicIPProbeTrust(ctx, id, *message.Metrics, publicIPProbeTrust()); err != nil {
 					slog.Error("store agent metrics", "agent_id", id, "error", err)
+					return
+				}
+				if err := reconcileTimeZoneMetrics(message.Metrics); err != nil {
 					return
 				}
 				if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
@@ -325,6 +409,26 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("dispatch next task for websocket", "agent_id", id, "error", err)
 					return
 				}
+			case core.WireAgentTimeZoneResult:
+				if !heartbeatReceived || !managedProcessTimeZone || message.AgentTimeZoneResult == nil {
+					_ = connection.Close(websocket.StatusPolicyViolation, "unexpected Agent time zone result")
+					return
+				}
+				result := *message.AgentTimeZoneResult
+				if result.Revision < 1 || !core.ValidTimeZone(result.TimeZone) {
+					_ = connection.Close(websocket.StatusPolicyViolation, "invalid Agent time zone result")
+					return
+				}
+				if result.Revision != timeZoneAckRevision {
+					continue
+				}
+				s.handleAgentTimeZoneResult(ctx, id, result)
+				if result.Revision == timeZoneAckRevision {
+					timeZoneAckDeadline = time.Time{}
+					if result.Error == "" {
+						timeZoneAckRevision = result.Revision
+					}
+				}
 			default:
 				_ = connection.Close(websocket.StatusUnsupportedData, "unsupported message type")
 				return
@@ -335,6 +439,10 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				return
 			}
 		case <-taskTicker.C:
+			if !timeZoneAckDeadline.IsZero() && !time.Now().Before(timeZoneAckDeadline) {
+				_ = s.store.SetAgentTimeZoneStatus(ctx, id, timeZoneAckRevision, "failed", "Agent 响应超时，请重试")
+				timeZoneAckDeadline = time.Time{}
+			}
 			if heartbeatReceived {
 				if agentHasManagedCertificates && time.Since(lastManagedScan) > 30*time.Second {
 					sources, sourceErr := s.store.AgentManagedCertificateSources(ctx, id)

@@ -56,6 +56,70 @@ func TestLookupRejectsNonPublicAddressBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestLookupTimeZoneValidatesAndCachesProviderResult(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.URL.Path != "/8.8.8.8" {
+			t.Fatalf("time-zone path = %q", request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"ip":"8.8.8.8","timezone":{"id":"America/New_York"}}`))
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.ipWhoEndpoint = server.URL
+	for range 2 {
+		zone, err := client.LookupTimeZone(context.Background(), netip.MustParseAddr("8.8.8.8"), false)
+		if err != nil || zone != "America/New_York" {
+			t.Fatalf("zone=%q err=%v", zone, err)
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("time-zone lookups = %d, want cached single request", requests)
+	}
+}
+
+func TestLookupTimeZoneRejectsInvalidAddressAndProviderZone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"ip":"8.8.8.8","timezone":{"id":"../UTC"}}`))
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.ipWhoEndpoint = server.URL
+	if _, err := client.LookupTimeZone(context.Background(), netip.MustParseAddr("192.168.1.2"), false); err == nil {
+		t.Fatal("private address reached time-zone provider")
+	}
+	if _, err := client.LookupTimeZone(context.Background(), netip.MustParseAddr("8.8.8.8"), false); err == nil {
+		t.Fatal("invalid provider timezone was accepted")
+	}
+}
+
+func TestLookupTimeZoneManualRetryBypassesFailureCache(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests == 1 {
+			_, _ = w.Write([]byte(`{"success":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"ip":"8.8.8.8","timezone":{"id":"America/Los_Angeles"}}`))
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.ipWhoEndpoint = server.URL
+	address := netip.MustParseAddr("8.8.8.8")
+	if _, err := client.LookupTimeZone(context.Background(), address, false); err == nil {
+		t.Fatal("initial provider failure was ignored")
+	}
+	if _, err := client.LookupTimeZone(context.Background(), address, false); err == nil || requests != 1 {
+		t.Fatalf("failure cache was not reused: err=%v requests=%d", err, requests)
+	}
+	zone, err := client.LookupTimeZone(context.Background(), address, true)
+	if err != nil || zone != "America/Los_Angeles" || requests != 2 {
+		t.Fatalf("manual refresh zone=%q err=%v requests=%d", zone, err, requests)
+	}
+}
+
 func TestLookupFillsMissingChinaProvinceFromAdditionalProviders(t *testing.T) {
 	for _, test := range []struct {
 		name, geoJS, ipWho, freeAPI, want string

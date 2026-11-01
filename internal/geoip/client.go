@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
@@ -63,6 +64,11 @@ type lookupFailureKey struct {
 	needProvince bool
 }
 
+type cachedTimeZone struct {
+	value     string
+	expiresAt time.Time
+}
+
 // Client looks up public addresses and keeps a short-lived in-memory cache.
 type Client struct {
 	http              *http.Client
@@ -71,11 +77,83 @@ type Client struct {
 	freeIPAPIEndpoint string
 	flagEndpoint      string
 
-	mu           sync.Mutex
-	cache        map[string]cachedRegion
-	failures     map[lookupFailureKey]time.Time
-	flagCache    map[string][]byte
-	freeAPICalls []time.Time
+	mu               sync.Mutex
+	cache            map[string]cachedRegion
+	failures         map[lookupFailureKey]time.Time
+	flagCache        map[string][]byte
+	freeAPICalls     []time.Time
+	timeZones        map[string]cachedTimeZone
+	timeZoneFailures map[string]time.Time
+}
+
+// LookupTimeZone resolves a public address to an IANA time-zone identifier
+// using the existing bounded GeoIP provider client.
+func (client *Client) LookupTimeZone(ctx context.Context, address netip.Addr, forceRefresh bool) (string, error) {
+	address = address.Unmap()
+	if !netpolicy.IsPublicAddress(address) {
+		return "", errors.New("time-zone lookup requires a public IP address")
+	}
+	if client.ipWhoEndpoint == "" {
+		return "", errors.New("time-zone provider is disabled")
+	}
+	key := address.String()
+	now := time.Now()
+	client.mu.Lock()
+	if cached, ok := client.timeZones[key]; ok && !forceRefresh {
+		if now.Before(cached.expiresAt) {
+			client.mu.Unlock()
+			return cached.value, nil
+		}
+		delete(client.timeZones, key)
+	}
+	if failedAt, ok := client.timeZoneFailures[key]; ok && !forceRefresh {
+		if now.Before(failedAt.Add(failureTTL)) {
+			client.mu.Unlock()
+			return "", errRecentFailure
+		}
+		delete(client.timeZoneFailures, key)
+	}
+	client.mu.Unlock()
+	var payload struct {
+		Success  bool   `json:"success"`
+		IP       string `json:"ip"`
+		Timezone struct {
+			ID string `json:"id"`
+		} `json:"timezone"`
+	}
+	if err := client.readJSON(ctx, strings.TrimRight(client.ipWhoEndpoint, "/")+"/"+key, &payload); err != nil {
+		client.rememberTimeZoneFailure(ctx, key)
+		return "", err
+	}
+	if !payload.Success || !sameIP(payload.IP, address.String()) {
+		client.rememberTimeZoneFailure(ctx, key)
+		return "", errors.New("time-zone provider returned no location for the requested IP")
+	}
+	zone := strings.TrimSpace(payload.Timezone.ID)
+	if !core.ValidTimeZone(zone) {
+		client.rememberTimeZoneFailure(ctx, key)
+		return "", errors.New("time-zone provider returned an invalid IANA time zone")
+	}
+	client.mu.Lock()
+	if len(client.timeZones) >= maxCachedRegions {
+		client.timeZones = make(map[string]cachedTimeZone)
+	}
+	delete(client.timeZoneFailures, key)
+	client.timeZones[key] = cachedTimeZone{value: zone, expiresAt: now.Add(cacheTTL)}
+	client.mu.Unlock()
+	return zone, nil
+}
+
+func (client *Client) rememberTimeZoneFailure(ctx context.Context, key string) {
+	if ctx.Err() != nil {
+		return
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.timeZoneFailures) >= maxCachedFailures {
+		client.timeZoneFailures = make(map[string]time.Time)
+	}
+	client.timeZoneFailures[key] = time.Now()
 }
 
 // New creates a GeoIP client. The HTTP client is injectable for tests.
@@ -92,6 +170,8 @@ func New(httpClient *http.Client) *Client {
 		cache:             make(map[string]cachedRegion),
 		failures:          make(map[lookupFailureKey]time.Time),
 		flagCache:         make(map[string][]byte),
+		timeZones:         make(map[string]cachedTimeZone),
+		timeZoneFailures:  make(map[string]time.Time),
 	}
 }
 

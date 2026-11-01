@@ -6,14 +6,35 @@ import (
 
 func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) chan struct{} {
 	trafficRefresh := make(chan struct{}, 1)
+	timeZoneRefresh := make(chan struct{}, 1)
 	s.connectionsMu.Lock()
 	previous, exists := s.connections[agentID]
-	s.connections[agentID] = liveConnection{id: connectionID, cancel: cancel, trafficRefresh: trafficRefresh}
+	s.connections[agentID] = liveConnection{id: connectionID, cancel: cancel, trafficRefresh: trafficRefresh, timeZoneRefresh: timeZoneRefresh}
 	s.connectionsMu.Unlock()
 	if exists {
 		previous.cancel()
 	}
 	return trafficRefresh
+}
+
+func (s *Server) agentTimeZoneRefreshChannel(agentID, connectionID string) chan struct{} {
+	s.connectionsMu.Lock()
+	defer s.connectionsMu.Unlock()
+	if connection, ok := s.connections[agentID]; ok && connection.id == connectionID {
+		return connection.timeZoneRefresh
+	}
+	return nil
+}
+
+func (s *Server) refreshAgentTimeZone(agentID string) {
+	s.connectionsMu.Lock()
+	defer s.connectionsMu.Unlock()
+	if connection, ok := s.connections[agentID]; ok {
+		select {
+		case connection.timeZoneRefresh <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // Refresh policies in-place: reconnect discovery would also add unselected ports.

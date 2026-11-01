@@ -71,6 +71,7 @@ const agentOfflineThresholdSQL = `(CASE WHEN agents.owner_id='' THEN (SELECT age
 const agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
+				time_zone_mode,time_zone,applied_time_zone,time_zone_status,time_zone_error,time_zone_revision,time_zone_auto_address_hash,
 				last_seen,enrolled_at,
 				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id,admin_hidden`
 
@@ -95,10 +96,13 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var observedPublicIP string
+		var timeZoneMode, timeZone, appliedTimeZone, timeZoneStatus, timeZoneError, timeZoneAddressHash string
+		var timeZoneRevision int64
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &timeZoneMode, &timeZone, &appliedTimeZone, &timeZoneStatus, &timeZoneError, &timeZoneRevision, &timeZoneAddressHash, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
+		agent.TimeZone = core.AgentTimeZoneState{Mode: timeZoneMode, TimeZone: timeZone, AppliedTimeZone: appliedTimeZone, Status: timeZoneStatus, Error: timeZoneError, Revision: timeZoneRevision, AutoAddressHash: timeZoneAddressHash}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
 			return nil, err
 		}
@@ -120,6 +124,9 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 			agent.Status = "offline"
 		}
 		scopeAgentPresentation(ctx, &agent)
+		if !agent.CanManage {
+			agent.TimeZone = core.AgentTimeZoneState{}
+		}
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
