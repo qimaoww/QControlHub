@@ -178,12 +178,12 @@ func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error
 		return nil, err
 	}
 	for i := range out {
-		if out[i].Source == "caddy" && out[i].Owned {
+		if (out[i].Source == "caddy" || out[i].Source == "node") && out[i].Owned {
 			out[i].SyncStatus = "unverified"
 			out[i].SyncError = "来源节点或部署关系已移除；保留现有证书，停止导入新版本"
 		}
 		for _, src := range sources {
-			if out[i].ID == src.CertificateID && out[i].Source == "caddy" {
+			if out[i].ID == src.CertificateID && (out[i].Source == "caddy" || out[i].Source == "node") {
 				out[i].SyncStatus = src.Status
 				out[i].SyncError = src.Error
 				out[i].LastSynced = src.LastSynced

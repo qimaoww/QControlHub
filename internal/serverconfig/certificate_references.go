@@ -3,14 +3,73 @@ package serverconfig
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
+	"path/filepath"
 	"strings"
 )
 
 type CertificateFileReference struct {
 	Path, Field string
 	Set         func(string)
+}
+
+// NodeTLSCertificateReferences uses the existing inbound parser and protocol
+// capabilities. Outbound keys, trust PEM, Reality and inline material cannot
+// become sources. Metadata must belong to the exact applied revision.
+func NodeTLSCertificateReferences(engine core.Engine, content string, metadata map[string]string) []core.NodeTLSCertificateReference {
+	out := []core.NodeTLSCertificateReference{}
+	if len(content) > core.MaxConfigBytes {
+		return out
+	}
+	_, files, err := CertificateFileReferences(engine, content)
+	if err != nil {
+		return out
+	}
+	paths := map[string]bool{}
+	for _, ref := range files {
+		paths[ref.Path] = true
+	}
+	for _, plan := range ParseAll(engine, content) {
+		if value := metadata[plan.Tag]; value != "" {
+			if ApplyClientMetadata(&plan, value) != nil {
+				continue
+			}
+		}
+		protocol, ok := FindProtocol(engine, plan.Protocol)
+		if !ok || protocol.UsesReality || protocol.UsesWireGuard || !(protocol.SupportsTLS || protocol.RequiresTLS) || !(plan.TLSEnabled || protocol.RequiresTLS) || plan.TLSMode != "" && plan.TLSMode != "native" {
+			continue
+		}
+		safe := func(path string) bool {
+			return filepath.IsAbs(path) && filepath.Clean(path) == path && paths[path] && !strings.HasPrefix(path, core.PanelCertificatePrefix) && !strings.Contains(path, "-----BEGIN ")
+		}
+		if !safe(plan.CertificatePath) || !safe(plan.PrivateKeyPath) || plan.CertificatePath == plan.PrivateKeyPath {
+			continue
+		}
+		domain := ""
+		if names, err := certificates.Domains([]string{plan.TLSServerName}); err == nil && !strings.HasPrefix(names[0], "*.") {
+			domain = names[0]
+		}
+		out = append(out, core.NodeTLSCertificateReference{Tag: plan.Tag, Domain: domain, CertificatePath: plan.CertificatePath, PrivateKeyPath: plan.PrivateKeyPath})
+	}
+	return out
+}
+
+// A shared deployment cannot confer ownership of arbitrary node files. The
+// exact protected instance directory is the export boundary for its user.
+func NodeTLSCertificatePathAllowed(engine core.Engine, shareID, path string) bool {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, core.PanelCertificatePrefix) {
+		return false
+	}
+	if shareID != "" {
+		if !core.ValidAgentShareID(shareID) {
+			return false
+		}
+		root := "/etc/qagent/" + string(engine) + "/shares/" + shareID + "/"
+		return strings.HasPrefix(path, root)
+	}
+	return !strings.Contains(path, "/shares/") && (strings.HasPrefix(path, "/etc/") || strings.HasPrefix(path, "/var/lib/")) && !strings.HasPrefix(path, "/var/lib/qcontrolhub-tls/")
 }
 
 // Enumerate file-capable fields in their actual configuration context. In

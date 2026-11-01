@@ -13,6 +13,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 // Only the fixed Caddy certificates subtree is inspected. Account keys and
@@ -52,6 +53,13 @@ func readManagedCertificateFile(root *os.Root, path string, limit int64) ([]byte
 }
 
 func (m *tlsFrontendManager) scanManagedCertificate(source core.ManagedCertificateSource, kind string) core.ManagedCertificateReport {
+	if source.Source == "node" {
+		spec, err := managedCertificateSpec(source, kind)
+		if err != nil {
+			return core.ManagedCertificateReport{SourceID: source.ID, TaskID: source.TaskID, Error: "node-source-unverified"}
+		}
+		return readNodeTLSCertificate(source, spec)
+	}
 	result := core.ManagedCertificateReport{SourceID: source.ID, Error: "managed-certificate-unavailable"}
 	if source.Engine != core.EngineSingBox && source.Engine != core.EngineXray {
 		return result
@@ -207,7 +215,7 @@ func (c *Client) syncManagedCertificates(ctx context.Context, sources []core.Man
 }
 
 func managedCertificateSpec(source core.ManagedCertificateSource, kind string) (EngineSpec, error) {
-	if source.Engine != core.EngineSingBox && source.Engine != core.EngineXray {
+	if source.Engine != core.EngineSingBox && source.Engine != core.EngineXray && !(source.Source == "node" && source.Engine == core.EngineMihomo) {
 		return EngineSpec{}, errors.New("invalid managed certificate engine")
 	}
 	spec := DefaultSpecsForServiceManager(kind)[source.Engine]
@@ -217,11 +225,77 @@ func managedCertificateSpec(source core.ManagedCertificateSource, kind string) (
 	return spec, nil
 }
 
+// Paths are taken from the protected effective configuration and must match the
+// server-confirmed revision's reference. Shared users may export only files in
+// their own protected instance directory, with an exact deployment sidecar.
+// Never return partially read secrets, paths, or underlying filesystem errors.
+func readNodeTLSCertificate(source core.ManagedCertificateSource, spec EngineSpec) core.ManagedCertificateReport {
+	failure := core.ManagedCertificateReport{SourceID: source.ID, TaskID: source.TaskID, Error: "node-source-unverified"}
+	ref := source.Reference
+	if ref == nil || source.ConfigID == "" || source.TaskID == "" {
+		return failure
+	}
+	for _, path := range []string{ref.CertificatePath, ref.PrivateKeyPath} {
+		if !serverconfig.NodeTLSCertificatePathAllowed(source.Engine, source.ShareID, path) {
+			return failure
+		}
+	}
+	content, err := readConfigurationFile(spec.ConfigPath)
+	if err != nil {
+		return failure
+	}
+	if source.ShareID != "" {
+		state, err := readSharedDeploymentState(spec)
+		if err != nil || state.ConfigID != source.ConfigID || state.AppliedTaskID != source.TaskID || state.Digest != configurationDigest(content) {
+			return failure
+		}
+	}
+	confirmed := false
+	for _, actual := range serverconfig.NodeTLSCertificateReferences(source.Engine, content, nil) {
+		if actual.Tag == ref.Tag && actual.CertificatePath == ref.CertificatePath && actual.PrivateKeyPath == ref.PrivateKeyPath {
+			confirmed = true
+			break
+		}
+	}
+	if !confirmed {
+		return failure
+	}
+	failure.Error = "node-files-unavailable"
+	root, err := os.OpenRoot("/")
+	if err != nil {
+		return failure
+	}
+	defer root.Close()
+	cert, err := readManagedCertificateFile(root, strings.TrimPrefix(ref.CertificatePath, "/"), 256<<10)
+	if err != nil {
+		return failure
+	}
+	key, err := readManagedCertificateFile(root, strings.TrimPrefix(ref.PrivateKeyPath, "/"), 32<<10)
+	if err != nil {
+		return failure
+	}
+	pair := certificates.Pair{Certificate: string(cert), PrivateKey: string(key)}
+	failure.Error = "node-pair-invalid"
+	if _, err = certificates.Inspect(pair, time.Now()); err != nil {
+		return failure
+	}
+	failure.Error = "node-domain-mismatch"
+	if err = certificates.Covers(pair, []string{source.Domain}); err != nil {
+		return failure
+	}
+	// Do not upload a pair read across a concurrent deployment or local edit.
+	failure.Error = "node-source-unverified"
+	if after, err := readConfigurationFile(spec.ConfigPath); err != nil || after != content {
+		return failure
+	}
+	return core.ManagedCertificateReport{SourceID: source.ID, TaskID: source.TaskID, Certificate: pair.Certificate, PrivateKey: pair.PrivateKey}
+}
+
 // The long-running Agent intentionally lacks DAC override. A short-lived,
 // read-only helper can read Caddy's core-owned 0700 store. Its private response
 // file never enters task output, stderr, a journal, or ordinary heartbeats.
 func (e *Executor) readManagedCertificate(ctx context.Context, source core.ManagedCertificateSource) core.ManagedCertificateReport {
-	failure := core.ManagedCertificateReport{SourceID: source.ID, Error: "managed-certificate-unavailable"}
+	failure := core.ManagedCertificateReport{SourceID: source.ID, TaskID: source.TaskID, Error: "managed-certificate-unavailable"}
 	cleanupManagedCertificateResponses()
 	kind := e.serviceManager().Kind()
 	spec, err := managedCertificateSpec(source, kind)
