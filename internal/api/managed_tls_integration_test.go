@@ -108,6 +108,9 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features}); err != nil {
 		t.Fatal(err)
 	}
+	plan.PanelCertificateID = "crt_conflicting_fixture"
+	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusBadRequest, nil)
+	plan.PanelCertificateID = ""
 	var saved configMutationResult
 	response := admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
 	if strings.Contains(string(response), "PRIVATE KEY") || len(saved.Task.TLSFrontends) > 0 {

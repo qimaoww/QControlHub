@@ -46,6 +46,10 @@ async function fixture(engine, readOnly = false, actual) {
     const body = options.body ? JSON.parse(options.body) : undefined;
     test.calls.push({ path, method: options.method || "GET", body });
     path = path.replace(/\?view=status$/, "");
+    if (path === "/certificates") {
+      if (actual?.certificateGate) await actual.certificateGate;
+      return { items: actual?.certificates || [] };
+    }
     if (path.endsWith("/workspace")) {
       if (test.workspaceFailure) throw new Error("模拟页面刷新失败");
       return { agent, config: test.saved, inbounds: structuredClone(test.inbounds), protocols,
@@ -328,7 +332,7 @@ export async function testPresetsRuntime(preview = false) {
   const catalog = await catalogResponse.json();
   const caddyPreset = catalog.find(entry => entry.engine === "sing-box" && entry.protocol.key === "vless-ws-tls");
   for (const shared of [false, true]) {
-    const test = await fixture("sing-box", false, {...caddyPreset, shared});
+    const test = await fixture("sing-box", false, {...caddyPreset, shared, certificates: [{id:"crt_fixture",name:"原生 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"}]});
     const advanced = form().querySelector("[data-tls-advanced]");
     assert(advanced.open && control("tls_mode").checkVisibility() && control("tls_mode").closest("[data-tls-advanced]") === advanced, "existing TLS selector must be visible in its original settings section");
     assert(form().querySelectorAll('[name="tls_mode"]').length === 1 && form().querySelector("#connection .plan-fields.two")?.textContent.includes("公网 HTTPS 端口") && !control("tls_mode").closest("#connection"), "TLS switching changed the original field grouping or duplicated its selector");
@@ -379,7 +383,25 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => test.saved?.version === 6 && !button("deploy").disabled, "native TLS deployment stalled");
     modeSave = submissions(test).at(-1).body.input;
     assert(modeSave.tls_mode === "native" && modeSave.tls_public_port === 0 && modeSave.listen === "0.0.0.0" && modeSave.certificate_path.endsWith("server.crt") && modeSave.private_key_path.endsWith("server.key") && !modeSave.tls_client_certificate, "native TLS deployment retained managed frontend state");
+    await waitFor(() => control("panel_certificate_id")?.options.length > 1, "certificate catalog did not load");
+    edit("panel_certificate_id", "crt_fixture");
+    assert(control("tls_mode").value === "native" && !control("panel_certificate_id").disabled && control("certificate_path").readOnly, "native certificate selection failed");
+    assert(readServerPlanInput(form(), caddyPreset.protocol).panel_certificate_id === "crt_fixture", "native certificate binding lost");
+    edit("tls_mode", "nginx");
+    assert(control("panel_certificate_id").disabled && control("panel_certificate_id").closest("[data-panel-certificate]").hidden, "native certificate selector conflicts with Nginx mode");
+    button("deploy").click();
+    await waitFor(() => test.saved?.version === 7 && !button("deploy").disabled, "Nginx deployment after panel certificate selection stalled");
+    modeSave = submissions(test).at(-1).body.input;
+    assert(modeSave.tls_mode === "nginx" && !modeSave.panel_certificate_id && !modeSave.certificate_path && !modeSave.private_key_path, "native certificate binding overrode selected Nginx mode");
   }
+  const certificateGate = deferred();
+  await fixture("sing-box", false, {...caddyPreset, certificateGate: certificateGate.promise,
+    plan: {...caddyPreset.plan, tls_mode:"native", listen:"0.0.0.0", tls_server_name:"proxy.example.test", certificate_path:"/etc/qcontrolhub/panel-certificates/crt_fixture/cert.pem", private_key_path:"/etc/qcontrolhub/panel-certificates/crt_fixture/key.pem"},
+    certificates:[{id:"crt_fixture",name:"加载中的证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"}]});
+  edit("tls_mode", "nginx");
+  certificateGate.resolve();
+  await waitFor(() => control("panel_certificate_id")?.options.length > 1, "delayed certificate catalog did not finish");
+  assert(control("tls_mode").value === "nginx" && control("panel_certificate_id").disabled && !readServerPlanInput(form(), caddyPreset.protocol).panel_certificate_id, "delayed native certificate response overrode the selected Nginx mode");
   const covered = new Set();
   const cases = [...catalog, ...catalog.filter(actual => actual.engine === "xray" && actual.plan.transport === "xhttp").map(actual => ({...actual, shared: true}))];
   for (const actual of cases) {
