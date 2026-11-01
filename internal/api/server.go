@@ -23,9 +23,10 @@ type tokenPrincipal struct {
 }
 
 type liveConnection struct {
-	trafficRefresh chan struct{}
-	id             string
-	cancel         context.CancelFunc
+	trafficRefresh  chan struct{}
+	timeZoneRefresh chan struct{}
+	id              string
+	cancel          context.CancelFunc
 }
 
 func New(dataStore *store.Store, config Config) *Server {

@@ -49,5 +49,5 @@ func (collector *Collector) Collect(ctx context.Context) (core.HostMetrics, erro
 }
 
 func HasData(metrics core.HostMetrics) bool {
-	return metrics.CPUAvailable || metrics.MemoryAvailable || metrics.DiskAvailable || metrics.NetworkAvailable || len(metrics.NetworkInterfaces) > 0
+	return metrics.CPUAvailable || metrics.MemoryAvailable || metrics.DiskAvailable || metrics.NetworkAvailable || len(metrics.NetworkInterfaces) > 0 || metrics.ClockSync != nil
 }

@@ -40,6 +40,10 @@ const AgentFeatureManagedPublicIPProbe = "managed-public-ip-probe-v1"
 // local core-log retention policy updates without a reinstall or restart.
 const AgentFeatureManagedPolicy = "managed-agent-policy-v1"
 
+// AgentFeatureProcessTimeZone identifies Agents that can apply an IANA time
+// zone to their own process without changing the host's system time zone.
+const AgentFeatureProcessTimeZone = "agent-process-time-zone-v1"
+
 // AgentFeatureManagedConfigRead identifies Agents that can independently read
 // the QAgent-managed configuration while an external service is also exposed
 // as an optional import source.

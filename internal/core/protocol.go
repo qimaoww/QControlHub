@@ -38,6 +38,8 @@ const (
 	WireCertificateChallenges     = "certificate_challenges"
 	WirePublicIPProbe             = "public_ip_probe"
 	WireAgentPolicy               = "agent_policy"
+	WireAgentTimeZone             = "agent_time_zone"
+	WireAgentTimeZoneResult       = "agent_time_zone_result"
 	WireHeartbeat                 = "heartbeat"
 	WireMetrics                   = "metrics"
 	WireTask                      = "task"
@@ -66,10 +68,23 @@ type WireMessage struct {
 	CoreLogs                  *CoreLogBatch              `json:"core_logs,omitempty"`
 	TrafficPolicies           []PortTrafficPolicy        `json:"traffic_policies,omitempty"`
 	// Preserve verified local enforcement until the initial heartbeat arrives.
-	TrafficPoliciesPending bool                 `json:"traffic_policies_pending,omitempty"`
-	PublicIPProbe          *PublicIPProbeConfig `json:"public_ip_probe,omitempty"`
-	AgentPolicy            *AgentPolicy         `json:"agent_policy,omitempty"`
-	TaskID                 string               `json:"task_id,omitempty"`
-	BatchID                string               `json:"batch_id,omitempty"`
-	Error                  string               `json:"error,omitempty"`
+	TrafficPoliciesPending bool                  `json:"traffic_policies_pending,omitempty"`
+	PublicIPProbe          *PublicIPProbeConfig  `json:"public_ip_probe,omitempty"`
+	AgentPolicy            *AgentPolicy          `json:"agent_policy,omitempty"`
+	AgentTimeZone          *AgentTimeZoneCommand `json:"agent_time_zone,omitempty"`
+	AgentTimeZoneResult    *AgentTimeZoneResult  `json:"agent_time_zone_result,omitempty"`
+	TaskID                 string                `json:"task_id,omitempty"`
+	BatchID                string                `json:"batch_id,omitempty"`
+	Error                  string                `json:"error,omitempty"`
+}
+
+type AgentTimeZoneCommand struct {
+	Revision int64  `json:"revision"`
+	TimeZone string `json:"time_zone"`
+}
+
+type AgentTimeZoneResult struct {
+	Revision int64  `json:"revision"`
+	TimeZone string `json:"time_zone"`
+	Error    string `json:"error,omitempty"`
 }

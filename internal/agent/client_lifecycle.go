@@ -494,6 +494,49 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				heartbeatTicker.Reset(time.Duration(message.AgentPolicy.HeartbeatIntervalSeconds) * time.Second)
 				metricsTicker.Reset(time.Duration(message.AgentPolicy.MetricsIntervalSeconds) * time.Second)
 				continue
+			case core.WireAgentTimeZone:
+				if message.AgentTimeZone == nil || message.AgentTimeZone.Revision < 1 || message.AgentTimeZone.Revision < c.timeZoneRevision {
+					return errors.New("control plane returned an invalid or stale Agent time zone")
+				}
+				result := core.AgentTimeZoneResult{Revision: message.AgentTimeZone.Revision, TimeZone: message.AgentTimeZone.TimeZone}
+				if activeTask != "" {
+					// Replacing the process while a system operation is running can
+					// interrupt that operation. Report a retryable failure instead;
+					// the panel keeps the requested revision and can retry after the
+					// task result has been acknowledged.
+					result.Error = "Agent 正在执行任务，请稍后重试"
+				} else {
+					// Tasks can continue across a WSS reconnect. Serialize against
+					// the process-wide task lifecycle before replacing the process,
+					// and do not race an in-progress Agent upgrade.
+					if !c.taskLifecycleMu.TryLock() {
+						result.Error = "Agent 正在执行任务，请稍后重试"
+					} else {
+						if c.upgradePending {
+							result.Error = "Agent 正在升级，请稍后重试"
+						} else {
+							restart, err := c.prepareAgentTimeZone(*message.AgentTimeZone)
+							if err != nil {
+								result.Error = "Agent 无法应用此时区"
+							} else if restart {
+								if err := c.restartForAgentTimeZone(message.AgentTimeZone.TimeZone); err != nil {
+									result.Error = "Agent 无法重启以应用时区"
+								} else {
+									return errors.New("Agent process restart returned")
+								}
+							} else {
+								// The requested process zone is already active.
+							}
+						}
+						c.taskLifecycleMu.Unlock()
+					}
+				}
+				select {
+				case outgoing <- core.WireMessage{Type: core.WireAgentTimeZoneResult, AgentTimeZoneResult: &result}:
+				case <-sessionContext.Done():
+					return context.Cause(sessionContext)
+				}
+				continue
 			case core.WireTask:
 				if message.Task == nil || activeTask != "" || !c.validTask(*message.Task) {
 					return errors.New("control plane returned an invalid or concurrent task envelope")

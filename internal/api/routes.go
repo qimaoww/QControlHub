@@ -53,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 		http.HandlerFunc(s.putMainlandAccessPolicy),
 	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
+	mux.Handle("GET /api/v1/agents/{id}/time-zone", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentTimeZone)))
+	mux.Handle("PUT /api/v1/agents/{id}/time-zone", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentTimeZone)))
 	mux.Handle("GET /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentRegion)))
 	mux.Handle("PUT /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentRegion)))
 	mux.Handle("GET /api/v1/regions", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listRegions)))

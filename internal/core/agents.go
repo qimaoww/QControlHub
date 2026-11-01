@@ -55,6 +55,7 @@ type Agent struct {
 	Labels                     map[string]string               `json:"labels,omitempty"`
 	Runtime                    map[Engine]RuntimeState         `json:"runtime,omitempty"`
 	Metrics                    HostMetrics                     `json:"metrics,omitempty"`
+	TimeZone                   AgentTimeZoneState              `json:"time_zone"`
 	LastSeen                   time.Time                       `json:"last_seen"`
 	EnrolledAt                 time.Time                       `json:"enrolled_at"`
 	PublicKey                  []byte                          `json:"-"`
@@ -77,6 +78,19 @@ type Agent struct {
 	// the control for someone else's node.
 	CanHide     bool `json:"can_hide,omitempty"`
 	Reinstalled bool `json:"-"`
+}
+
+// AgentTimeZoneState is scoped to one registered Agent. AutoAddressHash is
+// retained only as a non-reversible change detector and is never sent to the
+// panel client.
+type AgentTimeZoneState struct {
+	Mode            string `json:"mode,omitempty"`
+	TimeZone        string `json:"time_zone,omitempty"`
+	AppliedTimeZone string `json:"applied_time_zone,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Error           string `json:"error,omitempty"`
+	Revision        int64  `json:"revision,omitempty"`
+	AutoAddressHash string `json:"-"`
 }
 
 // AgentDirectoryEntry is the read-only cross-account summary behind the

@@ -43,6 +43,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
+	metrics.ClockSync = c.cachedClockSync(ctx)
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	metrics.BBR = c.bbr.Collect(ctx)
 	sharedInstances := c.executor.SharedInstanceStatuses(ctx)
@@ -89,6 +90,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
+	metrics.ClockSync = c.cachedClockSync(ctx)
 	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
 		return nil
 	}
@@ -125,6 +127,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureMihomoDevelopmentSource,
 		core.AgentFeatureManagedPublicIPProbe,
 		core.AgentFeatureManagedPolicy,
+		core.AgentFeatureProcessTimeZone,
 		core.AgentFeatureManagedConfigRead,
 		core.AgentFeatureConfigFiles,
 		core.AgentFeaturePairedConfigFiles,

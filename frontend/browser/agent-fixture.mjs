@@ -62,6 +62,7 @@ const populatedAgents = [
       network_tx_bytes: 4617089843,
       public_ipv4: "8.8.8.8",
       public_ipv4_source: "agent-config",
+      clock_sync: { status: "synchronized", offset_milliseconds: -1.375, checked_at: "2026-11-01T00:00:00Z" },
       collected_at: "2026-08-30T09:00:00Z",
     },
   },
@@ -86,6 +87,10 @@ const populatedAgents = [
     },
   },
 ];
+populatedAgents[0].time_zone = {
+  mode: "custom", time_zone: "America/New_York", applied_time_zone: "America/New_York",
+  status: "applied", error: "", revision: 2,
+};
 
 const testAPI = {
   calls: [],
@@ -95,6 +100,8 @@ const testAPI = {
   enrollmentFailure: false,
   renameFailure: false,
   renameGate: null,
+  timeZoneSaves: [],
+  timeZoneSaveFailure: false,
   profileNames: {},
   profileModes: {},
   profileAddresses: {},
@@ -541,6 +548,19 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.renameGate) await testAPI.renameGate;
     testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
     return json({ name });
+  }
+  if (method === "PUT" && /^\/agents\/[^/]+\/time-zone$/.test(path)) {
+    if (testAPI.timeZoneSaveFailure) return json({ error: "temporary time zone failure" }, 503);
+    const agentID = decodeURIComponent(path.split("/")[2]);
+    const input = JSON.parse(String(options.body || "{}"));
+    testAPI.timeZoneSaves.push({ agentID, ...input });
+    const agent = testAPI.agents.find((item) => item.id === agentID);
+    agent.time_zone = {
+      mode: input.mode, time_zone: input.time_zone || agent.time_zone?.time_zone || "",
+      applied_time_zone: agent.time_zone?.applied_time_zone || "", status: "applying", error: "",
+      revision: (agent.time_zone?.revision || 0) + 1,
+    };
+    return json(agent.time_zone);
   }
   if (method === "DELETE" && /^\/agents\/[^/]+$/.test(path)) {
     if (testAPI.deleteHang) {

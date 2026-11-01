@@ -437,8 +437,21 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
     if (mobile) {
       // A narrow desktop window is not a touch device and Chrome may clamp its
       // width. Apply actual mobile metrics before the fixture starts running.
-      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      const viewport = process.env.QCH_BROWSER_SMOKE_VIEWPORT?.match(/^(\d+)x(\d+)$/);
+      const width = viewport ? Number(viewport[1]) : 390;
+      const height = viewport ? Number(viewport[2]) : 844;
+      const deviceScaleFactor = Number(process.env.QCH_BROWSER_SMOKE_DPR || 1);
+      assert.ok(width > 0 && height > 0 && deviceScaleFactor > 0, "browser viewport and DPR must be positive");
+      await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor, mobile: true,
+        screenOrientation: { type: width > height ? "landscapePrimary" : "portraitPrimary", angle: width > height ? 90 : 0 } });
       await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    } else if (process.env.QCH_BROWSER_SMOKE_VIEWPORT) {
+      const viewport = process.env.QCH_BROWSER_SMOKE_VIEWPORT.match(/^(\d+)x(\d+)$/);
+      assert.ok(viewport, "browser viewport must use WIDTHxHEIGHT");
+      const width = Number(viewport[1]), height = Number(viewport[2]);
+      const deviceScaleFactor = Number(process.env.QCH_BROWSER_SMOKE_DPR || 1);
+      assert.ok(width > 0 && height > 0 && deviceScaleFactor > 0, "browser viewport and DPR must be positive");
+      await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor, mobile: false });
     }
     if (process.env.QCH_BROWSER_SMOKE_ZOOM) {
       const zoom = Number(process.env.QCH_BROWSER_SMOKE_ZOOM);
@@ -475,7 +488,7 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
-              measurements: window.cardCoordinateMeasurements || window.ipQualityMeasurements,
+              measurements: window.cardCoordinateMeasurements || window.ipQualityMeasurements || window.agentTimeZoneMeasurements,
             });
           }, 10);
         })`,
@@ -553,7 +566,7 @@ async function runMode(mode) {
     profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
     activeProfiles.add(profile);
     await chmod(profile, 0o700);
-    const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["presets-mobile", "logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || mode.startsWith("agent-time-zone-layout-mobile") || ["presets-mobile", "logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") || mode.endsWith("reduced") ? "about:blank" : url;
     child = spawn(
       chrome,
@@ -577,7 +590,7 @@ async function runMode(mode) {
         // Match a mouse-equipped desktop for TCP and shell layout checks. Headless
         // Chromium otherwise reports pointer:none and misses desktop CSS.
         ...((mode.startsWith("bbr") || mode.startsWith("shell-layout") || mode.startsWith("motion")) && !mobile ? ["--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"] : []),
-        mobile ? "--window-size=390,844" : mode === "shell-layout" ? "--window-size=820,900" : mode === "traffic-layout-dense" ? "--window-size=1960,1100" : "--window-size=1280,900",
+        process.env.QCH_BROWSER_SMOKE_VIEWPORT ? `--window-size=${process.env.QCH_BROWSER_SMOKE_VIEWPORT.replace("x", ",")}` : mobile ? "--window-size=390,844" : mode === "shell-layout" ? "--window-size=820,900" : mode === "traffic-layout-dense" ? "--window-size=1960,1100" : "--window-size=1280,900",
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
         initialURL,
@@ -617,7 +630,7 @@ async function runMode(mode) {
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}`,
     );
     timing.passed = true;
-    if (mode === "logs" || mode.startsWith("motion-cards")) process.stdout.write(`${result.detail}\n`);
+    if (mode === "logs" || mode.startsWith("motion-cards") || mode.startsWith("agent-time-zone-layout")) process.stdout.write(`${result.detail}${result.measurements ? ` ${JSON.stringify(result.measurements)}` : ""}\n`);
     if (result.measurements && process.env.QCH_BROWSER_SMOKE_REPORT) {
       await mkdir(process.env.QCH_BROWSER_SMOKE_REPORT, { recursive: true });
       await writeFile(join(process.env.QCH_BROWSER_SMOKE_REPORT, `${mode}.json`), JSON.stringify(result.measurements, null, 2) + "\n");

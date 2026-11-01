@@ -44,6 +44,22 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 		return nil, nil
 	}
 	metrics := *input
+	if metrics.ClockSync != nil {
+		status := *metrics.ClockSync
+		if status.Status != "synchronized" && status.Status != "unsynchronized" && status.Status != "unavailable" {
+			status.Status = "unavailable"
+			status.OffsetMilliseconds = nil
+		}
+		if status.OffsetMilliseconds != nil && (math.IsNaN(*status.OffsetMilliseconds) || math.IsInf(*status.OffsetMilliseconds, 0) || math.Abs(*status.OffsetMilliseconds) > 1_000_000) {
+			status.OffsetMilliseconds = nil
+		}
+		if status.CheckedAt.After(receivedAt.Add(30 * time.Second)) {
+			status.CheckedAt = receivedAt.UTC()
+		} else if !status.CheckedAt.IsZero() {
+			status.CheckedAt = status.CheckedAt.UTC()
+		}
+		metrics.ClockSync = &status
+	}
 	if metrics.BBR != nil {
 		status := *metrics.BBR
 		encoded, err := json.Marshal(status)

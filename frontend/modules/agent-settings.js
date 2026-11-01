@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { agentTimeZoneStatus, updateAgentTimeZone } from "./agent-time-zone.js";
 
 // In-flight settings writes survive a render and keep newer user input intact.
 export function createAgentSettings({ api, can: permission, engineName, notify, confirmAction }, { refreshAgentPage }) {
@@ -156,6 +157,69 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
         document.querySelectorAll("[data-agent-name-form]").forEach((current) => {
           if (current.dataset.agentNameForm === agentID) current.querySelector("button[type=submit]").disabled = !can("agents.manage");
         });
+      }
+    });
+  });
+  document.querySelectorAll("[data-agent-timezone-form]").forEach((form) => {
+    const agentID = form.dataset.agentTimezoneForm;
+    const agent = agentsByID.get(agentID);
+    const radios = [...form.querySelectorAll("[data-timezone-mode]")];
+    const timezoneInput = form.querySelector("[data-timezone-input]");
+    const submit = form.querySelector("[data-timezone-submit]");
+    const status = form.querySelector("[data-timezone-status]");
+    const canManage = () => permission("agents.manage", agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
+    const syncMode = () => {
+      const mode = radios.find((radio) => radio.checked)?.value || "auto";
+      timezoneInput.disabled = mode !== "custom" || !canManage() || form.dataset.busy === "1";
+      submit.textContent = mode === "custom" ? "保存并应用" : mode === agent?.time_zone?.mode && agent?.time_zone?.time_zone ? "重新检测并应用" : "启用自动匹配";
+      submit.disabled = !canManage() || form.dataset.busy === "1";
+    };
+    radios.forEach((radio) => bindEvent(radio, "change", syncMode));
+    syncMode();
+    bindEvent(form, "submit", async (event) => {
+      event.preventDefault();
+      if (!canManage() || form.dataset.busy === "1") return;
+      const mode = radios.find((radio) => radio.checked)?.value || "auto";
+      const zone = String(timezoneInput.value || "").trim();
+      if (mode === "custom" && !zone) {
+        timezoneInput.setCustomValidity("请输入 IANA 时区，例如 Asia/Shanghai");
+        timezoneInput.reportValidity();
+        timezoneInput.setCustomValidity("");
+        return;
+      }
+      const focusTarget = document.activeElement;
+      form.dataset.busy = "1";
+      delete form.dataset.error;
+      radios.forEach((radio) => { radio.disabled = true; });
+      syncMode();
+      status.textContent = mode === "auto" ? "正在检测公网 IP 时区" : "正在保存时区";
+      try {
+        const saved = await api(`/agents/${encodeURIComponent(agentID)}/time-zone`, {
+          method: "PUT",
+          body: JSON.stringify({
+            mode,
+            time_zone: mode === "custom" ? zone : "",
+            revision: agent?.time_zone?.revision || 0,
+            retry: mode === "auto",
+          }),
+          signal: AbortSignal.timeout(12000),
+        });
+        if (agent) agent.time_zone = saved;
+        delete form.dataset.error;
+        updateAgentTimeZone(document, { id: agentID, status: agent?.status, time_zone: saved }, { force: true });
+        notify(saved.status === "failed" ? saved.error || "时区检测失败" : saved.status === "unsupported" ? "当前 Agent 不支持时区设置" : saved.status === "pending" && agent?.status !== "online" ? "已保存，Agent 上线后生效" : "时区设置已保存");
+      } catch (error) {
+        form.dataset.error = error.message || "时区设置失败，请重试";
+        status.textContent = form.dataset.error;
+        notify(error.message, "error");
+      } finally {
+        delete form.dataset.busy;
+        radios.forEach((radio) => { radio.disabled = !canManage(); });
+        syncMode();
+        if (focusTarget?.isConnected && form.contains(focusTarget) &&
+            (document.activeElement === document.body || !form.contains(document.activeElement))) {
+          focusTarget.focus();
+        }
       }
     });
   });

@@ -6,6 +6,7 @@ import (
 
 type HostMetrics struct {
 	BBR               *SystemBBRStatus       `json:"bbr,omitempty"`
+	ClockSync         *ClockSyncStatus       `json:"clock_sync,omitempty"`
 	CollectedAt       time.Time              `json:"collected_at"`
 	CPUAvailable      bool                   `json:"cpu_available"`
 	CPUPercent        float64                `json:"cpu_percent"`
@@ -34,6 +35,12 @@ type HostMetrics struct {
 	// Probe sources are fixed audit enums and never contain endpoint URLs.
 	PublicIPv4Source string `json:"public_ipv4_source,omitempty"`
 	PublicIPv6Source string `json:"public_ipv6_source,omitempty"`
+}
+
+type ClockSyncStatus struct {
+	Status             string    `json:"status"`
+	OffsetMilliseconds *float64  `json:"offset_milliseconds,omitempty"`
+	CheckedAt          time.Time `json:"checked_at,omitempty"`
 }
 
 // HostNetworkInterface describes addresses assigned to an interface that
