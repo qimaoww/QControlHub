@@ -66,6 +66,58 @@ type nginxCertificateFile struct {
 	existed              bool
 }
 
+// Older automatic Nginx deployments used Caddy only for certificates. Retire
+// that helper on upgrade too, without starting a stopped frontend or touching
+// a Caddy still serving another active managed inbound.
+func (m *tlsFrontendManager) retireCaddyCertificateHelper(ctx context.Context, deployments tlsDeployments) error {
+	active, err := activeTLSFrontends(deployments)
+	if err != nil {
+		return err
+	}
+	needed := false
+	for _, f := range active {
+		if f.Mode == "caddy" {
+			return nil
+		}
+		needed = needed || f.AutomaticCertificate
+	}
+	if !needed {
+		return nil
+	}
+	service, unit, _ := m.serviceDefinition("caddy", false)
+	if _, err = os.Stat(unit); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	status, err := m.services.status(ctx, service)
+	if err != nil {
+		return err
+	}
+	if status == "inactive" {
+		return setServiceEnabled(ctx, service, false, m.services)
+	}
+	snapshots, err := m.snapshotRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	if err = m.ensureNginxCertificates(ctx, active, false); err != nil {
+		return err
+	}
+	if _, err = m.services.command(ctx, service, core.ActionStop); err == nil {
+		err = setServiceEnabled(ctx, service, false, m.services)
+	}
+	if err == nil {
+		err = m.upgradeHTTPChallengeRoutes(ctx, deployments)
+	}
+	if err != nil {
+		recovery, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, m.restoreRuntime(recovery, deployments, snapshots))
+	}
+	return nil
+}
+
 func (m *tlsFrontendManager) restoreNginxCertificates(files []nginxCertificateFile) error {
 	var result error
 	for _, file := range files {
@@ -93,7 +145,7 @@ func (m *tlsFrontendManager) copyAutomaticNginxCertificates(frontends []core.TLS
 			continue
 		}
 		seen[f.Domain] = true
-		certificate, key, err := m.storedCertificate(f.Domain, roots...)
+		certificate, key, err := m.storedNginxCertificate(f.Domain, roots...)
 		if err != nil {
 			if allowMissing {
 				continue
@@ -131,9 +183,13 @@ func (m *tlsFrontendManager) withAutomaticNginxCertificates(frontends []core.TLS
 	return validate()
 }
 
-// Caddy renews independently of panel connectivity. The Agent periodically
+// The Agent issues/renews independently of panel connectivity and Caddy, then
 // installs verified renewals and gracefully reloads only an active Nginx.
-func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deployments tlsDeployments, roots ...*x509.CertPool) error {
+func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deployments tlsDeployments, overrides ...nginxACMEOptions) error {
+	options := nginxACMEDefaults()
+	if len(overrides) > 0 {
+		options = overrides[0]
+	}
 	active, err := activeTLSFrontends(deployments)
 	if err != nil {
 		return err
@@ -153,9 +209,11 @@ func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deplo
 	if status != "active" {
 		return nil
 	}
-	files, err := m.copyAutomaticNginxCertificates(active, false, roots...)
+	// A failed renewal must not prevent another domain's pending reload.
+	renewalErr := m.ensureNginxCertificates(ctx, active, true, options)
+	files, err := m.copyAutomaticNginxCertificates(active, false, options.roots)
 	if err != nil || len(files) == 0 {
-		return err
+		return errors.Join(renewalErr, err)
 	}
 	reload := func(ctx context.Context) error {
 		_, err := run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", filepath.Join(m.root, "nginx.conf"), "-s", "reload")
@@ -176,5 +234,5 @@ func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deplo
 		reloadErr := reload(recovery)
 		return fmt.Errorf("Nginx 续期证书加载失败，已尝试恢复原证书：%w", errors.Join(err, restoreErr, reloadErr))
 	}
-	return nil
+	return renewalErr
 }

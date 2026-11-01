@@ -165,14 +165,11 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 	domains := map[string]string{}
 	byPort := map[int][]any{}
 	for _, f := range frontends {
-		if !f.UsesACME() {
+		if f.Mode != "caddy" {
 			continue
 		}
 		if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
 			domains[f.Domain] = f.ACMEEmail
-		}
-		if f.Mode != "caddy" {
-			continue // Nginx owns HTTPS; Caddy only automates this certificate.
 		}
 		versions := []string{"1.1"}
 		if f.Transport == "http" {
@@ -264,12 +261,13 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, mana
 			body.WriteString("  location / { return 404; }\n }\n")
 		}
 	}
-	hasCaddy, hasHTTPPort := false, false
+	hasCaddy, hasHTTPPort, automaticNginx := false, false, false
 	for _, f := range frontends {
-		hasCaddy = hasCaddy || f.UsesACME()
+		hasCaddy = hasCaddy || f.Mode == "caddy"
+		automaticNginx = automaticNginx || f.AutomaticCertificate
 		hasHTTPPort = hasHTTPPort || f.PublicPort == 80
 	}
-	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && len(managedHTTP) > 0 && managedHTTP[0] {
+	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && (automaticNginx || len(managedHTTP) > 0 && managedHTTP[0]) {
 		body.WriteString(" # qch-managed-http-challenges-v1\n server {\n listen 80;\n listen [::]:80;\n server_name _;\n location ^~ /.well-known/acme-challenge/ { proxy_pass http://127.0.0.1:9080; proxy_set_header Host $host; }\n location / { return 404; }\n }\n")
 	}
 	body.WriteString("}\n")
@@ -396,9 +394,6 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
-		if f.UsesACME() {
-			modes["caddy"] = true
-		}
 		if f.Mode == "nginx" && f.Transport == "xhttp" {
 			if err := validateXHTTPCertificate(ctx, f); err != nil {
 				return err
@@ -442,15 +437,12 @@ func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, fronte
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
-		if f.UsesACME() {
-			modes["caddy"] = true
-		}
 	}
 	for mode := range modes {
 		if mode == "nginx" && len(allowMissing) > 0 && allowMissing[0] {
 			missing := false
 			for _, f := range frontends {
-				missing = missing || f.AutomaticCertificate && !m.hasValidCertificate(f.Domain)
+				missing = missing || f.AutomaticCertificate && !m.hasValidNginxCertificate(f.Domain)
 			}
 			if missing {
 				continue // Validated after issuance, before any business configuration is replaced.
@@ -539,12 +531,12 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		}
 		domains := map[string]bool{}
 		for _, f := range frontends {
-			if f.UsesACME() {
+			if f.Mode == "caddy" {
 				domains[f.Domain] = true
 			}
 		}
 		for _, f := range old {
-			if f.UsesACME() && !domains[f.Domain] {
+			if f.Mode == "caddy" && !domains[f.Domain] {
 				frontends = append(frontends, f)
 				domains[f.Domain] = true
 			}
@@ -553,9 +545,6 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
-		if f.UsesACME() {
-			modes["caddy"] = true
-		}
 	}
 	for _, mode := range []string{"caddy", "nginx"} {
 		if len(certificateRoutes) > 0 && mode != "caddy" {

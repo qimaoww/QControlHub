@@ -118,6 +118,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureXHTTP,
 		core.AgentFeatureACMEFallback,
 		core.AgentFeatureNginxACME,
+		"managed-tls-nginx-acme-v1", // Remain compatible with older panels.
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,

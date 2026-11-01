@@ -340,7 +340,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 		for _, frontend := range task.TLSFrontends {
 			if frontend.AutomaticCertificate && !containsFeature(features, core.AgentFeatureNginxACME) {
-				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Nginx 自动申请和续期证书（managed-tls-nginx-acme-v1）", ErrConflict)
+				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Nginx 独立申请和续期证书（%s）", ErrConflict, core.AgentFeatureNginxACME)
 			}
 			if frontend.Transport == "http" && !containsFeature(features, core.AgentFeatureManagedTLSH2) {
 				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent 以支持 Caddy HTTP/H2 托管反代（managed-tls-h2-v1）", ErrConflict)

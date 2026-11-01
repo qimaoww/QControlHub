@@ -95,8 +95,10 @@ func (m *tlsFrontendManager) preflight(ctx context.Context, frontends []core.TLS
 			continue
 		}
 		seen[f.Domain] = true
-		if err := m.checkCaddyAccess(ctx); err != nil {
-			return err
+		if f.Mode == "caddy" {
+			if err := m.checkCaddyAccess(ctx); err != nil {
+				return err
+			}
 		}
 		executable, err := os.Executable()
 		if err != nil {
@@ -110,7 +112,11 @@ func (m *tlsFrontendManager) preflight(ctx context.Context, frontends []core.TLS
 		output, err := runTLSCommand(check, m.state, m.caddyEnvironment(), executable, &identity, "tls-network-preflight", f.Domain, fmt.Sprint(f.ACMEEmail != ""))
 		cancel()
 		fmt.Println(output)
-		if err != nil && (!strings.Contains(output, "ACME 网络检查：所有已启用机构均不可达") || !m.hasValidCertificate(f.Domain)) {
+		valid := m.hasValidCertificate(f.Domain)
+		if f.AutomaticCertificate {
+			valid = m.hasValidNginxCertificate(f.Domain)
+		}
+		if err != nil && (!strings.Contains(output, "ACME 网络检查：所有已启用机构均不可达") || !valid) {
 			return fmt.Errorf("[阶段:依赖和环境检查] %w；%s", err, output)
 		}
 		if err != nil {

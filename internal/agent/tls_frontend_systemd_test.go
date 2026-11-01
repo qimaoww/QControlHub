@@ -243,7 +243,7 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 			t.Fatalf("Nginx ACME: %v\n%s", err, output)
 		}
 	} else {
-		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", []string{"QCH_TEST_NGINX_ACME=1", "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSNginxACMESandbox$", "-test.v"}); err != nil {
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", []string{"QCH_TEST_NGINX_ACME=1", "QCH_TEST_TLS_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSNginxACMESandbox$", "-test.v"}); err != nil {
 			t.Fatalf("Nginx ACME: %v\n%s", err, output)
 		}
 	}
