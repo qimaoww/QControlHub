@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,9 @@ func TestAgentTimeZoneRestartSetsOnlyAgentEnvironment(t *testing.T) {
 	}
 	if time.Local != previousLocation {
 		t.Fatal("process replacement preparation mutated the live Go location")
+	}
+	if os.Getenv("TZ") != "UTC" {
+		t.Fatal("failed process replacement changed the running Agent environment")
 	}
 }
 

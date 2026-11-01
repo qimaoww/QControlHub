@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,14 +34,18 @@ func (c *Client) restartForAgentTimeZone(zone string) error {
 	if err != nil {
 		return fmt.Errorf("resolve Agent executable: %w", err)
 	}
-	if err := os.Setenv("TZ", zone); err != nil {
-		return fmt.Errorf("set Agent process time zone: %w", err)
+	environment := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "TZ=") {
+			environment = append(environment, entry)
+		}
 	}
+	environment = append(environment, "TZ="+zone)
 	reexec := c.reexecFunc
 	if reexec == nil {
 		reexec = syscall.Exec
 	}
-	if err := reexec(executable, os.Args, os.Environ()); err != nil {
+	if err := reexec(executable, os.Args, environment); err != nil {
 		return fmt.Errorf("restart Agent process to apply time zone: %w", err)
 	}
 	return errors.New("Agent process replacement unexpectedly returned")

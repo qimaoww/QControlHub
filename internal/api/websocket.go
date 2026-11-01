@@ -132,10 +132,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		}
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		state, err := s.store.GetAgentTimeZone(cleanupContext, id)
-		if err == nil && state.Revision == timeZoneAckRevision && state.Status == "applying" {
-			_ = s.store.SetAgentTimeZoneStatus(cleanupContext, id, timeZoneAckRevision, "pending", "")
-		}
+		_ = s.store.ResetAgentTimeZoneApplication(cleanupContext, id, timeZoneAckRevision)
 	}()
 	publicIPProbeTrust := func() store.PublicIPProbeTrust {
 		if !heartbeatReceived || !managedPublicIPProbe {
@@ -181,6 +178,21 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			return err
 		}
 		return nil
+	}
+	reconcileTimeZoneMetrics := func(metrics *core.HostMetrics) error {
+		if !heartbeatReceived || metrics == nil {
+			return nil
+		}
+		addressHash := timeZoneAddressHash(agentTimeZoneAddress(core.Agent{Metrics: *metrics}))
+		if addressHash == lastTimeZoneAddressHash {
+			return nil
+		}
+		if _, err := s.resolveAgentTimeZone(ctx, id, false); err != nil {
+			slog.Warn("reconcile agent process time zone", "agent_id", id, "error", err)
+			return nil
+		}
+		lastTimeZoneAddressHash = addressHash
+		return sendAgentTimeZone(false)
 	}
 	resumeRunning := true
 	dispatchTask := func() error {
@@ -335,6 +347,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 						slog.Error("dispatch after first heartbeat", "agent_id", id, "error", err)
 						return
 					}
+				} else if err := reconcileTimeZoneMetrics(message.Heartbeat.Metrics); err != nil {
+					return
 				}
 			case core.WireMetrics:
 				if message.Metrics == nil {
@@ -346,17 +360,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("store agent metrics", "agent_id", id, "error", err)
 					return
 				}
-				if heartbeatReceived {
-					addressHash := timeZoneAddressHash(agentTimeZoneAddress(core.Agent{Metrics: *message.Metrics}))
-					if addressHash != lastTimeZoneAddressHash {
-						lastTimeZoneAddressHash = addressHash
-						if _, err := s.resolveAgentTimeZone(ctx, id, false); err != nil {
-							slog.Warn("reconcile agent process time zone", "agent_id", id, "error", err)
-						}
-						if err := sendAgentTimeZone(false); err != nil {
-							return
-						}
-					}
+				if err := reconcileTimeZoneMetrics(message.Metrics); err != nil {
+					return
 				}
 				if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
 					slog.Error("store agent traffic metrics", "agent_id", id, "error", err)

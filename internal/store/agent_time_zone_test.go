@@ -32,6 +32,9 @@ func TestAgentTimeZoneIsAgentScopedVersionedAndOwnerManaged(t *testing.T) {
 	if accepted, err := db.AcknowledgeAgentTimeZone(ctx, first.ID, core.AgentTimeZoneResult{Revision: secondPending.Revision, TimeZone: "Asia/Hong_Kong"}); err != nil || !accepted {
 		t.Fatalf("current acknowledgement accepted=%v error=%v", accepted, err)
 	}
+	if err := db.ResetAgentTimeZoneApplication(ctx, first.ID, secondPending.Revision); err != nil {
+		t.Fatal(err)
+	}
 	if accepted, err := db.AcknowledgeAgentTimeZone(ctx, first.ID, core.AgentTimeZoneResult{Revision: secondPending.Revision, TimeZone: "Asia/Hong_Kong", Error: "late transport error"}); err != nil || accepted {
 		t.Fatalf("late failure changed an already applied revision: accepted=%v error=%v", accepted, err)
 	}
@@ -58,6 +61,33 @@ func TestAgentTimeZoneIsAgentScopedVersionedAndOwnerManaged(t *testing.T) {
 	}
 	if _, _, err := db.SetAgentTimeZone(recipientContext, first.ID, "custom", "Asia/Tokyo", secondPending.Revision, false); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("shared recipient changed host time zone: %v", err)
+	}
+}
+
+func TestAgentTimeZoneDisconnectResetsOnlyApplyingRevision(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	admin := WithConfigScope(ctx, "", true)
+	agent, _ := enrollTaskTestAgent(t, ctx, db)
+	state, _, err := db.SetAgentTimeZone(admin, agent.ID, "custom", "UTC", 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentTimeZoneStatus(ctx, agent.ID, state.Revision, "applying", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ResetAgentTimeZoneApplication(ctx, agent.ID, state.Revision-1); err != nil {
+		t.Fatal(err)
+	}
+	current, err := db.GetAgentTimeZone(ctx, agent.ID)
+	if err != nil || current.Status != "applying" {
+		t.Fatalf("stale cleanup changed application: %+v, %v", current, err)
+	}
+	if err := db.ResetAgentTimeZoneApplication(ctx, agent.ID, state.Revision); err != nil {
+		t.Fatal(err)
+	}
+	current, err = db.GetAgentTimeZone(ctx, agent.ID)
+	if err != nil || current.Status != "pending" {
+		t.Fatalf("disconnect did not preserve a retryable setting: %+v, %v", current, err)
 	}
 }
 

@@ -146,6 +146,12 @@ func (s *Store) SetAgentTimeZoneStatus(ctx context.Context, agentID string, revi
 	return err
 }
 
+func (s *Store) ResetAgentTimeZoneApplication(ctx context.Context, agentID string, revision int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET time_zone_status='pending',time_zone_error=''
+		WHERE id=$1 AND time_zone_revision=$2 AND time_zone_status='applying'`, agentID, revision)
+	return err
+}
+
 func (s *Store) AcknowledgeAgentTimeZone(ctx context.Context, agentID string, result core.AgentTimeZoneResult) (bool, error) {
 	if result.Error != "" {
 		detail := truncateTimeZoneError(result.Error)
