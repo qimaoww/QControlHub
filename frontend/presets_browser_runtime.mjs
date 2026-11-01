@@ -329,7 +329,9 @@ export async function testPresetsRuntime(preview = false) {
   const caddyPreset = catalog.find(entry => entry.engine === "sing-box" && entry.protocol.key === "vless-ws-tls");
   for (const shared of [false, true]) {
     const test = await fixture("sing-box", false, {...caddyPreset, shared});
-    assert(control("tls_mode").checkVisibility() && !form().querySelector("[data-tls-advanced]").open, "TLS frontend selector is hidden in advanced settings");
+    const advanced = form().querySelector("[data-tls-advanced]");
+    assert(advanced.open && control("tls_mode").checkVisibility() && control("tls_mode").closest("[data-tls-advanced]") === advanced, "existing TLS selector must be visible in its original settings section");
+    assert(form().querySelectorAll('[name="tls_mode"]').length === 1 && form().querySelector("#connection .plan-fields.two")?.textContent.includes("公网 HTTPS 端口") && !control("tls_mode").closest("#connection"), "TLS switching changed the original field grouping or duplicated its selector");
     edit("tls_server_name", "proxy.example.test");
     const previousPort = control("port").value;
     form().querySelector(".builder-actions [data-regenerate]").click();
@@ -340,7 +342,7 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => test.saved?.version === 1 && !button("deploy").disabled, "domain-only Caddy deployment stalled");
     const saved = submissions(test)[0].body.input;
     assert(saved.tls_mode === "caddy" && saved.listen === "127.0.0.1" && saved.tls_public_port === 443 && String(saved.port) === backendPort && !saved.certificate_path && !saved.private_key_path, "Caddy deployment did not use a generated loopback backend");
-    assert(control("tls_server_name").value === "proxy.example.test" && !form().querySelector("[data-tls-advanced]").open && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy domain-only settings did not survive reload");
+    assert(control("tls_server_name").value === "proxy.example.test" && control("tls_mode").checkVisibility() && control("transport_path").value === saved.transport_path && control("credential").value === saved.credential, "Caddy settings or visible TLS selector did not survive reload");
 
     edit("tls_mode", "nginx");
     assert(form().querySelector("[data-managed-tls-hint]").textContent.includes("自签证书") && form().querySelector("[data-managed-tls-route]").textContent.startsWith("Nginx：") && control("listen").value === "127.0.0.1", "Nginx mode did not update trust guidance or route preview");
@@ -384,9 +386,11 @@ export async function testPresetsRuntime(preview = false) {
     covered.add(actual.engine);
     if (actual.protocol.supports_managed_tls) {
       assert(!form().querySelector("[data-builder-step]"), "managed TLS still requires the four-tab workflow");
-      assert(!form().querySelector("[data-tls-advanced]").open, "generated settings should start collapsed");
+      const expanded = actual.protocol.key === "vless-ws-tls";
+      assert(form().querySelector("[data-tls-advanced]").open === expanded, "only VLESS WebSocket TLS settings should start expanded");
       const basic = [...form().querySelectorAll("input,select,textarea")].filter(input => input.willValidate && input.checkVisibility());
-      assert(basic.every(input => ["operation", "tls_mode", "tls_server_name", "tls_public_port"].includes(input.name)), "managed TLS asks for generated settings in the basic flow");
+      if (!expanded) assert(basic.every(input => ["operation", "tls_server_name", "tls_public_port"].includes(input.name)), "other managed TLS presets changed their domain-only flow");
+      else assert(control("tls_mode").checkVisibility() && control("tls_mode").closest("[data-tls-advanced]"), "VLESS WebSocket TLS selector is hidden or moved from its original section");
       assert(control("tls_mode").value === "caddy" && control("tls_public_port").value === "443", "managed TLS defaults lost");
       assert(control("listen").value === "127.0.0.1" && control("listen").readOnly, "managed backend is not loopback");
       assert(control("tls_server_name").required && !control("tls_server_name").checkValidity(), "managed domain must be supplied");
