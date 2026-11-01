@@ -62,7 +62,8 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		return err
 	}
 	engine, _, ok := managedSpecForService(request.Service, request.Kind)
-	if !ok || engine != core.EngineSingBox && engine != core.EngineXray {
+	nodeRead := request.SyncSource != nil && request.SyncSource.Source == "node"
+	if !ok || engine != core.EngineSingBox && engine != core.EngineXray && !(nodeRead && engine == core.EngineMihomo) {
 		return errors.New("TLS request must target a standard managed Xray or sing-box service")
 	}
 	services, err := NewServiceManager(request.Kind)

@@ -123,25 +123,38 @@ type CertificateHTTPNode struct {
 
 const AgentFeatureCaddyCertificates = "managed-caddy-certificates-v1"
 
+const AgentFeatureNodeCertificates = "managed-node-certificates-v1"
+
+type NodeTLSCertificateReference struct {
+	Tag             string `json:"tag"`
+	Domain          string `json:"domain"`
+	CertificatePath string `json:"certificate_path"`
+	PrivateKeyPath  string `json:"private_key_path"`
+}
+
 // Sources originate in verified server deployment snapshots. No client supplied
 // owner, path or service identity is accepted by the import channel.
 type ManagedCertificateSource struct {
-	ID            string     `json:"id"`
-	AgentID       string     `json:"agent_id"`
-	AgentName     string     `json:"agent_name,omitempty"`
-	ConfigID      string     `json:"config_id"`
-	TaskID        string     `json:"task_id"`
-	Engine        Engine     `json:"engine"`
-	ShareID       string     `json:"share_id,omitempty"`
-	Domain        string     `json:"domain"`
-	CertificateID string     `json:"certificate_id,omitempty"`
-	Status        string     `json:"status"`
-	Error         string     `json:"error,omitempty"`
-	LastSynced    *time.Time `json:"last_synced,omitempty"`
+	Source        string                       `json:"source"`
+	Reference     *NodeTLSCertificateReference `json:"reference,omitempty"`
+	SourceKey     string                       `json:"-"`
+	ID            string                       `json:"id"`
+	AgentID       string                       `json:"agent_id"`
+	AgentName     string                       `json:"agent_name,omitempty"`
+	ConfigID      string                       `json:"config_id"`
+	TaskID        string                       `json:"task_id"`
+	Engine        Engine                       `json:"engine"`
+	ShareID       string                       `json:"share_id,omitempty"`
+	Domain        string                       `json:"domain"`
+	CertificateID string                       `json:"certificate_id,omitempty"`
+	Status        string                       `json:"status"`
+	Error         string                       `json:"error,omitempty"`
+	LastSynced    *time.Time                   `json:"last_synced,omitempty"`
 }
 
 // Secret-bearing envelope, exclusively on the authenticated Agent WSS channel.
 type ManagedCertificateReport struct {
+	TaskID      string `json:"task_id,omitempty"`
 	SourceID    string `json:"source_id"`
 	Certificate string `json:"certificate,omitempty"`
 	PrivateKey  string `json:"private_key,omitempty"`

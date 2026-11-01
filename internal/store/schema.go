@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 84
+const currentSchemaVersion = 85
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS traffic_batch_requests (
@@ -946,6 +946,13 @@ CREATE TABLE IF NOT EXISTS managed_certificate_sources (
  error text NOT NULL DEFAULT '', last_synced timestamptz, last_requested timestamptz,
  UNIQUE(agent_id,owner_id,config_id,domain)
 );
+ALTER TABLE managed_certificate_sources ADD COLUMN IF NOT EXISTS source_kind text NOT NULL DEFAULT 'caddy';
+ALTER TABLE managed_certificate_sources ADD COLUMN IF NOT EXISTS source_key text NOT NULL DEFAULT '';
+DO $$ DECLARE constraint_name text; BEGIN
+ FOR constraint_name IN SELECT conname FROM pg_constraint WHERE conrelid='managed_certificate_sources'::regclass AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (agent_id, owner_id, config_id, domain)'
+ LOOP EXECUTE format('ALTER TABLE managed_certificate_sources DROP CONSTRAINT %I',constraint_name); END LOOP;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS managed_certificate_sources_identity ON managed_certificate_sources(agent_id,owner_id,config_id,domain,source_kind,source_key);
 CREATE INDEX IF NOT EXISTS managed_certificate_sources_owner ON managed_certificate_sources(owner_id);
 CREATE TABLE IF NOT EXISTS certificate_versions (
  certificate_id text NOT NULL REFERENCES panel_certificates(id) ON DELETE CASCADE,

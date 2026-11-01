@@ -358,6 +358,10 @@ func (s *Server) getCertificateHTTPNodes(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, items)
 }
 func (s *Server) getManagedCertificateSources(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DiscoverManagedCertificateSources(r.Context()); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	items, err := s.store.ManagedCertificateSources(r.Context())
 	if err != nil {
 		writeStoreError(w, err)
@@ -377,5 +381,6 @@ func (s *Server) setManagedCertificateSync(w http.ResponseWriter, r *http.Reques
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(r, "certificate.source_"+input.Action, r.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }

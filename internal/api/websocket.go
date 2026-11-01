@@ -281,7 +281,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
 				agentHasFeatureFromStore = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCertificates)
-				agentHasManagedCertificates = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCaddyCertificates)
+				agentHasManagedCertificates = (agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCaddyCertificates) || agentHasFeature(message.Heartbeat.Features, core.AgentFeatureNodeCertificates))
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
 				reportedProcessTimeZone := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureProcessTimeZone)

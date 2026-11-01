@@ -10,7 +10,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
-func (s *Store) managedTLSFrontendsTx(ctx context.Context, tx pgx.Tx, id string, version int, engine core.Engine, content string) ([]core.TLSFrontend, error) {
+func (s *Store) configClientMetadataTx(ctx context.Context, tx pgx.Tx, id string, version int) (map[string]string, error) {
 	rows, err := tx.Query(ctx, `SELECT profile_tag,content FROM config_client_metadata WHERE config_id=$1 AND config_version=$2`, id, version)
 	if err != nil {
 		return nil, err
@@ -31,6 +31,14 @@ func (s *Store) managedTLSFrontendsTx(ctx context.Context, tx pgx.Tx, id string,
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return metadata, nil
+}
+
+func (s *Store) managedTLSFrontendsTx(ctx context.Context, tx pgx.Tx, id string, version int, engine core.Engine, content string) ([]core.TLSFrontend, error) {
+	metadata, err := s.configClientMetadataTx(ctx, tx, id, version)
+	if err != nil {
 		return nil, err
 	}
 	frontends, err := serverconfig.ManagedTLSFrontends(engine, content, metadata)

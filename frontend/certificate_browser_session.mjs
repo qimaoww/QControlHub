@@ -177,6 +177,45 @@ try {
   assert.equal(await evaluate(c,"document.querySelectorAll('.cert-dialog').length"),0);
   record(`${mode}: Escape closes a certificate form and invalidates its delayed real resource response`);
 
+  // Node enrollment uses the existing source dialog and never edits a config.
+  const nativeBefore=await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo');
+  await click(a,'[data-cert-close]');await click(a,'[data-cert-sources]');
+  await wait(a,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.owner_source+'"][data-cert-source-action="enroll"]')+")");
+  const enrollSelector='[data-source="'+fixture.owner_source+'"][data-cert-source-action="enroll"]';
+  await click(a,enrollSelector);await wait(a,"!!document.querySelector('[data-confirm-dialog][open]')");
+  await click(a,'[data-confirm-cancel]');
+  assert.equal((await api(a,alice,'GET','/certificates')).items.some(item=>item.source_id===fixture.owner_source),false);
+  await click(a,enrollSelector);await wait(a,"!!document.querySelector('[data-confirm-dialog][open]')");await click(a,'[data-confirm-accept]');
+  await wait(a,"fetch('/api/v1/certificates').then(r=>r.json()).then(d=>d.items.some(i=>i.source_id==="+JSON.stringify(fixture.owner_source)+"))");
+  const nativeCert=(await api(a,alice,'GET','/certificates')).items.find(item=>item.source_id===fixture.owner_source);
+  assert.equal(nativeCert.source,'node');assert.equal(nativeCert.renewal_manager,'external');assert.equal(nativeCert.auto_renew,false);
+  await api(b,bob,'GET','/certificates/'+nativeCert.id,undefined,404);
+  await api(b,bob,'PUT','/certificate-managed-sources/'+fixture.owner_source,{action:'enroll'},404);
+  assert.deepEqual(await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo'),nativeBefore);
+  await click(a,'[data-cert-sources]');await wait(a,"!!document.querySelector("+JSON.stringify('[data-cert-detail="'+nativeCert.id+'"]')+")");
+  await click(a,'[data-cert-detail="'+nativeCert.id+'"]');await wait(a,"document.querySelector('.cert-dialog')?.textContent.includes('原有方式续期')");
+  assert.equal(await evaluate(a,"document.querySelector('.cert-dialog').textContent.includes('Caddy 自动续期')"),false);
+  await screenshot(a,'node-certificate-detail');
+  await click(a,'[data-cert-sources]');await wait(a,"document.querySelector('.cert-dialog h2')?.textContent==='节点来源'");
+  for(const [width,height] of [[1920,1080],[3840,2160],[1280,800],[1024,768],[768,1024],[390,844],[844,390],[320,568]]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768},a);
+    await call('Emulation.setTouchEmulationEnabled',{enabled:width<768},a);
+    await delay(100);
+    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && (()=>{const r=document.querySelector('.cert-dialog').getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1&&r.top>=-1&&r.bottom<=innerHeight+1})()"),true,'source layout overflow at '+width+'x'+height);
+    await screenshot(a,'node-sources-'+width+'x'+height);
+  }
+  for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9},a);
+  assert.equal(await evaluate(a,"!!document.activeElement.closest('.cert-dialog')"),true);
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},a);
+  for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27},b);
+  await open(b);await click(b,'[data-cert-sources]');await wait(b,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.shared_source+'"][data-cert-source-action="enroll"]')+")");
+  assert.equal(await evaluate(b,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.owner_source+'"]')+")"),false);
+  await click(b,'[data-source="'+fixture.shared_source+'"][data-cert-source-action="enroll"]');await wait(b,"!!document.querySelector('[data-confirm-dialog][open]')");await click(b,'[data-confirm-accept]');
+  await wait(b,"fetch('/api/v1/certificates').then(r=>r.json()).then(d=>d.items.some(i=>i.source_id==="+JSON.stringify(fixture.shared_source)+"))");
+  const sharedNative=(await api(b,bob,'GET','/certificates')).items.find(item=>item.source_id===fixture.shared_source);
+  assert.equal(sharedNative.owned,true);await api(a,alice,'GET','/certificates/'+sharedNative.id,undefined,404);
+  record(mode+': explicit native enrollment, canceled consent, unchanged TLS config, shared source isolation, 8 responsive viewports and keyboard focus passed');
+
   // Reuse the same document and installed route module across real logins.
   await click(a,'[data-cert-close]');
   await set(a,'[data-cert-search]','alice-private.example.test');

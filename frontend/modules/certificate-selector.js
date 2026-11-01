@@ -36,7 +36,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     const group = document.createElement("optgroup"); group.label = owned ? "我的证书" : "授权给我的证书";
     for (const cert of items.filter(item => item.owned === owned)) {
       const expired = !cert.not_after || Date.parse(cert.not_after) <= Date.now();
-      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · ${{caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"} · v${cert.version}${expired ? " · 不可用" : " · 可用"}`, cert.id);
+      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · ${{node:"节点证书",caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"} · v${cert.version}${expired ? " · 不可用" : " · 可用"}`, cert.id);
       option.disabled = expired; group.append(option);
     }
     select.append(group);
@@ -61,7 +61,6 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
       control.closest("label").hidden = active;
     }
     for (const note of form.querySelectorAll("p[data-native-certificate]")) { note.hidden = active; }
-    if (sniLabel) sniLabel.hidden = !active;
     managed = active;
   };
   select.addEventListener("change", update); update();
