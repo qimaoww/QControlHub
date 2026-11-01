@@ -209,3 +209,70 @@ func TestManagedTLSAuthoritySharedAcrossInbounds(t *testing.T) {
 		t.Fatal("CA signing key sent to Agent")
 	}
 }
+
+func TestManagedTLSModeSwitchClearsGeneratedNginxTrust(t *testing.T) {
+	protocol, _ := FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	nginx, _ := NewPlan(protocol)
+	nginx.TLSMode, nginx.TLSServerName = "nginx", "tls.example.test"
+	nginxMetadata, err := MarshalClientMetadataWithPrevious(nginx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original clientMetadata
+	if err = json.Unmarshal([]byte(nginxMetadata), &original); err != nil || original.TLSClientCertificate == "" || original.TLSAuthorityKey == "" {
+		t.Fatalf("Nginx trust material missing: %v", err)
+	}
+
+	for _, mode := range []string{"caddy", "external", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			next := nginx
+			next.TLSMode = mode
+			next.TLSClientCertificate = original.TLSClientCertificate
+			if mode == "native" {
+				next.Listen = "0.0.0.0"
+				next.CertificatePath, next.PrivateKeyPath = "/etc/qcontrolhub/tls/server.crt", "/etc/qcontrolhub/tls/server.key"
+			}
+			encoded, err := MarshalClientMetadataWithPrevious(next, nginxMetadata)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var metadata clientMetadata
+			if err = json.Unmarshal([]byte(encoded), &metadata); err != nil {
+				t.Fatal(err)
+			}
+			if metadata.TLSClientCertificate != "" || metadata.TLSAuthorityKey != "" {
+				t.Fatal("previous Nginx trust material survived a frontend mode change")
+			}
+			switch mode {
+			case "caddy":
+				if metadata.Frontend == nil || metadata.Frontend.Mode != "caddy" || metadata.ExternalFrontend != nil {
+					t.Fatalf("Caddy metadata mismatch: %+v", metadata)
+				}
+			case "external":
+				if metadata.ExternalFrontend == nil || metadata.ExternalFrontend.Mode != "external" || metadata.Frontend != nil {
+					t.Fatalf("external metadata mismatch: %+v", metadata)
+				}
+			case "native":
+				if metadata.Frontend != nil || metadata.ExternalFrontend != nil {
+					t.Fatalf("native TLS retained a proxy frontend: %+v", metadata)
+				}
+			}
+		})
+	}
+	customTrust, _, err := newFrontendAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := nginx
+	native.TLSMode, native.TLSClientCertificate = "native", customTrust
+	native.Listen = "0.0.0.0"
+	native.CertificatePath, native.PrivateKeyPath = "/etc/qcontrolhub/tls/server.crt", "/etc/qcontrolhub/tls/server.key"
+	encoded, err := MarshalClientMetadataWithPrevious(native, nginxMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preserved clientMetadata
+	if err = json.Unmarshal([]byte(encoded), &preserved); err != nil || preserved.TLSClientCertificate != customTrust {
+		t.Fatalf("custom native TLS trust was removed: %v", err)
+	}
+}

@@ -297,7 +297,14 @@ function bindProtocolOptionVisibility(form) {
     const tlsFields = form.querySelector("[data-native-tls]");
     if (tlsFields) { setVisible(tlsFields, Boolean(tls?.checked)); tlsFields.querySelectorAll("input, textarea").forEach(control => control.disabled = !tls?.checked); }
   };
+  let currentTLSMode = tlsMode?.value || "";
   const updateTLSMode = () => {
+    const nextTLSMode = tlsMode?.value || "";
+    if (currentTLSMode === "nginx" && nextTLSMode !== "nginx") {
+      const trustCertificate = form.elements.namedItem("tls_client_certificate");
+      if (trustCertificate) trustCertificate.value = "";
+    }
+    currentTLSMode = nextTLSMode;
     const managed = tls?.checked && ["caddy", "nginx", "external"].includes(tlsMode?.value);
     form.querySelectorAll("[data-managed-tls]").forEach(el => { setVisible(el, managed); el.querySelectorAll("input").forEach(control => { control.disabled = !managed; control.required = managed; }); });
     const acme = form.querySelector("[data-caddy-acme]");

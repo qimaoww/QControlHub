@@ -64,6 +64,11 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 // MarshalClientMetadataWithPrevious keeps the server-side proxy key solely in
 // versioned encrypted metadata. A form never receives or supplies that key.
 func MarshalClientMetadataWithPrevious(input Input, previous string) (string, error) {
+	var old clientMetadata
+	oldValid := json.Unmarshal([]byte(previous), &old) == nil
+	if oldValid && old.Frontend != nil && old.Frontend.Mode == "nginx" && input.TLSMode != "nginx" && input.TLSClientCertificate == old.TLSClientCertificate {
+		input.TLSClientCertificate = ""
+	}
 	encoded, err := MarshalClientMetadata(input)
 	if err != nil || !proxiedTLS(input) {
 		return encoded, err
@@ -79,8 +84,7 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 		data, err := json.Marshal(metadata)
 		return string(data), err
 	}
-	var old clientMetadata
-	if json.Unmarshal([]byte(previous), &old) == nil && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain {
+	if oldValid && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain {
 		f.Certificate, f.PrivateKey = old.Frontend.Certificate, old.Frontend.PrivateKey
 	}
 	if f.Mode == "nginx" {

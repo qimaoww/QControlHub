@@ -4,8 +4,14 @@ export function managedTLSPlanFields(protocol, plan, esc) {
   const native = !plan.tls_mode || plan.tls_mode === "native";
   return `<div class="builder-sections managed-tls-plan">
     <section class="builder-section" id="connection">
-      <header><strong>域名接入</strong></header>
-      <div class="plan-fields two">
+      <header><strong>TLS 接入</strong></header>
+      <div class="plan-fields three">
+        <label>前端模式<select name="tls_mode">
+          <option value="caddy" ${plan.tls_mode === "caddy" ? "selected" : ""}>Caddy 自动证书（默认）</option>
+          ${plan.transport !== "http" ? `<option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx 自签证书</option>` : ""}
+          <option value="external" ${plan.tls_mode === "external" ? "selected" : ""}>外部反代 · 自行管理 TLS</option>
+          <option value="native" ${native ? "selected" : ""}>原生 TLS · 已有证书</option>
+        </select></label>
         <label><span data-tls-domain-label>域名</span><input name="tls_server_name" value="${esc(plan.tls_server_name || "")}" placeholder="例如 proxy.example.com" autocomplete="off"><small data-managed-tls-hint></small></label>
         <label data-managed-tls>公网 HTTPS 端口<input name="tls_public_port" type="number" min="1" max="65535" value="${Number(plan.tls_public_port || 443)}"></label>
       </div>
@@ -13,14 +19,8 @@ export function managedTLSPlanFields(protocol, plan, esc) {
     </section>
     <section class="builder-section">
       <details class="preset-option-panel" data-tls-advanced ${native ? "open" : ""}>
-        <summary><b>高级设置</b><small>反代方式 · 内部端口 · 路径 · 凭据</small></summary>
+        <summary><b>高级设置</b><small>内部端口 · 路径 · 凭据</small></summary>
         <div class="tls-settings" data-native-tls>
-          <div class="plan-fields one"><label>证书方式<select name="tls_mode">
-            <option value="caddy" ${plan.tls_mode === "caddy" ? "selected" : ""}>Caddy 自动证书（默认）</option>
-            ${plan.transport !== "http" ? `<option value="nginx" ${plan.tls_mode === "nginx" ? "selected" : ""}>Nginx 自签证书</option>` : ""}
-            <option value="external" ${plan.tls_mode === "external" ? "selected" : ""}>外部反代 · 自行管理 TLS</option>
-            <option value="native" ${native ? "selected" : ""}>已有证书 · 原生 TLS</option>
-          </select></label></div>
           <div class="plan-fields three">
             <label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label>
             <label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label>
