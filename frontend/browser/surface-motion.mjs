@@ -6,6 +6,10 @@ import { reconcileView } from "../modules/refresh.js";
 import { routeModuleNames } from "../modules/routes.js";
 
 const animations = element => element.getAnimations({ subtree: true });
+const paintedScale = element => {
+  const value = getComputedStyle(element).scale;
+  return value === "none" ? 1 : Number.parseFloat(value);
+};
 // Chromium's internal details-content pseudo is not enumerated by getAnimations.
 // Inspect its actual paint state rather than confusing launcher focus transitions
 // with content motion.
@@ -52,7 +56,7 @@ export async function checkNativeExit(dialog, launcher, reduced) {
     await waitFor(() => dialogEntered(dialog), "rapid dialog reversal must finish its entrance");
     assert.ok(dialog.open && !dialog.inert);
     assert.equal(getComputedStyle(dialog).opacity, "1");
-    assert.ok(getComputedStyle(dialog).translate.split(" ").every(value => Math.abs(Number.parseFloat(value)) < .01),
+    assert.ok(getComputedStyle(dialog).translate.replace(/^none$/, "0").split(" ").every(value => Math.abs(Number.parseFloat(value)) < .01),
       "completed dialog has no residual displacement");
     dialog.close();
     await waitFor(() => getComputedStyle(dialog).display === "none" && animations(dialog).length === 0,
@@ -255,11 +259,11 @@ export async function checkInteractionFeedback(reduced) {
     assert.equal(panel.querySelector("[data-retired-scroll]").scrollLeft, scroll.left, "retired content retains horizontal scroll paint");
     panel.querySelectorAll("h2,footer").forEach((element, index) =>
       assert.ok(Math.abs(Number(getComputedStyle(element).opacity) - originals[index]) < .02, "interrupted content cannot flash on retiring clone"));
-    let previous = Number(getComputedStyle(panel).opacity), scale = Number.parseFloat(getComputedStyle(panel).scale);
+    let previous = Number(getComputedStyle(panel).opacity), scale = paintedScale(panel);
     await new Promise((resolve, reject) => {
       const sample = () => {
         if (!panel.isConnected) return resolve();
-        const next = Number(getComputedStyle(panel).opacity), size = Number.parseFloat(getComputedStyle(panel).scale);
+        const next = Number(getComputedStyle(panel).opacity), size = paintedScale(panel);
         try { assert.ok(next <= previous + .01 && size <= scale + .001, "mid-entry close must keep fading/shrinking without an enlarged or bright frame"); }
         catch (error) { reject(error); return; }
         previous = next; scale = size; requestAnimationFrame(sample);
