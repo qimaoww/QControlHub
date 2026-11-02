@@ -194,7 +194,61 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	if orders[0].Status != "canceled" {
 		t.Fatal("cancel not recovered")
 	}
+	manual, err := reopened.CreateACMECertificate(owner, core.Certificate{Name: "manual local ACME", Domains: []string{"manual-consent.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = reopened.CertificateOrders(owner, manual.ID)
+	if err != nil || len(orders) != 1 || orders[0].Status != "waiting_dns" || orders[0].Attempt != 1 || len(orders[0].Challenges) != 1 {
+		t.Fatalf("manual DNS consent state: %+v %v", orders, err)
+	}
+	manualOrder := orders[0]
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, _ = reopened.CertificateOrders(owner, manual.ID)
+	if orders[0].Status != "waiting_dns" || orders[0].Attempt != 1 {
+		t.Fatal("maintenance executed a manual order without consent")
+	}
+	if err = reopened.ContinueCertificateOrder(owner, manual.ID, manualOrder.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, _ = reopened.CertificateOrders(owner, manual.ID)
+	if orders[0].Status != "waiting_dns" || orders[0].Attempt != 2 || !strings.Contains(orders[0].Error, "DNS TXT") {
+		t.Fatalf("unpropagated manual TXT did not remain actionable: %+v", orders)
+	}
+	challenge := manualOrder.Challenges[0]
+	manage("/set-txt", map[string]string{"host": challenge.Name + ".", "value": challenge.Value})
+	defer manage("/clear-txt", map[string]string{"host": challenge.Name + "."})
+	if err = reopened.ContinueCertificateOrder(owner, manual.ID, manualOrder.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	// Isolated crash fixture: the worker claimed the real order, then stopped
+	// before validation. A new Store must honor its persisted continuation.
+	if _, err = reopened.pool.Exec(ctx, `UPDATE certificate_orders SET status='running' WHERE id=$1`, manualOrder.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := OpenWithConfigKey(ctx, database, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close()
+	configure(resumed)
+	if err = resumed.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = resumed.CertificateOrders(owner, manual.ID)
+	if err != nil || orders[0].Status != "succeeded" || orders[0].Attempt != 3 || orders[0].Error != "" {
+		t.Fatalf("continued manual order did not resume after restart: %+v %v", orders, err)
+	}
 	t.Log("Pebble verified DNS-01 SAN + wildcard; encrypted v1 survived panel restart; persisted account renewed to v2 without login; exact TXT cleanup and cancellation passed")
+	t.Log("Pebble verified manual DNS consent, missing TXT recovery and continued validation after worker restart")
 }
 func TestCertificateSecretsRequireEncryptionAndSupportRotation(t *testing.T) {
 	db, ctx, database := isolatedConfigScopeStore(t)
