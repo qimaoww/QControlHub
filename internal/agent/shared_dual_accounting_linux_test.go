@@ -11,6 +11,79 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
+func TestSharedAccountingCancellationRechecksBeforeStoppingInstances(t *testing.T) {
+	m, b, policies, now := sharedTrafficFixture(t)
+	for i := range policies {
+		policies[i].Engine = core.EngineSingBox
+		policies[i].SharedQuota.Engines = []core.Engine{core.EngineSingBox}
+		policies[i].SharedQuota.LimitBytes = 100000
+	}
+	var cancelSample context.CancelFunc
+	var sourceFailure bool
+	m.sharedSource = func(ctx context.Context, _ core.Engine, share string) (nativeAccountingSnapshot, error) {
+		if cancelSample != nil {
+			cancelSample()
+			cancelSample = nil
+			// Service inspection can wrap a killed command rather than return
+			// context.Canceled itself. Inspect the sampling context instead.
+			return nativeAccountingSnapshot{}, errors.New("inspect process: signal: killed")
+		}
+		if sourceFailure && share == policies[0].SharedQuota.ID {
+			return nativeAccountingSnapshot{}, errors.New("invalid instance configuration")
+		}
+		if err := ctx.Err(); err != nil {
+			return nativeAccountingSnapshot{}, err
+		}
+		plan := serverconfig.AccountingPlan{Source: "nft-dual"}
+		for _, p := range policies {
+			if p.SharedQuota.ID == share {
+				plan.Ports = append(plan.Ports, serverconfig.AccountingPort{Port: p.Port, Mark: uint32(0x51430000) | uint32(p.Port)})
+			}
+		}
+		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: share + "-process"}, nil
+	}
+	if err := m.SetPolicies(context.Background(), policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	stopped := []string{}
+	m.haltShare = func(_ context.Context, _ core.Engine, share string) error {
+		stopped = append(stopped, share)
+		return nil
+	}
+	r := m.records[policies[0].ID]
+	epoch := r.CounterEpoch
+	b.counters[trafficCounterName(r, "in", "tcp")] = 10
+	b.counters[trafficCounterName(r, "targetin", "tcp")] = 15
+	*now = now.Add(time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelSample = cancel
+	m.collect(ctx, false)
+	if len(stopped) != 0 || r.ShareUsedBytes != 25 || r.CounterEpoch != epoch {
+		t.Fatalf("cancelled source stopped instances or lost baselines: stopped=%v record=%+v", stopped, r)
+	}
+	for _, usage := range m.Snapshot() {
+		if !usage.EnforcementAvailable {
+			t.Fatalf("healthy source reported unavailable: %+v", usage)
+		}
+	}
+	// Retry includes the full tail once and preserves isolation on real failure.
+	m.collect(context.Background(), false)
+	if r.ShareUsedBytes != 25 {
+		t.Fatal("recheck double billed the cancelled sample")
+	}
+	sourceFailure = true
+	m.collect(ctx, false)
+	if len(stopped) == 0 {
+		t.Fatal("independent recheck hid a real accounting failure")
+	}
+	for _, share := range stopped {
+		if share != policies[0].SharedQuota.ID {
+			t.Fatalf("stopped unrelated instance: %s", share)
+		}
+	}
+}
+
 // A and B run the same core. A's target download is the previously missing RX
 // leg; both legs must settle once, across all ports of the same allocation.
 func TestSharedDualAccountingScopesBothLegsByInstance(t *testing.T) {
