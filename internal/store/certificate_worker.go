@@ -128,7 +128,9 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			err = s.processCertificateOrder(runCtx, item, job.id, status, state)
 			if err != nil {
 				_ = s.recordCertificateOrderFailure(context.WithoutCancel(ctx), job.id, item.Method, status, attempt, err)
-				_, _ = s.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM certificate_http_challenges WHERE order_id=$1`, job.id)
+				// A queued retry may still be under CA validation. Keep its
+				// bounded challenge routes until terminal/cancellation cleanup;
+				// Agent reads independently enforce status and current grants.
 			}
 		}()
 	}

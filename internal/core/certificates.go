@@ -118,12 +118,13 @@ type HTTPChallengeGrant struct {
 }
 
 type CertificateHTTPNode struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Owned     bool     `json:"owned"`
-	Available bool     `json:"available"`
-	Domains   []string `json:"domains"`
-	Reason    string   `json:"reason,omitempty"`
+	TemporaryUnavailable bool     `json:"-"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Owned                bool     `json:"owned"`
+	Available            bool     `json:"available"`
+	Domains              []string `json:"domains"`
+	Reason               string   `json:"reason,omitempty"`
 }
 
 const AgentFeatureCaddyCertificates = "managed-caddy-certificates-v1"

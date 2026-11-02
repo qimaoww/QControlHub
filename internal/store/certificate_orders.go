@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -214,18 +215,16 @@ func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, dom
 		if n.ID != agentID {
 			continue
 		}
+		if !n.Owned && !slices.Contains(n.Domains, names[0]) {
+			return fmt.Errorf("%w: 域名 %s 不在节点授权范围内", ErrForbidden, names[0])
+		}
 		if !n.Available {
+			if n.TemporaryUnavailable {
+				return fmt.Errorf("%w: %s", ErrConflict, n.Reason)
+			}
 			return fmt.Errorf("%w: %s", ErrForbidden, n.Reason)
 		}
-		if n.Owned {
-			return nil
-		}
-		for _, d := range n.Domains {
-			if d == names[0] {
-				return nil
-			}
-		}
-		return fmt.Errorf("%w: 域名 %s 不在节点授权范围内", ErrForbidden, names[0])
+		return nil
 	}
 	return fmt.Errorf("%w: 无节点 HTTP-01 认证权限", ErrForbidden)
 }

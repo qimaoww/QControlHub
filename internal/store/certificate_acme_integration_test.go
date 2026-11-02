@@ -868,3 +868,151 @@ func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
 		t.Fatalf("cleanup saved certificates: %d %v", versions, err)
 	}
 }
+
+func TestCertificateHTTPRetryRetainsRoutesAndOfflineIsTemporary(t *testing.T) {
+	for _, offline := range []bool{false, true} {
+		name := "CA request failure"
+		if offline {
+			name = "node offline"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			_, owner := sharedTestUser(t, db, ctx, "http-owner")
+			recipient, shared := sharedTestUser(t, db, ctx, "http-recipient")
+			agent := sharedTestAgent(t, db, owner)
+			if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features || '["panel-certificates-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+				t.Fatal(err)
+			}
+			domains := []string{"shared.example.test"}
+			current, err := db.AgentSharing(owner, agent.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sharing, err := db.SetAgentSharing(owner, agent.ID, core.AgentSharingRequest{Revision: current.Revision, Shares: []core.AgentSharingRecipient{{Username: recipient.Username, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}, HTTPDomains: &domains}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sh := sharing.Shares[0]
+			if _, err = db.RespondAgentShare(shared, sh.ID, core.AgentShareResponseRequest{Revision: sh.InvitationRevision, Decision: "accept"}); err != nil {
+				t.Fatal(err)
+			}
+			ca := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "isolated CA request rejected", 400) }))
+			defer ca.Close()
+			old := certificates.Directories["letsencrypt-staging"]
+			certificates.Directories["letsencrypt-staging"] = ca.URL
+			defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+			_, key, err := certificates.NewKey("ecdsa256")
+			if err != nil {
+				t.Fatal(err)
+			}
+			type target struct {
+				ctx     context.Context
+				item    core.Certificate
+				orderID string
+			}
+			targets := []target{}
+			for i, scope := range []context.Context{owner, shared} {
+				account, err := db.CreateCertificateAccount(scope, core.CertificateAccount{Name: "isolated CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key})
+				if err != nil {
+					t.Fatal(err)
+				}
+				domain := "owner.example.test"
+				if i == 1 {
+					domain = domains[0]
+				}
+				item, err := db.CreateACMECertificate(scope, core.Certificate{Name: "HTTP retry", Domains: []string{domain}, Method: "http-01", AgentID: agent.ID, AccountID: account.ID, KeyType: "ecdsa256"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				orders, err := db.CertificateOrders(scope, item.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				id := orders[0].ID
+				if _, err = db.pool.Exec(ctx, `INSERT INTO certificate_http_challenges(order_id,agent_id,domain,token,value,expires_at) VALUES($1,$2,$3,$4,'local-proof',now()+interval '15 minutes')`, id, agent.ID, domain, fmt.Sprintf("local-token-%d", i)); err != nil {
+					t.Fatal(err)
+				}
+				targets = append(targets, target{scope, item, id})
+			}
+			if offline {
+				if _, err = db.pool.Exec(ctx, `UPDATE agents SET last_seen=now()-interval '2 minutes' WHERE id=$1`, agent.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = db.RunCertificateMaintenance(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for _, target := range targets {
+				orders, err := db.CertificateOrders(target.ctx, target.item.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := orders[0]
+				if got.Status != "queued" || got.Stage != "retry" || got.Attempt != 1 || got.NextAttempt == nil || !got.NextAttempt.After(time.Now()) {
+					t.Fatalf("temporary failure terminated HTTP order: %+v", got)
+				}
+			}
+			routes, err := db.AgentCertificateChallenges(ctx, agent.ID)
+			if err != nil || len(routes) != 2 {
+				t.Fatalf("retry removed CA validation routes: %d %v", len(routes), err)
+			}
+			expectedAttempts := 1
+			if offline {
+				if _, err = db.pool.Exec(ctx, `UPDATE agents SET last_seen=now() WHERE id=$1`, agent.ID); err != nil {
+					t.Fatal(err)
+				}
+				for _, target := range targets {
+					if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET next_attempt=now() WHERE id=$1`, target.orderID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err = db.RunCertificateMaintenance(ctx); err != nil {
+					t.Fatal(err)
+				}
+				expectedAttempts = 2
+				for _, target := range targets {
+					orders, err := db.CertificateOrders(target.ctx, target.item.ID)
+					if err != nil || orders[0].Status != "queued" || orders[0].Attempt != expectedAttempts {
+						t.Fatalf("reconnection did not resume: %+v %v", orders, err)
+					}
+				}
+				if _, err = db.pool.Exec(ctx, `UPDATE agents SET last_seen=now()-interval '2 minutes' WHERE id=$1`, agent.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Revocation remains terminal even while the node is offline, and clears
+			// only this recipient's route. The owner's retry must survive.
+			if err = db.SetCertificateHTTPGrant(owner, core.HTTPChallengeGrant{AgentID: agent.ID, UserID: recipient.ID, Domain: domains[0]}, true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET next_attempt=now() WHERE id=$1`, targets[1].orderID); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.RunCertificateMaintenance(ctx); err != nil {
+				t.Fatal(err)
+			}
+			orders, err := db.CertificateOrders(shared, targets[1].item.ID)
+			if err != nil || orders[0].Status != "failed" {
+				t.Fatalf("revoked authority retried: %+v %v", orders, err)
+			}
+			routes, err = db.AgentCertificateChallenges(ctx, agent.ID)
+			if err != nil || len(routes) != 1 || routes[0].OrderID != targets[0].orderID {
+				t.Fatalf("revocation crossed owners: %+v %v", routes, err)
+			}
+			if err = db.ContinueCertificateOrder(owner, targets[0].item.ID, targets[0].orderID, true); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.RunCertificateMaintenance(ctx); err != nil {
+				t.Fatal(err)
+			}
+			routes, err = db.AgentCertificateChallenges(ctx, agent.ID)
+			if err != nil || len(routes) != 0 {
+				t.Fatal("canceled challenge remained available")
+			}
+			orders, err = db.CertificateOrders(owner, targets[0].item.ID)
+			if err != nil || orders[0].Status != "canceled" || orders[0].Attempt != expectedAttempts {
+				t.Fatalf("cancellation counted as issuance: %+v %v", orders, err)
+			}
+		})
+	}
+}
