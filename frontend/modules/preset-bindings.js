@@ -339,7 +339,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         if (intent === "deploy" && result?.task?.id) {
           recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
         }
-        showStatus(`配置 v${result.config.version} 已保存，${intent === "deploy" ? "部署" : "校验"}任务已提交。`, "", result.task);
+        showStatus(`配置已保存，${intent === "deploy" ? "部署" : "校验"}任务已提交。`, "", result.task);
         const operationStatus = operationFor(operationKey);
         Object.assign(operationStatus, {version:result.config.version, intent});
         watchPresetOperation(operationStatus);
@@ -367,7 +367,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       } catch (error) {
         if (current()) {
           if (committedConfig && committedTask) {
-            showStatus(`配置 v${committedConfig.version} 已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`, "error", committedTask);
+            showStatus(`配置已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`, "error", committedTask);
             operationFor(operationKey).reload = true;
             renderPresetStatus();
           } else {
@@ -377,7 +377,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
               ? `${error.message} 可直接调整端口或联系节点所有者核对分配后重试，草稿已保留。`
               : error.status === 409
               ? `配置或节点状态已变化：${error.message}。草稿已保留，请重新加载后再编辑。`
-              : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对版本后再提交。` : error.message, "error");
+              : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对结果后再提交。` : error.message, "error");
             if (!error.deployPreflight && !portConflict && (error.status === 409 || uncertain)) {
               operationFor(operationKey).reload = true;
               renderPresetStatus();

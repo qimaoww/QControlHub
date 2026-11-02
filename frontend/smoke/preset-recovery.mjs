@@ -11,7 +11,7 @@ export async function testSamePageRecovery({ FakeForm, AGENT_ID, ENGINE, makeAge
     const planForm=new FakeForm({operation:"modify",tag:"old-inbound",credential:"saved"});
     const fieldForm=new FakeForm({mutation:"modify",fragment:"{}"});
     const {ctx,markup}=buildContext(state,{
-      "GET /agents/test-agent/configs/xray/workspace":()=>{if(failRead)throw Error("workspace unavailable");return workspaceWithConfig({version:savedVersion});},
+      "GET /agents/test-agent/configs/xray/workspace":()=>{if(failRead)throw Error("workspace unavailable");return workspaceWithConfig({version:savedVersion,updated_at:`2026-11-02T01:00:0${savedVersion}Z`});},
       "GET /agents/test-agent/configs/xray/fields/log":{present:true,fragment:"{}",version:1},
       "POST /agents/test-agent/configs/xray/fields/log":()=>{if(failSave)throw TypeError("response lost");return {config:{version:2},task:{}};},
     });
@@ -34,12 +34,12 @@ export async function testSamePageRecovery({ FakeForm, AGENT_ID, ENGINE, makeAge
     savedVersion=2;allowDiscard=false;
     await pages.agentConfig();
     assert.equal(state.data.presetOperation.reload,true,"canceling a version replacement must keep the old draft locked against stale saves");
-    assert.ok(markup().includes("当前 v1"),"canceling external changes must render the old revision rather than hide its draft");
+    assert.ok(markup().includes("2026-11-02T01:00:01Z"),"canceling external changes must render the old revision rather than hide its draft");
     assert.equal(planForm.elements.namedItem("credential").value,"retained-draft");
     allowDiscard=true;
     await pages.agentConfig();
     assert.equal(state.data.presetOperation.reload,false,"confirmed new revision did not recover the editor");
-    assert.ok(markup().includes("当前 v2"));
+    assert.ok(markup().includes("2026-11-02T01:00:02Z"));
   }
 
 }

@@ -76,7 +76,7 @@ async function fixture(engine, readOnly = false, actual) {
       if (test.saveGate) await test.saveGate;
       if (test.saveFailure) throw Object.assign(new Error(typeof test.saveFailure === "string" ? test.saveFailure : "模拟保存失败，请重试"), {status:400});
       if (test.portConflict) throw Object.assign(new Error("端口 443 已由其他用户占用"), {status:409, code:"port_conflict", field:test.portConflict});
-      if (test.staleRevision) throw Object.assign(new Error("配置版本已变化"), {status:409});
+      if (test.staleRevision) throw Object.assign(new Error("配置已变化"), {status:409});
       assert(body.expected_version === (test.saved?.version || 0), "submitted a stale config revision");
       if (path.endsWith("/server-inbounds")) {
         if (body.operation === "add") {
@@ -148,7 +148,7 @@ async function testEditedRetryDialog() {
   };
   await openTaskEditRetry(ctx, "failed", () => { refreshed = true; });
   const dialog = document.querySelector("dialog[open]");
-  assert(dialog && dialog.textContent.includes("当前 v5") && dialog.textContent.includes("原任务 v2"), "retry editor did not identify exact current and original versions");
+  assert(dialog && dialog.textContent.includes("当前配置") && !/当前 v5|原任务 v2/.test(dialog.textContent), "retry editor did not identify exact current and original versions");
   const content = dialog.querySelector("[data-code-input]");
   const error = dialog.querySelector(".task-retry-error pre");
   assert(error.getBoundingClientRect().width >= content.closest(".code-workspace").getBoundingClientRect().width * .9,

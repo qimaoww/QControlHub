@@ -215,7 +215,7 @@ export function bindConfigInbounds(ctx) {
     const opened = dialog;
     opened.className = `config-inbound-dialog${["add", "modify"].includes(kind) ? " config-outbound-dialog" : ""}${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
     opened.setAttribute("aria-labelledby", "config-inbound-title");
-    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异",
+    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"配置历史", diff:"配置差异",
       "common-add":"增加通用配置项", "common-modify":"修改通用配置项", "common-delete":"删除通用配置项" };
     opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-inbound-title">${titles[kind]}</h2><p>${esc(agent.name)} / ${esc(engineName(engine))}${commonAction ? " / 公共配置" : chosen && kind !== "add" ? ` / ${esc(chosen.tag)} · :${Number(chosen.port)}` : ""}</p></div><button class="config-access-close" type="button" data-inbound-close aria-label="关闭弹窗">×</button></header><div class="config-inbound-body" data-inbound-body><p role="status">正在加载…</p></div>`;
     const body = opened.querySelector("[data-inbound-body]");
@@ -255,7 +255,7 @@ export function bindConfigInbounds(ctx) {
       const fresh = await api(`${base}/workspace`, {method:"GET"});
       if (!active()) return;
       if (mutation && (fresh.config?.version || 0) !== (saved?.version || 0)) {
-        throw new Error("配置版本已变化，请关闭弹窗并重新读取、核对配置后再编辑。");
+        throw new Error("配置已变化，请关闭弹窗并重新读取、核对配置后再编辑。");
       }
       if (mutation && !mutationReady()) { dispose(); return; }
       if (commonAction && !commonSelected()) { dispose(); return; }
@@ -270,7 +270,7 @@ export function bindConfigInbounds(ctx) {
         else {
           const revision = await api(`/configs/${encodeURIComponent(deployed.config_id)}/revisions/${deployed.config_version}`, {method:"GET"});
           if (!active()) return;
-          updateFeedbackHTML(body, `<p>已部署 v${deployed.config_version} → 已保存 v${fresh.config.version}</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
+          updateFeedbackHTML(body, `<p>已部署配置与已保存配置</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
         }
       } else if (kind === "delete") {
         updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
@@ -295,7 +295,7 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              const reason = error.status === 409 ? "配置版本已变化，请重新读取后重试。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
+              const reason = error.status === 409 ? "配置已变化，请重新读取后重试。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
               updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>删除入站失败</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
               if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });

@@ -40,7 +40,7 @@ const assertSharedStatusOrder = (root) => {
   assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
   assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="restart"]').disabled, false, "节点管理未保留本人实例重启");
   assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="stop"]').disabled, false, "节点管理未保留本人实例停止");
-  assert.equal(document.querySelector('[data-instance-version="mihomo"]').textContent, "运行 v1 · v2 待部署");
+  assert.equal(document.querySelector('[data-instance-version="mihomo"]').textContent, "运行 · 有修改待部署");
   assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-core-uninstall], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
   if (mode === "shared-node-mobile") {
     for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {

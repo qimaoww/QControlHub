@@ -15,6 +15,62 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestConfigArchivesPreserveTimestampCollisions(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_archive_dates", false)
+	config, err := db.CreateConfig(owner, core.Config{Name: "date archive", Engine: core.EngineMihomo, Content: "mixed-port: 7890\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		config, err = db.UpdateConfig(owner, config.ID, core.Config{Name: config.Name, Engine: config.Engine, Content: config.Content, Version: config.Version})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := db.ConfigRevision(owner, config.ID, config.Version)
+		if err != nil || !r.UpdatedAt.Equal(config.UpdatedAt.Truncate(time.Microsecond)) {
+			t.Fatalf("archive must use actual save time: %v %v %v", r.UpdatedAt, config.UpdatedAt, err)
+		}
+	}
+	// Isolated historical fixtures deliberately have equal display timestamps.
+	stamp := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err = db.pool.Exec(ctx, `UPDATE config_revisions SET created_at=$2 WHERE config_id=$1`, config.ID, stamp); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListConfigRevisions(owner, config.ID, 20)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("colliding dates lost archives: %d %v", len(rows), err)
+	}
+	for i, r := range rows {
+		if r.Version != 3-i || !r.UpdatedAt.Equal(stamp) {
+			t.Fatalf("unstable equal-date order: %+v", rows)
+		}
+	}
+	if _, err = db.pool.Exec(ctx, `UPDATE config_revisions SET created_at=$2 WHERE config_id=$1 AND version=1`, config.ID, stamp.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = db.ListConfigRevisions(owner, config.ID, 20)
+	if err != nil || rows[0].Version != 1 {
+		t.Fatalf("history is not ordered by saved time: %+v %v", rows, err)
+	}
+	before := time.Now().UTC()
+	restored, err := db.RestoreConfigRevision(owner, config.ID, 1, config.Version)
+	if err != nil || restored.UpdatedAt.Before(before) {
+		t.Fatalf("restore did not get a new save time: %+v %v", restored, err)
+	}
+	old, err := db.ConfigRevision(owner, config.ID, 1)
+	if err != nil || !old.UpdatedAt.Equal(stamp.Add(time.Second)) {
+		t.Fatalf("restore altered original archive: %+v %v", old, err)
+	}
+	if _, err = db.UpdateConfig(owner, config.ID, config); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update: %v", err)
+	}
+	rows, err = db.ListConfigRevisions(owner, config.ID, 20)
+	if err != nil || len(rows) != 4 {
+		t.Fatalf("failed save added an archive: %d %v", len(rows), err)
+	}
+}
+
 func TestConfigRevisionLifecycleWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

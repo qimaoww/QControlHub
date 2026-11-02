@@ -183,6 +183,17 @@ func TestNodeCertificateExplicitEnrollmentAndVersions(t *testing.T) {
 				if detail.Certificate.Version != version || detail.Certificate.SyncStatus != status || len(detail.Versions) != version || strings.Contains(string(raw), "PRIVATE KEY") {
 					t.Fatal("version/status/secret boundary failed")
 				}
+				if detail.Certificate.SavedAt == nil || detail.Certificate.SavedAt.IsZero() {
+					t.Fatal("enrolled certificate has no persisted save date")
+				}
+				for _, record := range detail.Versions {
+					if record.SavedAt == nil || record.SavedAt.IsZero() {
+						t.Fatal("certificate history has no persisted save date")
+					}
+					if record.Version == version && !record.SavedAt.Equal(*detail.Certificate.SavedAt) {
+						t.Fatal("current and historical certificate dates disagree")
+					}
+				}
 			}
 			check(1, "synced")
 			newer, _ := certificates.SelfSigned([]string{"edge.example.test", "alternate.example.test"}, "ecdsa256", 91)

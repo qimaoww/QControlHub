@@ -57,7 +57,8 @@ export async function createConfigFixture(engine, options = {}) {
       outbounds:[{tag:"direct", protocol:"freedom", type:"direct"},
         ...inbounds.map(item=>({tag:`qch-trf-${item.port}-abcdef012345`, protocol:"freedom", type:"direct"}))]})});
   const content = () => JSON.stringify(root(), null, 2);
-  let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content()};
+  const savedDate = version => `2026-11-02T04:05:${String(version).padStart(2,"0")}Z`;
+  let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content(),updated_at:savedDate(1)};
   let agentContent = saved ? options.drift ? saved.content + "\n# node-only" : saved.content : "";
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
@@ -109,7 +110,7 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.sourceFailure) throw Object.assign(new Error("fixture source save failed"), test.sourceFailure);
       assert(body.version === saved.version, "outbound save lost version check");
       test.writes.push({path, ...body});
-      saved = {...saved, content:body.content, version:saved.version+1};
+      saved = {...saved, content:body.content, version:saved.version+1,updated_at:savedDate(saved.version+1)};
       const task = {id:`task-${saved.version}`, action:body.intent, config_version:saved.version, status:"pending"};
       tasks.set(task.id, task);
       return {config:saved, task};
@@ -133,7 +134,7 @@ export async function createConfigFixture(engine, options = {}) {
           values.set(key, body.fragment);
         }
       }
-      saved = {id:"cfg", agent_id:agent.id, engine, name:"配置", version:(saved?.version || 0)+1, content:content()};
+      saved = {id:"cfg", agent_id:agent.id, engine, name:"配置", version:(saved?.version || 0)+1, content:content(),updated_at:savedDate((saved?.version || 0)+1)};
       const task = {id:`task-${saved.version}`, action:body.intent, config_version:saved.version, status:test.taskStatus,
         install_if_missing:Boolean(body.install_if_missing && !agent.runtime[engine].installed)};
       tasks.set(task.id, task);

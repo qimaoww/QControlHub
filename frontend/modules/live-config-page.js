@@ -233,7 +233,7 @@ async function liveConfig(options = {}) {
       let operation = operationFor(key);
       if (operation?.task?.id !== result.task.id) operation = saveOperation({
         key, task:result.task, version:result.config.version, intent:result.task.action,
-        message:`配置 v${result.config.version} 已保存，任务已提交。`,
+        message:`配置已保存，任务已提交。`,
       });
       watchPresetOperation(operation);
       if (result.task.action === "deploy") {
@@ -248,7 +248,7 @@ async function liveConfig(options = {}) {
         if (accountData !== state.data) return;
         // The mutation is already durable. Do not report it as a failed save
         // or silently lose the error after the embedded editor is disposed.
-        const message = `配置 v${result.config.version} 已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
+        const message = `配置已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
         const operation = operationFor(key);
         if (operation?.task?.id === result.task?.id) Object.assign(operation, {message, tone:"error", reload:true});
         renderPresetStatus();

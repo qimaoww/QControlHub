@@ -93,7 +93,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
         if (accountData !== state.data || !formElement.isConnected) return;
         liveSaveUncertain = !error.deployPreflight && submitted &&
           Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
-        const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
+        const message = `${persisted ? `配置已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
         updateFeedback(status, message);
         status.setAttribute("role", "alert");
         notify(message, "error");

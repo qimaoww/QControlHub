@@ -209,10 +209,10 @@ try {
   }
   await evaluate(a, "location.hash='#tasks'");
   await wait(a, `!!document.querySelector('[data-retry="${taskA.id}"]')`);
-  assert.equal(await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').textContent`), "重试配置 v1");
+  assert.equal(await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').textContent`), "重试配置");
   await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').click()`);
   await wait(a, "!!document.querySelector('[data-confirm-dialog][open]')");
-  assert.ok(await evaluate(a, "document.querySelector('[data-confirm-message]').textContent.includes('配置已有新版本')"));
+  assert.ok(await evaluate(a, "document.querySelector('[data-confirm-message]').textContent.includes('配置已有更新')"));
   assert.ok(await evaluate(a, "!document.querySelector('[data-confirm-message]').textContent.includes('安装稳定版')"));
   await screenshot(a, "after");
   await evaluate(a, "document.querySelector('[data-confirm-accept]').click()");
@@ -220,7 +220,7 @@ try {
   assert.ok(await evaluate(a, "document.documentElement.scrollWidth <= innerWidth + 1"));
   await api(a, alice, "POST", `/tasks/${taskA.id}/retry`, {}, 409);
   const pendingA = await api(a, alice, "POST", "/tasks", request(nextA), 201);
-  record(`${mode}: version-labelled UI confirmation; stale retry returned 409; explicit new-version task accepted`);
+  record(`${mode}: revision-free UI confirmation; stale retry returned 409; explicit updated-config task accepted`);
 
   let sharing = await api(manager, admin, "GET", `/agents/${fixture.shared}/sharing`);
   await api(manager, admin, "PUT", `/agents/${fixture.shared}/sharing`, { revision: sharing.revision, shares: sharing.shares.map(share => ({ username: share.username, engines: share.engines, ports: share.ports, limit_bytes: share.limit_bytes, enabled: share.user_id !== alice.user_id })) });

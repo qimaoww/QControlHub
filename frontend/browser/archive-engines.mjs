@@ -59,7 +59,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
       records.restores.push(payload);
       const id = path.split("/")[2], config = configs.find(item => item.id === id);
       const revision = revisions.get(id).find(item => item.version === Number(path.split("/")[4]));
-      Object.assign(config, { ...revision, version: config.version + 1 });
+      Object.assign(config, { ...revision, version: config.version + 1, updated_at:new Date().toISOString() });
       revisions.get(id).push({ ...config });
       return { ...config };
     }
@@ -67,7 +67,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
       records.writes.push({ method, payload });
       if (saveGate) await saveGate.promise;
       const id = method === "POST" ? `cfg-${configs.length + 1}` : path.split("/")[2];
-      const config = { ...payload, id, version: payload.version + 1 };
+      const config = { ...payload, id, version: payload.version + 1, updated_at:new Date().toISOString() };
       if (method === "POST") configs.push(config);
       else Object.assign(configs.find(item => item.id === id), config);
       revisions.set(id, [...(revisions.get(id) || []), { ...config }]);
@@ -208,7 +208,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
     await render();
     check(engine, content);
     assert.equal(field(archive(), "engine").disabled, true, "existing archive engine must remain locked");
-    assert.equal(archive().closest(".config-workspace").querySelector(".editor-toolbar-state b").textContent, "v1");
+    assert.equal(archive().closest(".config-workspace").querySelector(".editor-toolbar-state b").textContent, display.date(configs.find(item => item.id === savedId).updated_at));
     fill(archive(), "content", content + "\n");
     await render();
     check(engine, content + "\n", true);
@@ -224,8 +224,9 @@ export async function testArchiveEnginesRuntime(preview = false) {
     assert.equal(document.querySelector(".timeline-preview textarea").readOnly, true);
     document.querySelector("[data-restore-revision]").click();
     await waitFor(() => records.restores.length === engines.indexOf(engine) + 1 &&
-      archive().closest(".config-workspace").querySelector(".editor-toolbar-state b").textContent === "v3", "restore failed");
+      document.querySelector('[data-revision="3"]'), "restore failed");
     check(engine, content);
+    assert.equal(archive().closest(".config-workspace").querySelector(".editor-toolbar-state b").textContent, display.date(configs.find(item => item.id === savedId).updated_at));
     assert.equal(records.restores.at(-1).expected_version, 2);
     writable = false;
     await render();

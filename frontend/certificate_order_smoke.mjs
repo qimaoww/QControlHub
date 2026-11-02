@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { certificateOrderPresentation, certificateOrderDiagnostic } from "./modules/certificate-order.js";
+import { recordDate } from "./modules/record-display.js";
+import { createDisplayHelpers } from "./modules/formatting.js";
+import { createCertificateView } from "./modules/certificate-view.js";
+
+const scheduled = "2026-11-02T04:05:06Z";
+const show = patch => certificateOrderPresentation({status:"queued",stage:"queued",attempt:0,...patch}, String);
+assert.equal(show().label,"等待处理");
+assert.equal(show().info,"尚未执行");
+assert.match(show({status:"running",attempt:1}).info,/首次执行中/);
+assert.match(show({status:"running",attempt:2}).info,/第 2 次执行中/);
+const retry=show({stage:"retry",attempt:2,error:"not found",next_attempt:scheduled});
+assert.equal(retry.label,"等待自动重试");
+assert.match(retry.info,/已执行 2 次.*后台将自动继续申请.*2026-11-02T04:05:06Z/);
+assert.match(retry.error,/暂无法确认具体资源或原因/);
+assert.doesNotMatch(retry.error,/证书不存在|账号不存在/);
+assert.doesNotMatch(show({stage:"retry"}).info,/下次处理/);
+assert.equal(show({status:"waiting_dns"}).label,"等待人工 DNS 操作");
+assert.match(show({status:"waiting_dns"}).info,/TXT/);
+for(const [status,label] of [["succeeded","签发成功"],["failed","申请失败"],["canceling","取消中"],["canceled","已取消"]]) {
+  const result=show({status,stage:"complete",attempt:2,error:"old failure"});
+  assert.equal(result.label,label);
+  assert.equal(Boolean(result.error),status==="failed");
+  assert.doesNotMatch(result.info,/自动继续申请|下次处理/);
+}
+const cleanup=show({status:"succeeded",stage:"cleanup",error:"验证资源清理失败，将重试",next_attempt:scheduled});
+assert.equal(cleanup.label,"签发成功");
+assert.equal(cleanup.error,"");
+assert.match(cleanup.info,/验证资源待清理.*下次处理/);
+assert.match(show({stage:"retry",failure_stage:"http_preflight",error:"timeout"}).error,/检查 HTTP 入口超时/);
+assert.equal(show({error:"读取 ACME 申请账号失败: not found"}).error,"读取 ACME 申请账号失败，请检查本人申请账号是否仍可用。");
+assert.doesNotMatch(certificateOrderDiagnostic('token=fixture-secret https://user:secret@example.test/secret -----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----'),/fixture-secret|user:secret|example.test|\nfixture/);
+for(const missing of [undefined,null,"", "0001-01-01T00:00:00Z","invalid"]) assert.equal(recordDate(missing,String),"时间未知");
+const helpers=createDisplayHelpers({data:{settings:{time_zone:"Asia/Hong_Kong"}}});
+assert.equal(recordDate(scheduled,helpers.date),helpers.date(scheduled));
+const view=createCertificateView({...helpers,date:String});
+const certificate={id:"cert",name:"TLS",domains:["example.test"],key_type:"ecdsa256",source:"acme",method:"dns-api",version:1234,owned:true,status:"issued",saved_at:scheduled};
+const html=view.detail({certificate,orders:[{id:"order",status:"queued",stage:"retry",error:"not found",attempt:2,created_at:scheduled,challenges:[]}],bindings:[{version:5678,saved_at:scheduled}],grants:[],versions:[{version:1234,saved_at:scheduled}]});
+const text=html.replace(/<[^>]+>/g,"");
+assert.doesNotMatch(text,/v1234|1234|5678|第 0 次|版本历史/);
+assert.match(text,/2026-11-02T04:05:06Z/);
+assert.match(text,/等待自动重试/);
+assert.match(text,/暂无法确认具体资源或原因/);
+console.log("Certificate order states, real schedules, record dates and diagnostic redaction passed");

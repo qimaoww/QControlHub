@@ -36,7 +36,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     const group = document.createElement("optgroup"); group.label = owned ? "我的证书" : "授权给我的证书";
     for (const cert of items.filter(item => item.owned === owned)) {
       const expired = !cert.not_after || Date.parse(cert.not_after) <= Date.now();
-      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · ${{node:"节点证书",caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"} · v${cert.version}${expired ? " · 不可用" : " · 可用"}`, cert.id);
+      const option = new Option(`${cert.name} · ${cert.domains.join(", ")} · ${{node:"节点证书",caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source} · ${cert.not_after?new Date(cert.not_after).toLocaleDateString():"待签发"}${expired ? " · 不可用" : " · 可用"}`, cert.id);
       option.disabled = expired; group.append(option);
     }
     select.append(group);
@@ -45,7 +45,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   const update = (event) => {
     const active = Boolean(select.value);
     const cert=items.find(item=>item.id===select.value);
-    summary.hidden=!cert;summary.textContent=cert?`${cert.domains.join(" · ")} · v${cert.version}`:"";
+    summary.hidden=!cert;summary.textContent=cert?`${cert.domains.join(" · ")}`:"";
     const sni=form.elements.namedItem("tls_server_name");if(active&&cert?.domains.length===1&&!cert.domains[0].startsWith("*.")&&sni&&!sni.value)sni.value=cert.domains[0];
     const mode = form.elements.namedItem("tls_mode");
     if (active && mode && (event || protocol.key !== "vless-ws-tls")) { mode.value = "native"; mode.dispatchEvent(new Event("change", { bubbles: true })); }

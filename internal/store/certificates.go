@@ -135,7 +135,7 @@ func (s *Store) DeleteCertificateAccount(ctx context.Context, id string) error {
 }
 func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error) {
 	owner := certificateActor(ctx)
-	rows, err := s.pool.Query(ctx, `SELECT c.metadata,c.version,c.auto_renew,c.next_attempt,c.created_at,c.owner_id,COALESCE((SELECT o.status FROM certificate_orders o WHERE o.certificate_id=c.id ORDER BY o.created_at DESC LIMIT 1),''),COALESCE((SELECT o.error FROM certificate_orders o WHERE o.certificate_id=c.id ORDER BY o.created_at DESC LIMIT 1),''),(SELECT count(*) FROM certificate_bindings b JOIN configs f ON f.id=b.config_id WHERE b.certificate_id=c.id AND f.deleted_at IS NULL AND (c.owner_id=$1 OR b.owner_id=$1)),(SELECT count(*) FROM certificate_bindings b JOIN configs f ON f.id=b.config_id WHERE b.certificate_id=c.id AND f.deleted_at IS NULL AND (c.owner_id=$1 OR b.owner_id=$1) AND (b.version<c.version OR b.status<>'synced')) FROM panel_certificates c WHERE c.owner_id=$1 OR (EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=c.id AND g.user_id=$1) AND (NOT starts_with(c.owner_id,'usr_') OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=c.owner_id AND NOT u.disabled))) ORDER BY c.created_at DESC`, owner)
+	rows, err := s.pool.Query(ctx, `SELECT c.metadata,c.version,c.auto_renew,c.next_attempt,c.created_at,c.owner_id,(SELECT v.created_at FROM certificate_versions v WHERE v.certificate_id=c.id AND v.version=c.version),COALESCE((SELECT CASE WHEN o.status='queued' AND o.stage='retry' THEN 'retrying' ELSE o.status END FROM certificate_orders o WHERE o.certificate_id=c.id ORDER BY o.created_at DESC LIMIT 1),''),COALESCE((SELECT o.error FROM certificate_orders o WHERE o.certificate_id=c.id ORDER BY o.created_at DESC LIMIT 1),''),(SELECT count(*) FROM certificate_bindings b JOIN configs f ON f.id=b.config_id WHERE b.certificate_id=c.id AND f.deleted_at IS NULL AND (c.owner_id=$1 OR b.owner_id=$1)),(SELECT count(*) FROM certificate_bindings b JOIN configs f ON f.id=b.config_id WHERE b.certificate_id=c.id AND f.deleted_at IS NULL AND (c.owner_id=$1 OR b.owner_id=$1) AND (b.version<c.version OR b.status<>'synced')) FROM panel_certificates c WHERE c.owner_id=$1 OR (EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=c.id AND g.user_id=$1) AND (NOT starts_with(c.owner_id,'usr_') OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=c.owner_id AND NOT u.disabled))) ORDER BY c.created_at DESC`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -145,16 +145,18 @@ func (s *Store) ListCertificates(ctx context.Context) ([]core.Certificate, error
 		var raw []byte
 		var item core.Certificate
 		var orderStatus, orderError string
-		if err := rows.Scan(&raw, &item.Version, &item.AutoRenew, &item.NextAttempt, &item.CreatedAt, &item.OwnerID, &orderStatus, &orderError, &item.BindingCount, &item.PendingCount); err != nil {
+		if err := rows.Scan(&raw, &item.Version, &item.AutoRenew, &item.NextAttempt, &item.CreatedAt, &item.OwnerID, &item.SavedAt, &orderStatus, &orderError, &item.BindingCount, &item.PendingCount); err != nil {
 			return nil, err
 		}
 		bindingCount, pendingCount := item.BindingCount, item.PendingCount
+		savedAt := item.SavedAt
 		version, auto, next, created, resourceOwner := item.Version, item.AutoRenew, item.NextAttempt, item.CreatedAt, item.OwnerID
 		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, err
 		}
 		item.Version, item.AutoRenew, item.NextAttempt, item.CreatedAt, item.OwnerID = version, auto, next, created, resourceOwner
 		item.BindingCount, item.PendingCount = bindingCount, pendingCount
+		item.SavedAt = savedAt
 		item.Owned = owner == resourceOwner
 		if orderStatus != "" && orderStatus != "succeeded" && (orderStatus != "canceled" || item.Version == 0) {
 			item.Status = orderStatus
@@ -333,7 +335,7 @@ func (s *Store) CertificateBindings(ctx context.Context, id string) ([]core.Cert
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT b.config_id,c.agent_id,b.owner_id,c.engine,b.version,b.task_id,a.name,c.name,COALESCE(u.username,'资源所有者'),CASE WHEN b.version<p.version AND b.status='synced' THEN 'pending' ELSE b.status END,CASE WHEN b.enabled AND b.config_version<>c.version THEN '当前配置有未部署修改；请确认后手动部署最新配置和证书' ELSE b.error END, (p.owner_id=b.owner_id OR EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=p.id AND g.user_id=b.owner_id)) FROM certificate_bindings b JOIN configs c ON c.id=b.config_id JOIN agents a ON a.id=c.agent_id LEFT JOIN panel_users u ON u.id=b.owner_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE b.certificate_id=$1 AND c.deleted_at IS NULL AND ($2 OR b.owner_id=$3)`, id, item.Owned, certificateActor(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT (SELECT v.created_at FROM certificate_versions v WHERE v.certificate_id=b.certificate_id AND v.version=b.version),b.config_id,c.agent_id,b.owner_id,c.engine,b.version,b.task_id,a.name,c.name,COALESCE(u.username,'资源所有者'),CASE WHEN b.version<p.version AND b.status='synced' THEN 'pending' ELSE b.status END,CASE WHEN b.enabled AND b.config_version<>c.version THEN '当前配置有未部署修改；请确认后手动部署最新配置和证书' ELSE b.error END, (p.owner_id=b.owner_id OR EXISTS(SELECT 1 FROM certificate_grants g WHERE g.certificate_id=p.id AND g.user_id=b.owner_id)) FROM certificate_bindings b JOIN configs c ON c.id=b.config_id JOIN agents a ON a.id=c.agent_id LEFT JOIN panel_users u ON u.id=b.owner_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE b.certificate_id=$1 AND c.deleted_at IS NULL AND ($2 OR b.owner_id=$3)`, id, item.Owned, certificateActor(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +343,7 @@ func (s *Store) CertificateBindings(ctx context.Context, id string) ([]core.Cert
 	out := []core.CertificateBinding{}
 	for rows.Next() {
 		b := core.CertificateBinding{CertificateID: id}
-		if err := rows.Scan(&b.ConfigID, &b.AgentID, &b.OwnerID, &b.Engine, &b.Version, &b.TaskID, &b.AgentName, &b.ConfigName, &b.Username, &b.Status, &b.Error, &b.Authorized); err != nil {
+		if err := rows.Scan(&b.SavedAt, &b.ConfigID, &b.AgentID, &b.OwnerID, &b.Engine, &b.Version, &b.TaskID, &b.AgentName, &b.ConfigName, &b.Username, &b.Status, &b.Error, &b.Authorized); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -456,7 +458,7 @@ func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]cor
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT metadata FROM certificate_versions WHERE certificate_id=$1 ORDER BY version DESC LIMIT 100`, id)
+	rows, err := s.pool.Query(ctx, `SELECT metadata,created_at FROM certificate_versions WHERE certificate_id=$1 ORDER BY created_at DESC,version DESC LIMIT 100`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -465,12 +467,14 @@ func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]cor
 	for rows.Next() {
 		var raw []byte
 		var c core.Certificate
-		if err = rows.Scan(&raw); err != nil {
+		var savedAt time.Time
+		if err = rows.Scan(&raw, &savedAt); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &c); err != nil {
 			return nil, err
 		}
+		c.SavedAt = &savedAt
 		c.AccountID = ""
 		c.DNSAccountID = ""
 		c.AgentID = ""

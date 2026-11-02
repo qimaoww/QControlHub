@@ -393,3 +393,120 @@ func testCertificateFinishedOrderCleanup(t *testing.T, attempt int, cause error)
 		t.Fatalf("terminal order cleanup was not completed: stage=%s leases=%d", stage, leases)
 	}
 }
+
+// Use only an isolated, deliberately unavailable CA. Observe durable state while
+// the local request is in flight, then verify scheduling and cancellation.
+func TestCertificateWorkerPublishesExecutionAndRetryState(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_worker_status", false)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		http.Error(w, "fixture CA unavailable", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	old := certificates.Directories["letsencrypt-staging"]
+	certificates.Directories["letsencrypt-staging"] = server.URL
+	defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+	_, key, err := certificates.NewKey("ecdsa256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "worker states", Domains: []string{"worker.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- db.RunCertificateMaintenance(ctx) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil || len(orders) != 1 || orders[0].Status != "running" || orders[0].Attempt != 1 {
+		t.Fatalf("in-flight state: %+v %v", orders, err)
+	}
+	unblock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	orders, err = db.CertificateOrders(owner, item.ID)
+	if err != nil || orders[0].Status != "queued" || orders[0].Stage != "retry" || orders[0].Attempt != 1 || orders[0].NextAttempt == nil || !orders[0].NextAttempt.After(time.Now()) {
+		t.Fatalf("retry state: %+v %v", orders, err)
+	}
+	if len(orders[0].Challenges) != 0 {
+		t.Fatal("a failed setup must not ask for DNS records")
+	}
+	listed, err := db.GetCertificate(owner, item.ID)
+	if err != nil || listed.Status != "retrying" {
+		t.Fatalf("certificate retry label: %+v %v", listed, err)
+	}
+	if err := db.ContinueCertificateOrder(owner, item.ID, orders[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = db.CertificateOrders(owner, item.ID)
+	if err != nil || orders[0].Status != "canceled" || orders[0].Attempt != 1 || orders[0].Error != "" {
+		t.Fatalf("cancellation counted as issuance or retained error: %+v %v", orders, err)
+	}
+}
+
+func TestCertificateCleanupPreservesOutcomeAndAttempt(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_cleanup_status", false)
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "fixture CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "cleanup states", Domains: []string{"cleanup.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := orders[0].ID
+	// A synthetic encrypted cleanup journal points to an absent local DNS account.
+	state := certificateOrderState{Challenges: []certificateChallengeState{{Record: certificates.DNSRecord{ID: "fixture-record"}}}}
+	item.Method, item.DNSAccountID = "dns-api", "missing-fixture-account"
+	for _, status := range []string{"succeeded", "failed"} {
+		if _, err := db.pool.Exec(ctx, `UPDATE certificate_orders SET status=$2,stage='cleanup',attempt=2,error='original issuance failure' WHERE id=$1`, id, status); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.finishCertificateOrderCleanup(WithConfigScope(ctx, item.OwnerID, false), item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil || orders[0].Status != status || orders[0].Stage != "cleanup" || orders[0].Attempt != 2 || orders[0].NextAttempt == nil || !orders[0].NextAttempt.After(time.Now()) {
+			t.Fatalf("cleanup changed outcome: %+v %v", orders, err)
+		}
+		if status == "failed" && orders[0].Error != "original issuance failure" {
+			t.Fatal("cleanup lost issuance failure")
+		}
+		item.Method = "dns-manual"
+		if err := db.finishCertificateOrderCleanup(owner, item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil || orders[0].Stage != "complete" || (status == "succeeded" && orders[0].Error != "") {
+			t.Fatalf("cleanup completion: %+v %v", orders, err)
+		}
+		item.Method = "dns-api"
+	}
+}

@@ -1,4 +1,5 @@
 import "./formatting_smoke.mjs";
+import "./certificate_order_smoke.mjs";
 import "./permissions_smoke.mjs";
 import "./shared_instance_smoke.mjs";
 import "./core_install_state_smoke.mjs";

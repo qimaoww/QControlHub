@@ -142,7 +142,7 @@ async function submitTask(payload, onError) {
       button.disabled = true;
       try {
         if (!(await confirmAction(
-          `确定将已保存配置 v${button.dataset.configVersion} 部署到 ${engineName(button.dataset.engine)} 并重启服务？`, label.trim(),
+          `确定将已保存配置 部署到 ${engineName(button.dataset.engine)} 并重启服务？`, label.trim(),
         ))) return;
         button.textContent = "正在提交部署…";
         button.setAttribute("aria-busy", "true");

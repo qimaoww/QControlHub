@@ -1,3 +1,4 @@
+import { recordDate } from "./record-display.js";
 import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { createPresetDrafts } from "./preset-drafts.js";
@@ -10,7 +11,7 @@ import { createPresetStatus } from "./preset-status.js";
 import { createPresetBindings } from "./preset-bindings.js";
 
 export function createPresetEditor(ctx, { deployments, renderLiveConfig, onRuntimeChange }) {
-  const { api, state, engines, can, esc, ago, confirmAction, notify } = ctx;
+  const { api, state, engines, can, esc, date, ago, confirmAction, notify } = ctx;
   // One controller serves both the legacy route and the embedded editor.
   // Bindings/status share this private lifecycle record, never copied values.
   const editor = {
@@ -93,14 +94,14 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   if (!loadedWorkspace && !editor.savePending && prior?.sessionData === sessionData &&
       prior.draftScope === scope && prior.draftVersion !== (workspace.config?.version || 0) && drafts().dirty(scope)) {
     const discard = await confirmAction(
-      `服务端配置已从 v${prior.draftVersion} 更新为 v${workspace.config?.version || 0}。放弃此内核的旧版本草稿并加载新配置？取消会保留当前输入。`, "配置版本已更新",
+      `服务端配置已更新。放弃此内核的旧草稿并加载新配置？取消会保留当前输入。`, "配置已更新",
     );
     if (!isCurrent()) return;
     if (!discard) {
       prior.navigationEpoch = navigationEpoch;
       Object.assign(state.data, {protocol:prior.protocol?.key, inboundTag:prior.selectedInbound?.tag || ""});
       const key = `${prior.agent.id}|${engine}`;
-      saveOperation({key, message:"服务端已有更新版本，当前草稿已保留。请重新加载后再提交，避免覆盖其他修改。", tone:"error", reload:true});
+      saveOperation({key, message:"服务端配置已更新，当前草稿已保留。请重新加载后再提交，避免覆盖其他修改。", tone:"error", reload:true});
       // The old editor may have been unmounted while visiting another page.
       // Recreate that exact revision so its retained drafts remain visible.
       await renderAgentConfig({workspace:prior.workspace});
@@ -171,7 +172,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   // read or revision query. They replace only their own placeholders below.
   const fieldRead = path => presetRead(workspace, path, () => api(path).then(value => {
     if (value.version !== undefined && value.version !== config.version)
-      throw new Error("配置版本已变化，请重新加载配置后编辑字段");
+      throw new Error("配置已变化，请重新加载配置后编辑字段");
     return value;
   }));
   const fieldValues = [
@@ -288,7 +289,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   if (!loadedWorkspace && operationFor(`${agent.id}|${engine}`)) {
     const operation = operationFor(`${agent.id}|${engine}`);
     if (operation.reload) {
-      operation.message = `已重新加载配置 v${config?.version || 0}，可以继续编辑。`;
+      operation.message = "已重新加载配置，可以继续编辑。";
       operation.tone = "";
       operation.reload = false;
       renderPresetStatus();
@@ -303,15 +304,15 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       if (!history.open || loading || loaded) return;
       loading = true;
       const body = history.querySelector("[data-revision-body]");
-      updateFeedback(body, "正在加载版本历史…");
+      updateFeedback(body, "正在加载配置历史…");
       try {
         const path = `/configs/${encodeURIComponent(config.id)}/revisions?limit=50`;
         const revisions = await presetRead(workspace, path, () => api(path)).promise;
         if (!history.isConnected || !isCurrent()) return;
-        body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}</small></span></span>`).join("")}</nav>`;
+        body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>${esc(recordDate(revision.updated_at, date))}</b><strong>${esc(revision.name)}</strong><small>${revision.version === config.version ? "当前配置" : "历史记录"}</small></span></span>`).join("")}</nav>`;
         loaded = true;
       } catch (error) {
-        if (history.isConnected && isCurrent()) updateFeedback(body, `版本历史加载失败：${error.message}；重新展开可重试。`);
+        if (history.isConnected && isCurrent()) updateFeedback(body, `配置历史加载失败：${error.message}；重新展开可重试。`);
       } finally { loading = false; }
     };
     bindEvent(history, "toggle", loadHistory);

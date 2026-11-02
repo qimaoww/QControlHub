@@ -1,11 +1,17 @@
 import { bindDialogBackdrop } from "./popup.js";
+import { reconcileView } from "./refresh.js";
 import { createCertificateView } from "./certificate-view.js";
 import { certificateForm, certificateAccountForm } from "./certificate-forms.js";
 
 export function installCertificates(ctx) {
  const {api:requestAPI,state,esc,shell,notify,confirmAction}=ctx;
  // The shared transport accepts Fetch BodyInit, as do the existing pages.
- const api=(path,options={})=>requestAPI(path,{...options,...(options.body!==undefined?{body:JSON.stringify(options.body)}:{})});
+ const api=async(path,options={})=>{
+  const session=state.data,routeSignal=state.routeSignal;
+  const result=await requestAPI(path,{...options,...(options.body!==undefined?{body:JSON.stringify(options.body)}:{})});
+  if(session!==state.data||routeSignal?.aborted)throw new DOMException("页面已切换", "AbortError");
+  return result;
+ };
  const view=createCertificateView(ctx);
  let items=[],accounts=[],agents=[],httpGrants=[],httpNodes=[],managedSources=[],dialog=null,accountData=null;
  let certificateDraft=null,lastPageMarkup="",dialogReturnFocus=null;
@@ -40,7 +46,16 @@ export function installCertificates(ctx) {
   agents=httpNodes.map(node=>({id:node.id,name:node.name}));
   return true;
  }
- async function detail(id){const session=state.data,request=++modalRead;const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current()){modal(view.detail(data));dialog.dataset.certDetailId=id;}}
+ function renderDetail(data,id){
+  if(dialog?.dataset.certDetailId!==id){modal(view.detail(data));dialog.dataset.certDetailId=id;return;}
+  const content=dialog.querySelector("[data-cert-modal-content]");
+  const rendered=modalContent(view.detail(data));
+  dialog.querySelector("header h2").textContent=rendered.title;
+  if(content.innerHTML===rendered.body)return;
+  const fresh=content.cloneNode(false);fresh.innerHTML=rendered.body;
+  reconcileView(content,fresh);bind(content);
+ }
+ async function detail(id){const session=state.data,request=++modalRead;const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current())renderDetail(data,id);}
  async function share(id){const session=state.data,request=++modalRead;const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current())modal(view.sharing(data.certificate,data.grants,data.bindings));}
  async function create(source="acme",method="dns-api",replaceID="",saved={}){const request=++modalRead;if(!await resources(request))return;modal(certificateForm({esc,accounts,agents,httpGrants,httpNodes,source,method,replaceID}),saved);}
  function restore(form,saved){for(const [name,value]of Object.entries(saved)){const input=form?.elements.namedItem(name);if(!input||input.type==="file")continue;if(input.type==="checkbox")input.checked=value===true;else input.value=value;}}
@@ -55,15 +70,17 @@ export function installCertificates(ctx) {
  }
  async function sourcePage(){
   const session=state.data,request=++modalRead;const sources=await api("/certificate-managed-sources");if(request!==modalRead||session!==state.data||!current())return;managedSources=sources;
-  modal(`<h2>节点来源</h2><div class="settings-form"><p class="settings-hint">节点证书由原有方式续期，面板同步新版本。共享实例证书须位于本人实例目录。</p>${managedSources.map(s=>view.panel(esc(s.domain),view.terms([
+  modal(`<h2>节点来源</h2><div class="settings-form"><p class="settings-hint">节点证书由原有方式续期，面板同步更新。共享实例证书须位于本人实例目录。</p>${managedSources.map(s=>view.panel(esc(s.domain),view.terms([
    ["来源节点",esc(s.agent_name)], ["来源",s.source==="node"?"节点证书":"Caddy 自动续期"], ["实例",esc(s.engine)+(s.share_id?" · 共享实例":"")], ["状态",view.badge(s.status)], ["最近成功同步",s.last_synced?esc(ctx.date(s.last_synced)):"尚未同步"]
   ])+(s.error?`<p class="alert error notice-message" role="status">${esc(s.error)}</p>`:"")+`<div class="user-allocation-tools">${s.certificate_id?`<button class="button small" data-cert-detail="${esc(s.certificate_id)}">查看证书</button>`:""}${s.status==="available"?'<button class="button primary small" data-cert-source-action="enroll" data-source="'+esc(s.id)+'">接入证书管理</button>':s.status==="unsupported"?'<span class="settings-hint">升级节点 Agent 后重试</span>':s.status!=="deleted"?`<button class="button small" data-cert-source-action="${s.status==="paused"||s.status==="detached"?"resume":"pause"}" data-source="${esc(s.id)}">${s.status==="paused"||s.status==="detached"?"恢复同步":"暂停同步"}</button><button class="button small danger-button" data-cert-source-action="detach" data-source="${esc(s.id)}">解除来源关联</button>`:'<span class="settings-hint">已停止自动导入</span>'}</div>`)).join("")||'<p class="user-share-empty">暂无来源。请先部署含证书路径和 TLS 域名的配置。</p>'}<div class="user-allocation-tools"><button class="button small" data-cert-sources>重新检查状态</button></div></div>`);
  }
  async function submit(form,work){const button=form.querySelector('button:not([type="button"])');const error=form.querySelector("[data-cert-form-error]");if(button?.disabled)return;form.setAttribute("aria-busy","true");if(button)button.disabled=true;if(error){error.textContent="";error.hidden=true;}try{await work();if(!current())return;notify("操作已完成");}catch(e){if(error&&form.isConnected){error.textContent=e.message;error.hidden=false;error.tabIndex=-1;error.focus();}else if(current())notify(e.message,"error");}finally{if(button)button.disabled=false;form.removeAttribute("aria-busy");}}
  function bind(root){
+  const session=state.data,signal=state.routeSignal;
+  const active=()=>session===state.data&&!signal?.aborted&&current()&&root.isConnected;
   root.querySelectorAll("[data-cert-close]").forEach(b=>b.onclick=()=>close());
   root.querySelectorAll("[data-cert-sources]").forEach(b=>b.onclick=()=>sourcePage().catch(e=>notify(e.message,"error")));
-  root.querySelectorAll("[data-cert-source-action]").forEach(b=>b.onclick=async()=>{const action=b.dataset.certSourceAction;if(action==="enroll"&&!await confirmAction("接入后同步节点证书版本，原有 TLS 配置保持不变。","接入证书管理"))return;if(action==="detach"&&!await confirmAction("停止自动导入和版本同步？现有证书和绑定保留，可恢复同步。","解除来源关联"))return;b.disabled=true;try{await api(`/certificate-managed-sources/${b.dataset.source}`,{method:"PUT",body:{action}});await sourcePage()}catch(e){notify(e.message,"error");b.disabled=false}});
+  root.querySelectorAll("[data-cert-source-action]").forEach(b=>b.onclick=async()=>{const action=b.dataset.certSourceAction;if(action==="enroll"&&!await confirmAction("接入后同步节点证书，原有 TLS 配置保持不变。","接入证书管理"))return;if(action==="detach"&&!await confirmAction("停止自动导入和证书同步？现有证书和绑定保留，可恢复同步。","解除来源关联"))return;if(!active())return;b.disabled=true;try{await api(`/certificate-managed-sources/${b.dataset.source}`,{method:"PUT",body:{action}});await sourcePage()}catch(e){notify(e.message,"error");b.disabled=false}});
   root.querySelectorAll("[data-cert-create]").forEach(b=>b.onclick=()=>create().catch(e=>notify(e.message,"error")));
   root.querySelectorAll("[data-cert-accounts],[data-cert-open-accounts]").forEach(b=>b.onclick=()=>{if(b.hasAttribute("data-cert-open-accounts"))certificateDraft=read(b.closest("form"));accountsPage().catch(e=>notify(e.message,"error"))});
   root.querySelectorAll("[data-cert-return-draft]").forEach(b=>b.onclick=()=>create(certificateDraft.source,certificateDraft.method,"",certificateDraft));
@@ -74,9 +91,9 @@ export function installCertificates(ctx) {
   root.querySelectorAll("[data-cert-refresh]").forEach(b=>b.onclick=()=>page().catch(e=>notify(e.message,"error")));
   root.querySelectorAll("[data-cert-new-account]").forEach(b=>b.onclick=()=>accountForm());
   root.querySelectorAll("[data-cert-new-dns]").forEach(b=>b.onclick=()=>accountForm("dns"));
-  for(const [attribute,action]of [["certRenew","renew"],["certAuto","auto-renew"],["certDelete",""]])root.querySelectorAll(`[data-${attribute.replace(/[A-Z]/g,c=>"-"+c.toLowerCase())}]`).forEach(b=>b.onclick=async()=>{if(action===""&&!await confirmAction("删除此证书及其版本？","删除证书",{title:"删除证书？"}))return;b.disabled=true;try{const id=b.dataset[attribute];await api(`/certificates/${id}${action?"/"+action:""}`,{method:action===""?"DELETE":action==="auto-renew"?"PUT":"POST",...(action==="auto-renew"?{body:{enabled:b.dataset.enabled==="true"}}:{})});close();await page();if(action==="renew")await detail(id);}catch(e){notify(e.message,"error");b.disabled=false;}});
-  root.querySelectorAll("[data-cert-continue],[data-cert-cancel]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{const id=b.dataset.certContinue||b.dataset.certCancel;await api(`/certificates/${id}/orders/${b.dataset.order}${b.dataset.certContinue?"/continue":""}`,{method:b.dataset.certContinue?"POST":"DELETE"});await detail(id);}catch(e){notify(e.message,"error");b.disabled=false;}});
-  root.querySelectorAll("[data-cert-revoke]").forEach(b=>b.onclick=async()=>{if(!await confirmAction("撤销后停止分发和同步，现有部署保留。","撤销授权",{title:"撤销使用授权？"}))return;try{await api(`/certificates/${b.dataset.certRevoke}/grants`,{method:"DELETE",body:{username:b.dataset.username}});await share(b.dataset.certRevoke);}catch(e){notify(e.message,"error")}});
+  for(const [attribute,action]of [["certRenew","renew"],["certAuto","auto-renew"],["certDelete",""]])root.querySelectorAll(`[data-${attribute.replace(/[A-Z]/g,c=>"-"+c.toLowerCase())}]`).forEach(b=>b.onclick=async()=>{if(b.disabled)return;if(action===""&&!await confirmAction("删除此证书及其历史记录？","删除证书",{title:"删除证书？"}))return;if(!active())return;b.disabled=true;try{const id=b.dataset[attribute];await api(`/certificates/${id}${action?"/"+action:""}`,{method:action===""?"DELETE":action==="auto-renew"?"PUT":"POST",...(action==="auto-renew"?{body:{enabled:b.dataset.enabled==="true"}}:{})});close();await page();if(action==="renew")await detail(id);}catch(e){if(current()&&e.name!=="AbortError")notify(e.message,"error");}finally{b.disabled=false;}});
+  root.querySelectorAll("[data-cert-continue],[data-cert-cancel]").forEach(b=>b.onclick=async()=>{if(b.disabled||b.closest("[aria-busy=true]"))return;const container=b.closest("article");container?.setAttribute("aria-busy","true");container?.querySelectorAll("[data-cert-continue],[data-cert-cancel]").forEach(button=>button.disabled=true);modalRead++;try{const id=b.dataset.certContinue||b.dataset.certCancel;await api(`/certificates/${id}/orders/${b.dataset.order}${b.dataset.certContinue?"/continue":""}`,{method:b.dataset.certContinue?"POST":"DELETE"});await detail(id);}catch(e){if(current()&&e.name!=="AbortError")notify(e.message,"error");}finally{container?.removeAttribute("aria-busy");container?.querySelectorAll("[data-cert-continue],[data-cert-cancel]").forEach(button=>button.disabled=false);}});
+  root.querySelectorAll("[data-cert-revoke]").forEach(b=>b.onclick=async()=>{if(!await confirmAction("撤销后停止分发和同步，现有部署保留。","撤销授权",{title:"撤销使用授权？"}))return;if(!active())return;try{await api(`/certificates/${b.dataset.certRevoke}/grants`,{method:"DELETE",body:{username:b.dataset.username}});await share(b.dataset.certRevoke);}catch(e){notify(e.message,"error")}});
   const grant=root.querySelector("[data-cert-grant-form]");if(grant)grant.onsubmit=e=>{e.preventDefault();submit(grant,async()=>{await api(`/certificates/${grant.dataset.certGrantForm}/grants`,{method:"POST",body:read(grant)});await share(grant.dataset.certGrantForm)})};
   root.querySelectorAll("[data-cert-update-account]").forEach(b=>b.onclick=()=>{const a=accounts.find(a=>a.id===b.dataset.certUpdateAccount);accountForm("dns",a.provider,"",{name:a.name});const f=dialog.querySelector("form");f.dataset.update=a.id;f.elements.kind.disabled=true;f.elements.provider.disabled=true;dialog.querySelector("h2").textContent="更新 DNS 凭据";});
   root.querySelectorAll("[data-cert-check-account]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api(`/certificate-accounts/${b.dataset.certCheckAccount}/check`,{method:"POST"});notify("DNS 读取连接正常")}catch(e){notify(e.message,"error")}finally{b.disabled=false}});
@@ -105,7 +122,7 @@ export function installCertificates(ctx) {
   signal?.addEventListener("abort",dispose,{once:true});
   await page();
   if(signal?.aborted||session!==state.data||!current())return;
-  poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form"))return;const request=modalRead,id=dialog?.dataset.certDetailId;try{if(id){const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id){const content=dialog.querySelector("[data-cert-modal-content]");const scroll=content.scrollTop;const expanded=[...content.querySelectorAll("details")].map(d=>d.open);const rendered=modalContent(view.detail(data));dialog.querySelector("header h2").textContent=rendered.title;if(content.innerHTML===rendered.body)return;const focused=document.activeElement;const focusKey=focused?.getAttribute("data-cert-reload")||focused?.getAttribute("data-cert-copy");content.innerHTML=rendered.body;if(focusKey)[...content.querySelectorAll("button")].find(b=>b.dataset.certReload===focusKey||b.dataset.certCopy===focusKey)?.focus({preventScroll:true});content.querySelectorAll("details").forEach((d,i)=>d.open=expanded[i]||false);bind(content);content.scrollTop=scroll;}}else if(!dialog)await page(true)}catch(error){
+  poll=setInterval(async()=>{if(session!==state.data||!current()){dispose();return}if(document.hidden||dialog?.querySelector("form,[aria-busy=true]"))return;const request=modalRead,id=dialog?.dataset.certDetailId;try{if(id){const data=await api(`/certificates/${id}`);if(request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id){renderDetail(data,id);}}else if(!dialog)await page(true)}catch(error){
    if(id&&request===modalRead&&session===state.data&&current()&&dialog?.dataset.certDetailId===id&&[403,404].includes(error.status)){
     close();await page(true).catch(()=>{});
    }
