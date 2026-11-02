@@ -1,7 +1,7 @@
 import { redactDiagnostic } from "./errors.js";
 import { recordDate } from "./record-display.js";
 
-const stages = {preparing:"准备申请",continuing:"核对 DNS 验证记录",order_created:"订单已创建",challenges_ready:"验证记录已准备",dns_create_intent:"准备 DNS 记录",dns_created:"DNS 记录已创建",http_preflight:"检查 HTTP 入口",validating:"验证域名",finalizing:"签发证书"};
+const stages = {preparing:"准备申请",continuing:"核对 DNS 验证记录",order_created:"准备域名验证",challenges_ready:"核对验证记录",dns_create_intent:"准备 DNS 记录",dns_created:"核对 DNS 验证记录",http_preflight:"检查 HTTP 入口",validating:"验证域名",finalizing:"签发证书"};
 
 export function certificateOrderDiagnostic(value) {
   return redactDiagnostic(value)
