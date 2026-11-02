@@ -232,7 +232,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
     try {
       const fresh = await api(`${base}/workspace`, {method:"GET", signal:readController.signal});
       if (!active()) return;
-      if (!fresh.config || fresh.config.version !== saved.version) throw Error("配置版本已变化，请关闭弹窗并重新读取后再编辑");
+      if (!fresh.config || fresh.config.version !== saved.version) throw Error("配置已变化，请关闭弹窗并重新读取后再编辑");
       if (dirty()) throw Error("配置源码有未保存修改，请先保存");
       if (selectedInbound()?.tag !== inbound.tag || selectedInbound()?.port !== inbound.port) throw Error("所选入站已变化，请重新打开出站操作");
       const entries = outboundEntries(fresh.config.content).filter(entry => exit(entry, engine) && entry.tag);

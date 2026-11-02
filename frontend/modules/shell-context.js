@@ -1,3 +1,4 @@
+import { recordDate } from "./record-display.js";
 import { mergeTrafficPorts, trafficInUserScope } from "./traffic-model.js";
 import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
@@ -5,7 +6,7 @@ import { installedEngineCount } from "./agent-service-state.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
 import { settingsDirectoryMarkup } from "./settings-nav.js";
 
-export function createShellContext({ state, can, esc, engineName, ago, engines }) {
+export function createShellContext({ state, can, esc, engineName, date, ago, engines }) {
 function contextMarkup(title) {
   if (state.route === "client-connections") return clientConnectionSidebar({ state, esc, engineName });
   if (state.route === "ip-quality") {
@@ -70,7 +71,7 @@ function contextMarkup(title) {
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];
-    return `${can("configs.write") ? '<a class="context-primary" id="new-config" href="#new-config">＋ 新建配置档案</a>' : ""}<div class="context-section-label"><span>配置档案</span><b>${items.length}</b></div><nav class="context-list config-context-list">${items.map((item) => `<a class="${item.id === state.data.archiveConfigId ? "active" : ""}" href="#archive-config" data-archive-config="${esc(item.id)}"><span class="context-engine ${esc(item.engine)}">${esc(engineName(item.engine))}</span><span><strong>${esc(item.name)}</strong><small>v${item.version} · ${esc(ago(item.updated_at))}</small></span></a>`).join("") || "<p>还没有保存的配置</p>"}</nav><a class="context-primary" href="#live-config">节点实际配置</a>`;
+    return `${can("configs.write") ? '<a class="context-primary" id="new-config" href="#new-config">＋ 新建配置档案</a>' : ""}<div class="context-section-label"><span>配置档案</span><b>${items.length}</b></div><nav class="context-list config-context-list">${items.map((item) => `<a class="${item.id === state.data.archiveConfigId ? "active" : ""}" href="#archive-config" data-archive-config="${esc(item.id)}"><span class="context-engine ${esc(item.engine)}">${esc(engineName(item.engine))}</span><span><strong>${esc(item.name)}</strong><small>${esc(recordDate(item.updated_at, date))}</small></span></a>`).join("") || "<p>还没有保存的配置</p>"}</nav><a class="context-primary" href="#live-config">节点实际配置</a>`;
   }
   if (state.route === "tasks")
     return `<nav class="context-menu task-context-menu" aria-label="任务状态">${[

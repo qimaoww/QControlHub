@@ -17,11 +17,11 @@ assert.equal(sharedInstancePresentation(node({installed:false}), "xray").label, 
 assert.match(sharedInstancePresentation(node(), "xray").label, /尚未配置/);
 assert.equal(sharedInstancePresentation(node({}, {saved_version:1}), "xray").label, "待部署");
 const running = node({service_status:"active"}, {created:true, saved_config_id:"cfg_a", saved_version:2, deployed_config_id:"cfg_a", deployed_version:1});
-assert.equal(sharedInstancePresentation(running,"xray").version, "运行 v1 · v2 待部署");
+assert.equal(sharedInstancePresentation(running,"xray").version, "运行 · 有修改待部署");
 for (const [status,label] of [["inactive","已停止"],["unknown","状态未知"],["failed","启动失败"]]) {
   const state = sharedInstancePresentation(node({service_status:status},running.runtime.xray.instance),"xray");
   assert.equal(state.label,label);
-  assert.equal(state.version,"已部署 v1 · v2 待部署");
+  assert.equal(state.version,"已部署 · 有修改待部署");
 }
 assert.equal(sharedInstancePresentation({...running,status:"offline"},"xray").label,"离线 · 状态未知");
 const failed = structuredClone(running);
@@ -37,11 +37,11 @@ assert.equal(sharedConfigPresentation(node({installed:false}), "xray").label, "�
 assert.equal(sharedConfigPresentation(node(), "xray").label, "尚未配置");
 assert.equal(sharedConfigPresentation({can_manage:false, runtime:{xray:{installed:true}}}, "xray").label, "配置待核实");
 const configStates = [
-  [{saved_version:1, saved_config_id:"a"}, "v1 待部署"],
-  [{saved_version:1, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "已部署 v1"],
-  [{saved_version:2, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "v2 待部署"],
-  [{saved_version:1, saved_config_id:"b", deployed_version:1, deployed_config_id:"a"}, "v1 待部署"],
-  [{deployed_version:1, deployed_config_id:"a"}, "已部署 v1"],
+  [{saved_version:1, saved_config_id:"a"}, "待部署"],
+  [{saved_version:1, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "已部署"],
+  [{saved_version:2, saved_config_id:"a", deployed_version:1, deployed_config_id:"a"}, "待部署"],
+  [{saved_version:1, saved_config_id:"b", deployed_version:1, deployed_config_id:"a"}, "待部署"],
+  [{deployed_version:1, deployed_config_id:"a"}, "已部署"],
   [{deployed_version:1, config_uncertain:true}, "配置待核实"],
 ];
 for (const [instance, label] of configStates) {

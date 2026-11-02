@@ -98,8 +98,8 @@ export function renderGlobalFieldStudio({ fields, selected, value, config, catal
 export function renderConfigSourceStudio({ config, catalog, engineInstalled, open = false, ssRust = false }) {
   if (!config) return "";
   return `<details class="source-studio config-source-studio"${open ? " open" : ""}>
-    ${renderFieldSummary("完整源码", `${catalog.format === "YAML" ? "config.yaml" : "config.json"} · v${config.version}`)}
-    <div class="config-source-body"><p class="field-source-note">${ssRust ? "包含 servers 列表及未收录字段，保存可能同时影响多个端口。" : "编辑完整配置文件，保存将创建新版本。"}<a href="${esc(catalog.source)}" target="_blank" rel="noopener noreferrer">官方完整配置定义</a></p>
+    ${renderFieldSummary("完整源码", `${catalog.format === "YAML" ? "config.yaml" : "config.json"}`)}
+    <div class="config-source-body"><p class="field-source-note">${ssRust ? "包含 servers 列表及未收录字段，保存可能同时影响多个端口。" : "编辑完整配置文件，保存将留存新档案。"}<a href="${esc(catalog.source)}" target="_blank" rel="noopener noreferrer">官方完整配置定义</a></p>
     <form id="source-config-form"><div class="form-grid"><label>配置名称<input name="name" maxlength="100" required value="${esc(config.name)}"></label><label>说明<input name="description" maxlength="300" value="${esc(config.description)}"></label></div>
       <label class="field-value-label">${esc(catalog.format)} 配置源码<textarea name="content" spellcheck="false" required>${esc(config.content)}</textarea></label>
       <footer><div><button class="button" type="submit" data-source-intent="validate" ${engineInstalled ? "" : "disabled"}>保存源码并校验</button><button class="button primary" type="submit" data-source-intent="deploy" ${engineInstalled ? "" : "disabled"}>保存源码并部署</button></div></footer>

@@ -209,7 +209,7 @@ export async function testCommonConfigRuntime() {
     if (kind === "workspace") test.stale = true;
     else test.staleField = true;
     test.common("modify");
-    await waitFor(()=>document.querySelector("dialog")?.textContent.includes("配置版本已变化"), "common version conflict was not surfaced");
+    await waitFor(()=>document.querySelector("dialog")?.textContent.includes("配置已变化"), "common version conflict was not surfaced");
     assert(!form() && !test.writes.length, "common editor allows writes from a stale workspace/field read");
     test.dispose();
   }

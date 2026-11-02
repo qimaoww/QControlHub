@@ -28,11 +28,12 @@ type certificateChallengeState struct {
 	Record        certificates.DNSRecord    `json:"record"`
 }
 type certificateOrderState struct {
-	URL        string                      `json:"url"`
-	Key        string                      `json:"key"`
-	CSR        []byte                      `json:"csr"`
-	Challenges []certificateChallengeState `json:"challenges"`
-	Cleanup    bool                        `json:"cleanup"`
+	URL          string                      `json:"url"`
+	Key          string                      `json:"key"`
+	CSR          []byte                      `json:"csr"`
+	Challenges   []certificateChallengeState `json:"challenges"`
+	Cleanup      bool                        `json:"cleanup"`
+	FailureStage string                      `json:"failure_stage,omitempty"`
 }
 
 var errCertificateOrderInvalid = errors.New("ACME 订单已失效")
@@ -147,7 +148,7 @@ func (s *Store) CertificateOrders(ctx context.Context, id string) ([]core.Certif
 	if !item.Owned {
 		return []core.CertificateOrder{}, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,status,stage,error,attempt,created_at,updated_at,secret FROM certificate_orders WHERE certificate_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 50`, id, certificateActor(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT id,status,stage,error,attempt,created_at,updated_at,next_attempt,secret FROM certificate_orders WHERE certificate_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 50`, id, certificateActor(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +157,7 @@ func (s *Store) CertificateOrders(ctx context.Context, id string) ([]core.Certif
 	for rows.Next() {
 		order := core.CertificateOrder{CertificateID: id}
 		var secret string
-		if err := rows.Scan(&order.ID, &order.Status, &order.Stage, &order.Error, &order.Attempt, &order.CreatedAt, &order.UpdatedAt, &secret); err != nil {
+		if err := rows.Scan(&order.ID, &order.Status, &order.Stage, &order.Error, &order.Attempt, &order.CreatedAt, &order.UpdatedAt, &order.NextAttempt, &secret); err != nil {
 			return nil, err
 		}
 		var state certificateOrderState
@@ -164,6 +165,7 @@ func (s *Store) CertificateOrders(ctx context.Context, id string) ([]core.Certif
 			return nil, err
 		}
 		order.Challenges = []core.CertificateChallenge{}
+		order.FailureStage = state.FailureStage
 		for _, challenge := range state.Challenges {
 			order.Challenges = append(order.Challenges, challenge.Public)
 		}
@@ -185,7 +187,7 @@ func (s *Store) ContinueCertificateOrder(ctx context.Context, id, orderID string
 		status = "canceling"
 		valid = []string{"queued", "running", "waiting_dns", "validating", "failed"}
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status=$4,next_attempt=now(),updated_at=now() WHERE id=$1 AND certificate_id=$2 AND owner_id=$3 AND status=ANY($5::text[])`, orderID, id, certificateActor(ctx), status, valid)
+	tag, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status=$4,stage=CASE WHEN $4='canceling' THEN 'cleanup' ELSE 'continuing' END,error='',next_attempt=now(),updated_at=now() WHERE id=$1 AND certificate_id=$2 AND owner_id=$3 AND status=ANY($5::text[])`, orderID, id, certificateActor(ctx), status, valid)
 	if err != nil {
 		return err
 	}
@@ -337,7 +339,11 @@ func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certifica
 	if _, err := s.pool.Exec(ctx, `DELETE FROM certificate_http_challenges WHERE order_id=$1`, id); err != nil {
 		return err
 	}
-	if item.Method == "dns-api" {
+	needsDNS := false
+	for _, c := range state.Challenges {
+		needsDNS = needsDNS || c.CreatePending || c.Record.ID != ""
+	}
+	if item.Method == "dns-api" && needsDNS {
 		var credentials certificates.DNSCredentials
 		account, err := s.CertificateAccountSecret(ctx, item.DNSAccountID, "dns", &credentials)
 		if err != nil {
@@ -454,7 +460,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		if err := s.cleanupCertificateOrder(ctx, item, id, &state); err != nil {
 			return err
 		}
-		_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceled',stage='canceled',updated_at=now() WHERE id=$1`, id)
+		_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceled',stage='canceled',error='',updated_at=now() WHERE id=$1`, id)
 		return err
 	}
 	if err := certificateUserActive(ctx, s.pool, item.OwnerID); err != nil {
@@ -470,7 +476,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	var account certificates.ACMEAccount
 	accountMeta, err := s.CertificateAccountSecret(ctx, item.AccountID, "acme", &account)
 	if err != nil {
-		return err
+		return fmt.Errorf("读取 ACME 申请账号失败，请检查本人申请账号是否仍可用: %w", err)
 	}
 	client, err := certificates.Client(accountMeta.CA, account)
 	if err != nil {
@@ -551,15 +557,14 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	for _, challenge := range state.Challenges {
 		pending = pending || challenge.Public.Status != acme.StatusValid
 	}
-	if item.Method == "dns-manual" && pending && status != "queued" {
-		_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='waiting_dns',stage='waiting_dns',updated_at=now() WHERE id=$1 AND status<>'canceling'`, id)
-		return err
-	}
-	// A newly-created manual order stops before validation. Continue uses queued
-	// with persisted challenges and bypasses this first-visit condition.
-	if item.Method == "dns-manual" && pending && status == "queued" && !state.Cleanup {
+	// Newly prepared records wait for consent. Once continued, the durable
+	// stage lets a restarted running worker resume validation without asking
+	// the user to submit the same consent again.
+	if item.Method == "dns-manual" && pending {
 		var stage string
-		s.pool.QueryRow(ctx, `SELECT stage FROM certificate_orders WHERE id=$1`, id).Scan(&stage)
+		if err = s.pool.QueryRow(ctx, `SELECT stage FROM certificate_orders WHERE id=$1`, id).Scan(&stage); err != nil {
+			return err
+		}
 		if stage == "challenges_ready" {
 			_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='waiting_dns',stage='waiting_dns',updated_at=now() WHERE id=$1 AND status<>'canceling'`, id)
 			return err
@@ -569,7 +574,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		var credentials certificates.DNSCredentials
 		meta, err := s.CertificateAccountSecret(ctx, item.DNSAccountID, "dns", &credentials)
 		if err != nil {
-			return err
+			return fmt.Errorf("读取 DNS 账号失败，请检查本人 DNS 账号是否仍可用: %w", err)
 		}
 		dns := certificates.DNSClient{Provider: meta.Provider, Credentials: credentials, HTTP: s.certificateDNSHTTP}
 		for i := range state.Challenges {
@@ -771,7 +776,18 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
-	return s.cleanupCertificateOrder(ctx, item, id, &state)
+	return s.finishCertificateOrderCleanup(ctx, item, id, &state)
+}
+
+// Issuance and cleanup have independent outcomes. Keep failed issuance details
+// while retrying cleanup; never report a successful issuance as failed.
+func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Certificate, id string, state *certificateOrderState) error {
+	if err := s.cleanupCertificateOrder(ctx, item, id, state); err != nil {
+		_, updateErr := s.pool.Exec(ctx, `UPDATE certificate_orders SET error=CASE WHEN status='failed' THEN error ELSE '验证资源清理失败，将重试' END,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1`, id)
+		return updateErr
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET stage='complete',error=CASE WHEN status='failed' THEN error ELSE '' END,updated_at=now() WHERE id=$1`, id)
+	return err
 }
 
 func (s *Store) certificateTXTResolver() *net.Resolver {

@@ -63,7 +63,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         const stillDirty = draft.revision !== savingRevision;
         draft.dirty = stillDirty;
         saveButton.disabled = !stillDirty;
-        updateFeedback(stateBadge, stillDirty ? "已保存 · 仍有未保存更改" : `已保存 · v${saved.revision}`);
+        updateFeedback(stateBadge, stillDirty ? "已保存 · 仍有未保存更改" : "已保存");
         stateBadge.classList.toggle("dirty", stillDirty);
         notify("设置已保存");
       } catch (error) {

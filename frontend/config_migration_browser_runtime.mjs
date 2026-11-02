@@ -26,7 +26,8 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
   }
   const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",
     liveSources:options.readFromAgent ? {} : {[sourceKey]:{content,agentContent:content}}}};
-  let saved = {id:"config",version:1,name:"fixture",content};
+  const savedDate = version => `2026-11-02T04:05:${String(version).padStart(2,"0")}Z`;
+  let saved = {id:"config",version:1,name:"fixture",content,updated_at:savedDate(1)};
   const test = {writes:[],tasks:[],reads:[],confirmations:[],notifications:[],accept:false,
     snapshotReads:0, taskPolls:0, missingSnapshots:options.missingSnapshots || 0, snapshotGate:options.snapshotGate};
   const api = async (path, options = {}) => {
@@ -39,7 +40,7 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
       const input = JSON.parse(options.body); test.writes.push(input);
       if (test.saveGate) await test.saveGate;
       if (test.saveError) throw test.saveError;
-      saved = {...input,id:"config",version:saved.version+1}; return saved;
+      saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)}; return saved;
     }
     if (options.method === "POST" && path === "/tasks") {
       const input = JSON.parse(options.body);
@@ -232,7 +233,9 @@ async function testSourceSaveRuntime() {
     assert(test.state.data.liveEngine === engine && test.state.data.liveConfigSource === "managed", "pending source save allowed target switching");
     assert(test.writes.length === 1 && !test.tasks.length, "source save submitted twice or created a task before persistence");
     release();
-    await waitFor(()=>document.querySelector(".live-config-version")?.textContent === "配置 v2", "source save did not load its saved revision");
+    await waitFor(()=>test.saved().version === 2 &&
+      document.querySelector(".live-config-version")?.textContent === `已保存 · ${test.saved().updated_at}` &&
+      !document.querySelector("[data-live-intent]").disabled, "source save did not load its persisted save date");
     assert(test.writes.length === 1 && test.tasks.length === 1 && test.tasks[0].expected_config_version === 2, "source save lost exact-once revision/task submission");
     assert(!document.querySelector("[data-live-intent]").disabled, "source save did not unlock fresh controls");
     test.dispose();
@@ -259,7 +262,7 @@ async function testSourceSaveRuntime() {
       await waitFor(()=>test.tasks.length === 1, "correctable source failure could not retry");
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
     } else {
-      assert(document.querySelector("[data-live-save-status]").textContent.includes("配置 v2 已保存"), "partial source success misreported durable configuration as unsaved");
+      assert(document.querySelector("[data-live-save-status]").textContent.includes("配置已保存"), "partial source success misreported durable configuration as unsaved");
       assert(button.disabled, "partial source success allows uncertain resubmission");
       form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
       assert(test.writes.length === 1 && test.tasks.length === 1, "partial source failure repeated a committed mutation");

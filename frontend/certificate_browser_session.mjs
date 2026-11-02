@@ -132,6 +132,68 @@ try {
   await wait(a,"!!document.querySelector('[data-cert-share]')");
   const cert=(await api(a,alice,'GET','/certificates')).items[0];assert.equal(cert.version,1);assert.equal(cert.owner_id,alice.user_id);
   await api(b,bob,'GET',`/certificates/${cert.id}`,undefined,404);
+  // Clearly isolated presentation fixtures. Authorized reads still hit the real
+  // API; only this page's returned order view is substituted. No database order,
+  // CA request or credential is fabricated or sent to a public service.
+  await evaluate(a,`(() => {
+    const original=window.fetch.bind(window);
+    window.certificateOrderFixture={original,requests:0,order:{id:'synthetic-order',status:'queued',stage:'queued',attempt:0,created_at:'2026-11-02T04:05:06Z',challenges:[]}};
+    window.fetch=async(input,options={})=>{
+      const fixture=window.certificateOrderFixture;
+      const path=String(input);
+      if(path.endsWith('/orders/synthetic-order/continue')){
+        fixture.requests++;
+        return new Promise(resolve=>fixture.release=()=>resolve(new Response(JSON.stringify({error:'fixture validation interrupted'}),{status:409,headers:{'Content-Type':'application/json'}})));
+      }
+      const response=await original(input,options);
+      if(path.endsWith('/certificates/${cert.id}')&&(!options.method||options.method==='GET')&&response.ok){
+        const body=await response.json();
+        body.certificate.source='acme';body.certificate.method='dns-manual';body.orders=[structuredClone(fixture.order)];
+        return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+      }
+      return response;
+    };
+  })()`);
+  const detailText=()=>evaluate(a,"document.querySelector('.cert-dialog').textContent");
+  const refreshOrder=async patch=>{await evaluate(a,`Object.assign(window.certificateOrderFixture.order,${JSON.stringify(patch)})`);await click(a,'[data-cert-reload]');};
+  await refreshOrder({});await wait(a,"document.querySelector('.cert-dialog').textContent.includes('尚未执行')");
+  assert.doesNotMatch(await detailText(),/第 0 次|v1/);
+  await evaluate(a,"(() => {document.querySelector('[data-cert-reload]').focus();const content=document.querySelector('[data-cert-modal-content]');content.scrollTop=100;window.certificateScroll=content.scrollTop;window.certificateOrderFixture.order.status='running';window.certificateOrderFixture.order.stage='preparing';window.certificateOrderFixture.order.attempt=1;})()");
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('首次执行中')");
+  assert.equal(await evaluate(a,"document.activeElement.hasAttribute('data-cert-reload')"),true,'poll lost keyboard focus');
+  assert.equal(await evaluate(a,"document.querySelector('[data-cert-modal-content]').scrollTop"),await evaluate(a,"window.certificateScroll"),'poll lost scroll');
+  await refreshOrder({status:'waiting_dns',stage:'waiting_dns',challenges:[{type:'dns-01',domain:'example.test',name:'_acme-challenge.example.test',value:'synthetic-txt-value',status:'pending'}]});
+  await wait(a,"!!document.querySelector('[data-cert-continue]')");
+  assert.match(await detailText(),/等待人工 DNS 操作/);
+  assert.match(await detailText(),/_acme-challenge.example.test/);
+  await evaluate(a,"document.querySelector('[data-cert-continue]').click();document.querySelector('[data-cert-continue]').click()");
+  assert.equal(await evaluate(a,"window.certificateOrderFixture.requests"),1);
+  assert.equal(await evaluate(a,"document.querySelector('[data-cert-cancel]').disabled"),true);
+  await evaluate(a,"window.certificateOrderFixture.release()");
+  await wait(a,"!document.querySelector('[data-cert-continue]').disabled");
+  assert.match(await detailText(),/synthetic-txt-value/);
+  await refreshOrder({status:'queued',stage:'retry',attempt:2,error:'not found',next_attempt:'2026-11-02T04:06:06Z'});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('等待自动重试')");
+  assert.match(await detailText(),/已执行 2 次.*后台将自动继续申请/s);
+  assert.match(await detailText(),/暂无法确认具体资源或原因/);
+  for(const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[1920,1080,2],[1280,800,1],[1024,768,1],[768,1024,1],[390,844,1],[844,390,1],[320,568,1]]){
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:dpr,mobile:width<768},a);
+    await delay(50);
+    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && document.querySelector('.cert-dialog').getBoundingClientRect().right<=innerWidth+1"),true,'order detail overflow at '+width+'x'+height+' DPR '+dpr);
+  }
+  for(const status of ['succeeded','canceled']){
+    await refreshOrder({status,stage:'complete'});
+    await wait(a,`!document.querySelector('.cert-dialog').textContent.includes('暂无法确认具体资源或原因')`);
+    assert.doesNotMatch(await detailText(),/后台将自动继续申请|not found/);
+  }
+  await refreshOrder({status:'succeeded',stage:'cleanup',error:'验证资源清理失败，将重试'});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('验证资源待清理')");
+  assert.match(await detailText(),/签发成功/);
+  await evaluate(a,"window.fetch=window.certificateOrderFixture.original;delete window.certificateOrderFixture");
+  await click(a,'[data-cert-reload]');await wait(a,"!document.querySelector('.cert-dialog').textContent.includes('验证资源待清理')");
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},a);
+  record(mode+': synthetic order presentation: live polling/focus/scroll, DNS continuation single submit and recovery, retries, terminal cleanup, dates and 9 CSS viewport/DPR combinations passed');
+
   await click(a,'[data-cert-share]');await wait(a,"!!document.querySelector('[data-cert-grant-form]')");await set(a,'[name=username]','bob');await evaluate(a,"document.querySelector('[data-cert-grant-form]').requestSubmit()");await wait(a,"!!document.querySelector('[data-cert-revoke]')");
   await open(b);await wait(b,`!!document.querySelector('[data-cert-detail="${cert.id}"]')`);
   assert.equal((await api(b,bob,'GET','/certificates')).items[0].owned,false);

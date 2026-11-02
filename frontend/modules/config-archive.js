@@ -1,3 +1,4 @@
+import { recordDate } from "./record-display.js";
 import { bindEvent } from "./refresh.js";
 import { archiveDraftDirty, bindArchiveDraft, createArchiveDraft } from "./archive-drafts.js";
 
@@ -11,6 +12,7 @@ async function archiveConfigs() {
   if (draftData === sessionData) captureDrafts();
   else captureDrafts = () => {};
   draftData = sessionData;
+  const pending = sessionData.archivePending ||= new Set();
   const drafts = sessionData.archiveDrafts ||= { configs: new Map(), template: createArchiveDraft() };
   const request = ++archiveConfigRequest;
   const isCurrent = () => request === archiveConfigRequest && state.data === sessionData && state.route === "archive-config";
@@ -33,6 +35,7 @@ async function archiveConfigs() {
     version: 0,
   };
   const draftKey = savedConfig.id || "new";
+  const sameTarget = () => state.data === sessionData && state.route === "archive-config" && state.data.archiveConfigId === savedConfig.id;
   state.data.archiveConfigId = savedConfig.id;
   const revisions = savedConfig.id
     ? await api(
@@ -87,13 +90,13 @@ async function archiveConfigs() {
       .join("") ||
     '<p class="template-empty">暂无模板</p>';
   const revisionTimeline = formConfig.id
-    ? `<details class="revision-timeline" ${preview ? "open" : ""}><summary><b>版本历史</b><strong>${revisions.length} 个版本</strong></summary><div class="timeline-body"><nav aria-label="配置修订历史">${revisions.map((revision) => `<button class="${preview?.version === revision.version ? "active" : ""} ${revision.version === formConfig.version ? "current" : ""}" type="button" data-revision="${revision.version}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}${revision.version === formConfig.version ? " · 当前" : ""}</small></span></button>`).join("")}</nav>${preview ? `<section class="timeline-preview"><header><div><b>v${preview.version} · ${esc(preview.name)}</b><small>${esc(engineName(preview.engine))} · ${date(preview.updated_at)}</small></div>${preview.version === formConfig.version ? '<span class="status-label ok">当前版本</span>' : ""}</header><textarea readonly>${esc(preview.content)}</textarea>${can("configs.restore") && preview.version !== formConfig.version ? `<button class="button" type="button" data-restore-revision="${preview.version}">以此版本创建新版本</button>` : ""}</section>` : '<div class="timeline-placeholder">选择版本</div>'}</div></details>`
+    ? `<details class="revision-timeline" ${preview ? "open" : ""}><summary><b>配置历史</b><strong>${revisions.length} 份记录</strong></summary><div class="timeline-body"><nav aria-label="配置保存历史">${revisions.map((revision) => `<button class="${preview?.version === revision.version ? "active" : ""} ${revision.version === formConfig.version ? "current" : ""}" type="button" data-revision="${revision.version}"><i></i><span><b>${esc(recordDate(revision.updated_at, date))}</b><strong>${esc(revision.name)}</strong><small>历史存档${revision.version === formConfig.version ? " · 当前" : ""}</small></span></button>`).join("")}</nav>${preview ? `<section class="timeline-preview"><header><div><b>${esc(preview.name)}</b><small>${esc(engineName(preview.engine))} · ${esc(recordDate(preview.updated_at, date))}</small></div>${preview.version === formConfig.version ? '<span class="status-label ok">当前配置</span>' : ""}</header><textarea readonly>${esc(preview.content)}</textarea>${can("configs.restore") && preview.version !== formConfig.version ? `<button class="button" type="button" data-restore-revision="${preview.version}">恢复此档案</button>` : ""}</section>` : '<div class="timeline-placeholder">选择历史记录</div>'}</div></details>`
     : "";
   const delivery = formConfig.id
     ? `<section class="delivery-bar"><div><span class="delivery-icon"><svg viewBox="0 0 24 24"><path d="M13 2.5 5.5 13H11l-1 8.5L18.5 11H13z"/></svg></span><h3>校验或部署</h3></div><form id="archive-delivery"><label>目标节点<select name="agent_id" required><option value="">${deployAgents.length ? `选择在线且已安装 ${esc(engineName(formConfig.engine))} 的节点` : `没有在线且已安装 ${esc(engineName(formConfig.engine))} 的节点`}</option>${deployAgents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)} · 在线 · 已安装</option>`).join("")}</select></label><label>执行方式<select name="action"><option value="validate">仅校验，不写入</option><option value="deploy">部署并重启</option></select></label><button class="button primary" type="submit" ${!deployAgents.length || !can("tasks.execute") ? "disabled" : ""}>提交任务</button></form></section>`
     : "";
   shell(
-    `<article class="config-workspace"><header class="editor-toolbar"><h2>${esc(formConfig.name)}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(formConfig.engine)}">${esc(engineName(formConfig.engine))}</span><b>${isNew ? "草稿" : `v${formConfig.version}`}</b></div></header><form class="config-editor-grid" id="archive-form" data-profile-editor data-new-config="${isNew ? 1 : 0}" data-engine="${esc(formConfig.engine)}"><section class="code-workspace" data-code-editor data-code-language="${formConfig.engine === "mihomo" ? "YAML" : "JSON"}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${formConfig.engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${formConfig.engine === "mihomo" ? "YAML" : "JSON"}</span><span data-code-status aria-live="polite">${isNew ? "草稿" : "已保存"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(formConfig.engine))} 配置档案源码" spellcheck="false" required ${can("configs.write") ? "" : "readonly"}>${esc(formConfig.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset data-archive-reset disabled>恢复原文</button>${can("configs.write") ? `<button class="button code-format" type="button" data-code-format>格式化配置</button><button class="button primary" type="submit">${isNew ? "创建配置档案" : "保存新版本"}</button>` : ""}</div></footer></section><aside class="config-inspector"><header><h3>属性</h3></header><label>名称<input name="name" maxlength="100" required value="${esc(formConfig.name)}" ${can("configs.write") ? "" : "readonly"}></label><label>内核<select name="engine" ${isNew && can("configs.write") ? "" : "disabled"}>${engines.map((engine) => `<option value="${engine}" ${engine === formConfig.engine ? "selected" : ""}>${esc(engineName(engine))} · ${engine === "mihomo" ? "YAML" : "JSON"}</option>`).join("")}</select></label><label>说明<textarea class="description-input" name="description" maxlength="300" placeholder="填写用途、节点或变更说明" ${can("configs.write") ? "" : "readonly"}>${esc(formConfig.description || "")}</textarea></label></aside></form>${delivery}${revisionTimeline}${can("configs.delete") && formConfig.id ? '<footer class="config-danger"><span><b>删除配置档案</b><small>相关任务记录会保留，配置档案删除后无法恢复。</small></span><button type="button" data-remove="' + esc(formConfig.id) + '">删除配置</button></footer>' : ""}</article><section class="template-workspace" id="templates"><header class="template-head"><h3>配置模板</h3><span>用 {{node_name}}、{{node_id}}、{{lan_ip}}、{{random_port}} 占位符，按节点批量生成配置。</span></header>${can("templates.write") ? '<details class="template-create" ' + (!templates.length ? "open" : "") + '><summary><b>＋ 新建模板</b></summary><form id="template-form"><label>模板名称<input name="name" maxlength="100" required></label><label>内核<select name="engine">' + engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("") + '</select></label><label class="template-content-field">模板正文<textarea name="content" spellcheck="false" required></textarea></label><button class="button primary" type="submit">保存模板</button></form></details>' : ""}<div class="template-grid">${templateCards}</div></section>`,
+    `<article class="config-workspace"><header class="editor-toolbar"><h2>${esc(formConfig.name)}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(formConfig.engine)}">${esc(engineName(formConfig.engine))}</span><b>${isNew ? "草稿" : esc(recordDate(savedConfig.updated_at, date))}</b></div></header><form class="config-editor-grid" id="archive-form" data-profile-editor data-new-config="${isNew ? 1 : 0}" data-engine="${esc(formConfig.engine)}"><section class="code-workspace" data-code-editor data-code-language="${formConfig.engine === "mihomo" ? "YAML" : "JSON"}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${formConfig.engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${formConfig.engine === "mihomo" ? "YAML" : "JSON"}</span><span data-code-status aria-live="polite">${isNew ? "草稿" : "已保存"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(formConfig.engine))} 配置档案源码" spellcheck="false" required ${can("configs.write") ? "" : "readonly"}>${esc(formConfig.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset data-archive-reset disabled>恢复原文</button>${can("configs.write") ? `<button class="button code-format" type="button" data-code-format>格式化配置</button><button class="button primary" type="submit">${isNew ? "创建配置档案" : "保存并留档"}</button>` : ""}</div></footer></section><aside class="config-inspector"><header><h3>属性</h3></header><label>名称<input name="name" maxlength="100" required value="${esc(formConfig.name)}" ${can("configs.write") ? "" : "readonly"}></label><label>内核<select name="engine" ${isNew && can("configs.write") ? "" : "disabled"}>${engines.map((engine) => `<option value="${engine}" ${engine === formConfig.engine ? "selected" : ""}>${esc(engineName(engine))} · ${engine === "mihomo" ? "YAML" : "JSON"}</option>`).join("")}</select></label><label>说明<textarea class="description-input" name="description" maxlength="300" placeholder="填写用途、节点或变更说明" ${can("configs.write") ? "" : "readonly"}>${esc(formConfig.description || "")}</textarea></label></aside></form>${delivery}${revisionTimeline}${can("configs.delete") && formConfig.id ? '<footer class="config-danger"><span><b>删除配置档案</b><small>相关任务记录会保留，配置档案删除后无法恢复。</small></span><button type="button" data-remove="' + esc(formConfig.id) + '">删除配置</button></footer>' : ""}</article><section class="template-workspace" id="templates"><header class="template-head"><h3>配置模板</h3><span>用 {{node_name}}、{{node_id}}、{{lan_ip}}、{{random_port}} 占位符，按节点批量生成配置。</span></header>${can("templates.write") ? '<details class="template-create" ' + (!templates.length ? "open" : "") + '><summary><b>＋ 新建模板</b></summary><form id="template-form"><label>模板名称<input name="name" maxlength="100" required></label><label>内核<select name="engine">' + engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("") + '</select></label><label class="template-content-field">模板正文<textarea name="content" spellcheck="false" required></textarea></label><button class="button primary" type="submit">保存模板</button></form></details>' : ""}<div class="template-grid">${templateCards}</div></section>`,
     "配置档案",
     {
       viewKey: `archive-config-${formConfig.id || "new"}-${state.data.revisionVersion || "current"}`,
@@ -122,6 +125,7 @@ async function archiveConfigs() {
   bindCodeEditors();
   bindEvent(document.querySelector("#archive-form"), "submit", async (event) => {
       event.preventDefault();
+      if (pending.has(draftKey) || !sameTarget()) return;
       if (!can("configs.write") || archiveForm.querySelector("[data-code-editor]")?.dataset.codeValid === "0") return;
       captureConfig();
       const form = new FormData(event.currentTarget);
@@ -132,6 +136,8 @@ async function archiveConfigs() {
         content: form.get("content"),
         version: formConfig.version,
       };
+      pending.add(draftKey);
+      archiveForm.setAttribute("aria-busy", "true");
       try {
         const saved = await api(
           formConfig.id
@@ -142,7 +148,7 @@ async function archiveConfigs() {
             body: JSON.stringify(payload),
           },
         );
-        if (state.data !== sessionData) return;
+        if (!sameTarget()) return;
         captureDrafts();
         const currentDraft = drafts.configs.get(draftKey) || formConfig;
         // Keep edits made during a save as a draft of the returned version.
@@ -161,7 +167,10 @@ async function archiveConfigs() {
         state.data.archiveConfigId = saved.id;
         await archiveConfigs();
       } catch (error) {
-        notify(error.message, "error");
+        if (sameTarget()) notify(error.message, "error");
+      } finally {
+        pending.delete(draftKey);
+        archiveForm.removeAttribute("aria-busy");
       }
   });
   bindEvent(document.querySelector("#archive-delivery"), "submit", async (event) => {
@@ -175,6 +184,7 @@ async function archiveConfigs() {
         ))
       )
         return;
+      if (!sameTarget()) return;
       await submitTask({
         agent_id: form.get("agent_id"),
         engine: formConfig.engine,
@@ -182,7 +192,7 @@ async function archiveConfigs() {
         config_id: formConfig.id,
         expected_config_version: formConfig.version,
       });
-      location.hash = "#tasks";
+      if (sameTarget()) location.hash = "#tasks";
   });
   document.querySelectorAll("[data-revision]").forEach(
     (button) =>
@@ -192,23 +202,32 @@ async function archiveConfigs() {
       }),
   );
   bindEvent(document.querySelector("[data-restore-revision]"), "click", async (event) => {
-      const version = event.currentTarget.dataset.restoreRevision;
+      const button = event.currentTarget;
+      const version = button.dataset.restoreRevision;
       if (!(await confirmAction(
-        `确定以 v${version} 的内容创建新版本？`,
-        "创建新版本",
+        `确定恢复 ${recordDate(preview?.updated_at, date)} 的配置？将按本次保存时间新增档案。`,
+        "恢复配置",
       )))
         return;
-      await api(
-        `/configs/${encodeURIComponent(formConfig.id)}/revisions/${version}/restore`,
-        {
-          method: "POST",
-          body: JSON.stringify({ expected_version: formConfig.version }),
-        },
-      );
-      state.data.revisionVersion = 0;
-      drafts.configs.delete(draftKey);
-      captureDrafts = captureTemplate;
-      await archiveConfigs();
+      if (!sameTarget() || state.data.revisionVersion !== Number(version) || pending.has(draftKey)) return;
+      pending.add(draftKey);
+      button.disabled = true;
+      try {
+        await api(
+          `/configs/${encodeURIComponent(formConfig.id)}/revisions/${version}/restore`,
+          { method: "POST", body: JSON.stringify({ expected_version: formConfig.version }) },
+        );
+        if (!sameTarget()) return;
+        state.data.revisionVersion = 0;
+        drafts.configs.delete(draftKey);
+        captureDrafts = captureTemplate;
+        await archiveConfigs();
+      } catch (error) {
+        if (sameTarget()) notify(error.message, "error");
+      } finally {
+        pending.delete(draftKey);
+        button.disabled = false;
+      }
   });
   document.querySelectorAll("[data-remove]").forEach(
     (button) =>

@@ -37,6 +37,7 @@ type Certificate struct {
 	Error          string     `json:"error,omitempty"`
 	Owned          bool       `json:"owned"`
 	CreatedAt      time.Time  `json:"created_at"`
+	SavedAt        *time.Time `json:"saved_at,omitempty"`
 	NextAttempt    time.Time  `json:"next_attempt"`
 }
 type CertificateAccount struct {
@@ -54,19 +55,20 @@ type CertificateGrant struct {
 	CertificateID string `json:"certificate_id"`
 }
 type CertificateBinding struct {
-	AgentName     string `json:"agent_name,omitempty"`
-	ConfigName    string `json:"config_name,omitempty"`
-	Username      string `json:"username,omitempty"`
-	CertificateID string `json:"certificate_id"`
-	ConfigID      string `json:"config_id"`
-	AgentID       string `json:"agent_id"`
-	OwnerID       string `json:"owner_id"`
-	Engine        Engine `json:"engine"`
-	Version       int    `json:"version"`
-	TaskID        string `json:"task_id,omitempty"`
-	Status        string `json:"status"`
-	Error         string `json:"error,omitempty"`
-	Authorized    bool   `json:"authorized"`
+	AgentName     string     `json:"agent_name,omitempty"`
+	ConfigName    string     `json:"config_name,omitempty"`
+	Username      string     `json:"username,omitempty"`
+	CertificateID string     `json:"certificate_id"`
+	ConfigID      string     `json:"config_id"`
+	AgentID       string     `json:"agent_id"`
+	OwnerID       string     `json:"owner_id"`
+	Engine        Engine     `json:"engine"`
+	Version       int        `json:"version"`
+	TaskID        string     `json:"task_id,omitempty"`
+	Status        string     `json:"status"`
+	Error         string     `json:"error,omitempty"`
+	Authorized    bool       `json:"authorized"`
+	SavedAt       *time.Time `json:"saved_at,omitempty"`
 }
 type CertificateChallenge struct {
 	Domain   string `json:"domain"`
@@ -84,11 +86,13 @@ type CertificateOrder struct {
 	CertificateID string                 `json:"certificate_id"`
 	Status        string                 `json:"status"`
 	Stage         string                 `json:"stage"`
+	FailureStage  string                 `json:"failure_stage,omitempty"`
 	Error         string                 `json:"error,omitempty"`
 	Challenges    []CertificateChallenge `json:"challenges"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 	Attempt       int                    `json:"attempt"`
+	NextAttempt   *time.Time             `json:"next_attempt,omitempty"`
 }
 
 // Only the authenticated Agent execution channel receives this model.

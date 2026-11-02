@@ -64,21 +64,21 @@ const taskCards = (task, permissions = ["tasks.execute", "configs.write"]) => cr
 }).renderTaskCards([task], [], new Set());
 for (const config_version of [undefined, null, 0]) {
   const html = taskCards({ ...taskFixture, config_version });
-  assert.match(html, /版本未知/);
-  assert.match(html, /缺少配置版本/);
+  assert.match(html, /历史关联缺失/);
+  assert.match(html, /缺少配置历史关联/);
   assert.doesNotMatch(html, /data-retry=|vundefined|vnull|· v0/);
   assert.match(html, /data-edit-retry="historical-task"/);
 }
 const versioned = taskCards({ ...taskFixture, config_version: 3 });
-assert.match(versioned, /重试配置 v3/);
+assert.match(versioned, /重试配置/);
 assert.match(versioned, /data-retry-version="3"/);
-assert.doesNotMatch(versioned, /缺少配置版本|版本未知/);
+assert.doesNotMatch(versioned, /缺少配置历史关联|历史关联缺失/);
 const statusTask = taskCards({ ...taskFixture, action: "status", config_id: "" });
 assert.match(statusTask, /data-retry="historical-task"/);
 assert.match(statusTask, /重试任务/);
-assert.doesNotMatch(statusTask, /缺少配置版本|版本未知/);
+assert.doesNotMatch(statusTask, /缺少配置历史关联|历史关联缺失/);
 assert.doesNotMatch(taskCards(taskFixture, []), /data-retry=|data-edit-retry=/);
 const failedLegacy = taskCards({ ...taskFixture, status: "failed", error: "Caddy rollback failed" });
-assert.match(failedLegacy, /缺少配置版本/);
+assert.match(failedLegacy, /缺少配置历史关联/);
 assert.match(failedLegacy, /回滚失败：需检查节点最终服务与路由状态/);
 console.log("Task retry rendering handles omitted historical revisions and operation permissions");

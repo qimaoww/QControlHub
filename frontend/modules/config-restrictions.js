@@ -100,7 +100,7 @@ export async function bindConfigRestrictions(ctx) {
       const entry = entries.find(item => item.agent_id === agent.id && item.engine === engine &&
         item.tag === chosen.tag && item.port === chosen.port);
       if (!entry || !saved?.version || entry.config_version !== saved.version) {
-        notify("入站或配置版本已变化，请重新读取并保存配置后再设置限制。", "error"); return;
+        notify("入站或配置已变化，请重新读取并保存配置后再设置限制。", "error"); return;
       }
       access.open(entry, { trigger: button, isCurrent: current, onSaved: result => onSaved(result, chosen) });
     } catch (error) {

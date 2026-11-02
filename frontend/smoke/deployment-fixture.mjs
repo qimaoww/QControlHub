@@ -120,7 +120,7 @@ export function createDeploymentFixture() {
         return typeof h === "function" ? h(options, path) : h;
       },
       optionalAPI: async () => null,
-      can: () => true, esc: (v) => String(v ?? ""),
+      can: () => true, esc: (v) => String(v ?? ""), date: String,
       engineName: (v) => v, conciseVersion: (_e, v) => v,
       notify: noopFn, confirmAction: async () => true,
       shell: (m) => { markup = m; },

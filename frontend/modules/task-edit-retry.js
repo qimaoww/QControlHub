@@ -1,13 +1,14 @@
+import { recordDate } from "./record-display.js";
 import { bindDialogBackdrop, closeRetiringDialog } from "./popup.js";
 import { diagnosticError } from "./errors.js";
 import { bindCodeEditors } from "./code-editor.js";
 
 export async function openTaskEditRetry(ctx, id, refresh, trigger) {
-  const { api, state, esc, notify, confirmAction } = ctx;
+  const { api, state, esc, date, notify, confirmAction } = ctx;
   const dialog = document.createElement("dialog");
   dialog.className = "config-inbound-dialog task-retry-dialog";
   dialog.setAttribute("aria-labelledby", "task-edit-retry-title");
-  dialog.innerHTML = `<header class="config-inbound-heading"><div><h2 id="task-edit-retry-title">编辑后重试</h2><p>修改原任务关联配置，保存新版本后重新执行。</p></div><button type="button" class="config-access-close" aria-label="关闭弹窗" data-close>×</button></header><div class="config-inbound-body" data-body><p role="status">正在读取当前配置…</p></div>`;
+  dialog.innerHTML = `<header class="config-inbound-heading"><div><h2 id="task-edit-retry-title">编辑后重试</h2><p>修改原任务关联配置，保存并留档后重新执行。</p></div><button type="button" class="config-access-close" aria-label="关闭弹窗" data-close>×</button></header><div class="config-inbound-body" data-body><p role="status">正在读取当前配置…</p></div>`;
   const controller = new AbortController();
   let saving = false, dirty = false, confirming = false;
   const dispose = () => {
@@ -39,7 +40,7 @@ export async function openTaskEditRetry(ctx, id, refresh, trigger) {
     const language = config.engine === "mihomo" ? "YAML" : "JSON";
     const filename = language === "YAML" ? "config.yaml" : "config.json";
     dialog.querySelector("[data-body]").innerHTML = `
-      <section class="inbound-editor-toolbar task-retry-context"><div><strong>${esc(config.name)}</strong><small>当前 v${config.version} · 原任务 v${task.config_version}</small></div>${config.agent_id ? `<a class="button small" data-preset-link href="#live-config?agent=${encodeURIComponent(config.agent_id)}&engine=${encodeURIComponent(config.engine)}">在预设表单中编辑</a>` : ""}</section>
+      <section class="inbound-editor-toolbar task-retry-context"><div><strong>${esc(config.name)}</strong><small>当前配置 · ${esc(recordDate(config.updated_at, date))} · 原任务：${esc(recordDate(task.created_at, date))}</small></div>${config.agent_id ? `<a class="button small" data-preset-link href="#live-config?agent=${encodeURIComponent(config.agent_id)}&engine=${encodeURIComponent(config.engine)}">在预设表单中编辑</a>` : ""}</section>
       ${task.error ? `<details class="task-retry-error" open><summary>上次失败原因</summary><pre class="alert error">${esc(diagnosticError(task.error))}</pre></details>` : ""}
       <form class="task-retry-form live-config-workspace" data-retry-form>
         <section class="code-workspace" data-code-editor data-code-language="${language}">
@@ -75,7 +76,7 @@ export async function openTaskEditRetry(ctx, id, refresh, trigger) {
       try {
         await api(`/tasks/${encodeURIComponent(id)}/edit-retry`, { method: "POST", body: JSON.stringify({ content: content.value, expected_version: config.version }), signal: controller.signal });
         dirty = false;
-        notify(`已保存新版本并提交${label}任务`);
+        notify(`已保存并留档，已提交${label}任务`);
         dispose();
         await refresh();
       } catch (error) {

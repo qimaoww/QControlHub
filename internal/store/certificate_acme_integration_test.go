@@ -194,7 +194,61 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	if orders[0].Status != "canceled" {
 		t.Fatal("cancel not recovered")
 	}
+	manual, err := reopened.CreateACMECertificate(owner, core.Certificate{Name: "manual local ACME", Domains: []string{"manual-consent.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = reopened.CertificateOrders(owner, manual.ID)
+	if err != nil || len(orders) != 1 || orders[0].Status != "waiting_dns" || orders[0].Attempt != 1 || len(orders[0].Challenges) != 1 {
+		t.Fatalf("manual DNS consent state: %+v %v", orders, err)
+	}
+	manualOrder := orders[0]
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, _ = reopened.CertificateOrders(owner, manual.ID)
+	if orders[0].Status != "waiting_dns" || orders[0].Attempt != 1 {
+		t.Fatal("maintenance executed a manual order without consent")
+	}
+	if err = reopened.ContinueCertificateOrder(owner, manual.ID, manualOrder.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, _ = reopened.CertificateOrders(owner, manual.ID)
+	if orders[0].Status != "waiting_dns" || orders[0].Attempt != 2 || !strings.Contains(orders[0].Error, "DNS TXT") {
+		t.Fatalf("unpropagated manual TXT did not remain actionable: %+v", orders)
+	}
+	challenge := manualOrder.Challenges[0]
+	manage("/set-txt", map[string]string{"host": challenge.Name + ".", "value": challenge.Value})
+	defer manage("/clear-txt", map[string]string{"host": challenge.Name + "."})
+	if err = reopened.ContinueCertificateOrder(owner, manual.ID, manualOrder.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	// Isolated crash fixture: the worker claimed the real order, then stopped
+	// before validation. A new Store must honor its persisted continuation.
+	if _, err = reopened.pool.Exec(ctx, `UPDATE certificate_orders SET status='running' WHERE id=$1`, manualOrder.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := OpenWithConfigKey(ctx, database, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close()
+	configure(resumed)
+	if err = resumed.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = resumed.CertificateOrders(owner, manual.ID)
+	if err != nil || orders[0].Status != "succeeded" || orders[0].Attempt != 3 || orders[0].Error != "" {
+		t.Fatalf("continued manual order did not resume after restart: %+v %v", orders, err)
+	}
 	t.Log("Pebble verified DNS-01 SAN + wildcard; encrypted v1 survived panel restart; persisted account renewed to v2 without login; exact TXT cleanup and cancellation passed")
+	t.Log("Pebble verified manual DNS consent, missing TXT recovery and continued validation after worker restart")
 }
 func TestCertificateSecretsRequireEncryptionAndSupportRotation(t *testing.T) {
 	db, ctx, database := isolatedConfigScopeStore(t)
@@ -391,5 +445,122 @@ func testCertificateFinishedOrderCleanup(t *testing.T, attempt int, cause error)
 	}
 	if stage != "complete" || leases != 0 {
 		t.Fatalf("terminal order cleanup was not completed: stage=%s leases=%d", stage, leases)
+	}
+}
+
+// Use only an isolated, deliberately unavailable CA. Observe durable state while
+// the local request is in flight, then verify scheduling and cancellation.
+func TestCertificateWorkerPublishesExecutionAndRetryState(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_worker_status", false)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		http.Error(w, "fixture CA unavailable", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	old := certificates.Directories["letsencrypt-staging"]
+	certificates.Directories["letsencrypt-staging"] = server.URL
+	defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+	_, key, err := certificates.NewKey("ecdsa256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "worker states", Domains: []string{"worker.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- db.RunCertificateMaintenance(ctx) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil || len(orders) != 1 || orders[0].Status != "running" || orders[0].Attempt != 1 {
+		t.Fatalf("in-flight state: %+v %v", orders, err)
+	}
+	unblock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	orders, err = db.CertificateOrders(owner, item.ID)
+	if err != nil || orders[0].Status != "queued" || orders[0].Stage != "retry" || orders[0].Attempt != 1 || orders[0].NextAttempt == nil || !orders[0].NextAttempt.After(time.Now()) {
+		t.Fatalf("retry state: %+v %v", orders, err)
+	}
+	if len(orders[0].Challenges) != 0 {
+		t.Fatal("a failed setup must not ask for DNS records")
+	}
+	listed, err := db.GetCertificate(owner, item.ID)
+	if err != nil || listed.Status != "retrying" {
+		t.Fatalf("certificate retry label: %+v %v", listed, err)
+	}
+	if err := db.ContinueCertificateOrder(owner, item.ID, orders[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orders, err = db.CertificateOrders(owner, item.ID)
+	if err != nil || orders[0].Status != "canceled" || orders[0].Attempt != 1 || orders[0].Error != "" {
+		t.Fatalf("cancellation counted as issuance or retained error: %+v %v", orders, err)
+	}
+}
+
+func TestCertificateCleanupPreservesOutcomeAndAttempt(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_cleanup_status", false)
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "fixture CA", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "cleanup states", Domains: []string{"cleanup.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := orders[0].ID
+	// A synthetic encrypted cleanup journal points to an absent local DNS account.
+	state := certificateOrderState{Challenges: []certificateChallengeState{{Record: certificates.DNSRecord{ID: "fixture-record"}}}}
+	item.Method, item.DNSAccountID = "dns-api", "missing-fixture-account"
+	for _, status := range []string{"succeeded", "failed"} {
+		if _, err := db.pool.Exec(ctx, `UPDATE certificate_orders SET status=$2,stage='cleanup',attempt=2,error='original issuance failure' WHERE id=$1`, id, status); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.finishCertificateOrderCleanup(WithConfigScope(ctx, item.OwnerID, false), item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil || orders[0].Status != status || orders[0].Stage != "cleanup" || orders[0].Attempt != 2 || orders[0].NextAttempt == nil || !orders[0].NextAttempt.After(time.Now()) {
+			t.Fatalf("cleanup changed outcome: %+v %v", orders, err)
+		}
+		if status == "failed" && orders[0].Error != "original issuance failure" {
+			t.Fatal("cleanup lost issuance failure")
+		}
+		item.Method = "dns-manual"
+		if err := db.finishCertificateOrderCleanup(owner, item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil || orders[0].Stage != "complete" || (status == "succeeded" && orders[0].Error != "") {
+			t.Fatalf("cleanup completion: %+v %v", orders, err)
+		}
+		item.Method = "dns-api"
 	}
 }

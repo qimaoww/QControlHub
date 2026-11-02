@@ -25,7 +25,7 @@ export function createTaskBindings(ctx, { tasks }) {
           if (
             !(await confirmAction(
               button.dataset.retryVersion
-                ? `确定重试配置 v${button.dataset.retryVersion}？${button.dataset.retryInstall === "true" ? "仅缺少内核时安装稳定版，已安装的内核不会切换版本。" : ""}配置已有新版本时会拒绝本次重试，请选择编辑后重试或重新部署。`
+                ? `确定重试原任务关联配置？${button.dataset.retryInstall === "true" ? "仅缺少内核时安装稳定版，已安装的内核不会切换版本。" : ""}配置已有更新时会拒绝本次重试，请选择编辑后重试或重新部署。`
                 : "确定重新提交这个任务？",
               "重试任务",
             ))

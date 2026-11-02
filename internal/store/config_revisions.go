@@ -58,7 +58,7 @@ func (s *Store) listConfigRevisions(ctx context.Context, configID string, limit 
 		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at,c.owner_id
 		FROM config_revisions r JOIN configs c ON c.id=r.config_id
 		WHERE r.config_id=$1 AND c.deleted_at IS NULL`+ownerWhere+`
-		ORDER BY r.version DESC LIMIT $2`, args...)
+		ORDER BY r.created_at DESC,r.version DESC LIMIT $2`, args...)
 	if err != nil {
 		return nil, err
 	}

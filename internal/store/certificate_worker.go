@@ -101,29 +101,30 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			var raw []byte
 			var secret, status string
 			var attempt int
-			if err = connection.QueryRow(ctx, `SELECT c.metadata,o.secret,o.status,o.attempt FROM certificate_orders o JOIN panel_certificates c ON c.id=o.certificate_id WHERE o.id=$1 AND o.next_attempt<=now()`, job.id).Scan(&raw, &secret, &status, &attempt); err != nil {
+			if err = connection.QueryRow(ctx, `SELECT c.metadata,o.secret,o.status,o.attempt FROM certificate_orders o JOIN panel_certificates c ON c.id=o.certificate_id WHERE o.id=$1 AND o.next_attempt<=now() AND (o.status IN ('queued','running','validating','canceling') OR (o.status IN ('succeeded','failed','canceled') AND o.stage='cleanup'))`, job.id).Scan(&raw, &secret, &status, &attempt); err != nil {
 				return
 			}
 			var item core.Certificate
 			var state certificateOrderState
 			if json.Unmarshal(raw, &item) != nil || s.openCertificate(secret, &state) != nil {
-				_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET error='订单无法解密；请恢复加密密钥和 previous keys 后重试',next_attempt=now()+interval '10 minutes' WHERE id=$1`, job.id)
+				_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET error='订单无法解密；请恢复当前及旧加密密钥后重试',next_attempt=now()+interval '10 minutes' WHERE id=$1`, job.id)
 				return
 			}
 			ownerCtx := WithConfigScope(ctx, item.OwnerID, false)
 			runCtx, cancel := context.WithTimeout(ownerCtx, 90*time.Second)
 			defer cancel()
 			if status == "succeeded" || status == "failed" || status == "canceled" {
-				err = s.cleanupCertificateOrder(runCtx, item, job.id, &state)
-				if err == nil {
-					_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET stage='complete' WHERE id=$1`, job.id)
-				} else {
-					_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET error='验证资源清理失败，将重试',next_attempt=now()+interval '5 minutes' WHERE id=$1`, job.id)
-				}
+				_ = s.finishCertificateOrderCleanup(runCtx, item, job.id, &state)
 				return
 			}
-			// Preserve queued for manual continuation; all state transitions are durable.
-			_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET attempt=attempt+1,updated_at=now() WHERE id=$1`, job.id)
+			// Keep the starting status for manual continuation. Cleanup is not
+			// another issuance attempt; an in-flight cancellation wins this update.
+			if status != "canceling" {
+				tag, updateErr := s.pool.Exec(ctx, `UPDATE certificate_orders SET status='running',attempt=attempt+1,error='',stage=CASE WHEN stage IN ('queued','retry') THEN 'preparing' ELSE stage END,updated_at=now() WHERE id=$1 AND status IN ('queued','running','validating')`, job.id)
+				if updateErr != nil || tag.RowsAffected() != 1 {
+					return
+				}
+			}
 			err = s.processCertificateOrder(runCtx, item, job.id, status, state)
 			if err != nil {
 				_ = s.recordCertificateOrderFailure(context.WithoutCancel(ctx), job.id, item.Method, status, attempt, err)
@@ -140,15 +141,32 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, startedStatus string, attempt int, cause error) error {
 	retry := time.Duration(1<<min(attempt, 6)) * time.Minute
 	status, stage := "queued", "retry"
+	var secret, failedStage string
+	var state certificateOrderState
+	if err := s.pool.QueryRow(ctx, `SELECT secret,stage FROM certificate_orders WHERE id=$1`, id).Scan(&secret, &failedStage); err != nil {
+		return err
+	}
+	if err := s.openCertificate(secret, &state); err != nil {
+		return err
+	}
+	state.FailureStage = failedStage
+	secret, err := s.sealCertificate(state)
+	if err != nil {
+		return err
+	}
 	if method == "dns-manual" {
-		status, stage = "waiting_dns", "waiting_dns"
+		for _, c := range state.Challenges {
+			if c.Public.Type == "dns-01" && c.Public.Status != "valid" && c.Public.Name != "" && c.Public.Value != "" {
+				status, stage = "waiting_dns", "waiting_dns"
+			}
+		}
 	}
 	terminal := errors.Is(cause, ErrForbidden) || errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
-	if attempt >= 7 || terminal {
+	if terminal {
 		status, stage = "failed", "cleanup"
 	}
 	// A cancellation received during validation must not inherit its long retry
 	// delay. Once cleanup itself fails, retain backoff to protect the provider.
-	_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=$3,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(cause.Error(), 1000), intervalString(retry), startedStatus, terminal)
+	_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET secret=$8,status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=CASE WHEN status='canceling' THEN 'cleanup' ELSE $3 END,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(cause.Error(), 1000), intervalString(retry), startedStatus, terminal, secret)
 	return err
 }

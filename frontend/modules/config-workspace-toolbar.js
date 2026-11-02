@@ -37,7 +37,7 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
         ${shared && can("tasks.execute") && can("agent-config.read") ? '<button type="button" role="menuitem" data-instance-read>读取实例文件</button>' : ""}
         ${shared && can("core-logs.read") ? `<a role="menuitem" href="#core-logs?agent=${encodeURIComponent(agent.id)}&instance=${encodeURIComponent(agent.runtime?.[engine]?.instance?.id || "")}&engine=${encodeURIComponent(engine)}">实例日志</a>` : ""}
         <button type="button" role="menuitem" data-inbound-action="advanced">高级字段</button>
-        ${can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="history">版本历史</button>' : ""}
+        ${can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="history">配置历史</button>' : ""}
         ${can("deployments.read") && can("configs.read") ? '<button type="button" role="menuitem" data-inbound-action="diff">配置差异</button>' : ""}
         ${can("client-access.read") ? '<a role="menuitem" href="#client-access" data-config-client>客户端配置</a>' : ""}
       </div>
