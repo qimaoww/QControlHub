@@ -220,7 +220,7 @@ try {
   await evaluate(b,`location.hash='#live-config?agent=${fixture.shared}&engine=mihomo'`);await wait(b,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='＋ 增加入站')");
   await evaluate(b,"Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='＋ 增加入站').click()");await wait(b,"!!document.querySelector('.config-inbound-dialog select')");
   await evaluate(b,"(() => {const s=document.querySelector('.config-inbound-dialog select');s.value='trojan';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
-  await wait(b,"!!document.querySelector('[name=panel_certificate_id]')");
+  await wait(b,`!!document.querySelector('[name=panel_certificate_id] option[value="${cert.id}"]')`);
   assert.equal(await evaluate(b,`document.querySelector('[name=panel_certificate_id] option[value="${cert.id}"]').parentElement.label`),'授权给我的证书');
   const localPath=await evaluate(b,"document.querySelector('[name=certificate_path]').value");
   await set(b,'[name=panel_certificate_id]',cert.id);
