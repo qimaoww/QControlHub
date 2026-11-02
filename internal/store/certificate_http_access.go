@@ -44,6 +44,7 @@ func (s *Store) CertificateHTTPNodes(ctx context.Context) ([]core.CertificateHTT
 			n.Reason = "请升级验证节点 Agent 以支持证书中心"
 		case !online:
 			n.Reason = "HTTP-01 验证节点离线，恢复连接后重试"
+			n.TemporaryUnavailable = true
 		default:
 			n.Available = true
 		}

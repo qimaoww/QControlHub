@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type certificateOrderState struct {
 	Challenges   []certificateChallengeState `json:"challenges"`
 	Cleanup      bool                        `json:"cleanup"`
 	FailureStage string                      `json:"failure_stage,omitempty"`
+	CleanupError string                      `json:"cleanup_error,omitempty"`
 }
 
 var errCertificateOrderInvalid = errors.New("ACME 订单已失效")
@@ -166,6 +168,10 @@ func (s *Store) CertificateOrders(ctx context.Context, id string) ([]core.Certif
 		}
 		order.Challenges = []core.CertificateChallenge{}
 		order.FailureStage = state.FailureStage
+		order.CleanupError = state.CleanupError
+		if order.Status == "waiting_dns" || (order.Stage != "cleanup" && (order.Status == "succeeded" || order.Status == "failed" || order.Status == "canceled")) {
+			order.NextAttempt = nil
+		}
 		for _, challenge := range state.Challenges {
 			order.Challenges = append(order.Challenges, challenge.Public)
 		}
@@ -209,18 +215,16 @@ func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, dom
 		if n.ID != agentID {
 			continue
 		}
+		if !n.Owned && !slices.Contains(n.Domains, names[0]) {
+			return fmt.Errorf("%w: 域名 %s 不在节点授权范围内", ErrForbidden, names[0])
+		}
 		if !n.Available {
+			if n.TemporaryUnavailable {
+				return fmt.Errorf("%w: %s", ErrConflict, n.Reason)
+			}
 			return fmt.Errorf("%w: %s", ErrForbidden, n.Reason)
 		}
-		if n.Owned {
-			return nil
-		}
-		for _, d := range n.Domains {
-			if d == names[0] {
-				return nil
-			}
-		}
-		return fmt.Errorf("%w: 域名 %s 不在节点授权范围内", ErrForbidden, names[0])
+		return nil
 	}
 	return fmt.Errorf("%w: 无节点 HTTP-01 认证权限", ErrForbidden)
 }
@@ -457,11 +461,7 @@ func checkHTTPChallengeWith(ctx context.Context, domain, token, value string, lo
 }
 func (s *Store) processCertificateOrder(ctx context.Context, item core.Certificate, id, status string, state certificateOrderState) error {
 	if status == "canceling" {
-		if err := s.cleanupCertificateOrder(ctx, item, id, &state); err != nil {
-			return err
-		}
-		_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceled',stage='canceled',error='',updated_at=now() WHERE id=$1`, id)
-		return err
+		return s.finishCertificateOrderCleanup(ctx, item, id, &state)
 	}
 	if err := certificateUserActive(ctx, s.pool, item.OwnerID); err != nil {
 		return err
@@ -588,6 +588,22 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			if c.Record.ID == "" && c.CreatePending {
 				if err = s.recoverDNSCreate(ctx, dns, c); err != nil {
 					return err
+				}
+			}
+			if c.Record.ID != "" {
+				// A restart/retry can retain a receipt after the TXT record has
+				// disappeared. Recreate only after an exact successful lookup;
+				// lookup failures must never trigger another provider write.
+				records, findErr := dns.Find(ctx, c.Public.Name, c.Public.Value)
+				if findErr != nil {
+					return findErr
+				}
+				found := false
+				for _, record := range records {
+					found = found || record == c.Record
+				}
+				if !found {
+					c.Record = certificates.DNSRecord{}
 				}
 			}
 			if c.Record.ID == "" {
@@ -782,11 +798,24 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 // Issuance and cleanup have independent outcomes. Keep failed issuance details
 // while retrying cleanup; never report a successful issuance as failed.
 func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Certificate, id string, state *certificateOrderState) error {
-	if err := s.cleanupCertificateOrder(ctx, item, id, state); err != nil {
-		_, updateErr := s.pool.Exec(ctx, `UPDATE certificate_orders SET error=CASE WHEN status='failed' THEN error ELSE '验证资源清理失败，将重试' END,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1`, id)
+	cleanupErr := s.cleanupCertificateOrder(ctx, item, id, state)
+	// The provider may use the entire execution deadline. Persist its result
+	// with a separate bounded context so a timeout still schedules cleanup.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	state.CleanupError = ""
+	if cleanupErr != nil {
+		state.CleanupError = truncate(cleanupErr.Error(), 1000)
+	}
+	sealed, err := s.sealCertificate(state)
+	if err != nil {
+		return err
+	}
+	if cleanupErr != nil {
+		_, updateErr := s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1`, id, sealed)
 		return updateErr
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE certificate_orders SET stage='complete',error=CASE WHEN status='failed' THEN error ELSE '' END,updated_at=now() WHERE id=$1`, id)
+	_, err = s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,status=CASE WHEN status='canceling' THEN 'canceled' ELSE status END,stage='complete',error=CASE WHEN status='failed' THEN error ELSE '' END,updated_at=now() WHERE id=$1`, id, sealed)
 	return err
 }
 

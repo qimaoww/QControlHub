@@ -617,7 +617,7 @@ a.node-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   --motion-distance:24px;
   --motion-exit-distance:12px;
 }
-@keyframes qch-dialog-enter{from{opacity:0;translate:0 var(--motion-distance);scale:.94}to{opacity:1;translate:0 0;scale:1}}
+@keyframes qch-dialog-enter{from{opacity:0}to{opacity:1}}
 @keyframes qch-fade-enter{from{opacity:0}to{opacity:1}}
 @keyframes qch-route-progress{from{transform:scaleX(.15)}to{transform:scaleX(.85)}}
 @keyframes qch-boot-orbit{to{transform:rotate(360deg)}}
@@ -682,6 +682,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px soli
 summary>i{transition:transform var(--motion-base) var(--motion-ease-out),color var(--motion-fast) ease}
 :is(.task-filter-panel,.dashboard-month-picker)[open]>summary>i{transform:rotate(180deg)}
 :is(.runtime-drawer,.version-drawer,.advanced-studio,.config-hierarchy-menu,.config-diff-drawer)[open]>summary>i{transform:rotate(45deg)}
+/* Keep live modal shells free of transforms: even identity translate/scale
+   changes the containing block of injected viewport-positioned UI. */
 dialog[open]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
 dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
 /* Native top-layer retention supplies an exit without delaying close(), focus
@@ -689,11 +691,11 @@ dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
 @supports(transition-behavior:allow-discrete){
   .page-node-settings .core-version-panel[data-motion-disclosure]{transition:display var(--motion-base) allow-discrete}
   .page-node-settings .core-version-panel[data-motion-disclosure]:not([open]){pointer-events:none}
-  dialog{opacity:0;translate:0 var(--motion-exit-distance);scale:.96;pointer-events:none;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in),scale var(--motion-exit) var(--motion-ease-in),display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
-  dialog[open]{opacity:1;translate:0 0;scale:1;pointer-events:auto;animation:none;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out)}
+  dialog{opacity:0;pointer-events:none;transition:opacity var(--motion-exit) var(--motion-ease-in),display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
+  dialog[open]{opacity:1;pointer-events:auto;animation:none;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out)}
   dialog::backdrop{opacity:0;pointer-events:none;transition:opacity var(--motion-exit) ease,display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
   dialog[open]::backdrop{opacity:1;pointer-events:auto;animation:none;transition-duration:var(--motion-feedback)}
-  @starting-style{dialog[open]{opacity:0;translate:0 var(--motion-distance);scale:.94}dialog[open]::backdrop{opacity:0}}
+  @starting-style{dialog[open]{opacity:0}dialog[open]::backdrop{opacity:0}}
 }
 /* The browser owns reversal and the native open state. Only user-operated
    disclosures opt in, so initially open/restored content never fades again. */

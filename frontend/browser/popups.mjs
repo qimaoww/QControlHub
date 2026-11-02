@@ -2,6 +2,7 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 import { createAgentEnrollment } from "../modules/agent-enrollment.js";
 import { bindConfigMenu } from "../modules/config-menu.js";
 import { cancelPopupEntrance } from "../modules/popup.js";
+import { checkPopupAnchor } from "./popup-anchors.mjs";
 import { checkNativeExit, checkDisclosureMotion, checkCoreDisclosure, checkRouteCoverage, checkInteractionFeedback } from "./surface-motion.mjs";
 
 const movingPopups = () => document.getAnimations().filter(animation =>
@@ -42,6 +43,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
     assert.equal(root.inert, true);
     assert.ok(wrap.contains(document.activeElement), "modal takes focus immediately");
     if (reduced) assert.equal(card.getAnimations().length, 0);
+    await checkPopupAnchor(card, card.querySelector("input"));
     await settle();
     const bounds = card.getBoundingClientRect();
     assert.ok(bounds.left >= -1 && bounds.right <= innerWidth + 1 && bounds.top >= -1 && bounds.bottom <= innerHeight + 1);
