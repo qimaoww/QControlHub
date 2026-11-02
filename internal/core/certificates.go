@@ -87,6 +87,7 @@ type CertificateOrder struct {
 	Status        string                 `json:"status"`
 	Stage         string                 `json:"stage"`
 	FailureStage  string                 `json:"failure_stage,omitempty"`
+	CleanupError  string                 `json:"cleanup_error,omitempty"`
 	Error         string                 `json:"error,omitempty"`
 	Challenges    []CertificateChallenge `json:"challenges"`
 	CreatedAt     time.Time              `json:"created_at"`
@@ -117,12 +118,13 @@ type HTTPChallengeGrant struct {
 }
 
 type CertificateHTTPNode struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Owned     bool     `json:"owned"`
-	Available bool     `json:"available"`
-	Domains   []string `json:"domains"`
-	Reason    string   `json:"reason,omitempty"`
+	TemporaryUnavailable bool     `json:"-"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Owned                bool     `json:"owned"`
+	Available            bool     `json:"available"`
+	Domains              []string `json:"domains"`
+	Reason               string   `json:"reason,omitempty"`
 }
 
 const AgentFeatureCaddyCertificates = "managed-caddy-certificates-v1"
