@@ -87,6 +87,7 @@ type CertificateOrder struct {
 	Status        string                 `json:"status"`
 	Stage         string                 `json:"stage"`
 	FailureStage  string                 `json:"failure_stage,omitempty"`
+	CleanupError  string                 `json:"cleanup_error,omitempty"`
 	Error         string                 `json:"error,omitempty"`
 	Challenges    []CertificateChallenge `json:"challenges"`
 	CreatedAt     time.Time              `json:"created_at"`

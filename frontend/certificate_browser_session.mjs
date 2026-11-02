@@ -148,7 +148,7 @@ try {
       const response=await original(input,options);
       if(path.endsWith('/certificates/${cert.id}')&&(!options.method||options.method==='GET')&&response.ok){
         const body=await response.json();
-        body.certificate.source='acme';body.certificate.method='dns-manual';body.orders=[structuredClone(fixture.order)];
+        body.certificate.source='acme';body.certificate.method=fixture.order.method||'dns-manual';body.orders=[structuredClone(fixture.order)];
         return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
       }
       return response;
@@ -176,19 +176,39 @@ try {
   await wait(a,"document.querySelector('.cert-dialog').textContent.includes('等待自动重试')");
   assert.match(await detailText(),/已执行 2 次.*后台将自动继续申请/s);
   assert.match(await detailText(),/暂无法确认具体资源或原因/);
+  await refreshOrder({status:'failed',stage:'cleanup',method:'dns-api',attempt:8,created_at:'2026-11-02T06:18:04Z',next_attempt:'2026-11-02T06:23:04Z',error:'验证资源清理失败，将重试',failure_stage:'validating',challenges:[]});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('原始申请错误未保留')");
+  assert.match(await detailText(),/已执行 8 次/);
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1920,height:mode==='mobile'?844:1080,deviceScaleFactor:1,mobile:mode==='mobile'},a);
+  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await screenshot(a,'order-legacy-failure');
+  await refreshOrder({error:'DNS TXT 尚未传播：_acme-challenge.example.test',cleanup_error:'DNS API 返回 HTTP 503，请检查凭据与区域权限'});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('清理失败：DNS API 返回 HTTP 503')");
+  assert.match(await detailText(),/DNS TXT 尚未传播/);
+  assert.match(await detailText(),/下次清理/);
+  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await screenshot(a,'order-failed-cleanup');
   for(const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[1920,1080,2],[1280,800,1],[1024,768,1],[768,1024,1],[390,844,1],[844,390,1],[320,568,1]]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:dpr,mobile:width<768},a);
+    await call('Emulation.setTouchEmulationEnabled',{enabled:width<768},a);
     await delay(50);
     assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && document.querySelector('.cert-dialog').getBoundingClientRect().right<=innerWidth+1"),true,'order detail overflow at '+width+'x'+height+' DPR '+dpr);
   }
   for(const status of ['succeeded','canceled']){
     await refreshOrder({status,stage:'complete'});
-    await wait(a,`!document.querySelector('.cert-dialog').textContent.includes('暂无法确认具体资源或原因')`);
+    await wait(a,`Array.from(document.querySelectorAll('.cert-dialog .status-label')).some(e=>e.textContent===${JSON.stringify(status==='succeeded'?'签发成功':'已取消')})`);
     assert.doesNotMatch(await detailText(),/后台将自动继续申请|not found/);
   }
-  await refreshOrder({status:'succeeded',stage:'cleanup',error:'验证资源清理失败，将重试'});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('验证资源待清理')");
+  await refreshOrder({status:'succeeded',stage:'cleanup',error:'',cleanup_error:'DNS API 返回 HTTP 503'});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('验证资源待清理') && document.querySelector('.cert-dialog').textContent.includes('签发成功')");
   assert.match(await detailText(),/签发成功/);
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1920,height:mode==='mobile'?844:1080,deviceScaleFactor:1,mobile:mode==='mobile'},a);
+  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await screenshot(a,'order-success-cleanup');
+  await refreshOrder({status:'succeeded',stage:'complete',cleanup_error:'',next_attempt:null});
+  await wait(a,"!document.querySelector('.cert-dialog').textContent.includes('清理失败')");
+  assert.doesNotMatch(await detailText(),/下次清理|验证资源待清理/);
+  await screenshot(a,'order-success-complete');
   await evaluate(a,"window.fetch=window.certificateOrderFixture.original;delete window.certificateOrderFixture");
   await click(a,'[data-cert-reload]');await wait(a,"!document.querySelector('.cert-dialog').textContent.includes('验证资源待清理')");
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},a);

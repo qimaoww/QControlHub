@@ -65,6 +65,8 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	dnsAddress := os.Getenv("QCH_PEBBLE_DNS")
 	records := map[string]map[string]string{}
 	nextID := 0
+	holdTXT := true
+	cleanupFailures := 2
 	var mu sync.Mutex
 	manage := func(path string, payload any) {
 		t.Helper()
@@ -110,9 +112,15 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 					records[input.Name] = map[string]string{}
 				}
 				records[input.Name][id] = input.Content
-				manage("/set-txt", map[string]string{"host": input.Name + ".", "value": input.Content})
+				if !holdTXT {
+					manage("/set-txt", map[string]string{"host": input.Name + ".", "value": input.Content})
+				}
 				body = `{"success":true,"result":{"id":"` + id + `"}}`
 			} else {
+				if cleanupFailures > 0 {
+					cleanupFailures--
+					return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
+				}
 				parts := strings.Split(r.URL.Path, "/")
 				id := parts[len(parts)-1]
 				for name, values := range records {
@@ -141,10 +149,52 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	if err = db.RunCertificateMaintenance(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate propagation delay followed by loss of already acknowledged TXT
+	// resources between executions. Keep durable receipts and restart the store.
+	pendingOrders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil || pendingOrders[0].Status != "queued" || pendingOrders[0].Attempt != 1 {
+		t.Fatalf("expected propagation retry: %+v %v", pendingOrders, err)
+	}
+	mu.Lock()
+	records = map[string]map[string]string{}
+	holdTXT = false
+	mu.Unlock()
+	recovery, err := OpenWithConfigKey(ctx, database, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovery.Close()
+	configure(recovery)
+	if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET next_attempt=now() WHERE id=$1`, pendingOrders[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = recovery.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
 	issued, err := db.GetCertificate(owner, item.ID)
 	if err != nil || issued.Version != 1 {
 		orders, _ := db.CertificateOrders(owner, item.ID)
 		t.Fatalf("real CA did not issue: %+v %v orders=%+v", issued, err, orders)
+	}
+	cleanupOrders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil || cleanupOrders[0].Status != "succeeded" || cleanupOrders[0].Stage != "cleanup" || cleanupOrders[0].Attempt != 2 || cleanupOrders[0].CleanupError == "" {
+		t.Fatalf("successful issuance lost to cleanup: %+v %v", cleanupOrders, err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET next_attempt=now() WHERE id=$1`, cleanupOrders[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		if err = recovery.RunCertificateMaintenance(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanupOrders, err = db.CertificateOrders(owner, item.ID)
+	if err != nil || len(cleanupOrders) != 1 || cleanupOrders[0].Status != "succeeded" || cleanupOrders[0].Stage != "complete" || cleanupOrders[0].Attempt != 2 || cleanupOrders[0].CleanupError != "" || cleanupOrders[0].NextAttempt != nil {
+		t.Fatalf("cleanup retries changed issuance: %+v %v", cleanupOrders, err)
+	}
+	issued, err = db.GetCertificate(owner, item.ID)
+	if err != nil || issued.Version != 1 {
+		t.Fatalf("cleanup saved again: %+v %v", issued, err)
 	}
 	for _, values := range records {
 		if len(values) != 0 {
@@ -562,5 +612,259 @@ func TestCertificateCleanupPreservesOutcomeAndAttempt(t *testing.T) {
 			t.Fatalf("cleanup completion: %+v %v", orders, err)
 		}
 		item.Method = "dns-api"
+	}
+}
+
+func TestCertificateCleanupTimeoutPersistsIndependentOutcome(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_cleanup_timeout", false)
+	account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "fixture", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "cleanup deadline", Domains: []string{"timeout.example.test"}, Method: "dns-manual", AccountID: account.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := orders[0].ID
+	for _, status := range []string{"failed", "succeeded", "canceling"} {
+		if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET status=$2,stage='cleanup',attempt=8,error='original validation failure',next_attempt=now()-interval '1 day' WHERE id=$1`, id, status); err != nil {
+			t.Fatal(err)
+		}
+		state := certificateOrderState{FailureStage: "validating"}
+		expired, cancel := context.WithCancel(owner)
+		cancel()
+		if err = db.finishCertificateOrderCleanup(expired, item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := orders[0]
+		if got.Status != status || got.Stage != "cleanup" || got.Attempt != 8 || got.Error != "original validation failure" || got.CleanupError == "" || got.FailureStage != "validating" || got.NextAttempt == nil || !got.NextAttempt.After(time.Now()) {
+			t.Fatalf("timeout outcome: %+v", got)
+		}
+		if err = db.finishCertificateOrderCleanup(owner, item, id, &state); err != nil {
+			t.Fatal(err)
+		}
+		orders, err = db.CertificateOrders(owner, item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = orders[0]
+		expected := status
+		if status == "canceling" {
+			expected = "canceled"
+		}
+		if got.Status != expected || got.Stage != "complete" || got.Attempt != 8 || got.CleanupError != "" || got.NextAttempt != nil {
+			t.Fatalf("completed outcome: %+v", got)
+		}
+		if status == "failed" && got.Error != "original validation failure" {
+			t.Fatal("original failure lost")
+		}
+	}
+}
+
+// A local ACME contract fixture stops before public DNS resolution. The vendor
+// write deliberately fails so only a missing receipt can reach it.
+func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
+	for _, scenario := range []string{"missing", "present", "lookup failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			owner := WithConfigScope(ctx, "token_dns_receipt", false)
+			var caURL string
+			ca := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Replay-Nonce", "local-fixture-nonce")
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/dir":
+					fmt.Fprintf(w, `{"newNonce":%q,"newAccount":%q,"newOrder":%q}`, caURL+"/nonce", caURL+"/acct", caURL+"/new-order")
+				case "/nonce":
+					w.WriteHeader(200)
+				case "/order":
+					fmt.Fprintf(w, `{"status":"pending","authorizations":[%q],"finalize":%q}`, caURL+"/auth", caURL+"/finalize")
+				default:
+					http.Error(w, "fixture stops before challenge validation", 400)
+				}
+			}))
+			defer ca.Close()
+			caURL = ca.URL
+			old := certificates.Directories["letsencrypt-staging"]
+			certificates.Directories["letsencrypt-staging"] = caURL + "/dir"
+			defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+			_, key, err := certificates.NewKey("ecdsa256")
+			if err != nil {
+				t.Fatal(err)
+			}
+			acct, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key, URL: caURL + "/acct/1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			dns, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor", Kind: "dns", Provider: "cloudflare"}, certificates.DNSCredentials{Zone: "example.test", Token: "local-fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "receipt", Domains: []string{"receipt.example.test"}, Method: "dns-api", AccountID: acct.ID, DNSAccountID: dns.ID, KeyType: "ecdsa256"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			orders, _ := db.CertificateOrders(owner, item.ID)
+			id := orders[0].ID
+			writes := 0
+			db.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+				status := 200
+				body := `{"success":true,"result":[{"id":"zone"}]}`
+				if r.Method != "GET" {
+					writes++
+					status = 503
+					body = `{}`
+				} else if strings.Contains(r.URL.Path, "dns_records") {
+					body = `{"success":true,"result":[{"id":"peer","name":"_acme-challenge.receipt.example.test","content":"proof"}]}`
+					if scenario == "present" {
+						body = `{"success":true,"result":[{"id":"receipt","name":"_acme-challenge.receipt.example.test","content":"proof"}]}`
+					} else if scenario == "lookup failure" {
+						status = 503
+					}
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+			})}
+			state := certificateOrderState{URL: caURL + "/order", Challenges: []certificateChallengeState{{Public: core.CertificateChallenge{Domain: "receipt.example.test", Name: "_acme-challenge.receipt.example.test", Value: "proof", Type: "dns-01", Status: "pending"}, AuthURL: caURL + "/auth", Record: certificates.DNSRecord{ID: "receipt", Zone: "zone"}}}}
+			if err = db.saveCertificateOrderState(owner, id, state, "dns_created"); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.processCertificateOrder(owner, item, id, "queued", state); err == nil {
+				t.Fatal("fixture must fail")
+			}
+			expected := 0
+			if scenario == "missing" {
+				expected = 1
+			}
+			if writes != expected {
+				t.Fatalf("vendor writes=%d, want %d", writes, expected)
+			}
+			if scenario == "missing" {
+				var secret string
+				if err = db.pool.QueryRow(ctx, `SELECT secret FROM certificate_orders WHERE id=$1`, id).Scan(&secret); err != nil {
+					t.Fatal(err)
+				}
+				var saved certificateOrderState
+				if err = db.openCertificate(secret, &saved); err != nil {
+					t.Fatal(err)
+				}
+				c := saved.Challenges[0]
+				if !c.CreatePending || len(c.BeforeIDs) != 1 || c.BeforeIDs[0] != "peer" {
+					t.Fatalf("lost peer ownership boundary: %+v", c)
+				}
+			}
+		})
+	}
+}
+
+func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
+	db, ctx, database := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_cleanup_owner", false)
+	other := WithConfigScope(ctx, "token_cleanup_peer", false)
+	acct, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor", Kind: "dns", Provider: "cloudflare"}, certificates.DNSCredentials{Zone: "example.test", Token: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "partial cleanup", Domains: []string{"shared.example.test"}, Method: "dns-api", AccountID: acct.ID, DNSAccountID: dns.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := orders[0].ID
+	if _, err = db.CertificateOrders(other, item.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("peer read: %v", err)
+	}
+	if err = db.ContinueCertificateOrder(other, item.ID, id, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("peer cancel: %v", err)
+	}
+	records := map[string]string{"first": "value-a", "second": "value-b", "peer": "value-a"}
+	deletes := map[string]int{}
+	failures := 2
+	configure := func(target *Store) {
+		target.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+			status := 200
+			body := `{"success":true,"result":[{"id":"zone"}]}`
+			if strings.Contains(r.URL.Path, "dns_records") {
+				if r.Method == "DELETE" {
+					parts := strings.Split(r.URL.Path, "/")
+					recordID := parts[len(parts)-1]
+					deletes[recordID]++
+					if recordID == "second" && failures > 0 {
+						failures--
+						status = 503
+					} else {
+						delete(records, recordID)
+					}
+					body = `{"success":true,"result":{}}`
+				} else {
+					result := []map[string]string{}
+					for recordID, value := range records {
+						result = append(result, map[string]string{"id": recordID, "name": "_acme-challenge.shared.example.test", "content": value})
+					}
+					raw, _ := json.Marshal(map[string]any{"success": true, "result": result})
+					body = string(raw)
+				}
+			}
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		})}
+	}
+	state := certificateOrderState{FailureStage: "validating", Challenges: []certificateChallengeState{
+		{Public: core.CertificateChallenge{Name: "_acme-challenge.shared.example.test", Value: "value-a"}, Record: certificates.DNSRecord{ID: "first", Zone: "zone"}},
+		{Public: core.CertificateChallenge{Name: "_acme-challenge.shared.example.test", Value: "value-b"}, Record: certificates.DNSRecord{ID: "second", Zone: "zone"}},
+	}}
+	sealed, err := db.sealCertificate(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET status='failed',stage='cleanup',secret=$2,attempt=8,error='original validation failure',next_attempt=now() WHERE id=$1`, id, sealed); err != nil {
+		t.Fatal(err)
+	}
+	configure(db)
+	if err = db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenWithConfigKey(ctx, database, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	configure(reopened)
+	for i := 0; i < 2; i++ {
+		if _, err = db.pool.Exec(ctx, `UPDATE certificate_orders SET next_attempt=now() WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orders, err = reopened.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := orders[0]
+	if got.Status != "failed" || got.Stage != "complete" || got.Attempt != 8 || got.Error != "original validation failure" || got.CleanupError != "" || got.NextAttempt != nil {
+		t.Fatalf("restart outcome: %+v", got)
+	}
+	if len(records) != 1 || records["peer"] != "value-a" || deletes["first"] != 1 || deletes["second"] != 3 || deletes["peer"] != 0 {
+		t.Fatalf("cleanup escaped receipts: records=%v deletes=%v", records, deletes)
+	}
+	var versions int
+	if err = db.pool.QueryRow(ctx, `SELECT count(*) FROM certificate_versions WHERE certificate_id=$1`, item.ID).Scan(&versions); err != nil || versions != 0 {
+		t.Fatalf("cleanup saved certificates: %d %v", versions, err)
 	}
 }
