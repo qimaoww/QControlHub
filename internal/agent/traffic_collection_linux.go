@@ -69,6 +69,12 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		}
 		snapshots[key], sourceErrors[key] = snapshot, err
 	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		// Service/process inspection uses the same request context as nft.
+		// Recheck all sources before consuming any baselines or treating a
+		// cancelled inspection as an attribution failure that stops a share.
+		return manager.collectLocked(ctx, forceRules)
+	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
 		shared := record.Policy.SharedQuota != nil
