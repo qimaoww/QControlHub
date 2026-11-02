@@ -2,6 +2,7 @@ import { installUsers } from "../modules/users.js";
 import { assert, esc, waitFor, input } from "./users-helpers.mjs";
 import { testAllocationRaceRuntime } from "./users-allocation-races.mjs";
 import { testInvitationRuntime } from "./users-invitations.mjs";
+import { checkPopupAnchor } from "./popup-anchors.mjs";
 
 export async function testUsersRuntime(preview = false) {
   const state = { route: "users", data: {}, session: { role: "admin", user_id: "admin" } };
@@ -260,6 +261,7 @@ export async function testUsersRuntime(preview = false) {
   document.querySelector("[data-user-create]").click();
   const dialog = document.querySelector("[data-user-dialog]");
   let account = dialog.querySelector("form");
+  await checkPopupAnchor(dialog, account.elements.password);
   input(account.elements.username, "new-user");
   input(account.elements.password, "test-password-only");
   account.querySelector("details").open = true;
@@ -296,6 +298,7 @@ export async function testUsersRuntime(preview = false) {
   assert(!document.querySelector("[data-allocation-add]"), "administrator account was offered shared allocation");
   assert(document.querySelector("[data-user-login-info]").textContent.includes("没有数据库账号 ID"), "token identity is not explained");
   document.querySelector("[data-user-edit]").click();
+  await checkPopupAnchor(document.querySelector("[data-user-dialog]"), document.querySelector('[data-user-form] [name="password"]'));
   assert(!document.querySelector('[name="enabled"]').disabled && !document.querySelector('[name="role"]').disabled, "token entry did not allow administrator disable/demotion");
   document.querySelector("[data-user-dialog]").close();
   const administrator = items.find(item => item.id === "admin");
