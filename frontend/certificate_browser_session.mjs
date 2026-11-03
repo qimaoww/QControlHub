@@ -128,7 +128,7 @@ try {
   assert.equal((await api(a,alice,'GET','/certificate-accounts')).length,1);
   assert.deepEqual(await api(b,bob,'GET','/certificate-accounts'),[]);
   await click(a,'[data-cert-close]');await click(a,'[data-cert-create]');await wait(a,"!!document.querySelector('[name=source]')");await set(a,'[name=source]','self-signed');await wait(a,"!!document.querySelector('[name=days]')");
-  await set(a,'[name=name]','Alice UI TLS');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-cert-form]').requestSubmit()");
+  await set(a,'[name=name]','边缘入口证书');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-cert-form]').requestSubmit()");
   await wait(a,"!!document.querySelector('[data-cert-share]')");
   const cert=(await api(a,alice,'GET','/certificates')).items[0];assert.equal(cert.version,1);assert.equal(cert.owner_id,alice.user_id);
   await api(b,bob,'GET',`/certificates/${cert.id}`,undefined,404);

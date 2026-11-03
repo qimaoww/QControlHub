@@ -5,7 +5,8 @@
 .config-file-button b,.config-inbound-dialog .preset-option-panel>summary b{font-size:var(--text-small);line-height:var(--leading-caption)}
 .config-file-button small{font-size:var(--text-caption);color:var(--muted);line-height:var(--leading-caption)}
 .config-file-button:hover{background:var(--surface-2);border-color:var(--accent)}
-.config-file-button.active,.config-inbound-menu-items [aria-selected=true]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.config-file-button.active{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.config-inbound-menu-items [aria-selected=true]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--ink)}
 .config-file-button.active small{color:var(--accent)}
 .config-file-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .config-inbound-menu{position:relative;align-self:center;margin-left:0}

@@ -131,7 +131,7 @@ function open(select) {
     button.setAttribute('aria-selected', String(input ? select.value === option.value : option.selected));
     button.disabled = !enabled(option);
     if (option.dataset.description) {
-      const primary = document.createElement('strong'); primary.textContent = option.label || option.value;
+      const primary = document.createElement('span'); primary.textContent = option.label || option.value;
       const secondary = document.createElement('span'); secondary.className = 'settings-hint'; secondary.textContent = option.dataset.description;
       const content = document.createElement('span'); content.className = 'user-allocation-node';
       content.append(primary,secondary); button.append(content);
