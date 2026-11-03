@@ -160,9 +160,9 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
 			AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
 		UNION ALL
-		SELECT task.engine,task.config_content,COALESCE(task.config_id,''),COALESCE(task.config_version,0),false,true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
-			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND task.engine<>$3)) AND task.config_content IS NOT NULL`, agentID, userID, engine)
+			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND task.engine<>$3))`, agentID, userID, engine)
 	if err != nil {
 		return err
 	}
@@ -198,6 +198,9 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		content, frontends, err := core.DecodeExecutionSnapshot(content)
 		if err != nil {
 			return err
+		}
+		if content == "" {
+			return portConflict(ports[0], fmt.Errorf("%w: 无法确认待执行任务的监听端口，请等待任务结束并刷新状态", ErrConflict))
 		}
 		if len(frontends) == 0 {
 			frontends, err = s.managedTLSFrontendsTx(ctx, tx, d.id, d.version, d.engine, content)
@@ -237,6 +240,11 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {
 			if wanted[endpoint.Port] {
+				// Ordinary cores owned by the same principal may use separate
+				// TCP/UDP sockets. Shared metering still protects both transports.
+				if d.sameOwner && candidate != nil && candidate.SharedTrafficID == "" && !taskPortProtocolsOverlap(candidate, endpoint) {
+					continue
+				}
 				return conflict(endpoint.Port)
 			}
 		}
@@ -440,4 +448,24 @@ func retireUnusedSharedPolicyTx(ctx context.Context, tx pgx.Tx, agentID string, 
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 AND share_id=$3`, agentID, port, shareID)
 	return err
+}
+
+func taskPortProtocolsOverlap(task *core.Task, existing core.PortTrafficEndpoint) bool {
+	for _, frontend := range task.TLSFrontends {
+		if frontend.PublicPort == existing.Port || frontend.LocalOnly && frontend.BackendPort == existing.Port {
+			return true
+		}
+	}
+	matched := false
+	for _, next := range serverconfig.DiscoverTrafficPorts(task.Engine, task.ConfigContent) {
+		if next.Port != existing.Port {
+			continue
+		}
+		matched = true
+		if next.Protocol != core.TrafficProtocolTCP && next.Protocol != core.TrafficProtocolUDP ||
+			existing.Protocol != core.TrafficProtocolTCP && existing.Protocol != core.TrafficProtocolUDP || next.Protocol == existing.Protocol {
+			return true
+		}
+	}
+	return !matched
 }

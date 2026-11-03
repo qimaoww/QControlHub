@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -17,14 +18,34 @@ func (s *Store) checkTaskPortUseTx(ctx context.Context, tx pgx.Tx, task *core.Ta
 	default:
 		return nil
 	}
-	if task.ConfigContent == "" {
-		return nil
-	}
 	owner := scopeForConfig(ctx).OwnerID
 	if task.ConfigID != "" {
 		if err := tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1`, task.ConfigID).Scan(&owner); err != nil {
 			return err
 		}
+	}
+	if task.ConfigID == "" && task.ID != "" {
+		if err := tx.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1`, task.ID).Scan(&owner); err != nil {
+			return err
+		}
+	}
+	if task.ConfigContent == "" {
+		if task.Action != core.ActionStart && task.Action != core.ActionRestart {
+			return nil
+		}
+		var competing bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shared_instance_ownership
+			WHERE agent_id=$1 AND owner_id<>$2 AND (running OR uncertain))
+			OR EXISTS(SELECT 1 FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
+				WHERE t.agent_id=$1 AND t.id<>$3 AND COALESCE(c.owner_id,t.owner_id)<>$2
+				AND t.status IN ('pending','running') AND t.action IN ('deploy','import-existing','start','restart'))`,
+			task.AgentID, owner, task.ID).Scan(&competing); err != nil {
+			return err
+		}
+		if competing {
+			return fmt.Errorf("%w: 无法确认待启动服务的监听端口，请先部署已校验配置", ErrConflict)
+		}
+		return nil
 	}
 	var ports []int
 	for _, endpoint := range serverconfig.DiscoverTrafficPorts(task.Engine, task.ConfigContent) {

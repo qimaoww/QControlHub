@@ -292,3 +292,34 @@ func TestPortClaimRechecksBeforeDispatch(t *testing.T) {
 		t.Fatalf("rejected task marked executing: %v %v", started, err)
 	}
 }
+
+func TestUnknownHostStartCannotRaceSharedDeployment(t *testing.T) {
+	for _, hostFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(hostFirst), func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			_, owner := sharedTestUser(t, db, ctx, "unknown-start-host")
+			user, recipient := sharedTestUser(t, db, ctx, "unknown-start-recipient")
+			agent := allEnginesSharedTestAgent(t, db, owner)
+			sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 1000, 0)
+			config := sharedTestConfig(t, db, recipient, agent.ID, 21001)
+			start := func() error {
+				_, err := db.CreateTask(owner, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineXray, Action: core.ActionStart})
+				return err
+			}
+			deploy := func() error {
+				_, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+				return err
+			}
+			first, second := deploy, start
+			if hostFirst {
+				first, second = start, deploy
+			}
+			if err := first(); err != nil {
+				t.Fatal(err)
+			}
+			if err := second(); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "确认") {
+				t.Fatalf("untracked start raced with shared listeners: %v", err)
+			}
+		})
+	}
+}
