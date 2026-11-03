@@ -6,6 +6,8 @@ const AgentFeatureCertificates = "panel-certificates-v1"
 const PanelCertificatePrefix = "/etc/qcontrolhub/panel-certificates/"
 
 type Certificate struct {
+	BindingStatuses map[string]int `json:"binding_statuses,omitempty"`
+
 	SourceID       string     `json:"source_id,omitempty"`
 	SourceAgent    string     `json:"source_agent,omitempty"`
 	SourceConfig   string     `json:"source_config,omitempty"`

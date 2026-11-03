@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"golang.org/x/sys/unix"
 )
 
 // Certificate storage and Caddy's application directories are independent.
@@ -23,6 +24,18 @@ func (m *tlsFrontendManager) caddyEnvironment() []string {
 
 func (m *tlsFrontendManager) runCaddy(ctx context.Context, identity *commandIdentity, args ...string) (string, error) {
 	return runTLSCommand(ctx, m.state, m.caddyEnvironment(), managedCaddyBinary, identity, args...)
+}
+
+// nginx -t opens listening sockets as well as checking syntax and files.
+// Match the proxy's non-root identity and its sole ambient capability. Dropping
+// UID alone clears capabilities, even when the privileged helper has them.
+func (m *tlsFrontendManager) validateNginx(ctx context.Context, path string) (string, error) {
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		return "", err
+	}
+	identity.ambientCaps = []uintptr{unix.CAP_NET_BIND_SERVICE}
+	return runTLSCommand(ctx, m.state, nil, managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", path)
 }
 
 func runTLSCommand(ctx context.Context, directory string, environment []string, binary string, identity *commandIdentity, args ...string) (string, error) {
@@ -157,7 +170,7 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 		if mode == "caddy" {
 			_, err = m.runCaddy(ctx, nil, "validate", "--config", staged)
 		} else {
-			_, err = run(ctx, managedNginxBinary(), "-t", "-p", m.state+"/", "-c", staged)
+			_, err = m.validateNginx(ctx, staged)
 		}
 		if err != nil {
 			return fmt.Errorf("托管 HTTP-01 路由升级配置校验失败：%w", err)

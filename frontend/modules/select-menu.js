@@ -41,6 +41,21 @@ export function preserveSelectMenuAttribute(control, name) {
     suggested(control) && ['list', 'role', 'aria-autocomplete', 'aria-haspopup', 'aria-expanded'].includes(name);
 }
 
+// Preserve an open menu's keyboard item and scroll when API metadata refreshes.
+export function refreshSelectMenu(select, update) {
+  const snapshot = current?.select === select ? {value: current.options[current.active]?.value, scroll: current.popup.scrollTop} : null;
+  if (snapshot) close();
+  update();
+  if (snapshot && select.isConnected && !select.disabled) {
+    open(select);
+    if (current) {
+      const index = current.options.findIndex(option=>option.value===snapshot.value);
+      if (index >= 0) activate(index);
+      current.popup.scrollTop = snapshot.scroll;
+    }
+  }
+}
+
 function close() {
   if (!current) return;
   const { select, popup, attributes, watch } = current;
@@ -83,6 +98,7 @@ function open(select) {
   if ((!dropdown(select) && !input) || select.matches(':disabled')) return;
   const options = [...(input ? suggestion.list.options : select.options)].filter(option => !input || option.value.toLocaleLowerCase().includes(select.value.toLocaleLowerCase()));
   if (!options.some(visible)) return;
+  select.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
   const popup = document.createElement('div');
   popup.id = `select-menu-${++serial}`;
   popup.className = 'config-inbound-menu-items';
@@ -100,7 +116,7 @@ function open(select) {
       optionHost.setAttribute('aria-label', parent.label);
       popup.append(optionHost);
       const heading = document.createElement('div');
-      heading.className = 'notice-message';
+      heading.className = 'notice-message settings-hint';
       heading.textContent = parent.label;
       heading.setAttribute('aria-hidden', 'true');
       optionHost.append(heading);
@@ -114,7 +130,13 @@ function open(select) {
     button.setAttribute('role', 'option');
     button.setAttribute('aria-selected', String(input ? select.value === option.value : option.selected));
     button.disabled = !enabled(option);
-    button.textContent = option.label || option.value;
+    if (option.dataset.description) {
+      const primary = document.createElement('strong'); primary.textContent = option.label || option.value;
+      const secondary = document.createElement('span'); secondary.className = 'settings-hint'; secondary.textContent = option.dataset.description;
+      const content = document.createElement('span'); content.className = 'user-allocation-node';
+      content.append(primary,secondary); button.append(content);
+      button.title = option.title;
+    } else button.textContent = option.label || option.value;
     optionHost.append(button);
   });
   const attributes = ['aria-expanded', 'aria-controls', 'aria-activedescendant'].map(name => [name, select.getAttribute(name)]);

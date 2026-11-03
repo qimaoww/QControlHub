@@ -1,3 +1,4 @@
+import { bindCertificateSelector } from '../modules/certificate-selector.js';
 import { reconcileView } from '../modules/refresh.js';
 import { installSelectMenus } from '../modules/select-menu.js';
 import { assert, waitFor } from './assertions.mjs';
@@ -103,4 +104,44 @@ export async function testSelectMenusRuntime() {
   document.querySelector('[data-outside]').focus();
   assert.equal(domain.getAttribute('list'), 'domains', 'blur did not restore the native datalist binding');
   assert.ok(!domain.hasAttribute('role'), 'blur leaked authored combobox attributes');
+  await testCertificateSelectorStates();
+}
+
+async function testCertificateSelectorStates() {
+ const form=document.createElement('form');
+ form.innerHTML='<label data-native-certificate>证书<input name="certificate_path" value="/etc/test.crt"></label><label>私钥<input name="private_key_path" value="/etc/test.key"></label><label>SNI<input name="tls_server_name"></label>';
+ document.body.append(form);
+ let fail=false;
+ const base={id:'crt_0000000000000001',name:'one.example.test',domains:['one.example.test'],source:'import',owned:true,version:1,not_before:new Date(Date.now()-86400000).toISOString(),not_after:new Date(Date.now()+86400000*90).toISOString(),status:'issued'};
+ let items=[base,{...base,id:'crt_0000000000000002',name:'未签发',version:0,not_after:null},{...base,id:'crt_0000000000000003',name:'将生效',not_before:new Date(Date.now()+86400000).toISOString()},{...base,id:'crt_0000000000000004',name:'已过期',not_after:new Date(Date.now()-86400000).toISOString()},{...base,id:'crt_0000000000000005',owned:false,name:'多域名',domains:['*.example.test','two.example.test']}];
+ await bindCertificateSelector({api:async()=>{if(fail)throw Error('offline');return {items}},form,protocol:{supports_tls:true},plan:{},visible:()=>form.isConnected});
+ const select=form.elements.panel_certificate_id,summary=form.querySelector('[data-panel-certificate-summary]'),retry=form.querySelector('button');
+ const refresh=async()=>{retry.click();await waitFor(()=>!retry.disabled)};
+ assert.equal(select.options.length,6,'missing certificate states');
+ assert.equal([...select.options].filter(o=>o.disabled).length,3,'pending/future/expired must be unavailable');
+ assert.ok(!select.options[1].dataset.description.includes(base.domains[0]),'duplicate domain was not removed');
+ select.value=base.id;select.dispatchEvent(new Event('change',{bubbles:true}));
+ assert.equal(form.elements.tls_server_name.value,base.domains[0],'single domain autofill');
+ form.elements.tls_server_name.value='draft.example.test';form.elements.tls_server_name.dispatchEvent(new Event('input'));
+ assert.ok(select.validationMessage.includes('不覆盖'),'domain mismatch accepted');
+ select.click();
+ const scroll=document.querySelector('[role=listbox][popover]').scrollTop;
+ items=[{...base,status:'failed',binding_statuses:{synced:1,failed:1,pending:1}},...items.slice(1)];
+ await refresh();
+ assert.equal(form.elements.tls_server_name.value,'draft.example.test','refresh overwrote SNI draft');
+ assert.equal(document.activeElement,select,'refresh lost focus');
+ assert.equal(document.querySelector('[role=listbox][popover]').scrollTop,scroll,'refresh lost menu scroll');
+ form.elements.tls_server_name.value=base.domains[0];form.elements.tls_server_name.dispatchEvent(new Event('input'));
+ assert.ok(summary.textContent.includes('更新失败')&&summary.textContent.includes('部分完成'),'update and target states conflated');
+ assert.ok(!select.options[1].disabled,'failed renewal disabled the valid old pair');
+ fail=true;await refresh();assert.ok(!retry.hidden&&summary.textContent.includes('加载失败'),'load failure recovery missing');
+ fail=false;items=items.slice(1);await refresh();
+ assert.equal(select.value,base.id,'revoked selection was silently reset');
+ assert.ok(select.validationMessage.includes('撤销'),'revoked selection still valid');
+ select.value='crt_0000000000000005';form.elements.tls_server_name.value='';select.dispatchEvent(new Event('change',{bubbles:true}));
+ assert.equal(form.elements.tls_server_name.value,'','wildcard or multiple domains supplied an invalid SNI');
+ select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));
+ assert.equal(form.elements.certificate_path.value,'/etc/test.crt','local certificate path lost');
+ assert.equal(form.elements.private_key_path.value,'/etc/test.key','local key path lost');
+ form.remove();
 }

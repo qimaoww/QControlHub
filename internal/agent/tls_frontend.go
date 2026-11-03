@@ -469,7 +469,7 @@ func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, fronte
 		if mode == "caddy" {
 			output, err = m.runCaddy(ctx, &identity, "validate", "--config", path)
 		} else {
-			output, err = runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", path)
+			output, err = m.validateNginx(ctx, path)
 		}
 		_ = os.Remove(path)
 		if err != nil {

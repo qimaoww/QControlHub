@@ -154,20 +154,44 @@ func (s *Store) completeCertificateBindingsTx(ctx context.Context, tx pgx.Tx, id
 	}
 	return err
 }
+
+// Both ownership tables describe actual deployed instances, not editable drafts.
+// Agent locking in create/claim serializes this check with lifecycle changes.
+func validateCertificateSyncTargetTx(ctx context.Context, tx pgx.Tx, task core.Task, owner string) error {
+	var allowed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM (
+ SELECT agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain FROM agent_engine_ownership
+ UNION ALL
+ SELECT agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain FROM agent_shared_instance_ownership
+ ) st WHERE st.agent_id=$1 AND st.engine=$2 AND st.owner_id=$3 AND st.config_id=$4 AND st.config_version=$5
+ AND st.running AND NOT st.uncertain AND NOT st.config_uncertain
+ ) AND EXISTS(SELECT 1 FROM certificate_bindings WHERE config_id=$4 AND owner_id=$3 AND enabled AND config_version=$5)
+ AND NOT EXISTS(SELECT 1 FROM tasks WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND id<>$6 AND status IN ('pending','running') AND action IN ('deploy','start','stop','restart','uninstall','import-existing'))`,
+		task.AgentID, task.Engine, owner, task.ConfigID, task.ConfigVersion, task.ID).Scan(&allowed)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("%w: 证书同步目标已停止、变更或有任务执行中", ErrConflict)
+	}
+	return nil
+}
+
 func (s *Store) syncCertificateBindings(ctx context.Context) error {
-	rows, err := s.pool.Query(ctx, `SELECT b.certificate_id,b.config_id,b.owner_id,c.agent_id,c.engine,c.version FROM certificate_bindings b JOIN configs c ON c.id=b.config_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE c.deleted_at IS NULL AND c.agent_id IS NOT NULL AND b.enabled AND b.config_version=c.version AND b.version<p.version AND b.retry_at<=now() AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.config_id=c.id AND t.status IN ('pending','running')) ORDER BY b.retry_at LIMIT 20`)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT b.config_id,b.owner_id,c.agent_id,c.engine,c.version,b.config_version FROM certificate_bindings b JOIN configs c ON c.id=b.config_id AND c.owner_id=b.owner_id JOIN panel_certificates p ON p.id=b.certificate_id WHERE c.deleted_at IS NULL AND c.agent_id IS NOT NULL AND b.enabled AND b.version<p.version AND b.retry_at<=now() AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.config_id=c.id AND t.status IN ('pending','running')) LIMIT 20`)
 	if err != nil {
 		return err
 	}
 	type binding struct {
-		cert, config, owner, agent string
-		engine                     core.Engine
-		version                    int
+		config, owner, agent string
+		engine               core.Engine
+		version, applied     int
 	}
 	items := []binding{}
 	for rows.Next() {
 		var b binding
-		if err = rows.Scan(&b.cert, &b.config, &b.owner, &b.agent, &b.engine, &b.version); err != nil {
+		if err = rows.Scan(&b.config, &b.owner, &b.agent, &b.engine, &b.version, &b.applied); err != nil {
 			rows.Close()
 			return err
 		}
@@ -178,24 +202,44 @@ func (s *Store) syncCertificateBindings(ctx context.Context) error {
 		return err
 	}
 	for _, b := range items {
-		ownerCtx := WithConfigScope(ctx, b.owner, false)
-		if err = certificateUseTx(ownerCtx, s.pool, b.cert, b.owner); err == nil {
-			_, err = s.CreateTask(ownerCtx, core.TaskRequest{AgentID: b.agent, Engine: b.engine, Action: core.ActionDeploy, ConfigID: b.config, ExpectedConfigVersion: b.version})
+		ownerCtx := certificateOwnerContext(ctx, b.owner)
+		tx, e := s.pool.Begin(ownerCtx)
+		if e != nil {
+			return e
 		}
-		status := "pending"
-		message := ""
-		if err != nil {
-			status = "blocked"
-			message = truncate(err.Error(), 1000)
+		task, e := s.createTaskTx(ownerCtx, tx, core.TaskRequest{AgentID: b.agent, Engine: b.engine, Action: core.ActionDeploy, ConfigID: b.config, ExpectedConfigVersion: b.version}, 0, b.applied)
+		if e == nil {
+			_, e = tx.Exec(ctx, `UPDATE certificate_bindings SET task_id=$2,status='pending',error='',retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND enabled`, b.config, task.ID)
 		}
-		_, _ = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status=$3,error=$4,retry_at=now()+interval '5 minutes' WHERE certificate_id=$1 AND config_id=$2 AND status<>'running'`, b.cert, b.config, status, message)
+		if e == nil {
+			e = tx.Commit(ctx)
+		} else {
+			_ = tx.Rollback(ctx)
+		}
+		if e != nil {
+			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(e.Error(), 1000))
+			if err != nil {
+				return err
+			}
+		} else if !task.Reused {
+			s.signalTaskReady(task.AgentID)
+		}
 	}
 	return nil
 }
 
-func (s *Store) openCertificateExecution(ctx context.Context, tx pgx.Tx, task *core.Task, features []string) error {
+func (s *Store) openCertificateExecution(ctx context.Context, tx pgx.Tx, task *core.Task, features []string, claiming bool) error {
 	if err := s.openExecutionConfig(task, features); err != nil {
 		return err
+	}
+	if task.CertificateSync && claiming && task.Attempt == 1 {
+		var owner string
+		if err := tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`, task.ConfigID).Scan(&owner); err != nil {
+			return err
+		}
+		if err := validateCertificateSyncTargetTx(ctx, tx, *task, owner); err != nil {
+			return err
+		}
 	}
 	return s.prepareCertificateExecutionTx(ctx, tx, task, features)
 }

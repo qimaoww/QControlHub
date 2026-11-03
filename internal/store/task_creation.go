@@ -39,7 +39,7 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 
 // The caller commits before notifying the Agent. This also allows a preset
 // revision and its exact task snapshot to be published in one transaction.
-func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration) (core.Task, error) {
+func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration, certificateSyncVersion ...int) (core.Task, error) {
 	scope := scopeForConfig(ctx)
 	var configIDs []string
 	if scope.Admin && request.ConfigID != "" {
@@ -289,6 +289,23 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if request.ExpectedConfigVersion != 0 && task.ConfigVersion != request.ExpectedConfigVersion {
 			return core.Task{}, fmt.Errorf("%w: configuration changed after saving; no task was submitted, reload before deployment", ErrConflict)
 		}
+		if len(certificateSyncVersion) > 0 {
+			if request.Action != core.ActionDeploy {
+				return core.Task{}, ErrInvalid
+			}
+			appliedVersion := certificateSyncVersion[0]
+			// The latest revision guard above remains in force. Only this internal
+			// maintenance path may select the confirmed deployed snapshot.
+			if task.ConfigVersion != appliedVersion {
+				if err = tx.QueryRow(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version=$2`, task.ConfigID, appliedVersion).Scan(&task.ConfigContent); err != nil {
+					return core.Task{}, mapError(err)
+				}
+			}
+			task.ConfigVersion, task.CertificateSync = appliedVersion, true
+			if err = validateCertificateSyncTargetTx(ctx, tx, task, configOwnerID); err != nil {
+				return core.Task{}, err
+			}
+		}
 		if request.Action == core.ActionImportExisting && configAgentID != request.AgentID {
 			return core.Task{}, fmt.Errorf("%w: existing service migration requires this agent's saved snapshot", ErrInvalid)
 		}
@@ -442,7 +459,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err != nil {
 		return core.Task{}, err
 	}
-	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends)
+	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync)
 	if err != nil {
 		return core.Task{}, err
 	}

@@ -239,6 +239,21 @@ try {
   assert.ok(await evaluate(b,"document.documentElement.scrollWidth <= innerWidth+1"));
   record(`${mode}: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed`);
   await screenshot(b,'certificate-selector');
+  for (const [width,height] of mode==='mobile'?[[390,844],[844,390],[768,1024]]:[[1920,1080],[3840,2160],[1280,800],[540,720]]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},b);
+    for (const theme of ['light','dark','modern']) {
+      await evaluate(b,`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      await evaluate(b,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await click(b,'[name=panel_certificate_id]');
+      await wait(b,"!!document.querySelector('[role=listbox][popover]')");
+      const bounds=await evaluate(b,"(() => {const e=document.querySelector('[role=listbox][popover]');const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth+1,width:innerWidth,height:innerHeight}})()");
+      assert.ok(bounds.left>=-1&&bounds.right<=bounds.width+1&&bounds.top>=-1&&bounds.bottom<=bounds.height+1&&!bounds.overflow,JSON.stringify(bounds));
+      await screenshot(b,`certificate-menu-${theme}-${width}x${height}`);
+      await evaluate(b,"document.querySelector('[name=panel_certificate_id]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    }
+  }
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},b);
+
 
   // An already-open recipient detail must lose its stale content when the
   // owner revokes access; the read poll must distinguish 404 from outages.
