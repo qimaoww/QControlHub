@@ -48,7 +48,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     const reason = availability(cert);
     const renewal = {queued:"等待更新",running:"更新中",retrying:"更新重试中",validating:"更新验证中",waiting_dns:"等待 DNS 验证",failed:"更新失败",canceled:"更新已取消",canceling:"取消更新中"}[cert.status];
     const sourceUpdate = ["caddy","node"].includes(cert.source) ? {pending:"等待来源更新",synced:"来源已同步",blocked:"来源更新受阻",paused:"来源同步已暂停",detached:"来源已解除",unverified:"来源待核实"}[cert.sync_status] : "";
-    const expiry = cert.not_after ? `${new Date(cert.not_after).toLocaleDateString("zh-CN", { year:"numeric", month:"long", day:"numeric" })} 到期` : "";
+    const expiry = cert.not_after ? `${new Date(cert.not_after).toLocaleDateString("zh-CN", { year:"numeric", month:"2-digit", day:"2-digit" })}到期` : "";
     const valid = reason || (Date.parse(cert.not_after) - Date.now() < 30*86400000 ? "临近到期" : "有效");
     const sync = cert.binding_statuses || {};
     const syncLabels = {pending:"等待同步",running:"同步中",synced:"已同步",failed:"同步失败",blocked:"同步受阻",disabled:"未启用同步"};
@@ -59,7 +59,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   const name = cert => cert.name?.trim() || cert.domains.join(", ");
   const description = cert => {
     const domains = [...new Set(cert.domains)].filter(domain=>domain.toLowerCase()!==name(cert).toLowerCase());
-    return [domains.join(", "),{node:"节点证书",caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source,state(cert)].filter(Boolean).join(" · ");
+    return [domains.join(", "),[{node:"节点证书",caddy:"Caddy",acme:"ACME",import:"导入","self-signed":"自签"}[cert.source]||cert.source,state(cert)].filter(Boolean).join(" · ")].filter(Boolean).join("\n");
   };
   select.value = selected;
   const update = (event, refreshOnly = false) => {

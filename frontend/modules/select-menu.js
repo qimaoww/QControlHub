@@ -132,9 +132,12 @@ function open(select) {
     button.disabled = !enabled(option);
     if (option.dataset.description) {
       const primary = document.createElement('span'); primary.textContent = option.label || option.value;
-      const secondary = document.createElement('span'); secondary.className = 'settings-hint'; secondary.textContent = option.dataset.description;
-      const content = document.createElement('span'); content.className = 'user-allocation-node';
-      content.append(primary,secondary); button.append(content);
+      button.append(primary);
+      for (const line of option.dataset.description.split('\n')) {
+        const secondary = document.createElement('span');
+        secondary.className = 'settings-hint'; secondary.textContent = line;
+        button.append(secondary);
+      }
       button.title = option.title;
     } else button.textContent = option.label || option.value;
     optionHost.append(button);
