@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -15,25 +16,43 @@ import (
 )
 
 func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
+		for _, protocol := range serverconfig.Protocols(engine) {
+			if !protocol.SupportsTLS || protocol.UsesReality {
+				continue
+			}
+			supported := false
+			for _, transport := range protocol.Transports {
+				supported = supported || transport == "websocket"
+			}
+			if supported {
+				t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) { testNativeWebSocketTLSClientRoutingIsolation(t, engine, protocol.Key) })
+			}
+		}
+	}
+}
+
+func testNativeWebSocketTLSClientRoutingIsolation(t *testing.T, engine core.Engine, key string) {
 	db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
 	var plans [2]serverconfig.Input
 	var results [2]configMutationResult
-	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "native-ws-shared", core.EngineSingBox)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "native-ws-shared", engine)
 	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances)
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 443, 21002)
-	base := "/agents/" + agent.ID + "/configs/sing-box"
+	base := "/agents/" + agent.ID + "/configs/" + string(engine)
 	clients := []configScopeAPIClient{owner, recipient}
 	for i, client := range clients {
-		client.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plans[i])
+		client.call("POST", base+"/plans", map[string]string{"protocol": key}, http.StatusCreated, &plans[i])
 		plan := &plans[i]
+		plan.Transport = "websocket"
 		plan.Tag, plan.TLSServerName, plan.TransportPath = "same-tag", "same.example.test", "/same-path"
 		plan.Port, plan.TLSPublicPort = 21001+i, 443
 		// Native mode must keep the explicit listen port, not stale public metadata.
-		if i == 0 {
-			plan.TLSMode, plan.Listen, plan.Port = "native", "0.0.0.0", 444
+		if i == 0 || engine != core.EngineSingBox {
+			plan.TLSMode, plan.Listen, plan.Port = "native", "0.0.0.0", 444-i
 		}
 		plan.CertificatePath, plan.PrivateKeyPath = "/etc/certs/same.pem", "/etc/certs/same.key"
 		client.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &results[i])
@@ -55,7 +74,7 @@ func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
 		if saved.Port != plan.Port || saved.Listen != plan.Listen || saved.Credential != plan.Credential || saved.TLSServerName != plan.TLSServerName || saved.TransportHost != "" || saved.CertificatePath != plan.CertificatePath || saved.PrivateKeyPath != plan.PrivateKeyPath {
 			t.Fatal("native readback changed connection or certificate references")
 		}
-		client.call("PUT", "/agents/"+agent.ID+"/client-address", map[string]any{"profile": clientProfileSelector{Engine: core.EngineSingBox, Tag: plan.Tag, Port: plan.Port}, "address": "203.0.113.10"}, http.StatusOK, nil)
+		client.call("PUT", "/agents/"+agent.ID+"/client-address", map[string]any{"profile": clientProfileSelector{Engine: engine, Tag: plan.Tag, Port: plan.Port}, "address": "203.0.113.10"}, http.StatusOK, nil)
 	}
 	check := func(client configScopeAPIClient, i int) {
 		t.Helper()
@@ -66,6 +85,7 @@ func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
 			t.Fatal("foreign or missing deployed profile")
 		}
 		item := entries[0].Profiles[0]
+		item.Profile.Mihomo = item.MihomoYAML
 		uri, err := url.Parse(item.Profile.URI)
 		if err != nil {
 			t.Fatal(err)
@@ -74,7 +94,19 @@ func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
 		if wantHost == "" {
 			wantHost = plan.TLSServerName
 		}
-		if uri.Hostname() != "203.0.113.10" || uri.Port() != strconv.Itoa(plan.Port) || uri.Query().Get("host") != wantHost || uri.Query().Get("sni") != plan.TLSServerName || uri.Query().Get("path") != plan.TransportPath || uri.User.Username() != plan.Credential {
+		address, port, credential, host, sni, path := uri.Hostname(), uri.Port(), uri.User.Username(), uri.Query().Get("host"), uri.Query().Get("sni"), uri.Query().Get("path")
+		if uri.Scheme == "vmess" {
+			data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(item.Profile.URI, "vmess://"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(data, &payload); err != nil {
+				t.Fatal(err)
+			}
+			address, port, credential, host, sni, path = payload["add"], payload["port"], payload["id"], payload["host"], payload["sni"], payload["path"]
+		}
+		if address != "203.0.113.10" || port != strconv.Itoa(plan.Port) || host != wantHost || sni != plan.TLSServerName || path != plan.TransportPath || credential != plan.Credential {
 			t.Fatal("URI lost scoped native TLS routing")
 		}
 		if strings.Contains(item.Profile.URI, plans[1-i].Credential) {
@@ -86,14 +118,14 @@ func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
 		}
 		ws := out["transport"].(map[string]any)
 		tls := out["tls"].(map[string]any)
-		if ws["headers"].(map[string]any)["Host"] != wantHost || tls["server_name"] != plan.TLSServerName || out["server"] != "203.0.113.10" || out["uuid"] != plan.Credential {
+		if ws["headers"].(map[string]any)["Host"] != wantHost || tls["server_name"] != plan.TLSServerName || out["server"] != "203.0.113.10" || (out["uuid"] != plan.Credential && out["password"] != plan.Credential) {
 			t.Fatal("JSON lost scoped native TLS routing")
 		}
 		var proxy map[string]any
 		if err := yaml.Unmarshal([]byte(item.MihomoYAML), &proxy); err != nil {
 			t.Fatal(err)
 		}
-		if proxy["ws-opts"].(map[string]any)["headers"].(map[string]any)["Host"] != wantHost || proxy["uuid"] != plan.Credential {
+		if proxy["ws-opts"].(map[string]any)["headers"].(map[string]any)["Host"] != wantHost || (proxy["uuid"] != plan.Credential && proxy["password"] != plan.Credential) {
 			t.Fatal("Mihomo lost scoped routing")
 		}
 		var resource subStoreSyncResource
@@ -105,13 +137,12 @@ func TestNativeWebSocketTLSClientRoutingIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(profiles) != 1 || profiles[0].ConfigID != results[i].Config.ID || profiles[0].URI != item.Profile.URI {
+		if len(profiles) != 1 || profiles[0].ConfigID != results[i].Config.ID || profiles[0].URI != subStoreClientValue(item.Profile) {
 			t.Fatal("subscription changed the scoped URI")
 		}
-		for _, address := range profiles[0].Addresses {
-			parsed, err := url.Parse(address.URI)
-			if err != nil || parsed.Hostname() != "203.0.113.10" || parsed.Query().Get("host") != wantHost {
-				t.Fatal("subscription address override lost domain")
+		for _, candidate := range profiles[0].Addresses {
+			if candidate.Address != "203.0.113.10" || candidate.URI != profiles[0].URI {
+				t.Fatal("subscription address override changed scoped parameters")
 			}
 		}
 	}

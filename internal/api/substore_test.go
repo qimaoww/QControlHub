@@ -445,3 +445,22 @@ func TestSubStoreHysteriaALPNUsesNativeMap(t *testing.T) {
 		t.Fatal("Sub-Store Hysteria ALPN would be lost")
 	}
 }
+
+func TestSubStoreTrojanWebSocketPreservesIndependentHost(t *testing.T) {
+	input := serverconfig.Input{Protocol: serverconfig.ProtocolTrojan, Tag: "trojan-ws", Port: 443, Credential: "fixture-password", Transport: "websocket", TransportPath: "/ws", TransportHost: "host.example.test", TLSEnabled: true, TLSServerName: "sni.example.test"}
+	profile, err := serverconfig.BuildClientProfile(input, "203.0.113.10", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := subStoreClientValue(profile); got != profile.Mihomo || !strings.Contains(got, "host.example.test") {
+		t.Fatal("Mihomo subscription discarded independent Trojan WS Host")
+	}
+	input.TransportHost = ""
+	profile, err = serverconfig.BuildClientProfile(input, "203.0.113.10", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subStoreClientValue(profile) != profile.URI {
+		t.Fatal("default Host unnecessarily changed URI format")
+	}
+}

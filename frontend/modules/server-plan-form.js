@@ -112,7 +112,6 @@ function installGeneratedFieldButtons(form, protocol) {
       const updateVisibility = () => {
         setVisible(button, !(transport?.value === "raw"));
       };
-      bindEvent(transport, "change", updateVisibility);
       updateVisibility();
     }
   });
@@ -282,6 +281,7 @@ function bindProtocolOptionVisibility(form) {
   const tlsMode = form.elements.namedItem("tls_mode");
   const updateNative = () => {
     const kind = transport?.value || "raw";
+    form.querySelectorAll('[data-regenerate="transport_path"]').forEach(button => setVisible(button, kind !== "raw"));
     const path = form.elements.namedItem("transport_path");
     const host = form.elements.namedItem("transport_host");
     const usesPath = !["raw", "quic"].includes(kind);

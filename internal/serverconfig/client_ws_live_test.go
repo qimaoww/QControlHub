@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -22,8 +23,44 @@ import (
 // A local hostname-routing TLS edge, not a Cloudflare service. Keep this in the
 // existing live matrix so CI exercises actual VLESS payloads through the edge.
 func testSingBoxWebSocketTLSAddressOverride(t *testing.T) {
-	binary := os.Getenv("QCH_SING_BOX_BINARY")
-	protocol, _ := FindProtocol(core.EngineSingBox, "vless-ws-tls")
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
+		for _, protocol := range nativeWebSocketTLSProtocols(engine) {
+			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) { testNativeWebSocketTLSAddressOverride(t, engine, protocol) })
+		}
+	}
+}
+
+func nativeWebSocketTLSProtocols(engine core.Engine) []Protocol {
+	var result []Protocol
+	for _, p := range Protocols(engine) {
+		if !p.SupportsTLS || p.UsesReality {
+			continue
+		}
+		for _, transport := range p.Transports {
+			if transport == "websocket" {
+				result = append(result, p)
+				break
+			}
+		}
+	}
+	return result
+}
+
+func nativeWSTestBinary(t *testing.T, engine core.Engine) string {
+	t.Helper()
+	variable := map[core.Engine]string{core.EngineSingBox: "QCH_SING_BOX_BINARY", core.EngineXray: "QCH_XRAY_BINARY", core.EngineMihomo: "QCH_MIHOMO_BINARY"}[engine]
+	binary := os.Getenv(variable)
+	if binary == "" {
+		binary = filepath.Join(filepath.Dir(os.Getenv("QCH_SING_BOX_BINARY")), string(engine))
+	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Skipf("%s is unavailable", variable)
+	}
+	return binary
+}
+
+func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, protocol Protocol) {
+	binary := nativeWSTestBinary(t, core.EngineSingBox)
 	input, err := nativeTLSFixturePlan(protocol)
 	if err != nil {
 		t.Fatal(err)
@@ -32,14 +69,14 @@ func testSingBoxWebSocketTLSAddressOverride(t *testing.T) {
 	input.Listen, input.Port = "127.0.0.1", singBoxFreePort(t)
 	input.CertificatePath, input.PrivateKeyPath = certPath, keyPath
 	input.TLSServerName, input.TLSClientCertificate = "tls.example.test", certificate
-	input.TransportPath = "/custom-ws"
-	server, err := Generate(core.EngineSingBox, input)
+	input.Transport, input.TransportPath = "websocket", "/custom-ws"
+	server, err := Generate(engine, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverLog := singBoxRun(t, binary, "native-ws-origin", server)
+	serverLog := nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), server, input.Port, certPath)
 	// Exercise the saved source and detached metadata, not just the form input.
-	parsed, ok := Parse(core.EngineSingBox, server)
+	parsed, ok := Parse(engine, server)
 	if !ok {
 		t.Fatal("cannot read native TLS source")
 	}
@@ -158,10 +195,26 @@ func testSingBoxWebSocketTLSAddressOverride(t *testing.T) {
 			}
 
 			if tc.success && tc.edge {
+				t.Run("xray-json", func(t *testing.T) {
+					testWebSocketXrayImport(t, plan, tc.address, certPath)
+					select {
+					case r := <-seen:
+						want := tc.host
+						if want == "" {
+							want = input.TLSServerName
+						}
+						if r.host != want || r.sni != input.TLSServerName || r.path != input.TransportPath {
+							t.Fatalf("Xray changed routing: %+v", r)
+						}
+					case <-time.After(3 * time.Second):
+						t.Fatal("Xray did not reach edge")
+					}
+				})
+
 				for _, uri := range []bool{false, true} {
 					name := "mihomo-yaml"
 					if uri {
-						name = "vless-uri-import"
+						name = "share-uri-import"
 					}
 					t.Run(name, func(t *testing.T) {
 						testWebSocketMihomoImport(t, plan, tc.address, certPath, uri)
@@ -170,6 +223,12 @@ func testSingBoxWebSocketTLSAddressOverride(t *testing.T) {
 							want := tc.host
 							if want == "" {
 								want = input.TLSServerName
+							}
+							if uri && nativeProtocol(plan.Protocol) == ProtocolTrojan && tc.host != "" {
+								// Mihomo 1.19.32's Trojan URI parser ignores host. The
+								// subscription path must use native YAML for this case.
+								want = input.TLSServerName
+								t.Log("Mihomo Trojan URI ignored custom Host; use native YAML")
 							}
 							if r.host != want || r.sni != input.TLSServerName || r.path != input.TransportPath {
 								t.Fatalf("import changed edge routing: %+v", r)

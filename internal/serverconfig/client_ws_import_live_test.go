@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,10 +22,7 @@ import (
 // CA through the normal trust store. No certificate checks are disabled.
 func testWebSocketMihomoImport(t *testing.T, plan Input, address, certPath string, uri bool) {
 	t.Helper()
-	binary := os.Getenv("QCH_MIHOMO_BINARY")
-	if binary == "" {
-		t.Skip("QCH_MIHOMO_BINARY is not set")
-	}
+	binary := nativeWSTestBinary(t, core.EngineMihomo)
 	plan.TLSClientCertificate = ""
 	profile, err := BuildClientProfile(plan, address, "")
 	if err != nil {

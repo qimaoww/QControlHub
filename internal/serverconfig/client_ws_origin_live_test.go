@@ -1,0 +1,106 @@
+package serverconfig
+
+import (
+	"encoding/json"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
+)
+
+func nativeWSOriginRun(t *testing.T, engine core.Engine, binary, content string, port int, certPath string) func() string {
+	t.Helper()
+	if engine == core.EngineSingBox {
+		return singBoxRun(t, binary, "native-ws-origin", content)
+	}
+	dir := t.TempDir()
+	config := filepath.Join(dir, "server.json")
+	if err := os.WriteFile(config, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	checkArgs, runArgs := []string{"run", "-test", "-config", config}, []string{"run", "-config", config}
+	if engine == core.EngineMihomo {
+		checkArgs = []string{"-t", "-d", dir, "-f", config}
+		runArgs = []string{"-d", dir, "-f", config}
+	}
+	check := exec.Command(binary, checkArgs...)
+	check.Env = append(os.Environ(), "SAFE_PATHS="+filepath.Dir(certPath), "SSL_CERT_FILE="+certPath)
+	if output, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("%s rejected native WS: %v\n%s", engine, err, output)
+	}
+	logPath := filepath.Join(dir, "output.log")
+	output, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, runArgs...)
+	cmd.Env = check.Env
+	cmd.Stdout, cmd.Stderr = output, output
+	if err := cmd.Start(); err != nil {
+		_ = output.Close()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("origin did not exit")
+		}
+		_ = output.Close()
+	})
+	readLog := func() string { data, _ := os.ReadFile(logPath); return string(data) }
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if engine == core.EngineXray {
+			// Probing a tunnel client would itself start a second proxy request.
+			if strings.Contains(readLog(), "started") {
+				return readLog
+			}
+			continue
+		}
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return readLog
+		}
+		select {
+		case err := <-done:
+			done <- err
+			t.Fatalf("%s exited: %v\n%s", engine, err, readLog())
+		default:
+		}
+	}
+	t.Fatalf("%s origin did not listen: %s", engine, readLog())
+	return readLog
+}
+
+func testWebSocketXrayImport(t *testing.T, plan Input, address, certPath string) {
+	t.Helper()
+	binary := nativeWSTestBinary(t, core.EngineXray)
+	plan.TLSClientCertificate = ""
+	out, err := BuildClientOutbound(core.EngineXray, plan, address, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outbound map[string]any
+	if err := json.Unmarshal(out, &outbound); err != nil {
+		t.Fatal(err)
+	}
+	port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+	content, err := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "tunnel", "settings": map[string]any{"address": "127.0.0.1", "port": echo, "network": "tcp"}}}, "outbounds": []any{outbound}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := nativeWSOriginRun(t, core.EngineXray, binary, string(content), port, certPath)
+	if err := singBoxEchoRoundTrip("tcp", port); err != nil {
+		t.Fatalf("Xray outbound data failed: %v\n%s", err, logs())
+	}
+}

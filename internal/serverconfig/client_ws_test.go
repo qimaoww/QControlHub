@@ -157,10 +157,99 @@ func TestWebSocketClientHostScope(t *testing.T) {
 			var out map[string]any
 			_ = json.Unmarshal(raw, &out)
 			ws := mapValue(mapValue(out["streamSettings"])["wsSettings"])
-			got := stringValue(mapValue(ws["headers"])["Host"])
+			got := stringValue(ws["host"])
 			if got != tc.want {
 				t.Fatalf("Xray Host=%s want=%s at port %s", got, tc.want, strconv.Itoa(input.Port))
 			}
+		}
+	}
+}
+
+func TestNativeWebSocketTLSCatalogAndDetachedMetadata(t *testing.T) {
+	want := map[core.Engine]int{core.EngineSingBox: 6, core.EngineXray: 2, core.EngineMihomo: 2, core.EngineShadowsocksRust: 0}
+	for engine, count := range want {
+		protocols := nativeWebSocketTLSProtocols(engine)
+		if len(protocols) != count {
+			t.Fatalf("%s native TLS WS catalog changed: %d want %d", engine, len(protocols), count)
+		}
+		for _, p := range protocols {
+			t.Run(string(engine)+"/"+p.Key, func(t *testing.T) {
+				input, err := nativeTLSFixturePlan(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Transport, input.TransportPath = "websocket", "/independent"
+				input.TLSServerName, input.TransportHost = "sni.example.test", "host.example.test"
+				input.CertificatePath, input.PrivateKeyPath = "/etc/certs/site.pem", "/etc/certs/site.key"
+				source, err := Generate(engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				metadata, err := MarshalClientMetadata(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed, ok := Parse(engine, source)
+				if !ok {
+					t.Fatal("source parse failed")
+				}
+				if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+					t.Fatal(err)
+				}
+				if parsed.TransportHost != input.TransportHost || parsed.TLSServerName != input.TLSServerName {
+					t.Fatal("detached client routing was lost")
+				}
+				regenerated, err := RegeneratePlan(p, parsed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if regenerated.TransportHost != input.TransportHost || regenerated.TLSServerName != input.TLSServerName || regenerated.CertificatePath != input.CertificatePath {
+					t.Fatal("regeneration overwrote custom routing")
+				}
+				// Path/credentials are intentionally regenerated; bind a fresh snapshot.
+				next, err := Generate(engine, regenerated)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fresh, err := MarshalClientMetadata(regenerated)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reread, ok := Parse(engine, next)
+				if !ok {
+					t.Fatal("regenerated parse failed")
+				}
+				if err := ApplyClientMetadata(&reread, fresh); err != nil {
+					t.Fatal(err)
+				}
+				if reread.TransportHost != input.TransportHost || reread.TransportPath != regenerated.TransportPath {
+					t.Fatal("regenerated save lost WS client values")
+				}
+				if engine == core.EngineSingBox {
+					return
+				} // Its explicit Host is already source data.
+				for name, change := range map[string]func(*Input){
+					"peer":        func(in *Input) { in.Credential = "changed-peer" },
+					"tag":         func(in *Input) { in.Tag = "other" },
+					"path":        func(in *Input) { in.TransportPath = "/other" },
+					"port":        func(in *Input) { in.Port++ },
+					"listen":      func(in *Input) { in.Listen = "127.0.0.2" },
+					"certificate": func(in *Input) { in.CertificatePath = "/etc/certs/other.pem" },
+					"key":         func(in *Input) { in.PrivateKeyPath = "/etc/certs/other.key" },
+					"tls":         func(in *Input) { in.TLSEnabled = false },
+				} {
+					t.Run("stale-"+name, func(t *testing.T) {
+						stale, _ := Parse(engine, source)
+						change(&stale)
+						if err := ApplyClientMetadata(&stale, metadata); err != nil {
+							t.Fatal(err)
+						}
+						if stale.TransportHost != "" {
+							t.Fatal("stale WS client metadata applied to another endpoint")
+						}
+					})
+				}
+			})
 		}
 	}
 }
