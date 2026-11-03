@@ -134,6 +134,9 @@ async function testCertificateSelectorStates() {
  form.elements.tls_server_name.value=base.domains[0];form.elements.tls_server_name.dispatchEvent(new Event('input'));
  assert.ok(summary.textContent.includes('更新失败')&&summary.textContent.includes('部分完成'),'update and target states conflated');
  assert.ok(!select.options[1].disabled,'failed renewal disabled the valid old pair');
+ items=[{...base,source:'node',sync_status:'blocked',binding_statuses:{pending:1}},...items.slice(1)];await refresh();
+ assert.ok(summary.textContent.includes('来源更新受阻')&&summary.textContent.includes('等待同步'),'source collection and target deployment states conflated');
+ assert.ok(!select.options[1].disabled,'blocked external source disabled a valid imported pair');
  fail=true;await refresh();assert.ok(!retry.hidden&&summary.textContent.includes('加载失败'),'load failure recovery missing');
  fail=false;items=items.slice(1);await refresh();
  assert.equal(select.value,base.id,'revoked selection was silently reset');

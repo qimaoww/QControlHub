@@ -47,13 +47,14 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
   const state = cert => {
     const reason = availability(cert);
     const renewal = {queued:"等待更新",running:"更新中",retrying:"更新重试中",validating:"更新验证中",waiting_dns:"等待 DNS 验证",failed:"更新失败",canceled:"更新已取消",canceling:"取消更新中"}[cert.status];
+    const sourceUpdate = ["caddy","node"].includes(cert.source) ? {pending:"等待来源更新",synced:"来源已同步",blocked:"来源更新受阻",paused:"来源同步已暂停",detached:"来源已解除",unverified:"来源待核实"}[cert.sync_status] : "";
     const expiry = cert.not_after ? `${new Date(cert.not_after).toLocaleDateString()} 到期` : "";
     const valid = reason || (Date.parse(cert.not_after) - Date.now() < 30*86400000 ? "临近到期" : "有效");
     const sync = cert.binding_statuses || {};
     const syncLabels = {pending:"等待同步",running:"同步中",synced:"已同步",failed:"同步失败",blocked:"同步受阻",disabled:"未启用同步"};
     const targets = Object.entries(sync).filter(([,count])=>count).map(([key,count])=>`${syncLabels[key]||key} ${count}`);
     const partial = sync.synced && (sync.pending || sync.running || sync.failed || sync.blocked) ? "部分完成" : "";
-    return [valid,expiry,renewal && `${renewal}${!reason ? "，现有证书有效" : ""}`,partial,...targets].filter(Boolean).join(" · ");
+    return [valid,expiry,sourceUpdate,renewal && `${renewal}${!reason ? "，现有证书有效" : ""}`,partial,...targets].filter(Boolean).join(" · ");
   };
   const name = cert => cert.name?.trim() || cert.domains.join(", ");
   const description = cert => {
