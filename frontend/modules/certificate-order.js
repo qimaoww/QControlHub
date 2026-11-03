@@ -12,8 +12,9 @@ export function certificateOrderDiagnostic(value) {
 
 function failureMessage(value, stage) {
   const safe = certificateOrderDiagnostic(value);
-  if (/读取 ACME 申请账号失败/.test(safe)) return "读取 ACME 申请账号失败，请检查本人申请账号是否仍可用。";
-  if (/读取 DNS 账号失败/.test(safe)) return "读取 DNS 账号失败，请检查本人 DNS 账号是否仍可用。";
+  if (/^读取 (?:ACME 申请账号|DNS 账号)失败[:：]申请账号/.test(safe)) return safe;
+  if (/读取 ACME 申请账号失败/.test(safe)) return "读取 ACME 申请账号失败，暂无法确认原因，请联系管理员检查。";
+  if (/读取 DNS 账号失败/.test(safe)) return "读取 DNS 账号失败，暂无法确认原因，请联系管理员检查。";
   if (/not found/i.test(safe)) return `${stages[stage] || "申请处理"}失败，暂无法确认具体资源或原因，请刷新后核对申请详情。`;
   if (/\p{Script=Han}/u.test(safe)) return safe;
   if (/deadline exceeded|timed out|timeout/i.test(safe)) return `${stages[stage] || "申请处理"}超时，请检查网络及验证入口。`;

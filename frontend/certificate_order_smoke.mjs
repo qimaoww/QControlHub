@@ -38,7 +38,7 @@ assert.match(show({status:"succeeded",stage:"cleanup",cleanup_error:"context dea
 assert.doesNotMatch(show({status:"failed",stage:"complete",cleanup_error:"stale"}).cleanupError,/stale/);
 assert.doesNotMatch(show({stage:"retry",next_attempt:"invalid"}).info,/后台将|下次/);
 assert.match(show({stage:"retry",failure_stage:"http_preflight",error:"timeout"}).error,/检查 HTTP 入口超时/);
-assert.equal(show({error:"读取 ACME 申请账号失败: not found"}).error,"读取 ACME 申请账号失败，请检查本人申请账号是否仍可用。");
+assert.equal(show({error:"读取 ACME 申请账号失败: not found"}).error,"读取 ACME 申请账号失败，暂无法确认原因，请联系管理员检查。");
 assert.doesNotMatch(certificateOrderDiagnostic('token=fixture-secret https://user:secret@example.test/secret -----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----'),/fixture-secret|user:secret|example.test|\nfixture/);
 for(const missing of [undefined,null,"", "0001-01-01T00:00:00Z","invalid"]) assert.equal(recordDate(missing,String),"时间未知");
 const helpers=createDisplayHelpers({data:{settings:{time_zone:"Asia/Hong_Kong"}}});
@@ -52,3 +52,6 @@ assert.match(text,/2026-11-02T04:05:06Z/);
 assert.match(text,/等待自动重试/);
 assert.match(text,/暂无法确认具体资源或原因/);
 console.log("Certificate order states, real schedules, record dates and diagnostic redaction passed");
+
+assert.match(show({error:"读取 ACME 申请账号失败：申请账号解密失败，请联系管理员检查当前及旧加密密钥"}).error,/旧加密密钥/);
+assert.match(show({error:"读取 DNS 账号失败：申请账号读取暂时失败，请稍后重试"}).error,/稍后重试/);
