@@ -97,7 +97,9 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	// The jump-symbol cleanup removed the retired back-link, card-arrow and
 	// trailing row-affordance rules, so the reserved columns and the arrow
 	// spacing they depended on no longer exist.
-	const expected = "0598a0ec3b7f421491ed6530d8249a3a662af447013ad638ad6f2a1ea17f8f8b"
+	// The native WS routing fix reserves the existing mobile save-bar offset
+	// below form fields so the last input remains reachable by touch.
+	const expected = "9cf12bf8a96bf0dd934d2f53c36baf024e6a21f05cf700ffb63e62b8c7b133e7"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}
