@@ -164,15 +164,17 @@ func TestClientURLTransportParameters(t *testing.T) {
 			t.Fatal("VMess stale HTTP fields exported")
 		}
 	}
-	// A missing WS Host must not silently become TLS SNI.
+	// Empty WS Host follows the form's domain default, independently of the dial address.
 	input := Input{Protocol: ProtocolVMess, Port: 443, Credential: "123e4567-e89b-42d3-a456-426614174000", Transport: "websocket", TLSEnabled: true}
 	profile, err := BuildClientProfile(input, "edge.example.test", "tls.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	payload, _ := vmessURLPayload(profile.URI)
-	if payload["host"] != nil {
-		t.Fatal("SNI used as HTTP Host")
+	var host string
+	_ = json.Unmarshal(payload["host"], &host)
+	if host != "tls.example.test" {
+		t.Fatal("empty WS Host did not use the TLS domain")
 	}
 }
 

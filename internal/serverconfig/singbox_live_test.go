@@ -92,6 +92,7 @@ func TestSingBoxUpstreamLiveMatrix(t *testing.T) {
 		t.Fatalf("%v: %s", err, version)
 	}
 	t.Log(strings.TrimSpace(string(version)))
+	t.Run("ws-tls-address-override", testSingBoxWebSocketTLSAddressOverride)
 	certificate, certPath, keyPath := singBoxTestCertificate(t)
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {

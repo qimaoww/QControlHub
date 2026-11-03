@@ -117,6 +117,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 	}
 
+	input = clientWebSocketInput(input, serverName)
 	profile := ClientProfile{Fields: clientFields(input, address, serverName)}
 	host := net.JoinHostPort(address, strconv.Itoa(input.Port))
 	transport := clientTransport(input.Transport)

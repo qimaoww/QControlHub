@@ -100,7 +100,11 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 			switch input.Transport {
 			case "", "raw":
 			case "websocket":
-				stream["network"], stream["wsSettings"] = "ws", map[string]any{"path": input.TransportPath}
+				ws := map[string]any{"path": input.TransportPath}
+				if host := values["HTTP Host"]; host != "" {
+					ws["headers"] = map[string]string{"Host": host}
+				}
+				stream["network"], stream["wsSettings"] = "ws", ws
 			case "grpc":
 				stream["network"], stream["grpcSettings"] = "grpc", map[string]any{"serviceName": input.TransportPath}
 			case "xhttp":
@@ -160,7 +164,7 @@ func singBoxClientOutbound(input Input, address, serverName string) (map[string]
 		out["method"] = input.Method
 	}
 	if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
-		singBoxTransport(out, input)
+		singBoxTransport(out, clientWebSocketInput(input, serverName))
 	}
 	if input.TLSEnabled || input.RealityEnabled {
 		tls := map[string]any{"enabled": true, "server_name": serverName}
