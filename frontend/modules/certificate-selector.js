@@ -69,7 +69,7 @@ export async function bindCertificateSelector({ api, form, protocol, plan, visib
     const reason = active && !loading ? availability(cert) || (!sniValue ? "请填写 TLS SNI" : "") || (sniValue && !cert.domains.some(domain=>matches(domain.toLowerCase(),sniValue)) ? "证书不覆盖当前 TLS SNI" : "") : "";
     select.setCustomValidity(reason || (active && loading ? "正在加载证书，请稍候" : "") || (active && loadError ? "证书列表加载失败，请重试" : ""));
     summary.hidden = false;
-    summary.textContent = loading ? "正在加载证书…" : loadError ? "证书列表加载失败，已保留选择" : reason || (cert ? description(cert) : items.length ? "使用节点原有证书配置" : "暂无可选证书，可使用节点原有配置");
+    summary.textContent = loading ? "正在加载证书…" : loadError ? "证书列表加载失败，已保留选择" : reason || (cert ? description(cert).replaceAll("\n", " · ") : items.length ? "使用节点原有证书配置" : "暂无可选证书，可使用节点原有配置");
     select.title = cert ? `${name(cert)} · ${description(cert)}` : summary.textContent;
     if (refreshOnly) return;
     const sni=form.elements.namedItem("tls_server_name");if(event&&active&&cert?.domains.length===1&&!cert.domains[0].startsWith("*.")&&sni&&!sni.value)sni.value=cert.domains[0];

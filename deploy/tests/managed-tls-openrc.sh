@@ -28,7 +28,7 @@ docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_sta
  chmod +x /etc/init.d/qagent
  rc-service qagent start
  for attempt in $(seq 1 240); do
-  if grep -q "PASS\|FAIL" /var/log/qagent/qagent.log 2>/dev/null; then break; fi
+  if grep -Eq "^--- (PASS|FAIL): TestManagedTLSSystemdSandbox" /var/log/qagent/qagent.log 2>/dev/null; then break; fi
   sleep 1
  done
  rc-service qagent stop || true

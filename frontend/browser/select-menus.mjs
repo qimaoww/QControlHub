@@ -126,6 +126,9 @@ async function testCertificateSelectorStates() {
  assert.ok(select.validationMessage.includes('不覆盖'),'domain mismatch accepted');
  select.click();
  const scroll=document.querySelector('[role=listbox][popover]').scrollTop;
+ const sharedOption=document.querySelector('[role=listbox] [data-select-index="5"]');
+ assert.equal(sharedOption.querySelectorAll('.settings-hint').length,2,'domain and certificate state must occupy separate metadata rows');
+ assert.ok(!sharedOption.querySelector('strong,.user-allocation-node'),'certificate menu retained unrelated bold/card layout');
  items=[{...base,status:'failed',binding_statuses:{synced:1,failed:1,pending:1}},...items.slice(1)];
  await refresh();
  assert.equal(form.elements.tls_server_name.value,'draft.example.test','refresh overwrote SNI draft');
