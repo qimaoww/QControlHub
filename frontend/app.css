@@ -1143,20 +1143,22 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-file-button b,.config-inbound-dialog .preset-option-panel>summary b{font-size:var(--text-small);line-height:var(--leading-caption)}
 .config-file-button small{font-size:var(--text-caption);color:var(--muted);line-height:var(--leading-caption)}
 .config-file-button:hover{background:var(--surface-2);border-color:var(--accent)}
-.config-file-button.active,.config-inbound-menu-items [aria-selected=true]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.config-file-button.active{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.config-inbound-menu-items [aria-selected=true]{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
 .config-file-button.active small{color:var(--accent)}
 .config-file-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .config-inbound-menu{position:relative;align-self:center;margin-left:0}
 .config-inbound-menu>summary{list-style:none;gap:12px;cursor:pointer;min-height:40px}
 .config-inbound-menu>summary::-webkit-details-marker{display:none}
-.config-inbound-menu[open]>summary,select[aria-expanded=true],input[aria-expanded=true]{border-color:var(--accent);color:var(--accent);anchor-name:--control-menu}
+.config-inbound-menu[open]>summary,select[aria-expanded=true],input[aria-expanded=true]{border-color:var(--accent);anchor-name:--control-menu}
 .config-inbound-menu[open],.config-tools-menu[open]{z-index:21}
-.config-inbound-menu-items{position:fixed;position-anchor:--control-menu;inset:auto;top:calc(100% + 6px);top:calc(anchor(bottom,100%) + 6px);right:0;right:anchor(right,0px);z-index:20;width:200px;width:max(200px,anchor-size(width,200px));max-width:calc(100vw - 40px);max-height:min(320px,calc(50dvh - 40px));overflow:auto;overscroll-behavior:contain;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;margin:0;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-lift)}
+.config-inbound-menu-items{position:fixed;position-anchor:--control-menu;inset:auto;top:calc(100% + 6px);top:calc(anchor(bottom,100%) + 6px);right:0;right:anchor(right,0px);z-index:20;width:200px;width:max(200px,anchor-size(width,200px));max-width:calc(100vw - 40px);max-height:min(320px,calc(50dvh - 40px));overflow:auto;overscroll-behavior:contain;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;position-try-order:most-height;margin:0;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lift)}
 .config-inbound-menu-items:not([popover]){position:absolute;right:0;left:auto}
-.config-inbound-menu-items button{display:block;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;font-size:var(--text-body);cursor:pointer}
+.config-inbound-menu-items button{display:grid;gap:3px;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;font-size:var(--text-body);white-space:normal;overflow-wrap:anywhere;cursor:pointer}
 .config-inbound-menu-items button:hover:not(:disabled){background:var(--surface-2)}
 .config-inbound-menu-items button:focus-visible,.config-inbound-menu-items button[data-active]{outline:2px solid var(--accent);outline-offset:-2px;background:var(--surface-2)}
 .config-inbound-menu-items button:disabled{opacity:.42;cursor:not-allowed}
+.config-inbound-menu-items>div>div[aria-hidden=true]{padding:6px 12px}
 .config-inbound-menu-items .danger-text{color:var(--red)}
 .config-workspace-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px 18px;background:var(--surface);border-top:1px solid var(--line)}
 .config-workspace-tools [data-config-refresh]{margin-left:auto}
@@ -1187,7 +1189,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-inbound-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
 .config-inbound-dialog .config-inbound-heading{flex-shrink:0}
 .config-inbound-dialog .config-inbound-heading>div{min-width:0}
-.config-inbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.config-inbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain;scroll-padding-block:16px 88px}
 .config-outbound-dialog .config-outbound-studio{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .config-outbound-binding{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--text-small);line-height:var(--leading-body)}
 .config-outbound-binding>span{min-width:0;overflow-wrap:anywhere}

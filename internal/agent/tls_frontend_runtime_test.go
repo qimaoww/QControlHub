@@ -1,12 +1,20 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"github.com/qimaoww/qcontrolhub/internal/certificates"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +144,7 @@ func TestManagedTLSRuntimePersistenceSandbox(t *testing.T) {
 	if err := m.checkCaddyAccess(ctx); err != nil {
 		t.Fatal(err)
 	}
-	f := core.TLSFrontend{Tag: "runtime", Mode: "caddy", Domain: "runtime.example.test", PublicPort: 9443, BackendPort: 29999, Transport: "websocket", Path: "/runtime"}
+	f := core.TLSFrontend{Tag: "runtime", Mode: "caddy", Domain: "runtime.example.test", PublicPort: 443, BackendPort: 29999, Transport: "websocket", Path: "/runtime"}
 	config, _ := renderCaddyFrontends([]core.TLSFrontend{f}, m.state)
 	var root map[string]any
 	_ = json.Unmarshal([]byte(config), &root)
@@ -210,5 +218,171 @@ func TestManagedTLSRuntimePersistenceSandbox(t *testing.T) {
 		t.Fatal("custom config changed")
 	}
 	_ = os.WriteFile(path, stored, 0755)
+	verifyManagedTLSProviderSwitch(t, &m, ctx, f, cert)
 	t.Log("non-root Caddy persisted instance ID, certificates and CA state across legacy migration and restarts; custom units preserved")
+}
+
+// Run inside each real init-system fixture with low ports protected. Start
+// with a working Caddy listener, then exercise the same manager transaction
+// used by deployment. No public CA, DNS change or production state is used.
+func verifyManagedTLSProviderSwitch(t *testing.T, m *tlsFrontendManager, ctx context.Context, old core.TLSFrontend, certPath string) {
+	t.Helper()
+	policy, err := os.ReadFile("/proc/sys/net/ipv4/ip_unprivileged_port_start")
+	if err != nil || strings.TrimSpace(string(policy)) != "1024" {
+		t.Fatalf("fixture must protect low ports: %s %v", policy, err)
+	}
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != old.Path {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.WriteHeader(101)
+	}))
+	backend.Listener, err = net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(old.BackendPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.Start()
+	defer backend.Close()
+	crt, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := os.ReadFile(strings.TrimSuffix(certPath, ".crt") + ".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := old
+	next.Mode = "nginx"
+	next.Certificate = string(crt)
+	next.PrivateKey = string(key)
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(crt)
+	probeCaddy := func() error {
+		var err error
+		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
+			err = probeFrontendProtocol(ctx, old, &tls.Config{RootCAs: roots, ServerName: old.Domain, MinVersion: tls.VersionTLS12})
+			if err == nil {
+				return nil
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return err
+	}
+	if err = probeCaddy(); err != nil {
+		t.Fatal("original Caddy HTTPS backend", err)
+	}
+	snapshots, err := m.snapshotRuntime(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(m.root, "deployments.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		recovery, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := m.restoreRuntime(recovery, nil, snapshots); err != nil {
+			t.Error(err)
+		}
+		if err := m.writeConfig(filepath.Join(m.root, "deployments.json"), string(manifest), true); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err = m.prepare(ctx, []core.TLSFrontend{next}); err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(m.root, "nginx.permission-test.conf")
+	if err = m.writeConfig(staged, renderNginxFrontends([]core.TLSFrontend{next}, m.root, m.state), false); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(staged)
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", staged)
+	if err == nil || !strings.Contains(output, "Permission denied") || !strings.Contains(output, "syntax is ok") {
+		t.Fatalf("original UID-only validation did not reproduce bind EACCES: %v %s", err, output)
+	}
+	if output, err = m.validateNginx(ctx, staged); err != nil {
+		t.Fatalf("capability validation: %v %s", err, output)
+	}
+	// A late TLS failure must restore the exact internal-CA Caddy runtime.
+	bad := next
+	bad.Domain = "wrong.example.test"
+	failure, cancel := context.WithTimeout(ctx, 2*time.Second)
+	err = m.apply(failure, "qch-sing-box", []core.TLSFrontend{bad}, core.ActionDeploy)
+	cancel()
+	if err == nil || !strings.Contains(err.Error(), "已恢复原反代状态") {
+		t.Fatalf("switch failure rollback: %v", err)
+	}
+	if err = probeCaddy(); err != nil {
+		t.Fatal("Caddy rollback HTTPS", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy); err != nil {
+			t.Fatal("Caddy-to-Nginx deployment/repeat", err)
+		}
+	}
+	// Rotate the inline certificate and verify the actual peer, not just files.
+	pair, err := certificates.SelfSigned([]string{next.Domain}, "ecdsa256", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.Certificate, next.PrivateKey = pair.Certificate, pair.PrivateKey
+	if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy); err != nil {
+		t.Fatal("certificate rotation", err)
+	}
+	trust := x509.NewCertPool()
+	trust.AppendCertsFromPEM([]byte(pair.Certificate))
+	conn, err := (&tls.Dialer{Config: &tls.Config{RootCAs: trust, ServerName: next.Domain, MinVersion: tls.VersionTLS12}}).DialContext(ctx, "tcp", "127.0.0.1:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := tls.X509KeyPair([]byte(pair.Certificate), []byte(pair.PrivateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(conn.(*tls.Conn).ConnectionState().PeerCertificates[0].Raw, expected.Certificate[0]) {
+		t.Fatal("peer did not use replacement certificate")
+	}
+	conn.Close()
+	pid, err := os.ReadFile(filepath.Join(m.state, "nginx.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := os.ReadFile("/proc/" + strings.TrimSpace(string(pid)) + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(status), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "Uid:":
+			if fields[1] != strconv.Itoa(int(identity.uid)) {
+				t.Fatal("Nginx ran as wrong UID")
+			}
+			t.Log(line)
+		case "Gid:", "CapInh:", "CapPrm:", "CapBnd:":
+			t.Log(line)
+		case "CapEff:":
+			if fields[1] != "0000000000000400" {
+				t.Fatal("Nginx had unexpected effective capabilities", line)
+			}
+			t.Log(line)
+		case "NoNewPrivs:":
+			if fields[1] != "1" {
+				t.Fatal("Nginx no-new-privileges missing")
+			}
+			t.Log(line)
+		}
+	}
+	t.Log("reproduced syntax-ok then bind EACCES without capability; non-root CAP_NET_BIND_SERVICE validation passed while Caddy served 443; failed switch restored Caddy HTTPS; Nginx deployment, repeat and actual rotated-certificate TLS/backend passed")
 }

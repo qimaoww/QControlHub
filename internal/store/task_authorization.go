@@ -37,6 +37,7 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 		if err != nil {
 			return err
 		}
+		task.CertificateSync = core.IsCertificateSyncSnapshot(content)
 		task.ConfigContent, task.TLSFrontends, err = core.DecodeExecutionSnapshot(content)
 		if err != nil {
 			return err

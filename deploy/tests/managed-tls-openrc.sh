@@ -11,7 +11,7 @@ CGO_ENABLED=0 go test -buildvcs=false -c -o "$work/tls.test" ./internal/agent
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
  -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
  -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
-docker run --name "$container" --init --cap-add NET_ADMIN --cap-add SYS_PTRACE \
+docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_start=1024 --cap-add NET_ADMIN --cap-add SYS_PTRACE \
  -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.23 sh -ec '
  apk add --no-cache openrc libcap >/dev/null
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
@@ -28,7 +28,7 @@ docker run --name "$container" --init --cap-add NET_ADMIN --cap-add SYS_PTRACE \
  chmod +x /etc/init.d/qagent
  rc-service qagent start
  for attempt in $(seq 1 240); do
-  if grep -q "PASS\|FAIL" /var/log/qagent/qagent.log 2>/dev/null; then break; fi
+  if grep -Eq "^--- (PASS|FAIL): TestManagedTLSSystemdSandbox" /var/log/qagent/qagent.log 2>/dev/null; then break; fi
   sleep 1
  done
  rc-service qagent stop || true

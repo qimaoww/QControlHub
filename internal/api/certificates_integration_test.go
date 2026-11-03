@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -82,7 +83,7 @@ func TestCertificateOrdinaryUserIsolationSharingAndDeployment(t *testing.T) {
 	if err != nil || claimed == nil || len(claimed.Certificates) != 1 || claimed.Certificates[0].Version != 1 {
 		t.Fatalf("authorized deployment: %+v %v", claimed, err)
 	}
-	if err = db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+	if err = db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true, InstanceStatus: &core.SharedInstanceStatus{Engine: claimed.Engine, ShareID: claimed.SharedTrafficID, ConfigID: claimed.ConfigID, ConfigVersion: claimed.ConfigVersion, TaskID: claimed.ID, AppliedTaskID: claimed.ID, Status: "active", ObservedAt: time.Now().UTC()}}); err != nil {
 		t.Fatal(err)
 	}
 	raw = bob.call("GET", "/tasks/"+claimed.ID, nil, 200, nil)
@@ -96,6 +97,19 @@ func TestCertificateOrdinaryUserIsolationSharingAndDeployment(t *testing.T) {
 	alice.call("POST", "/certificates/"+cert.ID+"/replace", pair, 200, &cert)
 	if cert.Version != 2 {
 		t.Fatal("replacement version")
+	}
+
+	// Replacing through the authenticated API must reach the existing worker
+	// and the recipient's deployment channel without reselecting or saving.
+	if err = db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	synced, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || synced == nil || len(synced.Certificates) != 1 || synced.Certificates[0].Version != 2 || synced.ConfigID != saved.Config.ID {
+		t.Fatal("API replacement did not automatically reach bound shared instance", err)
+	}
+	if err = db.CompleteTask(ctx, agent.ID, synced.ID, core.TaskResultRequest{LeaseID: synced.LeaseID, Success: true, TrafficSettled: true, InstanceStatus: &core.SharedInstanceStatus{Engine: synced.Engine, ShareID: synced.SharedTrafficID, ConfigID: synced.ConfigID, ConfigVersion: synced.ConfigVersion, TaskID: synced.ID, AppliedTaskID: synced.ID, Status: "active", ObservedAt: time.Now().UTC()}}); err != nil {
+		t.Fatal(err)
 	}
 	var cfg core.Config
 	bob.call("GET", "/agents/"+agent.ID+"/configs/mihomo", nil, 200, &cfg)

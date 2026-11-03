@@ -219,11 +219,7 @@ func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deplo
 		_, err := run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", filepath.Join(m.root, "nginx.conf"), "-s", "reload")
 		return err
 	}
-	identity, identityErr := managedCoreServiceIdentity()
-	err = identityErr
-	if err == nil {
-		_, err = runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", filepath.Join(m.root, "nginx.conf"))
-	}
+	_, err = m.validateNginx(ctx, filepath.Join(m.root, "nginx.conf"))
 	if err == nil {
 		err = reload(ctx)
 	}
