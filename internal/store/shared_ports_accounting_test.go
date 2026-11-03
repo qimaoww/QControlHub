@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -165,4 +166,120 @@ func TestUnrestrictedSharedPortsAdoptExactRunningSnapshot(t *testing.T) {
 	if err != nil || len(policies) != 1 || policies[0].Port != 21001 || policies[0].SharedQuota == nil {
 		t.Fatalf("acceptance did not meter the exact deployed snapshot: %+v %v", policies, err)
 	}
+}
+
+func TestBorrowedPortClaimsSettlementAndAccounting(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	original, alice := sharedTestUser(t, db, ctx, "borrow-original")
+	borrower, bob := sharedTestUser(t, db, ctx, "borrow-actual")
+	agent := sharedTestAgent(t, db, ctx)
+	allocation := sharedTestAllocation(t, db, ctx, original.ID, agent.ID, 10000, 21001)
+	borrowed := sharedTestAllocation(t, db, ctx, borrower.ID, agent.ID, 10000, 0)
+	a := sharedTestConfig(t, db, alice, agent.ID, 21001)
+	b := sharedTestConfig(t, db, bob, agent.ID, 21001)
+	create := func(scope context.Context, config core.Config, action core.Action) (core.Task, error) {
+		return db.CreateTask(scope, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: action})
+	}
+	complete := func(task core.Task) {
+		t.Helper()
+		lease, err := db.ClaimTask(ctx, agent.ID)
+		if err != nil || lease == nil || lease.ID != task.ID {
+			t.Fatalf("claim: %+v %v", lease, err)
+		}
+		if err := completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := create(bob, b, core.ActionDeploy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].SharedQuota.ID != borrowed.Shares[0].ID {
+		t.Fatalf("borrowed accounting: %+v %v", policies, err)
+	}
+	canceledPolicy := policies[0].ID
+	if _, err := create(alice, a, core.ActionValidate); !errors.Is(err, ErrConflict) {
+		t.Fatalf("allocation owner bypassed pending claim: %v", err)
+	}
+	if err := db.CancelTask(bob, pending.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err := create(alice, a, core.ActionDeploy)
+	if err != nil {
+		t.Fatalf("canceled claim was not released: %v", err)
+	}
+	complete(active)
+	policies, err = db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].ID == canceledPolicy {
+		t.Fatalf("canceled claim reused metering identity: %+v %v", policies, err)
+	}
+	old := policies[0]
+	if _, err := create(bob, b, core.ActionDeploy); !errors.Is(err, ErrConflict) {
+		t.Fatalf("live deployment bypassed: %v", err)
+	}
+	stop, err := db.CreateTask(alice, core.TaskRequest{AgentID: agent.ID, Engine: a.Engine, Action: core.ActionStop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete(stop)
+	active, err = create(bob, b, core.ActionDeploy)
+	if err != nil {
+		t.Fatalf("settled stopped port unavailable: %v", err)
+	}
+	complete(active)
+	if _, err := db.CreateTask(alice, core.TaskRequest{AgentID: agent.ID, Engine: a.Engine, Action: core.ActionStart}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("original allocation reclaimed active borrower: %v", err)
+	}
+	policies, err = db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].ID == old.ID || policies[0].SharedQuota.ID != borrowed.Shares[0].ID {
+		t.Fatalf("handoff metering: %+v %v", policies, err)
+	}
+	now := time.Now().UTC().Add(time.Second)
+	var samples []core.PortTrafficUsage
+	for _, p := range []core.PortTrafficPolicy{old, policies[0]} {
+		start, end, _ := core.TrafficPeriodAt(p.CycleAnchor, p.Cycle, now)
+		samples = append(samples, core.PortTrafficUsage{PolicyID: p.ID, ResetGeneration: p.ResetGeneration, ShareID: p.SharedQuota.ID,
+			ShareUsedBytes: 123, ReceivedBytes: 123, UsedBytes: 123, LifetimeReceivedBytes: 123, CounterEpoch: strings.Repeat("b", 32), CollectedAt: now,
+			PeriodStart: start, PeriodEnd: end, EnforcementAvailable: true})
+	}
+	for range 2 {
+		if err := db.UpdatePortTrafficUsage(ctx, agent.ID, samples, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []struct {
+		id   string
+		want uint64
+	}{{allocation.Shares[0].ID, 0}, {borrowed.Shares[0].ID, 123}} {
+		var used uint64
+		if err := db.pool.QueryRow(ctx, `SELECT used_bytes FROM agent_shares WHERE id=$1`, item.id).Scan(&used); err != nil || used != item.want {
+			t.Fatalf("wrong ledger: %d want %d: %v", used, item.want, err)
+		}
+	}
+	var assigned string
+	if err := db.pool.QueryRow(ctx, `SELECT share_id FROM agent_share_ports WHERE agent_id=$1 AND port=21001`, agent.ID).Scan(&assigned); err != nil || assigned != allocation.Shares[0].ID {
+		t.Fatalf("original allocation changed: %s %v", assigned, err)
+	}
+	// Editing quota retains a borrowed policy; narrowing authority cannot orphan
+	// live metering simply because there is no allocation row for the borrower.
+	sharedTestAllocation(t, db, ctx, borrower.ID, agent.ID, 20000, 0)
+	if _, err := db.SetUserAgentAccess(ctx, borrower.ID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{b.Engine}, Ports: nil, LimitBytes: 20000}}}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("scope narrowing orphaned borrowed metering: %v", err)
+	}
+	b.Content = strings.ReplaceAll(b.Content, "21001", "21002")
+	b, err = db.SaveAgentConfig(bob, b, b.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := create(bob, b, core.ActionDeploy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete(changed)
+	returned, err := create(alice, a, core.ActionDeploy)
+	if err != nil {
+		t.Fatalf("retired endpoint still blocked after port change: %v", err)
+	}
+	complete(returned)
 }

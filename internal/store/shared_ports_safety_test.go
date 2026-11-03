@@ -10,7 +10,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing.T) {
+func TestUnrestrictedSharedPortsAllowIdleAllocationsButRejectForeignSnapshots(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	_, owner := sharedTestUser(t, db, ctx, "ports-host-owner")
 	user, recipient := sharedTestUser(t, db, ctx, "ports-borrower")
@@ -40,10 +40,36 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 			}
 		}
 	}
-	checkDenied()
+	// Allocation alone must not prevent validation, create accounting, or
+	// transfer the other user's authorization.
+	if _, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionValidate}); err != nil {
+		t.Fatalf("idle allocation prevented validation: %v", err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE tasks SET status='canceled' WHERE agent_id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatalf("idle allocation prevented deployment: %v", err)
+	}
+	var allocatedTo string
+	if err := db.pool.QueryRow(ctx, `SELECT share_id FROM agent_share_ports WHERE agent_id=$1 AND port=21001`, agent.ID).Scan(&allocatedTo); err != nil || allocatedTo == access.Shares[0].ID {
+		t.Fatalf("borrower changed foreign allocation: %s %v", allocatedTo, err)
+	}
+	// Cancel before dispatch: a policy prepared for an unexecuted task must
+	// not act as a permanent claim. Leave no fixture state for snapshot checks.
+	if _, err := db.pool.Exec(ctx, `UPDATE tasks SET status='canceled' WHERE id=$1`, deployment.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `DELETE FROM agent_share_ports WHERE share_id=$1`, access.Shares[0].ID); err != nil {
+		t.Fatal(err)
+	}
 	foreign := sharedEngineConfigs()[1]
 	foreign.AgentID = agent.ID
-	foreign, err := db.SaveAgentConfig(owner, foreign, 0)
+	foreign, err = db.SaveAgentConfig(owner, foreign, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +108,8 @@ func TestUnrestrictedSharedPortsRejectForeignReservationsAndSnapshots(t *testing
 func TestUnrestrictedSharedPortsConcurrentDeployment(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := allEnginesSharedTestAgent(t, db, ctx)
+	allocated, _ := sharedTestUser(t, db, ctx, "ports-race-allocation")
+	sharedTestAllocation(t, db, ctx, allocated.ID, agent.ID, 1000, 21001)
 	configs := sharedEngineConfigs()[:2]
 	scopes := make([]context.Context, len(configs))
 	for i := range configs {
@@ -225,5 +253,42 @@ func TestUnrestrictedSharedPortsKeepReservationLimit(t *testing.T) {
 	}
 	if policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 0 {
 		t.Fatalf("capacity failure created runtime accounting: %+v %v", policies, err)
+	}
+}
+
+func TestPortClaimRechecksBeforeDispatch(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	_, owner := sharedTestUser(t, db, ctx, "dispatch-host")
+	user, recipient := sharedTestUser(t, db, ctx, "dispatch-borrower")
+	agent := allEnginesSharedTestAgent(t, db, owner)
+	sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 1000, 0)
+	config := sharedTestConfig(t, db, recipient, agent.ID, 21001)
+	pending, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := sharedEngineConfigs()[1]
+	foreign.AgentID = agent.ID
+	foreign.Content = strings.ReplaceAll(foreign.Content, "21002", "21001")
+	foreign, err = db.SaveAgentConfig(owner, foreign, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate recovery discovering a service omitted by the earlier state.
+	if _, err := db.pool.Exec(ctx, `INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,updated_at)
+ VALUES($1,$2,$3,$4,$5,true,now())`, agent.ID, foreign.Engine, foreign.OwnerID, foreign.ID, foreign.Version); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || lease != nil {
+		t.Fatalf("conflicting task dispatched: %+v %v", lease, err)
+	}
+	failed, err := db.GetTask(recipient, pending.ID)
+	if err != nil || failed.Status != core.TaskFailed || !strings.Contains(failed.Error, "占用") {
+		t.Fatalf("wrong dispatch result: %+v %v", failed, err)
+	}
+	var started bool
+	if err := db.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shared_instance_ownership WHERE agent_id=$1)`, agent.ID).Scan(&started); err != nil || started {
+		t.Fatalf("rejected task marked executing: %v %v", started, err)
 	}
 }

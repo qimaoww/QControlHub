@@ -50,8 +50,8 @@ func TestChineseErrorMessages(t *testing.T) {
 		t.Fatalf("Chinese cause lost: %q", got)
 	}
 	for original, want := range map[string]string{
-		"conflict: port 443 is already reserved for another user":                                                                           "端口 443 已分配给其他用户，请联系节点所有者核对端口分配。",
-		"conflict: port 443 is reserved for another user":                                                                                   "端口 443 已分配给其他用户，请联系节点所有者核对端口分配。",
+		"conflict: port 443 is already reserved for another user":                                                                           "端口 443 的使用状态需要重新核实，请刷新节点状态后重试。",
+		"conflict: port 443 is reserved for another user":                                                                                   "端口 443 的使用状态需要重新核实，请刷新节点状态后重试。",
 		"conflict: port 443 belongs to another user's deployed configuration":                                                               "端口 443 正由其他用户的部署使用，请选择其他端口。",
 		"conflict: sing-box core tasks are disabled because an existing service could not be mapped safely: unsupported executable wrapper": "现有 sing-box 服务无法安全接管，已禁用该内核的任务。请检查现有服务布局后重新发现。原始原因（供排查）：unsupported executable wrapper",
 		"net.ipv4.tcp_rmem requires 3 integers":                                                                                             "参数 net.ipv4.tcp_rmem 需要填写 3 个整数。",

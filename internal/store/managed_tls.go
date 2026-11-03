@@ -72,7 +72,7 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 			ports = append(ports, f.BackendPort)
 		}
 	}
-	if err := s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, owner, task.AgentID, ports); err != nil {
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, owner, task.AgentID, ports, task); err != nil {
 		var conflict *PortConflictError
 		if errors.As(err, &conflict) {
 			field := fieldForPort(conflict.Port)
