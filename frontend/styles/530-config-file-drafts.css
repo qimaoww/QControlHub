@@ -51,7 +51,7 @@
 .config-inbound-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
 .config-inbound-dialog .config-inbound-heading{flex-shrink:0}
 .config-inbound-dialog .config-inbound-heading>div{min-width:0}
-.config-inbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.config-inbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain;scroll-padding-block:16px 88px}
 .config-outbound-dialog .config-outbound-studio{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .config-outbound-binding{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--text-small);line-height:var(--leading-body)}
 .config-outbound-binding>span{min-width:0;overflow-wrap:anywhere}

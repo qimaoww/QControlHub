@@ -248,6 +248,8 @@ try {
       await wait(b,"!!document.querySelector('[role=listbox][popover]')");
       const bounds=await evaluate(b,"(() => {const e=document.querySelector('[role=listbox][popover]');const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth+1,width:innerWidth,height:innerHeight}})()");
       assert.ok(bounds.left>=-1&&bounds.right<=bounds.width+1&&bounds.top>=-1&&bounds.bottom<=bounds.height+1&&!bounds.overflow,JSON.stringify(bounds));
+      const occlusion=await evaluate(b,"(() => {const s=document.querySelector('[name=panel_certificate_id]').getBoundingClientRect(),p=document.querySelector('[role=listbox][popover]').getBoundingClientRect(),body=document.querySelector('.config-inbound-body').getBoundingClientRect(),footer=document.querySelector('.config-inbound-dialog .builder-actions').getBoundingClientRect();return {selectTop:s.top,selectBottom:s.bottom,bodyTop:body.top,footerTop:footer.top,popupBottom:p.bottom}})()");
+      assert.ok(occlusion.selectTop>=occlusion.bodyTop-1&&occlusion.selectBottom<=occlusion.footerTop+1&&occlusion.popupBottom<=occlusion.footerTop+1,JSON.stringify(occlusion));
       await screenshot(b,`certificate-menu-${theme}-${width}x${height}`);
       await evaluate(b,"document.querySelector('[name=panel_certificate_id]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
     }
