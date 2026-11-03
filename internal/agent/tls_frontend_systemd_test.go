@@ -186,11 +186,15 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test"}
 		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", append(args, fixtureArgs...)); err != nil {
 			t.Fatalf("Caddy runtime: %v\n%s", err, output)
+		} else {
+			t.Log(output)
 		}
 	} else {
 		args := append([]string{"QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test"}, fixtureArgs...)
 		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
 			t.Fatalf("Caddy runtime: %v\n%s", err, output)
+		} else {
+			t.Log(output)
 		}
 	}
 	// The same privileged helper must handle local Xray targets while the

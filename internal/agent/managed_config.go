@@ -22,9 +22,10 @@ const (
 )
 
 type commandIdentity struct {
-	uid    uint32
-	gid    uint32
-	groups []uint32
+	uid         uint32
+	gid         uint32
+	groups      []uint32
+	ambientCaps []uintptr
 }
 
 func managedCoreServiceIdentity() (commandIdentity, error) {

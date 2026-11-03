@@ -143,17 +143,28 @@ func ValidateACMEEmail(email string) error {
 }
 
 type executionSnapshot struct {
-	Version   int           `json:"qcontrolhub_deployment"`
-	Content   string        `json:"content"`
-	Frontends []TLSFrontend `json:"tls_frontends"`
+	Version         int           `json:"qcontrolhub_deployment"`
+	Content         string        `json:"content"`
+	Frontends       []TLSFrontend `json:"tls_frontends"`
+	CertificateSync bool          `json:"certificate_sync,omitempty"`
 }
 
-func EncodeExecutionSnapshot(content string, frontends []TLSFrontend) (string, error) {
+func EncodeExecutionSnapshot(content string, frontends []TLSFrontend, certificateSync ...bool) (string, error) {
 	if content == "" && len(frontends) == 0 {
 		return "", nil
 	}
-	value, err := json.Marshal(executionSnapshot{1, content, frontends})
+	value, err := json.Marshal(executionSnapshot{Version: 1, Content: content, Frontends: frontends, CertificateSync: len(certificateSync) > 0 && certificateSync[0]})
 	return "qcontrolhub-deployment-v1\n" + string(value), err
+}
+
+// Only server-created encrypted execution envelopes can carry this intent.
+func IsCertificateSyncSnapshot(content string) bool {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	if !strings.HasPrefix(content, prefix) {
+		return false
+	}
+	var snapshot executionSnapshot
+	return json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) == nil && snapshot.Version == 1 && snapshot.CertificateSync
 }
 
 func DecodeExecutionSnapshot(content string) (string, []TLSFrontend, error) {

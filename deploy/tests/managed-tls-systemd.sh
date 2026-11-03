@@ -26,7 +26,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
  -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
  -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
 docker build -t "$image" -f deploy/tests/Dockerfile.managed-tls "$work"
-docker run -d --name "$container" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock --tmpfs /tmp "$image" >/dev/null
+docker run -d --name "$container" --privileged --sysctl net.ipv4.ip_unprivileged_port_start=1024 --cgroupns=private --tmpfs /run --tmpfs /run/lock --tmpfs /tmp "$image" >/dev/null
 ready=false
 for attempt in $(seq 1 60); do
  if docker exec "$container" systemctl list-units >/dev/null 2>&1; then ready=true; break; fi

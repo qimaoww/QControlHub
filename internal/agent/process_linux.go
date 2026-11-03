@@ -29,4 +29,5 @@ func configureCommandIdentity(command *exec.Cmd, identity *commandIdentity) {
 	command.SysProcAttr.Credential = &syscall.Credential{
 		Uid: identity.uid, Gid: identity.gid, Groups: identity.groups,
 	}
+	command.SysProcAttr.AmbientCaps = identity.ambientCaps
 }

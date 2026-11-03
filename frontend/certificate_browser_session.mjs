@@ -128,7 +128,7 @@ try {
   assert.equal((await api(a,alice,'GET','/certificate-accounts')).length,1);
   assert.deepEqual(await api(b,bob,'GET','/certificate-accounts'),[]);
   await click(a,'[data-cert-close]');await click(a,'[data-cert-create]');await wait(a,"!!document.querySelector('[name=source]')");await set(a,'[name=source]','self-signed');await wait(a,"!!document.querySelector('[name=days]')");
-  await set(a,'[name=name]','Alice UI TLS');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-cert-form]').requestSubmit()");
+  await set(a,'[name=name]','边缘入口证书');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-cert-form]').requestSubmit()");
   await wait(a,"!!document.querySelector('[data-cert-share]')");
   const cert=(await api(a,alice,'GET','/certificates')).items[0];assert.equal(cert.version,1);assert.equal(cert.owner_id,alice.user_id);
   await api(b,bob,'GET',`/certificates/${cert.id}`,undefined,404);
@@ -239,6 +239,23 @@ try {
   assert.ok(await evaluate(b,"document.documentElement.scrollWidth <= innerWidth+1"));
   record(`${mode}: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed`);
   await screenshot(b,'certificate-selector');
+  for (const [width,height] of mode==='mobile'?[[390,844],[844,390],[768,1024]]:[[1920,1080],[3840,2160],[1280,800],[540,720]]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},b);
+    for (const theme of ['light','dark','modern']) {
+      await evaluate(b,`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      await evaluate(b,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await click(b,'[name=panel_certificate_id]');
+      await wait(b,"!!document.querySelector('[role=listbox][popover]')");
+      const bounds=await evaluate(b,"(() => {const e=document.querySelector('[role=listbox][popover]');const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth+1,width:innerWidth,height:innerHeight}})()");
+      assert.ok(bounds.left>=-1&&bounds.right<=bounds.width+1&&bounds.top>=-1&&bounds.bottom<=bounds.height+1&&!bounds.overflow,JSON.stringify(bounds));
+      const occlusion=await evaluate(b,"(() => {const s=document.querySelector('[name=panel_certificate_id]').getBoundingClientRect(),p=document.querySelector('[role=listbox][popover]').getBoundingClientRect(),body=document.querySelector('.config-inbound-body').getBoundingClientRect(),footer=document.querySelector('.config-inbound-dialog .builder-actions').getBoundingClientRect();return {selectTop:s.top,selectBottom:s.bottom,bodyTop:body.top,footerTop:footer.top,popupBottom:p.bottom}})()");
+      assert.ok(occlusion.selectTop>=occlusion.bodyTop-1&&occlusion.selectBottom<=occlusion.footerTop+1&&occlusion.popupBottom<=occlusion.footerTop+1,JSON.stringify(occlusion));
+      await screenshot(b,`certificate-menu-${theme}-${width}x${height}`);
+      await evaluate(b,"document.querySelector('[name=panel_certificate_id]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    }
+  }
+  await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},b);
+
 
   // An already-open recipient detail must lose its stale content when the
   // owner revokes access; the read poll must distinguish 404 from outages.
