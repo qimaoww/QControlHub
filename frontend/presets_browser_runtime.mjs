@@ -468,6 +468,10 @@ export async function testPresetsRuntime(preview = false) {
       assert(saved.transport === "websocket" && saved.transport_path === "/custom-ws" && saved.tls_server_name === "tls.example.test" && saved.transport_host === "host.example.test", "native WS save lost independent routing");
       assert(control("tls_server_name").value === saved.tls_server_name && control("transport_host").value === saved.transport_host, "native WS reopen lost independent routing");
       if (actual.engine === "xray") assert(control("tls_alpn").value === "http/1.1", "Xray WS reopen lost ALPN");
+      form().querySelector('[data-builder-step="transport"]').click();
+      control("transport_host").scrollIntoView({ block: "center", behavior: "instant" });
+      const hostRect = control("transport_host").getBoundingClientRect();
+      assert(document.elementFromPoint(hostRect.x + hostRect.width / 2, hostRect.y + hostRect.height / 2) === control("transport_host"), "save bar obstructs WS Host input");
       edit("transport", "grpc");
       assert(control("transport_host").disabled, "WS Host remains active on gRPC");
       edit("transport", "websocket");
