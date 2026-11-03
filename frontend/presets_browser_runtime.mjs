@@ -75,7 +75,7 @@ async function fixture(engine, readOnly = false, actual) {
     if (options.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.saveGate) await test.saveGate;
       if (test.saveFailure) throw Object.assign(new Error(typeof test.saveFailure === "string" ? test.saveFailure : "模拟保存失败，请重试"), {status:400});
-      if (test.portConflict) throw Object.assign(new Error("端口 443 已由其他用户占用"), {status:409, code:"port_conflict", field:test.portConflict});
+      if (test.portConflict) throw Object.assign(new Error("端口 443 已被有效部署占用，请刷新状态或调整端口后重试。"), {status:409, code:"port_conflict", field:test.portConflict});
       if (test.staleRevision) throw Object.assign(new Error("配置已变化"), {status:409});
       assert(body.expected_version === (test.saved?.version || 0), "submitted a stale config revision");
       if (path.endsWith("/server-inbounds")) {
@@ -269,7 +269,7 @@ export async function testPresetsRuntime(preview = false) {
     test.portConflict = "port";
     const versionBeforeConflict = test.saved.version;
     button("validate").click();
-    await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "port conflict froze the editor");
+    await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "port conflict froze the editor");
     assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && document.activeElement === control("port"), "port conflict lost draft or did not focus port");
     assert(!document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "correctable port conflict required reload");
     test.portConflict = "";
@@ -439,7 +439,7 @@ export async function testPresetsRuntime(preview = false) {
       assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : expanded ? "公开可信证书" : "自签证书") && form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80") === expanded, "TLS help did not follow selected certificate mode");
       test.portConflict = "tls_public_port";
       button("validate").click();
-      await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("可直接调整端口"), "public HTTPS port conflict blocked retry");
+      await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "public HTTPS port conflict blocked retry");
       assert(!test.saved && control("tls_mode").value === proxyMode && control("tls_public_port").value === "8443" && control("tls_server_name").value === "tls.example.test", "public port conflict lost TLS draft");
       assert(document.activeElement === control("tls_public_port"), "public port conflict did not reveal and focus HTTPS port");
       test.portConflict = "";

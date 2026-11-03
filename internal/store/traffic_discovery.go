@@ -313,9 +313,9 @@ func (s *Store) SyncPortTrafficSnapshot(ctx context.Context, snapshot string, se
 		seen[key] = true
 		if c.ShareID != "" {
 			var reserved bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports p JOIN agent_shares sh ON sh.id=p.share_id
-    WHERE p.agent_id=$1 AND p.port=$2 AND sh.id=$3 AND sh.enabled AND sh.status='accepted' AND $4=ANY(sh.engines)
-      AND sh.user_id=$5)`, c.AgentID, c.Port, c.ShareID, c.Engine, scopeForConfig(ctx).OwnerID).Scan(&reserved); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shares sh
+    WHERE sh.agent_id=$1 AND sh.id=$3 AND sh.enabled AND sh.status='accepted' AND $4=ANY(sh.engines)
+      AND sh.user_id=$5 AND (sh.ports_unrestricted OR EXISTS(SELECT 1 FROM agent_share_ports p WHERE p.share_id=sh.id AND p.port=$2)))`, c.AgentID, c.Port, c.ShareID, c.Engine, scopeForConfig(ctx).OwnerID).Scan(&reserved); err != nil {
 				return nil, err
 			}
 			if !reserved {

@@ -377,7 +377,7 @@ func (m *tlsFrontendManager) checkPorts(previous, next []core.TLSFrontend) error
 		}
 		listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)))
 		if err != nil {
-			return fmt.Errorf("反代端口 %d 不可用：%w；检查现有 Caddy/Nginx、其他服务或端口分配", port, err)
+			return fmt.Errorf("反代端口 %d 不可用：%w；请检查监听地址及现有服务占用", port, err)
 		}
 		listener.Close()
 	}

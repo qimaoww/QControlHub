@@ -374,7 +374,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             const uncertain = !error.deployPreflight && (!error.status || error.status >= 500);
             const portConflict = error.code === "port_conflict";
             showStatus(error.deployPreflight ? error.message : portConflict
-              ? `${error.message} 可直接调整端口或联系节点所有者核对分配后重试，草稿已保留。`
+              ? `${error.message} 草稿已保留。`
               : error.status === 409
               ? `配置或节点状态已变化：${error.message}。草稿已保留，请重新加载后再编辑。`
               : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对结果后再提交。` : error.message, "error");

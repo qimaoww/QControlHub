@@ -49,7 +49,8 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err := db.SetAgentClientDetails(ctx, agent.ID, &address, &legacyName); err != nil {
 		t.Fatal(err)
 	}
-	const content = `{"dns":"9.9.9.9","servers":[{"id":"one","server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one-long"},{"id":"two","server":"::","server_port":20002,"method":"aes-256-gcm","password":"password-two-long"}]}`
+	// Keep the same numeric port across cores, with compatible UDP/TCP listeners.
+	const content = `{"dns":"9.9.9.9","mode":"udp_only","servers":[{"id":"one","server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one-long"},{"id":"two","server":"::","server_port":20002,"method":"aes-256-gcm","password":"password-two-long"}]}`
 	config, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "ports", Engine: core.EngineShadowsocksRust, Content: content}, 0)
 	if err != nil {
 		t.Fatal(err)
