@@ -476,7 +476,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	var account certificates.ACMEAccount
 	accountMeta, err := s.CertificateAccountSecret(ctx, item.AccountID, "acme", &account)
 	if err != nil {
-		return fmt.Errorf("读取 ACME 申请账号失败，请检查本人申请账号是否仍可用: %w", err)
+		return fmt.Errorf("读取 ACME 申请账号失败：%w", err)
 	}
 	client, err := certificates.Client(accountMeta.CA, account)
 	if err != nil {
@@ -574,7 +574,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		var credentials certificates.DNSCredentials
 		meta, err := s.CertificateAccountSecret(ctx, item.DNSAccountID, "dns", &credentials)
 		if err != nil {
-			return fmt.Errorf("读取 DNS 账号失败，请检查本人 DNS 账号是否仍可用: %w", err)
+			return fmt.Errorf("读取 DNS 账号失败：%w", err)
 		}
 		dns := certificates.DNSClient{Provider: meta.Provider, Credentials: credentials, HTTP: s.certificateDNSHTTP}
 		for i := range state.Challenges {

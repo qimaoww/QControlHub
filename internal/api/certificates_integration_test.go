@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -108,4 +110,62 @@ func TestCertificateOrdinaryUserIsolationSharingAndDeployment(t *testing.T) {
 	bob.call("GET", "/certificates/"+cert.ID, nil, 404, nil)
 	alice.call("DELETE", "/certificates/"+cert.ID, nil, 409, nil)
 	t.Log("Real ordinary-user password/CSRF sessions: create -> share -> select -> shared-instance task -> version replacement -> revoke queued deployment; no secret in history")
+}
+
+func TestCertificateACMEAccountSelectionAndWorkerScopes(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	localCA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "local CA unavailable", 400) }))
+	defer localCA.Close()
+	old := certificates.Directories["letsencrypt-staging"]
+	certificates.Directories["letsencrypt-staging"] = localCA.URL
+	defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+	_, key, err := certificates.NewKey("ecdsa256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients := []configScopeAPIClient{admin, alice, bob}
+	accounts := make([]core.CertificateAccount, len(clients))
+	issued := make([]core.Certificate, len(clients))
+	for i, client := range clients {
+		owner := client.userID
+		// The environment administrator uses the reserved empty legacy workspace.
+		scope := store.WithConfigScope(ctx, owner, i == 0)
+		accounts[i], err = db.CreateCertificateAccount(scope, core.CertificateAccount{Name: "same name and email", Email: "same@example.test", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var listed []core.CertificateAccount
+		client.call("GET", "/certificate-accounts", nil, 200, &listed)
+		if len(listed) != 1 || listed[0].ID != accounts[i].ID {
+			t.Fatalf("account selection: %+v", listed)
+		}
+		client.call("POST", "/certificates", map[string]any{"name": "API scope", "source": "acme", "domains": []string{"api.example.test"}, "method": "dns-manual", "key_type": "ecdsa256", "account_id": listed[0].ID}, 201, &issued[i])
+	}
+	if err = db.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i, client := range clients {
+		var detail struct {
+			Orders []core.CertificateOrder `json:"orders"`
+		}
+		client.call("GET", "/certificates/"+issued[i].ID, nil, 200, &detail)
+		if len(detail.Orders) != 1 || detail.Orders[0].Status != "queued" || detail.Orders[0].Stage != "retry" || strings.Contains(detail.Orders[0].Error, "读取 ACME") {
+			t.Fatalf("API worker scope: %+v", detail)
+		}
+		for j, other := range clients {
+			if i == j {
+				continue
+			}
+			other.call("POST", "/certificates", map[string]any{"name": "foreign", "source": "acme", "domains": []string{"api.example.test"}, "method": "dns-manual", "key_type": "ecdsa256", "account_id": accounts[i].ID}, 404, nil)
+		}
+	}
+	alice.call("POST", "/certificates/"+issued[1].ID+"/grants", map[string]string{"username": "bob"}, 204, nil)
+	bob.call("POST", "/certificates/"+issued[1].ID+"/renew", nil, 403, nil)
+	bob.call("PUT", "/certificates/"+issued[1].ID+"/auto-renew", map[string]bool{"enabled": true}, 403, nil)
+	var details struct {
+		Orders []core.CertificateOrder `json:"orders"`
+	}
+	alice.call("GET", "/certificates/"+issued[1].ID, nil, 200, &details)
+	bob.call("POST", "/certificates/"+issued[1].ID+"/orders/"+details.Orders[0].ID+"/continue", nil, 403, nil)
+	bob.call("POST", "/certificates/"+issued[1].ID+"/grants", map[string]string{"username": "alice"}, 404, nil)
 }

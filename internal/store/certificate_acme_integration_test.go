@@ -28,6 +28,16 @@ func (f certificateTestTransport) RoundTrip(r *http.Request) (*http.Response, er
 // Optional real local CA gate. DNS vendor HTTP is a deterministic fixture;
 // Pebble performs actual DNS-01 validation through its own resolver.
 func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "user"
+		if legacy {
+			name = "legacy_admin"
+		}
+		t.Run(name, func(t *testing.T) { testCertificateLocalACMEPersistenceRenewalAndCancellation(t, legacy) })
+	}
+}
+
+func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, legacy bool) {
 	directory := os.Getenv("QCH_PEBBLE_DIRECTORY")
 	if directory == "" {
 		t.Skip("QCH_PEBBLE_DIRECTORY enables the real local ACME gate")
@@ -45,6 +55,9 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := WithConfigScope(ctx, user.ID, false)
+	if legacy {
+		owner = WithConfigScope(ctx, "", true)
+	}
 	_, key, err := certificates.NewKey("ecdsa256")
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +222,7 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	}
 	defer reopened.Close()
 	configure(reopened)
-	if _, err = reopened.pool.Exec(ctx, `UPDATE panel_certificates SET metadata=jsonb_set(metadata,'{not_after}',to_jsonb(now()+interval '10 days')),next_attempt=now() WHERE id=$1`, item.ID); err != nil {
+	if _, err = reopened.pool.Exec(ctx, `UPDATE panel_certificates SET metadata=jsonb_set(metadata - 'owner_id','{not_after}',to_jsonb(now()+interval '10 days')),next_attempt=now() WHERE id=$1`, item.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
@@ -226,6 +239,16 @@ func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
 	}
 	if strings.Contains(stored, "PRIVATE KEY") || !strings.HasPrefix(stored, keyedEncryptedPrefix) {
 		t.Fatal("private key stored unencrypted")
+	}
+	if err = reopened.RenewCertificate(owner, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RunCertificateMaintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	manuallyRenewed, err := reopened.GetCertificate(owner, item.ID)
+	if err != nil || manuallyRenewed.Version != 3 {
+		t.Fatalf("manual renewal: %+v %v", manuallyRenewed, err)
 	}
 	if err = reopened.RenewCertificate(owner, item.ID); err != nil {
 		t.Fatal(err)

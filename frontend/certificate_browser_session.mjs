@@ -182,6 +182,11 @@ try {
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1920,height:mode==='mobile'?844:1080,deviceScaleFactor:1,mobile:mode==='mobile'},a);
   await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
   await screenshot(a,'order-legacy-failure');
+  await refreshOrder({error:'读取 ACME 申请账号失败：申请账号解密失败，请联系管理员检查当前及旧加密密钥',failure_stage:'preparing',cleanup_error:''});
+  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('旧加密密钥')");
+  assert.doesNotMatch(await detailText(),/本人申请账号是否仍可用/);
+  await screenshot(a,'order-account-decryption');
+
   await refreshOrder({error:'DNS TXT 尚未传播：_acme-challenge.example.test',cleanup_error:'DNS API 返回 HTTP 503，请检查凭据与区域权限'});
   await wait(a,"document.querySelector('.cert-dialog').textContent.includes('清理失败：DNS API 返回 HTTP 503')");
   assert.match(await detailText(),/DNS TXT 尚未传播/);

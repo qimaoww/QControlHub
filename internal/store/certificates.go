@@ -60,7 +60,7 @@ func certificateUseTx(ctx context.Context, ex storeExecutor, id, owner string) e
 	return nil
 }
 func (s *Store) ListCertificateAccounts(ctx context.Context) ([]core.CertificateAccount, error) {
-	rows, err := s.pool.Query(ctx, `SELECT metadata FROM certificate_accounts WHERE owner_id=$1 ORDER BY created_at`, certificateActor(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT id,kind,metadata FROM certificate_accounts WHERE owner_id=$1 ORDER BY created_at`, certificateActor(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +69,14 @@ func (s *Store) ListCertificateAccounts(ctx context.Context) ([]core.Certificate
 	for rows.Next() {
 		var raw []byte
 		var item core.CertificateAccount
-		if err := rows.Scan(&raw); err != nil {
+		var id, kind string
+		if err := rows.Scan(&id, &kind, &raw); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, err
 		}
+		item.ID, item.Kind = id, kind
 		out = append(out, item)
 	}
 	return out, rows.Err()
@@ -110,18 +112,56 @@ func (s *Store) CreateCertificateAccount(ctx context.Context, item core.Certific
 	}
 	return item, tx.Commit(ctx)
 }
+
+// Account errors expose only safe diagnostics. Missing and foreign records have
+// the same result; type checks occur only after the owner filter has matched.
+type certificateAccountReadError struct {
+	message   string
+	cause     error
+	permanent bool
+}
+
+func (e *certificateAccountReadError) Error() string { return e.message }
+func (e *certificateAccountReadError) Unwrap() error { return e.cause }
+
 func (s *Store) CertificateAccountSecret(ctx context.Context, id, kind string, value any) (core.CertificateAccount, error) {
-	var raw []byte
-	var secret string
-	err := s.pool.QueryRow(ctx, `SELECT metadata,secret FROM certificate_accounts WHERE id=$1 AND owner_id=$2 AND kind=$3`, id, certificateActor(ctx), kind).Scan(&raw, &secret)
 	var item core.CertificateAccount
+	fail := func(message string, cause error, permanent bool) (core.CertificateAccount, error) {
+		return item, &certificateAccountReadError{message, cause, permanent}
+	}
+	if id == "" {
+		return fail("申请账号引用缺失，请重新选择账号", ErrInvalid, true)
+	}
+	var raw []byte
+	var secret, storedKind string
+	err := s.pool.QueryRow(ctx, `SELECT metadata,secret,kind FROM certificate_accounts WHERE id=$1 AND owner_id=$2`, id, certificateActor(ctx)).Scan(&raw, &secret, &storedKind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fail("申请账号不存在或无权访问，请核对账号选择", ErrNotFound, true)
+	}
 	if err != nil {
-		return item, mapError(err)
+		return fail("申请账号读取暂时失败，请稍后重试", err, false)
 	}
-	if err = json.Unmarshal(raw, &item); err != nil {
-		return item, err
+	if storedKind != kind {
+		return fail("申请账号类型不匹配，请重新选择账号", ErrInvalid, true)
 	}
-	return item, s.openCertificate(secret, value)
+	if json.Unmarshal(raw, &item) != nil {
+		return fail("申请账号数据损坏，请联系管理员检查", ErrInvalid, true)
+	}
+	item.ID, item.Kind = id, storedKind
+	if s.cryptor == nil {
+		return fail("申请账号加密密钥未配置，请联系管理员恢复", ErrInvalid, true)
+	}
+	if !strings.HasPrefix(secret, keyedEncryptedPrefix) {
+		return fail("申请账号密文格式损坏，请联系管理员检查", ErrInvalid, true)
+	}
+	plain, err := s.decryptContent(secret)
+	if err != nil {
+		return fail("申请账号解密失败，请联系管理员检查当前及旧加密密钥", ErrInvalid, true)
+	}
+	if json.Unmarshal([]byte(plain), value) != nil {
+		return fail("申请账号秘密数据损坏，请联系管理员检查", ErrInvalid, true)
+	}
+	return item, nil
 }
 func (s *Store) DeleteCertificateAccount(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM certificate_accounts a WHERE a.id=$1 AND a.owner_id=$2 AND NOT EXISTS(SELECT 1 FROM panel_certificates c WHERE c.metadata->>'account_id'=a.id OR c.metadata->>'dns_account_id'=a.id)`, id, certificateActor(ctx))

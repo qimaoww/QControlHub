@@ -11,6 +11,12 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// certificateOwnerContext preserves the database owner, including the legacy
+// empty owner, without granting administrator or system access.
+func certificateOwnerContext(ctx context.Context, owner string) context.Context {
+	return context.WithValue(ctx, configScopeKey{}, configScope{OwnerID: owner})
+}
+
 func certificatePairFromDER(chain [][]byte, key string) certificates.Pair {
 	var cert []byte
 	for _, der := range chain {
@@ -28,7 +34,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 	// Rekeying failure is visible to the caller; do not block independent jobs.
 	rekeyErr := s.rewrapCertificateSecrets(ctx)
 	// A certificate with no active order becomes due 30 days before expiry.
-	rows, err := s.pool.Query(ctx, `SELECT metadata FROM panel_certificates c WHERE auto_renew AND next_attempt<=now() AND NOT EXISTS(SELECT 1 FROM certificate_orders o WHERE o.certificate_id=c.id AND o.status IN ('queued','running','waiting_dns','validating','canceling')) LIMIT 20`)
+	rows, err := s.pool.Query(ctx, `SELECT id,owner_id,metadata FROM panel_certificates c WHERE auto_renew AND next_attempt<=now() AND NOT EXISTS(SELECT 1 FROM certificate_orders o WHERE o.certificate_id=c.id AND o.status IN ('queued','running','waiting_dns','validating','canceling')) LIMIT 20`)
 	if err != nil {
 		return err
 	}
@@ -36,7 +42,8 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 	for rows.Next() {
 		var raw []byte
 		var c core.Certificate
-		if err = rows.Scan(&raw); err != nil {
+		var id, owner string
+		if err = rows.Scan(&id, &owner, &raw); err != nil {
 			rows.Close()
 			return err
 		}
@@ -44,6 +51,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			rows.Close()
 			return err
 		}
+		c.ID, c.OwnerID = id, owner
 		due = append(due, c)
 	}
 	rows.Close()
@@ -51,7 +59,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 		return err
 	}
 	for _, c := range due {
-		ownerCtx := WithConfigScope(ctx, c.OwnerID, false)
+		ownerCtx := certificateOwnerContext(ctx, c.OwnerID)
 		if c.NotAfter != nil && time.Until(*c.NotAfter) < 30*24*time.Hour && c.Method != "dns-manual" && c.Source == "acme" {
 			if err = certificateUserActive(ownerCtx, s.pool, c.OwnerID); err == nil {
 				_ = s.RenewCertificate(ownerCtx, c.ID)
@@ -99,9 +107,9 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 				connection.Release()
 			}()
 			var raw []byte
-			var secret, status string
+			var secret, status, owner string
 			var attempt int
-			if err = connection.QueryRow(ctx, `SELECT c.metadata,o.secret,o.status,o.attempt FROM certificate_orders o JOIN panel_certificates c ON c.id=o.certificate_id WHERE o.id=$1 AND o.next_attempt<=now() AND (o.status IN ('queued','running','validating','canceling') OR (o.status IN ('succeeded','failed','canceled') AND o.stage='cleanup'))`, job.id).Scan(&raw, &secret, &status, &attempt); err != nil {
+			if err = connection.QueryRow(ctx, `SELECT c.metadata,o.secret,o.status,o.attempt,c.owner_id FROM certificate_orders o JOIN panel_certificates c ON c.id=o.certificate_id WHERE o.id=$1 AND o.next_attempt<=now() AND (o.status IN ('queued','running','validating','canceling') OR (o.status IN ('succeeded','failed','canceled') AND o.stage='cleanup'))`, job.id).Scan(&raw, &secret, &status, &attempt, &owner); err != nil {
 				return
 			}
 			var item core.Certificate
@@ -110,7 +118,8 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 				_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET error='订单无法解密；请恢复当前及旧加密密钥后重试',next_attempt=now()+interval '10 minutes' WHERE id=$1`, job.id)
 				return
 			}
-			ownerCtx := WithConfigScope(ctx, item.OwnerID, false)
+			item.ID, item.OwnerID = job.cert, owner
+			ownerCtx := certificateOwnerContext(ctx, owner)
 			runCtx, cancel := context.WithTimeout(ownerCtx, 90*time.Second)
 			defer cancel()
 			if status == "succeeded" || status == "failed" || status == "canceled" {
@@ -163,7 +172,8 @@ func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, s
 			}
 		}
 	}
-	terminal := errors.Is(cause, ErrForbidden) || errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
+	var accountErr *certificateAccountReadError
+	terminal := (errors.As(cause, &accountErr) && accountErr.permanent) || errors.Is(cause, ErrForbidden) || errors.Is(cause, errCertificateOrderInvalid) || (attempt >= 7 && startedStatus != "canceling")
 	if terminal {
 		status, stage = "failed", "cleanup"
 	}
