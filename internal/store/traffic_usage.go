@@ -88,7 +88,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,accounting,COALESCE(share_id,''),port,
                (share_id IS NULL OR EXISTS(SELECT 1 FROM agent_shares sh JOIN agent_share_ports sp ON sp.share_id=sh.id
                  WHERE sh.id=port_traffic_policies.share_id AND sh.agent_id=port_traffic_policies.agent_id
-                 AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port))
+                 AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port)
+                 OR EXISTS(SELECT 1 FROM agent_shares sh WHERE sh.id=port_traffic_policies.share_id
+                   AND sh.agent_id=port_traffic_policies.agent_id AND sh.ports_unrestricted))
 		FROM port_traffic_policies
 		WHERE id=ANY($1::text[]) AND agent_id=$2 AND monitoring_enabled=true
 		ORDER BY id FOR UPDATE`, ids, agentID)

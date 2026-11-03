@@ -414,6 +414,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	} else if !task.SharedInstance {
 		task.ConfigID = ""
 	}
+	if err := s.prepareRetainedHostPortsTx(ctx, tx, &task); err != nil {
+		return core.Task{}, err
+	}
+	if err := s.checkTaskPortUseTx(ctx, tx, &task, false); err != nil {
+		return core.Task{}, err
+	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance

@@ -15,7 +15,12 @@ import (
 // Drafts and validation never reserve ports or create firewall policies.
 // The caller holds the Agent lock, serializing grants and deployments.
 func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, ports []int) error {
-	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, ports); err != nil {
+	var added []int
+	if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT unnest($2::int[]) EXCEPT
+		SELECT port FROM agent_share_ports WHERE share_id=$1)`, shareID, ports).Scan(&added); err != nil {
+		return err
+	}
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, added); err != nil {
 		return err
 	}
 	wanted := map[int]bool{}
@@ -25,7 +30,10 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 	rows, err := tx.Query(ctx, `SELECT reserved.port,COALESCE(policy.id,''),COALESCE(policy.engine,'')
 		FROM agent_share_ports reserved LEFT JOIN port_traffic_policies policy
 		ON policy.agent_id=reserved.agent_id AND policy.port=reserved.port AND policy.share_id=reserved.share_id
-		WHERE reserved.share_id=$1 ORDER BY reserved.port`, shareID)
+		WHERE reserved.share_id=$1
+		UNION ALL SELECT policy.port,policy.id,policy.engine FROM port_traffic_policies policy
+		WHERE policy.share_id=$1 AND NOT EXISTS(SELECT 1 FROM agent_share_ports reserved
+			WHERE reserved.share_id=$1 AND reserved.port=policy.port) ORDER BY 1`, shareID)
 	if err != nil {
 		return err
 	}
@@ -46,8 +54,12 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	var unrestricted bool
+	if err := tx.QueryRow(ctx, `SELECT ports_unrestricted FROM agent_shares WHERE id=$1`, shareID).Scan(&unrestricted); err != nil {
+		return err
+	}
 	for _, port := range prior {
-		if wanted[port.port] {
+		if wanted[port.port] || unrestricted {
 			continue
 		}
 		if port.policyID != "" {
@@ -77,6 +89,13 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 		}
 	}
 	for _, port := range ports {
+		var foreign bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports WHERE agent_id=$1 AND port=$2 AND share_id<>$3)`, agentID, port, shareID).Scan(&foreign); err != nil {
+			return err
+		}
+		if foreign {
+			return fmt.Errorf("%w: 端口 %d 已有授权分配，不能重复分配；具备不限端口权限的用户仍可申请使用空闲端口", ErrConflict, port)
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO agent_share_ports(agent_id,port,share_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
 			agentID, port, shareID); err != nil {
 			return mapError(err)
@@ -94,60 +113,56 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 
 // Validation uses the same read-only conflict checks as reservation, without
 // claiming a port or affecting another user's future deployment.
-func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, ports []int) error {
+func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, ports []int, tasks ...*core.Task) error {
 	if len(ports) == 0 {
 		return nil
+	}
+	var engine core.Engine
+	var candidate *core.Task
+	if len(tasks) > 0 {
+		candidate = tasks[0]
+		engine = candidate.Engine
 	}
 	wanted := make(map[int]bool, len(ports))
 	for _, port := range ports {
 		wanted[port] = true
 	}
-	rows, err := tx.Query(ctx, `SELECT port,share_id FROM agent_share_ports
-		WHERE agent_id=$1 AND port=ANY($2::int[]) ORDER BY port`, agentID, ports)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var port int
-		var reservedFor string
-		if err := rows.Scan(&port, &reservedFor); err != nil {
-			rows.Close()
-			return err
-		}
-		if reservedFor != shareID {
-			rows.Close()
-			return portConflict(port, fmt.Errorf("%w: port %d is already reserved for another user", ErrConflict, port))
-		}
-		delete(wanted, port)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	// Existing reservations already authorize these ports. A foreign
-	// uncertain service must not prevent revocation, quota edits or release.
-	if len(wanted) == 0 {
-		return nil
-	}
 	// Include queued deployment snapshots: a different core may be about
 	// to start a foreign listener which has no shared traffic monitor yet.
-	rows, err = tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
+	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version)
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
-		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
-			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version)
+			config.id IS NULL OR config.deleted_at IS NOT NULL
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
-		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain)
+			AND state.config_id<>'' AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
 		UNION ALL
-		SELECT task.engine,task.config_content,COALESCE(task.config_id,''),COALESCE(task.config_version,0),false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
-		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing')
-			AND COALESCE(config.owner_id,task.owner_id)<>$2 AND task.config_content IS NOT NULL`, agentID, userID)
+		SELECT state.engine,COALESCE(revision.content,config.content,''),attempt.config_id,attempt.config_version,
+			config.id IS NULL OR config.deleted_at IS NOT NULL
+				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2
+		FROM agent_shared_instance_ownership state LEFT JOIN tasks attempt ON attempt.id=state.last_task_id
+		LEFT JOIN configs config ON config.id=attempt.config_id
+		LEFT JOIN config_revisions revision ON revision.config_id=attempt.config_id AND revision.version=attempt.config_version
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain) AND attempt.action='deploy'
+			AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+		UNION ALL
+		SELECT state.engine,'','',0,true,false,state.owner_id=$2
+		FROM agent_shared_instance_ownership state
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain)
+			AND (state.config_id='' OR state.config_uncertain)
+			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
+			AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+		UNION ALL
+		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
+			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND task.engine<>$3))`, agentID, userID, engine)
 	if err != nil {
 		return err
 	}
@@ -156,11 +171,13 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		content, id string
 		version     int
 		uncertain   bool
+		pending     bool
+		sameOwner   bool
 	}
 	var deployments []deployment
 	for rows.Next() {
 		var d deployment
-		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain); err != nil {
+		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner); err != nil {
 			rows.Close()
 			return err
 		}
@@ -172,7 +189,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	}
 	for _, d := range deployments {
 		if d.uncertain {
-			return fmt.Errorf("%w: stop the uncertain %s core before reserving shared ports", ErrConflict, d.engine)
+			return portConflict(ports[0], fmt.Errorf("%w: 无法确认实例的端口状态，请刷新节点状态后重试", ErrConflict))
 		}
 		content, err := s.decryptContent(d.content)
 		if err != nil {
@@ -182,11 +199,20 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		if err != nil {
 			return err
 		}
+		if content == "" {
+			return portConflict(ports[0], fmt.Errorf("%w: 无法确认待执行任务的监听端口，请等待任务结束并刷新状态", ErrConflict))
+		}
 		if len(frontends) == 0 {
 			frontends, err = s.managedTLSFrontendsTx(ctx, tx, d.id, d.version, d.engine, content)
 			if err != nil {
 				return err
 			}
+		}
+		conflict := func(port int) error {
+			if d.pending {
+				return portConflict(port, fmt.Errorf("%w: 端口 %d 有部署任务处理中，请等待任务结束后重试", ErrConflict, port))
+			}
+			return portConflict(port, fmt.Errorf("%w: 端口 %d 已被有效部署占用，请刷新状态或调整端口后重试。", ErrConflict, port))
 		}
 		for _, f := range frontends {
 			ports := []int{f.PublicPort}
@@ -195,13 +221,31 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 			}
 			for _, port := range ports {
 				if wanted[port] {
-					return portConflict(port, fmt.Errorf("%w: 入口或内部反代端口 %d 属于其他用户的部署", ErrConflict, port))
+					compatible := false
+					if d.sameOwner && candidate != nil && port == f.PublicPort && !f.LocalOnly {
+						for _, next := range candidate.TLSFrontends {
+							compatible = compatible || (!next.LocalOnly && next.PublicPort == port && next.Mode == f.Mode && next.Path != f.Path)
+						}
+						for _, endpoint := range serverconfig.DiscoverTrafficPorts(candidate.Engine, candidate.ConfigContent) {
+							if endpoint.Port == port {
+								compatible = false
+							}
+						}
+					}
+					if !compatible {
+						return conflict(port)
+					}
 				}
 			}
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {
 			if wanted[endpoint.Port] {
-				return portConflict(endpoint.Port, fmt.Errorf("%w: port %d belongs to another user's deployed configuration", ErrConflict, endpoint.Port))
+				// Ordinary cores owned by the same principal may use separate
+				// TCP/UDP sockets. Shared metering still protects both transports.
+				if d.sameOwner && candidate != nil && candidate.SharedTrafficID == "" && !taskPortProtocolsOverlap(candidate, endpoint) {
+					continue
+				}
+				return conflict(endpoint.Port)
 			}
 		}
 	}
@@ -222,10 +266,19 @@ func (s *Store) reserveSharedDeploymentPortsTx(ctx context.Context, tx pgx.Tx, s
 	if !unrestricted {
 		return nil
 	}
+	var requested []int
 	for _, endpoint := range endpoints {
-		if !slices.Contains(ports, endpoint.Port) {
+		requested = append(requested, endpoint.Port)
+		var allocated bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports WHERE agent_id=$1 AND port=$2)`, agentID, endpoint.Port).Scan(&allocated); err != nil {
+			return err
+		}
+		if !allocated && !slices.Contains(ports, endpoint.Port) {
 			ports = append(ports, endpoint.Port)
 		}
+	}
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, requested); err != nil {
+		return err
 	}
 	slices.Sort(ports)
 	return s.setSharedPortsTx(ctx, tx, shareID, userID, agentID, ports)
@@ -303,8 +356,9 @@ func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID s
 func prepareSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint, activate bool) error {
 	for _, endpoint := range endpoints {
 		var reserved bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports p JOIN agent_shares s ON s.id=p.share_id
-			WHERE p.agent_id=$1 AND p.port=$2 AND p.share_id=$3 AND $4=ANY(s.engines))`,
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shares s
+			WHERE s.agent_id=$1 AND s.id=$3 AND $4=ANY(s.engines) AND
+			(s.ports_unrestricted OR EXISTS(SELECT 1 FROM agent_share_ports p WHERE p.share_id=s.id AND p.port=$2)))`,
 			agentID, endpoint.Port, shareID, endpoint.Engine).Scan(&reserved); err != nil {
 			return err
 		}
@@ -320,7 +374,10 @@ func prepareSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentI
 			return err
 		}
 		if boundID != "" && (boundID != shareID || engine != endpoint.Engine) {
-			return fmt.Errorf("%w: shared port %d is bound to a different allocation or core; stop and release it first", ErrConflict, endpoint.Port)
+			if err := retireUnusedSharedPolicyTx(ctx, tx, agentID, endpoint.Port, boundID, engine); err != nil {
+				return err
+			}
+			boundID = ""
 		}
 		if quota {
 			return fmt.Errorf("%w: remove the existing per-port quota on port %d before using a shared allowance", ErrConflict, endpoint.Port)
@@ -362,4 +419,53 @@ func prepareSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentI
 		return fmt.Errorf("%w: an Agent supports at most 256 monitored ports", ErrConflict)
 	}
 	return nil
+}
+
+// A policy is a metering identity, never a port allocation. Retire it only
+// after settlement (or when no task ever started). A fresh ID rejects delayed
+// samples for the previous user while their cumulative share ledger survives.
+func retireUnusedSharedPolicyTx(ctx context.Context, tx pgx.Tx, agentID string, port int, shareID string, engine core.Engine, readOnly ...bool) error {
+	var safe bool
+	if err := tx.QueryRow(ctx, `SELECT
+		NOT EXISTS(SELECT 1 FROM tasks WHERE agent_id=$1 AND engine=$2
+			AND shared_traffic_id=$3 AND status IN ('pending','running') AND action NOT IN ('validate','status'))
+		AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership
+			WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND (uncertain OR running AND config_uncertain OR
+				(running OR NOT traffic_settled) AND EXISTS(SELECT 1 FROM port_traffic_policies
+					WHERE agent_id=$1 AND port=$4 AND monitoring_enabled)))
+		AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership state JOIN agent_shares sh ON sh.user_id=state.owner_id
+			WHERE state.agent_id=$1 AND state.engine=$2 AND sh.id=$3 AND (state.uncertain OR state.running AND state.config_uncertain OR
+				(state.running OR NOT state.traffic_settled) AND EXISTS(SELECT 1 FROM port_traffic_policies
+					WHERE agent_id=$1 AND port=$4 AND monitoring_enabled)))`,
+		agentID, engine, shareID, port).Scan(&safe); err != nil {
+		return err
+	}
+	if !safe {
+		return portConflict(port, fmt.Errorf("%w: 端口 %d 的使用状态或流量结算尚未确认，请刷新节点状态后重试", ErrConflict, port))
+	}
+	if len(readOnly) > 0 && readOnly[0] {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 AND share_id=$3`, agentID, port, shareID)
+	return err
+}
+
+func taskPortProtocolsOverlap(task *core.Task, existing core.PortTrafficEndpoint) bool {
+	for _, frontend := range task.TLSFrontends {
+		if frontend.PublicPort == existing.Port || frontend.LocalOnly && frontend.BackendPort == existing.Port {
+			return true
+		}
+	}
+	matched := false
+	for _, next := range serverconfig.DiscoverTrafficPorts(task.Engine, task.ConfigContent) {
+		if next.Port != existing.Port {
+			continue
+		}
+		matched = true
+		if next.Protocol != core.TrafficProtocolTCP && next.Protocol != core.TrafficProtocolUDP ||
+			existing.Protocol != core.TrafficProtocolTCP && existing.Protocol != core.TrafficProtocolUDP || next.Protocol == existing.Protocol {
+			return true
+		}
+	}
+	return !matched
 }

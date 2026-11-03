@@ -120,7 +120,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
 		}
 		if unrestricted {
-			if task.Action == core.ActionDeploy {
+			if task.Action == core.ActionDeploy || task.Action == core.ActionStart || task.Action == core.ActionRestart {
 				if err := s.reserveSharedDeploymentPortsTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, endpoints); err != nil {
 					return err
 				}
@@ -129,7 +129,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 				for _, endpoint := range endpoints {
 					ports = append(ports, endpoint.Port)
 				}
-				return s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, ports)
+				return s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, ports, task)
 			}
 		} else {
 			for _, endpoint := range endpoints {
@@ -143,22 +143,26 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 				}
 			}
 		}
-		if task.Action == core.ActionDeploy {
+		ports := make([]int, 0, len(endpoints))
+		for _, endpoint := range endpoints {
+			ports = append(ports, endpoint.Port)
+		}
+		if err := s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, ports, task); err != nil {
+			return err
+		}
+		if task.Action == core.ActionDeploy || task.Action == core.ActionStart || task.Action == core.ActionRestart {
 			return prepareSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints, false)
 		}
 		return nil
 	}
-	// An unrestricted operator must not accidentally deploy over another
-	// user's reserved ports. Administrators can explicitly release/reassign.
+	// Allocation is authorization, not evidence of a live listener. The Agent
+	// row lock serializes this check with insertion of the task snapshot.
+	ports := make([]int, 0, len(endpoints))
 	for _, endpoint := range endpoints {
-		var foreign bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports reserved JOIN agent_shares share ON share.id=reserved.share_id
-			WHERE reserved.agent_id=$1 AND reserved.port=$2 AND share.user_id<>$3)`, task.AgentID, endpoint.Port, configOwner).Scan(&foreign); err != nil {
-			return err
-		}
-		if foreign {
-			return portConflict(endpoint.Port, fmt.Errorf("%w: port %d is reserved for another user", ErrConflict, endpoint.Port))
-		}
+		ports = append(ports, endpoint.Port)
+	}
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, "", configOwner, task.AgentID, ports, task); err != nil {
+		return err
 	}
 	return nil
 }

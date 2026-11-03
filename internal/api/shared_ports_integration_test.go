@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func TestSharedPortModesAPI(t *testing.T) {
@@ -105,6 +106,58 @@ func TestSharedPortModesAPI(t *testing.T) {
 				t.Fatalf("settled clear did not persist an unallocated scope: %+v", after)
 			}
 			recipient.call("POST", "/tasks", request, http.StatusConflict, nil)
+		})
+	}
+}
+
+func TestIdleForeignAllocationAllowsOwnerTLSEntry(t *testing.T) {
+	for _, mode := range []string{"caddy", "nginx", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "borrowed-public-entry", core.EngineSingBox)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCoreLifecycle)
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 443, 21001)
+			base := "/agents/" + agent.ID + "/configs/sing-box"
+			var plan serverconfig.Input
+			owner.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)
+			plan.Port, plan.TLSPublicPort, plan.TLSServerName, plan.TLSMode = 32548, 443, "entry.example.test", mode
+			if mode == "native" {
+				plan.Port, plan.TLSPublicPort, plan.Listen = 443, 0, "0.0.0.0"
+				plan.CertificatePath, plan.PrivateKeyPath = "/etc/certs/test.pem", "/etc/certs/test.key"
+			}
+			var saved configMutationResult
+			owner.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
+			claimed, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || claimed == nil || claimed.ID != saved.Task.ID {
+				t.Fatalf("claim: %+v %v", claimed, err)
+			}
+			if mode != "native" && (len(claimed.TLSFrontends) != 1 || claimed.TLSFrontends[0].PublicPort != 443 || claimed.TLSFrontends[0].BackendPort != 32548) {
+				t.Fatalf("public/backend ports mixed: %+v", claimed.TLSFrontends)
+			}
+			if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+				t.Fatal(err)
+			}
+			// Administrative visibility does not change the recipient's allocation.
+			var access core.AgentAccess
+			admin.call("GET", "/users/"+recipient.userID+"/agent-access", nil, http.StatusOK, &access)
+			if len(access.Shares) != 1 || !slices.Equal(access.Shares[0].Ports, []int{443, 21001}) {
+				t.Fatalf("foreign allocation changed: %+v", access)
+			}
+			plan.Port = 21001
+			if mode == "native" {
+				plan.Port = 443
+			}
+			var conflict struct {
+				Code, Field string
+				Port        int
+			}
+			recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusConflict, &conflict)
+			if conflict.Code != "port_conflict" || conflict.Port != 443 {
+				t.Fatalf("original allocation bypassed active listener: %+v", conflict)
+			}
 		})
 	}
 }
