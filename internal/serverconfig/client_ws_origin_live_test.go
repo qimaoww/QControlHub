@@ -94,7 +94,8 @@ func testWebSocketXrayImport(t *testing.T, plan Input, address, certPath string)
 	if err := json.Unmarshal(out, &outbound); err != nil {
 		t.Fatal(err)
 	}
-	port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+	echo := singBoxEcho(t, "tcp")
+	port := singBoxFreePort(t)
 	content, err := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "tunnel", "settings": map[string]any{"address": "127.0.0.1", "port": echo, "network": "tcp"}}}, "outbounds": []any{outbound}})
 	if err != nil {
 		t.Fatal(err)

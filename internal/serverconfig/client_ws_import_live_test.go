@@ -29,7 +29,8 @@ func testWebSocketMihomoImport(t *testing.T, plan Input, address, certPath strin
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+	echo := singBoxEcho(t, "tcp")
+	port := singBoxFreePort(t)
 	root := map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "info"}
 	if uri {
 		source := filepath.Join(dir, "subscription.txt")

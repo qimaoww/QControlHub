@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -100,15 +99,18 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 	proxy.Transport = transport
 	type requestInfo struct {
 		host, sni, path, alpn string
-		major                 int
+		major, rejection      int
 	}
 	seen := make(chan requestInfo, 32)
 	edge := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen <- requestInfo{r.Host, r.TLS.ServerName, r.URL.Path, r.TLS.NegotiatedProtocol, r.ProtoMajor}
+		info := requestInfo{host: r.Host, sni: r.TLS.ServerName, path: r.URL.Path, alpn: r.TLS.NegotiatedProtocol, major: r.ProtoMajor}
 		if r.Host != input.TLSServerName && r.Host != "custom.example.test" {
 			http.Error(w, "unknown virtual host", http.StatusMisdirectedRequest)
+			info.rejection = http.StatusMisdirectedRequest
+			seen <- info
 			return
 		}
+		seen <- info
 		proxy.ServeHTTP(w, r)
 	}))
 	// Prefer 443 (also exercised in an isolated network namespace locally).
@@ -167,13 +169,11 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 			if tc.removeHost {
 				delete(mapValue(out["transport"]), "headers")
 			}
-			port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+			echo := singBoxEcho(t, "tcp")
+			port := singBoxFreePort(t)
 			client, _ := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"type": "direct", "listen": "127.0.0.1", "listen_port": port, "network": "tcp", "override_address": "127.0.0.1", "override_port": echo}}, "outbounds": []any{out}})
 			clientLog := singBoxRun(t, binary, "ws-edge-client", string(client))
 			err = singBoxEchoRoundTrip("tcp", port)
-			if tc.removeHost && !strings.Contains(clientLog(), "unexpected HTTP response status: 421") {
-				t.Fatalf("missing Host failed outside HTTP hostname routing: %v\n%s", err, clientLog())
-			}
 			if tc.edge {
 				var r requestInfo
 				select {
@@ -187,6 +187,11 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 				}
 				if tc.removeHost {
 					wantHost = net.JoinHostPort(tc.address, strconv.Itoa(edgePort))
+					// Observe the actual response at the edge; core log writes can
+					// arrive after the failed socket read has already returned.
+					if r.rejection != http.StatusMisdirectedRequest {
+						t.Fatalf("missing Host failed outside HTTP hostname routing: %+v", r)
+					}
 				}
 				if r.host != wantHost || r.sni != input.TLSServerName || r.path != input.TransportPath || r.major != 1 || r.alpn != "http/1.1" {
 					t.Fatalf("unexpected edge request: %+v", r)
