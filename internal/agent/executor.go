@@ -41,6 +41,7 @@ type Executor struct {
 	coreBootstrapper         *coreServiceBootstrapper
 	validationSystemdRunPath string
 	coreStateHelperPath      string
+	tlsFrontendHelperPath    string
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	accountingConfigMu       sync.Mutex
