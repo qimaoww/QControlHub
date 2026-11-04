@@ -52,6 +52,11 @@ export const code = (message) => node("pre", { className: "a-code", tabindex: "0
 export const section = (title, content, tools, subtitle) => node("section", { className: "a-card" },
   (title || subtitle || tools) && node("div", { className: title ? "a-card-head" : "a-card-tools" },
     (title || subtitle) && node("div", {}, title && node("h2", {}, title), subtitle && node("p", {}, subtitle)), tools), content);
+// Compact query controls are separate from full editing forms and card content.
+export function filterbar(content) {
+  if (content.tagName === "FORM") content.classList.add("a-filter-form");
+  return node("div", { className: "a-filterbar" }, content);
+}
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 
 export function table(columns, rows, { emptyText, paginate = 12, label = "记录" } = {}) {

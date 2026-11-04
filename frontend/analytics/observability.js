@@ -1,5 +1,5 @@
 import { redactDiagnostic } from "../modules/errors.js";
-import { node, button, actions, stack, section, table, badge, field, muted, query, list, notice, code } from "./ui.js";
+import { filterbar, node, button, actions, stack, section, table, badge, field, muted, query, list, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
 const engines = [["", "全部内核"], "mihomo", "xray", "sing-box", "ss-rust"];
@@ -43,7 +43,7 @@ export async function logsPage(ctx) {
     draw();
     if (!next.length) older.disabled = true;
   }));
-  return stack(section(null, node("div", { className: "a-card-body" }, form)),
+  return stack(filterbar(form),
     section(null, stack(metadata, results, node("div", { className: "a-card-body" }, actions(older)))));
 }
 
@@ -103,6 +103,6 @@ export async function connectionsPage(ctx) {
   }
   const sourceState = node("div", { className: "a-card-body a-stack" });
   await load();
-  return stack(section(null, node("div", { className: "a-card-body" }, form)),
+  return stack(filterbar(form),
     section(null, stack(summary, results, sourceState, node("div", { className: "a-card-body" }, pageTools))));
 }

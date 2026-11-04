@@ -1,7 +1,7 @@
 import { formatDate } from "./appearance.js";
 import { aggregateDashboardTrafficDays, utcMonth } from "../modules/dashboard-model.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
-import { node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
+import { filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
   const amount = Math.max(0, Number(value) || 0);
@@ -193,7 +193,7 @@ export async function tasksPage(ctx) {
     ]), { label: "任务" }));
   }
   draw(await ctx.api(query("/tasks", filters)));
-  return stack(section(null, node("div", { className: "a-card-body" }, filter)), section(null, results));
+  return stack(filterbar(filter), section(null, results));
 }
 
 export async function quotaPage(ctx) {

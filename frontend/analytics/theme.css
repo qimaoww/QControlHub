@@ -363,3 +363,27 @@ strong, b { font-weight: 600; }
 .a-ipq-facts dd { margin: 0; overflow-wrap: anywhere; }
 .a-ipq-detail .a-grid .a-ipq-facts { grid-template-columns: minmax(0,1fr); }
 @media (max-width: 40rem) { .a-ipq-facts { grid-template-columns: minmax(0,1fr); } }
+
+/* Search/query toolbars do not inherit the spacing of edit forms or cards. */
+.a-filterbar { min-width: 0; }
+.a-filter-form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+.a-filter-form > .a-form-fields, .a-filter-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; min-width: 0; flex: 1 1 640px; }
+.a-filter-form > .a-form-fields > .a-form-grid { display: contents; }
+.a-filter-form .a-field, .a-filter-fields > .a-field { flex: 1 1 160px; min-width: 0; }
+.a-filter-form .a-field:has([name=source]) { flex: 1.6 1 220px; }
+.a-filter-form .a-field:has([name=q]) { flex: 1.5 1 200px; }
+.a-filter-form .a-field:has([name=limit]) { flex: .5 1 100px; }
+.a-filter-form > .a-actions { flex: 0 0 auto; }
+.a-filter-form > .a-notice:empty { display: none; }
+.a-filter-form > .a-notice:not(:empty) { flex-basis: 100%; order: 2; margin: 0; }
+.a-filterbar > .a-field { width: min(360px,100%); }
+.a-filter-form .a-check { margin: 0; align-self: flex-end; }
+.a-card > .a-card-body:first-child { padding-top: var(--card-gutter); }
+@media (max-width: 40rem) {
+  .a-filter-form > .a-form-fields, .a-filter-fields { flex-basis: 100%; display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .a-filter-form > .a-actions { width: 100%; }
+  .a-filter-form > .a-actions > .a-button { width: 100%; }
+}
+
+.a-filter-form > .a-actions > .a-button { min-height: 40px; }
+@media (max-width: 56rem) { .a-filter-form > .a-actions > .a-button { min-height: 44px; } }

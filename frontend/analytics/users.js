@@ -1,5 +1,5 @@
 import { userPermissions, defaultPermissions, userActionRestriction, parseSharedPorts, sharedLimitBytes, sharedLimitGiB, formatSharedPorts } from "../modules/user-model.js";
-import { node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice } from "./ui.js";
+import { filterbar, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice } from "./ui.js";
 import { date } from "./operations.js";
 
 export async function usersPage(ctx) {
@@ -149,6 +149,6 @@ export async function usersPage(ctx) {
   }
   draw();
   query.querySelector("input").addEventListener("input", draw);
-  return stack(section(null, node("div", { className: "a-card-body" }, query)),
+  return stack(filterbar(query),
     section(null, results, button("创建用户", () => edit(), { tone: "primary" })));
 }

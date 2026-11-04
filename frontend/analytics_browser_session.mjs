@@ -66,6 +66,12 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     assert.equal(await evaluate(page, "[...document.querySelectorAll('.a-main [role=alert]')].filter(item=>item.textContent.trim()).length"), 0, `${route}: real API did not fail`);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `${route}: no page overflow`);
     assert.equal(await evaluate(page, "document.querySelectorAll('.a-main > .a-heading, .a-main h1').length"), 0, `${route}: page title appears only in the top bar`);
+    if (route === "core-logs" && mode === "desktop") {
+      assert.ok(await evaluate(page, `(() => {
+        const controls=[...document.querySelectorAll('.a-filter-form .a-field input,.a-filter-form .a-field select,.a-filter-form button[type=submit]')].map(el=>el.getBoundingClientRect());
+        return controls.length===5 && Math.max(...controls.map(rect=>rect.top))-Math.min(...controls.map(rect=>rect.top))<2;
+      })()`), "log filters and submit share one compact desktop row");
+    }
     await screenshot(page, `analytics-${route}`);
     if (route === "settings") {
       const formWidths = mode === "mobile" ? [[390, 844], [768, 1024]] : [[1440, 1000], [1280, 900], [960, 800], [3840, 2160]];

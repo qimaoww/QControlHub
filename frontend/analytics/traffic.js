@@ -1,6 +1,6 @@
 import { trafficBatch } from "./traffic-batch.js";
 import { mergeTrafficPorts, trafficPolicyEditable, eligibleAgents, policyStatus, trafficRateForDisplay, trafficCardIdentity } from "../modules/traffic-model.js";
-import { node, button, actions, stack, section, table, badge, field, muted, list, pathID, notice, query } from "./ui.js";
+import { filterbar, node, button, actions, stack, section, table, badge, field, muted, list, pathID, notice, query } from "./ui.js";
 import { bytes, date } from "./operations.js";
 
 export async function trafficPage(ctx) {
@@ -127,7 +127,7 @@ export async function trafficPage(ctx) {
     });
     const box = ctx.dialog("同步配置端口", form, { wide: true });
   }));
-  return stack(section(null, node("div", { className: "a-card-body a-form-grid" }, search, scope)),
+  return stack(filterbar(node("div", { className: "a-filter-fields" }, search, scope)),
     section(null, stack(summary, results), actions(sync,
       ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
         const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}

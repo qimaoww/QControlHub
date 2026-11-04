@@ -1,5 +1,5 @@
 import { clientAccessAddressChoices, clientAccessEntryForAddress, clientAccessExport, filterClientAccessEntries, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
-import { copyText, node, button, actions, stack, section, table, badge, field, muted, list, notice, link, pathID } from './ui.js';
+import { filterbar, copyText, node, button, actions, stack, section, table, badge, field, muted, list, notice, link, pathID } from './ui.js';
 
 export async function clientAccessPage(ctx) {
   let entries = list(await ctx.api('/client-access'));
@@ -122,5 +122,5 @@ export async function clientAccessPage(ctx) {
   search.querySelector('input').addEventListener('input', draw);
   for (const control of [agentFilter, engineFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
   draw();
-  return stack(section(null, node('div', { className: 'a-card-body a-form-grid' }, search, agentFilter, engineFilter, format)), result);
+  return stack(filterbar(node('div', { className: 'a-filter-fields' }, search, agentFilter, engineFilter, format)), result);
 }

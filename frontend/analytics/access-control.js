@@ -1,4 +1,4 @@
-import { node, button, actions, stack, section, table, badge, field, muted, list, notice } from "./ui.js";
+import { filterbar, node, button, actions, stack, section, table, badge, field, muted, list, notice } from "./ui.js";
 import { status, taskDetail } from "./operations.js";
 
 export async function accessControlPage(ctx) {
@@ -52,5 +52,5 @@ export async function accessControlPage(ctx) {
   }
   draw();
   search.querySelector("input").addEventListener("input", draw);
-  return stack(section(null, node("div", { className: "a-card-body" }, search)), section(null, results));
+  return stack(filterbar(search), section(null, results));
 }

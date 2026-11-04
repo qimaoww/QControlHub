@@ -1,5 +1,5 @@
 import { certificateOrderPresentation, certificateOrderDiagnostic } from "../modules/certificate-order.js";
-import { node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, code } from "./ui.js";
+import { filterbar, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
 const certStatus = value => badge(({ ready: "可用", pending: "等待签发", issuing: "签发中", failed: "失败", expired: "已过期", revoked: "已撤销",
@@ -280,7 +280,7 @@ export async function certificatesPage(ctx) {
   }
   draw();
   search.querySelector("input").addEventListener("input", draw);
-  return stack(section(null, node("div", { className: "a-card-body" }, search)),
+  return stack(filterbar(search),
     section(null, results, actions(
       button("账号与认证授权", event => void run(event.currentTarget, accounts)),
       button("节点证书来源", event => void run(event.currentTarget, sources)),
