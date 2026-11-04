@@ -127,6 +127,12 @@ try {
     assert.equal(preference.theme_id, "classic");
     assert.equal(preference.revision, 0);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"));
+    if (mode === "mobile") {
+      assert.ok(await evaluate(page, "(() => {const r=document.querySelector('.mobile-account-menu>summary').getBoundingClientRect();return r.width>=44&&r.height>=44&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})()"), "mobile overflow launcher must remain visible for an account with every primary destination");
+      await evaluate(page, "document.querySelector('.mobile-account-menu').open=true");
+      assert.ok(await evaluate(page, "document.querySelector('.mobile-account-menu [href=\"#themes\"]').getClientRects().length>0"));
+      await evaluate(page, "document.querySelector('.mobile-account-menu').open=false");
+    }
   }
   const originalTheme = await api(a, alice, "GET", "/preferences/theme");
   await api(a, alice, "PUT", "/preferences/theme", { theme_id: "analytics", revision: originalTheme.revision });

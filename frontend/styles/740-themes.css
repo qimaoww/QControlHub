@@ -1,12 +1,12 @@
 /* Classic theme's picker. Independent theme styles must not import this file. */
 .page-themes .theme-picker{display:grid;gap:24px;max-width:1440px;margin-inline:auto;padding:28px 32px}
-.page-themes .theme-picker h1{font-size:26px;line-height:1.3;font-weight:650}
+.page-themes .theme-picker h1{font-size:var(--text-page);line-height:1.3;font-weight:var(--weight-semibold)}
 .page-themes .theme-picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),400px));gap:24px}
 .page-themes .theme-picker-card{overflow:hidden;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .page-themes .theme-picker-description{display:grid;gap:12px;padding:24px}
-.page-themes .theme-picker-description h2{font-size:19px;font-weight:650}
+.page-themes .theme-picker-description h2{font-size:var(--text-section);font-weight:var(--weight-semibold)}
 .page-themes .theme-picker-description>p{color:var(--muted);line-height:1.6}
-.page-themes .theme-picker-description .theme-picker-current{font-size:13px;color:var(--accent);font-weight:600}
+.page-themes .theme-picker-description .theme-picker-current{font-size:var(--text-small);color:var(--accent);font-weight:var(--weight-semibold)}
 .page-themes .theme-picker-description .button{justify-self:start;min-height:44px;padding-inline:20px}
 .page-themes .theme-picker-preview{display:flex;gap:14px;height:180px;padding:20px;background:var(--surface-2);border-bottom:1px solid var(--line)}
 .page-themes .theme-picker-preview>i{width:24px;border-radius:5px;background:var(--dock)}
