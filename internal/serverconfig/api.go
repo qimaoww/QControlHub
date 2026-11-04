@@ -1,10 +1,52 @@
 package serverconfig
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+// DisableXrayMutableAPI requires explicit consent at the mutation boundary.
+// Retain the transport, routes and every known non-routing service. A reserved
+// tag or an old revision alone never authorizes removal of a user's service.
+func DisableXrayMutableAPI(engine core.Engine, content string) (string, error) {
+	if engine != core.EngineXray {
+		return "", fmt.Errorf("API service migration is only supported for Xray")
+	}
+	root, err := decodeAccountingRoot(engine, content)
+	if err != nil {
+		return "", err
+	}
+	if _, err := xrayAccountingAPIAddress(root); err != nil {
+		return "", err
+	}
+	api := mapValue(root["api"])
+	if api == nil {
+		return content, nil
+	}
+	services, ok := api["services"].([]any)
+	if !ok {
+		return "", fmt.Errorf("Xray api.services must be an array")
+	}
+	kept := []any{}
+	for _, raw := range services {
+		name, ok := raw.(string)
+		if ok && (strings.EqualFold(name, "HandlerService") || strings.EqualFold(name, "RoutingService")) {
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	api["services"] = kept
+	if err := rejectMutableRoutingAPI(engine, root); err != nil {
+		return "", err
+	}
+	encoded, err := json.MarshalIndent(root, "", "  ")
+	return string(encoded) + "\n", err
+}
 
 func xrayAccountingAPIAddress(root map[string]any) (string, error) {
 	api := mapValue(root["api"])

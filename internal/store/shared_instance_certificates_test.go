@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -91,5 +92,11 @@ func TestSharedInstanceStartChecksCertificateGrantAndRetainsAppliedPair(t *testi
 	rejected, err := db.GetTask(recipient, pending.ID)
 	if err != nil || rejected.Status != core.TaskFailed || !strings.Contains(rejected.Error, "授权") {
 		t.Fatalf("missing certificate authorization error: %+v %v", rejected, err)
+	}
+	if _, err := db.RestoreConfigRevision(recipient, config.ID, 1, config.Version); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("history restore bypassed revoked certificate grant: %v", err)
+	}
+	if _, err := db.ConfigRevision(recipient, config.ID, config.Version+1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejected certificate restore created an archive: %v", err)
 	}
 }

@@ -383,7 +383,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		services, _ := api["services"].([]any)
 		foundStats := false
 		for _, service := range services {
-			if service == "StatsService" {
+			if name, ok := service.(string); ok && strings.EqualFold(name, "StatsService") {
 				foundStats = true
 			}
 		}

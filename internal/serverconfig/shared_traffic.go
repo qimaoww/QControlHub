@@ -37,8 +37,17 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		listKey, portKey, nameKey, kindKey = "inbounds", "port", "tag", "protocol"
 		if api := mapValue(root["api"]); api != nil {
 			services, ok := api["services"].([]any)
-			if !ok || len(services) != 1 || services[0] != "StatsService" {
-				return nil, fmt.Errorf("shared Xray configurations permit only the statistics API")
+			stats := false
+			for _, raw := range services {
+				if name, ok := raw.(string); ok && strings.EqualFold(name, "StatsService") {
+					stats = true
+				}
+			}
+			if !ok || !stats {
+				return nil, fmt.Errorf("shared Xray configurations require the statistics API")
+			}
+			if err := rejectMutableRoutingAPI(engine, root); err != nil {
+				return nil, err
 			}
 			if address, err := xrayAccountingAPIAddress(root); err != nil || address != "127.0.0.1:10085" {
 				return nil, fmt.Errorf("shared Xray statistics API must use 127.0.0.1:10085")

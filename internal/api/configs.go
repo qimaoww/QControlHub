@@ -167,7 +167,8 @@ func (s *Server) restoreConfigRevision(w http.ResponseWriter, request *http.Requ
 		return
 	}
 	var input struct {
-		ExpectedVersion int `json:"expected_version"`
+		ExpectedVersion   int  `json:"expected_version"`
+		DisableMutableAPI bool `json:"disable_mutable_api"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -177,7 +178,7 @@ func (s *Server) restoreConfigRevision(w http.ResponseWriter, request *http.Requ
 		writeError(w, http.StatusBadRequest, "expected_version must be positive")
 		return
 	}
-	restored, err := s.store.RestoreConfigRevision(request.Context(), request.PathValue("id"), version, input.ExpectedVersion)
+	restored, err := s.store.RestoreConfigRevision(request.Context(), request.PathValue("id"), version, input.ExpectedVersion, store.ConfigRestoreOptions{DisableMutableAPI: input.DisableMutableAPI})
 	if err != nil {
 		writeStoreError(w, err)
 		return

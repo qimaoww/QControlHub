@@ -248,9 +248,9 @@ async function liveConfig(options = {}) {
         if (accountData !== state.data) return;
         // The mutation is already durable. Do not report it as a failed save
         // or silently lose the error after the embedded editor is disposed.
-        const message = `配置已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
+        const message = `${result.task?.id ? "配置已保存且任务已提交" : "历史配置已恢复并保存，尚未部署"}，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
         const operation = operationFor(key);
-        if (operation?.task?.id === result.task?.id) Object.assign(operation, {message, tone:"error", reload:true});
+        if (operation && operation.task?.id === result.task?.id) Object.assign(operation, {message, tone:"error", reload:true});
         renderPresetStatus();
         notify(message, "error");
       }
