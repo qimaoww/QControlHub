@@ -55,9 +55,9 @@ export async function nodesPage(ctx) {
     meter('CPU',m.cpu_percent,online&&m.cpu_available),
     meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
-  function controls(agent){return actions(ctx.can('agent-config.read')&&link('实时配置',`#live-config?agent=${pathID(agent.id)}`),
-    button('查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent))),
-    canManage(agent)&&button('共享 Agent',event=>void ctx.mutate(event.currentTarget,()=>sharing(agent))));}
+  function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
+    button(compact?'设置':'查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent)),{title:'查看设置'}),
+    canManage(agent)&&button(compact?'共享':'共享 Agent',event=>void ctx.mutate(event.currentTarget,()=>sharing(agent)),{title:'共享 Agent'}));}
   function network(agent){const m=agent.metrics||{},available=agent.status==='online'&&m.network_available;return node('div',{className:'a-probe-network'},
     stack(muted('接收'),node('strong',{},available?`${bytes(m.network_rx_bps)}/s`:'—')),
     stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—')));}
@@ -90,10 +90,26 @@ export async function nodesPage(ctx) {
         node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
         node('footer',{className:'a-probe-footer'},controls(agent))))));
     else{
-      const listTable=table([...(selecting?['选择']:[]),'节点','状态','资源使用','网络速率','最近在线','操作'],shown.map(agent=>[
-        ...(selecting?[choice(agent)]:[]),stack(node('strong',{},agent.name),muted(`${agent.os} / ${agent.arch}`),actions((agent.capabilities||[]).map(engine=>badge(engine)))),
-        status(agent.status),metrics(agent),network(agent),date(agent.last_seen),controls(agent)]),{label:'节点监控'});
-      listTable.querySelectorAll('tbody tr').forEach((row,index)=>row.dataset.agentId=shown[index].id);
+      const compactMeter = (value, available, detail) => {
+        const percent = Math.min(100,Math.max(0,Number(value)||0));
+        return node('div',{className:'a-probe-cell',title:available?detail:'暂无数据'},
+          node('strong',{},available?`${percent.toFixed(1)}%`:'—'),
+          node('div',{className:'a-probe-track','aria-hidden':'true'},node('span',{style:`width:${available?percent:0}%`,className:percent>90?'bad':percent>75?'warn':''})),
+          detail&&muted(available?detail:'暂无数据'));
+      };
+      const listTable=table([...(selecting?['选择']:[]),'节点','状态','CPU','内存','磁盘','网络速率','操作'],shown.map(agent=>{
+        const m=agent.metrics||{},online=agent.status==='online';
+        return [...(selecting?[choice(agent)]:[]),
+          node('div',{className:'a-probe-identity'},node('strong',{},agent.name),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
+            muted(agent.can_manage===false?'本人共享实例':'主实例')),
+          node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
+          compactMeter(m.cpu_percent,online&&m.cpu_available),
+          compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
+          compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
+          node('div',{className:'a-probe-rates'},node('div',{},muted('接收'),node('span',{},online&&m.network_available?`${bytes(m.network_rx_bps)}/s`:'—')),
+            node('div',{},muted('发送'),node('span',{},online&&m.network_available?`${bytes(m.network_tx_bps)}/s`:'—'))),
+          node('div',{className:'a-probe-row-actions'},controls(agent,true))];
+      }),{label:'节点监控'});
       results.replaceChildren(node('div',{className:'a-card a-probe-list'},listTable));
     }
   }

@@ -315,8 +315,24 @@ strong, b { font-weight: 600; }
 .a-probe-batch { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); flex-wrap: wrap; }
 .a-probe-batch[hidden] { display: none; }
 .a-probe-choice { padding: 0 20px 16px; }
-.a-probe-list .a-probe-meters { min-width: 220px; }
-.a-probe-list .a-probe-network { min-width: 180px; }
+/* List mode owns a compact row layout instead of reusing card contents. */
+.a-probe-list table { min-width: 1000px; }
+.a-probe-list th { border-top: 0; }
+.a-probe-list td { padding-block: 18px; }
+.a-probe-identity { min-width: 190px; max-width: 260px; display: grid; gap: 5px; }
+.a-probe-identity > strong { font-weight: 500; overflow-wrap: anywhere; }
+.a-probe-identity > .a-muted { font-size: 12px; }
+.a-probe-cell { display: grid; align-content: start; min-height: 60px; gap: 8px; min-width: 78px; font-variant-numeric: tabular-nums; }
+.a-probe-cell > strong { font-size: 13px; font-weight: 500; }
+.a-probe-cell > .a-muted { font-size: 12px; white-space: nowrap; }
+.a-probe-list .a-probe-track { height: 4px; }
+.a-probe-rates { display: grid; gap: 7px; min-width: 110px; font-variant-numeric: tabular-nums; }
+.a-probe-rates > div { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; font-size: 12px; }
+.a-probe-rates .a-muted { font-size: 12px; }
+.a-probe-row-actions > .a-actions { flex-wrap: nowrap; gap: 4px; }
+.a-probe-row-actions .a-button { padding: 6px 9px; min-height: 32px; border-color: transparent; background: transparent; white-space: nowrap; }
+.a-probe-row-actions .a-button:hover { border-color: var(--border); background: var(--paper); }
+@media (max-width: 56rem) { .a-probe-row-actions .a-button { min-height: 44px; min-width: 44px; } }
 @media (max-width: 56rem) { .a-probe-toolbar { align-items: stretch; flex-direction: column; } .a-probe-toolbar > .a-field { width: 100%; flex-basis: auto; } .a-probe-grid { gap: 16px; } .a-probe-footer .a-button { min-height: 44px; } }
 
 .a-ipq-filter > .a-form-fields { display: flex; align-items: flex-end; }
