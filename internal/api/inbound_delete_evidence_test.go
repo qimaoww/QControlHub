@@ -60,6 +60,10 @@ func TestInboundDeleteEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		content := `{"inbounds":[{"tag":"keep","protocol":"socks","port":21001,"settings":{"auth":"noauth","udp":true}},{"tag":"remove","protocol":"socks","port":21002,"settings":{"auth":"noauth","udp":true}}],"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"exit","protocol":"freedom"}],"routing":{"rules":[{"type":"field","inboundTag":["remove"],"outboundTag":"exit"},{"type":"field","domain":["example.test"],"outboundTag":"direct"}]}}`
+		legacyAPI := os.Getenv("QCH_DELETE_LEGACY_API") == "1"
+		if legacyAPI {
+			content = `{"api":{"tag":"api","services":["LoggerService","StatsService"]},"inbounds":[{"tag":"api","listen":"127.0.0.1","port":40152,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},{"tag":"keep","protocol":"http","port":21001},{"tag":"VLESS-REALITY-8443.json","protocol":"vless","port":8443,"settings":{"clients":[{"id":"b3625453-d453-4ce5-8abc-9ce94fc44087"}]}}],"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"type":"field","inboundTag":["api"],"outboundTag":"api"}]}}`
+		}
 		// Persist the old exact generated revision, then emulate an old manual save
 		// changing the port without regenerating the managed exits and routes.
 		plan, err := evidencePlan(content)
@@ -82,6 +86,9 @@ func TestInboundDeleteEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		saved.Content = strings.Replace(saved.Content, `"port": 21002`, `"port": 21003`, 1)
+		if legacyAPI {
+			saved.Content = strings.Replace(saved.Content, `"services": [`, `"services": ["HandlerService",`, 1)
+		}
 		if _, err := db.SaveAgentConfig(owner, saved, 1); err != nil {
 			t.Fatal(err)
 		}

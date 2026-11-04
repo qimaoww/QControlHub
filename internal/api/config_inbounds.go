@@ -77,6 +77,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
 		OriginalTag           string             `json:"original_tag"`
 		ExpectedVersion       int                `json:"expected_version"`
+		DisableMutableAPI     bool               `json:"disable_mutable_api"`
 		Name                  string             `json:"name"`
 		Description           string             `json:"description"`
 		Intent                string             `json:"intent"`
@@ -158,6 +159,17 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		}
 	}
 	if currentErr == nil {
+		if input.DisableMutableAPI {
+			if input.Operation != "delete" {
+				mutationError("API service migration requires an inbound deletion")
+				return
+			}
+			current.Content, err = serverconfig.DisableXrayMutableAPI(engine, current.Content)
+			if err != nil {
+				mutationError(err.Error())
+				return
+			}
+		}
 		current.Content, err = s.presetAccountingSource(request.Context(), current)
 		if err != nil {
 			prefix := "无法安全更新独立出口配置："

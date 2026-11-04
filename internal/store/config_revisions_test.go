@@ -71,6 +71,41 @@ func TestConfigArchivesPreserveTimestampCollisions(t *testing.T) {
 	}
 }
 
+func TestConcurrentConfigRestoresPreserveNewerSave(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_restore_race", false)
+	config, err := db.CreateConfig(owner, core.Config{Name: "restore race", Engine: core.EngineXray, Content: `{"inbounds":[],"outbounds":[]}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err = db.UpdateConfig(owner, config.ID, core.Config{Name: config.Name, Engine: config.Engine, Content: config.Content, Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := db.RestoreConfigRevision(owner, config.ID, 1, 2); results <- err }()
+	}
+	success, conflict := 0, 0
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			success++
+		} else if errors.Is(err, ErrConflict) {
+			conflict++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatalf("concurrent restores: success=%d conflict=%d", success, conflict)
+	}
+	revisions, err := db.ListConfigRevisions(owner, config.ID, 20)
+	if err != nil || len(revisions) != 3 || revisions[0].Version != 3 {
+		t.Fatalf("concurrent restores lost history: %+v %v", revisions, err)
+	}
+}
+
 func TestConfigRevisionLifecycleWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

@@ -60,6 +60,11 @@ export async function createConfigFixture(engine, options = {}) {
   const savedDate = version => `2026-11-02T04:05:${String(version).padStart(2,"0")}Z`;
   let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content(),updated_at:savedDate(1)};
   let agentContent = saved ? options.drift ? saved.content + "\n# node-only" : saved.content : "";
+  const revisions = new Map(saved ? [[saved.version, structuredClone(saved)]] : []);
+  if (options.history && saved) {
+    saved = {...saved, version:2, updated_at:savedDate(2)};
+    revisions.set(2, structuredClone(saved));
+  }
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
@@ -95,8 +100,20 @@ export async function createConfigFixture(engine, options = {}) {
       const entry = entries.find(item => item.protocol.key === body.protocol);
       return {...structuredClone(entry.plan), tag:`new-${++test.serial}`, port:22000+test.serial};
     }
-    if (path.includes("/revisions/")) return {...saved, content:"{}"};
-    if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
+    if (path.endsWith("/restore")) {
+      if (test.restoreGate) await test.restoreGate;
+      if (test.restoreError) throw Object.assign(new Error("fixture restore rejected"), {status:test.restoreError});
+      assert(body.expected_version === saved.version, "restore lost optimistic version");
+      test.restores.push(body);
+      saved = {...revisions.get(Number(path.split("/")[4])), version:saved.version+1, updated_at:savedDate(saved.version+1)};
+      revisions.set(saved.version, structuredClone(saved));
+      return saved;
+    }
+    if (path.includes("/revisions/")) {
+      if (test.revisionGate) await test.revisionGate;
+      return revisions.get(Number(path.split("/")[4])) || {...saved, content:"{}"};
+    }
+    if (path.includes("/revisions")) return [...revisions.values()].reverse();
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
     if (request.method === "POST" && path === "/tasks") {
       assert(body.action === "read-managed-config" || body.action === "read-config", "deploy preflight created a non-read task");
@@ -186,6 +203,6 @@ export async function createConfigFixture(engine, options = {}) {
   const dispose = () => { controller.abort(); state.data = {}; };
   Object.assign(test, {state, agent, pages, click, common, select, selectCommon, reenter, dispose,
     setAgentContent:value=>{agentContent=value;},
-    primaryField, secondaryField, extraField, saved:()=>saved});
+    primaryField, secondaryField, extraField, saved:()=>saved, revisions, restores:[]});
   return test;
 }

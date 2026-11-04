@@ -22,6 +22,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   }
   await testWireGuardConfigRuntime();
   await testPresetFieldLayoutRuntime();
+  await testNodeConfigHistory();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);
@@ -288,4 +289,68 @@ export async function testConfigInboundsRuntime(preview = false) {
   assert(refreshFailure.writes.length === 1, "reload repeated the inbound mutation");
   refreshFailure.dispose();
   await testCommonConfigRuntime();
+}
+
+async function testNodeConfigHistory() {
+  for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
+    const test = await fixture(engine, {history:true, shared:true});
+    test.click("history");
+    await waitFor(() => document.querySelector('[data-revision="1"]'), "node history not selectable");
+    document.querySelector('[data-revision="1"]').click();
+    await waitFor(() => document.querySelector('[data-restore-revision]'), "history preview has no restore action");
+    assert(document.querySelector('[aria-label="历史配置内容"]').readOnly, "history preview is editable");
+    if (innerWidth <= 600) assert(document.querySelector('[data-history-preview]').getBoundingClientRect().width >
+      document.querySelector('.timeline-body').getBoundingClientRect().width * .9, "narrow history preview is squeezed beside the record list");
+    document.querySelector('[data-restore-revision]').click();
+    await pause();
+    assert(test.restores.length === 0, "canceling restore wrote a configuration");
+    test.confirm = true;
+    test.restoreError = 409;
+    document.querySelector('[data-restore-revision]').click();
+    await waitFor(() => document.querySelector('[data-restore-error]').textContent.includes("配置已变化"), "restore conflict is hidden");
+    assert(test.saved().version === 2, "conflict changed the configuration");
+    test.restoreError = 403;
+    document.querySelector('[data-restore-revision]').click();
+    await waitFor(() => document.querySelector('[data-restore-error]').textContent.includes("fixture restore rejected"), "restore authorization failure is hidden");
+    test.restoreError = null;
+    let release;
+    test.restoreGate = new Promise(resolve => { release = resolve; });
+    document.querySelector('[data-restore-revision]').click();
+    document.querySelector('[data-restore-revision]').click();
+    await pause();
+    assert(document.querySelector('[data-restore-revision]').disabled, "restore allowed duplicate commits");
+    document.querySelector('[data-inbound-close]').click();
+    await pause();
+    assert(document.querySelector('dialog[open]'), "restore modal closed during an uncertain commit");
+    release();
+    await waitFor(() => !document.querySelector('dialog[open]'), "restored page did not refresh");
+    assert(test.restores.length === 1 && test.restores[0].expected_version === 2, "restore used the historical version for CAS");
+    assert(test.saved().version === 3 && test.revisions.size === 3, "restore replaced an archive");
+    assert(document.body.textContent.includes("尚未部署"), "saved restore was reported as deployed");
+    assert(!test.calls.some(call => call.path === "/tasks"), "restore queued an implicit deployment");
+    test.click("history");
+    await waitFor(() => document.querySelector('[data-revision="3"]'), "restore did not refresh history");
+    document.querySelector('[data-revision="3"]').click();
+    await waitFor(() => document.querySelector('[aria-label="历史配置内容"]'), "current archive has no preview");
+    assert(!document.querySelector('[data-restore-revision]'), "current archive offers a duplicate restore");
+    test.dispose();
+  }
+  const readonly = await fixture("xray", {history:true, readonly:true});
+  readonly.click("history");
+  await waitFor(() => document.querySelector('[data-revision="1"]'), "read-only history unavailable");
+  document.querySelector('[data-revision="1"]').click();
+  await waitFor(() => document.querySelector('[aria-label="历史配置内容"]'), "read-only preview unavailable");
+  assert(!document.querySelector('[data-restore-revision]'), "read-only user can restore");
+  readonly.dispose();
+  const stale = await fixture("xray", {history:true});
+  stale.click("history");
+  await waitFor(() => document.querySelector('[data-revision="1"]'), "stale history unavailable");
+  let release;
+  stale.revisionGate = new Promise(resolve => { release = resolve; });
+  document.querySelector('[data-revision="1"]').click();
+  stale.dispose();
+  await fixture("sing-box");
+  release();
+  await pause();
+  assert(!document.querySelector('[data-restore-revision]'), "old account preview reached a new target");
 }

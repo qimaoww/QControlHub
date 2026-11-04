@@ -1,4 +1,5 @@
 import { redactDiagnostic } from "./errors.js";
+import { xrayMutableAPIServices } from "./xray-api.js";
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
@@ -273,6 +274,7 @@ export function bindConfigInbounds(ctx) {
           updateFeedbackHTML(body, `<p>已部署配置与已保存配置</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
         }
       } else if (kind === "delete") {
+        const mutableServices = xrayMutableAPIServices(engine, fresh.config.content);
         updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
         const buttons = [...body.querySelectorAll("[data-delete-intent]")];
         buttons.forEach(button => {
@@ -282,6 +284,11 @@ export function bindConfigInbounds(ctx) {
             opened.dataset.saving = "1";
             buttons.forEach(item => { item.disabled = true; });
             try {
+              if (mutableServices.length && !(await confirmAction(`此配置包含 ${mutableServices.join("、")}。删除需要关闭这些可修改路由的服务，保留统计、日志及其他 API 配置。是否继续？仅校验不会改变运行配置。`, "关闭可修改路由的服务"))) {
+                buttons.forEach(item => { item.disabled = false; });
+                return;
+              }
+              if (!active()) return;
               if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
                 updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验 Agent 当前配置…");
                 await beforeDeploy();
@@ -291,6 +298,7 @@ export function bindConfigInbounds(ctx) {
               const result = await api(`${base}/server-inbounds`, {method:"POST", body:JSON.stringify({
                 operation:"delete", original_tag:chosen.tag, input:{tag:chosen.tag, port:chosen.port}, expected_version:fresh.config.version,
                 name:fresh.config.name, description:fresh.config.description, intent:button.dataset.deleteIntent,
+                ...(mutableServices.length ? {disable_mutable_api:true} : {}),
               })});
               await commit(result, null);
             } catch (error) {

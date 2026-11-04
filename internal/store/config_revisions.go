@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func (s *Store) insertConfigRevision(ctx context.Context, tx pgx.Tx, config core.Config) error {
@@ -106,7 +107,11 @@ func (s *Store) ConfigRevision(ctx context.Context, configID string, version int
 	return revision, nil
 }
 
-func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revisionVersion, expectedVersion int) (core.Config, error) {
+type ConfigRestoreOptions struct {
+	DisableMutableAPI bool
+}
+
+func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revisionVersion, expectedVersion int, options ...ConfigRestoreOptions) (core.Config, error) {
 	if revisionVersion < 1 {
 		return core.Config{}, fmt.Errorf("%w: revision version must be positive", ErrInvalid)
 	}
@@ -118,7 +123,7 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 		return core.Config{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err := lockAgentUser(ctx, tx); err != nil {
+	if err := lockAgentUser(ctx, tx, configID); err != nil {
 		return core.Config{}, err
 	}
 
@@ -166,6 +171,21 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	if current.Version != expectedVersion {
 		return core.Config{}, fmt.Errorf("%w: configuration changed; reload before restoring", ErrConflict)
 	}
+	if current.AgentID != "" {
+		if err := requireAgentEngineAccess(ctx, tx, current.AgentID, current.Engine); err != nil {
+			return core.Config{}, err
+		}
+		var supported bool
+		if err := tx.QueryRow(ctx, `SELECT capabilities ? $2 FROM agents WHERE id=$1`, current.AgentID, current.Engine).Scan(&supported); err != nil {
+			return core.Config{}, err
+		}
+		if !supported {
+			return core.Config{}, fmt.Errorf("%w: agent no longer advertises this engine", ErrConflict)
+		}
+		if err := rejectPendingCapabilityTransition(ctx, tx, current.AgentID, current.Engine); err != nil {
+			return core.Config{}, err
+		}
+	}
 
 	var revision core.Config
 	err = tx.QueryRow(ctx, `
@@ -186,8 +206,31 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	if err != nil {
 		return core.Config{}, err
 	}
+	if len(options) > 0 && options[0].DisableMutableAPI {
+		if current.AgentID == "" {
+			return core.Config{}, fmt.Errorf("%w: API migration requires a node configuration", ErrInvalid)
+		}
+		revision.Content, err = serverconfig.DisableXrayMutableAPI(revision.Engine, revision.Content)
+		if err != nil {
+			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	}
 	if err := core.ValidateConfig(revision.Engine, revision.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: stored revision is invalid: %v", ErrInvalid, err)
+	}
+	if current.AgentID != "" {
+		if err := serverconfig.ValidateIndependentEgress(revision.Engine, revision.Content); err != nil {
+			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		ids, err := certificateReferences(revision.Engine, revision.Content)
+		if err != nil {
+			return core.Config{}, err
+		}
+		for _, id := range ids {
+			if err := certificateUseTx(ctx, tx, id, current.OwnerID); err != nil {
+				return core.Config{}, err
+			}
+		}
 	}
 	name, description, err := validateConfigMetadata(revision.Name, revision.Description)
 	if err != nil {
@@ -222,6 +265,11 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 		FROM config_client_metadata WHERE config_id=$1 AND config_version=$2
 		ON CONFLICT (config_id,config_version,profile_tag) DO NOTHING`, configID, revisionVersion, restored.Version); err != nil {
 		return core.Config{}, err
+	}
+	if current.AgentID != "" {
+		if _, err := s.managedTLSFrontendsTx(ctx, tx, restored.ID, restored.Version, restored.Engine, restored.Content); err != nil {
+			return core.Config{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, err

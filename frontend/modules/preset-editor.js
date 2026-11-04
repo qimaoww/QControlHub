@@ -1,5 +1,4 @@
-import { recordDate } from "./record-display.js";
-import { updateFeedback } from "./presence-motion.js";
+import { bindPresetHistory } from "./preset-history.js";
 import { bindEvent } from "./refresh.js";
 import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
@@ -11,7 +10,7 @@ import { createPresetStatus } from "./preset-status.js";
 import { createPresetBindings } from "./preset-bindings.js";
 
 export function createPresetEditor(ctx, { deployments, renderLiveConfig, onRuntimeChange }) {
-  const { api, state, engines, can, esc, date, ago, confirmAction, notify } = ctx;
+  const { api, state, engines, can, confirmAction, notify } = ctx;
   // One controller serves both the legacy route and the embedded editor.
   // Bindings/status share this private lifecycle record, never copied values.
   const editor = {
@@ -296,28 +295,14 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       editor.syncControls();
     }
   }
-  const history = root.querySelector("#revisions");
-  if (history && can("configs.read")) {
-    let loading = false;
-    let loaded = false;
-    const loadHistory = async () => {
-      if (!history.open || loading || loaded) return;
-      loading = true;
-      const body = history.querySelector("[data-revision-body]");
-      updateFeedback(body, "正在加载配置历史…");
-      try {
-        const path = `/configs/${encodeURIComponent(config.id)}/revisions?limit=50`;
-        const revisions = await presetRead(workspace, path, () => api(path)).promise;
-        if (!history.isConnected || !isCurrent()) return;
-        body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>${esc(recordDate(revision.updated_at, date))}</b><strong>${esc(revision.name)}</strong><small>${revision.version === config.version ? "当前配置" : "历史记录"}</small></span></span>`).join("")}</nav>`;
-        loaded = true;
-      } catch (error) {
-        if (history.isConnected && isCurrent()) updateFeedback(body, `配置历史加载失败：${error.message}；重新展开可重试。`);
-      } finally { loading = false; }
-    };
-    bindEvent(history, "toggle", loadHistory);
-    void loadHistory();
-  }
+  bindPresetHistory(ctx, {
+    history: root.querySelector("#revisions"), config, isCurrent, editor, drafts, status,
+    read: path => presetRead(workspace, path, () => api(path)).promise,
+    onSaved: async restored => {
+      if (host?.onSaved) await host.onSaved({ config:restored }, null);
+      else await refreshPresetPage();
+    },
+  });
 }
 
 async function refreshPresetPage() {

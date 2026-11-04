@@ -90,8 +90,17 @@ func rejectMutableRoutingAPI(engine core.Engine, root map[string]any) error {
 				return fmt.Errorf("mutable routing APIs cannot guarantee independent exits")
 			}
 			for _, service := range services {
-				if service != "StatsService" {
-					return fmt.Errorf("mutable routing APIs cannot guarantee independent exits")
+				name, ok := service.(string)
+				if !ok {
+					return fmt.Errorf("Xray api.services must contain service names")
+				}
+				// Xray matches these names case-insensitively. Logging,
+				// reflection and observation cannot add handlers or routes.
+				// Keep unknown services closed as well as the mutable ones.
+				switch strings.ToLower(name) {
+				case "statsservice", "loggerservice", "reflectionservice", "observatoryservice":
+				default:
+					return fmt.Errorf("Xray api.services 包含不支持独立出口的服务 %q；请仅移除此服务后重试，保留统计及其他必要配置", name)
 				}
 			}
 		}
@@ -146,7 +155,22 @@ func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
 	}
 	raw, exists := root[listKey]
 	entries, list := raw.([]any)
-	if !exists || (raw != nil && (!list || len(entries) != 0)) {
+	apiOnly := engine == core.EngineXray && list && len(entries) > 0
+	if apiOnly {
+		// Routed statistics APIs have a real transport inbound. It must not
+		// make deletion of the final proxy look like an unmetered listener.
+		for _, raw := range entries {
+			in := mapValue(raw)
+			listen := stringValue(in["listen"])
+			network := stringValue(mapValue(in["settings"])["network"])
+			if !xrayInternalAPIInbound(root, in) || (listen != "127.0.0.1" && listen != "::1") ||
+				trafficPortNumber(in["port"]) == 0 || (network != "" && network != "tcp") || in["streamSettings"] != nil || in["allocate"] != nil {
+				apiOnly = false
+				break
+			}
+		}
+	}
+	if !exists || (raw != nil && (!list || (len(entries) != 0 && !apiOnly))) {
 		return false
 	}
 	for key := range root {

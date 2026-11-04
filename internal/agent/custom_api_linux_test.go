@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestCustomXrayAPIRuntime(t *testing.T) {
 	if output, err := exec.CommandContext(ctx, "ip", "link", "set", "lo", "up").CombinedOutput(); err != nil {
 		t.Fatalf("loopback: %v %s", err, output)
 	}
-	content := `{"api":{"tag":"api","services":["HandlerService"]},"inbounds":[{"tag":"api-a","listen":"127.0.0.1","port":40152,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},{"tag":"api-b","listen":"127.0.0.1","port":40153,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},{"tag":"proxy","listen":"127.0.0.1","port":1080,"protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"type":"field","inboundTag":["api-a"],"outboundTag":"api"},{"type":"field","inboundTag":["api-b"],"outboundTag":"api"}]}}`
+	content := `{"api":{"tag":"api","services":["HandlerService","LoggerService"]},"inbounds":[{"tag":"api-a","listen":"127.0.0.1","port":40152,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},{"tag":"api-b","listen":"127.0.0.1","port":40153,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},{"tag":"proxy","listen":"127.0.0.1","port":1080,"protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"type":"field","inboundTag":["api-a"],"outboundTag":"api"},{"type":"field","inboundTag":["api-b"],"outboundTag":"api"}]}}`
 	plan, err := serverconfig.PrepareAccounting(core.EngineXray, content)
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +56,57 @@ func TestCustomXrayAPIRuntime(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				t.Fatalf("original API %s unavailable: %v", address, err)
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+	// Delete the final proxy from a historical routed API configuration. The
+	// explicit service migration must retain both statistics transports, and
+	// validating the candidate must leave the running configuration untouched.
+	migrated, err := serverconfig.DisableXrayMutableAPI(core.EngineXray, plan.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := serverconfig.PresetAccountingSource(core.EngineXray, migrated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := serverconfig.DeletePresetInbound(core.EngineXray, source, "proxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err = serverconfig.ReconcilePresetInboundReferences(core.EngineXray, deleted, "proxy", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := serverconfig.PrepareIndependentEgress(core.EngineXray, deleted)
+	if err != nil || empty.Source != "disabled" || strings.Contains(deleted, "HandlerService") {
+		t.Fatalf("final proxy deletion: %+v %v", empty, err)
+	}
+	candidate := filepath.Join(t.TempDir(), "candidate.json")
+	if err := os.WriteFile(candidate, []byte(deleted), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.CommandContext(ctx, binary, "run", "-test", "-c", candidate).CombinedOutput(); err != nil {
+		t.Fatalf("Xray rejected final deletion: %v %s", err, output)
+	}
+	if _, err := queryNativeTrafficAt(ctx, core.EngineXray, plan.API); err != nil {
+		t.Fatalf("validation disrupted running statistics: %v", err)
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	cmd = exec.CommandContext(ctx, binary, "run", "-c", candidate)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []string{plan.API, "127.0.0.1:40153"} {
+		for {
+			if _, err := queryNativeTrafficAt(ctx, core.EngineXray, address); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("statistics lost after deletion on %s", address)
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
