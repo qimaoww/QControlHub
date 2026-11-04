@@ -60,9 +60,9 @@ export async function ipQualityPage(ctx) {
         const link = `/api/v1/ip-quality/${pathID(report.task_id)}/archives/${archive.family}`;
         const image = node("img", { src: link, alt: `${agent.name} IPv${archive.family} 检测报告`, loading: "lazy", className: "a-report-image" });
         const error = notice("", "error");
-        const retry = button("重新加载图片", () => { image.src = `${link}?reload=${Date.now()}`; error.textContent = ""; retry.hidden = true; });
-        retry.hidden = true;
-        image.addEventListener("error", () => { error.textContent = "报告图片加载失败，可重试或查看结构化报告。"; retry.hidden = false; });
+        const retry = button("重新加载图片", () => { image.src = `${link}?reload=${Date.now()}`; error.textContent = ""; ctx.visible(retry, false); });
+        ctx.visible(retry, false);
+        image.addEventListener("error", () => { error.textContent = "报告图片加载失败，可重试或查看结构化报告。"; ctx.visible(retry, true); });
         return stack(image, error, retry);
       });
       return section(agent.name, node("div", { className: "a-card-body" }, stack(

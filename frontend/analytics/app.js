@@ -1,3 +1,5 @@
+import { mountTheme } from "../modules/theme-lifecycle.js";
+import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
 import { accountRequest } from "../modules/account-request.js";
 import { createPermissionChecker } from "../modules/permissions.js";
@@ -50,6 +52,8 @@ const pages = {
 // The new runtime never imports the classic shell or its renderers. It owns
 // its listeners, dialogs and pending requests for the whole document lifetime.
 export function startAnalytics({ app, session }) {
+  const presentation = mountTheme("analytics", createAnalyticsMotion);
+  const motion = presentation.motion;
   const state = { session, data: {} };
   const can = createPermissionChecker(state);
   const lifetime = new AbortController();
@@ -229,12 +233,14 @@ export function startAnalytics({ app, session }) {
       section("登录 QControlHub", node("div", { className: "a-card-body" }, stack(message && notice(message), loginForm)))));
     document.title = "登录 · QControlHub";
     app.querySelector("input")?.focus();
+    motion?.page(app);
   }
   async function render() {
     if (!state.session) { login(); return; }
     routeAbort?.abort();
     routeAbort = new AbortController();
     const signal = routeAbort.signal, epoch = ++routeEpoch;
+    const previousRoute = route;
     route = routeForHash(location.hash);
     if (route === "dashboard" && !can("overview.read")) route = "my-quota";
     if (["agents", "agent-config"].includes(route)) route = "live-config";
@@ -248,11 +254,11 @@ export function startAnalytics({ app, session }) {
     const context = {
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
       can, session: state.session, signal, state, dialog, confirm, mutate, form, announce,
-      refresh, setDirty(value) { dirty = value; },
+      refresh, visible: (...args) => motion ? motion.visible(...args) : (args[0].hidden = !args[1]), setDirty(value) { dirty = value; },
       async switchTheme(save) {
         if (pending || !await leave()) return false;
         pending++;
-        try { await save(); }
+        try { await save(); presentation.dispose(); }
         finally { pending--; }
         return true;
       },
@@ -270,7 +276,10 @@ export function startAnalytics({ app, session }) {
         return;
       }
       const content = await page(context);
-      if (context.current()) stage.replaceChildren(content);
+      if (context.current()) {
+        stage.replaceChildren(content);
+        if (previousRoute !== route) motion?.page(stage);
+      }
     } catch (error) {
       if (context.current() && error.name !== "AbortError")
         stage.replaceChildren(notice(error.message), actions(button("重试", () => void refresh())));

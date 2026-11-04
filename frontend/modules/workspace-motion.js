@@ -1,4 +1,4 @@
-import { animateMotion, cancelMotion, reducedMotion, retireSurface } from "./motion.js";
+import { classicMotionFrame, animateMotion, cancelMotion, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
 import { freezePaint } from "./paint-snapshot.js";
 
@@ -48,7 +48,7 @@ export function enterWorkspace(main, context) {
   if (context?.getClientRects().length) animateMotion(context, [
     { opacity: 0, translate: "-14px 0" }, { opacity: 1, translate: "0 0" },
   ], { id: "qch-context", token: "--motion-base", defer: true });
-  requestAnimationFrame(() => {
+  classicMotionFrame(() => {
     if (!main.isConnected || entrances.get(main) !== entrance || main.classList.contains("is-route-departing")) return;
     const bounds = main.getBoundingClientRect();
     let layers = [...main.querySelectorAll(layerSelector)].filter(element => {

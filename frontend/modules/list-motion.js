@@ -1,4 +1,4 @@
-import { animateMotion, cancelOwnMotion, reducedMotion, retireSurface } from "./motion.js";
+import { classicMotionFrame, animateMotion, cancelOwnMotion, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
 import { freezePaint } from "./paint-snapshot.js";
 
@@ -31,7 +31,7 @@ export function finishListMotion(current, snapshot) {
     const host = isolateMotionSurface(frame);
     if (host) retireSurface(host, { surface: clone });
   });
-  requestAnimationFrame(() => {
+  classicMotionFrame(() => {
     if (!current.isConnected || current.closest(".is-route-departing")) return;
     const survivors = [...snapshot.rects].filter(([child]) => child.isConnected && child.parentElement === current);
     // The previous landing affects getBoundingClientRect. Release all owners

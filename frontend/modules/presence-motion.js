@@ -1,4 +1,5 @@
-import { animateMotion, cancelMotion, cancelOwnMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
+import { currentTheme } from "./theme-lifecycle.js";
+import { classicMotionFrame, animateMotion, cancelMotion, cancelOwnMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
 import { freezePaint } from "./paint-snapshot.js";
 
@@ -75,7 +76,7 @@ export function setVisible(element, visible, { launcher = globalThis.document?.a
     retired?.stop();
   }
   else cancelMotion(element);
-  requestAnimationFrame(() => {
+  classicMotionFrame(() => {
     if (!parent?.isConnected || parent.closest(".is-route-departing")) return;
     const survivors = siblings.filter(([child]) => child.isConnected && child.parentElement === parent && !child.hidden);
     survivors.forEach(([child]) => cancelOwnMotion(child));
@@ -146,7 +147,7 @@ let feedbackObserver;
 // remaining changed button labels and semantic messages from server markup.
 // It never watches value/checked/selection, counters, geometry or clock ticks.
 export function observeFeedback(root) {
-  if (!root || !globalThis.MutationObserver) return;
+  if (!root || !globalThis.MutationObserver || currentTheme() && !currentTheme("classic")) return;
   const seed = element => { if (!feedbackKeys.has(element)) feedbackKeys.set(element, element.textContent); };
   if (root.matches?.(feedbackSelector)) seed(root);
   root.querySelectorAll(feedbackSelector).forEach(seed);
@@ -175,4 +176,9 @@ export function observeFeedback(root) {
     });
   });
   feedbackObserver.observe(document.body, { childList: true, characterData: true, subtree: true });
+}
+
+export function disposeFeedbackObservation() {
+  feedbackObserver?.disconnect();
+  feedbackObserver = null;
 }

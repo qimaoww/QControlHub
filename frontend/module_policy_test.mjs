@@ -70,7 +70,7 @@ const sharedLogic = new Set([
   "errors.js", "ip-quality-model.js", "live-config-state.js", "node-order.js",
   "permissions.js", "poller.js", "preset-route.js", "routes.js",
   "session-watch.js", "substore-model.js", "system-bbr-model.js",
-  "theme-registry.js", "traffic-model.js", "user-model.js",
+  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "user-model.js",
 ]);
 const analyticsRoot = resolve(root, "analytics");
 const independent = new Set();

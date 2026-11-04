@@ -85,6 +85,14 @@ export async function run() {
   controller.cancel(pending);
   assert.equal(timers.size, 0);
 
+  const failed = element();
+  failed.animate = () => { throw new Error("native presentation unavailable"); };
+  const beforeFailure = settled;
+  animate(failed);
+  assert.equal(settled, beforeFailure + 1, "animation failure releases presentation without blocking the caller");
+  assert.equal(controller.activeCount(), 0);
+  assert.equal(timers.size, 0);
+
   const parent = element(), child = element();
   parent.contains = node => node === child;
   animate(parent); animate(child);

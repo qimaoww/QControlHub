@@ -1,9 +1,20 @@
+import { currentTheme } from "./theme-lifecycle.js";
 import { reducedMotion } from "./motion.js";
 import { updateFeedback, removePresented } from "./presence-motion.js";
 
 let installed = false, tooltip, owner, anchor, showTimer, closeTimer, watch;
 let hovered, focused, errorID = 0;
 const errors = new WeakMap();
+let bindings;
+const listen = (target, event, handler, options) => target.addEventListener(event, handler, { ...(options === true ? { capture: true } : options), signal: bindings.signal });
+export function disposeInteractionFeedback() {
+  clearTimeout(showTimer); clearTimeout(closeTimer);
+  hideTip(true);
+  hovered = focused = null;
+  bindings?.abort(); bindings = null; installed = false;
+  document.querySelectorAll("[data-motion-invalid]").forEach(clearError);
+}
+
 const target = node => node?.closest?.("[title],[data-motion-title]");
 function hideTip(immediate = false) {
   clearTimeout(showTimer);
@@ -110,31 +121,32 @@ function invalidFeedback(control) {
 // One delegated binding covers current and subsequently mounted pages/forms.
 // Native validity and submission still decide whether an action may proceed.
 export function installInteractionFeedback() {
-  if (installed) return;
+  if (installed || currentTheme() && !currentTheme("classic")) return;
   installed = true;
-  document.addEventListener("pointerover", event => {
+  bindings = new AbortController();
+  listen(document, "pointerover", event => {
     if (event.pointerType === "touch") return;
     const element = target(event.target);
     if (element === hovered) return;
     hovered = element;
     if (element) scheduleTip(element); else if (!focused) hideTip();
   });
-  document.addEventListener("pointerout", event => {
+  listen(document, "pointerout", event => {
     if (!hovered?.contains(event.relatedTarget)) { hovered = null; if (!focused) hideTip(); }
   });
-  document.addEventListener("focusin", event => {
+  listen(document, "focusin", event => {
     focused = target(event.target);
     if (focused) scheduleTip(focused, 80); else hideTip();
   });
-  document.addEventListener("focusout", event => {
+  listen(document, "focusout", event => {
     if (!focused?.contains(event.relatedTarget)) { focused = null; if (!hovered) hideTip(); }
   });
-  document.addEventListener("pointerdown", () => hideTip(), true);
-  document.addEventListener("beforetoggle", event => {
+  listen(document, "pointerdown", () => hideTip(), true);
+  listen(document, "beforetoggle", event => {
     if (event.target.tagName === "DIALOG" && event.newState === "open") hideTip();
   }, true);
-  document.addEventListener("keydown", event => { if (event.key === "Escape") hideTip(); }, true);
-  document.addEventListener("invalid", event => {
+  listen(document, "keydown", event => { if (event.key === "Escape") hideTip(); }, true);
+  listen(document, "invalid", event => {
     const control = event.target;
     if (!control.validationMessage || !control.matches("input,select,textarea")) return;
     event.preventDefault();
@@ -148,12 +160,12 @@ export function installInteractionFeedback() {
     if (!errors.has(control)) return;
     if (control.validity.valid) clearError(control); else invalidFeedback(control);
   };
-  document.addEventListener("input", validate);
-  document.addEventListener("change", validate);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) hideTip(true); });
-  window.addEventListener("hashchange", () => hideTip(true));
-  window.addEventListener("resize", () => hideTip(true));
-  document.addEventListener("scroll", () => {
+  listen(document, "input", validate);
+  listen(document, "change", validate);
+  listen(document, "visibilitychange", () => { if (document.hidden) hideTip(true); });
+  listen(window, "hashchange", () => hideTip(true));
+  listen(window, "resize", () => hideTip(true));
+  listen(document, "scroll", () => {
     if (!tooltip?.hasAttribute("data-open") || !owner || !anchor) return;
     // Delayed focus/refresh scroll events can arrive after the tip opens.
     // Keep the same painted owner unless scrolling actually moves its anchor.

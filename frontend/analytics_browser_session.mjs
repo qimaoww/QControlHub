@@ -1,7 +1,13 @@
+import { checkAnalyticsMotion } from "./analytics_motion_browser.mjs";
 import assert from "node:assert/strict";
 
 export async function runAnalyticsBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api, record }) {
   const page = await createPage();
+  const capture = screenshot;
+  screenshot = async (target, label) => {
+    await wait(target, "!document.getAnimations().some(a=>a.id.startsWith('analytics-'))");
+    await capture(target, label);
+  };
   const identity = await login(page, "analytics-admin");
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
   await wait(page, "document.querySelector('.a-main h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
@@ -68,9 +74,11 @@ export async function runAnalyticsBrowser({ base, mode, createPage, login, call,
       await chooseScale(100);
     }
   }
+  await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });
+  await evaluate(page, "window.__animationBeforeFailure=Element.prototype.animate;Element.prototype.animate=function(){throw new Error('injected presentation failure')}");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
   await wait(page, "!!document.querySelector('dialog[open] form')");
-  await evaluate(page, `(() => { const form=document.querySelector('dialog[open] form');form.elements.name.value='独立主题验证配置';form.elements.content.value='mixed-port: 7890\\nmode: rule\\n';form.elements.content.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit(); })()`);
+  await evaluate(page, `(() => { const form=document.querySelector('dialog[open] form');form.elements.name.value='独立主题验证配置';form.elements.content.value='mixed-port: 7890\\nmode: rule\\n';form.elements.content.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit();form.requestSubmit(); })()`);
   await wait(page, "document.querySelector('dialog[open]')?.textContent.includes('已保存') && !document.querySelector('[aria-busy=true]')");
   const saved = (await api(page, identity, "GET", "/configs")).find(config => config.name === "独立主题验证配置");
   assert.ok(saved?.id);
@@ -89,8 +97,10 @@ export async function runAnalyticsBrowser({ base, mode, createPage, login, call,
   assert.ok(await evaluate(page, "!!document.activeElement.closest('dialog[open]')"));
   await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
   await api(page, identity, "DELETE", `/configs/${saved.id}`, undefined, 204);
+  await evaluate(page, "Element.prototype.animate=window.__animationBeforeFailure");
   if (mode === "mobile") {
     await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click()");
+    await wait(page, "document.getAnimations().some(a=>a.id==='analytics-menu')");
     await wait(page, "!!document.querySelector('dialog.a-drawer[open]')");
     assert.ok(await evaluate(page, `document.querySelector('dialog.a-drawer a[href="#themes"]').getBoundingClientRect().height>=44`));
     await screenshot(page, "analytics-mobile-navigation");
@@ -104,9 +114,23 @@ export async function runAnalyticsBrowser({ base, mode, createPage, login, call,
   // The test entry replaced its URL with the production route, so the
   // confirmed save reloads through the real gateway.
   await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
-  await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
   assert.equal(await evaluate(page, `document.querySelectorAll('link[href*="analytics/theme.css"],.a-layout').length`), 0);
   assert.equal((await api(page, identity, "GET", "/preferences/theme")).theme_id, "classic");
   await screenshot(page, "analytics-switched-classic");
+  await evaluate(page, `(async () => {
+    const lifecycle=await import('/assets/modules/theme-lifecycle.js');
+    const classic=await import('/assets/modules/motion.js');
+    const {createAnalyticsMotion}=await import('/assets/analytics/motion.js');
+    const old=lifecycle.currentTheme('classic');
+    classic.enterSurface(document.querySelector('.theme-picker-card'));
+    old.frame(()=>{document.body.dataset.staleClassic='frame'});
+    old.timer(()=>{document.body.dataset.staleClassic='timer'},40);
+    const replacement=lifecycle.mountTheme('analytics',createAnalyticsMotion);
+    if(old.current() || document.getAnimations().length)throw Error('classic animation retained ownership');
+    if(!document.querySelector('link[href*=\\"app.css\\"]').disabled)throw Error('classic stylesheet remained active');
+    await new Promise(resolve=>setTimeout(resolve,80));
+    if(document.body.dataset.staleClassic || document.querySelector('.interaction-tooltip,[data-motion-isolation]'))throw Error('classic presentation survived disposal');
+    replacement.dispose();
+  })()`);
   record(`${mode}: independent analytics runtime against real API; eighteen routes, archive save/history, native modal keyboard focus, responsive viewports, document/CSS isolation; registry remains unavailable until full parity`);
 }

@@ -192,3 +192,22 @@ strong, b { font-weight: 600; }
   .a-top-inner { gap: 12px; }
   .a-top-title { padding-inline-start: 12px; }
 }
+
+/* Analytics motion: short fades and small offsets, independent of classic. */
+.a-button, .a-nav-link, .a-field :is(input, select, textarea) { transition: background-color 120ms cubic-bezier(.2,.8,.2,1), border-color 120ms cubic-bezier(.2,.8,.2,1), box-shadow 120ms cubic-bezier(.2,.8,.2,1); }
+.a-dialog::backdrop { animation: analytics-scrim 140ms ease-out; }
+@keyframes analytics-scrim { from { background-color: #18181b00; } to { background-color: #18181b74; } }
+.a-motion-tail[popover] { display: block; position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: transparent; color: var(--ink); overflow: clip; pointer-events: none; }
+.a-motion-tail::backdrop { background: transparent; pointer-events: none; }
+.a-motion-tail * { pointer-events: none !important; }
+.a-modal-tail[popover] { background: #18181b74; }
+.a-tooltip[popover] { position: fixed; inset: auto; margin: 0; max-width: min(280px, calc(100vw - 16px)); padding: 6px 10px; border: 0; border-radius: 6px; background: #27272a; color: white; font-size: var(--text-caption); line-height: 1.6; pointer-events: none; }
+:root[data-ui-theme="analytics"][data-theme-motion="off"] *,
+:root[data-ui-theme="analytics"][data-theme-motion="off"] *::before,
+:root[data-ui-theme="analytics"][data-theme-motion="off"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+@media (prefers-reduced-motion: reduce) { body.analytics *, body.analytics *::before, body.analytics *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+.a-button[aria-busy="true"] { opacity: .65; animation: analytics-busy 140ms ease-out; }
+@keyframes analytics-busy { from { opacity: 1; } to { opacity: .65; } }
+
+.a-validation { border: 0; background: transparent; padding: 0; color: #a41a2b; font-size: var(--text-caption); }

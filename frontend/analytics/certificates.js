@@ -29,8 +29,8 @@ export async function certificatesPage(ctx) {
     const host = field("认证节点", "agent_id", "", { options: [["", "选择节点"], ...nodes.map(agent => [agent.id, `${agent.name}${agent.available ? "" : " · 暂不可用"}`])] });
     const methodInput = method.querySelector("select");
     const updateMethod = () => {
-      dns.hidden = methodInput.value !== "dns-api";
-      host.hidden = methodInput.value !== "http-01";
+      ctx.visible(dns, methodInput.value === "dns-api");
+      ctx.visible(host, methodInput.value === "http-01");
       dns.querySelector("select").required = methodInput.value === "dns-api";
       host.querySelector("select").required = methodInput.value === "http-01";
     };
@@ -221,7 +221,7 @@ export async function certificatesPage(ctx) {
       credentials.forEach(control => {
         const name = control.querySelector("input").name;
         const relevant = selected === "cloudflare" ? name === "token" : selected === "alidns" ? name.startsWith("access_key") : name.startsWith("secret_");
-        control.hidden = !relevant;
+        ctx.visible(control, relevant);
         control.querySelector("input").required = relevant;
       });
     };

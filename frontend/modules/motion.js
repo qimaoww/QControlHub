@@ -1,3 +1,4 @@
+import { currentTheme } from "./theme-lifecycle.js";
 // Native animations own no inline styles or business state. A bounded fallback
 // also settles them when the document is hidden or finish events are lost.
 export function createMotionController({
@@ -66,10 +67,11 @@ export function createMotionController({
     const parsed = Number.parseFloat(value);
     const duration = requestedDuration ?? (Number.isFinite(parsed)
       ? Math.max(0, parsed * (value.endsWith("ms") ? 1 : 1000)) : fallback);
-    const animation = element.animate(keyframes, {
+    let animation;
+    try { animation = element.animate(keyframes, {
       duration, easing: computed.getPropertyValue(easingToken).trim() || "ease-out",
       delay, fill: delay && fill === "none" ? "backwards" : fill,
-    });
+    }); } catch { onSettled(); return () => {}; }
     animation.id = id;
     let settled = false;
     let timer;
@@ -108,6 +110,8 @@ export function cancelMotion(root) { controller?.cancel(root); }
 // inserted descendants keep their independent owners and full playback.
 export function cancelOwnMotion(element) { controller?.cancelOwn(element); }
 export function animateMotion(element, keyframes, options) {
+  if (currentTheme() && !currentTheme("classic")) return () => {};
+  if (currentTheme("classic") && !currentTheme("classic").enabled()) { options?.onSettled?.(); return () => {}; }
   return motion().animate(element, keyframes, options);
 }
 export function enterSurface(element, options) {
@@ -121,6 +125,7 @@ export function enterSurface(element, options) {
   ], { defer: true, ...options });
 }
 export function reducedMotion() {
+  if (currentTheme() && (!currentTheme("classic") || !currentTheme("classic").enabled())) return true;
   return Boolean(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 }
 
@@ -198,4 +203,12 @@ export function syncSelectionMotion(root, { animate = true } = {}) {
         id: "qch-selection", token: "--motion-feedback",
       });
     });
+}
+
+// Deferred classic choreography cannot run in a later theme lifetime.
+export function classicMotionFrame(callback) {
+  const scope = currentTheme("classic");
+  if (scope) return scope.frame(callback);
+  if (currentTheme()) return null;
+  return requestAnimationFrame(() => { if (!currentTheme() || currentTheme("classic")) callback(); });
 }

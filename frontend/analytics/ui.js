@@ -1,3 +1,5 @@
+import { currentTheme } from "../modules/theme-lifecycle.js";
+let fieldID = 0;
 const icons = {
   brand: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -69,6 +71,7 @@ export function table(columns, rows, { emptyText, paginate = 12, label = "记录
     count.textContent = `共 ${rows.length} 条 · 第 ${page} / ${last} 页`;
     previous.disabled = page === 1;
     next.disabled = page === last;
+    currentTheme("analytics")?.motion?.list(body);
   }
   show(1);
   return node("div", {}, scroll, last > 1 && node("div", { className: "a-pagination" }, count, actions(previous, next)));
@@ -92,7 +95,10 @@ export function field(label, name, value = "", attrs = {}) {
   } else {
     input = node("input", { name, value: value ?? "", ...attributes });
   }
-  return node("label", { className: "a-field" }, node("span", { className: "a-field-label" }, label), input, hint && node("span", { className: "a-field-hint" }, hint));
+  if (!input.id) input.id = `a-field-${++fieldID}`;
+  const helper = hint && node("span", { className: "a-field-hint", id: `${input.id}-hint` }, hint);
+  if (helper) input.setAttribute("aria-describedby", helper.id);
+  return node("div", { className: "a-field" }, node("label", { className: "a-field-label", for: input.id }, label), input, helper);
 }
 
 export const formData = form => Object.fromEntries(new FormData(form));

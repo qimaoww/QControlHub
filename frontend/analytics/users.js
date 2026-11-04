@@ -13,7 +13,7 @@ export async function usersPage(ctx) {
     const role = field("角色", "role", user?.role || "user", { options: [["user", "普通用户"], ["admin", "管理员"]] });
     const permissionSection = section("账号权限", node("div", { className: "a-card-body a-grid" }, checks));
     const roleInput = role.querySelector("select");
-    const sync = () => { permissionSection.hidden = roleInput.value === "admin"; };
+    const sync = () => { ctx.visible(permissionSection, roleInput.value !== "admin"); };
     roleInput.addEventListener("change", sync);
     sync();
     const form = ctx.form([

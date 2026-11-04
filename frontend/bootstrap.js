@@ -1,3 +1,4 @@
+import { disposeTheme } from "./modules/theme-lifecycle.js";
 import { accountRequest } from "./modules/account-request.js";
 import { effectiveTheme } from "./modules/theme-registry.js";
 
@@ -44,6 +45,7 @@ async function start() {
       runtime.startAnalytics({ app, session });
       return;
     } catch {
+      disposeTheme();
       sheet.link.remove();
       app.replaceChildren();
       document.body.removeAttribute("class");

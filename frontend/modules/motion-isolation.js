@@ -2,6 +2,12 @@ import { reducedMotion } from "./motion.js";
 import { restorePaintScroll } from "./paint-snapshot.js";
 
 let exitStyles;
+const hosts = new Set();
+export function disposeMotionIsolation() {
+  hosts.forEach(host => host.remove());
+  hosts.clear();
+  exitStyles = null;
+}
 // Retired paint stays outside component queries, focus and the accessibility
 // tree. All exits share one parsed production sheet and bounded ownership.
 export function isolateMotionSurface(surface) {
@@ -22,6 +28,8 @@ export function isolateMotionSurface(surface) {
     shadow.adoptedStyleSheets = [exitStyles];
     surface.inert = true;
     shadow.append(surface);
+    for (const old of hosts) if (!old.isConnected) hosts.delete(old);
+    hosts.add(host);
     document.body.append(host);
     restorePaintScroll(surface);
     return host;

@@ -1,4 +1,4 @@
-/* Shared motion contract: feedback is quick, navigation is calm, and live
+/* Classic theme motion contract: feedback is quick, navigation is calm, and live
    refreshes do not replay entrances. JS reads these same duration/easing tokens. */
 :root{
   --motion-ease-out:cubic-bezier(.22,1,.36,1);
@@ -40,3 +40,8 @@
 .page-tasks [data-task-result]>summary{display:flex;align-items:center;justify-content:flex-end;gap:7px;cursor:pointer}
 .page-tasks [data-task-result]>summary span{display:inline-block;transition:transform var(--motion-base) var(--motion-ease-out)}
 .page-tasks [data-task-result][open]>summary span{transform:rotate(90deg)}
+
+/* Lifecycle suspension commits native final states without a visual tail. */
+:root[data-ui-theme="classic"][data-theme-motion="off"] *,
+:root[data-ui-theme="classic"][data-theme-motion="off"] *::before,
+:root[data-ui-theme="classic"][data-theme-motion="off"] *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}

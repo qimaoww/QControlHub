@@ -1,3 +1,4 @@
+import { mountClassicMotion } from "./modules/classic-motion.js";
 import { refreshNodeOrder } from "./modules/node-order.js";
 import { departWorkspace, restoreWorkspace } from "./modules/workspace-motion.js";
 import { cancelMotion } from "./modules/motion.js";
@@ -18,6 +19,7 @@ import { createRouteWarmup } from "./modules/route-warmup.js";
 import { createSessionWatch } from "./modules/session-watch.js";
 
 const app = document.querySelector("#app");
+mountClassicMotion();
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const actions = [
   "validate",
