@@ -318,3 +318,32 @@ strong, b { font-weight: 600; }
 .a-probe-list .a-probe-meters { min-width: 220px; }
 .a-probe-list .a-probe-network { min-width: 180px; }
 @media (max-width: 56rem) { .a-probe-toolbar { align-items: stretch; flex-direction: column; } .a-probe-toolbar > .a-field { width: 100%; flex-basis: auto; } .a-probe-grid { gap: 16px; } .a-probe-footer .a-button { min-height: 44px; } }
+
+.a-ipq-filter > .a-form-fields { display: flex; align-items: flex-end; }
+.a-ipq-filter { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.a-ipq-filter > .a-form-fields { flex: 0 1 280px; min-width: 0; }
+.a-ipq-filter .a-field { width: 100%; }
+.a-ipq-filter > .a-notice:empty { display: none; }
+.a-ipq-layout { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 20px; align-items: start; }
+.a-ipq-nodes { display: grid; gap: 8px; min-width: 0; }
+.a-button.a-ipq-node { justify-content: flex-start; padding: 14px 16px; text-align: start; white-space: normal; height: auto; }
+.a-ipq-node > .a-stack { gap: 4px; width: 100%; }
+.a-ipq-node strong { overflow-wrap: anywhere; }
+.a-ipq-node[aria-pressed=true] { background: var(--tint); border-color: #a1a1aa; }
+.a-ipq-detail { min-width: 0; }
+.a-ipq-detail > .a-card:first-child .a-card-head { flex-wrap: wrap; }
+.a-ipq-detail .a-empty { padding: 24px 0; text-align: start; }
+.a-ipq-detail details > summary { cursor: pointer; padding: 12px 0; color: var(--soft-ink); }
+@media (max-width: 56rem) {
+  .a-ipq-layout { grid-template-columns: minmax(0,1fr); gap: 16px; }
+  .a-ipq-nodes { display: flex; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; }
+  .a-button.a-ipq-node { flex: 0 0 min(240px,80%); scroll-snap-align: start; }
+  .a-ipq-detail > .a-card:first-child .a-card-head > .a-actions { width: 100%; }
+}
+
+.a-ipq-facts { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px 24px; padding: 0 var(--card-gutter) 20px; }
+.a-ipq-facts > div { min-width: 0; display: grid; gap: 5px; align-content: start; }
+.a-ipq-facts dt { color: var(--soft-ink); font-size: var(--text-label); }
+.a-ipq-facts dd { margin: 0; overflow-wrap: anywhere; }
+.a-ipq-detail .a-grid .a-ipq-facts { grid-template-columns: minmax(0,1fr); }
+@media (max-width: 40rem) { .a-ipq-facts { grid-template-columns: minmax(0,1fr); } }
