@@ -1,4 +1,4 @@
-import { createPoller } from "./refresh.js";
+import { createPoller } from "./poller.js";
 
 // Reuse the page polling lifecycle to revalidate idle views as well as actions.
 // Sharing usage counters are deliberately excluded from the grant identity.

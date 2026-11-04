@@ -159,7 +159,7 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	content := frontendSources(t, "modules/live-config-page.js", "modules/live-config-state.js",
-		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js")
+		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js", "modules/config-snapshot.js")
 	for _, required := range []string{
 		`data-live-intent="import">手动导入并迁移`,
 		`迁移任一步失败都会自动恢复原服务`,

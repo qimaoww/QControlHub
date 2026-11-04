@@ -48,6 +48,9 @@ function visitFromApplication(path) {
   for (const dependency of dependencies.get(path) || []) visitFromApplication(dependency);
 }
 const appPath = resolve(root, "app.js");
+for (const match of readFileSync(resolve(root, "bootstrap.js"), "utf8").matchAll(/from\s*["'](\.\/modules\/[^"']+)["']/g)) {
+  visitFromApplication(resolve(root, match[1]));
+}
 for (const match of readFileSync(appPath, "utf8").matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
   const dependency = resolve(dirname(appPath), match[1]);
   assert.equal(dependencies.has(dependency), true, "the application must import an existing production module");
@@ -58,3 +61,33 @@ for (const path of dependencies.keys()) {
 }
 
 console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy the module boundary contract`);
+
+// Independent UI can share transport and business models, never classic DOM
+// renderers or the application shell, including through transitive imports.
+const sharedLogic = new Set([
+  "account-request.js", "account-storage.js", "agent-service-state.js",
+  "certificate-order.js", "record-display.js", "client-access-model.js", "config-snapshot.js", "dashboard-model.js",
+  "errors.js", "ip-quality-model.js", "live-config-state.js", "node-order.js",
+  "permissions.js", "poller.js", "preset-route.js", "routes.js",
+  "session-watch.js", "substore-model.js", "system-bbr-model.js",
+  "theme-registry.js", "traffic-model.js", "user-model.js",
+]);
+const analyticsRoot = resolve(root, "analytics");
+const independent = new Set();
+function visitIndependent(path) {
+  if (independent.has(path)) return;
+  independent.add(path);
+  if (dirname(path) !== analyticsRoot) {
+    assert.equal(dirname(path), modulesDir, `${path}: unexpected theme dependency`);
+    assert.ok(sharedLogic.has(path.slice(modulesDir.length + 1)), `${path}: classic UI cannot enter the independent runtime`);
+  }
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
+    visitIndependent(resolve(dirname(path), match[1]));
+  }
+}
+visitIndependent(resolve(analyticsRoot, "app.js"));
+for (const name of readdirSync(analyticsRoot).filter(name => name.endsWith(".js"))) {
+  assert.ok(independent.has(resolve(analyticsRoot, name)), `${name}: unreachable independent theme module`);
+}
+console.log(`analytics: ${independent.size} independent UI and shared logic modules satisfy the boundary contract`);

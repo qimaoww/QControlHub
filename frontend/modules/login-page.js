@@ -2,6 +2,8 @@ import { installInteractionFeedback } from "./interaction-feedback.js";
 import { enterSurface } from "./motion.js";
 import { observeFeedback, updateFeedback } from "./presence-motion.js";
 import { setStorageAccount } from "./account-storage.js";
+import { accountRequest } from "./account-request.js";
+import { effectiveTheme } from "./theme-registry.js";
 
 // Session/route cleanup stays at the application boundary. A failed login
 // re-enters that boundary before displaying the error.
@@ -38,7 +40,17 @@ export function createLoginPage({
         state.data = {};
         state.session = session;
         setStorageAccount(session);
-        location.hash = "#dashboard";
+        // Direct links survive authentication. Only restart the document if
+        // another runtime owns this account's selected appearance.
+        if (document.querySelector('script[src*="/assets/bootstrap.js"]')) {
+          const preference = await accountRequest("/preferences/theme", { session, signal: AbortSignal.timeout(8000) }).catch(() => null);
+          if (state.session !== session || !button.isConnected) return;
+          if (effectiveTheme(preference?.theme_id) !== "classic") {
+            location.reload();
+            return;
+          }
+        }
+        if (!location.hash) history.replaceState(null, "", "#dashboard");
         await render();
       } catch (error) {
         const notice = app.querySelector("[data-login-error]");

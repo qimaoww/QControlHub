@@ -343,8 +343,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
   login.querySelector('[name="username"]').value = "fixture-user";
   login.querySelector('[name="token"]').value = "fixture-password";
   login.querySelector("button").click();
-  await waitFor(() => document.body.classList.contains("page-dashboard"), "second account did not log in");
-  location.hash = "#ip-quality";
+  await waitFor(() => document.body.classList.contains("page-ip-quality") && document.querySelector("#logout"),
+    "second account did not restore the authorized direct link after login");
   await waitFor(() => card() && !document.querySelector("[data-ip-quality-refresh]").disabled, "second account IP page did not load");
   releaseOld(); await delay(30);
   assert.equal(card().querySelector("img"), null, "obsolete response restored the first account report");

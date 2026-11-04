@@ -1,6 +1,7 @@
 // Real Chromium contexts against isolated PostgreSQL and password/CSRF sessions.
 // Follow the repository's dependency-free native CDP browser convention.
 import assert from "node:assert/strict";
+import { runAnalyticsBrowser } from "./analytics_browser_session.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -111,6 +112,8 @@ try {
     const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
   };
+
+  await runAnalyticsBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api, record });
 
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
   const [alice, bob, admin] = await Promise.all([login(a, "alice"), login(b, "bob"), login(manager, "browser-admin")]);

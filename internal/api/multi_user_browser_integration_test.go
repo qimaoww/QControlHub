@@ -24,6 +24,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}

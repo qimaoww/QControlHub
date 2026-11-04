@@ -1,4 +1,4 @@
-import { themes, effectiveTheme, createThemePreference } from "./theme-registry.js";
+import { themes, createThemePreference } from "./theme-registry.js";
 
 // The classic theme owns this renderer. Independent themes consume the same
 // preference model but render their own theme page.
@@ -17,7 +17,7 @@ export function installThemes({ api, state, shell, esc, notify }) {
     const signal = state.routeSignal;
     const current = await model.read();
     if (session() !== bound || signal?.aborted) return;
-    const active = effectiveTheme(current.theme_id);
+    const active = "classic";
     shell(`<section class="theme-picker"><header><h1>主题</h1></header>
       <div class="theme-picker-grid">${themes.filter(theme => theme.available).map(theme => `<article class="theme-picker-card">
         <div class="theme-picker-preview" aria-hidden="true"><i></i><div><b></b><span></span><span></span><span></span><em></em></div></div>

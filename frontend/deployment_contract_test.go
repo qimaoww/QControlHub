@@ -98,9 +98,9 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	}
 	content := string(index)
 	for _, required := range []string{
-		`/assets/app.css?v=__QCH_CSS_VERSION__`,
-		`/assets/app.js?v=__QCH_JS_VERSION__`,
-		`rel="modulepreload" href="/assets/modules/dashboard.js?v=__QCH_JS_VERSION__"`,
+		`/assets/bootstrap.js?v=__QCH_JS_VERSION__`,
+		`classic=__QCH_CSS_VERSION__`,
+		`analytics=__QCH_ANALYTICS_CSS_VERSION__`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("index.html is missing cache key placeholder %q", required)
@@ -110,7 +110,7 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, placeholder := range []string{"__QCH_CSS_VERSION__", "__QCH_JS_VERSION__"} {
+	for _, placeholder := range []string{"__QCH_CSS_VERSION__", "__QCH_JS_VERSION__", "__QCH_ANALYTICS_CSS_VERSION__"} {
 		if !strings.Contains(string(dockerfile), placeholder) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
 		}

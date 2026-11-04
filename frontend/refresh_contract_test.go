@@ -53,7 +53,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 	for _, required := range []string{
 		"export function reconcileView",
 		"export function createRefreshChannel",
-		"export function createPoller",
+		`export { createPoller } from "./poller.js";`,
 		"export function createInteractionGate",
 		"const preserveInert = current.classList?.contains(\"desktop-app\") && current.inert",
 		"scope !== getScope()",
@@ -63,6 +63,9 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		if !strings.Contains(refresh, required) {
 			t.Errorf("shared refresh runtime is missing %q", required)
 		}
+	}
+	if !strings.Contains(read("modules/poller.js"), "export function createPoller") {
+		t.Error("shared poller must remain a named export in its UI-independent module")
 	}
 	contracts := map[string][]string{
 		"modules/agents.js": {
