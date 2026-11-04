@@ -219,3 +219,44 @@ func TestFailedMainDeploymentObservationKeepsExactIdentityAndConflicts(t *testin
 		t.Fatalf("manager inherited configuration: %+v %v", lease, err)
 	}
 }
+
+func TestSharedRefreshDoesNotRebindAnOlderOperationObservation(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	_, owner := sharedTestUser(t, db, ctx, "refresh-owner")
+	user, recipient := sharedTestUser(t, db, ctx, "refresh-recipient")
+	node := allEnginesSharedTestAgent(t, db, owner)
+	sharedTestAllocation(t, db, ctx, user.ID, node.ID, 0, 21001)
+	config := sharedTestConfig(t, db, recipient, node.ID, 21001)
+	deploy, err := db.CreateTask(recipient, core.TaskRequest{AgentID: node.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, node.ID)
+	if err != nil || lease == nil || lease.ID != deploy.ID {
+		t.Fatalf("deploy claim: %+v %v", lease, err)
+	}
+	if err := completeSharedTestTask(db, ctx, node.ID, lease.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fresh := range []bool{false, true} {
+		refresh, err := db.CreateTask(recipient, core.TaskRequest{AgentID: node.ID, Engine: config.Engine, Action: core.ActionStatus})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err = db.ClaimTask(ctx, node.ID)
+		if err != nil || lease == nil || lease.ID != refresh.ID {
+			t.Fatalf("status claim: %+v %v", lease, err)
+		}
+		observation := core.SharedInstanceStatus{Engine: config.Engine, ShareID: lease.SharedTrafficID, TaskID: "tsk_older_operation", ConfigID: config.ID, ConfigVersion: config.Version, Status: "inactive", ObservedAt: time.Now().UTC()}
+		if fresh {
+			observation.TaskID = lease.ID // Identity bootstrapped by this status lease.
+		}
+		if err := db.CompleteTask(ctx, node.ID, lease.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, InstanceStatus: &observation}); err != nil {
+			t.Fatal(err)
+		}
+		var running bool
+		if err := db.pool.QueryRow(ctx, `SELECT running FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND share_id=$3`, node.ID, config.Engine, lease.SharedTrafficID).Scan(&running); err != nil || running == fresh {
+			t.Fatalf("fresh=%v running=%v: %v", fresh, running, err)
+		}
+	}
+}

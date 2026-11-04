@@ -199,7 +199,7 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if shared && result.InstanceStatus != nil {
-		if action == core.ActionStatus {
+		if action == core.ActionStatus && result.InstanceStatus.TaskID == taskID {
 			// The status lease is fresh and serialized with lifecycle tasks. Its
 			// metadata may have just bootstrapped a pre-sidecar deployment.
 			if err := tx.QueryRow(ctx, `SELECT last_task_id FROM agent_shared_instance_ownership
