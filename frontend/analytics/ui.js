@@ -85,6 +85,7 @@ export function field(label, name, value = "", attrs = {}) {
       const [id, text] = Array.isArray(item) ? item : [item, item];
       return node("option", { value: id }, text);
     }));
+    input.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
     input.value = value;
   } else if (multiline) {
     input = node("textarea", { name, rows: multiline, ...attributes });
@@ -111,3 +112,10 @@ export function query(path, params) {
   return values.size ? `${path}?${values}` : path;
 }
 export const list = value => Array.isArray(value) ? value : [];
+
+// Lock the document without shifting its content when a native modal opens.
+export function openDialog(box) {
+  if (!document.querySelector('dialog:modal,.a-modal-tail'))
+    document.documentElement.style.setProperty('--a-modal-scrollbar-gap', `${innerWidth - document.documentElement.getBoundingClientRect().width}px`);
+  box.showModal();
+}

@@ -31,19 +31,35 @@ export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, w
   await navigate("archive-config");
   await evaluate(page, "[...document.querySelectorAll('.a-top button')].find(item=>item.textContent.includes('刷新')).click()");
   await wait(page, "!document.querySelector('[aria-busy=true]')");
+  const mainWidth = await evaluate(page, "document.querySelector('.a-main').getBoundingClientRect().width");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
   await wait(page, "document.getAnimations().some(a=>a.id==='analytics-dialog')");
   assert.ok(await evaluate(page, "!!document.activeElement.closest('dialog[open]')"));
+  assert.equal(await evaluate(page, "document.documentElement.clientWidth"), await evaluate(page, "innerWidth"), "modal backdrop covers the viewport including the reserved scrollbar gutter");
+  assert.ok(Math.abs(await evaluate(page, "document.querySelector('.a-main').getBoundingClientRect().width") - mainWidth) < 1, "opening a modal preserves page width");
   // Escape commits closure/focus immediately, before its inert visual tail.
   await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, page);
   await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, page);
   await wait(page, "!document.querySelector('dialog[open]')");
+  assert.ok(await evaluate(page, `(() => {const tail=document.querySelector('.a-modal-tail');return !tail || getComputedStyle(tail).opacity==='1' && getComputedStyle(tail.firstElementChild).backgroundColor==='rgb(255, 255, 255)'})()`), "closing forms retain an opaque surface rather than blending live table text through them");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
   await wait(page, "!!document.querySelector('dialog[open]')");
   assert.equal(await evaluate(page, "document.querySelectorAll('.a-motion-tail').length"), 0, "reopening clears old paint");
   await wait(page, "document.getAnimations().some(a=>a.id==='analytics-dialog')");
   await wait(page, "!document.getAnimations().some(a=>a.id.startsWith('analytics-'))");
   assert.ok(await evaluate(page, "window.__analyticsMotion.some(a=>a.id==='analytics-dialog' && a.paint.some(value=>value<.98) && a.paint.some(value=>value>.98))"), "actual modal playback traverses intermediate and final paint");
+  await evaluate(page, `(() => {
+    document.querySelector('dialog[open]').close();
+    const animations=document.getAnimations().filter(a=>a.id.startsWith('analytics-'));
+    animations.forEach(a=>{a.pause();a.currentTime=55});
+    const host=document.querySelector('.a-modal-tail'),surface=host?.firstElementChild;
+    if(!surface || getComputedStyle(surface).opacity!=='1' || getComputedStyle(surface).backgroundColor!=='rgb(255, 255, 255)')throw Error('editor text blends through the closing surface');
+    animations.forEach(a=>a.play());
+  })()`);
+  await wait(page, "!document.querySelector('dialog[open],.a-motion-tail')");
+  assert.ok(Math.abs(await evaluate(page, "document.querySelector('.a-main').getBoundingClientRect().width") - mainWidth) < 1, "closing a modal restores page width");
+  await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
+  await wait(page, "!!document.querySelector('dialog[open] form')");
   await evaluate(page, "document.querySelector('dialog[open] form').requestSubmit()");
   await wait(page, "!!document.querySelector('.a-validation')");
   assert.ok(await evaluate(page, "document.activeElement.matches('[aria-invalid=true]')"));
@@ -73,6 +89,18 @@ export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, w
   await wait(page, "!document.querySelector('.a-tooltip')");
   await navigate("tasks");
   await wait(page, "!document.getAnimations().some(a=>a.id.startsWith('analytics-'))");
+  if (mode === "mobile") {
+    await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click()");
+    await wait(page, "document.getAnimations().some(a=>a.id==='analytics-menu')");
+    await evaluate(page, "document.querySelector('.a-drawer [title=关闭导航]').click();document.querySelector('.a-top [aria-label=切换导航]').click()");
+    await wait(page, "!!document.querySelector('.a-drawer[open]') && !document.querySelector('.a-motion-tail')");
+    assert.equal(await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').getAttribute('aria-expanded')"), "true", "a retired drawer cannot reset its replacement's state");
+    await wait(page, "!document.getAnimations().some(a=>a.id==='analytics-menu')");
+    await screenshot(page, "analytics-motion-navigation");
+    await evaluate(page, "document.querySelector('.a-drawer [title=关闭导航]').click()");
+    await wait(page, "!document.querySelector('dialog[open],.a-motion-tail')");
+    assert.ok(await evaluate(page, "document.activeElement.matches('.a-top [aria-label=切换导航]')"), "drawer close restores navigation focus even after interruption");
+  }
   const count = await evaluate(page, "window.__analyticsMotion.filter(a=>a.id==='analytics-page').length");
   await evaluate(page, "[...document.querySelectorAll('.a-top button')].find(item=>item.textContent.includes('刷新')).click()");
   await wait(page, "!document.querySelector('[aria-busy=true]')");

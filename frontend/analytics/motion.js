@@ -3,10 +3,12 @@
 export function createAnalyticsMotion(scope) {
   const active = new Map(), tails = new Set(), messages = new WeakMap(), seenMessages = new WeakMap();
   const invalid = new Map(); let validationID = 0;
-  const ease = "cubic-bezier(.2,.8,.2,1)", exitEase = "cubic-bezier(.4,0,1,1)";
+  // A quick departure and a long, damped arrival preserve spatial continuity.
+  // These are analytics' own timings, independent of classic motion.
+  const ease = "cubic-bezier(.16,1,.3,1)", exitEase = "cubic-bezier(.4,0,.7,.2)";
   let tooltip, tooltipOwner, tipTimer;
   function stop(element) { active.get(element)?.(); }
-  function play(element, frames, { duration = 160, name = "component", easing = ease, settled = () => {} } = {}) {
+  function play(element, frames, { duration = 220, delay = 0, name = "component", easing = ease, settled = () => {} } = {}) {
     if (!element?.isConnected || !scope.enabled() || !element.animate) { settled(); return () => {}; }
     // Reverse from the currently painted values rather than jumping to frame 0.
     if (active.has(element)) {
@@ -15,7 +17,7 @@ export function createAnalyticsMotion(scope) {
     }
     stop(element);
     let animation;
-    try { animation = element.animate(frames, { duration, easing }); }
+    try { animation = element.animate(frames, { duration, delay, easing, fill: "both" }); }
     catch { settled(); return () => {}; }
     animation.id = `analytics-${name}`;
     let done = false, timer;
@@ -28,7 +30,14 @@ export function createAnalyticsMotion(scope) {
     };
     active.set(element, finish);
     animation.onfinish = animation.oncancel = finish;
-    timer = scope.timer(finish, duration + 120);
+    // Rendering a large form may delay the animation's start. Start the normal
+    // cleanup deadline once the browser is ready, with a bounded fallback.
+    timer = scope.timer(finish, duration + delay + 1000);
+    animation.ready.then(() => {
+      if (done || !scope.current()) return;
+      scope.clearTimer(timer);
+      timer = scope.timer(finish, duration + delay + 120);
+    }).catch(finish);
     return finish;
   }
   function cancel() {
@@ -43,9 +52,10 @@ export function createAnalyticsMotion(scope) {
   };
   const reveal = (element, name = "component") => {
     if (!element?.isConnected || element.closest('[hidden],dialog:not([open])') || movingAncestor(element)) return;
-    play(element, [{ opacity: .25, translate: "0 4px" }, { opacity: 1, translate: "0 0" }], { name, duration: name === "page" ? 180 : 140 });
+    play(element, [{ opacity: 0, translate: "0 6px" }, { opacity: 1, translate: "0 0" }], { name, duration: name === "page" ? 300 : 220 });
   };
-  function clearTails() { tails.forEach(tail => { stop(tail); tail.remove(); }); tails.clear(); }
+  function stopTail(tail) { [...active.keys()].filter(target => tail.contains(target)).forEach(stop); }
+  function clearTails() { tails.forEach(tail => { stopTail(tail); tail.remove(); }); tails.clear(); }
   function retire(element, { modal = false } = {}) {
     if (!scope.enabled() || !element.isConnected) return;
     const rect = element.getBoundingClientRect();
@@ -55,8 +65,22 @@ export function createAnalyticsMotion(scope) {
       const surface = document.createElement("div"); surface.className = clone.className;
       surface.append(...clone.childNodes); clone = surface;
     }
-    clone.querySelectorAll('script,iframe,object,embed,[autofocus]').forEach(item => item.remove());
+    clone.querySelectorAll('script,iframe,object,embed').forEach(item => item.remove());
+    clone.querySelectorAll('[autofocus]').forEach(item => item.removeAttribute('autofocus'));
     clone.removeAttribute("id"); clone.querySelectorAll("[id]").forEach(item => item.removeAttribute("id"));
+    // A retired dialog is a DIV, so it must keep its painted surface rather
+    // than relying on the browser's default DIALOG background.
+    const paint = getComputedStyle(element);
+    clone.style.backgroundColor = paint.backgroundColor;
+    clone.style.color = paint.color;
+    const originalParts = [element, ...element.querySelectorAll('*')];
+    const cloneParts = [clone, ...clone.querySelectorAll('*')];
+    originalParts.forEach((part, index) => {
+      const copy = cloneParts[index];
+      if (!copy) return;
+      if ('value' in part && 'value' in copy) copy.value = part.value;
+      if ('checked' in part && 'checked' in copy) copy.checked = part.checked;
+    });
     clone.inert = true; clone.setAttribute("aria-hidden", "true");
     clone.removeAttribute("popover");
     Object.assign(clone.style, { display: "block", position: "fixed", inset: "auto", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", maxHeight: "none", pointerEvents: "none", transform: "none" });
@@ -65,8 +89,24 @@ export function createAnalyticsMotion(scope) {
     host.setAttribute("popover", "manual"); host.setAttribute("aria-hidden", "true"); host.inert = true;
     host.append(clone); document.body.append(host); tails.add(host);
     try { host.showPopover(); } catch { host.remove(); tails.delete(host); return; }
-    play(host, [{ opacity: 1 }, { opacity: 0 }], { duration: 110, name: "exit", easing: exitEase,
+    originalParts.forEach((part, index) => { const copy = cloneParts[index]; if (copy) { copy.scrollTop = part.scrollTop; copy.scrollLeft = part.scrollLeft; } });
+    if (modal) {
+      // The surface leaves against a held scrim; the scrim clears last. Never
+      // fade the full host, which would double-paint a form over the live page.
+      const drawer = element.classList.contains("a-drawer");
+      // Preserve the current paint when closing during the entrance.
+      const translate = paint.translate, scale = paint.scale;
+      // Clear text before fading the white surface. Two readable forms must
+      // never blend together, even halfway through a large editor's exit.
+      if (!drawer) for (const content of clone.children)
+        play(content, [{ opacity: 1 }, { opacity: 0 }], { duration: 100, name: "dialog-content-exit", easing: "ease-out", settled() { content.style.visibility = "hidden"; } });
+      play(clone, [{ opacity: 1, translate, scale }, { opacity: 1, offset: .6 }, { opacity: drawer ? 1 : 0, translate: drawer ? "-100% 0" : "0 8px", scale: drawer ? "1" : ".98" }],
+        { duration: drawer ? 220 : 180, name: "dialog-exit", easing: exitEase, settled() { clone.style.visibility = "hidden"; } });
+      play(host, [{ backgroundColor: getComputedStyle(host).backgroundColor }, { backgroundColor: "rgba(24,24,27,0)" }],
+        { delay: drawer ? 100 : 120, duration: 140, name: "exit", easing: "ease-out", settled() { [...clone.children].forEach(stop); stop(clone); host.remove(); tails.delete(host); } });
+    } else play(host, [{ opacity: 1 }, { opacity: 0 }], { duration: 160, name: "exit", easing: exitEase,
       settled() { host.remove(); tails.delete(host); } });
+
   }
   function visible(element, show, launcher = document.activeElement) {
     if (!element || element.hidden === !show) return;
@@ -87,7 +127,7 @@ export function createAnalyticsMotion(scope) {
       const after = child.getBoundingClientRect();
       const y = before.top - after.top;
       if (Math.abs(y) > .5 && !movingAncestor(child))
-        play(child, [{ translate: `0 ${y}px` }, { translate: "0 0" }], { name: "field-layout", duration: 150 });
+        play(child, [{ translate: `0 ${y}px` }, { translate: "0 0" }], { name: "field-layout", duration: 240 });
     }
   }
   function feedback(element) {
@@ -101,7 +141,7 @@ export function createAnalyticsMotion(scope) {
     if (!text) { seen.delete(`${element.className}|${previous}`); stop(element); return; }
     if (previous === undefined && seen.has(key)) return;
     seen.add(key);
-    if (!movingAncestor(element)) play(element, [{ opacity: .55 }, { opacity: 1 }], { name: "feedback", duration: 130 });
+    if (!movingAncestor(element)) play(element, [{ opacity: 0, translate: "0 3px" }, { opacity: 1, translate: "0 0" }], { name: "feedback", duration: 240 });
   }
   function hideTip() {
     scope.clearTimer(tipTimer);
@@ -141,9 +181,9 @@ export function createAnalyticsMotion(scope) {
       scope.frame(() => {
         if (!element.open) return;
         const drawer = element.classList.contains("a-drawer");
-        play(element, drawer ? [{ opacity: .4, translate: "-12px 0" }, { opacity: 1, translate: "0 0" }] :
-          [{ opacity: .2, translate: "0 6px", scale: ".995" }, { opacity: 1, translate: "0 0", scale: "1" }],
-        { name: drawer ? "menu" : "dialog", duration: drawer ? 170 : 180 });
+        play(element, drawer ? [{ translate: "-100% 0" }, { translate: "0 0" }] :
+          [{ opacity: 0, translate: "0 12px", scale: ".975" }, { opacity: 1, translate: "0 0", scale: "1" }],
+        { name: drawer ? "menu" : "dialog", duration: drawer ? 360 : 300 });
       });
     } else { retire(element, { modal: true }); stop(element); }
   }, { capture: true });
@@ -211,8 +251,24 @@ export function createAnalyticsMotion(scope) {
   scope.onSuspend(cancel);
   scope.own(() => { observer.disconnect(); cancel(); [...invalid.keys()].forEach(clearValidation); });
   return {
-    page: element => { clearTails(); seenMessages.delete(element.closest(".a-main") || element); reveal(element, "page"); }, visible,
-    list: element => { if (element.isConnected && !movingAncestor(element)) play(element, [{ opacity: .65 }, { opacity: 1 }], { name: "list", duration: 130 }); },
+    page: element => {
+      clearTails(); seenMessages.delete(element.closest(".a-main") || element);
+      // Animate two visual groups at most, never every row or polling update.
+      const content = element.children.length === 1 && element.firstElementChild.classList.contains("a-stack") ? element.firstElementChild : element;
+      const groups = [...content.children].filter(child => !child.hidden && child.getBoundingClientRect().top < innerHeight);
+      if (groups.length < 2) { reveal(element, "page"); return; }
+      groups.slice(0, 2).forEach((group, index) => play(group,
+        [{ opacity: 0, translate: "0 10px" }, { opacity: 1, translate: "0 0" }],
+        { name: index ? "page-follow" : "page", duration: 320, delay: index * 40 }));
+    }, visible,
+    navigation: layout => {
+      clearTails();
+      const rail = layout.querySelector(':scope > .a-rail');
+      if (!layout.classList.contains('a-collapsed')) reveal(rail, "navigation");
+      const work = layout.querySelector('.a-work');
+      if (work) play(work, [{ opacity: .5, translate: "6px 0" }, { opacity: 1, translate: "0 0" }], { name: "workspace", duration: 260 });
+    },
+    list: element => { if (element.isConnected && !movingAncestor(element)) play(element, [{ opacity: .3, translate: "0 3px" }, { opacity: 1, translate: "0 0" }], { name: "list", duration: 240 }); },
     cancel,
   };
 }

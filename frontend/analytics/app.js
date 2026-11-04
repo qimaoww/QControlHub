@@ -5,7 +5,7 @@ import { accountRequest } from "../modules/account-request.js";
 import { createPermissionChecker } from "../modules/permissions.js";
 import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
-import { node, icon, button, actions, stack, section, notice, empty, field, formData } from "./ui.js";
+import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog } from "./ui.js";
 import { dashboardPage, nodesPage, tasksPage, quotaPage } from "./operations.js";
 import { archivePage } from "./configs.js";
 import { themePage } from "./themes.js";
@@ -54,6 +54,7 @@ const pages = {
 export function startAnalytics({ app, session }) {
   const presentation = mountTheme("analytics", createAnalyticsMotion);
   const motion = presentation.motion;
+  presentation.own(() => document.documentElement.style.removeProperty("--a-modal-scrollbar-gap"));
   const state = { session, data: {} };
   const can = createPermissionChecker(state);
   const lifetime = new AbortController();
@@ -112,7 +113,7 @@ export function startAnalytics({ app, session }) {
       if (!pending && box.onRequestClose) void box.onRequestClose();
     });
     box.addEventListener("close", () => { box.remove(); if (active?.isConnected) active.focus(); }, { once: true });
-    box.showModal();
+    openDialog(box);
     return box;
   }
   async function confirm(message, label = "确认") {
@@ -188,12 +189,17 @@ export function startAnalytics({ app, session }) {
         if (matchMedia("(max-width: 56rem)").matches) {
           drawer = node("dialog", { className: "a-dialog a-drawer", "aria-label": "导航" }, rail(true));
           const opened = drawer;
-          opened.addEventListener("close", () => { opened.remove(); if (drawer === opened) drawer = null; navigationToggle?.setAttribute("aria-expanded", "false"); }, { once: true });
+          opened.addEventListener("close", () => {
+            opened.remove();
+            if (drawer === opened) { drawer = null; navigationToggle?.setAttribute("aria-expanded", "false"); }
+          }, { once: true });
           document.body.append(opened);
-          opened.showModal();
+          navigationToggle.focus({ preventScroll: true });
+          openDialog(opened);
           navigationToggle.setAttribute("aria-expanded", "true");
         } else {
           layout.classList.toggle("a-collapsed");
+          motion?.navigation(layout);
           navigationToggle.setAttribute("aria-expanded", String(!layout.classList.contains("a-collapsed")));
         }
       }, { glyph: "menu", title: "切换导航", className: "a-icon-button" });

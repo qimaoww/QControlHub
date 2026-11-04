@@ -20,6 +20,8 @@
   --header-height: 56px;
   --page-gutter: 24px;
   --card-gutter: 20px;
+  --a-ease-arrive: cubic-bezier(.16, 1, .3, 1);
+  --a-ease-state: cubic-bezier(.2, 0, .2, 1);
   --font-ui: "Analytics Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --text-caption: .75rem;
   --text-label: .8125rem;
@@ -134,9 +136,9 @@ strong, b { font-weight: 600; }
 .a-form-fields { border: 0; padding: 0; margin: 0; min-width: 0; gap: 20px; }
 .a-code, .a-editor textarea { font-family: ui-monospace, SFMono-Regular, Consolas, "Analytics Sans", monospace; font-size: var(--text-label); font-weight: 400; line-height: 1.75; font-variant-ligatures: none; }
 .a-code { max-height: 55dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--tint); padding: 16px; margin: 0; border-radius: 8px; }
-.a-dialog { width: min(680px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border); border-radius: var(--radius); color: var(--ink); box-shadow: 0 20px 70px #18181b35; }
+.a-dialog { width: min(680px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); color: var(--ink); box-shadow: 0 20px 70px #18181b35; }
 .a-dialog.wide { width: min(1120px, calc(100% - 32px)); }
-.a-dialog::backdrop { background: #18181b74; }
+.a-dialog::backdrop { position: fixed; inset: 0; background: #18181b74; }
 .a-dialog-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 12px var(--card-gutter); background: var(--paper); border-bottom: 1px solid var(--border); z-index: 1; }
 .a-dialog-body { padding: var(--card-gutter); }
 .a-chart { width: 100%; display: block; height: 240px; }
@@ -202,9 +204,10 @@ strong, b { font-weight: 600; }
   .a-top-title { padding-inline-start: 12px; }
 }
 
-/* Analytics motion: short fades and small offsets, independent of classic. */
-.a-button, .a-nav-link, .a-field :is(input, select, textarea) { transition: background-color 120ms cubic-bezier(.2,.8,.2,1), border-color 120ms cubic-bezier(.2,.8,.2,1), box-shadow 120ms cubic-bezier(.2,.8,.2,1); }
-.a-dialog::backdrop { animation: analytics-scrim 140ms ease-out; }
+/* Analytics motion: damped arrivals, quicker departures and quiet feedback. */
+.a-button, .a-nav-link, .a-field :is(input, select, textarea) { transition: background-color 180ms var(--a-ease-state), border-color 180ms var(--a-ease-state), box-shadow 180ms var(--a-ease-state), scale 180ms var(--a-ease-arrive); }
+.a-button:active:not(:disabled) { scale: .97; }
+.a-dialog::backdrop { animation: analytics-scrim 240ms var(--a-ease-arrive); }
 @keyframes analytics-scrim { from { background-color: #18181b00; } to { background-color: #18181b74; } }
 .a-motion-tail[popover] { display: block; position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: transparent; color: var(--ink); overflow: clip; pointer-events: none; }
 .a-motion-tail::backdrop { background: transparent; pointer-events: none; }
@@ -223,6 +226,7 @@ strong, b { font-weight: 600; }
 
 /* Native scrolling and form semantics, with this theme's presentation. */
 :root { scrollbar-color: #a1a1aa transparent; scrollbar-width: thin; scrollbar-gutter: stable; }
+:root:has(dialog:modal, .a-modal-tail) { overflow: hidden; scrollbar-gutter: auto; padding-inline-end: var(--a-modal-scrollbar-gap, 0px); }
 * { scrollbar-width: thin; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
@@ -236,16 +240,21 @@ strong, b { font-weight: 600; }
 @supports (appearance: base-select) {
   .a-field select, .a-field select::picker(select) { appearance: base-select; }
   .a-field select { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-inline-end: 12px; background-image: none; }
+  .a-field select > button { display: flex; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: start; }
+  .a-field selectedcontent { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .a-field select::picker-icon { content: ""; width: 7px; height: 7px; flex: none; margin-inline: auto 3px; border-right: 1.5px solid #71717a; border-bottom: 1.5px solid #71717a; rotate: 45deg; translate: 0 -2px; }
   .a-field select:open { border-color: #a1a1aa; }
   .a-field select::picker(select) {
     padding: 4px; margin-block: 6px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--paper); color: var(--ink); font: 400 var(--text-body)/1.5 var(--font-ui);
     box-shadow: 0 4px 16px rgb(24 24 27 / 10%); max-block-size: min(320px, 50dvh);
-    max-inline-size: calc(100vw - 24px); overflow: auto; scrollbar-gutter: stable;
-    opacity: 1; translate: 0 0;
-    transition: opacity 120ms cubic-bezier(.2,.8,.2,1), translate 120ms cubic-bezier(.2,.8,.2,1), display 120ms allow-discrete, overlay 120ms allow-discrete;
+    max-inline-size: calc(100vw - 24px); overflow: auto; scrollbar-gutter: auto;
+    opacity: 0; translate: 0 -4px;
+    transition: opacity 180ms var(--a-ease-arrive), translate 180ms var(--a-ease-arrive), display 180ms allow-discrete, overlay 180ms allow-discrete;
   }
+  .a-field select:open::picker(select) { opacity: 1; translate: 0 0; }
+  .a-field select::picker-icon { transition: rotate 220ms var(--a-ease-arrive); }
+  .a-field select:open::picker-icon { rotate: 225deg; }
   .a-field select option { gap: 12px; min-block-size: 36px; padding: 8px 10px; border-radius: 4px; white-space: normal; overflow-wrap: anywhere; font: inherit; }
   .a-field select option:checked { background: var(--tint); font-weight: 500; }
   .a-field select option:is(:hover,:focus-visible):not(:disabled) { background: #e4e4e7; outline: none; }
@@ -254,8 +263,8 @@ strong, b { font-weight: 600; }
   @starting-style { .a-field select:open::picker(select) { opacity: 0; translate: 0 -3px; } }
   @media (max-width: 48rem) { .a-field select option { min-block-size: 44px; padding-block: 11px; } }
 }
-:root[data-theme-motion="off"] .a-field select::picker(select) { transition: none; animation: none; }
-@media (prefers-reduced-motion: reduce) { .a-field select::picker(select) { transition: none; animation: none; } }
+:root[data-theme-motion="off"] .a-field select::picker(select), :root[data-theme-motion="off"] .a-dialog::backdrop { transition: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .a-field select::picker(select), .a-dialog::backdrop { transition: none; animation: none; } }
 @media (forced-colors: active) {
   :root { scrollbar-color: auto; }
   .a-field select { appearance: auto; background-image: none; }
