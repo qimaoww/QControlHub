@@ -48,6 +48,8 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`["traffic", "流量", dockIcons.chart, true]`,
 		`["core-logs", "日志", dockIcons.logs, true]`,
 		`["tasks", "任务", dockIcons.listChecks, true]`,
+		`["themes", "主题", dockIcons.sliders, true]`,
+		`["themes", "主题"]`,
 		`class="dock-settings`,
 		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
 		`summary class="${mobileMoreActive ? "active" : ""}"`,
@@ -65,7 +67,8 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 	for _, required := range []string{
 		`.dock-nav .dock-mobile-secondary{display:none}`,
-		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr))`,
+		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)`,
+		`.mobile-account-menu{position:relative;z-index:110;grid-column:auto;`,
 		`.dock-nav{display:contents!important}`,
 		`.dock-nav a,.mobile-account-menu>summary{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px`,
 		`,.page-agents .release-channel-options label{min-height:44px}`,
