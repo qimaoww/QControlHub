@@ -146,6 +146,8 @@
 }
 
 @media(max-width:600px){
+  .config-inbound-body .timeline-body{grid-template-columns:1fr}
+  .config-inbound-body .timeline-body>nav{border-right:0;border-bottom:1px solid var(--line)}
   .live-engine-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-engine-tab{flex-direction:column;gap:3px;min-height:58px;padding:7px 10px}
 }
