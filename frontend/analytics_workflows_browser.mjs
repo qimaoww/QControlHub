@@ -4,14 +4,22 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-main h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
   const click=async(label,selector='dialog[open]')=>evaluate(page,`[...document.querySelectorAll(${JSON.stringify(selector+' button')})].find(button=>!button.closest('select')&&button.textContent===${JSON.stringify(label)}).click()`);
   const close=async()=>{await evaluate(page,"document.querySelectorAll('dialog[open]').forEach(box=>box.close())");await wait(page,"!document.querySelector('dialog[open],.a-motion-tail')");};
-  await navigate('#node-settings');await click('添加节点','.a-main');
+  await navigate('#node-settings');
+  assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0,'initial node monitor has no selection boxes');
+  assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-grid')"));
+  await screenshot(page,'analytics-probe-cards');await click('列表','.a-main');
+  assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-list') && !document.querySelector('.a-main input[type=checkbox]')"));await screenshot(page,'analytics-probe-list');
+  await click('卡片','.a-main');await click('批量操作','.a-main');
+  assert.ok(await evaluate(page,"!!document.querySelector('.a-probe input[type=checkbox]')"));await click('取消选择','.a-main');
+  assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0);
+  await click('添加节点','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");await screenshot(page,'analytics-enrollment');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.elements.name.value='独立主题添加验证';form.requestSubmit()})()");
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='QAgent 安装命令') && !document.querySelector('[aria-busy=true]')");
   const token=(await api(page,identity,'GET','/enrollment-tokens')).find(token=>token.name==='独立主题添加验证');assert.ok(token?.id);
   assert.ok(await evaluate(page,"[...document.querySelectorAll('dialog[open] pre')].some(item=>item.textContent.includes('/install-agent.sh')&&item.textContent.includes('X-QControlHub-Enrollment'))"));
   await close();await api(page,identity,'DELETE',`/enrollment-tokens/${token.id}`,undefined,204);
-  await evaluate(page,`[...document.querySelectorAll('.a-main tbody tr')].find(row=>row.textContent.includes(${JSON.stringify(agentID)})).querySelectorAll('button')[0].click()`);
+  await evaluate(page,`document.querySelector(${JSON.stringify('[data-agent-id="'+agentID+'"]')}).querySelectorAll('footer button')[0].click()`);
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=name]').form;form.elements.name.value='主题工作流节点';form.requestSubmit()})()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('主题工作流节点')");
@@ -22,7 +30,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"document.querySelector('.a-toast [aria-label=关闭通知]').click()");
 
   await screenshot(page,'analytics-node-settings');await click('查看指标历史');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('指标历史')) && !document.querySelector('[aria-busy=true]')");await close();
-  await evaluate(page,`[...document.querySelectorAll('.a-main tbody tr')].find(row=>row.textContent.includes(${JSON.stringify(agentID)})).querySelectorAll('button')[1].click()`);
+  await evaluate(page,`document.querySelector(${JSON.stringify('[data-agent-id="'+agentID+'"]')}).querySelectorAll('footer button')[1].click()`);
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('共享 Agent')) && !document.querySelector('[aria-busy=true]')");await click('添加用户');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.querySelector('[name=username]').value='alice';form.querySelector('[name=ports]').value='23450-23451';form.querySelector('[name=limit_gib]').value='1';form.querySelector('[name=engines]').checked=true;form.requestSubmit()})()");
   await wait(page,"document.querySelector('.a-toast-region')?.textContent.includes('共享设置已保存') && !document.querySelector('[aria-busy=true]')");

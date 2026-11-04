@@ -17,6 +17,34 @@ export async function nodesPage(ctx) {
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
   const selected = new Set();
+  let view = ctx.state.data.nodeView || 'cards', selecting = false;
+  const summary = node('div', {className:'a-probe-summary'});
+  const batchBar = node('div', {className:'a-probe-batch'});
+  const cardToggle = button('卡片',()=>setView('cards'));
+  const listToggle = button('列表',()=>setView('list'));
+  function setView(value){ view=value;ctx.state.data.nodeView=value;draw(); }
+  function choice(agent){return field(`选择 ${agent.name}`,`select:${agent.id}`,selected.has(agent.id),{type:'checkbox',onchange(event){event.target.checked?selected.add(agent.id):selected.delete(agent.id);drawBatch();}});}
+  function drawBatch(){
+    batchBar.hidden=!selecting;
+    batchBar.replaceChildren(muted(`已选 ${selected.size} 个节点`),button('执行批量操作',batch,{disabled:!selected.size}),button('取消选择',()=>{selecting=false;selected.clear();draw();}));
+  }
+  const percentage=(used,total)=>total>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):0;
+  function meter(label,value,available,detail){
+    const percent=Math.min(100,Math.max(0,Number(value)||0));
+    return node('div',{className:'a-probe-meter'},node('div',{className:'a-probe-meter-label'},muted(label),node('strong',{},available?`${percent.toFixed(1)}%`:'—')),
+      node('div',{className:'a-probe-track','aria-hidden':'true'},node('span',{style:`width:${available?percent:0}%`,className:percent>90?'bad':percent>75?'warn':''})),detail&&muted(available?detail:'暂无数据'));
+  }
+  function metrics(agent){const m=agent.metrics||{},online=agent.status==='online';return node('div',{className:'a-probe-meters'},
+    meter('CPU',m.cpu_percent,online&&m.cpu_available),
+    meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
+    meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
+  function controls(agent){return actions(ctx.can('agent-config.read')&&link('实时配置',`#live-config?agent=${pathID(agent.id)}`),
+    button('查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent))),
+    canManage(agent)&&button('共享 Agent',event=>void ctx.mutate(event.currentTarget,()=>sharing(agent))));}
+  function network(agent){const m=agent.metrics||{},available=agent.status==='online'&&m.network_available;return node('div',{className:'a-probe-network'},
+    stack(muted('接收'),node('strong',{},available?`${bytes(m.network_rx_bps)}/s`:'—')),
+    stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—')));}
+
   async function load() {
     const received = list(await ctx.api('/agents'));
     if (!ctx.current()) return;
@@ -34,17 +62,27 @@ export async function nodesPage(ctx) {
   function draw() {
     const query = search.querySelector('input').value.trim().toLowerCase();
     const shown = agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
-    results.replaceChildren(table(['选择', '节点', '状态', '地址', '内核与实例', '操作'], shown.map(agent => [
-      field(`选择 ${agent.name}`, `select:${agent.id}`, selected.has(agent.id), { type: 'checkbox', disabled: !ctx.can('tasks.execute'), onchange(event) { if (event.target.checked) selected.add(agent.id); else selected.delete(agent.id); } }),
-      stack(node('strong', {}, agent.name), muted(agent.id), muted(`${agent.os} / ${agent.arch} · QAgent ${agent.version || '—'}`)),
-      stack(status(agent.status), muted(date(agent.last_seen))),
-      stack(agent.metrics?.public_ipv4 || agent.client_address || '—', agent.metrics?.public_ipv6 || null),
-      stack((agent.capabilities || []).map(engine => actions(badge(engine), status(agent.runtime?.[engine]?.service_status), muted(agent.can_manage === false ? '本人共享实例' : '主实例')))),
-      actions(ctx.can('agent-config.read') && link('实时配置', `#live-config?agent=${pathID(agent.id)}`),
-        button('查看设置', event => void ctx.mutate(event.currentTarget, () => settings(agent))),
-        canManage(agent) && button('共享 Agent', event => void ctx.mutate(event.currentTarget, () => sharing(agent)))),
-    ]), { label: '节点' }));
+    cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
+    const online=agents.filter(agent=>agent.status==='online').length;
+    summary.replaceChildren(stack(muted('全部节点'),node('strong',{},String(agents.length))),stack(muted('在线'),node('strong',{},String(online))),stack(muted('离线'),node('strong',{},String(agents.length-online))));
+    drawBatch();
+    if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
+    if(view==='cards')results.replaceChildren(node('div',{className:'a-probe-grid'},shown.map(agent=>
+      node('article',{className:'a-card a-probe','data-agent-id':agent.id},
+        node('header',{className:'a-probe-head'},node('div',{},node('h2',{},agent.name),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
+        selecting&&node('div',{className:'a-probe-choice'},choice(agent)),
+        node('div',{className:'a-probe-body'},metrics(agent),network(agent)),
+        node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
+        node('footer',{className:'a-probe-footer'},controls(agent))))));
+    else{
+      const listTable=table([...(selecting?['选择']:[]),'节点','状态','资源使用','网络速率','最近在线','操作'],shown.map(agent=>[
+        ...(selecting?[choice(agent)]:[]),stack(node('strong',{},agent.name),muted(`${agent.os} / ${agent.arch}`),actions((agent.capabilities||[]).map(engine=>badge(engine)))),
+        status(agent.status),metrics(agent),network(agent),date(agent.last_seen),controls(agent)]),{label:'节点监控'});
+      listTable.querySelectorAll('tbody tr').forEach((row,index)=>row.dataset.agentId=shown[index].id);
+      results.replaceChildren(node('div',{className:'a-card a-probe-list'},listTable));
+    }
   }
+
   function command(created) {
     const value = enrollmentInstallCommand(created);
     ctx.dialog('QAgent 安装命令', stack(code(value), button('复制命令', event => void ctx.mutate(event.currentTarget, async () => {
@@ -275,9 +313,9 @@ export async function nodesPage(ctx) {
   draw(); search.querySelector('input').addEventListener('input', draw);
   const deepID = location.hash.match(/^#(?:settings-node|node)-([^?]+)/)?.[1];
   if (deepID) { const agent = agents.find(agent => agent.id === deepID); if (agent) queueMicrotask(() => { if (ctx.current()) void settings(agent); }); }
-  return stack(section('节点', node('div', { className: 'a-card-body' }, search), actions(
+  return stack(summary,section('节点监控', node('div', { className: 'a-card-body a-probe-toolbar' }, search,actions(cardToggle,listToggle)), actions(
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
-    ctx.can('tasks.execute') && button('批量操作', batch),
-  )), section('节点列表', results));
+    ctx.can('tasks.execute') && button('批量操作',()=>{selecting=true;draw();}),
+  )), batchBar, results);
 }
