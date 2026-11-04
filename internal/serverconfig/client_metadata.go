@@ -39,8 +39,9 @@ type clientMetadata struct {
 }
 
 // Xray and Mihomo do not encode a client WS Host in their server listener.
-// Bind detached client values to the exact saved native TLS endpoint and peer.
+// Bind detached client values to the exact saved endpoint and peer.
 type webSocketClientMetadata struct {
+	Plain           bool   `json:"plain,omitempty"`
 	Tag             string `json:"tag"`
 	Listen          string `json:"listen"`
 	Path            string `json:"path"`
@@ -53,7 +54,7 @@ type webSocketClientMetadata struct {
 }
 
 func webSocketClientIdentity(input Input) webSocketClientMetadata {
-	return webSocketClientMetadata{Tag: input.Tag, Listen: input.Listen, Port: input.Port, Path: input.TransportPath,
+	return webSocketClientMetadata{Plain: !input.TLSEnabled, Tag: input.Tag, Listen: input.Listen, Port: input.Port, Path: input.TransportPath,
 		PeerHash: fmt.Sprintf("%x", sha256.Sum256([]byte(input.Credential))), CertificatePath: input.CertificatePath, PrivateKeyPath: input.PrivateKeyPath}
 }
 
@@ -61,9 +62,12 @@ func webSocketClientIdentity(input Input) webSocketClientMetadata {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
-	if input.Transport == "websocket" && input.TLSEnabled && !input.RealityEnabled && !proxiedTLS(input) {
+	if input.Transport == "websocket" && !input.RealityEnabled && !proxiedTLS(input) {
 		ws := webSocketClientIdentity(input)
-		ws.ServerName, ws.Host = input.TLSServerName, input.TransportHost
+		ws.Host = input.TransportHost
+		if input.TLSEnabled {
+			ws.ServerName = input.TLSServerName
+		}
 		metadata.WebSocket = &ws
 	}
 	if input.PanelCertificateID == "" && input.TLSEnabled && !input.RealityEnabled && (input.TLSMode == "" || input.TLSMode == "native") && input.CertificatePath != "" && input.PrivateKeyPath != "" && input.TLSServerName != "" {
@@ -144,7 +148,7 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if input.TLSEnabled {
 		input.TLSClientCertificate = metadata.TLSClientCertificate
 	}
-	if ws := metadata.WebSocket; ws != nil && input.Transport == "websocket" && input.TLSEnabled && !input.RealityEnabled && !proxiedTLS(*input) {
+	if ws := metadata.WebSocket; ws != nil && input.Transport == "websocket" && ws.Plain == !input.TLSEnabled && !input.RealityEnabled && !proxiedTLS(*input) {
 		identity := *ws
 		identity.ServerName, identity.Host = "", ""
 		if identity == webSocketClientIdentity(*input) && (input.TLSServerName == "" || input.TLSServerName == ws.ServerName) {

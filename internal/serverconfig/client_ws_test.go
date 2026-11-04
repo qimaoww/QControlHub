@@ -253,3 +253,56 @@ func TestNativeWebSocketTLSCatalogAndDetachedMetadata(t *testing.T) {
 		}
 	}
 }
+
+// Xray/Mihomo listeners have no client Host field, including plaintext WS.
+// Keep it in scoped metadata without treating a TLS snapshot as plaintext.
+func TestPlainWebSocketClientMetadataLifecycle(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
+		t.Run(string(engine), func(t *testing.T) {
+			input := Input{Protocol: ProtocolVMess, Username: "default", Tag: "plain-ws", Listen: "0.0.0.0", Port: 23456,
+				Credential: "123e4567-e89b-42d3-a456-426614174000", Transport: "websocket", TransportPath: "/relay?token=one", TransportHost: "host.example.test"}
+			source, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata, err := MarshalClientMetadata(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(engine, source)
+			if !ok {
+				t.Fatal("parse failed")
+			}
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
+			}
+			if parsed.TransportHost != input.TransportHost || parsed.TLSEnabled || parsed.Port != input.Port {
+				t.Fatal("plaintext WS routing lost")
+			}
+			for _, target := range []core.Engine{core.EngineSingBox, core.EngineXray} {
+				out, err := BuildClientOutbound(target, parsed, "203.0.113.10", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var value map[string]any
+				_ = json.Unmarshal(out, &value)
+				if target == core.EngineSingBox && mapValue(mapValue(value["transport"])["headers"])["Host"] != input.TransportHost {
+					t.Fatal("sing-box Host lost")
+				}
+				if target == core.EngineXray && mapValue(mapValue(value["streamSettings"])["wsSettings"])["host"] != input.TransportHost {
+					t.Fatal("Xray Host lost")
+				}
+			}
+			if engine != core.EngineSingBox {
+				stale, _ := Parse(engine, source)
+				stale.TLSEnabled = true
+				if err := ApplyClientMetadata(&stale, metadata); err != nil {
+					t.Fatal(err)
+				}
+				if stale.TransportHost != "" {
+					t.Fatal("plaintext metadata applied to TLS endpoint")
+				}
+			}
+		})
+	}
+}

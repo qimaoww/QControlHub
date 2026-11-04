@@ -36,7 +36,10 @@ export function outboundPreset(engine, protocol, values, validate = true) {
     throw Error("Reality 需要填写 ServerName 和目标入站的公钥，不是服务端私钥");
   if (validate && security === "reality" && !/^(?:[0-9a-f]{2}){0,8}$/i.test(values.shortId || ""))
     throw Error("Reality Short ID 必须是最多 16 位的偶数长度十六进制字符");
-  const sni = values.serverName?.trim() || server, flow = protocol === "vless" ? values.flow || "" : "";
+  const sni = values.serverName?.trim() || server;
+  const wsHost = transport === "ws" ? values.host?.trim() || (security !== "none" ? sni : "") : "";
+  if (validate && wsHost && /[\s/@?#\\]/.test(wsHost)) throw Error("请填写有效的 WS Host，不要填写 URL 或路径");
+  const flow = protocol === "vless" ? values.flow || "" : "";
   if (validate && flow && (flow !== "xtls-rprx-vision" || transport !== "tcp" || security === "none"))
     throw Error("Vision 预设需要 TCP + TLS / Reality；其他组合请使用高级 JSON 并校验");
   const out = {tag};
@@ -55,7 +58,7 @@ export function outboundPreset(engine, protocol, values, validate = true) {
     }
     if (transportable || protocol === "http" && security !== "none") {
       const stream = {network:transport};
-      if (transport === "ws") stream.wsSettings = {path:values.path || "/"};
+      if (transport === "ws") stream.wsSettings = {path:values.path || "/", ...(wsHost ? {host:wsHost} : {})};
       if (transport === "grpc") stream.grpcSettings = {serviceName:values.path || ""};
       if (transport === "xhttp") stream.xhttpSettings = {path:values.path || "/", mode:"auto"};
       if (security === "tls") Object.assign(stream, {security:"tls", tlsSettings:{serverName:sni}});
@@ -74,7 +77,7 @@ export function outboundPreset(engine, protocol, values, validate = true) {
     } else if (protocol === "tuic") Object.assign(out, {password, congestion_control:"bbr"});
     else if (!uuid) out.password = credential;
     if (protocol === "shadowsocks") out.method = values.method;
-    if (transport === "ws") out.transport = {type:"ws", path:values.path || "/"};
+    if (transport === "ws") out.transport = {type:"ws", path:values.path || "/", ...(wsHost ? {headers:{Host:wsHost}} : {})};
     if (transport === "grpc") out.transport = {type:"grpc", service_name:values.path || ""};
     if (security !== "none") out.tls = {enabled:true, server_name:sni};
     if (security === "reality") Object.assign(out.tls, {utls:{enabled:true, fingerprint:"chrome"},
@@ -106,6 +109,7 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
           <option>2022-blake3-aes-128-gcm</option><option>2022-blake3-aes-256-gcm</option><option>2022-blake3-chacha20-poly1305</option></select></label>
         <label data-preset-transport>传输<select data-outbound-value="transport"><option value="tcp">TCP</option><option value="ws">WebSocket</option><option value="grpc">gRPC</option>${engine === "xray" ? '<option value="xhttp">XHTTP</option>' : ""}</select></label>
         <label data-preset-path>路径 / ServiceName<input data-outbound-value="path" autocomplete="off" placeholder="/"></label>
+        <label data-preset-ws-host>WS Host<input data-outbound-value="host" autocomplete="off" placeholder="留空使用 TLS ServerName 或服务器地址"></label>
         <label data-preset-security>传输安全<select data-outbound-value="security"><option value="none">无 TLS</option><option value="tls">TLS</option><option value="reality">Reality</option></select></label>
         <label data-preset-tls>ServerName<input data-outbound-value="serverName" autocomplete="off" placeholder="留空使用服务器地址"></label>
         <label data-preset-reality>Reality 公钥<input data-outbound-value="publicKey" autocomplete="off" spellcheck="false"></label>
@@ -163,6 +167,7 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
     show("[data-preset-password]", ["http", "socks", "tuic"].includes(kind));
     show("[data-preset-method]", kind === "shadowsocks");
     show("[data-preset-transport]", transportable);
+    show("[data-preset-ws-host]", transportable && value("transport").value === "ws");
     show("[data-preset-path]", transportable && value("transport").value !== "tcp");
     show("[data-preset-security]", transportable || kind === "http" || tlsRequired);
     show("[data-preset-tls]", (transportable || kind === "http" || tlsRequired) && value("security").value !== "none");
