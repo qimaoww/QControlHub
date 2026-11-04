@@ -262,7 +262,7 @@ strong, b { font-weight: 600; }
   .a-field select option:checked { background: var(--tint); font-weight: 500; }
   .a-field select option:is(:hover,:focus-visible):not(:disabled) { background: #e4e4e7; outline: none; }
   .a-field select option:disabled { color: #a1a1aa; }
-  .a-field select option::checkmark { color: var(--ink); font-size: 12px; }
+  .a-field select option::checkmark { display: none; content: none; }
   @starting-style { .a-field select:open::picker(select) { opacity: 0; translate: 0 -3px; } }
   @media (max-width: 48rem) { .a-field select option { min-block-size: 44px; padding-block: 11px; } }
 }
