@@ -252,7 +252,7 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 	}
 }
 
-func TestPlainWebSocketClientRoutingLive(t *testing.T) {
+func testPlainWebSocketClientRoutingLive(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
 		t.Run(string(engine), func(t *testing.T) {
 			input := Input{Protocol: ProtocolVMess, Username: "default", Tag: "plain-ws", Listen: "127.0.0.1", Port: singBoxFreePort(t),

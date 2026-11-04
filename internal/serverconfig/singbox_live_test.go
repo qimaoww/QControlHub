@@ -93,6 +93,7 @@ func TestSingBoxUpstreamLiveMatrix(t *testing.T) {
 	}
 	t.Log(strings.TrimSpace(string(version)))
 	t.Run("ws-tls-address-override", testSingBoxWebSocketTLSAddressOverride)
+	t.Run("ws-plaintext-client-routing", testPlainWebSocketClientRoutingLive)
 	certificate, certPath, keyPath := singBoxTestCertificate(t)
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
