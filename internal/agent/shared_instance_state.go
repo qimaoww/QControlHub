@@ -25,6 +25,7 @@ type sharedDeploymentState struct {
 	TaskID        string `json:"task_id"`
 	Digest        string `json:"digest"`
 	Reason        string `json:"reason,omitempty"`
+	Applying      bool   `json:"applying,omitempty"`
 }
 
 func sharedStatePath(spec EngineSpec) string {
@@ -114,6 +115,9 @@ func (e *Executor) verifySharedStart(ctx context.Context, spec EngineSpec, task 
 		return fmt.Errorf("读取本人已部署配置失败，请重新部署: %w", err)
 	}
 	state, err := readSharedDeploymentState(spec)
+	if err == nil && state.Applying {
+		return errors.New("实例部署尚未核实，请重新部署已确认的配置")
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if warning != "" {
@@ -162,7 +166,7 @@ func (e *Executor) deploymentStatus(ctx context.Context, engine core.Engine, spe
 		if err == nil {
 			result.Reason = state.Reason
 		}
-		if content, readErr := readConfigurationFile(spec.ConfigPath); readErr == nil && configurationDigest(content) == state.Digest {
+		if content, readErr := readConfigurationFile(spec.ConfigPath); !state.Applying && readErr == nil && configurationDigest(content) == state.Digest {
 			result.ConfigID, result.ConfigVersion, result.AppliedTaskID = state.ConfigID, state.ConfigVersion, state.AppliedTaskID
 		} else if result.Reason == "" {
 			result.Reason = "实例配置文件与部署版本不一致，请重新部署"
@@ -185,6 +189,9 @@ func (e *Executor) identifyRetainedDeployment(ctx context.Context, spec EngineSp
 		return unverified
 	}
 	state, err := readSharedDeploymentState(spec)
+	if err == nil && state.Applying {
+		return unverified
+	}
 	if err == nil && state.ConfigID != "" {
 		if state.Digest != configurationDigest(actual) || state.ConfigID != task.ConfigID || state.ConfigVersion != task.ConfigVersion {
 			return unverified

@@ -404,10 +404,6 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err != nil {
 			return validation, fmt.Errorf("inspect service before deployment: %w", err)
 		}
-		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)
-		if err != nil {
-			return validation, err
-		}
 		applyAction := core.ActionRestart
 		if task.SharedInstance {
 			endpoints, endpointErr := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
@@ -417,6 +413,38 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			if len(endpoints) == 0 {
 				applyAction = core.ActionStop
 			}
+		}
+		// Persist uncertainty before changing the running process. If rollback
+		// fails, matching old bytes alone cannot prove what the process loaded.
+		trackIdentity := task.SharedInstance || task.ConfigID != ""
+		previousIdentity, identityErr := readSharedDeploymentState(spec)
+		restoreIdentity := func() error {
+			if !trackIdentity {
+				return nil
+			}
+			if identityErr == nil {
+				return writeSharedDeploymentState(spec, previousIdentity)
+			}
+			if errors.Is(identityErr, os.ErrNotExist) {
+				if removeErr := os.Remove(sharedStatePath(spec)); !errors.Is(removeErr, os.ErrNotExist) {
+					return removeErr
+				}
+			}
+			return nil
+		}
+		if trackIdentity {
+			applying := previousIdentity
+			if identityErr != nil {
+				applying = sharedDeploymentState{}
+			}
+			applying.Applying = true
+			if err := writeSharedDeploymentState(spec, applying); err != nil {
+				return validation, err
+			}
+		}
+		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)
+		if err != nil {
+			return validation, errors.Join(err, restoreIdentity())
 		}
 		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, applyAction)
 		err = tlsPhaseError("服务应用", err)
@@ -448,6 +476,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			}
 			if recoveryErr != nil {
 				return output, fmt.Errorf("configuration deployment failed (%v); rollback failed: %w", err, recoveryErr)
+			}
+			if recoveryErr = restoreIdentity(); recoveryErr != nil {
+				return output, fmt.Errorf("恢复实例部署标识失败: %w", recoveryErr)
 			}
 			if backup == "" {
 				return output, fmt.Errorf("configuration deployment failed; newly created configuration was removed and service was stopped: %w", err)
