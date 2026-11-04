@@ -80,7 +80,7 @@ strong, b { font-weight: 600; }
 .a-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .a-heading p, .a-card-head p { margin-top: 6px; color: var(--soft-ink); font-size: var(--text-label); font-weight: 400; line-height: 1.6; }
 .a-muted { color: var(--soft-ink); font-size: var(--text-label); font-weight: 400; line-height: 1.6; }
-.a-stack { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.a-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; align-content: start; }
 .a-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .a-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); box-shadow: 0 1px 2px #18181b05; overflow: clip; }
 .a-card-head { min-height: 64px; padding: 16px var(--card-gutter); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
