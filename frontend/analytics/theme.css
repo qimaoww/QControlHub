@@ -141,6 +141,7 @@ strong, b { font-weight: 600; }
 .a-dialog::backdrop { position: fixed; inset: 0; background: #18181b74; }
 .a-dialog-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 12px var(--card-gutter); background: var(--paper); border-bottom: 1px solid var(--border); z-index: 1; }
 .a-dialog-body { padding: var(--card-gutter); }
+.a-chart-container { min-width: 0; width: 100%; overflow: hidden; }
 .a-chart { width: 100%; display: block; height: 240px; }
 .a-chart text { font-family: var(--font-ui); font-size: 12px; font-weight: 400; fill: var(--soft-ink); }
 .a-chart-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 12px; font-variant-numeric: tabular-nums; }
