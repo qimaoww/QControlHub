@@ -18,6 +18,11 @@ import (
 // export for these credentials rather than changing the protocol URL encoding.
 func subStoreClientValue(profile serverconfig.ClientProfile) string {
 	u, err := url.Parse(profile.URI)
+	// Mihomo 1.19.32 ignores Trojan WS URI host. Preserve independent Host/SNI
+	// through the existing native-map importer used by subscriptions.
+	if err == nil && u.Scheme == "trojan" && u.Query().Get("type") == "ws" && u.Query().Get("host") != "" && u.Query().Get("host") != u.Query().Get("sni") && profile.MihomoError == "" && profile.Mihomo != "" {
+		return profile.Mihomo
+	}
 	// Its Hysteria 2 URI parser also ignores ALPN, including non-default
 	// values. The existing native map retains the configured TLS parameters.
 	if err == nil && u.Scheme == "hysteria2" && u.Query().Get("alpn") != "" {

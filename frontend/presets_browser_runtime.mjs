@@ -452,8 +452,32 @@ export async function testPresetsRuntime(preview = false) {
       if (actual.plan.transport === "http") edit("transport_http_method", "POST");
       if (actual.plan.tls_enabled) { edit("tls_server_name", "tls.example.test"); edit("tls_alpn", actual.plan.transport === "http" ? "h2" : ["quic"].includes(actual.plan.transport) || ["tuic", "hysteria2"].includes(actual.protocol.key) ? "h3" : "http/1.1"); }
     }
+    const crossCoreWS = ["xray", "mihomo"].includes(actual.engine) && ["vmess", "trojan"].includes(actual.protocol.key);
+    if (crossCoreWS) {
+      edit("transport", "websocket");
+      edit("transport_path", "/custom-ws");
+      edit("tls_server_name", "tls.example.test");
+      edit("transport_host", "host.example.test");
+      if (actual.engine === "xray") edit("tls_alpn", "http/1.1");
+      assert(control("transport_host").labels.length && control("tls_server_name").labels.length, "WS routing inputs need visible labels");
+    }
     button("validate").click();
     await waitFor(() => test.saved?.version === 1 && !button("validate").disabled, `${actual.engine}/${actual.protocol.key}: saving real preset defaults stalled`);
+    if (crossCoreWS) {
+      const saved = submissions(test)[0].body.input;
+      assert(saved.transport === "websocket" && saved.transport_path === "/custom-ws" && saved.tls_server_name === "tls.example.test" && saved.transport_host === "host.example.test", "native WS save lost independent routing");
+      assert(control("tls_server_name").value === saved.tls_server_name && control("transport_host").value === saved.transport_host, "native WS reopen lost independent routing");
+      if (actual.engine === "xray") assert(control("tls_alpn").value === "http/1.1", "Xray WS reopen lost ALPN");
+      form().querySelector('[data-builder-step="transport"]').click();
+      control("transport_host").scrollIntoView({ block: "center", behavior: "instant" });
+      const hostRect = control("transport_host").getBoundingClientRect();
+      assert(document.elementFromPoint(hostRect.x + hostRect.width / 2, hostRect.y + hostRect.height / 2) === control("transport_host"), "save bar obstructs WS Host input");
+      edit("transport", "grpc");
+      assert(control("transport_host").disabled, "WS Host remains active on gRPC");
+      edit("transport", "websocket");
+      assert(!control("transport_host").disabled && control("transport_host").value === saved.transport_host, "transport switch erased WS Host");
+    }
+
     assert(submissions(test)[0].body.input.protocol === actual.protocol.key, "real preset submitted a different protocol");
     if (actual.engine === "xray" && actual.plan.transport === "xhttp") {
       assert(!control("transport_host").disabled,"XHTTP Host was disabled by unrelated HTTP transport visibility");

@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 )
 
 type clientMetadata struct {
+	WebSocket                 *webSocketClientMetadata          `json:"websocket_client,omitempty"`
 	NativeTLS                 *core.NodeTLSCertificateReference `json:"native_tls,omitempty"`
 	PanelCertificateID        string                            `json:"panel_certificate_id,omitempty"`
 	PanelCertificateName      string                            `json:"panel_certificate_name,omitempty"`
@@ -36,10 +38,34 @@ type clientMetadata struct {
 	WireGuardKeepalive        *int                              `json:"wireguard_keepalive,omitempty"`
 }
 
+// Xray and Mihomo do not encode a client WS Host in their server listener.
+// Bind detached client values to the exact saved native TLS endpoint and peer.
+type webSocketClientMetadata struct {
+	Tag             string `json:"tag"`
+	Listen          string `json:"listen"`
+	Path            string `json:"path"`
+	PeerHash        string `json:"peer_hash"`
+	CertificatePath string `json:"certificate_path"`
+	PrivateKeyPath  string `json:"private_key_path"`
+	ServerName      string `json:"server_name,omitempty"`
+	Host            string `json:"host,omitempty"`
+	Port            int    `json:"port"`
+}
+
+func webSocketClientIdentity(input Input) webSocketClientMetadata {
+	return webSocketClientMetadata{Tag: input.Tag, Listen: input.Listen, Port: input.Port, Path: input.TransportPath,
+		PeerHash: fmt.Sprintf("%x", sha256.Sum256([]byte(input.Credential))), CertificatePath: input.CertificatePath, PrivateKeyPath: input.PrivateKeyPath}
+}
+
 // MarshalClientMetadata extracts client-only values for separately encrypted,
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
+	if input.Transport == "websocket" && input.TLSEnabled && !input.RealityEnabled && !proxiedTLS(input) {
+		ws := webSocketClientIdentity(input)
+		ws.ServerName, ws.Host = input.TLSServerName, input.TransportHost
+		metadata.WebSocket = &ws
+	}
 	if input.PanelCertificateID == "" && input.TLSEnabled && !input.RealityEnabled && (input.TLSMode == "" || input.TLSMode == "native") && input.CertificatePath != "" && input.PrivateKeyPath != "" && input.TLSServerName != "" {
 		metadata.NativeTLS = &core.NodeTLSCertificateReference{Tag: input.Tag, Domain: input.TLSServerName, CertificatePath: input.CertificatePath, PrivateKeyPath: input.PrivateKeyPath}
 	}
@@ -67,7 +93,7 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
 		_, preset := singBoxPresetFor(input.Protocol)
-		if input.TLSClientCertificate == "" && !preset && !proxiedTLS(input) && input.PanelCertificateID == "" && metadata.NativeTLS == nil {
+		if input.TLSClientCertificate == "" && !preset && !proxiedTLS(input) && input.PanelCertificateID == "" && metadata.NativeTLS == nil && metadata.WebSocket == nil {
 			return "", nil
 		}
 		metadata.TLSClientCertificate = input.TLSClientCertificate
@@ -112,11 +138,23 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		input.PanelCertificateID = metadata.PanelCertificateID
 		input.TLSServerName = metadata.PanelCertificateName
 	}
-	if native := metadata.NativeTLS; native != nil && input.TLSEnabled && !input.RealityEnabled && input.Tag == native.Tag && input.CertificatePath == native.CertificatePath && input.PrivateKeyPath == native.PrivateKeyPath && input.TLSServerName == "" {
+	if native := metadata.NativeTLS; metadata.WebSocket == nil && native != nil && input.TLSEnabled && !input.RealityEnabled && input.Tag == native.Tag && input.CertificatePath == native.CertificatePath && input.PrivateKeyPath == native.PrivateKeyPath && input.TLSServerName == "" {
 		input.TLSServerName = native.Domain
 	}
 	if input.TLSEnabled {
 		input.TLSClientCertificate = metadata.TLSClientCertificate
+	}
+	if ws := metadata.WebSocket; ws != nil && input.Transport == "websocket" && input.TLSEnabled && !input.RealityEnabled && !proxiedTLS(*input) {
+		identity := *ws
+		identity.ServerName, identity.Host = "", ""
+		if identity == webSocketClientIdentity(*input) && (input.TLSServerName == "" || input.TLSServerName == ws.ServerName) {
+			if input.TLSServerName == "" {
+				input.TLSServerName = ws.ServerName
+			}
+			if input.TransportHost == "" {
+				input.TransportHost = ws.Host
+			}
+		}
 	}
 	if preset, ok := singBoxPresetFor(metadata.Protocol); ok && nativeProtocol(input.Protocol) == preset.base && input.Transport == preset.transport && input.TLSEnabled == preset.tls && input.RealityEnabled == preset.reality {
 		input.Protocol = metadata.Protocol

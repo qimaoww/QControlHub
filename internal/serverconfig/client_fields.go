@@ -5,6 +5,16 @@ import (
 	"strconv"
 )
 
+// clientWebSocketInput resolves the form's empty Host default for exports only.
+// The dial address may be a CDN IP; it must not replace the TLS routing domain.
+// Inbound WS headers have server-side semantics and must remain unchanged.
+func clientWebSocketInput(input Input, serverName string) Input {
+	if input.Transport == "websocket" && input.TransportHost == "" {
+		input.TransportHost = serverName
+	}
+	return input
+}
+
 func clientTransport(value string) string {
 	switch value {
 	case "websocket":

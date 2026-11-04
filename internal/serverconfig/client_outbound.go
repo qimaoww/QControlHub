@@ -69,7 +69,7 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	}
 	out := map[string]any{"tag": "peer"}
 	if engine == core.EngineXray {
-		if input.Protocol == ProtocolSocks || input.TransportHost != "" || input.TLSClientCertificate != "" || input.TLSALPN != "" {
+		if input.Protocol == ProtocolSocks || input.TransportHost != "" && input.Transport != "websocket" || input.TLSClientCertificate != "" || input.TLSALPN != "" && input.Transport != "websocket" {
 			return nil, fmt.Errorf("Xray 出站暂不支持此 Socks / HTTP Host / ALPN / 自定义证书组合，请使用 sing-box JSON")
 		}
 		out["protocol"] = protocol
@@ -100,7 +100,11 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 			switch input.Transport {
 			case "", "raw":
 			case "websocket":
-				stream["network"], stream["wsSettings"] = "ws", map[string]any{"path": input.TransportPath}
+				ws := map[string]any{"path": input.TransportPath}
+				if host := values["HTTP Host"]; host != "" {
+					ws["host"] = host
+				}
+				stream["network"], stream["wsSettings"] = "ws", ws
 			case "grpc":
 				stream["network"], stream["grpcSettings"] = "grpc", map[string]any{"serviceName": input.TransportPath}
 			case "xhttp":
@@ -116,6 +120,9 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 				stream["security"], stream["realitySettings"] = "reality", reality
 			} else if input.TLSEnabled {
 				stream["security"], stream["tlsSettings"] = "tls", map[string]any{"serverName": serverName}
+				if input.TLSALPN != "" {
+					mapValue(stream["tlsSettings"])["alpn"], _ = validatedSingBoxALPN(input.TLSALPN)
+				}
 			}
 			out["streamSettings"] = stream
 		}
@@ -160,7 +167,7 @@ func singBoxClientOutbound(input Input, address, serverName string) (map[string]
 		out["method"] = input.Method
 	}
 	if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
-		singBoxTransport(out, input)
+		singBoxTransport(out, clientWebSocketInput(input, serverName))
 	}
 	if input.TLSEnabled || input.RealityEnabled {
 		tls := map[string]any{"enabled": true, "server_name": serverName}
