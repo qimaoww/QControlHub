@@ -352,7 +352,7 @@ func (m *tlsFrontendManager) writeConfig(path, content string, private bool) err
 	return err
 }
 
-func (m *tlsFrontendManager) checkPorts(previous, next []core.TLSFrontend) error {
+func (m *tlsFrontendManager) checkPorts(previous, next []core.TLSFrontend, handoff ...func(int) error) error {
 	owned := map[int]bool{}
 	for _, f := range previous {
 		owned[f.PublicPort] = true
@@ -377,6 +377,9 @@ func (m *tlsFrontendManager) checkPorts(previous, next []core.TLSFrontend) error
 		}
 		listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)))
 		if err != nil {
+			if len(handoff) > 0 && handoff[0](port) == nil {
+				continue
+			}
 			return fmt.Errorf("反代端口 %d 不可用：%w；请检查监听地址及现有服务占用", port, err)
 		}
 		listener.Close()
@@ -479,7 +482,7 @@ func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, fronte
 	return nil
 }
 
-func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontends []core.TLSFrontend) error {
+func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontends []core.TLSFrontend, candidate ...string) error {
 	tlsFrontendMutex.Lock()
 	defer tlsFrontendMutex.Unlock()
 	deployments, err := m.load()
@@ -498,7 +501,13 @@ func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontend
 	if len(next) == 0 {
 		return nil
 	}
-	if err = m.checkPorts(previous, next); err != nil {
+	var handoff []func(int) error
+	if len(candidate) > 0 && candidate[0] != "" {
+		handoff = append(handoff, func(port int) error {
+			return m.checkNativeTLSHandoff(ctx, service, candidate[0], frontends, port)
+		})
+	}
+	if err = m.checkPorts(previous, next, handoff...); err != nil {
 		return err
 	}
 	environment, cancel := context.WithTimeout(ctx, 120*time.Second)

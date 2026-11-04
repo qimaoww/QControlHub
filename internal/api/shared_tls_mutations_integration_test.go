@@ -87,6 +87,17 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 			if len(workspace.Inbounds) != 1 || workspace.Inbounds[0].Port != 443 || workspace.Inbounds[0].CertificatePath != plan.CertificatePath || workspace.Inbounds[0].PrivateKeyPath != plan.PrivateKeyPath {
 				t.Fatalf("native TLS certificate edit lost its port or paths: %+v", workspace.Inbounds)
 			}
+			for _, mode := range []string{"caddy", "nginx"} {
+				original := plan.Tag
+				plan.Tag, plan.TLSMode, plan.Listen, plan.Port, plan.TLSPublicPort = mode+"-renamed", mode, "127.0.0.1", 21001, 443
+				mutate("modify", original)
+				cdn.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
+				if len(workspace.Inbounds) != 1 || workspace.Inbounds[0].Tag != plan.Tag || workspace.Inbounds[0].Port != 21001 {
+					t.Fatalf("native-to-proxy edit did not replace the original inbound: %+v", workspace.Inbounds)
+				}
+				plan.TLSMode, plan.Listen, plan.Port, plan.TLSPublicPort = "native", "0.0.0.0", 443, 0
+				mutate("modify", plan.Tag)
+			}
 		})
 	}
 }

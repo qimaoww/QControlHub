@@ -15,14 +15,15 @@ import (
 )
 
 type tlsFrontendRequest struct {
-	Service      string                         `json:"service"`
-	Kind         string                         `json:"kind"`
-	Action       core.Action                    `json:"action"`
-	Stage        bool                           `json:"stage"`
-	Frontends    []core.TLSFrontend             `json:"frontends"`
-	Certificates bool                           `json:"certificates,omitempty"`
-	Deadline     time.Time                      `json:"deadline,omitempty"`
-	SyncSource   *core.ManagedCertificateSource `json:"sync_source,omitempty"`
+	Service       string                         `json:"service"`
+	Kind          string                         `json:"kind"`
+	Action        core.Action                    `json:"action"`
+	Stage         bool                           `json:"stage"`
+	Frontends     []core.TLSFrontend             `json:"frontends"`
+	Certificates  bool                           `json:"certificates,omitempty"`
+	Deadline      time.Time                      `json:"deadline,omitempty"`
+	SyncSource    *core.ManagedCertificateSource `json:"sync_source,omitempty"`
+	ConfigContent string                         `json:"config_content,omitempty"`
 }
 
 var tlsRequestName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
@@ -47,7 +48,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 4<<20 {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > core.MaxConfigEnvelopeBytes+(4<<20) {
 		return errors.New("unsafe TLS request file")
 	}
 	if err = validateOwner(info, "TLS request"); err != nil {
@@ -120,7 +121,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		return manager.prepareStagedCertificates(ctx, request.Service, request.Frontends)
 	}
 	if request.Stage {
-		return manager.stage(ctx, request.Service, request.Frontends)
+		return manager.stage(ctx, request.Service, request.Frontends, request.ConfigContent)
 	}
 	return manager.apply(ctx, request.Service, request.Frontends, request.Action)
 }
@@ -145,7 +146,11 @@ func (e *Executor) executeTLSFrontendRequest(ctx context.Context, spec EngineSpe
 	if !ok || engine != task.Engine {
 		return errors.New("托管 TLS 需要标准面板管理的 Xray / sing-box 服务")
 	}
-	name, err := writeTLSFrontendRequest(tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates})
+	request := tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates}
+	if stage && !certificates {
+		request.ConfigContent = task.ConfigContent
+	}
+	name, err := writeTLSFrontendRequest(request)
 	if err != nil {
 		return err
 	}
@@ -153,6 +158,9 @@ func (e *Executor) executeTLSFrontendRequest(ctx context.Context, spec EngineSpe
 	executable, err := os.Executable()
 	if err != nil {
 		return err
+	}
+	if e.tlsFrontendHelperPath != "" {
+		executable = e.tlsFrontendHelperPath
 	}
 	executable, err = ipQualityExecutable(executable)
 	if err != nil {
