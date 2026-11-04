@@ -2,6 +2,17 @@ import { checkAnalyticsMotion } from "./analytics_motion_browser.mjs";
 import assert from "node:assert/strict";
 
 export async function runAnalyticsBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api, record }) {
+  const anonymous = await createPage();
+  await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#tasks` }, anonymous);
+  await wait(anonymous, "!!document.querySelector('.a-login form')");
+  assert.equal(await evaluate(anonymous, "document.querySelectorAll('.login-shell,link[href*=\"app.css\"]').length"), 0);
+  await screenshot(anonymous, "analytics-login");
+  await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.username.value='analytics-admin';form.elements.token.value='wrong-preview-password';form.requestSubmit(); })()`);
+  await wait(anonymous, "!!document.querySelector('.a-login [role=alert]')?.textContent && !document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(anonymous, "document.querySelector('.a-login [name=username]').value"), "analytics-admin");
+  await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.token.value='config scope password fixture';form.requestSubmit(); })()`);
+  await wait(anonymous, "!!document.querySelector('#logout') && location.hash==='#tasks'");
+  assert.equal(await evaluate(anonymous, "document.querySelectorAll('.a-layout,.a-login').length"), 0, "authenticated classic preference overrides public analytics login hint");
   const page = await createPage();
   const capture = screenshot;
   screenshot = async (target, label) => {
@@ -23,6 +34,24 @@ export async function runAnalyticsBrowser({ base, mode, createPage, login, call,
   const { fonts } = await call("CSS.getPlatformFontsForNode", { nodeId }, page);
   assert.ok(fonts.length && fonts.every(font => font.isCustomFont), "Chinese heading uses the bundled font");
   await screenshot(page, "analytics-dashboard");
+  if (mode === "desktop") {
+    await call("Emulation.setDeviceMetricsOverride", { width:1440,height:720,deviceScaleFactor:1,mobile:false }, page);
+    await evaluate(page, `(() => {
+      window.__stableRail=document.querySelector('.a-rail');window.__stableTop=document.querySelector('.a-top');
+      const nav=window.__stableRail.querySelector('nav'),link=nav.querySelector('[href="#tasks"]');
+      link.focus();nav.scrollTop=100;link.click();window.__railScroll=nav.scrollTop;
+    })()`);
+    await wait(page, "document.querySelector('.a-main h1')?.textContent==='任务' && !document.querySelector('[aria-busy=true]')");
+    assert.ok(await evaluate(page, `window.__stableRail===document.querySelector('.a-rail') && window.__stableTop===document.querySelector('.a-top') && Math.abs(document.querySelector('.a-rail nav').scrollTop-window.__railScroll)<1 && document.activeElement.matches('[href="#tasks"]')`), "route changes preserve rail identity, scroll and keyboard focus");
+    await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click();location.hash='#archive-config'");
+    await wait(page, "document.querySelector('.a-main h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
+    assert.ok(await evaluate(page, "document.querySelector('.a-layout').classList.contains('a-collapsed')"));
+    await evaluate(page, "[...document.querySelectorAll('.a-top button')].find(item=>item.textContent.includes('刷新')).click()");
+    await wait(page, "!document.querySelector('[aria-busy=true]')");
+    assert.ok(await evaluate(page, "window.__stableTop===document.querySelector('.a-top') && document.querySelector('.a-layout').classList.contains('a-collapsed')"));
+    await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click();location.hash='#dashboard'");
+    await wait(page, "document.querySelector('.a-main h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
+  }
   const widths = mode === "mobile" ? [[390, 844], [844, 390], [768, 1024]] : [[1920, 1080], [3840, 2160], [1280, 900], [960, 800]];
   for (const [width, height] of widths) {
     await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);

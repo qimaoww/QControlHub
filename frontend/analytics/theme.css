@@ -159,7 +159,16 @@ strong, b { font-weight: 600; }
 .a-drawer .a-brand { padding-right: 56px; }
 .a-report-image { display: block; max-width: 100%; height: auto; border-radius: 8px; }
 .a-log-message { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Consolas, "Analytics Sans", monospace; font-size: var(--text-label); }
-.a-login { display: grid; align-content: center; min-height: 100dvh; width: min(448px, calc(100% - 32px)); margin-inline: auto; padding-block: 32px; }
+.a-login { display: grid; align-content: center; gap: 28px; min-height: 100dvh; width: min(416px, calc(100% - 40px)); margin-inline: auto; padding-block: 40px; }
+.a-login-brand { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 18px; line-height: 28px; }
+.a-login-card { padding: 32px; border: 1px solid var(--border); border-radius: 12px; background: var(--paper); box-shadow: 0 4px 20px rgb(24 24 27 / 3%); }
+.a-login-heading { margin-bottom: 28px; text-align: center; }
+.a-login-heading h1 { font-size: 24px; line-height: 32px; }
+.a-login-card .a-form-fields { gap: 20px; }
+.a-login-card form > .a-actions, .a-login-card button[type="submit"] { width: 100%; }
+.a-login-card button[type="submit"] { min-height: 42px; }
+.a-login-card > .a-notice:not(:empty) { margin-bottom: 20px; }
+@media (max-width: 480px) { .a-login-card { padding: 28px 24px; } .a-login { gap: 24px; } }
 @media (min-width: 1800px) { :root { --page-gutter: 32px; } }
 @media (max-width: 1200px) {
   .a-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

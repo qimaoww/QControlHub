@@ -63,7 +63,7 @@ export function startAnalytics({ app, session }) {
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
   const status = notice("", "ok");
   const work = node("div", { className: "a-work" });
-  let drawer;
+  let drawer, shellTitle, navigationToggle;
   document.body.className = "analytics";
   app.replaceChildren(layout);
   applyAppearance();
@@ -86,6 +86,7 @@ export function startAnalytics({ app, session }) {
     state.data = {};
     applyAppearance();
     dirty = false;
+    shellTitle = null;
     void render();
   } });
   function announce(message, tone = "ok") {
@@ -180,24 +181,38 @@ export function startAnalytics({ app, session }) {
         button("", () => void logout(), { glyph: "logout", title: "退出登录", className: "a-icon-button" })));
   }
   function shell(title) {
-    const toggle = button("", () => {
-      if (matchMedia("(max-width: 56rem)").matches) {
-        drawer = node("dialog", { className: "a-dialog a-drawer", "aria-label": "导航" }, rail(true));
-        const opened = drawer;
-        opened.addEventListener("close", () => { opened.remove(); if (drawer === opened) drawer = null; }, { once: true });
-        document.body.append(opened);
-        opened.showModal();
-      } else layout.classList.toggle("a-collapsed");
-    }, { glyph: "menu", title: "切换导航", className: "a-icon-button" });
-    toggle.setAttribute("aria-label", "切换导航");
-    const top = node("header", { className: "a-top" }, node("div", { className: "a-top-inner" },
-      toggle, node("span", { className: "a-top-title" }, title),
-      actions(button("刷新", () => void refresh(), { glyph: "refresh" }))));
-    work.replaceChildren(top, main);
-    layout.replaceChildren(node("a", {
-      href: "#content", className: "a-button a-skip",
-      onclick(event) { event.preventDefault(); main.focus(); main.scrollIntoView(); },
-    }, "跳到内容"), rail(), work);
+    // Keep navigation and header nodes alive across routes and refreshes.
+    // Scroll, keyboard focus and collapse state belong to this session's shell.
+    if (!shellTitle) {
+      navigationToggle = button("", () => {
+        if (matchMedia("(max-width: 56rem)").matches) {
+          drawer = node("dialog", { className: "a-dialog a-drawer", "aria-label": "导航" }, rail(true));
+          const opened = drawer;
+          opened.addEventListener("close", () => { opened.remove(); if (drawer === opened) drawer = null; navigationToggle?.setAttribute("aria-expanded", "false"); }, { once: true });
+          document.body.append(opened);
+          opened.showModal();
+          navigationToggle.setAttribute("aria-expanded", "true");
+        } else {
+          layout.classList.toggle("a-collapsed");
+          navigationToggle.setAttribute("aria-expanded", String(!layout.classList.contains("a-collapsed")));
+        }
+      }, { glyph: "menu", title: "切换导航", className: "a-icon-button" });
+      navigationToggle.setAttribute("aria-label", "切换导航");
+      navigationToggle.setAttribute("aria-expanded", String(!matchMedia("(max-width: 56rem)").matches && !layout.classList.contains("a-collapsed")));
+      shellTitle = node("span", { className: "a-top-title" }, title);
+      const top = node("header", { className: "a-top" }, node("div", { className: "a-top-inner" },
+        navigationToggle, shellTitle, actions(button("刷新", () => void refresh(), { glyph: "refresh" }))));
+      work.replaceChildren(top, main);
+      layout.replaceChildren(node("a", {
+        href: "#content", className: "a-button a-skip",
+        onclick(event) { event.preventDefault(); main.focus(); main.scrollIntoView(); },
+      }, "跳到内容"), rail(), work);
+    }
+    shellTitle.textContent = title;
+    layout.querySelectorAll('.a-nav-link').forEach(link => {
+      if (link.hash === `#${route}`) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
     main.replaceChildren(node("div", { className: "a-heading" }, node("h1", {}, title)), status);
   }
   async function leave() {
@@ -217,20 +232,29 @@ export function startAnalytics({ app, session }) {
   function login(message = "") {
     routeAbort?.abort();
     watch.stop();
+    const loginURL = new URL(location.href);
+    loginURL.searchParams.set("theme", "analytics");
+    history.replaceState(null, "", loginURL);
     state.session = null;
     state.data = {};
+    shellTitle = navigationToggle = null;
+    layout.classList.remove("a-collapsed");
     applyAppearance();
     dirty = false;
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
     const loginForm = form([
-      field("用户名", "username", "", { autocomplete: "username", required: true, maxlength: 64 }),
+      field("用户名", "username", "", { autocomplete: "username", required: true, maxlength: 64, pattern: "(?:[A-Za-z0-9._]|-)+", autocapitalize: "none", spellcheck: false }),
       field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true }),
     ], "登录", async values => {
       state.session = await api("/auth/login", { method: "POST", body: values });
       location.reload();
     });
+    loginForm.setAttribute("aria-label", "登录控制台");
     app.replaceChildren(node("main", { className: "a-login" },
-      section("登录 QControlHub", node("div", { className: "a-card-body" }, stack(message && notice(message), loginForm)))));
+      node("div", { className: "a-login-brand" }, node("span", { className: "a-mark" }, icon("brand")), node("strong", {}, "QControlHub")),
+      node("section", { className: "a-login-card", "aria-labelledby": "a-login-heading" },
+        node("header", { className: "a-login-heading" }, node("h1", { id: "a-login-heading" }, "登录控制台")),
+        message && notice(message), loginForm)));
     document.title = "登录 · QControlHub";
     app.querySelector("input")?.focus();
     motion?.page(app);

@@ -1,6 +1,6 @@
 import { disposeTheme } from "./modules/theme-lifecycle.js";
 import { accountRequest } from "./modules/account-request.js";
-import { effectiveTheme } from "./modules/theme-registry.js";
+import { effectiveTheme, loginTheme } from "./modules/theme-registry.js";
 
 const app = document.querySelector("#app");
 const params = new URL(import.meta.url).searchParams;
@@ -37,6 +37,9 @@ async function start() {
   } catch (error) {
     if (error.status === 401) session = null;
   }
+
+  if (!session) selected = loginTheme(location.search,
+    document.querySelector('meta[name="qch-login-theme"]')?.content);
 
   if (selected === "analytics") {
     const sheet = style("./analytics/theme.css", "analytics");
