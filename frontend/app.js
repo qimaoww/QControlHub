@@ -97,6 +97,10 @@ function renderLogin(message = "") {
 }
 
 const routeModules = createRouteModuleLoader({
+  async themes() {
+    const { installThemes } = await import("./modules/themes.js");
+    return installThemes({ api, state, shell, esc, notify });
+  },
   async dashboard() {
     const { installDashboard } = await import("./modules/dashboard.js");
     return installDashboard({

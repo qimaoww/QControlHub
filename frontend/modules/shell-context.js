@@ -8,6 +8,7 @@ import { settingsDirectoryMarkup } from "./settings-nav.js";
 
 export function createShellContext({ state, can, esc, engineName, date, ago, engines }) {
 function contextMarkup(title) {
+  if (state.route === "themes") return "";
   if (state.route === "client-connections") return clientConnectionSidebar({ state, esc, engineName });
   if (state.route === "ip-quality") {
     // One node at a time: the page owns the selection and publishes the exact

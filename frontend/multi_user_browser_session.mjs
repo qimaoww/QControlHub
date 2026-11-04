@@ -64,7 +64,7 @@ try {
     }
     throw new Error(`Browser condition timed out: ${expression}`);
   };
-  const reload = async page => {
+  const reload = async (page, trigger = () => call("Page.reload", {}, page)) => {
     let timeout;
     let onMessage;
     const loaded = new Promise((resolve, reject) => {
@@ -77,7 +77,7 @@ try {
     });
     try {
       // Register before reloading: command acknowledgement precedes navigation.
-      await Promise.all([call("Page.reload", {}, page), loaded]);
+      await Promise.all([trigger(), loaded]);
     } finally {
       clearTimeout(timeout);
       socket.removeEventListener("message", onMessage);
@@ -117,6 +117,28 @@ try {
   assert.equal(alice.role, "user"); assert.equal(bob.role, "user"); assert.equal(admin.role, "admin");
   assert.notEqual(alice.user_id, bob.user_id);
   record(`${mode}: three independent browser contexts, real password/cookie/CSRF identities`);
+  // Theme access does not require panel settings or fleet permissions. These
+  // checks intentionally keep the unfinished independent theme unavailable.
+  for (const [page, identity] of [[a, alice], [manager, admin]]) {
+    await evaluate(page, "location.hash='#themes'");
+    await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
+    assert.equal(await evaluate(page, "document.querySelectorAll('[data-select-theme]').length"), 1);
+    const preference = await api(page, identity, "GET", "/preferences/theme");
+    assert.equal(preference.theme_id, "classic");
+    assert.equal(preference.revision, 0);
+    assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"));
+  }
+  const originalTheme = await api(a, alice, "GET", "/preferences/theme");
+  await api(a, alice, "PUT", "/preferences/theme", { theme_id: "analytics", revision: originalTheme.revision });
+  await reload(a);
+  await wait(a, "document.querySelector('[data-select-theme=classic]')?.disabled===false");
+  assert.ok(await evaluate(a, "document.querySelector('main').textContent.includes('所选主题暂不可用')"));
+  await reload(a, () => evaluate(a, "document.querySelector('[data-select-theme=classic]').click()"));
+  await wait(a, "document.querySelector('[data-select-theme=classic]')?.disabled===true");
+  assert.equal((await api(a, alice, "GET", "/preferences/theme")).theme_id, "classic");
+  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 0);
+  await screenshot(a, "themes-classic");
+  record(`${mode}: theme page is account scoped, unavailable theme recovers through confirmed API save and reload`);
   for (const [user, route, selector] of [["task-reader", "tasks", "[data-task-page]"], ["traffic-reader", "traffic", ".traffic-workspace"]]) {
     const page = await createPage();
     await login(page, user);
@@ -145,6 +167,9 @@ try {
   record(`${mode}: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation`);
   const noPermissions = await createPage();
   await login(noPermissions, "no-permissions");
+  await evaluate(noPermissions, "location.hash='#themes'");
+  await wait(noPermissions, "!!document.querySelector('[data-select-theme=classic]')");
+  assert.ok(await evaluate(noPermissions, "!document.querySelector('.workspace-main .alert.error')"));
   assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.dock-nav a[href=\"#live-config\"]').length"), 0);
   await evaluate(noPermissions, "location.hash='#live-config'");
   await wait(noPermissions, "document.querySelector('.workspace-main .alert.error')?.textContent.includes('无权查看配置')");

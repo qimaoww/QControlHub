@@ -33,8 +33,10 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks, true],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
+    ["themes", "主题", dockIcons.sliders, true],
   ];
   const linkPermissions = {
+    themes: "agent-access.read",
     certificates: "certificates.read",
     dashboard: "overview.read",
     "ip-quality": "agents.read",
@@ -55,6 +57,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   // Workflow groups: overview | node operations | client delivery | observability | accounts.
   const navGroups = {
+    themes: "accounts",
     certificates: "nodes",
     dashboard: "overview",
     "node-settings": "nodes",
@@ -72,7 +75,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : state.route === "certificates" ? " no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ["certificates", "themes"].includes(state.route) ? " no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = { ...state.data.overview };
@@ -130,6 +133,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}>${indicatorMarkup}<svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
+    ["themes", "主题"],
     ["system-bbr", "BBR / TCP 调优"],
     ["ip-quality", "IP 质量检测"],
     ["access-control", "访问限制"],
@@ -147,7 +151,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     .filter(([id]) => can(linkPermissions[id]))
     .map(([id, text]) => `<a class="${activeDockRoute(id) ? "active" : ""}" href="#${id}" ${activeDockRoute(id) ? 'aria-current="page"' : ""}>${text}</a>`)
     .join("");
-  const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg><span>更多</span></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
+  const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg><span>更多</span></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换配色</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
   document.title = `${title} · ${panelName}`;
   const routeChanged = !previousMain || previousRoute !== state.route;
   const workspaceKey = `workspace-${viewKey}`;
@@ -156,7 +160,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   // Selection only changes the sidebar's highlight/content. Keep its links
   // mounted so rapid node switches retain the launcher and keyboard focus.
   const contextKey = state.route;
-  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span><a href="#${homeRoute}">${esc(panelName)}</a></span><i>/</i><b><a href="#${entryRoute}">${esc(title)}</a></b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${onlineLabel}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换配色"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">配色</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span><a href="#${homeRoute}">${esc(panelName)}</a></span><i>/</i><b><a href="#${entryRoute}">${esc(title)}</a></b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${onlineLabel}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
   if (previousMain && currentView) {
     const template = document.createElement("template");

@@ -20,6 +20,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/panel-metrics", s.requirePermission(core.PermissionPanelMetricsRead, http.HandlerFunc(s.getPanelMetrics)))
 	mux.Handle("GET /api/v1/preferences/node-order", s.requireAllPermissions(nil, http.HandlerFunc(s.getNodeOrder)))
+	mux.Handle("GET /api/v1/preferences/theme", s.requireAllPermissions(nil, http.HandlerFunc(s.getTheme)))
+	mux.Handle("PUT /api/v1/preferences/theme", s.requireAllPermissions(nil, http.HandlerFunc(s.putTheme)))
 	mux.Handle("PUT /api/v1/preferences/node-order", s.requireAllPermissions(nil, http.HandlerFunc(s.putNodeOrder)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/ip-quality/{id}/archives/{family}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getIPQualityArchive)))
