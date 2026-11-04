@@ -89,4 +89,3 @@ export function outboundPeers(entries, agentId) {
     (entry.profiles || []).map(profile => ({...profile, agentId:entry.agent_id, agentName:entry.agent_name,
       agentStatus:entry.agent_status, engine:entry.engine})));
 }
-

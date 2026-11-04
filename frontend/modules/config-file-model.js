@@ -158,4 +158,3 @@ export function configFileDisplayName(path, content) {
   } catch { /* Invalid drafts retain their file identity. */ }
   return name;
 }
-

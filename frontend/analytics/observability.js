@@ -1,3 +1,4 @@
+import { redactDiagnostic } from "../modules/errors.js";
 import { node, button, actions, stack, section, table, badge, field, muted, query, list, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
@@ -28,7 +29,7 @@ export async function logsPage(ctx) {
     results.replaceChildren(table(["时间", "节点", "实例", "内核", "级别", "内容"], records.map(record => [
       date(record.logged_at), record.agent_id, record.instance_id === "main" ? "主实例" : record.instance_id || "—",
       record.engine, badge(record.level, ["critical", "error"].includes(record.level) ? "bad" : ""),
-      node("span", { className: "a-log-message" }, record.message),
+      node("span", { className: "a-log-message" }, redactDiagnostic(record.message)),
     ]), { paginate: 50, label: "内核日志" }));
   }
   records = list(await ctx.api("/core-logs?limit=200"));

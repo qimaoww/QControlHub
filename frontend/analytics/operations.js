@@ -1,6 +1,6 @@
 import { formatDate } from "./appearance.js";
 import { aggregateDashboardTrafficDays, utcMonth } from "../modules/dashboard-model.js";
-import { diagnosticError } from "../modules/errors.js";
+import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
@@ -96,7 +96,7 @@ export async function taskDetail(ctx, taskID) {
   let task = await ctx.api(`/tasks/${pathID(taskID)}`);
   if (!ctx.current()) return;
   const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
-  const output = code(task.output || "暂无输出");
+  const output = code(redactDiagnostic(task.output) || "暂无输出");
   const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
     muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
@@ -116,9 +116,9 @@ export async function taskDetail(ctx, taskID) {
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
       const error = diagnosticError(task.error || "");
       if (failure.textContent !== error) failure.textContent = error;
-      if (output.textContent !== (task.output || "暂无输出")) {
+      if (output.textContent !== (redactDiagnostic(task.output) || "暂无输出")) {
         const follow = output.scrollHeight-output.scrollTop-output.clientHeight<24;
-        output.textContent = task.output || "暂无输出";
+        output.textContent = redactDiagnostic(task.output) || "暂无输出";
         if(follow)output.scrollTop=output.scrollHeight;
       }
     } finally { reading = false; }

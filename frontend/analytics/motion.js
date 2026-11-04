@@ -81,6 +81,7 @@ export function createAnalyticsMotion(scope) {
       if ('value' in part && 'value' in copy) copy.value = part.value;
       if ('checked' in part && 'checked' in copy) copy.checked = part.checked;
     });
+    clone.querySelectorAll('.a-toast-region').forEach(region=>region.remove());
     clone.inert = true; clone.setAttribute("aria-hidden", "true");
     clone.removeAttribute("popover");
     Object.assign(clone.style, { display: "block", position: "fixed", inset: "auto", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", maxHeight: "none", pointerEvents: "none", transform: "none" });
@@ -139,9 +140,9 @@ export function createAnalyticsMotion(scope) {
     if (!seen) { seen = new Set(); seenMessages.set(region, seen); }
     const key = `${element.className}|${text}`;
     if (!text) { seen.delete(`${element.className}|${previous}`); stop(element); return; }
-    if (previous === undefined && seen.has(key)) return;
+    if (previous === undefined && seen.has(key) && !element.classList.contains("a-toast")) return;
     seen.add(key);
-    if (!movingAncestor(element)) play(element, [{ opacity: 0, translate: "0 3px" }, { opacity: 1, translate: "0 0" }], { name: "feedback", duration: 240 });
+    if (!movingAncestor(element)) play(element, [{ opacity: 0, translate: element.classList.contains("a-toast") ? "10px 0" : "0 3px" }, { opacity: 1, translate: "0 0" }], { name: "feedback", duration: 240 });
   }
   function hideTip() {
     scope.clearTimer(tipTimer);
@@ -267,6 +268,7 @@ export function createAnalyticsMotion(scope) {
         [{ opacity: 0, translate: "0 10px" }, { opacity: 1, translate: "0 0" }],
         { name: index ? "page-follow" : "page", duration: 320, delay: index * 40 }));
     }, visible,
+    notificationExit: element => retire(element),
     navigation: layout => {
       clearTails();
       const rail = layout.querySelector(':scope > .a-rail');

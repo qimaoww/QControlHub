@@ -8,6 +8,7 @@ import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
 import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog } from "./ui.js";
 import { dashboardPage, tasksPage, quotaPage } from "./operations.js";
+import { createNotifications } from "./notifications.js";
 import { nodesPage } from "./nodes.js";
 import { archivePage } from "./configs.js";
 import { themePage } from "./themes.js";
@@ -65,7 +66,7 @@ export function startAnalytics({ app, session }) {
   let currentHash = location.hash, route = "", dialogSequence = 0, navigation = 0;
   const layout = node("div", { className: "a-layout" });
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
-  const status = notice("", "ok");
+  const notifications = createNotifications(presentation);
   const work = node("div", { className: "a-work" });
   let drawer, shellTitle, navigationToggle;
   document.body.className = "analytics";
@@ -93,11 +94,7 @@ export function startAnalytics({ app, session }) {
     shellTitle = null;
     void render();
   } });
-  function announce(message, tone = "ok") {
-    status.className = `a-notice ${tone}`;
-    status.setAttribute("role", tone === "error" ? "alert" : "status");
-    status.textContent = message;
-  }
+  const announce = notifications.show;
   function dialog(title, content, { wide = false } = {}) {
     const active = document.activeElement;
     const closeButton = button("", () => {
@@ -115,8 +112,9 @@ export function startAnalytics({ app, session }) {
       if (pending || box.onRequestClose) event.preventDefault();
       if (!pending && box.onRequestClose) void box.onRequestClose();
     });
-    box.addEventListener("close", () => { box.remove(); if (active?.isConnected) active.focus(); }, { once: true });
+    box.addEventListener("close", () => { notifications.position(); box.remove(); if (active?.isConnected) active.focus(); }, { once: true });
     openDialog(box);
+    notifications.position();
     return box;
   }
   async function confirm(message, label = "确认") {
@@ -193,12 +191,14 @@ export function startAnalytics({ app, session }) {
           drawer = node("dialog", { className: "a-dialog a-drawer", "aria-label": "导航" }, rail(true));
           const opened = drawer;
           opened.addEventListener("close", () => {
+            notifications.position();
             opened.remove();
             if (drawer === opened) { drawer = null; navigationToggle?.setAttribute("aria-expanded", "false"); }
           }, { once: true });
           document.body.append(opened);
           navigationToggle.focus({ preventScroll: true });
           openDialog(opened);
+          notifications.position();
           navigationToggle.setAttribute("aria-expanded", "true");
         } else {
           layout.classList.toggle("a-collapsed");
@@ -222,7 +222,7 @@ export function startAnalytics({ app, session }) {
       if (link.hash === `#${route}`) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
-    main.replaceChildren(node("div", { className: "a-heading" }, node("h1", {}, title)), status);
+    main.replaceChildren(node("div", { className: "a-heading" }, node("h1", {}, title)));
   }
   async function leave() {
     if (pending) { announce("操作正在提交，请等待结果。", "error"); return false; }
@@ -244,6 +244,7 @@ export function startAnalytics({ app, session }) {
     const loginURL = new URL(location.href);
     loginURL.searchParams.set("theme", "analytics");
     history.replaceState(null, "", loginURL);
+    notifications.clear();
     state.session = null;
     setStorageAccount(null);
     state.data = {};
@@ -280,7 +281,6 @@ export function startAnalytics({ app, session }) {
     if (["agents", "agent-config"].includes(route)) route = "live-config";
     const entry = destinations.flatMap(([, entries]) => entries).find(([id]) => id === route);
     const title = entry?.[1] || "控制台";
-    status.textContent = "";
     shell(title);
     document.title = `${title} · QControlHub`;
     const stage = node("div", { className: "a-stack", "aria-busy": "true" }, empty("正在加载…"));

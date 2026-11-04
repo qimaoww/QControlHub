@@ -1,3 +1,4 @@
+import { nodeMetrics } from './node-metrics.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
 import { createServiceActionGuard } from '../modules/agent-service-state.js';
@@ -100,19 +101,22 @@ export async function nodesPage(ctx) {
       muted(agent.id), muted(`${agent.os} / ${agent.arch} · QAgent ${agent.version || '—'}`),
       muted(`最近在线 · ${date(agent.last_seen)}`),
       agent.metrics && grid(
-        muted(`CPU · ${Number(agent.metrics.cpu_percent || 0).toFixed(1)}%`),
-        muted(`内存 · ${bytes(agent.metrics.memory_used_bytes)} / ${bytes(agent.metrics.memory_total_bytes)}`)),
+        muted(`CPU · ${agent.metrics.cpu_available ? Number(agent.metrics.cpu_percent).toFixed(1)+'%' : '—'}`),
+        muted(`内存 · ${agent.metrics.memory_available ? bytes(agent.metrics.memory_used_bytes)+' / '+bytes(agent.metrics.memory_total_bytes) : '—'}`),
+        muted(`磁盘 · ${agent.metrics.disk_available ? bytes(agent.metrics.disk_used_bytes)+' / '+bytes(agent.metrics.disk_total_bytes) : '—'}`),
+        muted(`网络 · ${agent.metrics.network_available ? '接收 '+bytes(agent.metrics.network_rx_bps)+'/s · 发送 '+bytes(agent.metrics.network_tx_bps)+'/s' : '—'}`)),
       agent.shared_allocation && stack(muted(`所有者 · ${agent.shared_allocation.owner_username || '—'}`),
         muted(`端口 · ${formatSharedPorts(agent.shared_allocation.ports) || '未分配'}`),
         muted(`流量 · ${bytes(agent.shared_allocation.used_bytes)} / ${agent.shared_allocation.limit_bytes ? bytes(agent.shared_allocation.limit_bytes) : '不限量'}`)),
     )));
     const sections = [facts];
+    if(ctx.can('metrics.read'))sections.push(section('资源指标',node('div',{className:'a-card-body'},button('查看指标历史',event=>void ctx.mutate(event.currentTarget,()=>nodeMetrics(ctx,agent))))));
     if (manage) {
       sections.push(section('Agent 设置', node('div', { className: 'a-card-body' }, stack(
         ctx.form([field('节点名称', 'name', agent.name, { required: true, maxlength: 100 })], '保存名称', async values => {
           const saved = await ctx.api(`${base}/name`, { method: 'PUT', body: { name: values.name.trim() } });
           if (!ctx.current()) return;
-          agent.name = saved.name; await load(); ctx.announce('名称已保存');
+          agent.name = saved.name; box.querySelector('.a-dialog-head h2').textContent = `${agent.name} · 节点设置`; await load(); ctx.announce('名称已保存');
         }),
         agent.can_hide && ctx.form([field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' })], '保存可见性', async (_, form) => {
           const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: form.elements.admin_hidden.checked } });
@@ -168,6 +172,11 @@ export async function nodesPage(ctx) {
       ))));
     }
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(sections, actions(
+      ctx.can('host.manage',agent) && button('升级 Agent',async event=>{
+        const control=event.currentTarget;
+        if(!await ctx.confirm('升级此节点的 QAgent？替换后自动重连，期间节点会短暂离线。','升级 Agent')||!ctx.current())return;
+        await ctx.mutate(control,()=>submit(agent,undefined,'upgrade-agent'));
+      },{disabled:agent.status!=='online'||!agent.features?.includes('agent-self-upgrade-v1'),title:agent.features?.includes('agent-self-upgrade-v1')?'升级 QAgent':'当前 Agent 需重新执行安装命令'}),
       manage && agent.enrollment_command_available && button('查看安装命令', event => void ctx.mutate(event.currentTarget, async () => command(await ctx.api(`${base}/enrollment-command`, { method: 'POST' })))),
       manage && button('共享 Agent', event => void ctx.mutate(event.currentTarget, () => sharing(agent))),
       manage && button('删除节点', async event => {
@@ -193,7 +202,7 @@ export async function nodesPage(ctx) {
       if (values.release_channel === 'custom' && !values.custom_version.trim()) throw new Error('请输入软件发行版本');
       if (!await ctx.confirm(shared ? '准备缺少的稳定版内核？已有版本会复用。' : '安装完成后将重启对应内核服务，确定继续？', '提交安装') || !ctx.current()) return;
       const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action: 'install', core_version: values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel, core_source: coreSourceForInstall(engine, values.release_channel, values.core_source) } });
-      feedback.textContent = '安装任务已提交';
+      feedback.textContent = ''; ctx.announce('安装任务已提交');
       if (ctx.can('tasks.read')) { await taskDetail(ctx, task.id); if (taskTerminal(task)) await load(); }
     });
     const sync = () => { ctx.visible(custom, form.elements.release_channel.value === 'custom'); form.elements.custom_version.required = form.elements.release_channel.value === 'custom'; ctx.visible(source, engine === 'mihomo' && form.elements.release_channel.value === 'development'); };
@@ -215,7 +224,7 @@ export async function nodesPage(ctx) {
       }));
       const received = await ctx.api(`/agents/${pathID(agent.id)}/sharing`, { method: 'PUT', body: { revision: saved.revision, shares } });
       if (!ctx.current()) return;
-      saved = received; rows.replaceChildren(); saved.shares.forEach(add); ctx.setDirty(false); feedback.textContent = '共享设置已保存';
+      saved = received; rows.replaceChildren(); saved.shares.forEach(add); ctx.setDirty(false); feedback.textContent = ''; ctx.announce('共享设置已保存');
     });
     function add(share) {
       const engines = node('div', { className: 'a-actions' }, (agent.supported_capabilities || agent.capabilities).map(engine => field(engine, 'engines', list(share.engines).includes(engine), { type: 'checkbox', value: engine })));

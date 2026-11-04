@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record }) {
   const agentID=fixture.analyticsAgent;
-  const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-main h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
-  const click=async(label,selector='dialog[open]')=>evaluate(page,`[...document.querySelectorAll(${JSON.stringify(selector+' button')})].find(button=>button.textContent===${JSON.stringify(label)}).click()`);
+  const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-main h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
+  const click=async(label,selector='dialog[open]')=>evaluate(page,`[...document.querySelectorAll(${JSON.stringify(selector+' button')})].find(button=>!button.closest('select')&&button.textContent===${JSON.stringify(label)}).click()`);
   const close=async()=>{await evaluate(page,"document.querySelectorAll('dialog[open]').forEach(box=>box.close())");await wait(page,"!document.querySelector('dialog[open],.a-motion-tail')");};
   await navigate('#node-settings');await click('添加节点','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");await screenshot(page,'analytics-enrollment');
@@ -16,11 +16,16 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=name]').form;form.elements.name.value='主题工作流节点';form.requestSubmit()})()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('主题工作流节点')");
   assert.equal((await api(page,identity,'GET','/agents')).find(agent=>agent.id===agentID).name,'主题工作流节点');
-  await screenshot(page,'analytics-node-settings');await close();
+  await wait(page,"!!document.querySelector('.a-toast') && !document.getAnimations().some(animation=>animation.id==='analytics-feedback')");
+  assert.ok(await evaluate(page,"(()=>{const region=document.querySelector('.a-toast-region'),toast=region.querySelector('.a-toast'),box=toast.getBoundingClientRect(),control=toast.querySelector('button'),point=control.getBoundingClientRect();return region.matches(':popover-open')&&region.closest('dialog')?.open&&box.right<=innerWidth&&box.top>=0&&document.elementFromPoint(point.left+point.width/2,point.top+point.height/2)?.closest('.a-toast')===toast&&!document.querySelector('.a-main > .a-notice')&&!toast.textContent.includes('√')})()"),'notifications stay above the real modal, right aligned, interactive and without a checkmark');
+  await screenshot(page,'analytics-notification-modal');
+  await evaluate(page,"document.querySelector('.a-toast [aria-label=关闭通知]').click()");
+
+  await screenshot(page,'analytics-node-settings');await click('查看指标历史');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('指标历史')) && !document.querySelector('[aria-busy=true]')");await close();
   await evaluate(page,`[...document.querySelectorAll('.a-main tbody tr')].find(row=>row.textContent.includes(${JSON.stringify(agentID)})).querySelectorAll('button')[1].click()`);
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('共享 Agent')) && !document.querySelector('[aria-busy=true]')");await click('添加用户');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.querySelector('[name=username]').value='alice';form.querySelector('[name=ports]').value='23450-23451';form.querySelector('[name=limit_gib]').value='1';form.querySelector('[name=engines]').checked=true;form.requestSubmit()})()");
-  await wait(page,"document.querySelector('dialog[open]')?.textContent.includes('共享设置已保存') && !document.querySelector('[aria-busy=true]')");
+  await wait(page,"document.querySelector('.a-toast-region')?.textContent.includes('共享设置已保存') && !document.querySelector('[aria-busy=true]')");
   const sharing=await api(page,identity,'GET',`/agents/${agentID}/sharing`);assert.deepEqual(sharing.shares[0].ports,[23450,23451]);assert.equal(sharing.shares[0].status,'pending');
   await screenshot(page,'analytics-node-sharing');await close();await api(page,identity,'PUT',`/agents/${agentID}/sharing`,{revision:sharing.revision,shares:[]});
   await navigate(`#live-config?agent=${agentID}&engine=mihomo`);await click('添加入站','.a-main');
@@ -45,5 +50,27 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('主题接入名称')");
   assert.ok((await api(page,identity,'GET','/client-access')).find(entry=>entry.agent_id===agentID).profiles.some(item=>item.client_name==='主题接入名称'));
   await click('参数详情','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('参数详情'))");await screenshot(page,'analytics-client-details');await close();
-  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback passed`);
+  const policies=(await api(page,identity,'GET','/traffic-policies')).filter(policy=>policy.agent_id===agentID);assert.ok(policies.length);
+  await navigate('#traffic');await click('批量操作','.a-main');
+  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='流量批量操作')");
+  await evaluate(page,`(()=>{const choice=document.querySelector('dialog[open] [name="${policies[0].id}"]');choice.checked=true;choice.dispatchEvent(new Event('change',{bubbles:true}));choice.form.requestSubmit()})()`);
+  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='清零当前周期')");await click('清零当前周期');
+  await wait(page,"!document.querySelector('[aria-busy=true]') && (!!document.querySelector('dialog[open] tbody tr') || [...document.querySelectorAll('dialog[open] [role=alert]')].some(item=>item.textContent))");
+  assert.ok(await evaluate(page,"!!document.querySelector('dialog[open] tbody tr') && document.querySelector('dialog[open]').textContent.includes('成功')"),await evaluate(page,"document.querySelector('dialog[open]')?.textContent"));
+  await screenshot(page,'analytics-traffic-batch');await close();
+  await navigate(`#live-config?agent=${fixture.analyticsXray}&engine=xray`);await click('出站','.a-main');await click('添加并绑定');
+  await wait(page,"!!document.querySelector('dialog[open] [name=fragment]') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=protocol]');input.form.requestSubmit()})()");
+  await wait(page,"document.querySelector('dialog[open] [name=fragment]')?.value.includes('freedom') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page,"document.querySelector('dialog[open] [name=fragment]').form.requestSubmit()");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] h2')].some(item=>item.textContent==='任务详情')");await close();
+  const xray=await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`);
+  const document=JSON.parse(xray.config.content);assert.ok(document.outbounds.some(item=>item.tag==='exit-23479'));assert.ok(document.routing.rules.some(item=>item.inboundTag?.includes('theme-xray')&&item.outboundTag==='exit-23479'));
+  for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${fixture.analyticsXray}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
+  await click('配置文件','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(await evaluate(page,"document.querySelector('dialog[open] [name=file]').options.length>1"));await screenshot(page,'analytics-xray-files');
+  await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");
+  assert.equal((await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`)).config.version,xray.config.version+1);
+  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and atomic split-file save passed`);
 }

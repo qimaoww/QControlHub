@@ -1,3 +1,4 @@
+import { trafficBatch } from "./traffic-batch.js";
 import { mergeTrafficPorts, trafficPolicyEditable, eligibleAgents, policyStatus, trafficRateForDisplay, trafficCardIdentity } from "../modules/traffic-model.js";
 import { node, button, actions, stack, section, table, badge, field, muted, list, pathID, notice, query } from "./ui.js";
 import { bytes, date } from "./operations.js";
@@ -26,11 +27,11 @@ export async function trafficPage(ctx) {
         field("协议", "protocol", target?.protocol || "both", { options: [["both", "TCP + UDP"], ["tcp", "TCP"], ["udp", "UDP"]] }),
         field("周期", "cycle", policy?.cycle || "monthly", { options: [["monthly", "每月"], ["yearly", "每年"]] }),
         field("周期起始日", "cycle_anchor", (policy?.cycle_anchor || new Date().toISOString()).slice(0, 10), { type: "date", required: true }),
-        field("配额（GiB）", "limit_gb", (policy?.limit_bytes || 0) / 1024 ** 3, { type: "number", min: 0.000001, step: "any", required: true })),
+        field("配额（GiB）", "limit_gb", (policy?.limit_bytes || 0) / 1024 ** 3, { type: "number", min: 0, step: "any", required: true })),
       field("超额自动封禁", "auto_block", policy?.auto_block ?? true, { type: "checkbox" }),
     ], "保存配额", async (values, element) => {
       const limit = Math.round(Number(values.limit_gb) * 1024 ** 3);
-      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("请输入有效配额。");
+      if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("请输入有效配额。");
       const payload = { agent_id: policy?.agent_id || values.agent_id, engine: policy?.engine || values.engine,
         port: Number(values.port), name: values.name, protocol: values.protocol, cycle: values.cycle,
         cycle_anchor: `${values.cycle_anchor}T00:00:00Z`, limit_bytes: limit, auto_block: element.elements.auto_block.checked };
@@ -128,5 +129,8 @@ export async function trafficPage(ctx) {
   }));
   return stack(section("流量筛选", node("div", { className: "a-card-body a-form-grid" }, search, scope)),
     section("端口流量", stack(summary, results), actions(sync,
+      ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
+        const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}
+      })),
       ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))));
 }

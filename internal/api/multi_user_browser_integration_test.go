@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -39,6 +42,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 			completeConfigScopeAPITask(t, analyticsScope, db, analyticsDeploy)
+			analyticsXray := enrollAnalyticsXray(t, analyticsScope, db)
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}
@@ -66,7 +70,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fixture := map[string]any{"owned": owned, "analyticsAgent": analyticsAgent.ID, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
+			fixture := map[string]any{"owned": owned, "analyticsAgent": analyticsAgent.ID, "analyticsXray": analyticsXray.ID, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
 				"contentA": configScopeAPIConfig(t, 21001).Content, "contentB": configScopeAPIConfig(t, 21002).Content}
 			frontendRoot := filepath.Join("..", "..", "frontend")
 			serve := func(root string) *httptest.Server {
@@ -112,4 +116,28 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A saved fixture exercises analytics editing without claiming a live kernel.
+func enrollAnalyticsXray(t *testing.T, ctx context.Context, db *store.Store) core.Agent {
+	t.Helper()
+	token, err := db.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "analytics-xray"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "analytics-xray", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineXray}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := serverconfig.Generate(core.EngineXray, serverconfig.Input{Protocol: serverconfig.ProtocolVLESS, Tag: "theme-xray", Listen: "0.0.0.0", Port: 23479, Username: "theme-user", Credential: "123e4567-e89b-42d3-a456-426614174000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "analytics-xray", Engine: core.EngineXray, Content: content}, 0); err != nil {
+		t.Fatal(err)
+	}
+	return agent
 }

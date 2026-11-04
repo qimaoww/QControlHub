@@ -10,4 +10,3 @@ export function commonConfigFields(engine, fields) {
   return fields.filter(field => !structural.has(field.key) &&
     (engine === "ss-rust" ? ["global", "override"].includes(field.scope) : !["inbound", "structure"].includes(field.scope)));
 }
-
