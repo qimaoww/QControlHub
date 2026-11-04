@@ -91,6 +91,9 @@ func TestStatusRefreshRecoversFailedHostDeploymentAcrossEnginesAndInstances(t *t
 					t.Log(label + ": unchanged-port validate/deploy blocked; transaction did not save or queue a task")
 				}
 				denied("after unrelated failed host deployment")
+				if _, err := db.CreateTask(owner, core.TaskRequest{AgentID: node.ID, Engine: foreign.Engine, Action: core.ActionStatus}); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "升级 Agent") {
+					t.Fatalf("legacy Agent did not receive recovery instructions: %v", err)
+				}
 				runtime := map[core.Engine]core.RuntimeState{}
 				for _, engine := range core.AllEngines() {
 					runtime[engine] = core.RuntimeState{Installed: true, ServiceStatus: "active"}
@@ -134,7 +137,7 @@ func TestStatusRefreshRecoversFailedHostDeploymentAcrossEnginesAndInstances(t *t
 				for _, action := range []core.Action{core.ActionValidate, core.ActionDeploy} {
 					saved, task, err := db.SaveAgentConfigAndTask(targetContext, target, target.Version, ConfigMutationOptions{Action: action})
 					if err != nil {
-						t.Fatalf("successful unrelated redeploy did not restore %s: %v", action, err)
+						t.Fatalf("verified refresh did not restore %s: %v", action, err)
 					}
 					target = saved
 					finish(task, true)

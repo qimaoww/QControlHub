@@ -20,7 +20,10 @@ func (s *Store) prepareStatusSnapshotTx(ctx context.Context, tx pgx.Tx, task *co
 	if !task.SharedInstance && !containsFeature(features, core.AgentFeatureInstanceStatus) {
 		var uncertain bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership
-			WHERE agent_id=$1 AND engine=$2 AND (uncertain OR config_uncertain))`, task.AgentID, task.Engine).Scan(&uncertain); err != nil {
+			WHERE agent_id=$1 AND engine=$2 AND (uncertain OR config_uncertain)
+			AND NOT EXISTS(SELECT 1 FROM tasks current WHERE current.agent_id=$1 AND current.engine=$2
+				AND NOT current.shared_instance AND current.status IN ('pending','running')
+				AND current.action IN ('deploy','import-existing','start','restart','stop','uninstall')))`, task.AgentID, task.Engine).Scan(&uncertain); err != nil {
 			return err
 		}
 		if uncertain {
