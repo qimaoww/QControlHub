@@ -1321,7 +1321,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .live-config-workspace>.editor-toolbar{flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px}
   .live-config-workspace>.editor-toolbar>div:first-child{min-width:0;flex:1 1 150px}
   .live-config-workspace>.editor-toolbar h2{overflow-wrap:anywhere}
-  .live-config-workspace>.editor-toolbar .editor-toolbar-state{flex-shrink:0;width:auto;flex-wrap:wrap}
+  .live-config-workspace>.editor-toolbar .editor-toolbar-state{flex-shrink:0;width:auto;max-width:100%;flex-wrap:wrap}
   .live-config-workspace .live-config-source-switch{display:flex;flex-wrap:wrap}
   .live-config-workspace .live-config-source-switch button{flex:1 1 140px}
   .live-config-workspace .button{min-height:44px}
