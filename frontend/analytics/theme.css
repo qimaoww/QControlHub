@@ -220,3 +220,44 @@ strong, b { font-weight: 600; }
 @keyframes analytics-busy { from { opacity: 1; } to { opacity: .65; } }
 
 .a-validation { border: 0; background: transparent; padding: 0; color: #a41a2b; font-size: var(--text-caption); }
+
+/* Native scrolling and form semantics, with this theme's presentation. */
+:root { scrollbar-color: #a1a1aa transparent; scrollbar-width: thin; scrollbar-gutter: stable; }
+* { scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #a1a1aa; border: 2px solid transparent; border-radius: 8px; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: #71717a; }
+*::-webkit-scrollbar-corner { background: transparent; }
+.a-rail nav, .a-dialog, .a-code, .a-table-scroll, .a-field textarea { scrollbar-gutter: stable; }
+.a-field select { appearance: none; padding-inline-end: 36px; text-overflow: ellipsis; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2371717a' stroke-width='1.5' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+.a-field select:hover:not(:disabled) { border-color: #a1a1aa; }
+.a-field select option { font: inherit; color: var(--ink); background: var(--paper); }
+@supports (appearance: base-select) {
+  .a-field select, .a-field select::picker(select) { appearance: base-select; }
+  .a-field select { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-inline-end: 12px; background-image: none; }
+  .a-field select::picker-icon { content: ""; width: 7px; height: 7px; flex: none; margin-inline: auto 3px; border-right: 1.5px solid #71717a; border-bottom: 1.5px solid #71717a; rotate: 45deg; translate: 0 -2px; }
+  .a-field select:open { border-color: #a1a1aa; }
+  .a-field select::picker(select) {
+    padding: 4px; margin-block: 6px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--paper); color: var(--ink); font: 400 var(--text-body)/1.5 var(--font-ui);
+    box-shadow: 0 4px 16px rgb(24 24 27 / 10%); max-block-size: min(320px, 50dvh);
+    max-inline-size: calc(100vw - 24px); overflow: auto; scrollbar-gutter: stable;
+    opacity: 1; translate: 0 0;
+    transition: opacity 120ms cubic-bezier(.2,.8,.2,1), translate 120ms cubic-bezier(.2,.8,.2,1), display 120ms allow-discrete, overlay 120ms allow-discrete;
+  }
+  .a-field select option { gap: 12px; min-block-size: 36px; padding: 8px 10px; border-radius: 4px; white-space: normal; overflow-wrap: anywhere; font: inherit; }
+  .a-field select option:checked { background: var(--tint); font-weight: 500; }
+  .a-field select option:is(:hover,:focus-visible):not(:disabled) { background: #e4e4e7; outline: none; }
+  .a-field select option:disabled { color: #a1a1aa; }
+  .a-field select option::checkmark { color: var(--ink); font-size: 12px; }
+  @starting-style { .a-field select:open::picker(select) { opacity: 0; translate: 0 -3px; } }
+  @media (max-width: 48rem) { .a-field select option { min-block-size: 44px; padding-block: 11px; } }
+}
+:root[data-theme-motion="off"] .a-field select::picker(select) { transition: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .a-field select::picker(select) { transition: none; animation: none; } }
+@media (forced-colors: active) {
+  :root { scrollbar-color: auto; }
+  .a-field select { appearance: auto; background-image: none; }
+  .a-field select::picker(select) { appearance: auto; }
+}
