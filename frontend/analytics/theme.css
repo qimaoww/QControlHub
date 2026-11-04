@@ -223,6 +223,10 @@ strong, b { font-weight: 600; }
 @keyframes analytics-busy { from { opacity: 1; } to { opacity: .65; } }
 
 .a-validation { border: 0; background: transparent; padding: 0; color: #a41a2b; font-size: var(--text-caption); }
+.a-clipboard { position: fixed; inset: 0 auto auto 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.a-disclosure { border: 1px solid var(--border); border-radius: 8px; background: var(--paper); }
+.a-disclosure > summary { padding: 12px 16px; cursor: pointer; font-weight: 500; }
+.a-disclosure-body { padding: 0 16px 16px; }
 
 /* Native scrolling and form semantics, with this theme's presentation. */
 :root { scrollbar-color: #a1a1aa transparent; scrollbar-width: thin; scrollbar-gutter: stable; }

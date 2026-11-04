@@ -1,12 +1,14 @@
 import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
+import { setStorageAccount } from "../modules/account-storage.js";
 import { accountRequest } from "../modules/account-request.js";
 import { createPermissionChecker } from "../modules/permissions.js";
 import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
 import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog } from "./ui.js";
-import { dashboardPage, nodesPage, tasksPage, quotaPage } from "./operations.js";
+import { dashboardPage, tasksPage, quotaPage } from "./operations.js";
+import { nodesPage } from "./nodes.js";
 import { archivePage } from "./configs.js";
 import { themePage } from "./themes.js";
 import { logsPage, connectionsPage } from "./observability.js";
@@ -56,6 +58,7 @@ export function startAnalytics({ app, session }) {
   const motion = presentation.motion;
   presentation.own(() => document.documentElement.style.removeProperty("--a-modal-scrollbar-gap"));
   const state = { session, data: {} };
+  setStorageAccount(session);
   const can = createPermissionChecker(state);
   const lifetime = new AbortController();
   let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0;
@@ -242,6 +245,7 @@ export function startAnalytics({ app, session }) {
     loginURL.searchParams.set("theme", "analytics");
     history.replaceState(null, "", loginURL);
     state.session = null;
+    setStorageAccount(null);
     state.data = {};
     shellTitle = navigationToggle = null;
     layout.classList.remove("a-collapsed");

@@ -1,6 +1,5 @@
 import { formatDate } from "./appearance.js";
 import { aggregateDashboardTrafficDays, utcMonth } from "../modules/dashboard-model.js";
-import { createServiceActionGuard } from "../modules/agent-service-state.js";
 import { diagnosticError } from "../modules/errors.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
@@ -94,30 +93,79 @@ export async function dashboardPage(ctx) {
 
 export async function taskDetail(ctx, taskID) {
   if (!ctx.can("tasks.read")) return;
-  const task = await ctx.api(`/tasks/${pathID(taskID)}`);
+  let task = await ctx.api(`/tasks/${pathID(taskID)}`);
   if (!ctx.current()) return;
-  const content = stack(
-    actions(status(task.status), badge(task.engine), badge(actionName(task.action))),
-    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`),
-    task.error && notice(diagnosticError(task.error)),
-    code(task.output || "暂无输出"));
+  const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
+  const output = code(task.output || "暂无输出");
+  const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
+    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
-  const refresh = button("刷新结果", () => void ctx.mutate(refresh, async () => {
-    const latest = await ctx.api(`/tasks/${pathID(taskID)}`);
-    if (!ctx.current() || !box.open) return;
-    content.replaceChildren(stack(actions(status(latest.status), badge(latest.engine)),
-      latest.error && notice(diagnosticError(latest.error)), code(latest.output || "暂无输出"), actions(refresh)));
-  }));
+  let timer, reading = false;
+  const stop = () => clearTimeout(timer);
+  const active = () => ctx.current() && box.open;
+  const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
   content.append(actions(refresh));
+  async function read() {
+    if (reading || !active()) return;
+    reading = true;
+    try {
+      const latest = await ctx.api(`/tasks/${pathID(taskID)}`);
+      if (!active()) return;
+      task = latest;
+      const next = status(task.status);
+      if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
+      const error = diagnosticError(task.error || "");
+      if (failure.textContent !== error) failure.textContent = error;
+      if (output.textContent !== (task.output || "暂无输出")) {
+        const follow = output.scrollHeight-output.scrollTop-output.clientHeight<24;
+        output.textContent = task.output || "暂无输出";
+        if(follow)output.scrollTop=output.scrollHeight;
+      }
+    } finally { reading = false; }
+  }
+  async function poll() {
+    try { if (!document.hidden && active()) await read(); }
+    catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
+    finally { if (active() && ["pending","running"].includes(task.status)) timer=setTimeout(poll,2000); }
+  }
+  box.addEventListener("close", stop, {once:true});
+  ctx.signal.addEventListener("abort", stop, {once:true});
+  if(["pending","running"].includes(task.status))timer=setTimeout(poll,2000);
 }
 
 export async function tasksPage(ctx) {
+  const filters = ctx.state.data.taskFilters || { limit: "100" };
   const filter = ctx.form([
     node("div", { className: "a-form-grid" },
-      field("状态", "status", "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
-      field("节点 ID", "agent_id", ""), field("条数", "limit", "100", { type: "number", min: 1, max: 500 })),
-  ], "查询", async values => draw(await ctx.api(query("/tasks", values))));
+      field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
+      field("节点 ID", "agent_id", filters.agent_id || ""),
+      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp"].map(action => [action, actionName(action)])] }),
+      field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
+  ], "查询", async values => { ctx.state.data.taskFilters = values; draw(await ctx.api(query("/tasks", values))); });
   const results = node("div");
+  async function editRetry(task) {
+    const resource = await ctx.api(`/tasks/${pathID(task.id)}/retry-editor`);
+    if (!ctx.current()) return;
+    const { config } = resource;
+    const form = ctx.form([
+      muted(`${config.name} · ${date(config.updated_at)}`),
+      task.error && notice(diagnosticError(task.error)),
+      config.agent_id && link("在实时配置中编辑", `#live-config?agent=${pathID(config.agent_id)}&engine=${pathID(config.engine)}`),
+      node("div", { className: "a-editor" }, field("当前配置", "content", config.content, { multiline: 18, required: true, spellcheck: false })),
+    ], `保存并重试${task.action === "deploy" ? "部署" : "校验"}`, async values => {
+      if (!await ctx.confirm("保存当前修改并重新执行任务？部署会重启对应内核。", "保存并重试") || !ctx.current()) return;
+      const result = await ctx.api(`/tasks/${pathID(task.id)}/edit-retry`, { method: "POST", body: { content: values.content, expected_version: config.version } });
+      if (!ctx.current()) return;
+      ctx.setDirty(false); box.close(); ctx.announce("配置已保存，重试任务已提交");
+      await taskDetail(ctx, result.task.id);
+    });
+    form.addEventListener("input", () => ctx.setDirty(true));
+    const box = ctx.dialog("编辑后重试", form, { wide: true });
+    box.onRequestClose = async () => {
+      if (form.elements.content.value !== config.content && !await ctx.confirm("放弃未保存的配置修改？", "放弃更改") || !ctx.current()) return;
+      ctx.setDirty(false); box.close();
+    };
+  }
   function draw(tasks) {
     results.replaceChildren(table(["操作", "节点", "内核", "状态", "创建时间", "操作"], list(tasks).map(task => [
       actionName(task.action), task.agent_id, task.engine, status(task.status), date(task.created_at),
@@ -131,72 +179,21 @@ export async function tasksPage(ctx) {
             await taskDetail(ctx, retry.id);
           });
         }),
+        ctx.can("tasks.execute") && task.config_id && ["validate", "deploy"].includes(task.action) && ["failed", "canceled"].includes(task.status) &&
+          (ctx.can("agent-config.write") || ctx.can("configs.write")) && button("编辑后重试", event => void ctx.mutate(event.currentTarget, () => editRetry(task))),
         ctx.can("tasks.execute") && ["pending", "running"].includes(task.status) && button("取消", async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm("取消此任务？已在节点执行的操作可能仍需核实结果。", "取消任务") || !ctx.current()) return;
           await ctx.mutate(control, async () => {
             await ctx.api(`/tasks/${pathID(task.id)}`, { method: "DELETE" });
             ctx.announce("已提交取消请求");
-            draw(await ctx.api("/tasks?limit=100"));
+            draw(await ctx.api(query("/tasks", ctx.state.data.taskFilters || filters)));
           });
         }, { tone: "danger" })),
     ]), { label: "任务" }));
   }
-  draw(await ctx.api("/tasks?limit=100"));
+  draw(await ctx.api(query("/tasks", filters)));
   return stack(section("筛选任务", node("div", { className: "a-card-body" }, filter)), section("任务记录", results));
-}
-
-export async function nodesPage(ctx) {
-  const agents = list(await ctx.api("/agents"));
-  const guard = createServiceActionGuard(ctx.can);
-  const search = field("搜索节点", "search", "", { type: "search", placeholder: "名称、节点 ID 或地址" });
-  const results = node("div");
-  function draw(value = "") {
-    const shown = agents.filter(agent => [agent.name, agent.id, agent.client_address].some(item => String(item || "").toLowerCase().includes(value.toLowerCase())));
-    results.replaceChildren(table(["节点", "状态", "地址", "内核与实例", "操作"], shown.map(agent => [
-      stack(node("strong", {}, agent.name), muted(agent.id)),
-      status(agent.status), agent.client_address || agent.public_ip || "—",
-      stack((agent.capabilities || []).map(engine => {
-        const runtime = agent.runtime?.[engine];
-        return actions(badge(engine), status(runtime?.service_status),
-          muted(runtime?.instance ? "共享实例" : "主实例"));
-      })),
-      actions(link("实时配置", `#live-config?agent=${pathID(agent.id)}`),
-        button("查看设置", () => void ctx.mutate(null, async () => {
-          const sections = [section("节点信息", node("div", { className: "a-card-body" }, stack(
-            muted(agent.id), actions(status(agent.status), muted(date(agent.last_seen))))))];
-          if (ctx.can("agents.manage", agent)) {
-            sections.push(section("节点名称", node("div", { className: "a-card-body" }, ctx.form([
-              field("名称", "name", agent.name, { required: true, maxlength: 100 }),
-            ], "保存名称", async values => {
-              const saved = await ctx.api(`/agents/${pathID(agent.id)}/name`, { method: "PUT", body: values });
-              agent.name = saved.name;
-              ctx.announce("名称已保存");
-              draw(search.querySelector("input").value);
-            }))));
-          }
-          for (const engine of agent.capabilities || []) {
-            const runtime = agent.runtime?.[engine];
-            sections.push(section(engine, node("div", { className: "a-card-body" }, stack(
-              actions(status(runtime?.service_status), muted(runtime?.version || "尚未安装")),
-              actions(["status", "start", "stop", "restart"].map(action => button(actionName(action), async event => {
-                const control = event.currentTarget;
-                if (action !== "status" && !await ctx.confirm(`对 ${agent.name} 的 ${engine} 执行“${actionName(action)}”？`, actionName(action))) return;
-                if (!ctx.current()) return;
-                await ctx.mutate(control, async () => {
-                  const task = await ctx.api("/tasks", { method: "POST", body: { agent_id: agent.id, engine, action } });
-                  ctx.announce("任务已提交");
-                  await taskDetail(ctx, task.id);
-                });
-              }, { disabled: guard(action, agent.status === "online", runtime?.installed, runtime?.service_status, agent, engine) })))))));
-          }
-          ctx.dialog(agent.name, stack(sections), { wide: true });
-        }))),
-    ]), { label: "节点" }));
-  }
-  draw();
-  search.querySelector("input").addEventListener("input", event => draw(event.target.value));
-  return stack(section("节点", node("div", { className: "a-card-body" }, search)), section("节点列表", results));
 }
 
 export async function quotaPage(ctx) {

@@ -66,12 +66,18 @@ console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy th
 // renderers or the application shell, including through transitive imports.
 const sharedLogic = new Set([
   "account-request.js", "account-storage.js", "agent-service-state.js",
+  "core-install-state.js", "core-install-source.js", "xray-api.js", "enrollment-command.js",
+  "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js",
+  "code-format.js",
   "certificate-order.js", "record-display.js", "client-access-model.js", "config-snapshot.js", "dashboard-model.js",
   "errors.js", "ip-quality-model.js", "live-config-state.js", "node-order.js",
   "permissions.js", "poller.js", "preset-route.js", "routes.js",
   "session-watch.js", "substore-model.js", "system-bbr-model.js",
   "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "user-model.js",
 ]);
+for (const name of ["core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js"]) {
+  assert.doesNotMatch(readFileSync(resolve(modulesDir, name), "utf8"), /innerHTML|document\.(?:createElement|querySelector|getElementById)|\.classList\b|\.animate\(/, `${name}: shared logic must not render either theme`);
+}
 const analyticsRoot = resolve(root, "analytics");
 const independent = new Set();
 function visitIndependent(path) {

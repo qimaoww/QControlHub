@@ -171,6 +171,12 @@ export function createAnalyticsMotion(scope) {
     tooltip.style.top = `${Math.max(8, rect.top > box.height + 12 ? rect.top - box.height - 6 : rect.bottom + 6)}px`;
     reveal(tooltip, "tooltip");
   }
+  scope.listen(document, "toggle", event => {
+    const element = event.target;
+    if (!element.matches?.('details.a-disclosure')) return;
+    const body = element.querySelector('.a-disclosure-body');
+    if (element.open) reveal(body, "field"); else if (body) stop(body);
+  }, { capture: true });
   scope.listen(document, "beforetoggle", event => {
     const element = event.target;
     if (!element.matches?.('dialog.a-dialog')) return;

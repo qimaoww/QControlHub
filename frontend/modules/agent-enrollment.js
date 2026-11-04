@@ -2,6 +2,7 @@ import { updateFeedback, removePresented } from "./presence-motion.js";
 // Enrollment commands and node-directory dialogs own their modal lifecycle.
 import { cancelMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface as isolateExit } from "./motion-isolation.js";
+import { enrollmentInstallCommand } from "./enrollment-command.js";
 export function createAgentEnrollment({ api, state, esc, engineName, notify, refreshAgentPage }) {
 let activeModal;
 let retiringModal;
@@ -309,14 +310,6 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   wrap.querySelector("input").focus();
 }
 
-function enrollmentInstallCommand(created) {
-  const token = String(created?.token || "");
-  const name = String(created?.name || "");
-  if (!token || !name) throw new Error("当前节点没有可恢复的部署命令");
-  const escapedToken = token.replaceAll("'", "'\\''");
-  const escapedName = name.replaceAll("'", "'\\''");
-  return `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-}
 
 function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
   const wrap = document.createElement("div");

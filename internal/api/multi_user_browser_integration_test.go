@@ -24,7 +24,21 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
-			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
+			var analyticsUser core.User
+			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
+			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
+			analyticsScope := store.WithConfigScope(ctx, analyticsUser.ID, false)
+			analyticsConfig := configScopeAPIConfig(t, 23475)
+			analyticsConfig.AgentID = analyticsAgent.ID
+			analyticsConfig, err := db.SaveAgentConfig(analyticsScope, analyticsConfig, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			analyticsDeploy, err := db.CreateTask(analyticsScope, core.TaskRequest{AgentID: analyticsAgent.ID, Engine: analyticsConfig.Engine, Action: core.ActionDeploy, ConfigID: analyticsConfig.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			completeConfigScopeAPITask(t, analyticsScope, db, analyticsDeploy)
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}
@@ -52,7 +66,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fixture := map[string]any{"owned": owned, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
+			fixture := map[string]any{"owned": owned, "analyticsAgent": analyticsAgent.ID, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
 				"contentA": configScopeAPIConfig(t, 21001).Content, "contentB": configScopeAPIConfig(t, 21002).Content}
 			frontendRoot := filepath.Join("..", "..", "frontend")
 			serve := func(root string) *httptest.Server {

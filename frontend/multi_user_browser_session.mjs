@@ -113,7 +113,7 @@ try {
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
   };
 
-  await runAnalyticsBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api, record });
+  await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });
 
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
   const [alice, bob, admin] = await Promise.all([login(a, "alice"), login(b, "bob"), login(manager, "browser-admin")]);

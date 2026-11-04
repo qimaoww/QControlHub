@@ -6,15 +6,8 @@ import { prepareDisclosure } from "./popup.js";
 import { bindEvent } from "./refresh.js";
 import { createTaskMonitor } from "./task-monitor.js";
 
-export function developmentSourceVisible(engine, channel) {
-  return engine === "mihomo" && channel === "development";
-}
-
-export function coreSourceForInstall(engine, channel, rawSource) {
-  return developmentSourceVisible(engine, channel)
-    ? rawSource || "official"
-    : undefined;
-}
+import { developmentSourceVisible, coreSourceForInstall } from "./core-install-source.js";
+export { developmentSourceVisible, coreSourceForInstall } from "./core-install-source.js";
 
 
 export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }, { refreshAgentPage } = {}) {

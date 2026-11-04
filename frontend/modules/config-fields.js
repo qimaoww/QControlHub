@@ -2,18 +2,8 @@
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
-// The existing root-field API replaces a whole field. Inbound structures and
-// outbounds (which include exits paired with individual JSON files) must not be
-// presented as common-only mutations. They remain in the source/advanced editor.
-export function commonConfigFields(engine, fields) {
-  const structural = new Set(["inbounds", "endpoints", "listeners", "servers", "shadowsocks", "outbounds"]);
-  if (engine === "mihomo") {
-    for (const key of ["port", "socks-port", "redir-port", "tproxy-port", "mixed-port",
-      "ss-config", "vmess-config", "tunnels", "tun", "tuic-server"]) structural.add(key);
-  }
-  return fields.filter(field => !structural.has(field.key) &&
-    (engine === "ss-rust" ? ["global", "override"].includes(field.scope) : !["inbound", "structure"].includes(field.scope)));
-}
+import { commonConfigFields } from "./config-field-model.js";
+export { commonConfigFields } from "./config-field-model.js";
 
 export function renderFieldSummary(title, context) {
   return `<summary><b>${esc(title)}</b><span class="field-studio-context"><small>${esc(context)}</small><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></span></summary>`;

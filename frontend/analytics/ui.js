@@ -39,8 +39,8 @@ export function icon(name) {
   return span;
 }
 
-export const button = (label, onclick, { tone = "", disabled = false, glyph, title, className = "" } = {}) =>
-  node("button", { className: `a-button ${tone} ${className}`, type: "button", onclick, disabled, title }, glyph && icon(glyph), label);
+export const button = (label, onclick, { tone = "", disabled = false, glyph, title, className = "", ...attrs } = {}) =>
+  node("button", { className: `a-button ${tone} ${className}`, type: "button", onclick, disabled, title, ...attrs }, glyph && icon(glyph), label);
 export const link = (label, href, tone = "") => node("a", { className: `a-button ${tone}`, href }, label);
 export const badge = (value, tone = "") => node("span", { className: `a-badge ${tone}` }, value);
 export const actions = (...items) => node("div", { className: "a-actions" }, items);
@@ -89,7 +89,7 @@ export function field(label, name, value = "", attrs = {}) {
     input.value = value;
   } else if (multiline) {
     input = node("textarea", { name, rows: multiline, ...attributes });
-    input.value = value ?? "";
+    input.defaultValue = input.value = value ?? "";
   } else if (attributes.type === "checkbox") {
     input = node("input", { ...attributes, name, checked: Boolean(value) });
     return node("label", { className: "a-check" }, input, node("span", {}, label), hint && muted(hint));
@@ -112,6 +112,20 @@ export function query(path, params) {
   return values.size ? `${path}?${values}` : path;
 }
 export const list = value => Array.isArray(value) ? value : [];
+
+export async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(String(value)); return; }
+    catch { /* HTTP previews and browser restrictions use native selection. */ }
+  }
+  const active = document.activeElement;
+  const source = node("textarea", { className: "a-clipboard", readonly: true });
+  source.value = String(value);
+  (document.querySelector('dialog:modal') || document.body).append(source);
+  source.focus({ preventScroll: true }); source.select();
+  try { if (!document.execCommand('copy')) throw new Error('浏览器拒绝了剪贴板操作'); }
+  finally { source.remove(); active?.focus?.({ preventScroll: true }); }
+}
 
 // Lock the document without shifting its content when a native modal opens.
 export function openDialog(box) {

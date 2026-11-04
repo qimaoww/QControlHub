@@ -1,7 +1,8 @@
 import { checkAnalyticsMotion } from "./analytics_motion_browser.mjs";
+import { checkAnalyticsWorkflows } from "./analytics_workflows_browser.mjs";
 import assert from "node:assert/strict";
 
-export async function runAnalyticsBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api, record }) {
+export async function runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record }) {
   const anonymous = await createPage();
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#tasks` }, anonymous);
   await wait(anonymous, "!!document.querySelector('.a-login form')");
@@ -103,6 +104,7 @@ export async function runAnalyticsBrowser({ base, mode, createPage, login, call,
       await chooseScale(100);
     }
   }
+  await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
   await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });
   await evaluate(page, "window.__animationBeforeFailure=Element.prototype.animate;Element.prototype.animate=function(){throw new Error('injected presentation failure')}");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");

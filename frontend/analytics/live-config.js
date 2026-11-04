@@ -2,6 +2,8 @@ import { requestConfigSnapshot } from "../modules/config-snapshot.js";
 import { liveConfigReadAction, assertAgentConfigBaseline, submitLiveConfigChange } from "../modules/live-config-state.js";
 import { readPresetRoute } from "../modules/preset-route.js";
 import { diagnosticError } from "../modules/errors.js";
+import { configStudio } from "./config-studio.js";
+import { formatConfigContent } from "../modules/code-format.js";
 import { node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
 
@@ -165,24 +167,53 @@ export async function liveConfigPage(ctx) {
   const format = editable && !importSource && engine !== "mihomo" && button("格式化 JSON", () => {
     try {
       const editor = form.elements.content;
-      editor.value = JSON.stringify(JSON.parse(editor.value), null, 2) + "\n";
+      editor.value = formatConfigContent(editor.value, "JSON");
       ctx.setDirty(true);
     } catch { ctx.announce("JSON 格式无效，请检查配置。", "error"); }
   });
   const readHistory = saved && ctx.can("configs.read") && button("保存历史", event => void ctx.mutate(event.currentTarget, async () => {
     const records = list(await ctx.api(`/configs/${pathID(saved.id)}/revisions?limit=100`));
     const preview = node("div", {}, muted("选择一份记录预览"));
-    ctx.dialog("节点配置历史", stack(table(["保存时间", "状态", "操作"], records.map(record => [
+    const historyBox = ctx.dialog("节点配置历史", stack(table(["保存时间", "状态", "操作"], records.map(record => [
       date(record.updated_at), record.version === saved.version ? badge("当前") : "历史档案",
       button("预览", event => void ctx.mutate(event.currentTarget, async () => {
         const revision = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${record.version}`);
-        preview.replaceChildren(code(revision.content));
+        if (!ctx.current() || !historyBox.isConnected) return;
+        preview.replaceChildren(stack(code(revision.content), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
+          const control = event.currentTarget;
+          if (!await ctx.confirm(`恢复 ${date(revision.updated_at)} 的配置？将按当前时间新增记录，原档案保留。`, "恢复配置") || !ctx.current()) return;
+          await ctx.mutate(control, async () => {
+            const restored = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${revision.version}/restore`, { method: "POST", body: { expected_version: saved.version } });
+            if (!ctx.current()) return;
+            saved = restored;
+            form.elements.name.value = restored.name;
+            form.elements.description.value = restored.description || "";
+            form.elements.content.value = form.elements.content.defaultValue = restored.content;
+            ctx.setDirty(false); historyBox.close();
+            liveNotice.textContent = `已保存 · ${date(restored.updated_at)}`;
+            ctx.announce("配置已恢复，节点部署保持原状");
+          });
+        }, { tone: "primary" })));
       })),
     ]), { label: "节点配置历史" }), preview), { wide: true });
   }));
-  const inbounds = section("入站配置", table(["名称", "协议", "端口"], list(workspace.inbound_targets).map(inbound => [
-    inbound.tag, inbound.kind, inbound.port,
-  ]), { label: "入站配置" }));
+  const inbounds = configStudio(ctx, {
+    agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
+    dirty: () => form.elements.content.value !== form.elements.content.defaultValue || form.elements.name.value !== (saved?.name || `${agent.name} ${engine}`) || form.elements.description.value !== (saved?.description || ""),
+    accept(config) {
+      saved = config; workspace.config = config;
+      form.elements.name.value = config.name;
+      form.elements.description.value = config.description || "";
+      form.elements.content.value = form.elements.content.defaultValue = config.content;
+      liveNotice.textContent = `已保存 · ${date(config.updated_at)}`;
+      ctx.setDirty(false);
+    },
+    beforeDeploy: hostManaged ? async () => {
+      if (!source?.content) assertAgentConfigBaseline(undefined, "");
+      const fresh = await snapshot();
+      assertAgentConfigBaseline(source.content, fresh.content);
+    } : undefined,
+  });
   return stack(section("目标实例", node("div", { className: "a-card-body" }, select), flags),
     errorText && notice(errorText),
     section(agent.name, node("div", { className: "a-card-body" }, form), actions(read, format, readHistory),
