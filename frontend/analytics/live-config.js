@@ -216,7 +216,7 @@ export async function liveConfigPage(ctx) {
   });
   return stack(section("目标实例", node("div", { className: "a-card-body" }, select), flags),
     errorText && notice(errorText),
+    inbounds,
     section(agent.name, node("div", { className: "a-card-body" }, form), actions(read, format, readHistory),
-      hostManaged && mode === "personal" ? "部署前需读取托管配置，以核对节点当前内容。" : null),
-    inbounds);
+      hostManaged && mode === "personal" ? "部署前需读取托管配置，以核对节点当前内容。" : null));
 }
