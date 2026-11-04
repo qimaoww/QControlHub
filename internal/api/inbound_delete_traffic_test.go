@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -49,8 +50,7 @@ func TestDeleteAndManualEditRecoverVerifiedAccounting(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				saved.Content = strings.Replace(saved.Content, `"port": 21002`, `"port": 21003`, 1)
-				saved.Content = strings.Replace(saved.Content, `"listen_port": 21002`, `"listen_port": 21003`, 1)
+				saved.Content = regexp.MustCompile(`("(?:listen_)?port"\s*:\s*)21002\b`).ReplaceAllString(saved.Content, "${1}21003")
 				if operation == "conflict" {
 					saved.Content = strings.Replace(saved.Content, `"tag": "qch-trf-21002-`, `"unexpected": true, "tag": "qch-trf-21002-`, 1)
 				}

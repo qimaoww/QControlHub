@@ -1,0 +1,1142 @@
+[
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "ready",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 922,
+   "height": 71
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "long",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 922,
+   "height": 71
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "readonly",
+  "phase": "ready",
+  "editor": {
+   "top": 453,
+   "bottom": 893,
+   "height": 440
+  },
+  "footer": {
+   "top": 893,
+   "bottom": 926,
+   "height": 33
+  },
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "import",
+  "phase": "ready",
+  "editor": {
+   "top": 402,
+   "bottom": 842,
+   "height": 440
+  },
+  "footer": {
+   "top": 842,
+   "bottom": 913,
+   "height": 71
+  },
+  "submitCount": 1,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "导入并迁移"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "error",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "error-long",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "offline",
+  "phase": "offline",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "unsupported",
+  "phase": "unsupported",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "upgrade",
+  "phase": "upgrade",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "busy",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "正在提交…",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "saved",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "validated",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "light",
+  "state": "fail",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "ready",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 922,
+   "height": 71
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "long",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 922,
+   "height": 71
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "readonly",
+  "phase": "ready",
+  "editor": {
+   "top": 453,
+   "bottom": 893,
+   "height": 440
+  },
+  "footer": {
+   "top": 893,
+   "bottom": 926,
+   "height": 33
+  },
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "import",
+  "phase": "ready",
+  "editor": {
+   "top": 402,
+   "bottom": 842,
+   "height": 440
+  },
+  "footer": {
+   "top": 842,
+   "bottom": 913,
+   "height": 71
+  },
+  "submitCount": 1,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "导入并迁移"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "error",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "error-long",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "offline",
+  "phase": "offline",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "unsupported",
+  "phase": "unsupported",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "upgrade",
+  "phase": "upgrade",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "busy",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "正在提交…",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "saved",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "validated",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "desktop",
+  "theme": "dark",
+  "state": "fail",
+  "phase": "ready",
+  "editor": {
+   "top": 411,
+   "bottom": 851,
+   "height": 440
+  },
+  "footer": {
+   "top": 851,
+   "bottom": 941,
+   "height": 90
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1000,
+  "viewportH": 1000
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "ready",
+  "phase": "ready",
+  "editor": {
+   "top": 749,
+   "bottom": 869,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "long",
+  "phase": "ready",
+  "editor": {
+   "top": 1137,
+   "bottom": 1257,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1556,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "readonly",
+  "phase": "ready",
+  "editor": {
+   "top": 739,
+   "bottom": 859,
+   "height": 120
+  },
+  "footer": {
+   "top": 723,
+   "bottom": 780,
+   "height": 57
+  },
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1158,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "import",
+  "phase": "ready",
+  "editor": {
+   "top": 688,
+   "bottom": 808,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 1,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "导入并迁移"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1107,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "error",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 881,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "error-long",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 2485,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "offline",
+  "phase": "offline",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 881,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "unsupported",
+  "phase": "unsupported",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 847,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "upgrade",
+  "phase": "upgrade",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 932,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "busy",
+  "phase": "ready",
+  "editor": {
+   "top": 425,
+   "bottom": 545,
+   "height": 120
+  },
+  "footer": {
+   "top": 601,
+   "bottom": 780,
+   "height": 179
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "正在提交…",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "saved",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 622,
+   "bottom": 780,
+   "height": 158
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "validated",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 597,
+   "bottom": 780,
+   "height": 183
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "light",
+  "state": "fail",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 597,
+   "bottom": 780,
+   "height": 183
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "ready",
+  "phase": "ready",
+  "editor": {
+   "top": 749,
+   "bottom": 869,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "long",
+  "phase": "ready",
+  "editor": {
+   "top": 1137,
+   "bottom": 1257,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1556,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "readonly",
+  "phase": "ready",
+  "editor": {
+   "top": 739,
+   "bottom": 859,
+   "height": 120
+  },
+  "footer": {
+   "top": 723,
+   "bottom": 780,
+   "height": 57
+  },
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1158,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "import",
+  "phase": "ready",
+  "editor": {
+   "top": 688,
+   "bottom": 808,
+   "height": 120
+  },
+  "footer": {
+   "top": 679,
+   "bottom": 780,
+   "height": 101
+  },
+  "submitCount": 1,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "导入并迁移"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1107,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "error",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 881,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "error-long",
+  "phase": "error",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 2485,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "offline",
+  "phase": "offline",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 881,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "unsupported",
+  "phase": "unsupported",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 847,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "upgrade",
+  "phase": "upgrade",
+  "editor": null,
+  "footer": null,
+  "submitCount": 0,
+  "submitFullyVisible": false,
+  "submitLabels": [],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 932,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "busy",
+  "phase": "ready",
+  "editor": {
+   "top": 425,
+   "bottom": 545,
+   "height": 120
+  },
+  "footer": {
+   "top": 601,
+   "bottom": 780,
+   "height": 179
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "正在提交…",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": false,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "saved",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 622,
+   "bottom": 780,
+   "height": 158
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "validated",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 597,
+   "bottom": 780,
+   "height": 183
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ },
+ {
+  "viewport": "phone",
+  "theme": "dark",
+  "state": "fail",
+  "phase": "ready",
+  "editor": {
+   "top": 572,
+   "bottom": 692,
+   "height": 120
+  },
+  "footer": {
+   "top": 597,
+   "bottom": 780,
+   "height": 183
+  },
+  "submitCount": 3,
+  "submitFullyVisible": true,
+  "submitLabels": [
+   "保存草稿",
+   "保存并校验",
+   "保存并部署"
+  ],
+  "footerOverlapsEditor": true,
+  "overflowX": false,
+  "pageHeight": 1168,
+  "viewportH": 844
+ }
+]

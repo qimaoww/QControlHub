@@ -26,7 +26,7 @@ for (const [pages, names] of [
   ]],
   [installConfigPages(context), [
     "agentConfig", "liveConfig", "archiveConfigs", "capturePresetDrafts",
-    "presetHasUnsavedChanges", "configHasUnsavedChanges",
+    "presetHasUnsavedChanges", "configHasUnsavedChanges", "clearWorkspace",
   ]],
 ]) {
   assert.deepEqual(Object.keys(pages).sort(), names.sort());

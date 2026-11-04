@@ -1,5 +1,6 @@
 import { enterSurface } from "./motion.js";
 import { taskTerminal } from "./task-monitor.js";
+import { diagnosticError } from "./errors.js";
 
 // Operation feedback remains account-scoped and follows the same deployment
 // poller used by the source editor.
@@ -15,18 +16,36 @@ function saveOperation(operation) {
   state.data.presetOperation = operation;
   return operation;
 }
+const hasTaskFeedback = taskID => Object.values(state.data.presetOperations || {}).some(operation => operation.task?.id === taskID);
+
+// Failure feedback carries a Chinese explanation followed by the original log,
+// so newlines become real line breaks without injecting markup.
+function fillStatusText(element, message) {
+  const text = String(message ?? "");
+  if (!text.includes("\n") || typeof document.createTextNode !== "function") {
+    element.textContent = text;
+    return;
+  }
+  const nodes = [];
+  text.split("\n").forEach((line, index) => {
+    if (index) nodes.push(document.createElement("br"));
+    nodes.push(document.createTextNode(line));
+  });
+  element.replaceChildren(...nodes);
+}
 
 function renderPresetStatus() {
-  const key = state.route === "live-config" ? `${state.data.liveAgent}|${state.data.liveEngine}` : `${state.data.agentId}|${state.data.engine}`;
+  const key = state.route === "live-config" ? `${state.data.liveAgent}|${state.data.liveEngine}|${state.data.liveConfigSource}` : `${state.data.agentId}|${state.data.engine}`;
   if (state.route !== "live-config" && !presetVisible()) return;
   const operation = operationFor(key);
   if (!operation) return;
   const root = editor.host?.root || document;
-  let status = root.querySelector("[data-preset-status]");
+  let status = root.querySelector("[data-preset-status], [data-workspace-result]");
+  if (status) status.dataset.presetStatus = "";
   if (!status) {
     status = document.createElement("div");
     status.dataset.presetStatus = "";
-    const anchor = root.querySelector(".config-command-bar, .live-config-details");
+    const anchor = root.querySelector("[data-workspace-result], .config-command-bar, .live-config-details");
     if (anchor) anchor.after(status);
     else if (editor.host) root.prepend(status);
   }
@@ -35,9 +54,9 @@ function renderPresetStatus() {
   status.className = `alert preset-submit-status ${operation.tone}`;
   status.setAttribute("role", operation.tone === "error" ? "alert" : "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = operation.message;
+  fillStatusText(status, operation.message);
   if (changed) enterSurface(status, { token: "--motion-feedback" });
-  if (operation.task?.id && can("tasks.read")) {
+  if (operation.task?.id && can("tasks.read") && operation.tone !== "error") {
     const link = document.createElement("a");
     link.href = "#tasks";
     link.textContent = " 查看执行记录";
@@ -54,6 +73,10 @@ function renderPresetStatus() {
       const epoch = state.navigationEpoch;
       retry.disabled = true;
       try {
+        if (state.route === "live-config" && !editor.host) {
+          if (await renderLiveConfig({refresh:true, operationKey:key})) { operation.reload = false; renderPresetStatus(); }
+          return;
+        }
         if (drafts().dirty() && !(await confirmAction("重新加载将放弃当前未保存的草稿，是否继续？", "重新加载配置"))) return;
         if (state.data !== sessionData || state.navigationEpoch !== epoch || operationFor(key) !== operation) return;
         drafts().clear(operation.key + "|");
@@ -69,7 +92,7 @@ function renderPresetStatus() {
       catch (error) {
         if (operationFor(key) !== operation) return;
         operation.reload = true;
-        operation.message = `页面加载失败：${error.message}。请重新加载后继续编辑。`;
+        operation.message = diagnosticError(error.message) || "配置加载失败";
         renderPresetStatus();
         editor.syncControls();
       }
@@ -80,16 +103,29 @@ function renderPresetStatus() {
 }
 
 function watchPresetOperation(operation) {
-  if (!operation?.task?.id || operation.monitoring || taskTerminal(operation.task) || !can("tasks.read")) return;
+  if (!operation?.task?.id || operation.monitoring) return;
   const sessionData = state.data;
   const {key, intent, task} = operation;
+  const verb = intent === "deploy" ? "部署" : intent === "import" ? "迁移" : "校验";
   const [agentId, engine] = key.split("|");
   const tracked = () => sessionData === state.data && operationFor(key) === operation;
+  const finish = latest => {
+    if (!tracked()) return;
+    operation.task = latest;
+    operation.message = latest.status === "succeeded"
+      ? `${verb}成功`
+      : diagnosticError(latest.error) || `${verb}${latest.status === "canceled" ? "已取消" : "失败"}`;
+    operation.tone = latest.status === "succeeded" ? "success" : "error";
+    if (task.install_if_missing || intent === "deploy") onRuntimeChange(agentId, engine);
+    renderPresetStatus();
+  };
+  if (taskTerminal(task)) { finish(task); return; }
+  if (!can("tasks.read")) return;
   operation.monitoring = true;
   const progress = (latest, error) => {
     if (!tracked() || operation.reload) return;
-    const message = error ? `配置已保存，任务状态连接暂时中断，正在重试…` :
-      `配置已保存，${task.install_if_missing ? "稳定版安装及" : ""}${intent === "deploy" ? "部署" : "校验"}任务${latest.status === "running" ? "正在执行" : "正在排队"}…`;
+    const action = `${task.install_if_missing ? "安装并" : ""}${verb}`;
+    const message = error ? "正在重新连接…" : latest.status === "running" ? `正在${action}…` : `等待${action}…`;
     if (operation.message === message) return;
     operation.message = message;
     operation.tone = "";
@@ -98,25 +134,15 @@ function watchPresetOperation(operation) {
   const waiting = waitForDeployTerminal(task.id, progress);
   if (intent === "deploy") void monitorDeployTask(task.id, agentId, engine);
   void waiting.then(latest => {
-    if (!tracked()) return;
-    operation.task = latest;
-    operation.message = latest.status === "succeeded"
-      ? `配置${intent === "deploy" ? "部署" : "校验"}成功。`
-      : `配置已保存，任务${latest.status === "canceled" ? "已取消" : "失败"}：${latest.error || "请查看执行记录"}`;
-    if (operation.reload) operation.message += " 请重新加载配置后继续编辑。";
-    operation.tone = latest.status === "succeeded" ? "success" : "error";
-    if (task.install_if_missing || intent === "deploy") {
-      onRuntimeChange(agentId, engine);
-    }
-    renderPresetStatus();
+    finish(latest);
   }).catch(error => {
     if (!tracked() || error.name === "AbortError") return;
-    operation.message = "配置已保存，任务状态暂不可读取，请查看执行记录。";
+    operation.message = diagnosticError(error.message) || "无法获取任务结果";
     operation.tone = "error";
     renderPresetStatus();
   }).finally(() => { operation.monitoring = false; });
 }
 
 
-  return { operationFor, saveOperation, renderPresetStatus, watchPresetOperation };
+  return { operationFor, saveOperation, renderPresetStatus, watchPresetOperation, hasTaskFeedback };
 }

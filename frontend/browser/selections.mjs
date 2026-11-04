@@ -224,6 +224,7 @@ export async function testSelectionRuntime({ mode, testAPI }, preview) {
     confirmAction: () => new Promise(resolve => confirmations.push(resolve)) }, {
     agent: { id: "alpha" }, engine: "mihomo", accountData: configState.data, sourceMode: "qagent", current: { content: "original" },
     workspaceElement: host.firstElementChild, liveConfig: async () => { configReads++; },
+    workspace: { submitting: false }, workspaces: { capture() {}, dirty: () => true },
   });
   host.querySelector('[data-live-agent]').click(); host.querySelector('[data-live-source]').click();
   assert.equal(confirmations.length, 2);

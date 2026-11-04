@@ -304,7 +304,9 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
       const form = new FormData(event.currentTarget);
       await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close, () => wrap.isConnected && !wrap.inert);
     }
-    catch (error) { if (wrap.isConnected && !wrap.inert) { submit.disabled = false; notify(error.message, "error"); } }
+    // Enrollment reports the localized cause only; raw diagnostics belong to
+    // the config and task views.
+    catch (error) { if (wrap.isConnected && !wrap.inert) { submit.disabled = false; notify(String(error.message).split("\n")[0], "error"); } }
   };
   wrap.querySelector("input").focus();
 }

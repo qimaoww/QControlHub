@@ -74,6 +74,14 @@ func (s *Server) configCatalog(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Request) {
+	var preview *configDraftPreview
+	if request.Method == http.MethodPost {
+		preview = &configDraftPreview{}
+		if err := decodeJSON(w, request, preview, core.MaxConfigEnvelopeBytes); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	engine, err := core.ParseEngine(request.PathValue("engine"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -111,6 +119,20 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, "agent does not support the requested engine")
 		return
 	}
+	if preview != nil {
+		if config.Version != preview.ExpectedVersion {
+			writeStoreError(w, store.ErrConflict)
+			return
+		}
+		if err := validateConfigDraft(engine, preview.Content); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		config.AgentID, config.Engine, config.Content = agent.ID, engine, preview.Content
+		if config.Name == "" {
+			config.Name = agent.Name + " · " + string(engine)
+		}
+	}
 	s.redactAgentMetrics(request, &agent)
 	catalog, err := configschema.CatalogFor(engine)
 	if err != nil {
@@ -123,7 +145,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		InboundTargets: []configInboundTargetResource{},
 		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
-	if config.ID != "" {
+	if config.ID != "" || preview != nil {
 		result.Config = &config
 		// Reading a saved plan only needs one verification pass. Stripping and
 		// compiling it again tripled this work on every post-save page refresh.
@@ -144,9 +166,11 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
 			})
 		}
-		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
-			writeInternalError(w, err)
-			return
+		if config.ID != "" {
+			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
+				writeInternalError(w, err)
+				return
+			}
 		}
 		if engine == core.EngineShadowsocksRust {
 			destination := false

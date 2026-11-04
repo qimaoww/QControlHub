@@ -62,6 +62,73 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 }
 
 func mutateGenerated(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
+	result, err := mutateGeneratedProjection(engine, currentContent, generatedContent, matchValue, operation)
+	if err != nil || matchValue == "" || (operation != "modify" && operation != "upsert") {
+		return result, err
+	}
+	for _, input := range ParseAll(engine, currentContent) {
+		if input.Tag != matchValue {
+			continue
+		}
+		candidate, supported := Parse(engine, generatedContent)
+		if !supported || candidate.Protocol != input.Protocol {
+			return result, nil
+		}
+		baseline, generateErr := Generate(engine, input)
+		if generateErr != nil {
+			// Detached TLS/WireGuard metadata is intentionally not stored in
+			// the native document. Those forms retain their existing guards.
+			return result, nil
+		}
+		before, baselineErr := mutateGeneratedProjection(engine, currentContent, baseline, matchValue, "modify")
+		if baselineErr != nil {
+			return "", baselineErr
+		}
+		if engine == core.EngineXray {
+			before = legacyXrayProjection(currentContent, before, result, matchValue)
+		}
+		preserved, patchErr := configschema.ApplyDocumentChanges(engine, currentContent, before, result)
+		if patchErr != nil {
+			return "", patchErr
+		}
+		return enforceCentralLogging(engine, preserved)
+	}
+	return result, nil
+}
+
+func legacyXrayProjection(content, before, after, tag string) string {
+	type document struct {
+		Inbounds []map[string]json.RawMessage `json:"inbounds"`
+	}
+	var original, previous, next document
+	if json.Unmarshal([]byte(content), &original) != nil || json.Unmarshal([]byte(before), &previous) != nil || json.Unmarshal([]byte(after), &next) != nil {
+		return before
+	}
+	for index, inbound := range original.Inbounds {
+		var identity string
+		_ = json.Unmarshal(inbound["tag"], &identity)
+		if identity != tag || index >= len(previous.Inbounds) || index >= len(next.Inbounds) {
+			continue
+		}
+		var settings, projected, generated map[string]json.RawMessage
+		_ = json.Unmarshal(inbound["settings"], &settings)
+		_ = json.Unmarshal(previous.Inbounds[index]["settings"], &projected)
+		_ = json.Unmarshal(next.Inbounds[index]["settings"], &generated)
+		if settings["users"] == nil || generated["clients"] == nil || generated["users"] != nil || projected == nil {
+			return before
+		}
+		projected["users"] = settings["users"]
+		previous.Inbounds[index]["settings"], _ = json.Marshal(projected)
+		var root map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(before), &root)
+		root["inbounds"], _ = json.Marshal(previous.Inbounds)
+		result, _ := json.Marshal(root)
+		return string(result)
+	}
+	return before
+}
+
+func mutateGeneratedProjection(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
 	if engine == core.EngineXray {
 		if merged, handled, err := mutateXHTTPGroup(currentContent, generatedContent, matchValue, operation); handled {
 			return merged, err

@@ -114,6 +114,15 @@ func TestMergeListItemPreservesAdvancedFieldsAndAdditionalInbounds(t *testing.T)
 	}
 }
 
+func TestPresetMutationRetainsUnknownIntegerPrecision(t *testing.T) {
+	content := `{"future":18446744073709551615,"inbounds":[{"tag":"primary","port":1080,"custom":{"id":9007199254740993}},{"tag":"other","port":8080}]}`
+	generated := `{"inbounds":[{"tag":"primary","port":1081}]}`
+	merged, err := MutateListItem(core.EngineXray, content, generated, "inbounds", "tag", "primary", "modify", "tag", "port")
+	if err != nil || !strings.Contains(merged, "18446744073709551615") || !strings.Contains(merged, "9007199254740993") {
+		t.Fatalf("protocol form mutation rounded unknown numeric values: %s / %v", merged, err)
+	}
+}
+
 func TestMutateListItemEnforcesExplicitAddModifyDelete(t *testing.T) {
 	t.Parallel()
 	yamlCurrent := "future-option: keep\nlisteners:\n  - name: primary\n    type: vmess\n    port: 1000\n    future-inbound: keep\n  - name: secondary\n    type: http\n    port: 2000\n"

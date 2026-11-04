@@ -1,0 +1,2090 @@
+[
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "90",
+  "theme": "light",
+  "viewportH": 844,
+  "header": {
+   "top": 177,
+   "bottom": 245,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 379,
+   "bottom": 529,
+   "height": 150,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 245,
+   "bottom": 379,
+   "height": 134,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 710,
+   "bottom": 1115,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1115,
+   "bottom": 1268,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1156,
+    "bottom": 1200,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1156,
+    "bottom": 1200,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1208,
+    "bottom": 1252,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1411,
+  "bodyHeight": 1411,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "90",
+  "theme": "dark",
+  "viewportH": 844,
+  "header": {
+   "top": 177,
+   "bottom": 245,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 379,
+   "bottom": 529,
+   "height": 150,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 245,
+   "bottom": 379,
+   "height": 134,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 710,
+   "bottom": 1115,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1115,
+   "bottom": 1268,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1156,
+    "bottom": 1200,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1156,
+    "bottom": 1200,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1208,
+    "bottom": 1252,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1411,
+  "bodyHeight": 1411,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "100",
+  "theme": "light",
+  "viewportH": 844,
+  "header": {
+   "top": 181,
+   "bottom": 249,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 383,
+   "bottom": 533,
+   "height": 150,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 249,
+   "bottom": 383,
+   "height": 134,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 720,
+   "bottom": 1126,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1126,
+   "bottom": 1279,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1167,
+    "bottom": 1211,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1167,
+    "bottom": 1211,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1219,
+    "bottom": 1263,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1422,
+  "bodyHeight": 1422,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "100",
+  "theme": "dark",
+  "viewportH": 844,
+  "header": {
+   "top": 181,
+   "bottom": 249,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 383,
+   "bottom": 533,
+   "height": 150,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 249,
+   "bottom": 383,
+   "height": 134,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 720,
+   "bottom": 1126,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1126,
+   "bottom": 1279,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1167,
+    "bottom": 1211,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1167,
+    "bottom": 1211,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1219,
+    "bottom": 1263,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1422,
+  "bodyHeight": 1422,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "110",
+  "theme": "light",
+  "viewportH": 844,
+  "header": {
+   "top": 187,
+   "bottom": 255,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 392,
+   "bottom": 546,
+   "height": 155,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 255,
+   "bottom": 392,
+   "height": 137,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 739,
+   "bottom": 1144,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1144,
+   "bottom": 1297,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1185,
+    "bottom": 1229,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1185,
+    "bottom": 1229,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1237,
+    "bottom": 1281,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1440,
+  "bodyHeight": 1440,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "phone",
+  "size": "390x844",
+  "scale": "110",
+  "theme": "dark",
+  "viewportH": 844,
+  "header": {
+   "top": 187,
+   "bottom": 255,
+   "height": 68,
+   "left": 13,
+   "right": 377
+  },
+  "engineBar": {
+   "top": 392,
+   "bottom": 546,
+   "height": 155,
+   "left": 13,
+   "right": 377
+  },
+  "details": {
+   "top": 255,
+   "bottom": 392,
+   "height": 137,
+   "left": 13,
+   "right": 377
+  },
+  "editor": {
+   "top": 739,
+   "bottom": 1144,
+   "height": 405,
+   "left": 49,
+   "right": 377
+  },
+  "footer": {
+   "top": 1144,
+   "bottom": 1297,
+   "height": 153,
+   "left": 13,
+   "right": 377
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1185,
+    "bottom": 1229,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   },
+   {
+    "label": "保存并校验",
+    "top": 1185,
+    "bottom": 1229,
+    "height": 44,
+    "left": 199,
+    "right": 361
+   },
+   {
+    "label": "保存并部署",
+    "top": 1237,
+    "bottom": 1281,
+    "height": 44,
+    "left": 29,
+    "right": 191
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 780,
+   "bottom": 844,
+   "height": 64,
+   "left": 0,
+   "right": 390
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1440,
+  "bodyHeight": 1440,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 336
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "90",
+  "theme": "light",
+  "viewportH": 1024,
+  "header": {
+   "top": 185,
+   "bottom": 253,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 351,
+   "bottom": 421,
+   "height": 70,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 253,
+   "bottom": 351,
+   "height": 98,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 573,
+   "bottom": 1064,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1064,
+   "bottom": 1217,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1105,
+    "bottom": 1149,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1105,
+    "bottom": 1149,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1157,
+    "bottom": 1201,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1294,
+  "bodyHeight": 1294,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "90",
+  "theme": "dark",
+  "viewportH": 1024,
+  "header": {
+   "top": 185,
+   "bottom": 253,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 351,
+   "bottom": 421,
+   "height": 70,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 253,
+   "bottom": 351,
+   "height": 98,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 573,
+   "bottom": 1064,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1064,
+   "bottom": 1217,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1105,
+    "bottom": 1149,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1105,
+    "bottom": 1149,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1157,
+    "bottom": 1201,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1294,
+  "bodyHeight": 1294,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "100",
+  "theme": "light",
+  "viewportH": 1024,
+  "header": {
+   "top": 186,
+   "bottom": 254,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 352,
+   "bottom": 422,
+   "height": 70,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 254,
+   "bottom": 352,
+   "height": 98,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 577,
+   "bottom": 1069,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1069,
+   "bottom": 1222,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1110,
+    "bottom": 1154,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1110,
+    "bottom": 1154,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1162,
+    "bottom": 1206,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1299,
+  "bodyHeight": 1299,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "100",
+  "theme": "dark",
+  "viewportH": 1024,
+  "header": {
+   "top": 186,
+   "bottom": 254,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 352,
+   "bottom": 422,
+   "height": 70,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 254,
+   "bottom": 352,
+   "height": 98,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 577,
+   "bottom": 1069,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1069,
+   "bottom": 1222,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1110,
+    "bottom": 1154,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1110,
+    "bottom": 1154,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1162,
+    "bottom": 1206,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1299,
+  "bodyHeight": 1299,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "110",
+  "theme": "light",
+  "viewportH": 1024,
+  "header": {
+   "top": 192,
+   "bottom": 260,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 359,
+   "bottom": 448,
+   "height": 89,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 260,
+   "bottom": 359,
+   "height": 99,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 608,
+   "bottom": 1099,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1099,
+   "bottom": 1252,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1140,
+    "bottom": 1184,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1140,
+    "bottom": 1184,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1192,
+    "bottom": 1236,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1329,
+  "bodyHeight": 1329,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-portrait",
+  "size": "768x1024",
+  "scale": "110",
+  "theme": "dark",
+  "viewportH": 1024,
+  "header": {
+   "top": 192,
+   "bottom": 260,
+   "height": 68,
+   "left": 13,
+   "right": 755
+  },
+  "engineBar": {
+   "top": 359,
+   "bottom": 448,
+   "height": 89,
+   "left": 13,
+   "right": 755
+  },
+  "details": {
+   "top": 260,
+   "bottom": 359,
+   "height": 99,
+   "left": 13,
+   "right": 755
+  },
+  "editor": {
+   "top": 608,
+   "bottom": 1099,
+   "height": 492,
+   "left": 49,
+   "right": 755
+  },
+  "footer": {
+   "top": 1099,
+   "bottom": 1252,
+   "height": 153,
+   "left": 13,
+   "right": 755
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 1140,
+    "bottom": 1184,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   },
+   {
+    "label": "保存并校验",
+    "top": 1140,
+    "bottom": 1184,
+    "height": 44,
+    "left": 388,
+    "right": 739
+   },
+   {
+    "label": "保存并部署",
+    "top": 1192,
+    "bottom": 1236,
+    "height": 44,
+    "left": 29,
+    "right": 380
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 964,
+   "bottom": 1024,
+   "height": 60,
+   "left": 0,
+   "right": 634
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1329,
+  "bodyHeight": 1329,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 714
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "90",
+  "theme": "light",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 241,
+   "bottom": 307,
+   "height": 66,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 145,
+   "bottom": 241,
+   "height": 96,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 445,
+   "bottom": 765,
+   "height": 320,
+   "left": 359,
+   "right": 999
+  },
+  "footer": {
+   "top": 765,
+   "bottom": 836,
+   "height": 71,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 703,
+    "right": 781
+   },
+   {
+    "label": "保存并校验",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 789,
+    "right": 880
+   },
+   {
+    "label": "保存并部署",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 888,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "90",
+  "theme": "dark",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 241,
+   "bottom": 307,
+   "height": 66,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 145,
+   "bottom": 241,
+   "height": 96,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 445,
+   "bottom": 765,
+   "height": 320,
+   "left": 359,
+   "right": 999
+  },
+  "footer": {
+   "top": 765,
+   "bottom": 836,
+   "height": 71,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 703,
+    "right": 781
+   },
+   {
+    "label": "保存并校验",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 789,
+    "right": 880
+   },
+   {
+    "label": "保存并部署",
+    "top": 782,
+    "bottom": 820,
+    "height": 38,
+    "left": 888,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 845,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "100",
+  "theme": "light",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 241,
+   "bottom": 307,
+   "height": 66,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 145,
+   "bottom": 241,
+   "height": 96,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 449,
+   "bottom": 769,
+   "height": 320,
+   "left": 363,
+   "right": 999
+  },
+  "footer": {
+   "top": 769,
+   "bottom": 840,
+   "height": 71,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 683,
+    "right": 767
+   },
+   {
+    "label": "保存并校验",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 775,
+    "right": 873
+   },
+   {
+    "label": "保存并部署",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 881,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "100",
+  "theme": "dark",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 241,
+   "bottom": 307,
+   "height": 66,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 145,
+   "bottom": 241,
+   "height": 96,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 449,
+   "bottom": 769,
+   "height": 320,
+   "left": 363,
+   "right": 999
+  },
+  "footer": {
+   "top": 769,
+   "bottom": 840,
+   "height": 71,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 683,
+    "right": 767
+   },
+   {
+    "label": "保存并校验",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 775,
+    "right": 873
+   },
+   {
+    "label": "保存并部署",
+    "top": 786,
+    "bottom": 824,
+    "height": 38,
+    "left": 881,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 1,
+  "textOverflowItems": 0,
+  "listScrollWidth": 885,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "110",
+  "theme": "light",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 147,
+   "height": 64,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 246,
+   "bottom": 335,
+   "height": 89,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 147,
+   "bottom": 246,
+   "height": 99,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 482,
+   "bottom": 802,
+   "height": 320,
+   "left": 367,
+   "right": 999
+  },
+  "footer": {
+   "top": 802,
+   "bottom": 874,
+   "height": 73,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 664,
+    "right": 753
+   },
+   {
+    "label": "保存并校验",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 761,
+    "right": 866
+   },
+   {
+    "label": "保存并部署",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 874,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "tablet-landscape",
+  "size": "1024x768",
+  "scale": "110",
+  "theme": "dark",
+  "viewportH": 768,
+  "header": {
+   "top": 83,
+   "bottom": 147,
+   "height": 64,
+   "left": 325,
+   "right": 999
+  },
+  "engineBar": {
+   "top": 246,
+   "bottom": 335,
+   "height": 89,
+   "left": 325,
+   "right": 999
+  },
+  "details": {
+   "top": 147,
+   "bottom": 246,
+   "height": 99,
+   "left": 325,
+   "right": 999
+  },
+  "editor": {
+   "top": 482,
+   "bottom": 802,
+   "height": 320,
+   "left": 367,
+   "right": 999
+  },
+  "footer": {
+   "top": 802,
+   "bottom": 874,
+   "height": 73,
+   "left": 325,
+   "right": 999
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 664,
+    "right": 753
+   },
+   {
+    "label": "保存并校验",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 761,
+    "right": 866
+   },
+   {
+    "label": "保存并部署",
+    "top": 819,
+    "bottom": 858,
+    "height": 40,
+    "left": 874,
+    "right": 979
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 768,
+   "height": 768,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 768,
+  "bodyHeight": 768,
+  "overflowX": false,
+  "partialItems": 2,
+  "textOverflowItems": 0,
+  "listScrollWidth": 933,
+  "listClientWidth": 638
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "90",
+  "theme": "light",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 203,
+   "bottom": 269,
+   "height": 66,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 145,
+   "bottom": 203,
+   "height": 58,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 407,
+   "bottom": 911,
+   "height": 504,
+   "left": 359,
+   "right": 1415
+  },
+  "footer": {
+   "top": 911,
+   "bottom": 982,
+   "height": 71,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1119,
+    "right": 1197
+   },
+   {
+    "label": "保存并校验",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1205,
+    "right": 1296
+   },
+   {
+    "label": "保存并部署",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1304,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": true,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "90",
+  "theme": "dark",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 203,
+   "bottom": 269,
+   "height": 66,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 145,
+   "bottom": 203,
+   "height": 58,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 407,
+   "bottom": 911,
+   "height": 504,
+   "left": 359,
+   "right": 1415
+  },
+  "footer": {
+   "top": 911,
+   "bottom": 982,
+   "height": 71,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1119,
+    "right": 1197
+   },
+   {
+    "label": "保存并校验",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1205,
+    "right": 1296
+   },
+   {
+    "label": "保存并部署",
+    "top": 928,
+    "bottom": 966,
+    "height": 38,
+    "left": 1304,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": true,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "100",
+  "theme": "light",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 203,
+   "bottom": 269,
+   "height": 66,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 145,
+   "bottom": 203,
+   "height": 58,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 411,
+   "bottom": 915,
+   "height": 504,
+   "left": 363,
+   "right": 1415
+  },
+  "footer": {
+   "top": 915,
+   "bottom": 986,
+   "height": 71,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1099,
+    "right": 1183
+   },
+   {
+    "label": "保存并校验",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1191,
+    "right": 1289
+   },
+   {
+    "label": "保存并部署",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1297,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": true,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "100",
+  "theme": "dark",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 145,
+   "height": 62,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 203,
+   "bottom": 269,
+   "height": 66,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 145,
+   "bottom": 203,
+   "height": 58,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 411,
+   "bottom": 915,
+   "height": 504,
+   "left": 363,
+   "right": 1415
+  },
+  "footer": {
+   "top": 915,
+   "bottom": 986,
+   "height": 71,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1099,
+    "right": 1183
+   },
+   {
+    "label": "保存并校验",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1191,
+    "right": 1289
+   },
+   {
+    "label": "保存并部署",
+    "top": 932,
+    "bottom": 970,
+    "height": 38,
+    "left": 1297,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": true,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "110",
+  "theme": "light",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 147,
+   "height": 64,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 206,
+   "bottom": 295,
+   "height": 89,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 147,
+   "bottom": 206,
+   "height": 60,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 442,
+   "bottom": 946,
+   "height": 504,
+   "left": 367,
+   "right": 1415
+  },
+  "footer": {
+   "top": 946,
+   "bottom": 1019,
+   "height": 73,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1080,
+    "right": 1169
+   },
+   {
+    "label": "保存并校验",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1177,
+    "right": 1282
+   },
+   {
+    "label": "保存并部署",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1290,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ },
+ {
+  "viewport": "desktop",
+  "size": "1440x1000",
+  "scale": "110",
+  "theme": "dark",
+  "viewportH": 1000,
+  "header": {
+   "top": 83,
+   "bottom": 147,
+   "height": 64,
+   "left": 325,
+   "right": 1415
+  },
+  "engineBar": {
+   "top": 206,
+   "bottom": 295,
+   "height": 89,
+   "left": 325,
+   "right": 1415
+  },
+  "details": {
+   "top": 147,
+   "bottom": 206,
+   "height": 60,
+   "left": 325,
+   "right": 1415
+  },
+  "editor": {
+   "top": 442,
+   "bottom": 946,
+   "height": 504,
+   "left": 367,
+   "right": 1415
+  },
+  "footer": {
+   "top": 946,
+   "bottom": 1019,
+   "height": 73,
+   "left": 325,
+   "right": 1415
+  },
+  "submit": [
+   {
+    "label": "保存草稿",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1080,
+    "right": 1169
+   },
+   {
+    "label": "保存并校验",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1177,
+    "right": 1282
+   },
+   {
+    "label": "保存并部署",
+    "top": 963,
+    "bottom": 1003,
+    "height": 40,
+    "left": 1290,
+    "right": 1395
+   }
+  ],
+  "submitFullyVisible": false,
+  "editorVisible": true,
+  "dock": {
+   "top": 0,
+   "bottom": 1000,
+   "height": 1000,
+   "left": 0,
+   "right": 68
+  },
+  "dockOverlapsFooter": false,
+  "footerOverlapsEditor": false,
+  "dockOverlapsSubmit": false,
+  "pageHeight": 1000,
+  "bodyHeight": 1000,
+  "overflowX": false,
+  "partialItems": 0,
+  "textOverflowItems": 0,
+  "listScrollWidth": 1054,
+  "listClientWidth": 1054
+ }
+]

@@ -1,6 +1,5 @@
-// Drafts contain credentials: keep them in session memory, never browser
-// storage. Keys include the server revision so stale drafts cannot overwrite
-// a newer configuration after another editor saves.
+// Revision-scoped form drafts are owned by the configuration workspace.
+// The workspace limits optional persistence to the current account/browser tab.
 const valueType = control => ["checkbox", "radio"].includes(control.type) ? control.type : "value";
 const snapshot = form => [...form.elements].filter(control => control.name && !["submit", "button", "reset"].includes(control.type))
   .map(control => ({name:control.name, type:valueType(control), value:control.value, checked:Boolean(control.checked)}));
@@ -18,6 +17,8 @@ export function createPresetDrafts() {
   };
   return {
     capture,
+    serialize(scope = "") { capture(); return [...drafts].filter(([key]) => key.startsWith(scope)); },
+    restore(values = []) { for (const entry of Array.isArray(values) ? values : []) if (Array.isArray(entry) && typeof entry[0] === "string" && Array.isArray(entry[1])) drafts.set(entry[0], entry[1]); },
     bind(form, key) {
       if (!form || bindings.get(form)?.key === key) return;
       const baseline = signature(snapshot(form));

@@ -269,9 +269,9 @@ export async function testPresetsRuntime(preview = false) {
     test.portConflict = "port";
     const versionBeforeConflict = test.saved.version;
     button("validate").click();
-    await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "port conflict froze the editor");
+    await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").firstChild?.textContent === "端口 443 已被有效部署占用，请刷新状态或调整端口后重试。", "port conflict froze the editor");
     assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && document.activeElement === control("port"), "port conflict lost draft or did not focus port");
-    assert(!document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "correctable port conflict required reload");
+    assert(!document.querySelector("[data-preset-status]").querySelector("button"), "correctable port conflict required reload");
     test.portConflict = "";
     // Deletion must use the saved identity even when a hidden draft is invalid.
     edit("operation", "delete"); edit("credential", "");
@@ -306,7 +306,7 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => !button("deploy").disabled, "reload did not recover saved form");
     test.staleRevision = true;
     button("validate").click();
-    await waitFor(() => document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "stale revision recovery was lost");
+    await waitFor(() => document.querySelector("[data-preset-status]").querySelector("button"), "stale revision recovery was lost");
     assert(button("validate").disabled, "stale revision allowed submitting an outdated draft");
     test.staleRevision = false;
     document.querySelector("[data-preset-status] button").click();
@@ -439,7 +439,7 @@ export async function testPresetsRuntime(preview = false) {
       assert(form().querySelector("[data-managed-tls-hint]").textContent.includes(proxyMode === "external" ? "自行配置" : expanded ? "公开可信证书" : "自签证书") && form().querySelector("[data-managed-tls-hint]").textContent.includes("TCP 80") === expanded, "TLS help did not follow selected certificate mode");
       test.portConflict = "tls_public_port";
       button("validate").click();
-      await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "public HTTPS port conflict blocked retry");
+      await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").firstChild?.textContent === "端口 443 已被有效部署占用，请刷新状态或调整端口后重试。", "public HTTPS port conflict blocked retry");
       assert(!test.saved && control("tls_mode").value === proxyMode && control("tls_public_port").value === "8443" && control("tls_server_name").value === "tls.example.test", "public port conflict lost TLS draft");
       assert(document.activeElement === control("tls_public_port"), "public port conflict did not reveal and focus HTTPS port");
       test.portConflict = "";

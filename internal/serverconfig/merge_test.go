@@ -68,7 +68,7 @@ func TestMergeGeneratedRemovesStaleManagedInboundFields(t *testing.T) {
 				}
 			}
 			for _, marker := range fixture.keptMarkers {
-				if !strings.Contains(merged, marker) {
+				if !containsNativeJSON(merged, marker) {
 					t.Errorf("advanced field %q was lost:\n%s", marker, merged)
 				}
 			}
@@ -104,7 +104,7 @@ func TestMergeGeneratedForcesCentralLogOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(merged, fixture.want) || strings.Contains(merged, "/var/log/") {
+		if !containsNativeJSON(merged, fixture.want) || strings.Contains(merged, "/var/log/") {
 			t.Fatalf("%s centralized log configuration = %s", fixture.engine, merged)
 		}
 	}

@@ -20,7 +20,7 @@ export function coreSourceForInstall(engine, channel, rawSource) {
 export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }, { refreshAgentPage } = {}) {
   const { watchInstall, installFeedback } = createCoreInstallMonitor({ api, state, can, notify, refreshAgentPage });
   const waitForOperation = createTaskMonitor({read:id => api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"}), session:() => state.data});
-async function submitTask(payload, onError) {
+async function submitTask(payload, onError, options = {}) {
   try {
     const agent = state.data.agents?.find((item) => item.id === payload.agent_id);
     if (agent?.can_manage === false && !["install", "deploy", "validate", "status", "start", "stop", "restart", "read-config", "read-managed-config"].includes(payload.action))
@@ -31,7 +31,7 @@ async function submitTask(payload, onError) {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    notify("任务已提交");
+    if (!options.quiet) notify("任务已提交");
     return task;
   } catch (error) {
     notify(error.message, "error");

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
 )
@@ -62,6 +63,7 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 	if root == nil || old == nil {
 		return "", fmt.Errorf("invalid accounting configuration")
 	}
+	before := encodeAccountingDocument(engine, root)
 	if engine == core.EngineShadowsocksRust {
 		// Ports and IDs may be edited in source. Only marks present in the
 		// verified previous revision may be removed and replanned; arbitrary
@@ -89,7 +91,10 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 			delete(entry, "outbound_fwmark")
 		}
 		data, err := json.Marshal(root)
-		return string(data), err
+		if err != nil {
+			return "", err
+		}
+		return configschema.ApplyDocumentChanges(engine, content, string(before), string(data))
 	}
 	outsKey, tagKey, routeKey, targetKey := "outbounds", "tag", "route", "outbound"
 	if engine == core.EngineXray {
@@ -170,5 +175,8 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 	} else {
 		data, err = json.Marshal(root)
 	}
-	return string(data), err
+	if err != nil {
+		return "", err
+	}
+	return configschema.ApplyDocumentChanges(engine, content, string(before), string(data))
 }

@@ -28,7 +28,7 @@ export function bindEvent(target, type, handler, options) {
   }
   const eventKey = `${type}:${Boolean(
     options === true || options?.capture,
-  )}`;
+  )}:${options?.bindingKey || ""}`;
   const existing = events.get(eventKey);
   if (existing) {
     existing.handler = handler;

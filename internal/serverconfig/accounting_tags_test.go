@@ -177,7 +177,7 @@ func TestXrayProtocolMarksMigrateAndRejectConflicts(t *testing.T) {
 	}
 	legacy, _ := json.Marshal(root)
 	migrated, err := PrepareAccounting(core.EngineXray, string(legacy))
-	if err != nil || !reflect.DeepEqual(plan, migrated) {
+	if err != nil || !sameAccountingPlan(plan, migrated) {
 		t.Fatalf("legacy protocol exits did not migrate: %v", err)
 	}
 	source, err := AccountingUpdateSource(core.EngineXray, string(legacy), string(legacy))
@@ -185,7 +185,7 @@ func TestXrayProtocolMarksMigrateAndRejectConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrated, err = PrepareAccounting(core.EngineXray, source)
-	if err != nil || !reflect.DeepEqual(plan, migrated) {
+	if err != nil || !sameAccountingPlan(plan, migrated) {
 		t.Fatalf("legacy editor update changed routes or marks: %v", err)
 	}
 	conflict := strings.Replace(content, `"tcpFastOpen":true`, `"mark":123`, 1)

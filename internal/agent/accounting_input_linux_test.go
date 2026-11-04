@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,21 @@ func TestAccountingSavedInputIsRepeatable(t *testing.T) {
 	if err := os.WriteFile(path, []byte(plan.Content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	saved := strings.Replace(plan.Content, `"domainStrategy": "AsIs"`, `"domainStrategy": "UseIP"`, 1)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(plan.Content), &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range document["outbounds"].([]any) {
+		outbound := item.(map[string]any)
+		if outbound["tag"] == "direct" {
+			outbound["settings"].(map[string]any)["domainStrategy"] = "UseIP"
+		}
+	}
+	data, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := string(data)
 	source, err := accountingUpdateInput(core.EngineXray, path, saved)
 	if err != nil {
 		t.Fatal(err)

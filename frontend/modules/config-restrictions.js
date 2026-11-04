@@ -10,9 +10,11 @@ export async function bindConfigRestrictions(ctx) {
   if (!input) return;
   const baseline = input.value, data = state.data, epoch = state.navigationEpoch;
   const current = () => data === state.data && epoch === state.navigationEpoch && form.isConnected &&
-    state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine;
+    state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode;
   const access = createAccessControlController(ctx);
-  let navigation = form.querySelector(".config-file-buttons"), selected = null, commonSelected = false, busy = false;
+  const navigation = form.querySelector("[data-config-object-tools]");
+  let busy = false;
+  if (!navigation) return;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button config-access-trigger";
@@ -20,72 +22,17 @@ export async function bindConfigRestrictions(ctx) {
   button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5c0 4.6 3.1 7.9 7.5 10 4.4-2.1 7.5-5.4 7.5-10V6zM8.5 12h7"/></svg>限制';
   button.setAttribute("aria-haspopup", "dialog");
   button.setAttribute("aria-expanded", "false");
-  const target = () => files ? files.selectedInbound() : selected;
+  const target = () => files?.selectedInbound();
   const dirty = () => files ? files.dirty() : input.value !== baseline;
   const update = () => {
     setVisible(button, target());
     button.disabled = busy || !target();
     button.title = target() ? "设置当前入站的访问限制" : "请先选择一个入站配置";
   };
-  if (!navigation) {
-    navigation = document.createElement("nav");
-    navigation.className = "config-file-buttons";
-    navigation.setAttribute("aria-label", "选择限制入站");
-    const fileList = document.createElement("div");
-    fileList.className = "config-file-list";
-    navigation.append(fileList);
-    form.querySelector(".code-editor-toolbar").before(navigation);
-    // YAML and native ssserver configs remain whole-file editors. Use the
-    // server's parsed saved inbounds for their restriction selection.
-    try {
-      const entries = inbounds ? inbounds.map(entry => ({...entry, agent_id:agent.id, engine})) : await api("/access-controls");
-      if (!current()) return;
-      if (inbounds) {
-        const common = document.createElement("button");
-        common.type = "button"; common.className = "config-file-button active";
-        common.dataset.configCommon = "";
-        common.innerHTML = "<b>公共配置</b><small>完整配置源码</small>";
-        common.setAttribute("aria-pressed", "true");
-        commonSelected = true;
-        common.onclick = () => {
-          selected = null;
-          commonSelected = true;
-          navigation.querySelectorAll(".config-file-button").forEach(other => {
-            other.classList.toggle("active", other === common);
-            other.setAttribute("aria-pressed", String(other === common));
-          });
-          update();
-          input.dispatchEvent(new Event("config-selection"));
-        };
-        fileList.append(common);
-      }
-      entries.filter(entry => entry.agent_id === agent.id && entry.engine === engine).forEach(entry => {
-        const tab = document.createElement("button");
-        tab.type = "button"; tab.className = "config-file-button";
-        tab.dataset.accessInbound = entry.tag;
-        const name = document.createElement("b"), detail = document.createElement("small");
-        name.textContent = entry.tag; detail.textContent = (entry.kind || engine) + " · " + entry.port;
-        tab.append(name, detail);
-        tab.setAttribute("aria-pressed", "false");
-        tab.onclick = () => {
-          selected = entry;
-          commonSelected = false;
-          navigation.querySelectorAll(".config-file-button").forEach(other => {
-            other.classList.toggle("active", other === tab);
-            other.setAttribute("aria-pressed", String(other === tab));
-          });
-          update();
-          input.dispatchEvent(new Event("config-selection"));
-        };
-        fileList.append(tab);
-      });
-    } catch (error) {
-      if (current() && error.name !== "AbortError") notify("读取入站限制失败：" + error.message, "error");
-    }
-  }
   if (!current()) return;
-  navigation.append(button);
+  navigation.prepend(button);
   input.addEventListener("input", update);
+  input.addEventListener("config-selection", update);
   update();
   button.onclick = async () => {
     if (busy || !target() || !current()) return;
@@ -108,12 +55,9 @@ export async function bindConfigRestrictions(ctx) {
     } finally { busy = false; if (current()) update(); }
   };
   return {
-    selectedCommon: () => files ? files.selectedCommon() : commonSelected,
+    selectedCommon: () => files?.selectedCommon(),
     selectedInbound: target,
-    selectInbound(tag, port) {
-      if (files) return files.selectInbound(tag, port);
-      const entry = inbounds?.find(item => item.tag === tag && item.port === port);
-      if (entry) [...navigation.querySelectorAll("[data-access-inbound]")].find(tab => tab.dataset.accessInbound === tag)?.click();
+    selectInbound(tag, port) { files?.selectInbound(tag, port);
     },
   };
 }

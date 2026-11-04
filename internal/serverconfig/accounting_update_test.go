@@ -94,7 +94,7 @@ func TestSSRustSourceEditReplansVerifiedMarks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		edited := strings.Replace(plan.Content, `"server_port": 1080`, `"server_port": 2080`, 1)
+		edited := replaceNativeNumber(t, plan.Content, "server_port", "1080", "2080")
 		source, err := AccountingUpdateSource(core.EngineShadowsocksRust, edited, plan.Content)
 		if err != nil {
 			t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -25,13 +26,17 @@ func PresetAccountingSource(engine core.Engine, content string) (string, error) 
 		if err := decoder.Decode(&root); err != nil {
 			return "", err
 		}
+		before := encodeAccountingDocument(engine, root)
 		delete(root, "outbound_fwmark")
 		entries, _ := root["servers"].([]any)
 		for _, entry := range entries {
 			delete(mapValue(entry), "outbound_fwmark")
 		}
 		data, err := json.Marshal(root)
-		return string(data), err
+		if err != nil {
+			return "", err
+		}
+		return configschema.ApplyDocumentChanges(engine, content, string(before), string(data))
 	}
 	if !strings.Contains(content, accountingPrefix) {
 		return content, nil

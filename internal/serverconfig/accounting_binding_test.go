@@ -96,11 +96,11 @@ func TestBoundOutboundsAlwaysHaveIndependentMarks(t *testing.T) {
 				}
 				// Generated copies may remain in an edited source request;
 				// only the original port changes before the server replans.
-				portKey := `"port": 443`
+				portKey := "port"
 				if engine == core.EngineSingBox {
-					portKey = `"listen_port": 443`
+					portKey = "listen_port"
 				}
-				edited := strings.Replace(plan.Content, portKey, strings.Replace(portKey, "443", "9443", 1), 1)
+				edited := replaceNativeNumber(t, plan.Content, portKey, "443", "9443")
 				source, err = AccountingUpdateSource(engine, edited, plan.Content)
 				if err != nil {
 					t.Fatal(err)

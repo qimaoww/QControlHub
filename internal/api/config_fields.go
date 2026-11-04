@@ -39,12 +39,13 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Mutation        string `json:"mutation"`
-		Fragment        string `json:"fragment"`
-		ExpectedVersion int    `json:"expected_version"`
-		Name            string `json:"name"`
-		Description     string `json:"description"`
-		Intent          string `json:"intent"`
+		Mutation        string  `json:"mutation"`
+		Fragment        string  `json:"fragment"`
+		ExpectedVersion int     `json:"expected_version"`
+		Name            string  `json:"name"`
+		Description     string  `json:"description"`
+		Intent          string  `json:"intent"`
+		Content         *string `json:"content,omitempty"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -61,6 +62,11 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 	}
 	if input.ExpectedVersion != current.Version {
 		writeStoreError(w, store.ErrConflict)
+		return
+	}
+	current, err = s.configDraftSource(request.Context(), current, input.Content)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var present bool
@@ -181,6 +187,22 @@ func (s *Server) getConfigField(w http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if request.Method == http.MethodPost {
+		var preview configDraftPreview
+		if err := decodeJSON(w, request, &preview, core.MaxConfigEnvelopeBytes); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if preview.ExpectedVersion != config.Version {
+			writeStoreError(w, store.ErrConflict)
+			return
+		}
+		if err := validateConfigDraft(engine, preview.Content); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		config.Content = preview.Content
 	}
 	fragment, present, err := configschema.Fragment(engine, config.Content, key)
 	inherited := ""

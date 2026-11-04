@@ -431,37 +431,51 @@ func TestManagedPublicIPProbeRunAppliesConfigImmediately(t *testing.T) {
 
 func TestPublicIPProberCoalescesConcurrentRefresh(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		started := make(chan struct{})
 		release := make(chan struct{})
 		var requests atomic.Int32
 		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			requests.Add(1)
+			if requests.Add(1) == 1 {
+				close(started)
+			}
 			<-release
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("198.35.26.96"))}, nil
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("198.35.26.96")),
+			}, nil
 		})}
 		prober := &PublicIPProber{
 			httpV4: client, httpV6: client, interval: time.Minute,
 			config: publicIPProbeRuntimeConfig{endpoints: [2][]string{{"https://probe.example.test/v4"}, {}}, source: core.PublicIPProbeSourceAgent},
 			wake:   make(chan struct{}, 1),
 		}
-		done := make(chan struct{}, 2)
+		const callers = 8
+		done := make(chan struct{}, callers)
 		go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
-		// Keep the response blocked until both callers have reached their wait
-		// points. Merely starting the second goroutine can leave it unscheduled
-		// until after the first refresh has already completed.
+		<-started
+		for range callers - 1 {
+			go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
+		}
+		// All followers must enter the in-flight wait before the response is released.
+		// A real network read cannot provide this synchronization to synctest.
 		synctest.Wait()
-		go func() { prober.probeAll(context.Background()); done <- struct{}{} }()
-		synctest.Wait()
-		if len(done) != 0 {
-			t.Error("refresh returned before the shared response was released")
+		if completed := len(done); completed != 0 {
+			t.Errorf("%d refreshes returned before the probe completed", completed)
 		}
 		close(release)
-		<-done
-		<-done
+		for range callers {
+			<-done
+		}
 		if got := requests.Load(); got != 1 {
 			t.Fatalf("concurrent refresh made %d requests, want 1", got)
 		}
-		if ipv4, ipv6 := prober.Snapshot(); ipv4 != "198.35.26.96" || ipv6 != "" {
-			t.Fatalf("coalesced refresh lost the response: %q %q", ipv4, ipv6)
+		if ipv4, _, source, _ := prober.SnapshotWithSources(); ipv4 != "198.35.26.96" || source != core.PublicIPProbeSourceAgent {
+			t.Fatalf("concurrent refresh did not publish its result: address=%q source=%q", ipv4, source)
+		}
+
+		prober.probeAll(context.Background())
+		if got := requests.Load(); got != 2 {
+			t.Fatalf("subsequent refresh made %d requests, want 2", got)
 		}
 	})
 }
