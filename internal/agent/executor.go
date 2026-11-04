@@ -426,7 +426,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		if err == nil {
 			err = tlsPhaseError("TLS与协议就绪检查", waitPanelCertificateListeners(ctx, task))
 		}
-		if err == nil && task.SharedInstance {
+		if err == nil && (task.SharedInstance || task.ConfigID != "") {
 			err = e.commitSharedDeployment(spec, task)
 		}
 		output := validation + "\ndeployed to " + spec.ConfigPath
@@ -479,6 +479,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		output, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 		return output, errors.Join(err, e.executeTLSFrontend(ctx, spec, task, false))
 	case core.ActionStatus:
+		if err := e.identifyRetainedDeployment(ctx, spec, task); err != nil {
+			return "", err
+		}
 		return serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	case core.ActionInstall:
 		version, err := core.NormalizeCoreVersionSelector(task.CoreVersion)

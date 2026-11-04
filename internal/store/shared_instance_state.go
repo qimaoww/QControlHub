@@ -11,7 +11,14 @@ import (
 )
 
 func validateSharedInstanceStatus(instance core.SharedInstanceStatus) error {
-	if !instance.Engine.Valid() || !core.ValidAgentShareID(instance.ShareID) ||
+	if !core.ValidAgentShareID(instance.ShareID) {
+		return fmt.Errorf("%w: invalid shared instance identity", ErrInvalid)
+	}
+	return validateInstanceStatus(instance)
+}
+
+func validateInstanceStatus(instance core.SharedInstanceStatus) error {
+	if !instance.Engine.Valid() ||
 		len(instance.Reason) > 2048 || !utf8.ValidString(instance.Reason) || len(instance.ConfigID) > 100 ||
 		len(instance.TaskID) > 100 || len(instance.AppliedTaskID) > 100 || instance.ConfigVersion < 0 ||
 		(instance.ConfigID == "") != (instance.ConfigVersion == 0) {

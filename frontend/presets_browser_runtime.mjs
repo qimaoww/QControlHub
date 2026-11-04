@@ -97,6 +97,7 @@ async function fixture(engine, readOnly = false, actual) {
     }
     if (path === "/tasks" && options.method === "POST") {
       if (test.taskFailure) throw new Error("模拟任务提交失败");
+      if (body.action === "status" && test.recoverOnStatus) test.portConflict = "";
       return { id: `task-${test.saved.version}`, status: "pending" };
     }
     if (path.startsWith("/tasks/")) return { id: path.split("/").at(-1), status: test.taskState, error: test.taskState === "failed" ? "内核校验失败" : "" };
@@ -272,7 +273,13 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "port conflict froze the editor");
     assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && document.activeElement === control("port"), "port conflict lost draft or did not focus port");
     assert(!document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "correctable port conflict required reload");
-    test.portConflict = "";
+    test.recoverOnStatus = true;
+    const credentialDraft = control("credential").value;
+    const refreshCalls = test.calls.length;
+    document.querySelector("[data-refresh-preset]").click();
+    await waitFor(() => !document.querySelector("[data-refresh-preset]").disabled && test.portConflict === "", "status refresh did not execute a recovery task");
+    assert(test.calls.slice(refreshCalls).some(call => call.path === "/tasks" && call.body.action === "status" && call.body.agent_id === "node" && call.body.engine === engine), "refresh queried the wrong instance");
+    assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && control("credential").value === credentialDraft, "status recovery lost the draft or saved it silently");
     // Deletion must use the saved identity even when a hidden draft is invalid.
     edit("operation", "delete"); edit("credential", "");
     test.confirmed = false;

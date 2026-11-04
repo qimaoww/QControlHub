@@ -80,6 +80,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		return tx.Commit(ctx)
 	}
 	versioned := containsFeature(features, core.AgentFeatureSharedCoreLifecycle)
+	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus) {
+		if result.InstanceStatus.Engine != engine {
+			return fmt.Errorf("%w: main instance result does not match its leased target", ErrInvalid)
+		}
+	}
 	if shared && (action.ChangesInstance() || action == core.ActionStatus) {
 		observation := result.InstanceStatus
 		if observation != nil && (validateSharedInstanceStatus(*observation) != nil || observation.Engine != engine || observation.ShareID != shareID ||
@@ -194,6 +199,14 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if shared && result.InstanceStatus != nil {
+		if action == core.ActionStatus {
+			// The status lease is fresh and serialized with lifecycle tasks. Its
+			// metadata may have just bootstrapped a pre-sidecar deployment.
+			if err := tx.QueryRow(ctx, `SELECT last_task_id FROM agent_shared_instance_ownership
+				WHERE agent_id=$1 AND engine=$2 AND share_id=$3`, agentID, engine, shareID).Scan(&result.InstanceStatus.TaskID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		if err := recordSharedInstanceObservationTx(ctx, tx, agentID, *result.InstanceStatus, versioned, time.Now().UTC(), result.TrafficSettled, nil); err != nil {
 			return err
 		}
@@ -201,6 +214,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		if _, err := tx.Exec(ctx, `UPDATE agent_shared_instance_ownership state SET service_status='unknown',status_reason=$2
 			FROM tasks t WHERE t.id=$1 AND state.agent_id=t.agent_id AND state.engine=t.engine AND state.share_id=t.shared_traffic_id
 			AND state.last_task_id=t.id`, taskID, storedError); err != nil {
+			return err
+		}
+	}
+	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus) {
+		if err := recordHostInstanceObservationTx(ctx, tx, taskID, *result.InstanceStatus); err != nil {
 			return err
 		}
 	}

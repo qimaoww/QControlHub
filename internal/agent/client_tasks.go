@@ -231,6 +231,13 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		}
 		result.InstanceStatus = &instance
 	}
+	if !task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus) {
+		if spec, ok := c.executor.Specs[task.Engine]; ok {
+			instance := c.executor.deploymentStatus(ctx, task.Engine, spec, "")
+			instance.TaskID = task.ID
+			result.InstanceStatus = &instance
+		}
+	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
 		slog.Warn("task failed", "task_id", task.ID, "error", executionErr)

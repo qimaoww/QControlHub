@@ -142,13 +142,17 @@ func (e *Executor) verifySharedStart(ctx context.Context, spec EngineSpec, task 
 }
 
 func (e *Executor) sharedInstanceStatus(ctx context.Context, engine core.Engine, shareID string) core.SharedInstanceStatus {
-	result := core.SharedInstanceStatus{Engine: engine, ShareID: shareID, Status: "unknown"}
 	base := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
 	spec, err := sharedInstanceSpec(engine, base, shareID, e.serviceManager().Kind())
 	if err != nil {
-		result.Reason = "实例标识无效"
-		return result
+		return core.SharedInstanceStatus{Engine: engine, ShareID: shareID, Status: "unknown", Reason: "实例标识无效"}
 	}
+	return e.deploymentStatus(ctx, engine, spec, shareID)
+}
+
+func (e *Executor) deploymentStatus(ctx context.Context, engine core.Engine, spec EngineSpec, shareID string) core.SharedInstanceStatus {
+	result := core.SharedInstanceStatus{Engine: engine, ShareID: shareID, Status: "unknown"}
+	var err error
 	result.Status, err = serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	if err != nil {
 		result.Status, result.Reason = "unknown", "实例服务状态查询失败"
@@ -166,4 +170,47 @@ func (e *Executor) sharedInstanceStatus(ctx context.Context, engine core.Engine,
 	}
 	result.ObservedAt = time.Now().UTC()
 	return result
+}
+
+// A status task may bootstrap pre-sidecar deployments, but only by reproducing
+// the server's retained deployment, never its newer saved draft. This performs
+// no service operation and never rewrites the configuration.
+func (e *Executor) identifyRetainedDeployment(ctx context.Context, spec EngineSpec, task core.Task) error {
+	if task.ConfigID == "" || task.ConfigVersion < 1 || task.ConfigContent == "" {
+		return nil
+	}
+	unverified := errors.New("运行配置尚未核实，请在对应实例中重新部署已确认的配置")
+	actual, err := readConfigurationFile(spec.ConfigPath)
+	if err != nil {
+		return unverified
+	}
+	state, err := readSharedDeploymentState(spec)
+	if err == nil && state.ConfigID != "" {
+		if state.Digest != configurationDigest(actual) || state.ConfigID != task.ConfigID || state.ConfigVersion != task.ConfigVersion {
+			return unverified
+		}
+		return nil // A local edit must not silently reassign a committed identity.
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return unverified
+	}
+	err = nil
+	// Exact bytes are sufficient for legacy configurations without compiled
+	// accounting. Otherwise reproduce only the retained server snapshot.
+	prepared := task.ConfigContent
+	if prepared != actual {
+		var warning string
+		prepared, warning = e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if warning != "" {
+			return unverified
+		}
+	}
+	if task.SharedInstance {
+		prepared, err = serverconfig.SharedInstanceRuntimeContent(task.Engine, prepared)
+	}
+	if err != nil || prepared != actual {
+		return unverified
+	}
+	task.ConfigContent = actual
+	return e.commitSharedDeployment(spec, task)
 }
