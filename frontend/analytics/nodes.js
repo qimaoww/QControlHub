@@ -11,18 +11,35 @@ const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
 const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.status);
 
 export async function nodesPage(ctx) {
-  let agents = list(await ctx.api('/agents'));
+  const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view')]);
+  let agents = list(receivedAgents), preference = savedView;
   const canManage = agent => ctx.can('agents.manage', agent) && agent.can_manage !== false;
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
   const selected = new Set();
-  let view = ctx.state.data.nodeView || 'cards', selecting = false;
-  const summary = node('div', {className:'a-probe-summary'});
+  let view = preference.view === 'list' ? 'list' : 'cards', selecting = false;
   const batchBar = node('div', {className:'a-probe-batch'});
-  const cardToggle = button('卡片',()=>setView('cards'));
-  const listToggle = button('列表',()=>setView('list'));
-  function setView(value){ view=value;ctx.state.data.nodeView=value;draw(); }
+  const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
+  const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
+  async function setView(value) {
+    if (value === view) return;
+    cardToggle.disabled = listToggle.disabled = true;
+    try {
+      const saved = await ctx.api('/preferences/node-view', { method: 'PUT', body: { view: value, revision: preference.revision } });
+      if (!ctx.current()) return;
+      preference = saved; view = saved.view; draw();
+    } catch (error) {
+      if (error.status === 409) {
+        const latest = await ctx.api('/preferences/node-view');
+        if (!ctx.current()) return;
+        preference = latest; view = latest.view; draw();
+      }
+      throw error;
+    } finally {
+      if (ctx.current()) cardToggle.disabled = listToggle.disabled = false;
+    }
+  }
   function choice(agent){return field(`选择 ${agent.name}`,`select:${agent.id}`,selected.has(agent.id),{type:'checkbox',onchange(event){event.target.checked?selected.add(agent.id):selected.delete(agent.id);drawBatch();}});}
   function drawBatch(){
     batchBar.hidden=!selecting;
@@ -63,8 +80,6 @@ export async function nodesPage(ctx) {
     const query = search.querySelector('input').value.trim().toLowerCase();
     const shown = agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
-    const online=agents.filter(agent=>agent.status==='online').length;
-    summary.replaceChildren(stack(muted('全部节点'),node('strong',{},String(agents.length))),stack(muted('在线'),node('strong',{},String(online))),stack(muted('离线'),node('strong',{},String(agents.length-online))));
     drawBatch();
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
     if(view==='cards')results.replaceChildren(node('div',{className:'a-probe-grid'},shown.map(agent=>
@@ -313,7 +328,8 @@ export async function nodesPage(ctx) {
   draw(); search.querySelector('input').addEventListener('input', draw);
   const deepID = location.hash.match(/^#(?:settings-node|node)-([^?]+)/)?.[1];
   if (deepID) { const agent = agents.find(agent => agent.id === deepID); if (agent) queueMicrotask(() => { if (ctx.current()) void settings(agent); }); }
-  return stack(summary,section('节点监控', node('div', { className: 'a-card-body a-probe-toolbar' }, search,actions(cardToggle,listToggle)), actions(
+  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
+    cardToggle, listToggle,
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
     ctx.can('tasks.execute') && button('批量操作',()=>{selecting=true;draw();}),

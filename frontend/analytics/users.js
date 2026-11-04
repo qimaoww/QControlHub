@@ -149,6 +149,6 @@ export async function usersPage(ctx) {
   }
   draw();
   query.querySelector("input").addEventListener("input", draw);
-  return stack(section("用户筛选", node("div", { className: "a-card-body" }, query)),
-    section("用户", results, button("创建用户", () => edit(), { tone: "primary" })));
+  return stack(section(null, node("div", { className: "a-card-body" }, query)),
+    section(null, results, button("创建用户", () => edit(), { tone: "primary" })));
 }

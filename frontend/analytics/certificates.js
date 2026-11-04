@@ -280,8 +280,8 @@ export async function certificatesPage(ctx) {
   }
   draw();
   search.querySelector("input").addEventListener("input", draw);
-  return stack(section("证书筛选", node("div", { className: "a-card-body" }, search)),
-    section("证书", results, actions(
+  return stack(section(null, node("div", { className: "a-card-body" }, search)),
+    section(null, results, actions(
       button("账号与认证授权", event => void run(event.currentTarget, accounts)),
       button("节点证书来源", event => void run(event.currentTarget, sources)),
       ...["acme", "import", "self-signed"].map(source => button(source === "acme" ? "申请证书" : source === "import" ? "导入证书" : "自签证书",

@@ -122,5 +122,5 @@ export async function clientAccessPage(ctx) {
   search.querySelector('input').addEventListener('input', draw);
   for (const control of [agentFilter, engineFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
   draw();
-  return stack(section('接入配置', node('div', { className: 'a-card-body a-form-grid' }, search, agentFilter, engineFilter, format)), result);
+  return stack(section(null, node('div', { className: 'a-card-body a-form-grid' }, search, agentFilter, engineFilter, format)), result);
 }

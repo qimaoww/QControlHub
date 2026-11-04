@@ -127,8 +127,8 @@ export async function trafficPage(ctx) {
     });
     const box = ctx.dialog("同步配置端口", form, { wide: true });
   }));
-  return stack(section("流量筛选", node("div", { className: "a-card-body a-form-grid" }, search, scope)),
-    section("端口流量", stack(summary, results), actions(sync,
+  return stack(section(null, node("div", { className: "a-card-body a-form-grid" }, search, scope)),
+    section(null, stack(summary, results), actions(sync,
       ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
         const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}
       })),

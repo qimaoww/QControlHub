@@ -208,7 +208,7 @@ export function startAnalytics({ app, session }) {
       }, { glyph: "menu", title: "切换导航", className: "a-icon-button" });
       navigationToggle.setAttribute("aria-label", "切换导航");
       navigationToggle.setAttribute("aria-expanded", String(!matchMedia("(max-width: 56rem)").matches && !layout.classList.contains("a-collapsed")));
-      shellTitle = node("span", { className: "a-top-title" }, title);
+      shellTitle = node("h1", { className: "a-top-title" }, title);
       const top = node("header", { className: "a-top" }, node("div", { className: "a-top-inner" },
         navigationToggle, shellTitle, actions(button("刷新", () => void refresh(), { glyph: "refresh" }))));
       work.replaceChildren(top, main);
@@ -222,7 +222,7 @@ export function startAnalytics({ app, session }) {
       if (link.hash === `#${route}`) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
-    main.replaceChildren(node("div", { className: "a-heading" }, node("h1", {}, title)));
+    main.replaceChildren();
   }
   async function leave() {
     if (pending) { announce("操作正在提交，请等待结果。", "error"); return false; }

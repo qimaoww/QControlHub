@@ -22,7 +22,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   };
   const identity = await login(page, "analytics-admin");
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
-  await wait(page, "document.querySelector('.a-main h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
+  await wait(page, "document.querySelector('.a-top h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page, `document.querySelectorAll('link[href*="app.css"],.workspace-main,.app-dock').length`), 0);
   assert.equal(await evaluate(page, "document.querySelectorAll('.a-stat').length"), 4);
   assert.ok(await evaluate(page, "document.querySelector('.a-chart')?.getAttribute('aria-label').includes('流量')"));
@@ -31,7 +31,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await call("DOM.enable", {}, page);
   await call("CSS.enable", {}, page);
   const { root } = await call("DOM.getDocument", {}, page);
-  const { nodeId } = await call("DOM.querySelector", { nodeId: root.nodeId, selector: ".a-heading h1" }, page);
+  const { nodeId } = await call("DOM.querySelector", { nodeId: root.nodeId, selector: ".a-top h1" }, page);
   const { fonts } = await call("CSS.getPlatformFontsForNode", { nodeId }, page);
   assert.ok(fonts.length && fonts.every(font => font.isCustomFont), "Chinese heading uses the bundled font");
   await screenshot(page, "analytics-dashboard");
@@ -42,16 +42,16 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       const nav=window.__stableRail.querySelector('nav'),link=nav.querySelector('[href="#tasks"]');
       link.focus();nav.scrollTop=100;link.click();window.__railScroll=nav.scrollTop;
     })()`);
-    await wait(page, "document.querySelector('.a-main h1')?.textContent==='任务' && !document.querySelector('[aria-busy=true]')");
+    await wait(page, "document.querySelector('.a-top h1')?.textContent==='任务' && !document.querySelector('[aria-busy=true]')");
     assert.ok(await evaluate(page, `window.__stableRail===document.querySelector('.a-rail') && window.__stableTop===document.querySelector('.a-top') && Math.abs(document.querySelector('.a-rail nav').scrollTop-window.__railScroll)<1 && document.activeElement.matches('[href="#tasks"]')`), "route changes preserve rail identity, scroll and keyboard focus");
     await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click();location.hash='#archive-config'");
-    await wait(page, "document.querySelector('.a-main h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
+    await wait(page, "document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
     assert.ok(await evaluate(page, "document.querySelector('.a-layout').classList.contains('a-collapsed')"));
     await evaluate(page, "[...document.querySelectorAll('.a-top button')].find(item=>item.textContent.includes('刷新')).click()");
     await wait(page, "!document.querySelector('[aria-busy=true]')");
     assert.ok(await evaluate(page, "window.__stableTop===document.querySelector('.a-top') && document.querySelector('.a-layout').classList.contains('a-collapsed')"));
     await evaluate(page, "document.querySelector('.a-top [aria-label=切换导航]').click();location.hash='#dashboard'");
-    await wait(page, "document.querySelector('.a-main h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
+    await wait(page, "document.querySelector('.a-top h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
   }
   const widths = mode === "mobile" ? [[390, 844], [844, 390], [768, 1024]] : [[1920, 1080], [3840, 2160], [1280, 900], [960, 800]];
   for (const [width, height] of widths) {
@@ -62,9 +62,10 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);
   for (const [route, title] of [["settings", "面板设置"], ["users", "用户管理"], ["traffic", "流量"], ["ip-quality", "IP 质量"], ["certificates", "证书"], ["node-settings", "节点"], ["live-config", "实时配置"], ["access-control", "访问控制"], ["system-bbr", "TCP 调优"], ["substore-sync", "订阅同步"], ["tasks", "任务"], ["core-logs", "日志"], ["client-connections", "客户端连接"], ["client-access", "客户端接入"], ["my-quota", "共享与额度"], ["themes", "主题"], ["archive-config", "配置档案"]]) {
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
-    await wait(page, `document.querySelector('.a-main h1')?.textContent===${JSON.stringify(title)} && !document.querySelector('[aria-busy=true]')`);
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(title)} && !document.querySelector('[aria-busy=true]')`);
     assert.equal(await evaluate(page, "[...document.querySelectorAll('.a-main [role=alert]')].filter(item=>item.textContent.trim()).length"), 0, `${route}: real API did not fail`);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `${route}: no page overflow`);
+    assert.equal(await evaluate(page, "document.querySelectorAll('.a-main > .a-heading, .a-main h1').length"), 0, `${route}: page title appears only in the top bar`);
     await screenshot(page, `analytics-${route}`);
     if (route === "settings") {
       const formWidths = mode === "mobile" ? [[390, 844], [768, 1024]] : [[1440, 1000], [1280, 900], [960, 800], [3840, 2160]];
@@ -98,7 +99,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       };
       await chooseScale(110);
       await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#settings` }, page);
-      await wait(page, "document.querySelector('.a-main h1')?.textContent==='面板设置' && !document.querySelector('[aria-busy=true]') && getComputedStyle(document.documentElement).fontSize==='17.6px'");
+      await wait(page, "document.querySelector('.a-top h1')?.textContent==='面板设置' && !document.querySelector('[aria-busy=true]') && getComputedStyle(document.documentElement).fontSize==='17.6px'");
       await evaluate(page, "document.fonts.ready.then(()=>true)");
       await screenshot(page, "analytics-settings-large-font");
       await chooseScale(100);

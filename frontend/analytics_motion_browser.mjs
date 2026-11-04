@@ -132,6 +132,6 @@ export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, w
     replacement.dispose();
   })()`);
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#archive-config` }, page);
-  await wait(page, "document.querySelector('.a-main h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
+  await wait(page, "document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
   record(`${mode}: actual analytics modal playback, interrupted close/reopen, field reversal, stable refresh, reduced motion, queued callback cancellation and stylesheet disposal passed`);
 }

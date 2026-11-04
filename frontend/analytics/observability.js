@@ -43,8 +43,8 @@ export async function logsPage(ctx) {
     draw();
     if (!next.length) older.disabled = true;
   }));
-  return stack(section("日志筛选", node("div", { className: "a-card-body" }, form)),
-    section("内核日志", stack(metadata, results, node("div", { className: "a-card-body" }, actions(older)))));
+  return stack(section(null, node("div", { className: "a-card-body" }, form)),
+    section(null, stack(metadata, results, node("div", { className: "a-card-body" }, actions(older)))));
 }
 
 export async function connectionsPage(ctx) {
@@ -103,6 +103,6 @@ export async function connectionsPage(ctx) {
   }
   const sourceState = node("div", { className: "a-card-body a-stack" });
   await load();
-  return stack(section("连接筛选", node("div", { className: "a-card-body" }, form)),
-    section("客户端连接", stack(summary, results, sourceState, node("div", { className: "a-card-body" }, pageTools))));
+  return stack(section(null, node("div", { className: "a-card-body" }, form)),
+    section(null, stack(summary, results, sourceState, node("div", { className: "a-card-body" }, pageTools))));
 }

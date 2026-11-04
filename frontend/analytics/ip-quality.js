@@ -77,5 +77,5 @@ export async function ipQualityPage(ctx) {
     }));
   }
   draw();
-  return stack(section("历史记录", node("div", { className: "a-card-body" }, filter)), results);
+  return stack(section(null, node("div", { className: "a-card-body" }, filter)), results);
 }

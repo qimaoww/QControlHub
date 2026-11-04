@@ -173,6 +173,6 @@ export async function archivePage(ctx) {
     });
     const box = ctx.dialog("新建模板", form, { wide: true });
   });
-  return stack(section("配置档案", results, ctx.can("configs.write") && button("新建配置", () => edit(), { tone: "primary" })),
+  return stack(section(null, results, ctx.can("configs.write") && button("新建配置", () => edit(), { tone: "primary" })),
     ctx.can("templates.read") && section("配置模板", templateResults, addTemplate));
 }

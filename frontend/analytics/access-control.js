@@ -52,5 +52,5 @@ export async function accessControlPage(ctx) {
   }
   draw();
   search.querySelector("input").addEventListener("input", draw);
-  return stack(section("入站筛选", node("div", { className: "a-card-body" }, search)), section("访问限制", results));
+  return stack(section(null, node("div", { className: "a-card-body" }, search)), section(null, results));
 }

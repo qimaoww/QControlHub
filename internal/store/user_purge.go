@@ -204,6 +204,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	for _, statement := range []string{
 		`DELETE FROM account_node_orders WHERE account_id=$1`,
 		`DELETE FROM account_themes WHERE account_id=$1`,
+		`DELETE FROM account_node_views WHERE account_id=$1`,
 		`DELETE FROM traffic_batch_requests WHERE account_id=$1`,
 		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
 		`DELETE FROM ip_quality_schedules WHERE owner_id=$1`,

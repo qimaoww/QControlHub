@@ -8,7 +8,7 @@ export async function tcpPage(ctx) {
     ctx.can("tasks.read") ? ctx.api("/system-tcp/tasks") : [],
   ]);
   const latest = new Map(list(tasks).map(task => [task.agent_id, task]));
-  return section("系统 TCP 调优", table(["节点", "状态", "拥塞控制", "队列", "最近任务", "操作"], list(agents).map(agent => {
+  return section(null, table(["节点", "状态", "拥塞控制", "队列", "最近任务", "操作"], list(agents).map(agent => {
     const current = systemBBRState(agent), metrics = agent.metrics?.bbr || {};
     const busy = ["pending", "running"].includes(latest.get(agent.id)?.status);
     const editable = ctx.can("agents.manage", agent) && ctx.can("tasks.execute") && current.controllable && !busy;

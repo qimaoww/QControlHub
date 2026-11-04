@@ -50,7 +50,8 @@ export const empty = (message = "暂无记录") => node("p", { className: "a-emp
 export const muted = (message) => node("span", { className: "a-muted" }, message);
 export const code = (message) => node("pre", { className: "a-code", tabindex: "0" }, message);
 export const section = (title, content, tools, subtitle) => node("section", { className: "a-card" },
-  node("div", { className: "a-card-head" }, node("div", {}, node("h2", {}, title), subtitle && node("p", {}, subtitle)), tools), content);
+  (title || subtitle || tools) && node("div", { className: title ? "a-card-head" : "a-card-tools" },
+    (title || subtitle) && node("div", {}, title && node("h2", {}, title), subtitle && node("p", {}, subtitle)), tools), content);
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 
 export function table(columns, rows, { emptyText, paginate = 12, label = "记录" } = {}) {

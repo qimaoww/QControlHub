@@ -193,12 +193,12 @@ export async function tasksPage(ctx) {
     ]), { label: "任务" }));
   }
   draw(await ctx.api(query("/tasks", filters)));
-  return stack(section("筛选任务", node("div", { className: "a-card-body" }, filter)), section("任务记录", results));
+  return stack(section(null, node("div", { className: "a-card-body" }, filter)), section(null, results));
 }
 
 export async function quotaPage(ctx) {
   const access = await ctx.api("/agent-access");
-  if (!access.isolated) return section("共享与额度", node("div", { className: "a-card-body" }, muted("按账号权限访问节点")));
+  if (!access.isolated) return section(null, node("div", { className: "a-card-body" }, muted("按账号权限访问节点")));
   return grid(list(access.shares).map(share => section(share.agent_name, node("div", { className: "a-card-body" }, stack(
     muted(`所有者 · ${share.owner_username || "管理员"}`),
     node("strong", {}, `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : "不限量"}`),
