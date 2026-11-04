@@ -251,3 +251,52 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 		})
 	}
 }
+
+func testPlainWebSocketClientRoutingLive(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
+		t.Run(string(engine), func(t *testing.T) {
+			input := Input{Protocol: ProtocolVMess, Username: "default", Tag: "plain-ws", Listen: "127.0.0.1", Port: singBoxFreePort(t),
+				Credential: "123e4567-e89b-42d3-a456-426614174000", Transport: "websocket", TransportPath: "/relay", TransportHost: "host.example.test"}
+			source, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), source, input.Port, "")
+			metadata, _ := MarshalClientMetadata(input)
+			parsed, ok := Parse(engine, source)
+			if !ok {
+				t.Fatal("parse failed")
+			}
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
+			}
+			target, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(input.Port))
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Host != input.TransportHost || r.URL.Path != input.TransportPath {
+					http.Error(w, "wrong WS route", http.StatusMisdirectedRequest)
+					return
+				}
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(edge.Close)
+			_, port, _ := net.SplitHostPort(edge.Listener.Addr().String())
+			parsed.Port, _ = strconv.Atoi(port)
+			out, err := BuildClientOutbound(core.EngineSingBox, parsed, "127.0.0.1", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outbound map[string]any
+			_ = json.Unmarshal(out, &outbound)
+			echo, clientPort := singBoxEcho(t, "tcp"), singBoxFreePort(t)
+			client, _ := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"type": "direct", "listen": "127.0.0.1", "listen_port": clientPort, "network": "tcp", "override_address": "127.0.0.1", "override_port": echo}}, "outbounds": []any{outbound}})
+			logs := singBoxRun(t, nativeWSTestBinary(t, core.EngineSingBox), "plain-ws-client", string(client))
+			if err := singBoxEchoRoundTrip("tcp", clientPort); err != nil {
+				t.Fatalf("plaintext WS payload: %v\n%s", err, logs())
+			}
+			t.Run("xray", func(t *testing.T) { testWebSocketXrayImport(t, parsed, "127.0.0.1", "") })
+			t.Run("mihomo", func(t *testing.T) { testWebSocketMihomoImport(t, parsed, "127.0.0.1", "", false) })
+			t.Run("share-uri", func(t *testing.T) { testWebSocketMihomoImport(t, parsed, "127.0.0.1", "", true) })
+		})
+	}
+}

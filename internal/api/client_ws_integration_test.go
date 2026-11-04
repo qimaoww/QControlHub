@@ -162,3 +162,57 @@ func testNativeWebSocketTLSClientRoutingIsolation(t *testing.T, engine core.Engi
 	check(recipient, 1)
 	check(owner, 0)
 }
+
+func TestPlainWebSocketHostRoutingIsolation(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray, core.EngineMihomo} {
+		t.Run(string(engine), func(t *testing.T) {
+			db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "plain-ws-shared", engine)
+			agent.Features = append(agent.Features, core.AgentFeatureSharedCoreInstances)
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 23002)
+			base := "/agents/" + agent.ID + "/configs/" + string(engine)
+			var results [2]configMutationResult
+			for i, client := range []configScopeAPIClient{owner, recipient} {
+				var plan serverconfig.Input
+				client.call("POST", base+"/plans", map[string]string{"protocol": "vmess"}, http.StatusCreated, &plan)
+				plan.TLSEnabled, plan.TLSMode, plan.TLSPublicPort = false, "", 0
+				plan.Listen, plan.Port, plan.Tag = "0.0.0.0", 23001+i, "same-tag"
+				plan.Transport, plan.TransportPath, plan.TransportHost = "websocket", "/same-path", "host.example.test"
+				plan.TLSServerName, plan.CertificatePath, plan.PrivateKeyPath = "", "", ""
+				client.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &results[i])
+				completeConfigScopeAPITask(t, ctx, db, results[i].Task)
+				if results[i].Task.SharedInstance != (i == 1) {
+					t.Fatal("wrong instance")
+				}
+				var workspace struct{ Inbounds []serverconfig.Input }
+				client.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
+				if len(workspace.Inbounds) != 1 || workspace.Inbounds[0].TransportHost != plan.TransportHost || workspace.Inbounds[0].TLSEnabled {
+					t.Fatal("plaintext readback lost Host")
+				}
+				client.call("PUT", "/agents/"+agent.ID+"/client-address", map[string]any{"profile": clientProfileSelector{Engine: engine, Tag: plan.Tag, Port: plan.Port}, "address": "203.0.113.10"}, http.StatusOK, nil)
+				for _, target := range []string{"sing-box", "xray"} {
+					var entries []clientAccessEntry
+					client.call("GET", "/client-access?outbound_engine="+target, nil, http.StatusOK, &entries)
+					if len(entries) != 1 || entries[0].ConfigID != results[i].Config.ID || len(entries[0].Profiles) != 1 {
+						t.Fatal("foreign profile")
+					}
+					item := entries[0].Profiles[0]
+					if !strings.Contains(string(item.Outbound), plan.TransportHost) || !strings.Contains(item.MihomoYAML, plan.TransportHost) {
+						t.Fatal("export lost Host")
+					}
+				}
+				var resource subStoreSyncResource
+				client.call("GET", "/substore-sync", nil, http.StatusOK, &resource)
+				if len(resource.Profiles) != 1 || resource.Profiles[0].ConfigID != results[i].Config.ID {
+					t.Fatal("foreign subscription")
+				}
+			}
+			owner.call("GET", "/configs/"+results[1].Config.ID+"/revisions", nil, http.StatusNotFound, nil)
+			recipient.call("GET", "/configs/"+results[0].Config.ID+"/revisions", nil, http.StatusNotFound, nil)
+			admin.call("GET", "/configs/"+results[1].Config.ID+"/revisions", nil, http.StatusOK, nil)
+		})
+	}
+}

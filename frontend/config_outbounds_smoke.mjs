@@ -52,6 +52,20 @@ for (const engine of ["xray", "sing-box"]) {
     assert.equal(out.tag, values.tag);
     assert(!JSON.stringify(out).includes("qch-trf-"));
   }
+  for (const protocol of ["vless", "vmess", "trojan"]) {
+    const ws = overrides => outboundPreset(engine, protocol, {...values, transport:"ws", path:"/relay?token=one", serverName:"sni.example", ...overrides});
+    const host = out => engine === "xray" ? out.streamSettings?.wsSettings?.host : out.transport?.headers?.Host;
+    assert.equal(host(ws({host:"host.example"})), "host.example");
+    assert.equal(host(ws({host:""})), "sni.example");
+    assert.equal(host(ws({host:"", serverName:""})), values.server);
+    assert.equal(host(ws({host:"", security:"none"})), undefined);
+    assert.equal(host(ws({host:"host.example", security:"none"})), "host.example");
+    const moved = ws({server:"203.0.113.10", host:"host.example"});
+    assert.equal(host(moved), "host.example");
+    assert.equal(engine === "xray" ? moved.streamSettings.tlsSettings.serverName : moved.tls.server_name, "sni.example");
+    for (const transport of ["tcp", "grpc"]) assert(!JSON.stringify(ws({host:"host.example", transport})).includes("host.example"));
+    assert.throws(()=>ws({host:"https://host.example/path"}), /WS Host/);
+  }
   const reality = outboundPreset(engine, "vless", {...values, security:"reality", publicKey:"public-only", shortId:"aabb", serverName:"tls.example", flow:"xtls-rprx-vision"});
   assert(JSON.stringify(reality).includes("public-only") && JSON.stringify(reality).includes("tls.example"));
   assert.throws(()=>outboundPreset(engine, "vless", {...values, credential:"not-uuid"}), /UUID/);
