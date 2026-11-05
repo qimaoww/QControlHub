@@ -83,6 +83,9 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		if success && err != nil {
 			t.Fatalf("%s stage=%t: %v\n%s", action, stage, err, output)
 		}
+		if !success && err != nil {
+			t.Logf("expected failure %s stage=%t: %v\n%s", action, stage, err, output)
+		}
 		if !success && err == nil {
 			t.Fatal("invalid frontend deployment accepted")
 		}
