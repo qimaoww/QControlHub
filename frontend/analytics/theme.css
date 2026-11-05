@@ -319,6 +319,9 @@ strong, b { font-weight: 600; }
 .a-probe-list table { min-width: 1000px; }
 .a-probe-list th { border-top: 0; }
 .a-probe-list td { padding-block: 18px; }
+.a-probe-list :is(th,td)[data-column="选择"] { width: 64px; min-width: 64px; padding-inline: 10px; text-align: center; }
+.a-probe-list td[data-column="选择"] .a-check { justify-content: center; min-height: 44px; }
+.a-probe-list td[data-column="选择"] .a-check > span { display: none; }
 .a-probe-identity { min-width: 190px; max-width: 260px; display: grid; gap: 5px; }
 .a-probe-identity > strong { font-weight: 500; overflow-wrap: anywhere; }
 .a-probe-identity > .a-muted { font-size: 12px; }
