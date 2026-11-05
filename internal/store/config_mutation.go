@@ -3,13 +3,17 @@ package store
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
+var configMutationTaskID = regexp.MustCompile(`^tsk_[a-f0-9]{16}$`)
+
 type ConfigMutationOptions struct {
 	ManagementState  *serverconfig.ManagedState
+	TaskID           string
 	Action           core.Action
 	ClientMetadata   *ConfigClientMetadataMutation
 	InstallIfMissing bool
@@ -21,6 +25,9 @@ type ConfigMutationOptions struct {
 // policies and exact task snapshot together. A failed task never leaves an
 // apparently failed save behind, and Agents are only woken after commit.
 func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, expectedVersion int, options ConfigMutationOptions) (core.Config, core.Task, error) {
+	if options.TaskID != "" && !configMutationTaskID.MatchString(options.TaskID) {
+		return core.Config{}, core.Task{}, fmt.Errorf("%w: invalid configuration task identifier", ErrInvalid)
+	}
 	if options.Action != core.ActionValidate && options.Action != core.ActionDeploy {
 		return core.Config{}, core.Task{}, fmt.Errorf("%w: preset intent must be validate or deploy", ErrInvalid)
 	}
@@ -46,7 +53,7 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 		}
 	}
 	task, err := s.createTaskTx(ctx, tx, core.TaskRequest{
-		AgentID: saved.AgentID, Engine: saved.Engine, Action: options.Action,
+		MutationTaskID: options.TaskID, AgentID: saved.AgentID, Engine: saved.Engine, Action: options.Action,
 		ConfigID: saved.ID, ExpectedConfigVersion: saved.Version,
 		InstallIfMissing: options.InstallIfMissing,
 	}, 0)

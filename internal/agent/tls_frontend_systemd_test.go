@@ -89,6 +89,9 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		if !success && err == nil {
 			t.Fatal("invalid frontend deployment accepted")
 		}
+		if !success && err != nil {
+			t.Logf("expected rejection: %v\n%s", err, output)
+		}
 	}
 	service := "qagent-sing-box.service"
 	if kind == ServiceManagerOpenRC {

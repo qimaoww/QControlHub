@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { assertAgentConfigBaseline, liveConfigEngineEligible, liveConfigEditorState, liveConfigReadAction, liveConfigSnapshotReusable, submitLiveConfigChange } from "../modules/configs.js";
+import { liveConfigEngineEligible, liveConfigEditorState, liveConfigReadAction, liveConfigSnapshotReusable, submitLiveConfigChange } from "../modules/configs.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {
@@ -132,55 +132,20 @@ assert.equal(liveConfigSnapshotReusable({ content:"node", readAt:snapshotNow - 6
 assert.equal(liveConfigSnapshotReusable({ content:"saved draft", saved:true, readAt:0 }, snapshotNow), true,
   "saved drafts are not Agent snapshot cache entries and must remain available");
 
-assert.doesNotThrow(() => assertAgentConfigBaseline("agent bytes\n", "agent bytes\n"));
-let baselineConflict;
-try { assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"); }
-catch (error) { baselineConflict = error; }
-assert.match(baselineConflict?.message || "", /部署前核验发现 Agent 当前配置已在页面读取后发生变化/);
-assert.equal(baselineConflict.deployPreflight, true);
-
-const deployOrder = [];
-const deployForm = new Map([
-  ["name", "verified deployment"],
-  ["description", "preflight order"],
-  ["content", "edited target\n"],
-  ["version", "0"],
-]);
-await submitLiveConfigChange({
-  api: async (_path, options) => {
-    deployOrder.push("save");
-    return { id: "cfg_verified", version: 1, ...JSON.parse(options.body) };
-  },
-  submitTask: async () => {
-    deployOrder.push("deploy");
-    return { id: "tsk_verified" };
-  },
-  agent: { id: "agt_verified" },
-  engine: "xray",
-  intent: "deploy",
-  form: deployForm,
-  source: { content: "cached bytes\n", agentContent: "cached bytes\n" },
-  existingAvailable: false,
-  savedConfig: null,
-  beforeDeploy: async () => { deployOrder.push("verify"); },
-});
-assert.deepEqual(deployOrder, ["verify", "save", "deploy"],
-  "deployment must force Agent verification before persisting the draft or creating its task");
-
-let preflightMutationAttempted = false;
-await assert.rejects(submitLiveConfigChange({
-  api: async () => { preflightMutationAttempted = true; },
-  submitTask: async () => { preflightMutationAttempted = true; },
-  agent: { id: "agt_conflict" },
-  engine: "xray",
-  intent: "deploy",
-  form: deployForm,
-  source: { content: "cached bytes\n", agentContent: "cached bytes\n" },
-  existingAvailable: false,
-  savedConfig: null,
-  beforeDeploy: async () => assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"),
-}), /已停止保存和部署/);
-assert.equal(preflightMutationAttempted, false,
-  "a changed Agent baseline must block both the config save and deploy task");
-
+const requests = [];
+for (const intent of ["validate", "deploy"]) {
+  const form = new Map([["content", '{"inbounds":[]}'], ["name", "config"], ["version", "1"]]);
+  const result = await submitLiveConfigChange({
+    api:async (path, options) => {
+      requests.push({path, body:JSON.parse(options.body)});
+      return {config:{id:"cfg", version:2, content:'{"inbounds":[]}'}, task:{id:"task", action:intent}};
+    },
+    submitTask:() => assert.fail("save and task must be atomic"),
+    agent:{id:"node"}, engine:"xray", intent, form, existingAvailable:false,
+  });
+  assert.equal(result.task.action, intent);
+  assert.equal(requests.at(-1).path, "/agents/node/configs/xray/source");
+  assert.equal(requests.at(-1).body.version, 1);
+}
+assert.equal(requests.length, 2);
 }

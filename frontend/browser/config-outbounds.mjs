@@ -123,7 +123,7 @@ export async function testConfigOutboundsRuntime() {
     "deletion left a binding or changed another inbound/endpoint");
     test.dispose();
   }
-  for (const status of [400, 409, 503, undefined]) {
+  for (const status of [200, 400, 408, 409, 503, undefined]) {
     const test = await fixture("xray");
     test.select("first");
     await open("add");

@@ -17,7 +17,7 @@ import (
 // SaveAgentConfig creates or updates an agent-owned configuration using an
 // optimistic version check. expectedVersion must be zero for the first save.
 func (s *Store) SaveAgentConfig(ctx context.Context, input core.Config, expectedVersion int) (core.Config, error) {
-	return s.saveAgentConfig(ctx, input, expectedVersion, nil)
+	return s.saveAgentConfig(ctx, input, expectedVersion, nil, nil)
 }
 
 // ConfigClientMetadataMutation replaces encrypted auxiliary metadata for one inbound
@@ -35,10 +35,19 @@ func (s *Store) SaveAgentConfigWithClientMetadata(ctx context.Context, input cor
 	if !mutation.Delete && strings.TrimSpace(mutation.Content) != "" && s.cryptor == nil {
 		return core.Config{}, fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required for client-only configuration secrets", ErrSecretUnavailable)
 	}
-	return s.saveAgentConfig(ctx, input, expectedVersion, &mutation)
+	return s.saveAgentConfig(ctx, input, expectedVersion, &mutation, nil)
 }
 
-func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation) (core.Config, error) {
+// SaveAgentConfigWithPolicies keeps save-only SS Rust changes and their
+// external access policies in the same revision transaction.
+func (s *Store) SaveAgentConfigWithPolicies(ctx context.Context, input core.Config, expectedVersion int, policies []core.MainlandAccessPolicy) (core.Config, error) {
+	if policies != nil && input.Engine != core.EngineShadowsocksRust {
+		return core.Config{}, fmt.Errorf("%w: external policies require ss-rust", ErrInvalid)
+	}
+	return s.saveAgentConfig(ctx, input, expectedVersion, nil, policies)
+}
+
+func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation, policies []core.MainlandAccessPolicy) (core.Config, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.Config{}, err
@@ -47,6 +56,11 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, metadataMutation)
 	if err != nil {
 		return core.Config{}, err
+	}
+	if policies != nil {
+		if err := s.replaceMainlandAccessPoliciesTx(ctx, tx, input.AgentID, saved.Version, policies); err != nil {
+			return core.Config{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, err

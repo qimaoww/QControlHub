@@ -74,7 +74,7 @@ async function readCurrentConfig(agent, engine, sourceKey, readAction, preferCac
     state.data.liveSources[sourceKey] = {
       content: snapshot.content,
       // Keep the Agent bytes separate from later saved-but-not-deployed edits.
-      // Deployment preflight compares against this immutable editor baseline.
+      // Display provenance survives later saved-but-not-deployed edits.
       agentContent: snapshot.content,
       taskId: snapshot.taskId,
       readAt: snapshot.readAt,

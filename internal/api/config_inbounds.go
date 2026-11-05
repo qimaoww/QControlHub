@@ -298,25 +298,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		desired = reconcileShadowsocksRustPolicies(entries, existingShadowsocksRustPolicies, agent.ID, input.ExpectedVersion+1,
 			destination, canonicalTag, input.Input.Port, input.Input.BlockMainlandSource, applySelection)
 	}
-	// Finish local identity, port, routing and policy checks before spending
-	// time on DNS/TLS. A duplicate inbound should fail immediately.
-	if input.Input.RealityEnabled && input.Operation != "delete" {
-		target, err := serverconfig.ProbePlanRealityTarget(request.Context(), input.Input)
-		if err != nil {
-			mutationError(err.Error())
-			return
-		}
-		if input.Input.RealityMLDSA65Seed != "" {
-			if err := serverconfig.ValidateRealityMLDSATarget(target); err != nil {
-				mutationError(err.Error())
-				return
-			}
-		}
-	}
+	// Reality credentials and target syntax are checked by Generate. Remote
+	// DNS/TLS reachability from the panel is not a configuration validity test.
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), core.Config{
 		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
 	}, input.ExpectedVersion, store.ConfigMutationOptions{
-		Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired,
+		TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired,
 		InstallIfMissing: input.InstallIfMissing && !agent.Runtime[engine].Installed,
 	})
 	if err != nil {

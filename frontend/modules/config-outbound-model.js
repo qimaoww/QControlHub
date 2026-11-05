@@ -20,12 +20,14 @@ export function outboundEntries(content) {
 function referencesTo(content, index) {
   const document = JSON.parse(content), previous = document.outbounds[index], references = [];
   document.outbounds.splice(index, 1);
-  const visit = (value, path) => {
-    if (Array.isArray(value)) value.forEach((entry, i) => visit(entry, `${path}/${i}`));
+  const referenceKeys = new Set(["outboundTag", "outbound", "outbounds", "detour", "dialerProxy", "final"]);
+  const visit = (value, path, reference = false) => {
+    if (Array.isArray(value)) value.forEach((entry, i) => visit(entry, `${path}/${i}`, reference));
     else if (value && typeof value === "object") Object.entries(value).forEach(([key, entry]) => {
-      if (key !== "tag") visit(entry, `${path}/${key}`);
+      visit(entry, `${path}/${key}`, referenceKeys.has(key) || key === "tag" && path.endsWith("/proxySettings"));
     });
-    else if (value === previous.tag) references.push(path);
+    else if (reference && value === previous.tag) references.push(path);
+    else if (path.match(/\/balancers\/\d+\/selector\/\d+$/) && typeof value === "string" && previous.tag.startsWith(value)) references.push(path);
   };
   visit(document, "");
   return references;

@@ -30,7 +30,7 @@ func TestPresetMutationCommitsOrRollsBackTogether(t *testing.T) {
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
 	input := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "atomic preset", Content: "listeners: [{name: a, port: 1080, type: socks}]\nrules: ['MATCH,DIRECT']\n"}
 	metadata := &ConfigClientMetadataMutation{Tag: "a", Content: `{"client":"private"}`}
-	options := ConfigMutationOptions{Action: core.ActionDeploy, ClientMetadata: metadata}
+	options := ConfigMutationOptions{TaskID: "tsk_0123456789abcdef", Action: core.ActionDeploy, ClientMetadata: metadata}
 	// A task-side failure happens after INSERT/UPDATE of config + revision.
 	// It must roll back both on the first save and on later revisions.
 	if _, err := db.pool.Exec(ctx, `CREATE FUNCTION reject_preset_task() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test task insert failure'; END $$; CREATE TRIGGER reject_preset_task BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION reject_preset_task()`); err != nil {
@@ -51,7 +51,7 @@ func TestPresetMutationCommitsOrRollsBackTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved, task, err := db.SaveAgentConfigAndTask(ctx, input, 0, options)
-	if err != nil || saved.Version != 1 || task.ConfigVersion != saved.Version || task.ConfigContent != saved.Content {
+	if err != nil || task.ID != options.TaskID || saved.Version != 1 || task.ConfigVersion != saved.Version || task.ConfigContent != saved.Content {
 		t.Fatalf("atomic save: %+v %+v %v", saved, task, err)
 	}
 	// Frequent preset status polls must not read or return the execution log.
@@ -154,4 +154,55 @@ func TestPresetMutationCommitsOrRollsBackTogether(t *testing.T) {
 			t.Fatalf("task did not snapshot new policy: %+v %v", task.MainlandAccessPolicies, err)
 		}
 	})
+}
+
+func TestSaveOnlyPolicyFailureDoesNotLeaveRevision(t *testing.T) {
+	database := os.Getenv("QCH_TEST_DATABASE_URL")
+	if database == "" {
+		t.Skip("requires PostgreSQL")
+	}
+	ctx := context.Background()
+	schema, err := testdb.IsolatePostgres(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schema.Close(ctx)
+	db, err := OpenWithConfigKey(ctx, schema.URL, true, strings.Repeat("t", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	agent, _ := enrollTaskTestAgent(t, ctx, db)
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET capabilities='["ss-rust"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	input := core.Config{AgentID: agent.ID, Engine: core.EngineShadowsocksRust, Name: "save only", Content: `{"server":"0.0.0.0","server_port":8388,"method":"aes-256-gcm","password":"test"}`}
+	policies := []core.MainlandAccessPolicy{{AgentID: agent.ID, Engine: input.Engine, Tag: "one", Kind: "shadowsocks", Port: 8388, BlockMainlandSource: true}}
+	first, err := db.SaveAgentConfigWithPolicies(ctx, input, 0, policies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.pool.Exec(ctx, `CREATE FUNCTION reject_saved_policy() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test policy insert failure'; END $$; CREATE TRIGGER reject_saved_policy BEFORE INSERT ON mainland_access_policies FOR EACH ROW EXECUTE FUNCTION reject_saved_policy()`); err != nil {
+		t.Fatal(err)
+	}
+	input.Content = strings.ReplaceAll(input.Content, "8388", "8389")
+	policies[0].Port = 8389
+	if _, err = db.SaveAgentConfigWithPolicies(ctx, input, 1, policies); err == nil {
+		t.Fatal("policy failure accepted")
+	}
+	current, err := db.AgentConfig(ctx, agent.ID, input.Engine)
+	if err != nil || current.Version != 1 || current.Content != first.Content {
+		t.Fatalf("failed save changed config: %+v %v", current, err)
+	}
+	if _, err = db.ConfigRevision(ctx, first.ID, 2); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed save left history: %v", err)
+	}
+	retained, err := db.ListMainlandAccessPolicies(ctx, agent.ID)
+	if err != nil || len(retained) != 1 || retained[0].Port != 8388 {
+		t.Fatalf("failed save changed policy: %+v %v", retained, err)
+	}
+	tasks, err := db.ListTasks(ctx, agent.ID, 10)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("save-only created tasks: %+v %v", tasks, err)
+	}
 }
