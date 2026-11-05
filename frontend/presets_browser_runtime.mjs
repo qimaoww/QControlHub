@@ -318,6 +318,23 @@ export async function testPresetsRuntime(preview = false) {
     test.staleRevision = false;
     document.querySelector("[data-preset-status] button").click();
     await waitFor(() => !button("validate").disabled, "stale revision reload did not recover");
+    test.taskState = "running";
+    const nextVersion = test.saved.version + 1;
+    button("deploy").click();
+    await waitFor(() => test.saved.version === nextVersion && !button("deploy").disabled, "pending deployment did not return to the editor");
+    const pendingOperation = test.state.data.presetOperations[`node|${engine}`];
+    edit("credential", "unsaved-authentication-draft");
+    test.taskFailure = true;
+    document.querySelector("[data-refresh-preset]").click();
+    await waitFor(() => document.querySelector("[data-preset-status]").textContent.includes("刷新失败"), "failed status request was not reported");
+    assert(test.state.data.presetOperations[`node|${engine}`] === pendingOperation && pendingOperation.task?.id && pendingOperation.monitoring,
+      "failed status refresh replaced the accepted deployment receipt or detached its watcher");
+    assert(control("credential").value === "unsaved-authentication-draft" && test.saved.version === nextVersion,
+      "failed status refresh saved or discarded the authentication draft");
+    test.taskFailure = false;
+    test.taskState = "succeeded";
+    await waitFor(() => pendingOperation.task.status === "succeeded" && document.querySelector("[data-preset-status]").textContent.includes("部署成功"),
+      "deployment result did not recover after the status refresh failed");
     if (engine === "xray") {
       for (const protocol of ["vless-xhttp-reality", "vless-enc-tcp-reality-vision"]) {
         document.querySelector(`[data-protocol="${protocol}"]`).click();

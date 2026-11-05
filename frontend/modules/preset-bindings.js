@@ -196,7 +196,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       await refreshPresetPage();
     } catch (error) {
       if (visible()) {
-        showStatus(`刷新失败：${error.message}。草稿已保留。`, "error");
+        showStatus(`刷新失败：${error.message}。草稿已保留。`, "error", operationFor(operationKey)?.task);
       }
     } finally {
       ctx.navigating = false;
