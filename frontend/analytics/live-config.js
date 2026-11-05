@@ -74,8 +74,13 @@ export async function liveConfigPage(ctx) {
     if (values.agent !== agent.id) { delete values.engine; delete values.source; }
     else if (values.engine !== engine) delete values.source;
     location.hash = `#live-config?${new URLSearchParams(values)}`;
-  } }, targetField, engineField, modeField, actions(
-    node("button", { type: "submit", className: "a-button" }, "打开配置")));
+    // The route guard owns draft confirmation. Until navigation is accepted,
+    // keep the controls bound to the configuration actually being edited.
+    targetField.querySelector("select").value = agent.id;
+    engineField.querySelector("select").value = engine;
+    modeField.querySelector("select").value = mode;
+  } }, targetField, engineField, modeField);
+  select.addEventListener("change", () => select.requestSubmit());
   const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
   const api = (path, options) => ctx.api(path, { method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });

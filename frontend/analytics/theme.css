@@ -370,7 +370,7 @@ strong, b { font-weight: 600; }
 .a-filterbar > .a-field { flex: 0 1 320px; }
 .a-filterbar > .a-filter-fields { flex: 1 1 480px; }
 .a-filterbar > .a-actions { flex: 0 1 auto; }
-.a-target-form { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr) auto; align-items: end; gap: 12px; }
+.a-target-form { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr); align-items: end; gap: 12px; }
 .a-target-form > .a-field { flex: 1 1 160px; }
 .a-target-form > .a-field:first-child { flex: 1.5 1 220px; }
 .a-filter-form.a-target-form { display: grid; flex-basis: 800px; }
@@ -472,15 +472,22 @@ strong, b { font-weight: 600; }
   .a-query-options > summary { min-height: 44px; }
 }
 
+.a-auto-filter > .a-form-fields { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); align-items: end; }
+.a-auto-filter .a-query-options { grid-column: 1 / -1; }
+.a-auto-filter.a-connection-filters > .a-form-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.a-auto-filter.a-ipq-filter > .a-form-fields { grid-template-columns: minmax(0,1fr); }
+.a-auto-filter[aria-busy=true] :is(input,select) { border-color: var(--soft-ink); }
 .a-filter-form.a-log-filters { display: grid; grid-template-columns: minmax(180px,1.5fr) minmax(100px,1fr) minmax(160px,1.5fr) 100px auto; align-items: end; }
 .a-log-filters > .a-form-fields, .a-log-filters > .a-form-fields > .a-form-grid { display: contents; }
 .a-log-filters > .a-notice { grid-column: 1 / -1; }
 @media (min-width: 40.001rem) and (max-width: 75rem) {
-  .a-filter-form.a-log-filters { grid-template-columns: repeat(3,minmax(0,1fr)); }
-  .a-log-filters > .a-actions { justify-self: start; }
+  .a-filter-form.a-log-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .a-auto-filter > .a-form-fields, .a-auto-filter.a-connection-filters > .a-form-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 40rem) {
   .a-filter-form.a-log-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .a-auto-filter > .a-form-fields, .a-auto-filter.a-connection-filters > .a-form-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .a-connection-filters .a-field:has([type=datetime-local]) { grid-column: 1 / -1; }
   .a-log-filters .a-field:has([name=source]), .a-log-filters .a-field:has([name=q]), .a-log-filters > .a-actions { grid-column: 1 / -1; }
   .a-log-filters .a-field:has([name=level]) { grid-row: 2; grid-column: 1; }
   .a-log-filters .a-field:has([name=limit]) { grid-row: 2; grid-column: 2; }
@@ -497,3 +504,7 @@ strong, b { font-weight: 600; }
 .a-table-pairs table { min-width: 0; table-layout: fixed; }
 .a-table-pairs :is(th,td) { min-width: 0; width: 45%; overflow-wrap: anywhere; }
 .a-table-pairs :is(th,td):first-child { min-width: 0; width: 55%; }
+
+.a-auto-filter > .a-actions { justify-content: flex-end; }
+.a-filterbar > .a-actions > .a-actions { gap: 8px; }
+@media (max-width: 40rem) { .a-auto-filter > .a-actions { margin-left: auto; } .a-log-filters > .a-actions { justify-self: end; grid-column: 2; } }

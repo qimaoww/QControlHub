@@ -134,4 +134,42 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");
   assert.equal((await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`)).config.version,xray.config.version+1);
   await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and complete-source save and persistent port target enable/disable and unbound outbound add/delete passed`);
+  // Filters query real endpoints without a confirmation button. Delay an old
+  // response to exercise rapid changes and navigation during a pending query.
+  await evaluate(page,"location.hash='#tasks'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='任务' && !!document.querySelector('.a-auto-filter') && !document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(page,"document.querySelectorAll('.a-auto-filter button[type=submit]').length"),0);
+  await evaluate(page,`(() => {
+    window.__queryFetch=window.fetch;window.__queryCalls=[];window.__oldQueryFinished=false;window.__oldQueryReady=false;
+    window.fetch=async (url,options)=>{
+      if(!String(url).includes('/tasks?'))return window.__queryFetch(url,options);
+      window.__queryCalls.push(String(url));
+      const response=await window.__queryFetch(url,options);
+      if(String(url).includes('status=pending')) {
+        const body=await response.text();window.__oldQueryReady=true;
+        await new Promise(resolve=>setTimeout(resolve,700));window.__oldQueryFinished=true;
+        return new Response(body,{status:response.status,headers:response.headers});
+      }
+      return response;
+    };
+    const select=document.querySelector('.a-auto-filter [name=status]');select.value='pending';select.dispatchEvent(new Event('change',{bubbles:true}));
+  })()`);
+  await wait(page,"window.__oldQueryReady");
+  await evaluate(page,"const select=document.querySelector('.a-auto-filter [name=status]');select.value='failed';select.dispatchEvent(new Event('change',{bubbles:true}))");
+  await wait(page,"window.__queryCalls.some(url=>url.includes('status=failed')) && !document.querySelector('[aria-busy=true]')");
+  const filtered=await evaluate(page,"document.querySelector('.a-main section').textContent");
+  await wait(page,"window.__oldQueryFinished");
+  assert.equal(await evaluate(page,"document.querySelector('.a-main section').textContent"),filtered,'old query cannot replace current results');
+  await evaluate(page,"window.fetch=window.__queryFetch;delete window.__queryFetch;delete window.__queryCalls;delete window.__oldQueryFinished;delete window.__oldQueryReady");
+  await evaluate(page,"[...document.querySelectorAll('.a-auto-filter button')].find(button=>button.textContent==='重置').click()");
+  await wait(page,"document.querySelector('.a-auto-filter [name=status]').value==='' && !document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(page,"document.querySelector('.a-auto-filter [name=limit]').value"),'100');
+  await screenshot(page,'analytics-automatic-task-filter');
+  await evaluate(page,"location.hash='#core-logs'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='日志' && !!document.querySelector('.a-auto-filter') && !document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(page,"document.querySelectorAll('.a-auto-filter button[type=submit]').length"),0);
+  await evaluate(page,"const input=document.querySelector('.a-auto-filter [name=q]');input.value='automatic filter';input.dispatchEvent(new Event('input',{bubbles:true}));location.hash='#archive-config'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
+  record(`${mode}: automatic query filters, removed confirmation controls, delayed response isolation and navigation with pending debounce passed`);
+
 }

@@ -1,5 +1,5 @@
 import { redactDiagnostic } from "../modules/errors.js";
-import { filterbar, node, button, actions, stack, section, table, badge, field, muted, query, list, notice, code } from "./ui.js";
+import { autoFilter, filterbar, node, button, actions, stack, section, table, badge, field, muted, query, list, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
 const engines = [["", "全部内核"], "mihomo", "xray", "sing-box", "ss-rust"];
@@ -7,20 +7,23 @@ const engines = [["", "全部内核"], "mihomo", "xray", "sing-box", "ss-rust"];
 export async function logsPage(ctx) {
   const sources = list(await ctx.api("/core-log-sources"));
   const results = node("div");
-  let filters = {}, records = [];
+  let filters = {}, records = [], queryRevision = 0;
   const sourceOptions = sources.map((source, index) => [String(index),
     `${source.name || source.agent_name || source.agent_id} · ${source.engine} · ${source.instance_id === "main" ? "主实例" : source.username || source.instance_id}`]);
-  const form = ctx.form([
+  const form = autoFilter(ctx, [
     node("div", { className: "a-form-grid" },
       field("日志来源", "source", "", { options: [["", "全部获授权来源"], ...sourceOptions] }),
       field("级别", "level", "", { options: [["", "全部"], ["debug", "调试"], ["info", "信息"], ["warning", "警告"], ["error", "错误"], ["critical", "严重错误"]] }),
       field("搜索内容", "q", "", { type: "search" }),
       field("每个内核条数", "limit", 200, { type: "number", min: 1, max: 2000 })),
-  ], "查询日志", async values => {
+  ], async (values, _, request) => {
+    queryRevision++;
     const source = values.source === "" ? null : sources[Number(values.source)];
-    filters = { level: values.level, q: values.q, limit: values.limit,
+    const nextFilters = { level: values.level, q: values.q, limit: values.limit,
       agent_id: source?.agent_id, engine: source?.engine, instance_id: source?.instance_id, user_id: source?.owner_id };
-    records = list(await ctx.api(query("/core-logs", filters)));
+    const received = list(await request.api(query("/core-logs", nextFilters)));
+    if (!request.current()) return;
+    filters = nextFilters; records = received;
     draw();
   });
   form.classList.add("a-log-filters");
@@ -35,8 +38,10 @@ export async function logsPage(ctx) {
   }
   const older = button("读取更早日志", event => void ctx.mutate(event.currentTarget, async () => {
     if (!records.length) return;
+    const revision = queryRevision;
     const before = Math.min(...records.map(record => record.id));
     const next = list(await ctx.api(query("/core-logs", { ...filters, before })));
+    if (!ctx.current() || revision !== queryRevision) return;
     const ids = new Set(records.map(record => record.id));
     records.push(...next.filter(record => !ids.has(record.id)));
     draw();
@@ -54,10 +59,10 @@ export async function connectionsPage(ctx) {
   const until = new Date(), since = new Date(until.getTime() - 24 * 3600_000);
   const localValue = value => new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   let filters = { locations: "cached", limit: 100 };
-  let nextCursor = "", nextBefore = 0;
+  let nextCursor = "", nextBefore = 0, queryRevision = 0;
   const previous = [];
   const pageTools = actions();
-  const form = ctx.form([
+  const form = autoFilter(ctx, [
     node("div", { className: "a-form-grid" },
       field("开始时间", "since", localValue(since), { type: "datetime-local", required: true }),
       field("结束时间", "until", localValue(until), { type: "datetime-local", required: true }),
@@ -69,15 +74,18 @@ export async function connectionsPage(ctx) {
       field("传输", "transport", ""),
       field("分组", "group_by", "", { options: [["", "逐条记录"], ["ip", "按客户端 IP"]] })),
     field("包含非公网地址", "include_non_public", false, { type: "checkbox" })),
-  ], "查询连接", async (values, element) => {
+  ], async (values, element, request) => {
+    queryRevision++;
     filters = { ...values, since: new Date(values.since).toISOString(), until: new Date(values.until).toISOString(),
       include_non_public: element.elements.include_non_public.checked, locations: "cached", limit: 100 };
     previous.length = 0;
-    await load();
+    await load("", 0, request);
   });
-  async function load(cursor = "", before = 0) {
-    const data = await ctx.api(query("/client-connections", { ...filters, cursor, before: before || "" }));
-    if (!ctx.current()) return;
+  form.classList.add("a-connection-filters");
+  async function load(cursor = "", before = 0, request = ctx) {
+    const revision = queryRevision;
+    const data = await request.api(query("/client-connections", { ...filters, cursor, before: before || "" }));
+    if (!request.current() || revision !== queryRevision) return;
     nextCursor = data.next_cursor || "";
     nextBefore = data.next_before || 0;
     summary.replaceChildren(muted("根据内核日志观测，不代表当前在线会话数"));

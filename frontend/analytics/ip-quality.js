@@ -1,5 +1,5 @@
 import { ipQualityReportRecord, ipQualityBlockReason, ipQualityValue, ipQualityEntries, ipQualityStatusName } from "../modules/ip-quality-model.js";
-import { node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, query, code } from "./ui.js";
+import { autoFilter, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, query, code } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
 
 export async function ipQualityPage(ctx) {
@@ -9,10 +9,12 @@ export async function ipQualityPage(ctx) {
   let selectedID = agents.some(agent => agent.id === ctx.state.data.ipQualityNode) ? ctx.state.data.ipQualityNode : agents[0]?.id;
   const navigation = node("nav", { className: "a-ipq-nodes", "aria-label": "检测节点" });
   const results = node("div", { className: "a-ipq-detail a-stack" });
-  const filter = ctx.form([
+  const filter = autoFilter(ctx, [
     field("检测日期", "date", "", { options: [["", "最新检测"], ...list(history.dates).map(day => [day, day])] }),
-  ], "查看记录", async values => {
-    history = await ctx.api(query("/ip-quality", { date: values.date, timezone }));
+  ], async (values, _, request) => {
+    const received = await request.api(query("/ip-quality", { date: values.date, timezone }));
+    if (!request.current()) return;
+    history = received;
     draw();
   });
   filter.classList.add("a-ipq-filter");

@@ -55,7 +55,67 @@ export const section = (title, content, tools, subtitle) => node("section", { cl
 // Compact query controls are separate from full editing forms and card content.
 export function filterbar(content, tools) {
   if (content.tagName === "FORM") content.classList.add("a-filter-form");
-  return node("div", { className: "a-filterbar" }, content, tools);
+  return node("div", { className: "a-filterbar" }, content,
+    content.tagName !== "FORM" ? actions(filterReset(content), tools) : tools);
+}
+export function filterReset(content) {
+  const fields = [...content.querySelectorAll("input,select,textarea")].filter(field => field.name !== "format");
+  const defaults = fields.map(field => field.type === "checkbox" ? field.checked : field.value);
+  return button("重置", () => {
+    fields.forEach((field, index) => { if (field.type === "checkbox") field.checked = defaults[index]; else field.value = defaults[index]; });
+    fields.forEach(field => field.dispatchEvent(new Event(field.tagName === "SELECT" || field.type === "checkbox" ? "change" : "input", { bubbles: true })));
+  });
+}
+// Read-only queries stay editable while loading; only the newest query may paint.
+export function autoFilter(ctx, fields, load, resetValues = {}) {
+  const feedback = notice("");
+  const form = node("form", { className: "a-stack a-filter-form a-auto-filter" },
+    node("fieldset", { className: "a-form-fields a-stack" }, fields), feedback);
+  const controls = [...form.querySelectorAll("input,select,textarea")];
+  const defaults = controls.map(field => resetValues[field.name] ?? (field.type === "checkbox" ? field.checked : field.value));
+  form.append(actions(button("重置", () => form.reset())));
+  let timer, controller, revision = 0;
+  const cancel = () => { clearTimeout(timer); controller?.abort(); revision++; form.removeAttribute("aria-busy"); };
+  ctx.signal.addEventListener("abort", cancel, { once: true });
+  async function run(expected) {
+    if (ctx.signal.aborted || expected !== revision || !form.checkValidity()) return;
+    controller = new AbortController();
+    const signal = controller.signal;
+    const current = () => !signal.aborted && expected === revision && ctx.current();
+    form.setAttribute("aria-busy", "true");
+    feedback.textContent = "";
+    try {
+      await load(formData(form), form, {
+        current, api: (path, options = {}) => ctx.api(path, { ...options, signal }),
+      });
+    } catch (error) {
+      if (current() && error.name !== "AbortError") feedback.textContent = error.message;
+    } finally { if (current()) form.removeAttribute("aria-busy"); }
+  }
+  function schedule(delay = 0) {
+    cancel();
+    const expected = revision;
+    if (delay) timer = setTimeout(() => void run(expected), delay);
+    else void run(expected);
+  }
+  form.addEventListener("submit", event => { event.preventDefault(); schedule(); });
+  form.addEventListener("reset", event => {
+    event.preventDefault();
+    controls.forEach((field, index) => { if (field.type === "checkbox") field.checked = defaults[index]; else field.value = defaults[index]; });
+    schedule();
+  });
+  form.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.isComposing && event.target.matches("input")) {
+      event.preventDefault(); schedule();
+    }
+  });
+  form.addEventListener("input", event => {
+    if (event.isComposing) return;
+    if (event.target.matches('input:not([type=checkbox]),textarea')) schedule(250);
+  });
+  form.addEventListener("compositionend", () => schedule(250));
+  form.addEventListener("change", () => schedule());
+  return form;
 }
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 

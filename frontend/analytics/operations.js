@@ -1,7 +1,7 @@
 import { formatDate } from "./appearance.js";
 import { aggregateDashboardTrafficDays, utcMonth } from "../modules/dashboard-model.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
-import { filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
+import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
   const amount = Math.max(0, Number(value) || 0);
@@ -135,13 +135,17 @@ export async function taskDetail(ctx, taskID) {
 
 export async function tasksPage(ctx) {
   const filters = ctx.state.data.taskFilters || { limit: "100" };
-  const filter = ctx.form([
+  const filter = autoFilter(ctx, [
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
       field("节点 ID", "agent_id", filters.agent_id || ""),
       field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp"].map(action => [action, actionName(action)])] }),
       field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
-  ], "查询", async values => { ctx.state.data.taskFilters = values; draw(await ctx.api(query("/tasks", values))); });
+  ], async (values, _, request) => {
+    const tasks = await request.api(query("/tasks", values));
+    if (!request.current()) return;
+    ctx.state.data.taskFilters = values; draw(tasks);
+  }, { status: "", agent_id: "", action: "", limit: "100" });
   const results = node("div");
   async function editRetry(task) {
     const resource = await ctx.api(`/tasks/${pathID(task.id)}/retry-editor`);

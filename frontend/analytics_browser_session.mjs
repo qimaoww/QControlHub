@@ -69,8 +69,8 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     if (route === "core-logs" && mode === "desktop") {
       assert.ok(await evaluate(page, `(() => {
         const controls=[...document.querySelectorAll('.a-filter-form .a-field input,.a-filter-form .a-field select,.a-filter-form button[type=submit]')].map(el=>el.getBoundingClientRect());
-        return controls.length===5 && Math.max(...controls.map(rect=>rect.top))-Math.min(...controls.map(rect=>rect.top))<2;
-      })()`), "log filters and submit share one compact desktop row");
+        return controls.length===4 && !document.querySelector('.a-filter-form button[type=submit]') && Math.max(...controls.map(rect=>rect.top))-Math.min(...controls.map(rect=>rect.top))<2;
+      })()`), "automatic log filters share one compact desktop row without a confirmation button");
     }
     await screenshot(page, `analytics-${route}`);
     if (route === "settings") {
