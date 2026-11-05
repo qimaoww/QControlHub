@@ -34,7 +34,7 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     if (path === "/agents") return [node];
     if (path.endsWith("/workspace")) {
       if (test.refreshError && test.writes.length) throw test.refreshError;
-      return {config:saved};
+      return {config:saved,inbound_targets:[{tag:"a",kind:"http",port:1080}]};
     }
     if (options.method === "PUT") {
       const input = JSON.parse(options.body); test.writes.push(input);
@@ -94,15 +94,15 @@ export async function testConfigMigrationRuntime(preview = false) {
       button.click(); await pause();
       assert(test.writes.length===0 && test.tasks.length===0,"canceling source deployment wrote data");
       test.accept = true;
-      const buttons = document.querySelectorAll("[data-config-file]");
-      assert(buttons[1].querySelector("b").textContent === "a", "filename must follow the preset tag, not the server name");
-      buttons[1].click();
       const input = document.querySelector("[data-code-input]");
-      assert(JSON.parse(input.value).outbounds?.[0]?.tag === "qch-trf-1080-111111111111", "inbound editor did not include its dedicated exit");
-      assert(!document.querySelector('optgroup[label="出站"]'), "legacy outbound file group remains visible");
-      input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
-      buttons[0].click();
-      assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
+      const complete = input.value;
+      const inbound = document.querySelector('[data-access-inbound="a"]');
+      assert(inbound, "complete editor lost its inbound selection");
+      inbound.click();
+      assert(input.value === complete && JSON.parse(complete).outbounds?.some(value=>value.tag === "qch-trf-1080-111111111111"), "selection replaced the complete source or lost the dedicated exit");
+      assert(!document.querySelector('[data-config-preview]'), "single-file editor retained merged preview");
+      input.value = complete.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
+      input.dispatchEvent(new Event("input", {bubbles:true}));
       document.querySelector('[data-live-intent="deploy"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
       assert(test.reads.length===1 && test.reads[0].prefer_cached===undefined,
@@ -145,14 +145,14 @@ function testReconciledConfigFiles() {
       return form;
     };
     const form = markup(); document.body.replaceChildren(form);
-    let files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
-    files.selectInbound("second",24105);
-    if (dirty) form.querySelector("textarea").value = form.querySelector("textarea").value.replace("24105","24106");
+    assert(bindConfigFiles(form, "xray", () => {}) === null, "single-file source unexpectedly has a fragment controller");
+    if (dirty) form.querySelector("textarea").value = baseline.replace("24105","24106");
     reconcileView(form, markup());
-    files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
-    assert(files.paths().length === 3 && form.querySelectorAll(".config-file-buttons").length === 1, "refresh lost inbound fragments or duplicated navigation");
-    assert(JSON.parse(files.content()).inbounds[1].port === (dirty ? 24106 : 24105), "refresh discarded an inbound draft");
-    assert(files.selectedInbound()?.tag === "second", "refresh changed the selected inbound");
+    assert(bindConfigFiles(form, "xray", () => {}) === null, "refresh reintroduced fragments");
+    assert(form.querySelectorAll(".config-file-buttons").length === 0, "source binding added fragment navigation");
+    const complete = JSON.parse(form.querySelector("textarea").value);
+    assert(complete.inbounds.length === 2 && complete.outbounds.length === 1, "refresh lost complete configuration arrays");
+    assert(complete.inbounds[1].port === (dirty ? 24106 : 24105), "refresh discarded the complete source draft");
   }
 }
 

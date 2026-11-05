@@ -177,9 +177,10 @@ func atomicDeployManagedConfiguration(engine core.Engine, spec EngineSpec, manag
 	if err != nil {
 		return "", err
 	}
-	if err := writeManagedConfigFiles(engine, spec.ConfigPath, content, metadata); err != nil {
-		return "", err
-	}
+	// Managed service arguments consume this complete file, including shared
+	// instances. Do not generate additional inbound/outbound source fragments.
+	// Existing immutable sources-* directories remain untouched for rollback
+	// by older Agents; they are not input to the managed service invocation.
 	return atomicDeployWithDefaultMetadata(spec.ConfigPath, content, metadata)
 }
 

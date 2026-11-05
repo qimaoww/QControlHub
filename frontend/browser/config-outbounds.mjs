@@ -147,7 +147,8 @@ export async function testConfigOutboundsRuntime() {
   assert(!document.querySelector("dialog") && !late.writes.length, "outbound read escaped its route");
   for (const options of [{readonly:true}, {noTasks:true}, {import:true}]) {
     const test = await fixture("xray", options);
-    test.select("first");
+    if (!options.import) test.select("first");
+    else assert(!document.querySelector("[data-access-inbound]"), "external source exposes an editable inbound selection");
     assert(["add", "bind", "modify", "delete"].every(kind=>action(kind).disabled), "outbound actions bypass permission/source gates");
     test.dispose();
   }

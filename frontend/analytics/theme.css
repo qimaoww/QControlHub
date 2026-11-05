@@ -47,7 +47,7 @@ svg { display: block; }
 h1, h2, h3, p, form { margin: 0; }
 h1, h2, h3, p, td, label { overflow-wrap: anywhere; }
 h1 { font-size: var(--text-title); font-weight: 600; letter-spacing: 0; line-height: 1.4; }
-h2 { font-size: var(--text-section); font-weight: 600; letter-spacing: 0; line-height: 1.5; }
+h2 { font-size: var(--text-body); font-weight: 600; letter-spacing: 0; line-height: 1.5; }
 h3 { font-size: var(--text-body); font-weight: 500; line-height: 1.6; }
 strong, b { font-weight: 600; }
 [hidden] { display: none !important; }
@@ -76,13 +76,13 @@ strong, b { font-weight: 600; }
 .a-top-inner { display: flex; align-items: center; gap: 16px; width: 100%; max-width: 1760px; height: 100%; margin-inline: auto; padding-inline: var(--page-gutter); }
 .a-top-title { margin: 0; padding-inline-start: 16px; border-inline-start: 1px solid var(--border); font-size: var(--text-body); font-weight: 500; line-height: 20px; }
 .a-top-inner > .a-actions { margin-inline-start: auto; }
-.a-main { max-width: 1760px; margin-inline: auto; padding: 28px var(--page-gutter) 40px; }
+.a-main { max-width: 1760px; margin-inline: auto; padding: 12px var(--page-gutter) 40px; }
 .a-muted { color: var(--soft-ink); font-size: var(--text-label); font-weight: 400; line-height: 1.6; }
-.a-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; align-content: start; }
+.a-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; align-content: start; }
 .a-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .a-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); box-shadow: 0 1px 2px #18181b05; overflow: clip; }
 .a-card-head p { margin-top: 6px; color: var(--soft-ink); font-size: var(--text-label); font-weight: 400; line-height: 1.6; }
-.a-card-head { min-height: 64px; padding: 16px var(--card-gutter); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.a-card-head { min-height: 48px; padding: 10px var(--card-gutter); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .a-card-head > div:first-child { min-width: 0; }
 .a-card-head > .a-actions { justify-content: flex-end; }
 .a-card-body { padding: 0 var(--card-gutter) var(--card-gutter); }
@@ -182,13 +182,13 @@ strong, b { font-weight: 600; }
 }
 @media (max-width: 640px) {
   :root { --page-gutter: 16px; --card-gutter: 16px; --text-title: 1.5rem; }
-  .a-main { padding-top: 20px; }
+  .a-main { padding-top: 10px; }
   .a-grid, .a-form-grid { grid-template-columns: minmax(0, 1fr); }
   .a-form-grid > div:has(> button[type="submit"]) { padding-top: 0; }
   .a-form-grid > .a-check { margin-top: 0; }
-  .a-card-head { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .a-card-head { align-items: center; flex-wrap: wrap; gap: 8px 12px; }
   .a-card-head > .a-actions { justify-content: flex-start; }
-  .a-card-head h2 { padding-block: 6px; }
+  .a-card-head h2 { padding-block: 2px; }
   .a-stat-grid { gap: 12px; }
   .a-stat { gap: 8px; }
   .a-stat strong { font-size: 1.625rem; }
@@ -287,7 +287,7 @@ strong, b { font-weight: 600; }
 .a-probe-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .a-probe-toolbar > .a-field { width: min(100%,360px); flex: 0 1 360px; min-width: 0; }
 .a-probe-toolbar > .a-actions { flex-wrap: wrap; }
-.a-card-tools { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; padding: 16px var(--card-gutter); }
+.a-card-tools { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; padding: 10px var(--card-gutter); }
 .a-probe-toolbar [aria-pressed=true] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .a-probe-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,340px),1fr)); gap: 20px; }
 .a-probe { min-width: 0; overflow: hidden; }
@@ -365,7 +365,18 @@ strong, b { font-weight: 600; }
 @media (max-width: 40rem) { .a-ipq-facts { grid-template-columns: minmax(0,1fr); } }
 
 /* Search/query toolbars do not inherit the spacing of edit forms or cards. */
-.a-filterbar { min-width: 0; }
+.a-filterbar { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; min-width: 0; padding-block: 4px; }
+.a-filterbar > .a-filter-form { flex: 1 1 640px; }
+.a-filterbar > .a-field { flex: 0 1 320px; }
+.a-filterbar > .a-filter-fields { flex: 1 1 480px; }
+.a-filterbar > .a-actions { flex: 0 1 auto; }
+.a-target-form { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr) auto; align-items: end; gap: 12px; }
+.a-target-form > .a-field { flex: 1 1 160px; }
+.a-target-form > .a-field:first-child { flex: 1.5 1 220px; }
+.a-filter-form.a-target-form { display: grid; flex-basis: 800px; }
+.a-config-tools { display: flex; padding-block: 2px; }
+.a-card > .a-stack > .a-card-body:first-child { padding-top: 14px; padding-bottom: 0; }
+.a-card > .a-stack > .a-card-body:empty { display: none; }
 .a-filter-form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
 .a-filter-form > .a-form-fields, .a-filter-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; min-width: 0; flex: 1 1 640px; }
 .a-filter-form > .a-form-fields > .a-form-grid { display: contents; }
@@ -387,3 +398,45 @@ strong, b { font-weight: 600; }
 
 .a-filter-form > .a-actions > .a-button { min-height: 40px; }
 @media (max-width: 56rem) { .a-filter-form > .a-actions > .a-button { min-height: 44px; } }
+
+/* Port identity remains readable with all actions in reach on narrow screens. */
+.a-port-list td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a-port-list td:last-child > .a-actions { min-width: 248px; }
+@media (max-width: 48rem) {
+  .a-port-list .a-table-scroll { overflow: visible; }
+  .a-port-list table { min-width: 0; display: block; }
+  .a-port-list thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .a-port-list tbody { display: block; }
+  .a-port-list tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 16px; padding: 20px var(--card-gutter); border-top: 1px solid var(--border); }
+  .a-port-list tbody td { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; max-width: none; padding: 0; border: 0; }
+  .a-port-list tbody td:first-child { grid-column: 1; font-weight: 600; }
+  .a-port-list tbody td:nth-child(2) { grid-row: 2; grid-column: 1 / -1; }
+  .a-port-list tbody td:nth-child(3) { grid-row: 3; }
+  .a-port-list tbody td:nth-child(4) { grid-row: 1; grid-column: 2; align-items: flex-end; }
+  .a-port-list tbody td:last-child { grid-column: 1 / -1; padding: 0; }
+  .a-port-list tbody td::before { content: attr(data-label); color: var(--soft-ink); font-size: var(--text-caption); font-weight: 400; }
+  .a-port-list tbody td:last-child::before { content: none; }
+  .a-port-list tbody tr:last-child td { border: 0; }
+  .a-port-list td:last-child > .a-actions { min-width: 0; width: 100%; }
+  .a-port-list td:last-child .a-button { flex: 1 1 auto; min-height: 44px; }
+}
+
+@media (max-width: 40rem) {
+  .a-filterbar > .a-field, .a-filterbar > .a-filter-fields { flex-basis: 100%; width: 100%; }
+  .a-filterbar > .a-actions { width: 100%; }
+  .a-target-form { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .a-target-form > .a-field:first-child { grid-column: 1 / -1; }
+  .a-target-form > .a-actions { width: 100%; grid-column: 1 / -1; }
+  .a-target-form > .a-actions > .a-button { width: 100%; }
+}
+
+/* Tables keep identities readable; narrow viewports scroll the result surface. */
+@media (max-width: 56rem) {
+  .a-table-scroll th, .a-table-scroll td { min-width: 96px; }
+  .a-table-scroll :is(th,td):first-child { min-width: 160px; }
+  .a-table-scroll td > .a-actions { flex-wrap: nowrap; }
+}
+@media (max-width: 48rem) {
+  .a-port-list .a-table-scroll :is(th,td) { min-width: 0; }
+  .a-port-list .a-table-scroll td > .a-actions { flex-wrap: wrap; }
+}

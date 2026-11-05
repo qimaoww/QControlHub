@@ -73,6 +73,10 @@ func (s *Store) prepareSharedInstanceOperationTx(ctx context.Context, tx pgx.Tx,
 	}
 	// Revalidate the retained revision and its reservations. A newer draft is
 	// deliberately not read; start always uses the last deployed version.
+	task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+	if err != nil {
+		return err
+	}
 	if err := s.prepareSharedTaskTx(ctx, tx, task, scopeForConfig(ctx).OwnerID, features, core.RuntimeState{}); err != nil {
 		return err
 	}

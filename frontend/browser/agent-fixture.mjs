@@ -386,7 +386,7 @@ window.fetch = async (input, options = {}) => {
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
       const engine = path.split("/")[4];
-      return json({config:{id:"cfg-layout",version:8,name:"节点实际配置",content:layoutConfig(engine)}});
+      return json({config:{id:"cfg-layout",version:8,name:"节点实际配置",content:layoutConfig(engine)},inbound_targets:["socks-in","http-in"].map((tag,i)=>({tag,port:i?8080:1080,kind:i?"http":"socks"}))});
     }
     if (path === "/tasks" && method === "POST") {
       const input = JSON.parse(options.body);

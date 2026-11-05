@@ -280,10 +280,9 @@ export async function certificatesPage(ctx) {
   }
   draw();
   search.querySelector("input").addEventListener("input", draw);
-  return stack(filterbar(search),
-    section(null, results, actions(
+  return stack(filterbar(search, actions(
       button("账号与认证授权", event => void run(event.currentTarget, accounts)),
       button("节点证书来源", event => void run(event.currentTarget, sources)),
       ...["acme", "import", "self-signed"].map(source => button(source === "acme" ? "申请证书" : source === "import" ? "导入证书" : "自签证书",
-        event => void run(event.currentTarget, () => create(source)), { disabled: !resource.encryption_ready, tone: source === "acme" ? "primary" : "" })))));
+        event => void run(event.currentTarget, () => create(source)), { disabled: !resource.encryption_ready, tone: source === "acme" ? "primary" : "" })))), section(null, results));
 }

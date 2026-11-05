@@ -38,11 +38,13 @@ async function assertWireGuardFieldLayout(form, engine) {
 export async function testWireGuardConfigRuntime() {
   for (const engine of ["xray", "sing-box"]) {
     const fixture = await createConfigFixture(engine, {protocol:"wireguard"});
-    const controller = document.querySelector("[data-code-editor]").configFileController;
-    const expected = engine === "sing-box" ? "endpoints/second.json" : "inbounds/second.json";
-    assert(controller.paths().includes(expected), "WireGuard has no selectable source file");
+    const source = document.querySelector("[data-code-input]");
+    const complete = source.value;
+    const documentValue = JSON.parse(complete);
+    const section = engine === "sing-box" ? "endpoints" : "inbounds";
+    assert(documentValue[section].some(value => value.tag === "second"), "complete source lost WireGuard identity");
     fixture.select("second");
-    assert(controller.selectedInbound()?.tag === "second", "endpoint selection lost its native identity");
+    assert(source.value === complete, "selecting an endpoint replaced the complete source");
     fixture.click("modify");
     await waitFor(() => document.querySelector("#server-plan-form"), "WireGuard editor did not open");
     let form = document.querySelector("#server-plan-form");

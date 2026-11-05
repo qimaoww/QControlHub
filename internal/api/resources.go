@@ -23,16 +23,19 @@ type configInboundTargetResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
-	AccountingPlan  *serverconfig.AccountingPlan  `json:"accounting_plan,omitempty"`
-	AccountingError string                        `json:"accounting_error,omitempty"`
-	Agent           core.Agent                    `json:"agent"`
-	Config          *core.Config                  `json:"config,omitempty"`
-	Catalog         configschema.Catalog          `json:"catalog"`
-	Protocols       []serverconfig.Protocol       `json:"protocols"`
-	Inbounds        []serverconfig.Input          `json:"inbounds"`
-	InboundTargets  []configInboundTargetResource `json:"inbound_targets"`
-	PresentFields   map[string]bool               `json:"present_fields"`
-	RealityPresets  []string                      `json:"reality_presets"`
+	Deployment      store.ConfigManagementDeployment `json:"deployment"`
+	Management      serverconfig.ManagedState        `json:"management"`
+	ManagedObjects  []serverconfig.ManagedObject     `json:"managed_objects"`
+	AccountingPlan  *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
+	AccountingError string                           `json:"accounting_error,omitempty"`
+	Agent           core.Agent                       `json:"agent"`
+	Config          *core.Config                     `json:"config,omitempty"`
+	Catalog         configschema.Catalog             `json:"catalog"`
+	Protocols       []serverconfig.Protocol          `json:"protocols"`
+	Inbounds        []serverconfig.Input             `json:"inbounds"`
+	InboundTargets  []configInboundTargetResource    `json:"inbound_targets"`
+	PresentFields   map[string]bool                  `json:"present_fields"`
+	RealityPresets  []string                         `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -125,6 +128,21 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	}
 	if config.ID != "" {
 		result.Config = &config
+		result.Management, err = s.store.ConfigManagementState(request.Context(), config.ID, config.Version)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		result.Deployment, err = s.store.ConfigManagementDeployment(request.Context(), config.ID, config.Version)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		result.ManagedObjects, err = serverconfig.ManagedObjects(engine, config.Content, result.Management)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		// Reading a saved plan only needs one verification pass. Stripping and
 		// compiling it again tripled this work on every post-save page refresh.
 		plan, planErr := serverconfig.PrepareAccounting(engine, config.Content)

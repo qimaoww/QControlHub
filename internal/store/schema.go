@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 87
+const currentSchemaVersion = 88
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS account_node_views (
@@ -185,6 +185,14 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	);
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_content_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_content_check CHECK (octet_length(content) <= 4194304);
+
+CREATE TABLE IF NOT EXISTS config_management_states (
+ config_id text NOT NULL,
+ config_version integer NOT NULL CHECK (config_version > 0),
+ content text NOT NULL CHECK (octet_length(content) <= 1048576),
+ PRIMARY KEY (config_id,config_version),
+ FOREIGN KEY (config_id,config_version) REFERENCES config_revisions(config_id,version) ON DELETE CASCADE
+);
 
 	CREATE TABLE IF NOT EXISTS config_client_metadata (
 	    config_id text NOT NULL,

@@ -25,6 +25,24 @@ export async function testConfigInboundsRuntime(preview = false) {
   await testNodeConfigHistory();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
+    test.select("second");
+    const source = document.querySelector("[data-code-input]").value;
+    for (const [index, label] of ["停用入站", "启用入站"].entries()) {
+      const trigger = document.querySelector('[data-inbound-action="toggle"]');
+      assert(!trigger.disabled && trigger.textContent === label, "state action does not reflect selected inbound");
+      trigger.click();
+      await waitFor(()=>document.querySelector('[data-management-intent="validate"]'), "state confirmation missing");
+      assert(document.querySelector("dialog").textContent.includes("second"), "state dialog targets another inbound");
+      const submit = document.querySelector('[data-management-intent="validate"]');
+      submit.click(); submit.click();
+      await waitFor(()=>!document.querySelector("dialog[open]"), "state save did not complete");
+      assert(test.writes.length === index+1, "state operation submitted twice");
+      assert(test.writes[index].version === index+1 && test.writes[index].disabled.length === (index === 0 ? 1 : 0), "state revision or target lost");
+      assert(document.querySelector("[data-code-input]").value === source, "state save discarded source parameters");
+    }
+  }
+  for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
+    const test = await fixture(engine);
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);
     assert(!document.querySelector('[data-live-intent="migrate-files"]'), "configuration page still renders the removed bundle action");
     assert(document.querySelector(".config-inbound-menu").previousElementSibling?.matches("[data-config-access-open]"), "inbound menu must be beside restrictions");
@@ -81,12 +99,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     await waitFor(()=>!document.querySelector("dialog[open]"), "delete did not return to editor");
     assert(test.writes.length === 3 && test.writes[2].operation === "delete" && test.writes[2].original_tag === test.writes[1].input.tag, "wrong deletion target");
     assert(action("modify").disabled && action("delete").disabled, "deletion retained removed selection");
-    if (["xray", "sing-box"].includes(engine)) {
-      test.select("first");
-      document.querySelector("[data-config-preview]").click();
-      assert(action("modify").disabled && action("delete").disabled, "merged preview allows mutation");
-      document.querySelector("[data-config-preview]").click();
-    }
+    assert(!document.querySelector("[data-config-preview]"), "single-file editor still offers a redundant merged preview");
     const input = document.querySelector("[data-code-input]");
     const original = input.value;
     input.value += "\n "; input.dispatchEvent(new Event("input"));

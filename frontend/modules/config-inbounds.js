@@ -109,6 +109,7 @@ export function bindConfigInbounds(ctx) {
   const input = form?.querySelector("[data-code-input]");
   const baseline = input?.value;
   const target = () => files?.selectedInbound() || (!files && selection?.selectedInbound()) || null;
+  const managedTarget = chosen => workspace.managed_objects?.find(item => item.inbound && item.tag === chosen?.tag && (!item.port || item.port === chosen?.port));
   const commonSelected = () => Boolean(files ? files.selectedCommon() : selection?.selectedCommon());
   const dirty = () => files ? files.dirty() : Boolean(input && input.value !== baseline);
   const writable = () => can("agent-config.write") && can("tasks.execute") && sourceMode !== "import" &&
@@ -131,6 +132,7 @@ export function bindConfigInbounds(ctx) {
         <button type="button" role="menuitem" class="danger-text" data-common-action="delete">删除通用配置项</button>
       </div>
       <button type="button" role="menuitem" data-inbound-action="modify">修改入站</button>
+      <button type="button" role="menuitem" data-inbound-action="toggle">启用／停用入站</button>
       <button type="button" role="menuitem" class="danger-text" data-inbound-action="delete">删除入站</button>
     </div>`;
   navigation.append(menu);
@@ -159,23 +161,25 @@ export function bindConfigInbounds(ctx) {
   sourceActions.prepend(addInbound);
   const tools = composeConfigWorkspaceToolbar({ can, container, form, navigation, sourceActions, sourceMode, agent, engine });
   const actionKind = button => button.dataset.commonAction ? `common-${button.dataset.commonAction}` : button.dataset.inboundAction;
-  const isMutation = kind => ["add", "modify", "delete", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
+  const isMutation = kind => ["add", "modify", "delete", "toggle", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
   const triggers = [addInbound, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
     ...tools.querySelectorAll("[data-inbound-action]")];
   const update = () => {
     const common = commonSelected();
+    const managed = managedTarget(target());
+    menu.querySelector('[data-inbound-action="toggle"]').textContent = managed ? (managed.enabled ? "停用入站" : "启用入站") : "启用／停用入站";
     setVisible(menu, !(!common && !target() && Boolean(files)));
     setVisible(menu.querySelector("[data-common-actions]"), !(!common));
     menu.querySelector("[data-config-operation-label]").textContent = common ? "通用配置操作" : target() || !files ? "入站操作" : "配置操作";
     for (const button of triggers) {
       const kind = actionKind(button), commonAction = kind.startsWith("common-");
-      setVisible(button, !(["modify", "delete"].includes(kind) && common));
+      setVisible(button, !(["modify", "delete", "toggle"].includes(kind) && common));
       button.disabled = busy || (isMutation(kind) && !writable()) || (commonAction && !common) ||
-        (kind !== "add" && !saved) || (["modify", "delete"].includes(kind) && !target()) ||
-        (kind === "modify" && !editable(target()));
+        (kind !== "add" && !saved) || (["modify", "delete", "toggle"].includes(kind) && !target()) ||
+        (kind === "modify" && !editable(target())) || (kind === "toggle" && !managed);
       button.title = commonAction && !saved ? "请先通过“增加入站”创建配置，再编辑通用配置项" :
         commonAction && !common ? "请先选择公共配置；合并预览不可操作通用配置项" :
-        ["modify", "delete"].includes(kind) && !target() ? "请先选择一个入站；公共配置和合并预览不可修改或删除" :
+        ["modify", "delete", "toggle"].includes(kind) && !target() ? "请先选择一个入站；公共配置和合并预览不可修改或删除" :
         kind === "modify" && !editable(target()) ? "此入站无法还原为预设参数，请使用源码或高级字段编辑" : "";
     }
   };
@@ -209,14 +213,14 @@ export function bindConfigInbounds(ctx) {
     if (commonAction && (!commonSelected() || !saved)) return;
     if (mutation && !mutationReady()) return;
     const chosen = !commonAction && target() ? { ...target() } : null;
-    if (["modify", "delete"].includes(kind) && !chosen) return;
+    if (["modify", "delete", "toggle"].includes(kind) && !chosen) return;
     busy = true; update();
     let editor, confirming = false;
     dialog = document.createElement("dialog");
     const opened = dialog;
     opened.className = `config-inbound-dialog${["add", "modify"].includes(kind) ? " config-outbound-dialog" : ""}${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
     opened.setAttribute("aria-labelledby", "config-inbound-title");
-    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"配置历史", diff:"配置差异",
+    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", toggle:managedTarget(chosen)?.enabled ? "停用入站" : "启用入站", advanced:"高级字段", history:"配置历史", diff:"配置差异",
       "common-add":"增加通用配置项", "common-modify":"修改通用配置项", "common-delete":"删除通用配置项" };
     opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-inbound-title">${titles[kind]}</h2><p>${esc(agent.name)} / ${esc(engineName(engine))}${commonAction ? " / 公共配置" : chosen && kind !== "add" ? ` / ${esc(chosen.tag)} · :${Number(chosen.port)}` : ""}</p></div><button class="config-access-close" type="button" data-inbound-close aria-label="关闭弹窗">×</button></header><div class="config-inbound-body" data-inbound-body><p role="status">正在加载…</p></div>`;
     const body = opened.querySelector("[data-inbound-body]");
@@ -260,7 +264,7 @@ export function bindConfigInbounds(ctx) {
       }
       if (mutation && !mutationReady()) { dispose(); return; }
       if (commonAction && !commonSelected()) { dispose(); return; }
-      if (["modify", "delete"].includes(kind) && (target()?.tag !== chosen.tag || target()?.port !== chosen.port)) {
+      if (["modify", "delete", "toggle"].includes(kind) && (target()?.tag !== chosen.tag || target()?.port !== chosen.port)) {
         dispose(); return;
       }
       if (kind === "diff") {
@@ -273,6 +277,32 @@ export function bindConfigInbounds(ctx) {
           if (!active()) return;
           updateFeedbackHTML(body, `<p>已部署配置与已保存配置</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
         }
+      } else if (kind === "toggle") {
+        const object = fresh.managed_objects?.find(item => item.inbound && item.tag === chosen.tag && (!item.port || item.port === chosen.port));
+        if (!object) throw new Error("入站状态已变化，请重新读取后重试。");
+        const disabled = (fresh.management?.disabled || []).filter(item => item.section !== object.section || item.tag !== object.tag);
+        if (object.enabled) disabled.push({section:object.section, tag:object.tag});
+        const label = object.enabled ? "停用" : "启用";
+        updateFeedbackHTML(body, `<p>${label}入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？配置参数和关联信息将保留。</p><p class="validation-note">校验不改变运行状态；成功部署后才会应用监听变更。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-management-intent="validate">保存并校验</button><button class="button primary" type="button" data-management-intent="deploy">保存并部署</button></footer>`);
+        const buttons = [...body.querySelectorAll("[data-management-intent]")];
+        buttons.forEach(button => {
+          button.disabled = !writable() || fresh.agent?.status !== "online";
+          button.onclick = async () => {
+            if (!active() || opened.dataset.saving === "1" || !mutationReady()) return;
+            opened.dataset.saving = "1";
+            buttons.forEach(item => { item.disabled = true; });
+            try {
+              if (button.dataset.managementIntent === "deploy" && beforeDeploy) await beforeDeploy();
+              if (!active()) return;
+              const result = await api(`${base}/management`, {method:"PUT", body:JSON.stringify({version:fresh.config.version, disabled, intent:button.dataset.managementIntent})});
+              await commit(result);
+            } catch (error) {
+              if (!active()) return;
+              updateFeedback(body.querySelector("[data-inbound-error]"), error.status === 409 ? "配置已变化，请关闭弹窗并重新读取。" : redactDiagnostic(error.message));
+              if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409) buttons.forEach(item => { item.disabled = false; });
+            } finally { delete opened.dataset.saving; }
+          };
+        });
       } else if (kind === "delete") {
         const mutableServices = xrayMutableAPIServices(engine, fresh.config.content);
         updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);

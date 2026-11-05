@@ -118,33 +118,40 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 		}
 		kind := strings.TrimSpace(stringValue(entry[typeField]))
 		name := trafficEndpointName(entry[nameField], kind, string(engine)+" :"+strconv.Itoa(port))
-		protocol := trafficProtocol(entry["network"], trafficProtocolForKind(kind, fallback))
-		if engine == core.EngineMihomo && kind == ProtocolMieru {
-			protocol = trafficProtocol(entry["transport"], protocol)
-		}
-		if engine == core.EngineSingBox && stringValue(mapValue(entry["transport"])["type"]) == "quic" {
-			protocol = core.TrafficProtocolUDP
-		}
-		if engine == core.EngineXray {
-			if settings, ok := entry["settings"].(map[string]any); ok {
-				protocol = trafficProtocol(settings["network"], protocol)
-			}
-			stream := mapValue(entry["streamSettings"])
-			if kind == "vless" || kind == "vmess" || kind == "trojan" {
-				switch stringValue(stream["network"]) {
-				case "quic", "kcp":
-					protocol = core.TrafficProtocolUDP
-				case "xhttp", "splithttp":
-					alpn, _ := mapValue(stream["tlsSettings"])["alpn"].([]any)
-					if stream["security"] == "tls" && len(alpn) == 1 && alpn[0] == "h3" {
-						protocol = core.TrafficProtocolUDP
-					}
-				}
-			}
-		}
+		protocol := trafficEntryProtocol(engine, entry, kind, fallback)
 		result = append(result, trafficEndpoint(engine, name, port, protocol))
 	}
 	return result
+}
+
+// Shared by accounting and configuration projections; neither infers a listener
+// transport from a remote server port.
+func trafficEntryProtocol(engine core.Engine, entry map[string]any, kind string, fallback core.TrafficProtocol) core.TrafficProtocol {
+	protocol := trafficProtocol(entry["network"], trafficProtocolForKind(kind, fallback))
+	if engine == core.EngineMihomo && kind == ProtocolMieru {
+		protocol = trafficProtocol(entry["transport"], protocol)
+	}
+	if engine == core.EngineSingBox && stringValue(mapValue(entry["transport"])["type"]) == "quic" {
+		protocol = core.TrafficProtocolUDP
+	}
+	if engine == core.EngineXray {
+		if settings, ok := entry["settings"].(map[string]any); ok {
+			protocol = trafficProtocol(settings["network"], protocol)
+		}
+		stream := mapValue(entry["streamSettings"])
+		if kind == "vless" || kind == "vmess" || kind == "trojan" {
+			switch stringValue(stream["network"]) {
+			case "quic", "kcp":
+				protocol = core.TrafficProtocolUDP
+			case "xhttp", "splithttp":
+				alpn, _ := mapValue(stream["tlsSettings"])["alpn"].([]any)
+				if stream["security"] == "tls" && len(alpn) == 1 && alpn[0] == "h3" {
+					protocol = core.TrafficProtocolUDP
+				}
+			}
+		}
+	}
+	return protocol
 }
 
 func trafficEndpoint(engine core.Engine, name string, port int, protocol core.TrafficProtocol) core.PortTrafficEndpoint {

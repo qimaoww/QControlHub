@@ -94,13 +94,7 @@ export async function testCommonConfigRuntime() {
     menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowUp", bubbles:true}));
     assert(document.activeElement.dataset.inboundAction === "delete", "menu ArrowUp did not enter at the last visible item");
     menu.open = false;
-    if (["xray", "sing-box"].includes(engine)) {
-      document.querySelector("[data-config-preview]").click();
-      assert(document.querySelector("[data-common-actions]").hidden &&
-        document.querySelector('[data-common-action="modify"]').disabled, "merged preview is treated as common configuration");
-      assert(!document.querySelector('[data-inbound-action="add"]').hidden, "merged preview hid the standalone add action");
-      document.querySelector("[data-config-preview]").click();
-    }
+    assert(!document.querySelector("[data-config-preview]"), "single-file editor still offers a redundant merged preview");
     test.selectCommon();
     assert(!document.querySelector("dialog"), "returning to common source opened a modal");
     const source = document.querySelector("[data-code-input]"), baseline = source.value;

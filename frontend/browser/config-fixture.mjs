@@ -69,8 +69,11 @@ export async function createConfigFixture(engine, options = {}) {
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
+  let disabled = [];
   const workspace = () => ({agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
     engine, inbounds:structuredClone(options.native ? [] : inbounds),
+    management:{disabled:structuredClone(disabled)},
+    managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})),
     inbound_targets:inbounds.map(item=>({tag:item.tag, port:item.port, kind:options.native ? "socks" : item.protocol})),
     protocols:entries.map(entry => entry.protocol), reality_presets:["www.amazon.com"],
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},
@@ -95,6 +98,19 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
       if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
       return workspace();
+    }
+    if (path.endsWith("/management") && request.method === "PUT") {
+      if (test.gate) await test.gate;
+      if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
+      assert(body.version === saved.version, "state lost optimistic version");
+      const source = saved.content;
+      disabled = structuredClone(body.disabled);
+      test.writes.push({path, ...body});
+      saved = {...saved, version:saved.version+1, updated_at:savedDate(saved.version+1)};
+      assert(saved.content === source, "state rewrote full source");
+      const task = {id:`task-${saved.version}`, action:body.intent, config_version:saved.version, status:test.taskStatus};
+      tasks.set(task.id, task);
+      return {config:saved, task};
     }
     if (path.endsWith("/plans")) {
       const entry = entries.find(item => item.protocol.key === body.protocol);

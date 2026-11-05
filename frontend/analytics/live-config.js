@@ -4,7 +4,7 @@ import { readPresetRoute } from "../modules/preset-route.js";
 import { diagnosticError } from "../modules/errors.js";
 import { configStudio } from "./config-studio.js";
 import { formatConfigContent } from "../modules/code-format.js";
-import { node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code } from "./ui.js";
+import { filterbar, node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
 
 const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
@@ -68,13 +68,13 @@ export async function liveConfigPage(ctx) {
     ...(hostManaged && canReadHost ? [["managed", "QAgent 托管配置"]] : []),
     ...(canImport ? [["import", "可导入的系统服务配置"]] : []),
   ] });
-  const select = node("form", { className: "a-form-grid a-target-form", onsubmit(event) {
+  const select = node("form", { className: "a-target-form", onsubmit(event) {
     event.preventDefault();
     const values = formData(event.currentTarget);
     if (values.agent !== agent.id) { delete values.engine; delete values.source; }
     else if (values.engine !== engine) delete values.source;
     location.hash = `#live-config?${new URLSearchParams(values)}`;
-  } }, targetField, engineField, modeField, node("div", {},
+  } }, targetField, engineField, modeField, actions(
     node("button", { type: "submit", className: "a-button" }, "打开配置")));
   const liveNotice = notice(saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存", "ok");
   const errorText = runtime.existing_config_unsupported_reason;
@@ -214,9 +214,9 @@ export async function liveConfigPage(ctx) {
       assertAgentConfigBaseline(source.content, fresh.content);
     } : undefined,
   });
-  return stack(section("目标实例", node("div", { className: "a-card-body" }, select), flags),
+  return stack(filterbar(select, flags),
     errorText && notice(errorText),
     inbounds,
-    section(agent.name, node("div", { className: "a-card-body" }, form), actions(read, format, readHistory),
+    section("配置源码", node("div", { className: "a-card-body" }, form), actions(read, format, readHistory),
       hostManaged && mode === "personal" ? "部署前需读取托管配置，以核对节点当前内容。" : null));
 }

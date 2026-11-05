@@ -5,9 +5,11 @@ import (
 	"fmt"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 type ConfigMutationOptions struct {
+	ManagementState  *serverconfig.ManagedState
 	Action           core.Action
 	ClientMetadata   *ConfigClientMetadataMutation
 	InstallIfMissing bool
@@ -30,7 +32,11 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 		return core.Config{}, core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, options.ClientMetadata)
+	var management []serverconfig.ManagedState
+	if options.ManagementState != nil {
+		management = []serverconfig.ManagedState{*options.ManagementState}
+	}
+	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, options.ClientMetadata, management...)
 	if err != nil {
 		return core.Config{}, core.Task{}, err
 	}

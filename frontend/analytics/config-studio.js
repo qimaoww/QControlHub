@@ -1,4 +1,3 @@
-import { splitConfigFiles, mergeConfigFiles, configFileDisplayName } from '../modules/config-file-model.js';
 import { outboundEntries, inboundOutbound, bindOutbound, changeInboundOutbound, outboundCanBind } from '../modules/config-outbound-model.js';
 import { outboundProtocols, outboundPreset, outboundPeers } from '../modules/outbound-preset-model.js';
 import { commonConfigFields } from '../modules/config-field-model.js';
@@ -163,21 +162,12 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   }
   async function files() {
     if(!await latest()||!current.config)return;
-    const parts=splitConfigFiles(engine,current.config.content),selector=field('配置文件','file','0',{options:parts.map((part,index)=>[String(index),configFileDisplayName(part.path,part.content)])});
-    const editor=field('文件内容','content',parts[0].content,{multiline:18,spellcheck:false,readonly:!editable});
-    const feedback=notice('');let selected=0;
-    const merge = () => ['xray','sing-box'].includes(engine) ? mergeConfigFiles(parts) : parts[0].content;
-    const form=ctx.form([selector,node('div',{className:'a-editor'},editor),feedback], '保存全部文件',async()=>{
-      parts[selected].content=form.elements.content.value;
-      const content=merge();
-      const multi=['xray','sing-box'].includes(engine);
-      const saved=await ctx.api(`${base}${multi?'/files':''}`,{method:'PUT',body:{name:current.config.name,description:current.config.description,version:current.config.version,...(multi?{files:parts}:{content})}});
+    const editor=field('完整配置','content',current.config.content,{multiline:24,spellcheck:false,readonly:!editable});
+    const form=ctx.form([node('div',{className:'a-editor'},editor)], '保存配置',async()=>{
+      const saved=await ctx.api(base,{method:'PUT',body:{name:current.config.name,description:current.config.description,version:current.config.version,content:form.elements.content.value}});
       await committed({config:saved},box);
     });
-    selector.querySelector('select').addEventListener('change',event=>{parts[selected].content=form.elements.content.value;selected=Number(event.target.value);form.elements.content.value=parts[selected].content;});
-    const box=ctx.dialog('配置文件',stack(form,button('合并预览',()=>{
-      try{parts[selected].content=form.elements.content.value;ctx.dialog('合并预览',code(merge()),{wide:true});}catch(error){feedback.textContent=error.message;}
-    })),{wide:true});
+    const box=ctx.dialog('配置文件',form,{wide:true});
     track(form,box);
     if(!editable)form.querySelector('button[type=submit]').remove();
   }
@@ -237,12 +227,58 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       })));
     }
   }
+  async function outboundObject(object,operation='modify') {
+    if(!await latest()||!current.config)return;
+    const config=current.config;
+    const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
+    const sectionName=object?.section||sections[0][0];
+    let content=engine==='mihomo'?'name: new-exit\ntype: direct\n':JSON.stringify({tag:'new-exit',[engine==='xray'?'protocol':'type']:engine==='xray'?'freedom':'direct'},null,2);
+    if(object) {
+      const selected=await ctx.api(`${base}/outbounds/${pathID(object.section)}/${pathID(object.tag)}`);
+      if(!ctx.current())return;
+      if(selected.version!==config.version)throw new Error('配置已变化，请重新读取');
+      content=selected.fragment;
+    }
+    const form=ctx.form([
+      operation==='delete'?muted(`删除 ${object.tag}？仍被引用的出站会拒绝删除。`):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
+      operation!=='delete'&&field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',content,{multiline:12,spellcheck:false}),
+      object&&operation==='modify'&&muted('保存会更新所有引用此出站的入站。'),intents(),
+    ],operation==='delete'?'删除出站':'保存出站',async values=>{
+      if(object&&operation==='modify'&&!await ctx.confirm(`更新“${object.tag}”及其所有引用？`,'更新出站'))return;
+      if(!await preparing(values.intent))return;
+      const result=await ctx.api(`${base}/outbounds`,{method:'POST',body:{version:config.version,intent:values.intent,section:object?.section||values.section,tag:object?.tag||'',fragment:values.fragment||'',operation}});
+      await committed(result,box);
+    });
+    const box=ctx.dialog(operation==='add'?'添加出站':operation==='delete'?'删除出站':`${object.tag} · 出站`,form,{wide:true});track(form,box);
+  }
   function draw() {
     const inbounds=list(current.inbounds),targets=list(current.inbound_targets);
+    const managed=list(current.managed_objects);
+    const toggle=object=>button(object.enabled?'停用':'启用',event=>void ctx.mutate(event.currentTarget,async()=>{
+      if(!await latest())return;
+      const fresh=list(current.managed_objects).find(item=>item.section===object.section&&item.tag===object.tag);
+      if(!fresh||fresh.enabled!==object.enabled)throw new Error('配置状态已变化，请重新选择');
+      const disabled=list(current.management?.disabled).filter(item=>item.section!==object.section||item.tag!==object.tag);
+      const expectedVersion=current.config.version;
+      if(object.enabled)disabled.push({section:object.section,tag:object.tag});
+      const form=ctx.form([muted(`${object.enabled?'停用':'启用'} ${object.tag}`),intents()], '保存状态',async values=>{
+        if(!await preparing(values.intent))return;
+        const result=await ctx.api(`${base}/management`,{method:'PUT',body:{version:expectedVersion,disabled,intent:values.intent}});
+        await committed(result,box);
+      });
+      const box=ctx.dialog(object.enabled?'停用配置对象':'启用配置对象',form);
+    }));
     const controls=writable&&button('添加入站',event=>void ctx.mutate(event.currentTarget,()=>inboundEdit(null,'add')),{tone:'primary'});
+    const deployment=current.deployment||{};
+    const deploymentLabel={pending:'待部署',deploying:'部署中',failed:'部署失败',applied:'已部署',unknown:'部署状态未知'}[deployment.state]||'部署状态未知';
+    const serviceLabel={active:'运行中',inactive:'已停止',failed:'服务异常'}[deployment.service_status]||'运行状态未知';
+    const status=actions(badge(deploymentLabel),muted(serviceLabel));
     const rows=targets.map(target=>{
       const input=inbounds.find(input=>input.tag===target.tag);
-      return [target.tag,target.kind,target.port,actions(
+      const object=managed.find(item=>item.inbound&&item.tag===target.tag);
+      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),target.kind,
+        object?badge(object.enabled?'启用':'停用'):muted('—'),actions(
+        writable&&object&&toggle(object),
         writable&&input&&button('修改',event=>void ctx.mutate(event.currentTarget,()=>inboundEdit(input))),
         writable&&input&&button('复制入站',event=>void ctx.mutate(event.currentTarget,()=>inboundEdit({...input,tag:`${input.tag}-copy`},'add'))),
         writable&&button('删除',async event=>{
@@ -261,11 +297,21 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         writable&&engine==='ss-rust'&&button('端口配置项',()=>fieldChooser(target)),
       )];
     });
-    surface.replaceChildren(section('入站配置',table(['名称','协议','端口','操作'],rows,{label:'入站配置'}),controls),
-      current.config&&section('配置工具',node('div',{className:'a-card-body'},actions(
+    const outboundObjects=managed.filter(item=>!item.inbound);
+    const headers=['端口','监听','协议','目标状态','操作'];
+    const portTable=table(headers,rows,{label:'入站配置'});
+    portTable.classList.add('a-port-list');
+    for(const element of portTable.querySelectorAll('table,thead,tbody,tr,th,td')) {
+      const roles={TABLE:'table',THEAD:'rowgroup',TBODY:'rowgroup',TR:'row',TH:'columnheader',TD:'cell'};
+      element.setAttribute('role',roles[element.tagName]);
+    }
+    for(const row of portTable.querySelectorAll('tbody tr')) [...row.cells].forEach((cell,index)=>cell.dataset.label=headers[index]);
+    surface.replaceChildren(section('入站配置',portTable,actions(status,controls)),
+      ['xray','sing-box','mihomo'].includes(engine)&&section('出站配置',table(['名称','类型','目标状态','操作'],outboundObjects.map(object=>[object.tag,object.kind||object.section,badge(object.enabled?'启用':'停用'),writable&&actions(toggle(object),button('修改',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object))),button('删除',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object,'delete')),{tone:'danger'}))]),{label:'出站配置'}),writable&&button('添加出站',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(null,'add')))),
+      current.config&&node('div',{className:'a-config-tools'},actions(
         button('配置文件',event=>void ctx.mutate(event.currentTarget,files)),
         writable&&button('通用配置项',()=>fieldChooser()),
-      ))));
+      )));
   }
   function fieldChooser(inbound) {
     const fields=inbound?list(current.catalog?.fields).filter(item=>['inbound','override'].includes(item.scope)):commonConfigFields(engine,list(current.catalog?.fields));

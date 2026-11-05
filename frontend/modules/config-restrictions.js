@@ -44,7 +44,7 @@ export async function bindConfigRestrictions(ctx) {
         const common = document.createElement("button");
         common.type = "button"; common.className = "config-file-button active";
         common.dataset.configCommon = "";
-        common.innerHTML = "<b>公共配置</b><small>完整配置源码</small>";
+        common.innerHTML = "<b>完整配置</b><small>配置源码</small>";
         common.setAttribute("aria-pressed", "true");
         commonSelected = true;
         common.onclick = () => {
@@ -84,6 +84,11 @@ export async function bindConfigRestrictions(ctx) {
     }
   }
   if (!current()) return;
+  if (!form.querySelector(".config-file-actions")) {
+    const actions = document.createElement("div");
+    actions.className = "config-file-actions";
+    form.querySelector(".code-editor-toolbar").append(actions);
+  }
   navigation.append(button);
   input.addEventListener("input", update);
   update();

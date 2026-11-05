@@ -1,4 +1,4 @@
-import { node, button, actions, stack, grid, section, table, badge, field, code, muted, pathID, list, notice } from "./ui.js";
+import { filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, pathID, list, notice } from "./ui.js";
 import { date, taskDetail } from "./operations.js";
 
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
@@ -173,6 +173,6 @@ export async function archivePage(ctx) {
     });
     const box = ctx.dialog("新建模板", form, { wide: true });
   });
-  return stack(section(null, results, ctx.can("configs.write") && button("新建配置", () => edit(), { tone: "primary" })),
+  return stack(ctx.can("configs.write") && filterbar(actions(button("新建配置", () => edit(), { tone: "primary" }))), section(null, results),
     ctx.can("templates.read") && section("配置模板", templateResults, addTemplate));
 }

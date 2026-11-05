@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 // SaveAgentConfig creates or updates an agent-owned configuration using an
@@ -53,7 +54,7 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 	return saved, nil
 }
 
-func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation) (core.Config, error) {
+func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation, management ...serverconfig.ManagedState) (core.Config, error) {
 	if err := lockAgentUser(ctx, tx); err != nil {
 		return core.Config{}, err
 	}
@@ -163,7 +164,36 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 	if err != nil {
 		return core.Config{}, err
 	}
-	if err := s.insertConfigRevision(ctx, tx, saved); err != nil {
+	if len(management) == 0 && metadataMutation != nil && metadataMutation.OriginalTag != "" {
+		state, err := s.configManagementStateTx(ctx, tx, saved.ID, currentVersion)
+		if err != nil {
+			return core.Config{}, err
+		}
+		objects, err := serverconfig.ManagedObjects(saved.Engine, saved.Content, serverconfig.ManagedState{})
+		if err != nil {
+			return core.Config{}, err
+		}
+		updated := []serverconfig.ManagedResource{}
+		for _, ref := range state.Disabled {
+			if ref.Tag == metadataMutation.OriginalTag {
+				inbound := ref.Section == "inbounds" || ref.Section == "endpoints" || ref.Section == "listeners" || ref.Section == "servers" || ref.Section == "shadowsocks"
+				if inbound {
+					if metadataMutation.Delete {
+						continue
+					}
+					for _, object := range objects {
+						if object.Inbound && object.Tag == metadataMutation.Tag {
+							ref.Section, ref.Tag = object.Section, object.Tag
+							break
+						}
+					}
+				}
+			}
+			updated = append(updated, ref)
+		}
+		management = []serverconfig.ManagedState{{Disabled: updated}}
+	}
+	if err := s.insertConfigRevision(ctx, tx, saved, management...); err != nil {
 		return core.Config{}, err
 	}
 	if currentVersion > 0 {

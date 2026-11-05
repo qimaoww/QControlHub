@@ -11,7 +11,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
-func (s *Store) insertConfigRevision(ctx context.Context, tx pgx.Tx, config core.Config) error {
+func (s *Store) insertConfigRevision(ctx context.Context, tx pgx.Tx, config core.Config, stateOverride ...serverconfig.ManagedState) error {
 	storedContent, err := s.encryptContent(config.Content)
 	if err != nil {
 		return err
@@ -20,7 +20,29 @@ func (s *Store) insertConfigRevision(ctx context.Context, tx pgx.Tx, config core
 		INSERT INTO config_revisions (config_id,version,agent_id,name,description,engine,content,created_at)
 		VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8)`,
 		config.ID, config.Version, config.AgentID, config.Name, config.Description, config.Engine, storedContent, config.UpdatedAt)
-	return mapError(err)
+	if err != nil {
+		return mapError(err)
+	}
+	state, err := s.configManagementStateTx(ctx, tx, config.ID, config.Version-1)
+	if err != nil {
+		return err
+	}
+	if len(stateOverride) > 0 {
+		state = stateOverride[0]
+	} else if config.Engine == core.EngineShadowsocksRust && len(state.Disabled) > 0 {
+		var previous string
+		if err = tx.QueryRow(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version=$2`, config.ID, config.Version-1).Scan(&previous); err != nil {
+			return err
+		}
+		previous, err = s.decryptContent(previous)
+		if err != nil {
+			return err
+		}
+		if err = serverconfig.ValidateManagedSourceUpdate(config.Engine, previous, config.Content, state); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	}
+	return s.saveConfigManagementStateTx(ctx, tx, config, state)
 }
 
 func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit int) ([]core.Config, error) {
@@ -256,7 +278,11 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	if command.RowsAffected() != 1 {
 		return core.Config{}, fmt.Errorf("%w: configuration changed; reload before restoring", ErrConflict)
 	}
-	if err := s.insertConfigRevision(ctx, tx, restored); err != nil {
+	state, err := s.configManagementStateTx(ctx, tx, configID, revisionVersion)
+	if err != nil {
+		return core.Config{}, err
+	}
+	if err := s.insertConfigRevision(ctx, tx, restored, state); err != nil {
 		return core.Config{}, err
 	}
 	if _, err := tx.Exec(ctx, `

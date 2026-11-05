@@ -53,9 +53,9 @@ export const section = (title, content, tools, subtitle) => node("section", { cl
   (title || subtitle || tools) && node("div", { className: title ? "a-card-head" : "a-card-tools" },
     (title || subtitle) && node("div", {}, title && node("h2", {}, title), subtitle && node("p", {}, subtitle)), tools), content);
 // Compact query controls are separate from full editing forms and card content.
-export function filterbar(content) {
+export function filterbar(content, tools) {
   if (content.tagName === "FORM") content.classList.add("a-filter-form");
-  return node("div", { className: "a-filterbar" }, content);
+  return node("div", { className: "a-filterbar" }, content, tools);
 }
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 

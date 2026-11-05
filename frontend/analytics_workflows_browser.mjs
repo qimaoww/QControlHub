@@ -67,6 +67,44 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");
   assert.equal((await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`)).config.version,workspace.config.version+2);
+  // Exercise the saved target state separately from actual deployment: queued
+  // validation must not claim a listener was stopped on the remote Agent.
+  const cancelPending = async () => {
+    for (const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status))) await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
+  };
+  await cancelPending();
+  for (const [enabled,label] of [[false,'停用'],[true,'启用']]) {
+    await evaluate(page,`(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('theme-inbound'));const button=[...row.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)});if(!button)throw new Error('port state action missing');button.click()})()`);
+    await wait(page,"!!document.querySelector('dialog[open] [name=intent]') && !document.querySelector('[aria-busy=true]')");
+    await evaluate(page,"document.querySelector('dialog[open] [name=intent]').form.requestSubmit()");
+    await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>/配置对象$/.test(title.textContent))");
+    const updated=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
+    const object=updated.managed_objects.find(item=>item.tag==='theme-inbound');
+    assert.equal(object.enabled,enabled);
+    assert.equal(updated.config.content,workspace.config.content,'target state must retain complete source');
+    assert.ok(updated.management.disabled.some(item=>item.tag==='theme-inbound')===!enabled);
+    await close();
+    await evaluate(page,"document.querySelectorAll('.a-toast [aria-label=关闭通知]').forEach(button=>button.click())");
+    await wait(page,"!document.querySelector('.a-motion-tail') && !document.getAnimations().some(animation=>animation.id?.startsWith('analytics-'))");
+    assert.ok(await evaluate(page,"document.documentElement.scrollWidth<=innerWidth+1 && [...document.querySelectorAll('.a-port-list tbody td:first-child')].every(cell=>getComputedStyle(cell).whiteSpace==='nowrap')"));
+    await screenshot(page,enabled?'analytics-port-enabled-target':'analytics-port-disabled-target');
+    await cancelPending();
+  }
+  await click('添加出站','.a-main');
+  await wait(page,"!!document.querySelector('dialog[open] [name=fragment]')");
+  await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=fragment]');input.value='name: unused-exit\\ntype: http\\nserver: 127.0.0.1\\nport: 443\\n';input.form.requestSubmit()})()");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('unused-exit')");
+  await close();await cancelPending();
+  const exitWorkspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
+  assert.ok(exitWorkspace.managed_objects.some(item=>!item.inbound&&item.tag==='unused-exit'));
+  await evaluate(page,"(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('unused-exit'));[...row.querySelectorAll('button')].find(button=>button.textContent==='删除').click()})()");
+  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='删除出站')");
+  await evaluate(page,"document.querySelector('dialog[open] [name=intent]').form.requestSubmit()");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && !document.querySelector('.a-main').textContent.includes('unused-exit')");
+  await close();await cancelPending();
+  const removedExit=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
+  assert.ok(removedExit.inbounds.some(item=>item.tag==='theme-inbound'&&item.port===23477));
+  assert.ok(!removedExit.managed_objects.some(item=>item.tag==='unused-exit'));
   await navigate('#client-access');await click('修改显示参数','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=name]').form;form.elements.name.value='主题接入名称';form.requestSubmit()})()");
@@ -91,9 +129,9 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   const document=JSON.parse(xray.config.content);assert.ok(document.outbounds.some(item=>item.tag==='exit-23479'));assert.ok(document.routing.rules.some(item=>item.inboundTag?.includes('theme-xray')&&item.outboundTag==='exit-23479'));
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${fixture.analyticsXray}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
   await click('配置文件','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
-  assert.ok(await evaluate(page,"document.querySelector('dialog[open] [name=file]').options.length>1"));await screenshot(page,'analytics-xray-files');
+  assert.ok(await evaluate(page,"!document.querySelector('dialog[open] [name=file]') && document.querySelector('dialog[open] [name=content]').value.includes('inbounds') && document.querySelector('dialog[open] [name=content]').value.includes('outbounds')"));await screenshot(page,'analytics-xray-files');
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");
   assert.equal((await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`)).config.version,xray.config.version+1);
-  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and atomic split-file save passed`);
+  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and complete-source save and persistent port target enable/disable and unbound outbound add/delete passed`);
 }

@@ -127,10 +127,9 @@ export async function trafficPage(ctx) {
     });
     const box = ctx.dialog("同步配置端口", form, { wide: true });
   }));
-  return stack(filterbar(node("div", { className: "a-filter-fields" }, search, scope)),
-    section(null, stack(summary, results), actions(sync,
+  return stack(filterbar(node("div", { className: "a-filter-fields" }, search, scope), actions(sync,
       ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
         const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}
       })),
-      ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))));
+      ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))), section(null, stack(summary, results)));
 }
