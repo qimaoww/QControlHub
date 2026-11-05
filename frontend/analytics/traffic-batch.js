@@ -5,7 +5,17 @@ const requestID=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>
 export function trafficBatch(ctx, policies, agentName, onSaved) {
   const selected=new Set(), results=node('div'), feedback=notice('');
   let uncertain=null,last=null;
-  const choices=policies.map(policy=>field(`${agentName(policy.agent_id)} · ${policy.engine} · :${policy.port}`,policy.id,false,{type:'checkbox',onchange:event=>event.target.checked?selected.add(policy.id):selected.delete(policy.id)}));
+  const choices=policies.map(policy=>field(`${agentName(policy.agent_id)} · ${policy.engine} · :${policy.port}`,policy.id,false,{type:'checkbox',onchange:event=>{event.target.checked?selected.add(policy.id):selected.delete(policy.id);syncSelection();}}));
+  const all = field('全选', 'select-all', false, { type: 'checkbox', disabled: !policies.length, onchange(event) {
+    policies.forEach(policy => event.target.checked ? selected.add(policy.id) : selected.delete(policy.id));
+    choices.forEach(choice => { choice.querySelector('input').checked = event.target.checked; });
+    syncSelection();
+  } });
+  function syncSelection() {
+    const input = all.querySelector('input');
+    input.checked = policies.length > 0 && selected.size === policies.length;
+    input.indeterminate = selected.size > 0 && selected.size < policies.length;
+  }
   const operation=field('批量操作','action','reset',{options:Object.entries(labels)});
   const quota=node('div',{className:'a-form-grid'},[
     ['limit_bytes','周期额度（GiB）','limit_gb',{type:'number',min:0,max:8388607,step:'any'},''],
@@ -34,7 +44,7 @@ export function trafficBatch(ctx, policies, agentName, onSaved) {
     const input=uncertain||{...last.input,request_id:requestID(),ids:last.results.filter(item=>item.status==='failed').map(item=>item.id)};
     if(input.ids.length)await execute(input);
   }));retry.hidden=true;
-  const form=ctx.form([operation,node('div',{className:'a-stack'},choices),quota,results,feedback,actions(retry)],'执行批量操作',async(values,form)=>{
+  const form=ctx.form([operation,all,node('div',{className:'a-stack'},choices),quota,results,feedback,actions(retry)],'执行批量操作',async(values,form)=>{
     if(uncertain)throw new Error('请先重试未完成项，确认上次操作结果');
     if(!selected.size)throw new Error('请选择流量记录');
     const patch={};

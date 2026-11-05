@@ -45,14 +45,13 @@ export async function trafficPage(ctx) {
     });
     const box = ctx.dialog(policy ? "编辑端口配额" : "添加端口配额", form);
   }
-  function draw() {
+  function matchesFilter(value) {
     const q = search.querySelector("input").value.toLowerCase();
-    const all = scope.querySelector("select").value === "all";
-    const items = mergeTrafficPorts(policies, list(endpoints)).filter(item => {
-      const value = item.policy || item.endpoint;
-      return (all || value.is_current_user === true) &&
-        [value.agent_id, byID.get(value.agent_id)?.name, value.name, value.engine, value.port].join(" ").toLowerCase().includes(q);
-    });
+    return (scope.querySelector("select").value === "all" || value.is_current_user === true) &&
+      [value.agent_id, byID.get(value.agent_id)?.name, value.name, value.engine, value.port].join(" ").toLowerCase().includes(q);
+  }
+  function draw() {
+    const items = mergeTrafficPorts(policies, list(endpoints)).filter(item => matchesFilter(item.policy || item.endpoint));
     results.replaceChildren(table(["节点 / 归属", "端口", "内核", "状态", "已用 / 配额", "速率", "操作"], items.map(item => {
       const value = item.policy || item.endpoint;
       const agent = byID.get(value.agent_id);
@@ -126,7 +125,7 @@ export async function trafficPage(ctx) {
     const box = ctx.dialog("同步配置端口", form, { wide: true });
   }));
   return stack(filterbar(node("div", { className: "a-filter-fields" }, search, scope), actions(sync,
-      ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
+      ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>matchesFilter(policy)&&trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
         const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}
       })),
       ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))), section(null, results));

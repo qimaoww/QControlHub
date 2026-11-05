@@ -40,10 +40,32 @@ export async function nodesPage(ctx) {
       if (ctx.current()) cardToggle.disabled = listToggle.disabled = false;
     }
   }
-  function choice(agent){return field(`选择 ${agent.name}`,`select:${agent.id}`,selected.has(agent.id),{type:'checkbox',onchange(event){event.target.checked?selected.add(agent.id):selected.delete(agent.id);drawBatch();}});}
-  function drawBatch(){
-    batchBar.hidden=!selecting;
-    batchBar.replaceChildren(muted(`已选 ${selected.size} 个节点`),button('执行批量操作',batch,{disabled:!selected.size}),button('取消选择',()=>{selecting=false;selected.clear();draw();}));
+  const shownAgents = () => {
+    const query = search.querySelector('input').value.trim().toLowerCase();
+    return agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
+  };
+  const selectable = agent => (agent.capabilities || []).some(engine => {
+    const runtime = agent.runtime?.[engine] || {};
+    return !guard('status', agent.status === 'online', runtime.installed, runtime.service_status, agent, engine);
+  });
+  function choice(agent) { return field(`选择 ${agent.name}`, `select:${agent.id}`, selected.has(agent.id), {
+    type: 'checkbox', disabled: !selectable(agent), onchange(event) {
+      event.target.checked ? selected.add(agent.id) : selected.delete(agent.id); drawBatch();
+    },
+  }); }
+  function drawBatch() {
+    batchBar.hidden = !selecting;
+    const eligible = shownAgents().filter(selectable);
+    const count = eligible.filter(agent => selected.has(agent.id)).length;
+    const all = field('全选', 'select-all', eligible.length > 0 && count === eligible.length, {
+      type: 'checkbox', disabled: !eligible.length, onchange(event) {
+        eligible.forEach(agent => event.target.checked ? selected.add(agent.id) : selected.delete(agent.id)); draw();
+        batchBar.querySelector('[name="select-all"]').focus({ preventScroll: true });
+      },
+    });
+    all.querySelector('input').indeterminate = count > 0 && count < eligible.length;
+    batchBar.replaceChildren(all, muted(`已选 ${selected.size} 个节点`), button('执行批量操作', batch, { disabled: !selected.size }),
+      button('取消选择', () => { selecting = false; selected.clear(); draw(); }));
   }
   const percentage=(used,total)=>total>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):0;
   function meter(label,value,available,detail){
@@ -77,8 +99,8 @@ export async function nodesPage(ctx) {
     return task;
   }
   function draw() {
-    const query = search.querySelector('input').value.trim().toLowerCase();
-    const shown = agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
+    const shown = shownAgents();
+    for (const id of selected) if (!shown.some(agent => agent.id === id && selectable(agent))) selected.delete(id);
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
     drawBatch();
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}

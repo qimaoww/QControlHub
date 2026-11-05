@@ -25,7 +25,15 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('列表','.a-main');await wait(page,"!!document.querySelector('.a-probe-list') && !document.querySelector('[aria-busy=true]')");
   await click('卡片','.a-main');await wait(page,"!!document.querySelector('.a-probe-grid') && !document.querySelector('[aria-busy=true]')");
   await click('批量操作','.a-main');
-  assert.ok(await evaluate(page,"!!document.querySelector('.a-probe input[type=checkbox]')"));await click('取消选择','.a-main');
+  assert.ok(await evaluate(page,"!!document.querySelector('.a-probe input[type=checkbox]')"));
+  await evaluate(page,"document.querySelector('.a-probe-batch [name=select-all]').click()");
+  assert.ok(await evaluate(page,"[...document.querySelectorAll('.a-probe input[type=checkbox]:not(:disabled)')].every(input=>input.checked)"));
+  await evaluate(page,"document.querySelector('.a-probe input[type=checkbox]:checked').click()");
+  assert.ok(await evaluate(page,"const all=document.querySelector('.a-probe-batch [name=select-all]');!all.checked && (document.querySelectorAll('.a-probe input[type=checkbox]:not(:disabled)').length<2 || all.indeterminate)"));
+  await screenshot(page,'analytics-batch-partial-selection');
+  await evaluate(page,"document.querySelector('.a-probe-batch [name=select-all]').click();document.querySelector('.a-probe-batch [name=select-all]').click()");
+  assert.equal(await evaluate(page,"document.querySelectorAll('.a-probe input[type=checkbox]:checked').length"),0);
+  await click('取消选择','.a-main');
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0);
   await click('添加节点','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");await screenshot(page,'analytics-enrollment');
@@ -114,6 +122,9 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   const policies=(await api(page,identity,'GET','/traffic-policies')).filter(policy=>policy.agent_id===agentID);assert.ok(policies.length);
   await navigate('#traffic');await click('批量操作','.a-main');
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='流量批量操作')");
+  await evaluate(page,"document.querySelector('dialog[open] [name=select-all]').click()");
+  assert.ok(await evaluate(page,"(() => { const inputs=[...document.querySelectorAll('dialog[open] input[type=checkbox]')].filter(input=>input.name!=='select-all'&&!input.name.startsWith('patch:'));return inputs.length>0&&inputs.every(input=>input.checked); })()"));
+  await evaluate(page,"document.querySelector('dialog[open] [name=select-all]').click()");
   await evaluate(page,`(()=>{const choice=document.querySelector('dialog[open] [name="${policies[0].id}"]');choice.checked=true;choice.dispatchEvent(new Event('change',{bubbles:true}));choice.form.requestSubmit()})()`);
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='清零当前周期')");await click('清零当前周期');
   await wait(page,"!document.querySelector('[aria-busy=true]') && (!!document.querySelector('dialog[open] tbody tr') || [...document.querySelectorAll('dialog[open] [role=alert]')].some(item=>item.textContent))");
