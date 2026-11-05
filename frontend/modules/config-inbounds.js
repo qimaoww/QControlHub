@@ -275,7 +275,7 @@ export function bindConfigInbounds(ctx) {
         }
       } else if (kind === "delete") {
         const mutableServices = xrayMutableAPIServices(engine, fresh.config.content);
-        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
+        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
         const buttons = [...body.querySelectorAll("[data-delete-intent]")];
         buttons.forEach(button => {
           button.disabled = !writable() || fresh.agent?.status !== "online" || !fresh.agent?.runtime?.[engine]?.installed;
