@@ -33,6 +33,7 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
   const api = async (path, options = {}) => {
     if (path === "/agents") return [node];
     if (path.endsWith("/workspace")) {
+      if (test.workspaceError) throw test.workspaceError;
       if (test.refreshError && test.writes.length) throw test.refreshError;
       return {config:saved};
     }
@@ -65,7 +66,7 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     }
     if (path.startsWith("/tasks/")) {
       test.taskPolls++;
-      return {status:"failed",error:"Fixture: node execution is intentionally not performed"};
+      return {status:"failed",error:"测试任务未执行"};
     }
     throw new Error(`unexpected API ${path}`);
   };
@@ -278,7 +279,31 @@ async function testSourceSaveRuntime() {
       assert(button.disabled, "partial source success allows uncertain resubmission");
       form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
       assert(test.writes.length === 1 && test.tasks.length === 1, "partial source failure repeated a committed mutation");
+      test.refreshError = null;
+      const retry = document.querySelector("[data-live-save-status] button");
+      assert(retry?.textContent === "重新加载配置", "accepted source save has no same-page recovery");
+      retry.click();
+      await waitFor(()=>!document.querySelector('[data-live-intent="validate"]').disabled,
+        "read-only page recovery did not unlock deployment");
+      assert(test.writes.length === 1 && test.tasks.length === 1, "page recovery submitted another mutation");
     }
     test.dispose();
   }
+
+  const test = await fixture("xray", false, false, false, false, {multi:true});
+  test.accept = true;
+  const workspace = document.querySelector(".live-config-workspace");
+  const input = document.querySelector("[data-code-input]");
+  input.value = input.value.replace("9007199254740993", "9007199254740995");
+  const draft = input.value;
+  test.workspaceError = Object.assign(Error("temporary workspace read failure"), {status:503});
+  const other = document.querySelector('[data-live-engine="sing-box"]');
+  await other.onclick({preventDefault(){}});
+  assert(test.state.data.liveEngine === "xray" && workspace.isConnected && !workspace.inert &&
+    input.value === draft, "failed engine switch lost its original workspace or draft");
+  test.workspaceError = null;
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>test.tasks.length === 1, "failed engine switch poisoned the original deployment guard");
+  assert(test.writes.length === 1 && test.tasks[0].action === "deploy", "same-page deployment repeated its write");
+  test.dispose();
 }

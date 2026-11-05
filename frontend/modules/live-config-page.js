@@ -167,11 +167,10 @@ async function liveConfig(options = {}) {
   // Scope guards remain local. The API checks the saved revision and the Agent
   // validates and applies the exact task snapshot in the target instance.
   const beforeDeploy = () => {
-    if (accountData !== state.data || runtimeScope !== state.navigationEpoch ||
-        request !== liveConfigRequest || state.route !== "live-config" ||
+    if (accountData !== state.data || workspaceElement?.isConnected === false || state.route !== "live-config" ||
         state.data.liveAgent !== agent.id || state.data.liveEngine !== engine ||
         state.data.liveConfigSource !== sourceMode) {
-      throw new Error("页面目标已变化，请重新打开配置后提交。");
+      throw Object.assign(new Error("页面目标已变化，请重新打开配置后提交。"), {deployPreflight:true});
     }
   };
   const current = (privateWorkspace || !unsupportedReason) && source?.content

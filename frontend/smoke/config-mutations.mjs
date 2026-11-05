@@ -41,6 +41,24 @@ export async function run() {
     state.data = {};
     await make().recover("node", "xray");
     assert.equal(seen.length, 2, "another user inherited the task");
+    const delayedState = {data:{}};
+    let available = false, delayedWrites = 0;
+    const delayed = createConfigMutations({state:delayedState, api:async (url, options = {})=>{
+      if (options.method === "POST") {
+        delayedWrites++;
+        id = options.headers["X-Config-Task-ID"];
+        throw Object.assign(Error("incomplete response"), {status:200});
+      }
+      if (!available) throw Object.assign(Error("not found yet"), {status:404});
+      return api(url, options);
+    }}, {onTask:result=>seen.push(result), waitForTerminal:()=>completion});
+    let interrupted;
+    try { await delayed.request(path,{method:"POST",body}); } catch (error) { interrupted = error; }
+    assert.equal(typeof interrupted?.recoverConfigSubmission, "function", "unknown save cannot be reconciled in the same page");
+    available = true;
+    const recovered = await interrupted.recoverConfigSubmission();
+    assert.equal(recovered.config.version,4);
+    assert.equal(delayedWrites,1,"same-page recovery replayed an interrupted write");
     release({status:"succeeded"});
     // A response arriving after an account change cannot call onTask.
     lost = false;

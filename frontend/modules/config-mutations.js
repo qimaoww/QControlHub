@@ -13,6 +13,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
       if (storageAccount().stable) {
         try { records = JSON.parse(accountStorage.getItem(storageKey) || "{}"); } catch { /* Storage may be unavailable. */ }
       }
+      if (!records || typeof records !== "object" || Array.isArray(records)) records = {};
       pending.set(state.data, records);
     }
     return records;
@@ -72,7 +73,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
       result = await api(path, {...options, headers:{...options.headers, "X-Config-Task-ID":id}});
     } catch (error) {
       if (state.data !== owner) throw error;
-      if (error.status && error.status < 500 && error.status !== 408) {
+      if (error.status >= 400 && error.status < 500 && error.status !== 408) {
         delete records[id];
         persist(records);
         throw error;
@@ -84,7 +85,15 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
         try { result = await readReceipt(id, record); break; }
         catch { if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250)); }
       }
-      if (!result) throw error;
+      if (!result) {
+        error.recoverConfigSubmission = async () => {
+          const recovered = await readReceipt(id, record);
+          if (state.data !== owner) throw new DOMException("Aborted", "AbortError");
+          track(recovered, record, owner, records, id);
+          return recovered;
+        };
+        throw error;
+      }
     }
     track(result, record, owner, records, id);
     return result;
