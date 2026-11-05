@@ -22,6 +22,7 @@ export async function nodesPage(ctx) {
   const batchBar = node('div', {className:'a-probe-batch'});
   const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
   const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
+  const batchToggle = ctx.can('tasks.execute') && button('批量操作', () => { selecting = true; draw(); });
   async function setView(value) {
     if (value === view) return;
     cardToggle.disabled = listToggle.disabled = true;
@@ -46,13 +47,14 @@ export async function nodesPage(ctx) {
   };
   const selectable = agent => ctx.can('tasks.execute') &&
     (agent.can_manage !== false || ctx.can('instance.manage', agent));
-  function choice(agent) { return field(`选择 ${agent.name}`, `select:${agent.id}`, selected.has(agent.id), {
-    type: 'checkbox', disabled: !selectable(agent), onchange(event) {
+  function choice(agent) { return field('选择', `select:${agent.id}`, selected.has(agent.id), {
+    type: 'checkbox', 'aria-label': `选择 ${agent.name}`, disabled: !selectable(agent), onchange(event) {
       event.target.checked ? selected.add(agent.id) : selected.delete(agent.id); drawBatch();
     },
   }); }
   function drawBatch() {
     batchBar.hidden = !selecting;
+    if (batchToggle) batchToggle.hidden = selecting;
     if (!selecting) { batchBar.replaceChildren(); return; }
     const eligible = shownAgents().filter(selectable);
     const count = eligible.filter(agent => selected.has(agent.id)).length;
@@ -369,6 +371,6 @@ export async function nodesPage(ctx) {
     cardToggle, listToggle,
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
-    ctx.can('tasks.execute') && button('批量操作',()=>{selecting=true;draw();}),
+    batchToggle,
   )), batchBar, results);
 }
