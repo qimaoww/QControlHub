@@ -26,6 +26,11 @@ function style(path, key) {
 }
 
 async function start() {
+  const entryURL = new URL(location.href);
+  if (entryURL.searchParams.has("theme")) {
+    entryURL.searchParams.delete("theme");
+    history.replaceState(null, "", entryURL);
+  }
   let session = null;
   let selected = "classic";
   try {
@@ -38,8 +43,7 @@ async function start() {
     if (error.status === 401) session = null;
   }
 
-  if (!session) selected = loginTheme(location.search,
-    document.querySelector('meta[name="qch-login-theme"]')?.content);
+  if (!session) selected = loginTheme(document.querySelector('meta[name="qch-login-theme"]')?.content);
 
   if (selected === "analytics") {
     const sheet = style("./analytics/theme.css", "analytics");

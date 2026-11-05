@@ -26,10 +26,10 @@ const model = createThemePreference({
 assert.equal(effectiveTheme("bad"),"classic");
 assert.equal(effectiveTheme("analytics"),"classic", "incomplete theme is never advertised as available");
 assert.equal(themeByID("bad"),null);
-assert.equal(loginTheme(""),"classic", "anonymous entry never reads an account preference");
-assert.equal(loginTheme("?theme=unknown"),"classic");
-assert.equal(loginTheme("?theme=analytics"),"classic", "unavailable runtime remains guarded at anonymous entry");
-assert.equal(loginTheme("?theme=classic", "analytics"),"classic", "explicit public hint wins over deployment login appearance");
+assert.equal(loginTheme(),"classic", "anonymous entry never reads an account preference");
+assert.equal(loginTheme("unknown"),"classic");
+assert.equal(loginTheme("analytics"),"classic", "unavailable runtime remains guarded at anonymous entry");
+assert.equal(loginTheme("?theme=analytics"),"classic", "URLs cannot select an account theme");
 await assert.rejects(model.save("classic"));
 assert.deepEqual(await model.read(),server);
 await assert.rejects(model.save("unknown"));

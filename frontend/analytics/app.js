@@ -243,7 +243,7 @@ export function startAnalytics({ app, session }) {
     routeAbort?.abort();
     watch.stop();
     const loginURL = new URL(location.href);
-    loginURL.searchParams.set("theme", "analytics");
+    loginURL.searchParams.delete("theme");
     history.replaceState(null, "", loginURL);
     notifications.clear();
     state.session = null;

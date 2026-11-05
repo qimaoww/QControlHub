@@ -14,10 +14,10 @@ export function effectiveTheme(id) {
   return theme?.available ? theme.id : "classic";
 }
 
-// Public presentation hint only. Authenticated preferences always take priority.
-export function loginTheme(search, defaultID = "classic") {
-  const requested = new URLSearchParams(search).get("theme");
-  return effectiveTheme(requested === null ? defaultID : requested);
+// Anonymous presentation uses the public deployment default. Account choices
+// are read only after authentication and never come from a business URL.
+export function loginTheme(defaultID = "classic") {
+  return effectiveTheme(defaultID);
 }
 
 // This loader is also usable by independently built frontends. A full document
