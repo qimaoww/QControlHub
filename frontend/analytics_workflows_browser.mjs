@@ -57,15 +57,15 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('theme-inbound')");
   const workspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);assert.ok(workspace.inbounds.some(input=>input.tag==='theme-inbound'&&input.port===23477));assert.ok(workspace.config?.version);await close();
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
-  await click('配置文件','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");await screenshot(page,'analytics-config-files');
+  await click('展开源码','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");await screenshot(page,'analytics-config-files');
   await api(page,identity,'PUT',`/agents/${agentID}/configs/mihomo`,{name:workspace.config.name,description:workspace.config.description,content:workspace.config.content,version:workspace.config.version});
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] [role=alert]')].some(item=>item.textContent)");
   assert.ok(await evaluate(page,"!!document.querySelector('dialog[open] [name=content]')?.value"),'a stale save preserves the editor and draft');
   assert.equal((await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`)).config.version,workspace.config.version+1);
-  await close();await click('配置文件','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
+  await close();await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
-  await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");
   assert.equal((await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`)).config.version,workspace.config.version+2);
   // Exercise the saved target state separately from actual deployment: queued
   // validation must not claim a listener was stopped on the remote Agent.
@@ -128,10 +128,10 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   const xray=await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`);
   const document=JSON.parse(xray.config.content);assert.ok(document.outbounds.some(item=>item.tag==='exit-23479'));assert.ok(document.routing.rules.some(item=>item.inboundTag?.includes('theme-xray')&&item.outboundTag==='exit-23479'));
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${fixture.analyticsXray}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
-  await click('配置文件','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
+  await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
   assert.ok(await evaluate(page,"!document.querySelector('dialog[open] [name=file]') && document.querySelector('dialog[open] [name=content]').value.includes('inbounds') && document.querySelector('dialog[open] [name=content]').value.includes('outbounds')"));await screenshot(page,'analytics-xray-files');
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
-  await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='配置文件')");
+  await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");
   assert.equal((await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`)).config.version,xray.config.version+1);
   await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and complete-source save and persistent port target enable/disable and unbound outbound add/delete passed`);
 }

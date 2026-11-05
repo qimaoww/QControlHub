@@ -68,14 +68,14 @@ export async function dashboardPage(ctx) {
     ctx.can("tasks.read") ? ctx.api("/tasks?limit=7") : [],
     ctx.can("traffic.read") ? ctx.api(query("/traffic-usage", { month })) : null,
   ]);
-  const stat = (title, value, subtitle, glyph) => node("section", { className: "a-card a-stat" },
-    node("div", { className: "a-stat-heading" }, muted(title), badge(glyph)),
+  const stat = (title, value, subtitle) => node("section", { className: "a-card a-stat" },
+    node("div", { className: "a-stat-heading" }, muted(title)),
     node("strong", {}, value), muted(subtitle));
   const cards = node("div", { className: "a-stat-grid" },
-    stat("在线节点", overview.agents_online ?? 0, `共 ${overview.agents ?? 0} 个节点`, "实时"),
-    stat("节点配置", overview.node_configs ?? 0, "当前账号可见配置", "配置"),
-    stat("执行中任务", overview.tasks_running ?? 0, `等待执行 ${overview.tasks_pending ?? 0} 项`, "任务"),
-    stat("失败任务", overview.tasks_failed ?? 0, "可在任务页查看详情", "状态"));
+    stat("在线节点", overview.agents_online ?? 0, `共 ${overview.agents ?? 0} 个节点`),
+    stat("节点配置", overview.node_configs ?? 0, "当前账号可见配置"),
+    stat("执行中任务", overview.tasks_running ?? 0, `等待执行 ${overview.tasks_pending ?? 0} 项`),
+    stat("失败任务", overview.tasks_failed ?? 0, "可在任务页查看详情"));
   const days = traffic ? aggregateDashboardTrafficDays(traffic.days, month).filter(day => day.day <= new Date().toISOString().slice(0, 10)) : [];
   const trafficCard = traffic && section("流量趋势", node("div", { className: "a-card-body" },
     responsiveChart(days, ctx.signal), node("div", { className: "a-chart-meta" }, muted(`${month} · UTC`),

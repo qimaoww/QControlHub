@@ -19,7 +19,12 @@ export async function ipQualityPage(ctx) {
   const display = value => ipQualityValue(value).replace(/(?:\x1b|\\x1b|x1b)\[[0-?]*[ -/]*[@-~]/gi, "");
   const facts = entries => node("dl", { className: "a-ipq-facts" }, entries.map(([key,value]) => node("div", {}, node("dt", {}, key), node("dd", {}, display(value)))));
   function reportView(report) {
-    const pairs = data => facts(ipQualityEntries(data));
+    const pairs = data => table(["来源", "结果"], ipQualityEntries(data).map(([name,value]) => [name,display(value)]));
+    const factorNames = { CountryCode: "国家 / 地区", Proxy: "代理", Tor: "Tor", VPN: "VPN", Server: "数据中心", Abuser: "滥用", Robot: "机器人" };
+    const factors = ipQualityEntries(report.Factor);
+    const providers = [...new Set(factors.flatMap(([,values]) => ipQualityEntries(values).map(([name]) => name)))];
+    const factorTable = table(["来源", ...factors.map(([name]) => factorNames[name] || name)],
+      providers.map(provider => [provider, ...factors.map(([,values]) => display(values?.[provider]))]));
     const details = node("details", {}, node("summary", {}, "上游原始 JSON"), code(JSON.stringify(report, null, 2)));
     return stack(
       section(report.Head?.IP || "IP 检测报告", facts([
@@ -27,8 +32,7 @@ export async function ipQualityPage(ctx) {
         ["城市", report.Info?.City?.Name], ["检测时间", report.Head?.Time], ["脚本发行版本", report.Head?.Version],
       ])),
       grid(section("风险评分", pairs(report.Score)), section("IP 用途", pairs(report.Type?.Usage))),
-      section("风险因子", grid(ipQualityEntries(report.Factor).map(([name, data]) => section(
-        ({ CountryCode: "国家 / 地区", Proxy: "代理", Tor: "Tor", VPN: "VPN", Server: "数据中心", Abuser: "滥用", Robot: "机器人" })[name] || name, pairs(data))))),
+      section("风险因子", factorTable),
       section("流媒体与 AI", table(["平台", "状态", "区域", "类型"], ipQualityEntries(report.Media).map(([name, value]) => [
         name, display(value?.Status), display(value?.Region), display(value?.Type),
       ]))),

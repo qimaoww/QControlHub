@@ -27,7 +27,7 @@ const multiline = new Set(['xhttp_extra','xhttp_server_extra','mieru_custom_patt
 const group = (title, content, open = false) => node('details', { className:'a-disclosure', open }, node('summary',{},title), node('div',{className:'a-disclosure-body'},content));
 
 // All operations stay bound to one account/agent/engine workspace revision.
-export function configStudio(ctx, { agent, engine, base, workspace, getDraft, accept, beforeDeploy, dirty }) {
+export function configStudio(ctx, { agent, engine, base, workspace, getDraft, accept, beforeDeploy, dirty, sourceTools }) {
   let current = workspace;
   const surface = node('div', {className:'a-stack'});
   const editable = ctx.can('agent-config.write'), execute = ctx.can('tasks.execute') && agent.status === 'online';
@@ -167,7 +167,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const saved=await ctx.api(base,{method:'PUT',body:{name:current.config.name,description:current.config.description,version:current.config.version,content:form.elements.content.value}});
       await committed({config:saved},box);
     });
-    const box=ctx.dialog('配置文件',form,{wide:true});
+    const box=ctx.dialog('展开源码',form,{wide:true});
     track(form,box);
     if(!editable)form.querySelector('button[type=submit]').remove();
   }
@@ -308,10 +308,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     for(const row of portTable.querySelectorAll('tbody tr')) [...row.cells].forEach((cell,index)=>cell.dataset.label=headers[index]);
     surface.replaceChildren(section('入站配置',portTable,actions(status,controls)),
       ['xray','sing-box','mihomo'].includes(engine)&&section('出站配置',table(['名称','类型','目标状态','操作'],outboundObjects.map(object=>[object.tag,object.kind||object.section,badge(object.enabled?'启用':'停用'),writable&&actions(toggle(object),button('修改',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object))),button('删除',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object,'delete')),{tone:'danger'}))]),{label:'出站配置'}),writable&&button('添加出站',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(null,'add')))),
-      current.config&&node('div',{className:'a-config-tools'},actions(
-        button('配置文件',event=>void ctx.mutate(event.currentTarget,files)),
-        writable&&button('通用配置项',()=>fieldChooser()),
-      )));
+    );
+    sourceTools?.replaceChildren(...(current.config?[
+      button('展开源码',event=>void ctx.mutate(event.currentTarget,files)),
+      writable&&button('通用配置项',()=>fieldChooser()),
+    ].filter(Boolean):[]));
   }
   function fieldChooser(inbound) {
     const fields=inbound?list(current.catalog?.fields).filter(item=>['inbound','override'].includes(item.scope)):commonConfigFields(engine,list(current.catalog?.fields));

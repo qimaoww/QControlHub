@@ -60,7 +60,7 @@ export async function liveConfigPage(ctx) {
     sourceMode: mode, managedReadSupported: agent.features?.includes("managed-config-read-v1"),
     existingAvailable: Boolean(runtime.existing_config_available),
   });
-  const flags = actions(badge(engine), status(agent.status), badge(agent.shared_allocation ? "共享实例" : "主实例"));
+  const flags = actions(status(agent.status), badge(agent.shared_allocation ? "共享实例" : "主实例"));
   const targetField = field("节点", "agent", target.id, { options: available.map(item => [item.id, item.name]) });
   const engineField = field("内核", "engine", engine, { options: engines });
   const modeField = field("配置来源", "source", mode, { options: [
@@ -76,7 +76,7 @@ export async function liveConfigPage(ctx) {
     location.hash = `#live-config?${new URLSearchParams(values)}`;
   } }, targetField, engineField, modeField, actions(
     node("button", { type: "submit", className: "a-button" }, "打开配置")));
-  const liveNotice = notice(saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存", "ok");
+  const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
   const api = (path, options) => ctx.api(path, { method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });
   const snapshot = async (preferCached = false) => {
@@ -197,7 +197,9 @@ export async function liveConfigPage(ctx) {
       })),
     ]), { label: "节点配置历史" }), preview), { wide: true });
   }));
+  const sourceTools = actions();
   const inbounds = configStudio(ctx, {
+    sourceTools,
     agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
     dirty: () => form.elements.content.value !== form.elements.content.defaultValue || form.elements.name.value !== (saved?.name || `${agent.name} ${engine}`) || form.elements.description.value !== (saved?.description || ""),
     accept(config) {
@@ -217,6 +219,6 @@ export async function liveConfigPage(ctx) {
   return stack(filterbar(select, flags),
     errorText && notice(errorText),
     inbounds,
-    section("配置源码", node("div", { className: "a-card-body" }, form), actions(read, format, readHistory),
+    section("配置源码", node("div", { className: "a-card-body" }, form), actions(sourceTools, read, format, readHistory),
       hostManaged && mode === "personal" ? "部署前需读取托管配置，以核对节点当前内容。" : null));
 }

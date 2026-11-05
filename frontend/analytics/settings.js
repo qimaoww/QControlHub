@@ -39,7 +39,7 @@ export async function settingsPage(ctx) {
       input("default_config_editor", "默认配置编辑器", { options: [["structured", "结构化编辑"], ["source", "源码编辑"]] }))),
     section("默认内核能力", node("div", { className: "a-card-body a-actions" },
       engineIDs.map(engine => field(engine, `engine:${engine}`, settings.default_agent_engines?.includes(engine), { type: "checkbox", disabled: !writable })))),
-    section("运行与数据保留", node("div", { className: "a-card-body a-form-grid" },
+    section("运行与数据保留", node("div", { className: "a-card-body a-form-grid a-settings-metrics" },
       numeric, input("core_log_minimum_level", "日志最低级别", { options: [["debug", "调试"], ["info", "信息"], ["warning", "警告"], ["error", "错误"], ["critical", "严重错误"], ["off", "关闭"]] }),
       input("client_connection_retention_days", "客户端连接保留天数", { type: "number", min: 0, max: 3650 }))),
     section("证书与地址库", node("div", { className: "a-card-body a-form-grid" },

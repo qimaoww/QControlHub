@@ -62,8 +62,9 @@ export const notice = (message, tone = "error") => node("p", { className: `a-not
 export function table(columns, rows, { emptyText, paginate = 12, label = "记录" } = {}) {
   const body = node("tbody");
   const scroll = node("div", { className: "a-table-scroll", tabindex: "0", role: "region", "aria-label": label },
-    node("table", {}, node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col" }, title)))), body));
+    node("table", {}, node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col", "data-column": title }, title)))), body));
   if (!rows.length) return empty(emptyText);
+  if (columns.length === 2) scroll.classList.add("a-table-pairs");
   const previous = button("上一页", () => show(page - 1));
   const next = button("下一页", () => show(page + 1));
   const count = node("span", { className: "a-muted", "aria-live": "polite" });
@@ -73,7 +74,7 @@ export function table(columns, rows, { emptyText, paginate = 12, label = "记录
   function show(value) {
     page = Math.max(1, Math.min(last, value));
     body.replaceChildren(...rows.slice((page - 1) * size, page * size).map(row =>
-      node("tr", {}, (typeof row === "function" ? row() : row).map(cell => node("td", {}, cell ?? "—")))));
+      node("tr", {}, (typeof row === "function" ? row() : row).map((cell, index) => node("td", { "data-column": columns[index] }, cell ?? "—")))));
     count.textContent = `共 ${rows.length} 条 · 第 ${page} / ${last} 页`;
     previous.disabled = page === 1;
     next.disabled = page === last;

@@ -68,7 +68,7 @@ export function startAnalytics({ app, session }) {
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
   const notifications = createNotifications(presentation);
   const work = node("div", { className: "a-work" });
-  let drawer, shellTitle, navigationToggle;
+  let drawer, shellTitle, navigationToggle, pageActions;
   document.body.className = "analytics";
   app.replaceChildren(layout);
   applyAppearance();
@@ -210,7 +210,7 @@ export function startAnalytics({ app, session }) {
       navigationToggle.setAttribute("aria-expanded", String(!matchMedia("(max-width: 56rem)").matches && !layout.classList.contains("a-collapsed")));
       shellTitle = node("h1", { className: "a-top-title" }, title);
       const top = node("header", { className: "a-top" }, node("div", { className: "a-top-inner" },
-        navigationToggle, shellTitle, actions(button("刷新", () => void refresh(), { glyph: "refresh" }))));
+        navigationToggle, shellTitle, actions(pageActions = actions(), button("刷新", () => void refresh(), { glyph: "refresh" }))));
       work.replaceChildren(top, main);
       layout.replaceChildren(node("a", {
         href: "#content", className: "a-button a-skip",
@@ -222,6 +222,7 @@ export function startAnalytics({ app, session }) {
       if (link.hash === `#${route}`) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
+    pageActions.replaceChildren();
     main.replaceChildren();
   }
   async function leave() {
@@ -285,7 +286,9 @@ export function startAnalytics({ app, session }) {
     document.title = `${title} · QControlHub`;
     const stage = node("div", { className: "a-stack", "aria-busy": "true" }, empty("正在加载…"));
     main.append(stage);
+    let stagedActions = [];
     const context = {
+      pageActions(...items) { stagedActions = items; },
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
       can, session: state.session, signal, state, dialog, confirm, mutate, form, announce,
       refresh, visible: (...args) => motion ? motion.visible(...args) : (args[0].hidden = !args[1]), setDirty(value) { dirty = value; },
@@ -311,6 +314,7 @@ export function startAnalytics({ app, session }) {
       }
       const content = await page(context);
       if (context.current()) {
+        pageActions.replaceChildren(...stagedActions);
         stage.replaceChildren(content);
         if (previousRoute !== route) motion?.page(stage);
       }

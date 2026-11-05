@@ -12,7 +12,6 @@ export async function trafficPage(ctx) {
   const search = field("搜索端口", "search", "", { type: "search", placeholder: "节点、名称、内核或端口" });
   const scope = field("用户范围", "scope", "current", { options: [["current", "当前用户"], ["all", "全部获授权资源"]] });
   const results = node("div");
-  const summary = node("div", { className: "a-card-body a-actions" });
   function edit(policy = null, endpoint = null) {
     const target = policy || endpoint;
     const available = eligibleAgents(list(agents));
@@ -54,7 +53,6 @@ export async function trafficPage(ctx) {
       return (all || value.is_current_user === true) &&
         [value.agent_id, byID.get(value.agent_id)?.name, value.name, value.engine, value.port].join(" ").toLowerCase().includes(q);
     });
-    summary.replaceChildren(badge(`${items.length} 个端口`), muted(`已用 ${bytes(items.reduce((sum, item) => sum + Number(item.policy?.used_bytes || 0), 0))}`));
     results.replaceChildren(table(["节点 / 归属", "端口", "内核", "状态", "已用 / 配额", "速率", "操作"], items.map(item => {
       const value = item.policy || item.endpoint;
       const agent = byID.get(value.agent_id);
@@ -131,5 +129,5 @@ export async function trafficPage(ctx) {
       ctx.can("traffic.manage") && button("批量操作",()=>trafficBatch(ctx,policies.filter(policy=>trafficPolicyEditable(policy,byID.get(policy.agent_id),ctx.can)),id=>byID.get(id)?.name||id,async()=>{
         const received=list(await ctx.api("/traffic-policies"));if(ctx.current()){policies.splice(0,policies.length,...received);draw();}
       })),
-      ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))), section(null, stack(summary, results)));
+      ctx.can("traffic.manage") && button("添加配额", () => edit(), { tone: "primary", disabled: !eligibleAgents(list(agents)).length }))), section(null, results));
 }

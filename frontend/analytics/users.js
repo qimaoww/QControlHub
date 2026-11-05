@@ -149,6 +149,7 @@ export async function usersPage(ctx) {
   }
   draw();
   query.querySelector("input").addEventListener("input", draw);
-  return stack(filterbar(query, actions(button("创建用户", () => edit(), { tone: "primary" }))),
+  ctx.pageActions(button("创建用户", () => edit(), { tone: "primary" }));
+  return stack(filterbar(query),
     section(null, results));
 }

@@ -7,7 +7,6 @@ const engines = [["", "全部内核"], "mihomo", "xray", "sing-box", "ss-rust"];
 export async function logsPage(ctx) {
   const sources = list(await ctx.api("/core-log-sources"));
   const results = node("div");
-  const metadata = node("div", { className: "a-card-body" });
   let filters = {}, records = [];
   const sourceOptions = sources.map((source, index) => [String(index),
     `${source.name || source.agent_name || source.agent_id} · ${source.engine} · ${source.instance_id === "main" ? "主实例" : source.username || source.instance_id}`]);
@@ -24,16 +23,16 @@ export async function logsPage(ctx) {
     records = list(await ctx.api(query("/core-logs", filters)));
     draw();
   });
+  form.classList.add("a-log-filters");
   function draw() {
-    metadata.replaceChildren(muted(`已读取 ${records.length} 条日志`));
+    older.hidden = records.length === 0;
+    older.disabled = records.length === 0;
     results.replaceChildren(table(["时间", "节点", "实例", "内核", "级别", "内容"], records.map(record => [
       date(record.logged_at), record.agent_id, record.instance_id === "main" ? "主实例" : record.instance_id || "—",
       record.engine, badge(record.level, ["critical", "error"].includes(record.level) ? "bad" : ""),
       node("span", { className: "a-log-message" }, redactDiagnostic(record.message)),
     ]), { paginate: 50, label: "内核日志" }));
   }
-  records = list(await ctx.api("/core-logs?limit=200"));
-  draw();
   const older = button("读取更早日志", event => void ctx.mutate(event.currentTarget, async () => {
     if (!records.length) return;
     const before = Math.min(...records.map(record => record.id));
@@ -43,8 +42,10 @@ export async function logsPage(ctx) {
     draw();
     if (!next.length) older.disabled = true;
   }));
-  return stack(filterbar(form),
-    section(null, stack(metadata, results, node("div", { className: "a-card-body" }, actions(older)))));
+  records = list(await ctx.api("/core-logs?limit=200"));
+  draw();
+  const more = node("div", { className: "a-result-footer" }, older);
+  return stack(filterbar(form), section(null, results), more);
 }
 
 export async function connectionsPage(ctx) {
@@ -62,11 +63,12 @@ export async function connectionsPage(ctx) {
       field("结束时间", "until", localValue(until), { type: "datetime-local", required: true }),
       field("节点 ID", "agent_id", ""),
       field("内核", "engine", "", { options: engines }),
-      field("客户端 IP", "client_ip", ""), field("端口", "port", "", { type: "number", min: 1, max: 65535 }),
-      field("协议", "protocol", ""), field("入站", "inbound", ""),
+      field("客户端 IP", "client_ip", ""), field("端口", "port", "", { type: "number", min: 1, max: 65535 })),
+    node("details", { className: "a-query-options" }, node("summary", {}, "更多筛选"),
+      node("div", { className: "a-form-grid" }, field("协议", "protocol", ""), field("入站", "inbound", ""),
       field("传输", "transport", ""),
       field("分组", "group_by", "", { options: [["", "逐条记录"], ["ip", "按客户端 IP"]] })),
-    field("包含非公网地址", "include_non_public", false, { type: "checkbox" }),
+    field("包含非公网地址", "include_non_public", false, { type: "checkbox" })),
   ], "查询连接", async (values, element) => {
     filters = { ...values, since: new Date(values.since).toISOString(), until: new Date(values.until).toISOString(),
       include_non_public: element.elements.include_non_public.checked, locations: "cached", limit: 100 };
@@ -78,8 +80,7 @@ export async function connectionsPage(ctx) {
     if (!ctx.current()) return;
     nextCursor = data.next_cursor || "";
     nextBefore = data.next_before || 0;
-    summary.replaceChildren(badge(`连接记录 ${data.flows ?? 0}`), badge(`客户端 IP ${data.ips ?? 0}`),
-      muted("根据内核日志观测，不代表当前在线会话数"));
+    summary.replaceChildren(muted("根据内核日志观测，不代表当前在线会话数"));
     results.replaceChildren(table(["客户端", "属地", "节点", "内核", "协议 / 传输", "入站 / 端口", "首次发现", "最后发现"],
       list(data.records).map(record => [
         record.client_ip,
@@ -89,6 +90,7 @@ export async function connectionsPage(ctx) {
         [record.inbound, record.local_port || ""].filter(Boolean).join(" / "),
         date(record.first_seen), date(record.last_seen),
       ]), { label: "客户端连接" }));
+    pageTools.hidden = !previous.length && !nextCursor && !nextBefore;
     pageTools.replaceChildren(
       button("上一页", event => void ctx.mutate(event.currentTarget, async () => {
         const target = previous.pop();
