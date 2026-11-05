@@ -56,7 +56,7 @@ export const section = (title, content, tools, subtitle) => node("section", { cl
 export function filterbar(content, tools) {
   if (content.tagName === "FORM") content.classList.add("a-filter-form");
   return node("div", { className: "a-filterbar" }, content,
-    content.tagName !== "FORM" ? actions(filterReset(content), tools) : tools);
+    content.tagName !== "FORM" && content.querySelectorAll("input,select").length > 1 ? actions(filterReset(content), tools) : tools);
 }
 export function filterReset(content) {
   const fields = [...content.querySelectorAll("input,select,textarea")].filter(field => field.name !== "format");

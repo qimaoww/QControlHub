@@ -4,7 +4,7 @@ import { coreSourceForInstall } from '../modules/core-install-source.js';
 import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { enrollmentInstallCommand } from '../modules/enrollment-command.js';
 import { parseSharedPorts, formatSharedPorts, sharedLimitBytes, sharedLimitGiB } from '../modules/user-model.js';
-import { filterReset, copyText, node, button, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
+import { copyText, node, button, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
 import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
@@ -344,7 +344,7 @@ export async function nodesPage(ctx) {
   draw(); search.querySelector('input').addEventListener('input', draw);
   const deepID = location.hash.match(/^#(?:settings-node|node)-([^?]+)/)?.[1];
   if (deepID) { const agent = agents.find(agent => agent.id === deepID); if (agent) queueMicrotask(() => { if (ctx.current()) void settings(agent); }); }
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(filterReset(search),
+  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
     cardToggle, listToggle,
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),

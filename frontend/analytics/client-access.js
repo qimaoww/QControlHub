@@ -115,9 +115,9 @@ export async function clientAccessPage(ctx) {
         ctx.can('agent-config.read') && node('div', { className: 'a-card-body' }, link('服务端配置', `#live-config?agent=${pathID(entry.agent_id)}&engine=${pathID(entry.engine)}`)),
       ), badge(entry.engine));
     }));
-    if (!shown.length) result.replaceChildren(stack(node('p', { className: 'a-empty' }, entries.length ? '没有符合条件的接入配置' : '部署服务端入站后生成客户端配置'), actions(button('清除筛选', () => {
-      search.querySelector('input').value = ''; agentFilter.querySelector('select').value = ''; engineFilter.querySelector('select').value = ''; draw();
-    }), link('前往节点设置', '#node-settings'))));
+    if (!shown.length) result.replaceChildren(stack(
+      node('p', { className: 'a-empty' }, entries.length ? '没有符合条件的接入配置' : '部署服务端入站后生成客户端配置'),
+      !entries.length && ctx.can('agents.read') && actions(link('前往节点设置', '#node-settings'))));
   }
   search.querySelector('input').addEventListener('input', draw);
   for (const control of [agentFilter, engineFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
