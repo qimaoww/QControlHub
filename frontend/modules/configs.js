@@ -14,13 +14,14 @@ export function installConfigPages(ctx) {
     onTask(result, record) {
       const key = `${record.agentId}|${record.engine}`;
       const previous = presets.status.operationFor(key);
-      if (previous?.version > result.task.config_version) return;
+      if (record.intent === "deploy") void deployments.monitorDeployTask(result.task.id, record.agentId, record.engine);
+      if (previous?.version > result.task.config_version || result.config.version > result.task.config_version) return;
       if (typeof result.config.content === "string") {
         ctx.state.data.liveSources ||= {};
         ctx.state.data.liveSources[key] = {content:result.config.content, saved:true, cached:false};
       }
       const operation = previous?.task?.id === result.task.id ? previous : presets.status.saveOperation({
-        key, task:result.task, version:result.config.version, intent:record.intent,
+        key, task:result.task, version:result.task.config_version ?? result.config.version, intent:record.intent,
         message:"配置已保存，任务已提交。",
       });
       if (record.intent === "deploy") deployments.recordPendingDeploy(result.task.id, record.agentId, record.engine);

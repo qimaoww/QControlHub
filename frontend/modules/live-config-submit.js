@@ -67,8 +67,10 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           beforeDeploy,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
-            recordPendingDeploy(taskId, agent.id, engine);
+            if (accountData !== state.data) return;
             monitorDeployTask(taskId, agent.id, engine);
+            if (state.data.presetOperations?.[`${agent.id}|${engine}`]?.version > persisted?.version) return;
+            recordPendingDeploy(taskId, agent.id, engine);
           },
         });
         completed = result;
@@ -113,7 +115,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
               await liveConfig();
             } catch (recoveryError) {
               if (!current()) return;
-              updateFeedback(status, `${completed ? "配置已保存，页面刷新失败" : "保存结果暂未确认"}：${diagnosticError(recoveryError.message)}`);
+              updateFeedback(status, recoveryError.code === "config_submission_superseded" ? diagnosticError(recoveryError.message) : `${completed ? "配置已保存，页面刷新失败" : "保存结果暂未确认"}：${diagnosticError(recoveryError.message)}`);
               status.append(retry);
             } finally { retry.disabled = false; }
           };

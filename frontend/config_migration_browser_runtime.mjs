@@ -44,7 +44,14 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
       if (test.taskError) throw test.taskError;
       saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)};
       test.tasks.push({action:input.intent, expected_config_version:saved.version});
-      return {config:saved, task:{id:options.headers["X-Config-Task-ID"], action:input.intent, status:"pending"}};
+      const task = {id:options.headers["X-Config-Task-ID"], agent_id:"node", engine, config_id:saved.id, config_version:saved.version, action:input.intent, status:"pending"};
+      test.receiptTask = task;
+      if (test.supersedeLostSave) {
+        saved = {...saved,version:saved.version+1,content:saved.content.replaceAll("9007199254740995", "9007199254740997"),updated_at:savedDate(saved.version+1)};
+        throw TypeError("测试保存响应中断");
+      }
+      test.beforeSaveResponse?.();
+      return {config:saved, task};
     }
     if (options.method === "PUT") {
       const input = JSON.parse(options.body); test.writes.push(input);
@@ -66,8 +73,9 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     }
     if (path.startsWith("/tasks/")) {
       test.taskPolls++;
-      return {status:"failed",error:"测试任务未执行"};
+      return {...(path.split("?")[0] === `/tasks/${test.receiptTask?.id}` ? test.receiptTask : {}),status:"failed",error:"测试任务未执行"};
     }
+    if (path === `/agents/node/configs/${engine}`) return saved;
     throw new Error(`unexpected API ${path}`);
   };
   const pages = installConfigPages({state,api,optionalAPI:api,engines:[engine],can:()=>!readOnly,esc:String,engineName:v=>v,conciseVersion:()=>"fixture",date:String,ago:String,bytes:String,
@@ -92,6 +100,36 @@ export async function testConfigMigrationRuntime(preview = false) {
     return;
   }
   testReconciledConfigFiles();
+  {
+    const test = await fixture("xray");
+    test.supersedeLostSave = true;
+    const input = document.querySelector("[data-code-input]");
+    input.value = input.value.replaceAll("9007199254740993", "9007199254740995");
+    input.dispatchEvent(new Event("input", {bubbles:true}));
+    const draft = input.value;
+    document.querySelector('[data-live-intent="validate"]').click();
+    await waitFor(()=>document.querySelector("[data-live-save-status]")?.textContent.includes("之后又有新的配置保存"), "lost response associated a later revision with the original task");
+    assert(input.isConnected && input.value === draft && document.querySelector('[data-live-intent="validate"]').disabled, "superseded receipt lost its draft or allowed duplicate writes");
+    const operation = test.state.data.presetOperations?.["node|xray"];
+    assert(!operation || operation.version === operation.task.config_version, "old task was labeled with another saved revision");
+    assert(test.writes.length === 1 && test.tasks.length === 1 && test.saved().version === 3, "receipt recovery repeated the mutation");
+    test.dispose();
+  }
+  for (const change of ["account", "newer-operation"]) {
+    const test = await fixture("xray");
+    test.accept = true;
+    test.beforeSaveResponse = () => {
+      if (change === "account") test.state.data = {...test.state.data, pendingDeployTasks:{}};
+      else {
+        test.state.data.presetOperations = {"node|xray":{version:3,task:{id:"newer-task"}}};
+        test.state.data.pendingDeployTasks = {"node|xray":{taskId:"newer-task"}};
+      }
+    };
+    document.querySelector('[data-live-intent="deploy"]').click();
+    await waitFor(()=>test.writes.length === 1 && !document.querySelector("#live-config-form")?.hasAttribute("aria-busy"), "late source response did not release its editor");
+    assert(test.state.data.pendingDeployTasks?.["node|xray"]?.taskId === (change === "account" ? undefined : "newer-task"), "late source response replaced another account or newer deployment");
+    test.dispose();
+  }
   for (const engine of ["xray","sing-box","mihomo","ss-rust"]) {
     for (const restricted of [false,true]) {
       const test = await fixture(engine, restricted);

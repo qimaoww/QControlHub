@@ -36,6 +36,16 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
       persist(records);
     }).catch(() => { /* Retain the address for the next page visit. */ });
   }
+  function finishRequest(result, record, owner, records, id) {
+    if (state.data !== owner) throw new DOMException("Aborted", "AbortError");
+    track(result, record, owner, records, id);
+    if (result.config?.version > result.task?.config_version) {
+      throw Object.assign(new Error("配置已保存且任务已提交，之后又有新的配置保存，请重新读取后继续。"), {
+        status:409, code:"config_submission_superseded",
+      });
+    }
+    return result;
+  }
   async function readReceipt(id, record) {
     const task = await api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"});
     if (task.id !== id || task.agent_id !== record.agentId || task.engine !== record.engine ||
@@ -89,14 +99,12 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
         error.recoverConfigSubmission = async () => {
           const recovered = await readReceipt(id, record);
           if (state.data !== owner) throw new DOMException("Aborted", "AbortError");
-          track(recovered, record, owner, records, id);
-          return recovered;
+          return finishRequest(recovered, record, owner, records, id);
         };
         throw error;
       }
     }
-    track(result, record, owner, records, id);
-    return result;
+    return finishRequest(result, record, owner, records, id);
   }
   return { request, recover };
 }

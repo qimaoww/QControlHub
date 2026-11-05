@@ -305,7 +305,7 @@ export function bindConfigInbounds(ctx) {
               if (!active()) return;
               const uncertain = !error.deployPreflight && (error.recoverConfigSubmission || !error.status || error.status === 408 || error.status >= 500);
               const reason = error.status === 409 ? "配置已变化，请重新读取后重试。" : uncertain ? "请重新读取并核对保存结果后继续。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
-              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>${uncertain ? "删除结果暂未确认" : "删除入站失败"}</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
+              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>${error.code === "config_submission_superseded" ? "配置已保存，任务已提交" : uncertain ? "删除结果暂未确认" : "删除入站失败"}</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
               if (error.deployPreflight || !uncertain && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }

@@ -59,8 +59,20 @@ export async function run() {
     const recovered = await interrupted.recoverConfigSubmission();
     assert.equal(recovered.config.version,4);
     assert.equal(delayedWrites,1,"same-page recovery replayed an interrupted write");
+    const superseded = createConfigMutations({state:{data:{}}, api:async (url, options = {})=>{
+      if (options.method === "POST") {
+        id = options.headers["X-Config-Task-ID"];
+        throw TypeError("response lost after commit");
+      }
+      const value = await api(url, options);
+      return url.startsWith("/tasks/") ? value : {...value, version:5, content:"another saved edit"};
+    }}, {onTask:()=>{}, waitForTerminal:()=>completion});
+    await assert.rejects(superseded.request(path,{method:"POST",body}), error=>
+      error.status === 409 && error.code === "config_submission_superseded" && error.message.includes("任务已提交"),
+    "reconciliation returned a later edit as the submitted task's configuration");
     release({status:"succeeded"});
-    // A response arriving after an account change cannot call onTask.
+    // A response arriving after an account change cannot reach task callbacks
+    // or the caller's subsequent save/deploy handlers.
     lost = false;
     const oldData = state.data;
     const late = createConfigMutations({state, api:async (_path, options)=>{
@@ -68,7 +80,7 @@ export async function run() {
       state.data = {};
       return {config:{id:"cfg",version:4}, task:{id}};
     }}, {onTask:()=>assert.fail("old account response applied"), waitForTerminal:()=>completion});
-    await late.request(path,{method:"POST",body});
+    await assert.rejects(late.request(path,{method:"POST",body}), {name:"AbortError"});
     assert.notEqual(state.data,oldData);
   } finally {
     setStorageAccount(null);
