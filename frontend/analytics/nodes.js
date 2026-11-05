@@ -144,7 +144,7 @@ export async function nodesPage(ctx) {
     }))));
   }
   async function enrollment() {
-    const records = node('div');
+    const records = node('div', {}, muted('正在读取添加记录…'));
     async function reload() {
       const tokens = list(await ctx.api('/enrollment-tokens'));
       if (!ctx.current() || !box.isConnected) return;
@@ -166,7 +166,9 @@ export async function nodesPage(ctx) {
       command(created); await reload();
     });
     const box = ctx.dialog('添加节点', stack(form, section('添加记录', records)), { wide: true });
-    await reload();
+    void reload().catch(error => {
+      if (ctx.current() && box.open && error.name !== 'AbortError') records.replaceChildren(notice(error.message));
+    });
   }
   async function directory() {
     const entries = list(await ctx.api('/agent-directory'));

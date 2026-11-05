@@ -36,7 +36,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('取消选择','.a-main');
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0);
   await click('添加节点','.a-main');
-  await wait(page,"!!document.querySelector('dialog[open] [name=name]')");await screenshot(page,'analytics-enrollment');
+  await wait(page,"!!document.querySelector('dialog[open] [name=name]') && !document.querySelector('[aria-busy=true]')");await screenshot(page,'analytics-enrollment');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.elements.name.value='独立主题添加验证';form.requestSubmit()})()");
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='QAgent 安装命令') && !document.querySelector('[aria-busy=true]')");
   const token=(await api(page,identity,'GET','/enrollment-tokens')).find(token=>token.name==='独立主题添加验证');assert.ok(token?.id);
