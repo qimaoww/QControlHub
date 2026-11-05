@@ -298,7 +298,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         ))) return;
         if (!current() || !formElement.isConnected) return;
         if (intent === "deploy" && ctx.beforeDeploy) {
-          showStatus("正在核验 Agent 当前配置…");
+          showStatus("正在检查提交目标…");
           if (submitter) updateFeedback(submitter, "正在核验…");
           await ctx.beforeDeploy();
           if (!current() || !formElement.isConnected) return;
@@ -345,7 +345,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             }),
           });
         }
-        if (state.data !== sessionData) return;
+        if (state.data !== sessionData || operationFor(operationKey)?.version > result.config.version) return;
         committedConfig = result.config;
         committedTask = result.task;
         drafts().clear(ctx.draftScope);
@@ -384,7 +384,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             operationFor(operationKey).reload = true;
             renderPresetStatus();
           } else {
-            const uncertain = !error.deployPreflight && (!error.status || error.status >= 500);
+            const uncertain = !error.deployPreflight && (error.recoverConfigSubmission || !error.status || error.status === 408 || error.status >= 500);
             const portConflict = error.code === "port_conflict";
             showStatus(error.deployPreflight ? error.message : portConflict
               ? `${error.message} 草稿已保留。`

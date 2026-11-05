@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -29,7 +30,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		return
 	}
 	current, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
-	if err != nil {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeStoreError(w, err)
 		return
 	}
@@ -66,7 +67,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.Version,
-		store.ConfigMutationOptions{Action: core.Action(input.Intent), MainlandPolicies: policies})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies})
 	if err != nil {
 		writeStoreError(w, err)
 		return

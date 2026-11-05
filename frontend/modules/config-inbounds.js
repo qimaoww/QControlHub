@@ -275,7 +275,7 @@ export function bindConfigInbounds(ctx) {
         }
       } else if (kind === "delete") {
         const mutableServices = xrayMutableAPIServices(engine, fresh.config.content);
-        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" class="event-result" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
+        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><div role="alert" data-inbound-error></div><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
         const buttons = [...body.querySelectorAll("[data-delete-intent]")];
         buttons.forEach(button => {
           button.disabled = !writable() || fresh.agent?.status !== "online" || !fresh.agent?.runtime?.[engine]?.installed;
@@ -290,7 +290,7 @@ export function bindConfigInbounds(ctx) {
               }
               if (!active()) return;
               if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
-                updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验 Agent 当前配置…");
+                updateFeedback(body.querySelector("[data-inbound-error]"), "正在检查提交目标…");
                 await beforeDeploy();
                 if (!active()) return;
                 updateFeedback(body.querySelector("[data-inbound-error]"), "");
@@ -303,9 +303,10 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              const reason = error.status === 409 ? "配置已变化，请重新读取后重试。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
-              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>删除入站失败</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
-              if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
+              const uncertain = !error.deployPreflight && (error.recoverConfigSubmission || !error.status || error.status === 408 || error.status >= 500);
+              const reason = error.status === 409 ? "配置已变化，请重新读取后重试。" : uncertain ? "请重新读取并核对保存结果后继续。" : /统计|accounting/.test(error.message) ? "统计配置引用冲突，请查看详情。" : "请查看详情并重试。";
+              updateFeedbackHTML(body.querySelector("[data-inbound-error]"), `<div class="task-diagnostic"><b>${error.code === "config_submission_superseded" ? "配置已保存，任务已提交" : uncertain ? "删除结果暂未确认" : "删除入站失败"}</b><small>${esc(reason)}</small></div><details><summary>错误详情</summary><div class="task-result-block"><pre class="task-error">${esc(redactDiagnostic(error.message))}</pre></div></details>`);
+              if (error.deployPreflight || !uncertain && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }
           };

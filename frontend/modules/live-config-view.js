@@ -100,7 +100,7 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   } else if (source?.cached) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    updateFeedback(hint, "最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。");
+    updateFeedback(hint, "最近 600 秒内已校验的节点快照；手动刷新会重新读取。");
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.saved) {
     const hint = document.createElement("p");

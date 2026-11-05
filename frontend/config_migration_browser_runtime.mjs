@@ -33,8 +33,25 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
   const api = async (path, options = {}) => {
     if (path === "/agents") return [node];
     if (path.endsWith("/workspace")) {
+      if (test.workspaceError) throw test.workspaceError;
       if (test.refreshError && test.writes.length) throw test.refreshError;
       return {config:saved};
+    }
+    if (options.method === "POST" && path.endsWith("/source")) {
+      const input = JSON.parse(options.body); test.writes.push(input);
+      if (test.saveGate) await test.saveGate;
+      if (test.saveError) throw test.saveError;
+      if (test.taskError) throw test.taskError;
+      saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)};
+      test.tasks.push({action:input.intent, expected_config_version:saved.version});
+      const task = {id:options.headers["X-Config-Task-ID"], agent_id:"node", engine, config_id:saved.id, config_version:saved.version, action:input.intent, status:"pending"};
+      test.receiptTask = task;
+      if (test.supersedeLostSave) {
+        saved = {...saved,version:saved.version+1,content:saved.content.replaceAll("9007199254740995", "9007199254740997"),updated_at:savedDate(saved.version+1)};
+        throw TypeError("测试保存响应中断");
+      }
+      test.beforeSaveResponse?.();
+      return {config:saved, task};
     }
     if (options.method === "PUT") {
       const input = JSON.parse(options.body); test.writes.push(input);
@@ -56,8 +73,9 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     }
     if (path.startsWith("/tasks/")) {
       test.taskPolls++;
-      return {status:"failed",error:"Fixture: node execution is intentionally not performed"};
+      return {...(path.split("?")[0] === `/tasks/${test.receiptTask?.id}` ? test.receiptTask : {}),status:"failed",error:"测试任务未执行"};
     }
+    if (path === `/agents/node/configs/${engine}`) return saved;
     throw new Error(`unexpected API ${path}`);
   };
   const pages = installConfigPages({state,api,optionalAPI:api,engines:[engine],can:()=>!readOnly,esc:String,engineName:v=>v,conciseVersion:()=>"fixture",date:String,ago:String,bytes:String,
@@ -82,6 +100,36 @@ export async function testConfigMigrationRuntime(preview = false) {
     return;
   }
   testReconciledConfigFiles();
+  {
+    const test = await fixture("xray");
+    test.supersedeLostSave = true;
+    const input = document.querySelector("[data-code-input]");
+    input.value = input.value.replaceAll("9007199254740993", "9007199254740995");
+    input.dispatchEvent(new Event("input", {bubbles:true}));
+    const draft = input.value;
+    document.querySelector('[data-live-intent="validate"]').click();
+    await waitFor(()=>document.querySelector("[data-live-save-status]")?.textContent.includes("之后又有新的配置保存"), "lost response associated a later revision with the original task");
+    assert(input.isConnected && input.value === draft && document.querySelector('[data-live-intent="validate"]').disabled, "superseded receipt lost its draft or allowed duplicate writes");
+    const operation = test.state.data.presetOperations?.["node|xray"];
+    assert(!operation || operation.version === operation.task.config_version, "old task was labeled with another saved revision");
+    assert(test.writes.length === 1 && test.tasks.length === 1 && test.saved().version === 3, "receipt recovery repeated the mutation");
+    test.dispose();
+  }
+  for (const change of ["account", "newer-operation"]) {
+    const test = await fixture("xray");
+    test.accept = true;
+    test.beforeSaveResponse = () => {
+      if (change === "account") test.state.data = {...test.state.data, pendingDeployTasks:{}};
+      else {
+        test.state.data.presetOperations = {"node|xray":{version:3,task:{id:"newer-task"}}};
+        test.state.data.pendingDeployTasks = {"node|xray":{taskId:"newer-task"}};
+      }
+    };
+    document.querySelector('[data-live-intent="deploy"]').click();
+    await waitFor(()=>test.writes.length === 1 && !document.querySelector("#live-config-form")?.hasAttribute("aria-busy"), "late source response did not release its editor");
+    assert(test.state.data.pendingDeployTasks?.["node|xray"]?.taskId === (change === "account" ? undefined : "newer-task"), "late source response replaced another account or newer deployment");
+    test.dispose();
+  }
   for (const engine of ["xray","sing-box","mihomo","ss-rust"]) {
     for (const restricted of [false,true]) {
       const test = await fixture(engine, restricted);
@@ -105,8 +153,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
       document.querySelector('[data-live-intent="deploy"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
-      assert(test.reads.length===1 && test.reads[0].prefer_cached===undefined,
-        "source deployment preflight reused the display cache");
+      assert(test.reads.length===0,
+        "source deployment required a duplicate Agent read");
       assert(test.tasks[0].action==="deploy","source save must use validated rollback-capable deployment");
       assert(test.tasks[0].expected_config_version===2,"source deployment must use the exact newly saved version");
       assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"source deployment corrupted integer or discarded fragment draft");
@@ -127,8 +175,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       button.click(); await pause();
       assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
         "removing bundle generation blocked normal deployment to a legacy Agent");
-      assert(legacy.reads.length===1 && legacy.reads[0].prefer_cached===undefined,
-        "legacy source deployment skipped its forced Agent read");
+      assert(legacy.reads.length===0,
+        "legacy source deployment required a duplicate Agent read");
     }
   }
   await testSourceSaveRuntime();
@@ -187,7 +235,7 @@ async function testConfigReadCacheRuntime() {
   deploy.accept = true;
   document.querySelector('[data-live-intent="deploy"]').click();
   await waitFor(()=>deploy.tasks.length === 1, "fresh preflight did not recover a concurrent snapshot retirement");
-  assert(deploy.reads.length === 2 && deploy.reads.every(read=>read.prefer_cached === undefined),
+  assert(deploy.reads.length === 0,
     "fresh preflight recovery used a cached read");
   assert(deploy.writes.length === 1, "preflight recovery duplicated configuration persistence");
   await pause();
@@ -261,12 +309,39 @@ async function testSourceSaveRuntime() {
       button.click();
       await waitFor(()=>test.tasks.length === 1, "correctable source failure could not retry");
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
+    } else if (failure === "task") {
+      assert(test.saved().version === 1 && !test.tasks.length, "task creation failure partially committed the save");
+      assert(button.disabled, "unknown transaction outcome allows blind resubmission");
     } else {
       assert(document.querySelector("[data-live-save-status]").textContent.includes("配置已保存"), "partial source success misreported durable configuration as unsaved");
       assert(button.disabled, "partial source success allows uncertain resubmission");
       form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
       assert(test.writes.length === 1 && test.tasks.length === 1, "partial source failure repeated a committed mutation");
+      test.refreshError = null;
+      const retry = document.querySelector("[data-live-save-status] button");
+      assert(retry?.textContent === "重新加载配置", "accepted source save has no same-page recovery");
+      retry.click();
+      await waitFor(()=>!document.querySelector('[data-live-intent="validate"]').disabled,
+        "read-only page recovery did not unlock deployment");
+      assert(test.writes.length === 1 && test.tasks.length === 1, "page recovery submitted another mutation");
     }
     test.dispose();
   }
+
+  const test = await fixture("xray", false, false, false, false, {multi:true});
+  test.accept = true;
+  const workspace = document.querySelector(".live-config-workspace");
+  const input = document.querySelector("[data-code-input]");
+  input.value = input.value.replace("9007199254740993", "9007199254740995");
+  const draft = input.value;
+  test.workspaceError = Object.assign(Error("temporary workspace read failure"), {status:503});
+  const other = document.querySelector('[data-live-engine="sing-box"]');
+  await other.onclick({preventDefault(){}});
+  assert(test.state.data.liveEngine === "xray" && workspace.isConnected && !workspace.inert &&
+    input.value === draft, "failed engine switch lost its original workspace or draft");
+  test.workspaceError = null;
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>test.tasks.length === 1, "failed engine switch poisoned the original deployment guard");
+  assert(test.writes.length === 1 && test.tasks[0].action === "deploy", "same-page deployment repeated its write");
+  test.dispose();
 }

@@ -13,7 +13,8 @@ func TestIPQualityDateRangeCalendarTransitions(t *testing.T) {
 		{"2026-04-04", "America/Santiago", "2026-04-04T03:00:00Z", "2026-04-05T04:00:00Z"},
 		{"2026-03-29", "Asia/Beirut", "2026-03-28T22:00:00Z", "2026-03-29T21:00:00Z"},
 		{"2026-10-24", "Asia/Beirut", "2026-10-23T21:00:00Z", "2026-10-24T22:00:00Z"},
-		{"2026-11-01", "America/Havana", "2026-11-01T04:00:00Z", "2026-11-02T05:00:00Z"},
+		// Use an observed transition; future DST rules can change with tzdata.
+		{"2025-11-02", "America/Havana", "2025-11-02T04:00:00Z", "2025-11-03T05:00:00Z"},
 		{"2026-10-04", "Australia/Lord_Howe", "2026-10-03T13:30:00Z", "2026-10-04T13:00:00Z"},
 		{"2011-12-29", "Pacific/Apia", "2011-12-29T10:00:00Z", "2011-12-30T10:00:00Z"},
 		{"2011-12-30", "Pacific/Apia", "2011-12-30T10:00:00Z", "2011-12-30T10:00:00Z"},

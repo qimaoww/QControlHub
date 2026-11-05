@@ -117,6 +117,23 @@ export async function testConfigInboundsRuntime(preview = false) {
     test.dispose();
     assert(!document.querySelector("dialog"), "route abort left an orphan modal");
   }
+  for (const status of [200, 408]) {
+    for (const kind of ["modify", "delete"]) {
+      const test = await fixture("xray");
+      test.select("first");
+      test.click(kind);
+      const selector = kind === "delete" ? "[data-delete-intent=validate]" : "[data-plan-intent=validate]";
+      await waitFor(()=>document.querySelector(selector), "interrupted inbound form did not open");
+      const form = document.querySelector("#server-plan-form");
+      if (form) form.elements.tag.value = "interrupted-draft";
+      test.mutationFailure = {status};
+      document.querySelector(selector).click();
+      await waitFor(()=>document.querySelector(kind === "delete" ? "[data-inbound-error]" : "dialog [data-preset-status]")?.textContent.includes("确认"), "interrupted inbound result was not shown as unknown");
+      assert(document.querySelector(selector).disabled && !test.writes.length, "interrupted inbound response permits duplicate writes");
+      assert(!form || form.elements.tag.value === "interrupted-draft", "interrupted inbound response lost its draft");
+      test.dispose();
+    }
+  }
   for (const options of [{missing:true}, {missing:true, legacy:true}, {missing:true, shared:true}, {missing:true, offline:true}]) {
     const test = await fixture("xray", options);
     test.click("add");
@@ -212,8 +229,8 @@ export async function testConfigInboundsRuntime(preview = false) {
   await waitFor(()=>document.querySelector("#server-plan-form"), "background fixture did not open");
   document.querySelector("[data-plan-intent=deploy]").click();
   await waitFor(()=>background.writes.length === 1 && !document.querySelector("dialog"), "background deployment not submitted");
-  assert(background.readRequests.length === 1 && background.readRequests[0].prefer_cached === undefined,
-    "deployment preflight reused the 600-second display cache");
+  assert(background.readRequests.length === 0,
+    "deployment added a redundant Agent read");
   background.select("first"); background.click("delete");
   await waitFor(()=>document.querySelector("[data-delete-intent]"), "delete fixture did not open");
   const workspaceReads = background.calls.filter(call=>call.path.endsWith("/workspace")).length;
@@ -230,13 +247,9 @@ export async function testConfigInboundsRuntime(preview = false) {
   conflictForm.elements.tag.value = "keep-conflicting-draft";
   deployConflict.setAgentContent(deployConflict.saved().content + "\n");
   conflictForm.querySelector("[data-plan-intent=deploy]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("部署前核验发现"),
-    "changed Agent configuration did not stop deployment");
-  assert(deployConflict.writes.length === 0 && document.querySelector("dialog[open]") &&
-    conflictForm.elements.tag.value === "keep-conflicting-draft",
-    "deployment conflict saved data, closed the draft, or lost its input");
-  assert(deployConflict.readRequests.length === 1 && deployConflict.readRequests[0].prefer_cached === undefined,
-    "deployment conflict was checked through a cached read");
+  await waitFor(()=>deployConflict.writes.length === 1 && !document.querySelector("dialog"),
+    "runtime snapshot drift blocked a valid saved-revision deployment");
+  assert(deployConflict.readRequests.length === 0, "deployment required an unrelated runtime snapshot");
   deployConflict.dispose();
   const stale = await fixture("xray");
   let release;
