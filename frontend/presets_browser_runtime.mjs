@@ -97,6 +97,7 @@ async function fixture(engine, readOnly = false, actual) {
     }
     if (path === "/tasks" && options.method === "POST") {
       if (test.taskFailure) throw new Error("模拟任务提交失败");
+      if (body.action === "status" && test.recoverOnStatus) test.portConflict = "";
       return { id: `task-${test.saved.version}`, status: "pending" };
     }
     if (path.startsWith("/tasks/")) return { id: path.split("/").at(-1), status: test.taskState, error: test.taskState === "failed" ? "内核校验失败" : "" };
@@ -272,7 +273,13 @@ export async function testPresetsRuntime(preview = false) {
     await waitFor(() => !button("validate").disabled && document.querySelector("[data-preset-status]").textContent.includes("草稿已保留"), "port conflict froze the editor");
     assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && document.activeElement === control("port"), "port conflict lost draft or did not focus port");
     assert(!document.querySelector("[data-preset-status]").textContent.includes("请重新加载"), "correctable port conflict required reload");
-    test.portConflict = "";
+    test.recoverOnStatus = true;
+    const credentialDraft = control("credential").value;
+    const refreshCalls = test.calls.length;
+    document.querySelector("[data-refresh-preset]").click();
+    await waitFor(() => !document.querySelector("[data-refresh-preset]").disabled && test.portConflict === "", "status refresh did not execute a recovery task");
+    assert(test.calls.slice(refreshCalls).some(call => call.path === "/tasks" && call.body.action === "status" && call.body.agent_id === "node" && call.body.engine === engine), "refresh queried the wrong instance");
+    assert(test.saved.version === versionBeforeConflict && control("port").value === "22001" && control("credential").value === credentialDraft, "status recovery lost the draft or saved it silently");
     // Deletion must use the saved identity even when a hidden draft is invalid.
     edit("operation", "delete"); edit("credential", "");
     test.confirmed = false;
@@ -311,6 +318,23 @@ export async function testPresetsRuntime(preview = false) {
     test.staleRevision = false;
     document.querySelector("[data-preset-status] button").click();
     await waitFor(() => !button("validate").disabled, "stale revision reload did not recover");
+    test.taskState = "running";
+    const nextVersion = test.saved.version + 1;
+    button("deploy").click();
+    await waitFor(() => test.saved.version === nextVersion && !button("deploy").disabled, "pending deployment did not return to the editor");
+    const pendingOperation = test.state.data.presetOperations[`node|${engine}`];
+    edit("credential", "unsaved-authentication-draft");
+    test.taskFailure = true;
+    document.querySelector("[data-refresh-preset]").click();
+    await waitFor(() => document.querySelector("[data-preset-status]").textContent.includes("刷新失败"), "failed status request was not reported");
+    assert(test.state.data.presetOperations[`node|${engine}`] === pendingOperation && pendingOperation.task?.id && pendingOperation.monitoring,
+      "failed status refresh replaced the accepted deployment receipt or detached its watcher");
+    assert(control("credential").value === "unsaved-authentication-draft" && test.saved.version === nextVersion,
+      "failed status refresh saved or discarded the authentication draft");
+    test.taskFailure = false;
+    test.taskState = "succeeded";
+    await waitFor(() => pendingOperation.task.status === "succeeded" && document.querySelector("[data-preset-status]").textContent.includes("部署成功"),
+      "deployment result did not recover after the status refresh failed");
     if (engine === "xray") {
       for (const protocol of ["vless-xhttp-reality", "vless-enc-tcp-reality-vision"]) {
         document.querySelector(`[data-protocol="${protocol}"]`).click();

@@ -181,7 +181,7 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		}
 		for _, instance := range heartbeat.SharedInstances {
 			if err := recordSharedInstanceObservationTx(ctx, tx, id, instance,
-				containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreLifecycle), receivedAt, false, reportedPolicies[instance.ShareID]); err != nil {
+				containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreLifecycle), receivedAt, false, reportedPolicies[instance.ShareID], false); err != nil {
 				return err
 			}
 		}

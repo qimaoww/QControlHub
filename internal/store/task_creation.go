@@ -421,6 +421,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := s.prepareRetainedHostPortsTx(ctx, tx, &task); err != nil {
 		return core.Task{}, err
 	}
+	if err := s.prepareStatusSnapshotTx(ctx, tx, &task, features); err != nil {
+		return core.Task{}, err
+	}
 	if err := s.checkTaskPortUseTx(ctx, tx, &task, false); err != nil {
 		return core.Task{}, err
 	}

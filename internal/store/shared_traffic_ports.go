@@ -119,9 +119,12 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	}
 	var engine core.Engine
 	var candidate *core.Task
+	var sharedInstance bool
+	var instanceID string
 	if len(tasks) > 0 {
 		candidate = tasks[0]
 		engine = candidate.Engine
+		sharedInstance, instanceID = candidate.SharedInstance, candidate.SharedTrafficID
 	}
 	wanted := make(map[int]bool, len(ports))
 	for _, port := range ports {
@@ -134,7 +137,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
-		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR $4::boolean)))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
@@ -142,7 +145,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain)
-			AND state.config_id<>'' AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+			AND state.config_id<>'' AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),attempt.config_id,attempt.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
@@ -151,18 +154,18 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		LEFT JOIN configs config ON config.id=attempt.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=attempt.config_id AND revision.version=attempt.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain) AND attempt.action='deploy'
-			AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
 		SELECT state.engine,'','',0,true,false,state.owner_id=$2
 		FROM agent_shared_instance_ownership state
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain)
 			AND (state.config_id='' OR state.config_uncertain)
 			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
-			AND (state.owner_id<>$2 OR ($3<>'' AND state.engine<>$3))
+			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
 		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
-			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND task.engine<>$3))`, agentID, userID, engine)
+			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND (task.engine<>$3 OR task.shared_instance<>$4::boolean OR task.shared_instance AND task.shared_traffic_id<>$5)))`, agentID, userID, engine, sharedInstance, instanceID)
 	if err != nil {
 		return err
 	}

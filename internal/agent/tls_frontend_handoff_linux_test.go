@@ -5,8 +5,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"golang.org/x/net/proxy"
 )
 
 // Uses the existing disposable managed-TLS node and official sing-box binary.
@@ -285,7 +288,7 @@ func TestRetainedListenerWithLiveCores(t *testing.T) {
 					t.Fatal(err)
 				}
 				spec := base
-				task := core.Task{Engine: engine, Action: core.ActionDeploy, SharedInstance: shared}
+				task := core.Task{ID: "tsk_initial", ConfigID: "cfg_live_identity", ConfigVersion: 1, Engine: engine, Action: core.ActionDeploy, SharedInstance: shared}
 				if shared {
 					task.SharedTrafficID = "shr_b123456789abcdef"
 					spec, err = sharedInstanceSpec(engine, base, task.SharedTrafficID, manager.Kind())
@@ -328,6 +331,40 @@ func TestRetainedListenerWithLiveCores(t *testing.T) {
 				if output, err := e.Execute(ctx, task); err != nil {
 					t.Fatalf("initial: %v\n%s", err, output)
 				}
+				// Existing deployments predate the main-instance sidecar. A
+				// refresh must reconstruct the retained identity without restart.
+				if err := os.Remove(sharedStatePath(spec)); err != nil {
+					t.Fatal(err)
+				}
+				beforeStatus, err := managedServiceProcessPID(ctx, manager, spec.Service)
+				if err != nil {
+					t.Fatal(err)
+				}
+				refresh := task
+				refresh.ID = "tsk_status"
+				refresh.Action = core.ActionStatus
+				if output, err := e.Execute(ctx, refresh); err != nil {
+					t.Fatalf("legacy status: %v %s", err, output)
+				}
+				afterStatus, err := managedServiceProcessPID(ctx, manager, spec.Service)
+				if err != nil || afterStatus != beforeStatus {
+					t.Fatal("status restarted the service")
+				}
+				identity := e.deploymentStatus(ctx, engine, spec, task.SharedTrafficID)
+				if identity.ConfigID != task.ConfigID || identity.ConfigVersion != 1 {
+					t.Fatalf("legacy identity was not restored: %+v", identity)
+				}
+				failed := task
+				failed.ID = "tsk_failed"
+				failed.ConfigVersion = 2
+				failed.ConfigContent = "invalid configuration"
+				if _, err := e.Execute(ctx, failed); err == nil {
+					t.Fatal("invalid candidate unexpectedly deployed")
+				}
+				identity = e.deploymentStatus(ctx, engine, spec, task.SharedTrafficID)
+				if identity.ConfigID != task.ConfigID || identity.ConfigVersion != 1 {
+					t.Fatal("failed candidate replaced retained identity")
+				}
 				fresh, err := serverconfig.NewPlan(protocol)
 				if err != nil {
 					t.Fatal(err)
@@ -345,6 +382,7 @@ func TestRetainedListenerWithLiveCores(t *testing.T) {
 						t.Fatal(err)
 					}
 					task.ConfigContent = content
+					task.ConfigVersion++
 					validation := task
 					validation.Action = core.ActionValidate
 					pid, err := managedServiceProcessPID(ctx, manager, spec.Service)
@@ -361,6 +399,7 @@ func TestRetainedListenerWithLiveCores(t *testing.T) {
 					if output, err := e.Execute(ctx, task); err != nil {
 						t.Fatalf("update: %v\n%s", err, output)
 					}
+					assertRetainedSS2022RoundTrip(t, ctx, input, 24443)
 					pid, err = managedServiceProcessPID(ctx, manager, spec.Service)
 					if err != nil {
 						t.Fatal(err)
@@ -404,4 +443,43 @@ func TestRetainedListenerWithLiveCores(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Exercise authentication with the official client against the updated live
+// listener; reading a changed file alone cannot prove the process applied it.
+func assertRetainedSS2022RoundTrip(t *testing.T, ctx context.Context, input serverconfig.Input, serverPort int) {
+	t.Helper()
+	echo := singBoxEcho(t, "tcp")
+	localPort := singBoxFreePort(t)
+	client := exec.CommandContext(ctx, "/usr/local/lib/qagent/cores/sslocal", "-b", fmt.Sprintf("127.0.0.1:%d", localPort), "-s", fmt.Sprintf("127.0.0.1:%d", serverPort), "-m", input.Method, "-k", input.Credential)
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Process.Kill(); _ = client.Wait() }()
+	var last error
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), nil, &net.Dialer{Timeout: time.Second})
+		if err != nil {
+			last = err
+			continue
+		}
+		connection, err := dialer.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", echo))
+		if err != nil {
+			last = err
+			continue
+		}
+		_ = connection.SetDeadline(time.Now().Add(time.Second))
+		expected := []byte("qch-retained-credentials")
+		_, err = connection.Write(expected)
+		reply := make([]byte, len(expected))
+		if err == nil {
+			_, err = io.ReadFull(connection, reply)
+		}
+		connection.Close()
+		if err == nil && string(reply) == string(expected) {
+			return
+		}
+		last = err
+	}
+	t.Fatalf("updated credentials did not pass a live TCP request: %v", last)
 }
