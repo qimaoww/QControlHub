@@ -44,10 +44,8 @@ export async function nodesPage(ctx) {
     const query = search.querySelector('input').value.trim().toLowerCase();
     return agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
   };
-  const selectable = agent => (agent.capabilities || []).some(engine => {
-    const runtime = agent.runtime?.[engine] || {};
-    return !guard('status', agent.status === 'online', runtime.installed, runtime.service_status, agent, engine);
-  });
+  const selectable = agent => ctx.can('tasks.execute') &&
+    (agent.can_manage !== false || ctx.can('instance.manage', agent));
   function choice(agent) { return field(`选择 ${agent.name}`, `select:${agent.id}`, selected.has(agent.id), {
     type: 'checkbox', disabled: !selectable(agent), onchange(event) {
       event.target.checked ? selected.add(agent.id) : selected.delete(agent.id); drawBatch();
@@ -55,6 +53,7 @@ export async function nodesPage(ctx) {
   }); }
   function drawBatch() {
     batchBar.hidden = !selecting;
+    if (!selecting) { batchBar.replaceChildren(); return; }
     const eligible = shownAgents().filter(selectable);
     const count = eligible.filter(agent => selected.has(agent.id)).length;
     const all = field('全选', 'select-all', eligible.length > 0 && count === eligible.length, {
