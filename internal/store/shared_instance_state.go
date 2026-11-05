@@ -35,7 +35,7 @@ func validateInstanceStatus(instance core.SharedInstanceStatus) error {
 // collected before a newer operation cannot overwrite it, even if delivered
 // after its result. Only a known deployed revision can acquire an identity.
 func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID string, instance core.SharedInstanceStatus,
-	versioned bool, receivedAt time.Time, settled bool, policies []string) error {
+	versioned bool, receivedAt time.Time, settled bool, policies []string, statusRefresh bool) error {
 	if err := validateSharedInstanceStatus(instance); err != nil {
 		return err
 	}
@@ -58,7 +58,11 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 		WHERE state.agent_id=$1 AND state.engine=$2 AND state.share_id=$3
 		AND (state.sampled_at IS NULL OR state.sampled_at<=$10)
         AND ($6='' OR state.config_id=$6 AND state.config_version=$7 OR $8<>'' AND $8=state.last_task_id)
-		AND (NOT $12::boolean OR state.last_task_id='' OR state.last_task_id=$9)
+		AND (NOT $12::boolean OR state.last_task_id='' OR state.last_task_id=$9 OR $15::boolean)
+		AND (NOT $15::boolean OR EXISTS(SELECT 1 FROM tasks refreshed
+			WHERE refreshed.id=$9 AND refreshed.agent_id=$1 AND refreshed.engine=$2
+			AND refreshed.shared_instance AND refreshed.shared_traffic_id=$3
+			AND refreshed.action='status' AND refreshed.status='succeeded' AND refreshed.started_at<=$10))
 		AND NOT EXISTS(SELECT 1 FROM tasks current WHERE current.agent_id=state.agent_id AND current.engine=state.engine
 			AND current.shared_instance AND current.shared_traffic_id=state.share_id AND current.status='running'
 			AND current.action IN ('deploy','start','stop','restart') AND current.id<>$9)
@@ -73,7 +77,7 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 		applied_task_id=CASE WHEN obs.identity_verified AND $8<>'' THEN $8 ELSE state.applied_task_id END,
 		deployed_at=CASE WHEN obs.identity_verified AND (state.config_id<>$6 OR state.config_version<>$7 OR state.deployed_at IS NULL)
 			THEN COALESCE((SELECT finished_at FROM tasks WHERE id=$8),$11) ELSE state.deployed_at END,
-		last_task_id=CASE WHEN state.last_task_id='' THEN $9 ELSE state.last_task_id END,
+		last_task_id=CASE WHEN state.last_task_id='' OR $15::boolean THEN $9 ELSE state.last_task_id END,
 		observed_at=$11,sampled_at=$10,updated_at=$11,
 		traffic_settled=$4 IN ('inactive','failed') AND ($13::boolean OR
 			COALESCE(cardinality($14::text[])>0,false)
@@ -82,6 +86,6 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 				AND NOT(p.id=ANY($14::text[]))))
 	FROM observation obs WHERE state.agent_id=obs.agent_id AND state.engine=obs.engine AND state.share_id=obs.share_id`,
 		agentID, instance.Engine, instance.ShareID, instance.Status, instance.Reason, instance.ConfigID,
-		instance.ConfigVersion, instance.AppliedTaskID, instance.TaskID, sampledAt, receivedAt, versioned, settled, policies)
+		instance.ConfigVersion, instance.AppliedTaskID, instance.TaskID, sampledAt, receivedAt, versioned, settled, policies, statusRefresh)
 	return err
 }

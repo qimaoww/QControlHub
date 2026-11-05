@@ -258,5 +258,15 @@ func TestSharedRefreshDoesNotRebindAnOlderOperationObservation(t *testing.T) {
 		if err := db.pool.QueryRow(ctx, `SELECT running FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND share_id=$3`, node.ID, config.Engine, lease.SharedTrafficID).Scan(&running); err != nil || running == fresh {
 			t.Fatalf("fresh=%v running=%v: %v", fresh, running, err)
 		}
+		if fresh {
+			observation.TaskID = lease.ID // Agent keeps the bootstrapped sidecar's identity.
+			observation.Status, observation.ObservedAt = "active", time.Now().UTC()
+			if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: append(node.Features, core.AgentFeatureSharedCoreLifecycle), SharedInstances: []core.SharedInstanceStatus{observation}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.pool.QueryRow(ctx, `SELECT running FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND share_id=$3`, node.ID, config.Engine, lease.SharedTrafficID).Scan(&running); err != nil || !running {
+				t.Fatalf("heartbeat after legacy identity recovery was discarded: running=%v %v", running, err)
+			}
+		}
 	}
 }

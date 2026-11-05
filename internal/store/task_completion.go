@@ -199,15 +199,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if shared && result.InstanceStatus != nil {
-		if action == core.ActionStatus && result.InstanceStatus.TaskID == taskID {
-			// The status lease is fresh and serialized with lifecycle tasks. Its
-			// metadata may have just bootstrapped a pre-sidecar deployment.
-			if err := tx.QueryRow(ctx, `SELECT last_task_id FROM agent_shared_instance_ownership
-				WHERE agent_id=$1 AND engine=$2 AND share_id=$3`, agentID, engine, shareID).Scan(&result.InstanceStatus.TaskID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-		}
-		if err := recordSharedInstanceObservationTx(ctx, tx, agentID, *result.InstanceStatus, versioned, time.Now().UTC(), result.TrafficSettled, nil); err != nil {
+		// A freshly bootstrapped sidecar keeps this status task's identity.
+		// Adopt that same identity atomically so subsequent heartbeats remain
+		// eligible. Older operation observations must retain their own identity.
+		statusRefresh := action == core.ActionStatus && result.InstanceStatus.TaskID == taskID
+		if err := recordSharedInstanceObservationTx(ctx, tx, agentID, *result.InstanceStatus, versioned, time.Now().UTC(), result.TrafficSettled, nil, statusRefresh); err != nil {
 			return err
 		}
 	} else if shared && status == core.TaskFailed && action.ChangesInstance() {
