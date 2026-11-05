@@ -117,6 +117,23 @@ export async function testConfigInboundsRuntime(preview = false) {
     test.dispose();
     assert(!document.querySelector("dialog"), "route abort left an orphan modal");
   }
+  for (const status of [200, 408]) {
+    for (const kind of ["modify", "delete"]) {
+      const test = await fixture("xray");
+      test.select("first");
+      test.click(kind);
+      const selector = kind === "delete" ? "[data-delete-intent=validate]" : "[data-plan-intent=validate]";
+      await waitFor(()=>document.querySelector(selector), "interrupted inbound form did not open");
+      const form = document.querySelector("#server-plan-form");
+      if (form) form.elements.tag.value = "interrupted-draft";
+      test.mutationFailure = {status};
+      document.querySelector(selector).click();
+      await waitFor(()=>document.querySelector(kind === "delete" ? "[data-inbound-error]" : "dialog [data-preset-status]")?.textContent.includes("确认"), "interrupted inbound result was not shown as unknown");
+      assert(document.querySelector(selector).disabled && !test.writes.length, "interrupted inbound response permits duplicate writes");
+      assert(!form || form.elements.tag.value === "interrupted-draft", "interrupted inbound response lost its draft");
+      test.dispose();
+    }
+  }
   for (const options of [{missing:true}, {missing:true, legacy:true}, {missing:true, shared:true}, {missing:true, offline:true}]) {
     const test = await fixture("xray", options);
     test.click("add");

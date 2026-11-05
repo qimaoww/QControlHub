@@ -371,7 +371,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             operationFor(operationKey).reload = true;
             renderPresetStatus();
           } else {
-            const uncertain = !error.deployPreflight && (!error.status || error.status >= 500);
+            const uncertain = !error.deployPreflight && (error.recoverConfigSubmission || !error.status || error.status === 408 || error.status >= 500);
             const portConflict = error.code === "port_conflict";
             showStatus(error.deployPreflight ? error.message : portConflict
               ? `${error.message} 草稿已保留。`

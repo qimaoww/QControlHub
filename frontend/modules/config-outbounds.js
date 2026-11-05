@@ -331,7 +331,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
           await onSaved(result, inbound);
         } catch (error) {
           if (!active()) return;
-          uncertain = submitted && (!error.status || error.status === 409 || error.status >= 500);
+          uncertain = submitted && Boolean(error.recoverConfigSubmission || !error.status || error.status === 408 || error.status === 409 || error.status >= 500);
           updateFeedback(errorBox, `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`);
         } finally {
           saving = false;
