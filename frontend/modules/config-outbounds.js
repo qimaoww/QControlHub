@@ -27,12 +27,14 @@ export function outboundEntries(content) {
 function referencesTo(content, index) {
   const document = JSON.parse(content), previous = document.outbounds[index], references = [];
   document.outbounds.splice(index, 1);
-  const visit = (value, path) => {
-    if (Array.isArray(value)) value.forEach((entry, i) => visit(entry, `${path}/${i}`));
+  const referenceKeys = new Set(["outboundTag", "outbound", "outbounds", "detour", "dialerProxy", "final"]);
+  const visit = (value, path, reference = false) => {
+    if (Array.isArray(value)) value.forEach((entry, i) => visit(entry, `${path}/${i}`, reference));
     else if (value && typeof value === "object") Object.entries(value).forEach(([key, entry]) => {
-      if (key !== "tag") visit(entry, `${path}/${key}`);
+      visit(entry, `${path}/${key}`, referenceKeys.has(key) || key === "tag" && path.endsWith("/proxySettings"));
     });
-    else if (value === previous.tag) references.push(path);
+    else if (reference && value === previous.tag) references.push(path);
+    else if (path.match(/\/balancers\/\d+\/selector\/\d+$/) && typeof value === "string" && previous.tag.startsWith(value)) references.push(path);
   };
   visit(document, "");
   return references;
@@ -315,7 +317,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
               !(await confirmAction(`${deleting ? "删除出站并恢复全局路由" : "保存出站绑定"}：${inbound.tag} :${inbound.port} → ${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
           if (!active()) return;
           if (intent === "deploy" && beforeDeploy) {
-            updateFeedback(status, "正在核验 Agent 当前配置…");
+            updateFeedback(status, "正在检查提交目标…");
             await beforeDeploy();
             if (!active()) return;
           }

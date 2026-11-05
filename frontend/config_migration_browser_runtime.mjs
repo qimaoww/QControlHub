@@ -36,6 +36,15 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
       if (test.refreshError && test.writes.length) throw test.refreshError;
       return {config:saved};
     }
+    if (options.method === "POST" && path.endsWith("/source")) {
+      const input = JSON.parse(options.body); test.writes.push(input);
+      if (test.saveGate) await test.saveGate;
+      if (test.saveError) throw test.saveError;
+      if (test.taskError) throw test.taskError;
+      saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)};
+      test.tasks.push({action:input.intent, expected_config_version:saved.version});
+      return {config:saved, task:{id:options.headers["X-Config-Task-ID"], action:input.intent, status:"pending"}};
+    }
     if (options.method === "PUT") {
       const input = JSON.parse(options.body); test.writes.push(input);
       if (test.saveGate) await test.saveGate;
@@ -105,8 +114,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
       document.querySelector('[data-live-intent="deploy"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
-      assert(test.reads.length===1 && test.reads[0].prefer_cached===undefined,
-        "source deployment preflight reused the display cache");
+      assert(test.reads.length===0,
+        "source deployment required a duplicate Agent read");
       assert(test.tasks[0].action==="deploy","source save must use validated rollback-capable deployment");
       assert(test.tasks[0].expected_config_version===2,"source deployment must use the exact newly saved version");
       assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"source deployment corrupted integer or discarded fragment draft");
@@ -127,8 +136,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       button.click(); await pause();
       assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
         "removing bundle generation blocked normal deployment to a legacy Agent");
-      assert(legacy.reads.length===1 && legacy.reads[0].prefer_cached===undefined,
-        "legacy source deployment skipped its forced Agent read");
+      assert(legacy.reads.length===0,
+        "legacy source deployment required a duplicate Agent read");
     }
   }
   await testSourceSaveRuntime();
@@ -187,7 +196,7 @@ async function testConfigReadCacheRuntime() {
   deploy.accept = true;
   document.querySelector('[data-live-intent="deploy"]').click();
   await waitFor(()=>deploy.tasks.length === 1, "fresh preflight did not recover a concurrent snapshot retirement");
-  assert(deploy.reads.length === 2 && deploy.reads.every(read=>read.prefer_cached === undefined),
+  assert(deploy.reads.length === 0,
     "fresh preflight recovery used a cached read");
   assert(deploy.writes.length === 1, "preflight recovery duplicated configuration persistence");
   await pause();
@@ -261,6 +270,9 @@ async function testSourceSaveRuntime() {
       button.click();
       await waitFor(()=>test.tasks.length === 1, "correctable source failure could not retry");
       assert(test.writes.length === 2, "correctable source failure duplicated its retry");
+    } else if (failure === "task") {
+      assert(test.saved().version === 1 && !test.tasks.length, "task creation failure partially committed the save");
+      assert(button.disabled, "unknown transaction outcome allows blind resubmission");
     } else {
       assert(document.querySelector("[data-live-save-status]").textContent.includes("配置已保存"), "partial source success misreported durable configuration as unsaved");
       assert(button.disabled, "partial source success allows uncertain resubmission");

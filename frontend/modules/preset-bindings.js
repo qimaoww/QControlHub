@@ -285,7 +285,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         ))) return;
         if (!current() || !formElement.isConnected) return;
         if (intent === "deploy" && ctx.beforeDeploy) {
-          showStatus("正在核验 Agent 当前配置…");
+          showStatus("正在检查提交目标…");
           if (submitter) updateFeedback(submitter, "正在核验…");
           await ctx.beforeDeploy();
           if (!current() || !formElement.isConnected) return;
@@ -332,7 +332,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             }),
           });
         }
-        if (state.data !== sessionData) return;
+        if (state.data !== sessionData || operationFor(operationKey)?.version > result.config.version) return;
         committedConfig = result.config;
         committedTask = result.task;
         drafts().clear(ctx.draftScope);

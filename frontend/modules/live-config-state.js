@@ -1,4 +1,4 @@
-// Snapshot compatibility, freshness and fail-closed deployment preflight.
+// Source selection, snapshot freshness and atomic configuration submission.
 
 export function liveConfigEditorState({
   existingAvailable,
@@ -33,25 +33,6 @@ export function liveConfigReadAction({
   return existingAvailable ? "" : "read-config";
 }
 
-function deployPreflightError(message) {
-  const error = new Error(message);
-  error.deployPreflight = true;
-  return error;
-}
-
-export function assertAgentConfigBaseline(expected, actual) {
-  if (typeof expected !== "string") {
-    throw deployPreflightError(
-      "部署前没有可核验的 Agent 配置基线，已停止保存和部署。请先重新读取节点配置。",
-    );
-  }
-  if (actual !== expected) {
-    throw deployPreflightError(
-      "部署前核验发现 Agent 当前配置已在页面读取后发生变化，已停止保存和部署。当前草稿已保留，请重新读取节点配置并合并修改。",
-    );
-  }
-}
-
 export async function submitLiveConfigChange({
   api,
   submitTask,
@@ -74,10 +55,20 @@ export async function submitLiveConfigChange({
   });
   if (intent === "import" && !editor.content)
     throw new Error("待迁移的原始节点快照已失效，请重新读取");
-  // A managed configuration can be cached for fast page entry, but deployment
-  // must never persist a draft or enqueue a task until a fresh Agent read has
-  // been compared with the exact baseline that the editor was opened from.
   if (intent === "deploy") await beforeDeploy?.();
+  if (!existingAvailable && ["deploy", "validate"].includes(intent)) {
+    const result = await api(
+      `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/source`,
+      { method: "POST", body: JSON.stringify({
+        engine, name: form.get("name"), description: form.get("description"),
+        content: editor.content, version: Number(form.get("version")), intent,
+      }) },
+    );
+    if (!result.config?.id || !result.task?.id) throw new Error("未能确认保存与任务结果，请重新读取后核对。");
+    onSavedConfig?.(result.config);
+    if (intent === "deploy") onDeployTask?.(result.task.id);
+    return { saved: result.config, content: result.config.content, task: result.task };
+  }
   let saved = savedConfig;
   if (
     !existingAvailable ||
@@ -149,7 +140,6 @@ export function liveConfigSnapshotReusable(source, now = Date.now()) {
   return now - readAt < liveConfigSnapshotCacheTTL;
 }
 
-export { deployPreflightError };
 
 export function liveSourceKey(agentId, engine, source = "managed") {
   return source === "import"

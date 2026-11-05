@@ -1,6 +1,6 @@
 import { bindEvent } from "./refresh.js";
 import { diagnosticError } from "./errors.js";
-import { assertAgentConfigBaseline, deployPreflightError, liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveSourceKey } from "./live-config-state.js";
+import { liveConfigEngineEligible, liveConfigReadAction, liveConfigSnapshotReusable, liveSourceKey } from "./live-config-state.js";
 import { presetRoute } from "./preset-route.js";
 import { bindConfigFiles } from "./config-files.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
@@ -10,7 +10,7 @@ import { bindLiveConfigNavigation } from "./live-config-navigation.js";
 import { bindLiveConfigSubmit } from "./live-config-submit.js";
 import { bindSharedInstanceRead } from "./shared-instance-read.js";
 
-export function createLiveConfigPage(ctx, { presets, deployments, reader }) {
+export function createLiveConfigPage(ctx, { presets, deployments, reader, mutations }) {
   const { api, state, can, engineName, notify, shell, bindCodeEditors } = ctx;
   const { operationFor, saveOperation, renderPresetStatus, watchPresetOperation } = presets.status;
   const { mountPresetEditor } = presets;
@@ -117,6 +117,8 @@ async function liveConfig(options = {}) {
   const engine = state.data.liveEngine;
   if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
     globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
+  await mutations.recover(agent.id, engine);
+  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   await reconcilePendingDeploy(agent.id, engine);
   const prefetched = prefetchWorkspace && selectedAgent === agent.id && selectedEngine === engine
     ? await prefetchWorkspace : null;
@@ -162,41 +164,16 @@ async function liveConfig(options = {}) {
       content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n"),
       saved: true,
     } : null);
-  const beforeDeploy = !privateWorkspace && sourceMode === "managed" && managedAvailable
-    ? async () => {
-        if (!readAction) {
-          throw deployPreflightError(
-            "当前 Agent 版本无法在部署前独立读取 QAgent 托管配置，已停止保存和部署。请先升级 Agent。",
-          );
-        }
-        const isCurrent = () =>
-          accountData === state.data &&
-          runtimeScope === state.navigationEpoch &&
-          request === liveConfigRequest &&
-          state.route === "live-config" &&
-          state.data.liveAgent === agent.id &&
-          state.data.liveEngine === engine &&
-          state.data.liveConfigSource === sourceMode;
-        let fresh;
-        try {
-          // Deliberately omit prefer_cached. This read runs immediately before
-          // any save/API mutation and therefore cannot trust the 600s display
-          // cache that supplied the editor baseline.
-          fresh = await requestCurrentConfigSnapshot(agent, engine, readAction, { isCurrent });
-        } catch (error) {
-          if (error?.deployPreflight) throw error;
-          throw deployPreflightError(
-            `部署前无法核验 Agent 当前配置，已停止保存和部署：${diagnosticError(error.message)}`,
-          );
-        }
-        if (!fresh || !isCurrent()) {
-          throw deployPreflightError(
-            "部署前页面状态已变化，已停止保存和部署。当前草稿已保留，请重新确认节点与内核。",
-          );
-        }
-        assertAgentConfigBaseline(source?.agentContent, fresh.content);
-      }
-    : null;
+  // Scope guards remain local. The API checks the saved revision and the Agent
+  // validates and applies the exact task snapshot in the target instance.
+  const beforeDeploy = () => {
+    if (accountData !== state.data || runtimeScope !== state.navigationEpoch ||
+        request !== liveConfigRequest || state.route !== "live-config" ||
+        state.data.liveAgent !== agent.id || state.data.liveEngine !== engine ||
+        state.data.liveConfigSource !== sourceMode) {
+      throw new Error("页面目标已变化，请重新打开配置后提交。");
+    }
+  };
   const current = (privateWorkspace || !unsupportedReason) && source?.content
     ? {
         ...(saved || {
@@ -223,6 +200,7 @@ async function liveConfig(options = {}) {
   const applyInboundMutation = async (result, chosen) => {
     if (accountData !== state.data) return;
     const key = `${agent.id}|${engine}`;
+    if (operationFor(key)?.version > result.config.version) return;
     state.data.liveSources[sourceKey] = {
       ...(state.data.liveSources[sourceKey] || source),
       content: result.config.content,

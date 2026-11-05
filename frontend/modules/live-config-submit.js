@@ -63,20 +63,15 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           source,
           existingAvailable: importSource,
           savedConfig: saved,
-          beforeDeploy: beforeDeploy ? async () => {
-            updateFeedback(status, "正在核验 Agent 当前配置…");
-            if (submitter) updateFeedback(submitter, "正在核验…");
-            await beforeDeploy();
-            updateFeedback(status, "正在保存配置并提交任务…");
-            if (submitter) updateFeedback(submitter, "正在提交…");
-          } : null,
+          beforeDeploy,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
             recordPendingDeploy(taskId, agent.id, engine);
             monitorDeployTask(taskId, agent.id, engine);
           },
         });
-        if (accountData !== state.data) return;
+        if (accountData !== state.data ||
+            state.data.presetOperations?.[`${agent.id}|${engine}`]?.version > result.saved.version) return;
         if (intent === "save") notify("已保存，尚未部署");
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");

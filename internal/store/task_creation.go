@@ -461,9 +461,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, fmt.Errorf("%w: 本人实例已有部署或启停任务，请等待完成后再操作", ErrConflict)
 		}
 	}
-	task.ID, err = core.NewID("tsk")
-	if err != nil {
-		return core.Task{}, err
+	task.ID = request.MutationTaskID
+	if task.ID == "" {
+		task.ID, err = core.NewID("tsk")
+		if err != nil {
+			return core.Task{}, err
+		}
 	}
 	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync)
 	if err != nil {

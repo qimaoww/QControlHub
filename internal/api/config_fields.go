@@ -139,7 +139,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.ExpectedVersion,
-		store.ConfigMutationOptions{Action: core.Action(input.Intent), MainlandPolicies: desired})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: desired})
 	if err != nil {
 		writeStoreError(w, err)
 		return

@@ -22,7 +22,7 @@ for (const [facade, owner, names] of [
   [agents, coreActions, ["developmentSourceVisible", "coreSourceForInstall"]],
   [agents, agentRefresh, ["agentStructureSignature"]],
   [configs, plan, ["bindServerPlanRegeneration", "readServerPlanInput"]],
-  [configs, live, ["assertAgentConfigBaseline", "liveConfigEditorState", "liveConfigEngineEligible", "liveConfigReadAction", "liveConfigSnapshotReusable", "submitLiveConfigChange"]],
+  [configs, live, ["liveConfigEditorState", "liveConfigEngineEligible", "liveConfigReadAction", "liveConfigSnapshotReusable", "submitLiveConfigChange"]],
 ]) {
   for (const name of names) assert.equal(facade[name], owner[name], `${name} must retain its public export`);
 }

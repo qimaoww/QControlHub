@@ -290,7 +290,7 @@ export function bindConfigInbounds(ctx) {
               }
               if (!active()) return;
               if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
-                updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验 Agent 当前配置…");
+                updateFeedback(body.querySelector("[data-inbound-error]"), "正在检查提交目标…");
                 await beforeDeploy();
                 if (!active()) return;
                 updateFeedback(body.querySelector("[data-inbound-error]"), "");

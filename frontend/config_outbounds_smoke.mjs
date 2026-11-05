@@ -122,3 +122,17 @@ assert.throws(()=>outboundPreset("sing-box", "vless", {tag:"t", transport:"xhttp
 assert.throws(()=>outboundPreset("xray", "hysteria2", {}, false), /不支持/);
 assert.deepEqual(outboundPeers([{agent_id:"self",profiles:[{tag:"private"}]},{agent_id:"other",profiles:[{tag:"peer"}]}],"self").map(peer=>peer.tag), ["peer"]);
 console.log("Outbound binding and presets smoke passed");
+
+// Unrelated text equal to an outbound tag is not a routing reference.
+const sameText = JSON.stringify({outbounds:[{tag:"unused",type:"direct"}], log:{output:"unused"},
+  dns:{servers:[{tag:"resolver", address:"unused"}]}, route:{rules:[{domain:["unused"], action:"reject"}]}});
+assert.equal(JSON.parse(mutateOutbound(sameText, "delete", 0)).outbounds.length, 0);
+for (const reference of [
+  {outbounds:[{tag:"relay",detour:"unused"}]},
+  {outbounds:[{tag:"relay",proxySettings:{tag:"unused"}}]},
+  {routing:{balancers:[{selector:["unus"]}]}},
+]) {
+  const config = {...JSON.parse(sameText), ...reference};
+  config.outbounds = [{tag:"unused",type:"direct"}, ...(reference.outbounds || [])];
+  assert.throws(() => mutateOutbound(JSON.stringify(config), "delete", 0), /引用/);
+}

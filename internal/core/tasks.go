@@ -113,6 +113,8 @@ type Task struct {
 }
 
 type TaskRequest struct {
+	// Reserved for atomic configuration submissions; never decoded from task JSON.
+	MutationTaskID string `json:"-"`
 	// Only the atomic inbound mutation and its retries may request installation.
 	InstallIfMissing      bool        `json:"-"`
 	ExpectedConfigVersion int         `json:"expected_config_version,omitempty"`

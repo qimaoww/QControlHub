@@ -212,8 +212,8 @@ export async function testConfigInboundsRuntime(preview = false) {
   await waitFor(()=>document.querySelector("#server-plan-form"), "background fixture did not open");
   document.querySelector("[data-plan-intent=deploy]").click();
   await waitFor(()=>background.writes.length === 1 && !document.querySelector("dialog"), "background deployment not submitted");
-  assert(background.readRequests.length === 1 && background.readRequests[0].prefer_cached === undefined,
-    "deployment preflight reused the 600-second display cache");
+  assert(background.readRequests.length === 0,
+    "deployment added a redundant Agent read");
   background.select("first"); background.click("delete");
   await waitFor(()=>document.querySelector("[data-delete-intent]"), "delete fixture did not open");
   const workspaceReads = background.calls.filter(call=>call.path.endsWith("/workspace")).length;
@@ -230,13 +230,9 @@ export async function testConfigInboundsRuntime(preview = false) {
   conflictForm.elements.tag.value = "keep-conflicting-draft";
   deployConflict.setAgentContent(deployConflict.saved().content + "\n");
   conflictForm.querySelector("[data-plan-intent=deploy]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("部署前核验发现"),
-    "changed Agent configuration did not stop deployment");
-  assert(deployConflict.writes.length === 0 && document.querySelector("dialog[open]") &&
-    conflictForm.elements.tag.value === "keep-conflicting-draft",
-    "deployment conflict saved data, closed the draft, or lost its input");
-  assert(deployConflict.readRequests.length === 1 && deployConflict.readRequests[0].prefer_cached === undefined,
-    "deployment conflict was checked through a cached read");
+  await waitFor(()=>deployConflict.writes.length === 1 && !document.querySelector("dialog"),
+    "runtime snapshot drift blocked a valid saved-revision deployment");
+  assert(deployConflict.readRequests.length === 0, "deployment required an unrelated runtime snapshot");
   deployConflict.dispose();
   const stale = await fixture("xray");
   let release;
