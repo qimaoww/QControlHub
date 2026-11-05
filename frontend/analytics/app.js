@@ -3,6 +3,7 @@ import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
 import { setStorageAccount } from "../modules/account-storage.js";
 import { accountRequest } from "../modules/account-request.js";
+import { effectiveTheme } from "../modules/theme-registry.js";
 import { createPermissionChecker } from "../modules/permissions.js";
 import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
@@ -258,8 +259,26 @@ export function startAnalytics({ app, session }) {
       field("用户名", "username", "", { autocomplete: "username", required: true, maxlength: 64, pattern: "(?:[A-Za-z0-9._]|-)+", autocapitalize: "none", spellcheck: false }),
       field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true }),
     ], "登录", async values => {
-      state.session = await api("/auth/login", { method: "POST", body: values });
-      location.reload();
+      const authenticated = await api("/auth/login", { method: "POST", body: values });
+      const preference = await accountRequest("/preferences/theme", {
+        session: authenticated, signal: lifetime.signal,
+        isCurrent: () => loginForm.isConnected && !state.session && !lifetime.signal.aborted,
+      });
+      state.session = authenticated;
+      if (effectiveTheme(preference.theme_id) !== "analytics") {
+        // Authentication has completed. Release the old runtime before the
+        // deliberate theme boundary; its pending login is not an editor draft.
+        lifetime.abort();
+        routeAbort?.abort();
+        watch.stop();
+        presentation.dispose();
+        location.reload();
+        return;
+      }
+      setStorageAccount(state.session);
+      dirty = false;
+      app.replaceChildren(layout);
+      await render();
     });
     loginForm.setAttribute("aria-label", "登录控制台");
     app.replaceChildren(node("main", { className: "a-login" },
@@ -338,7 +357,7 @@ export function startAnalytics({ app, session }) {
     await render();
   }, { signal: lifetime.signal });
   window.addEventListener("beforeunload", event => {
-    if (!dirty && !pending) return;
+    if (!state.session || (!dirty && !pending)) return;
     event.preventDefault();
     event.returnValue = "";
   }, { signal: lifetime.signal });

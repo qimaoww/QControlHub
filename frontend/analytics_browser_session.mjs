@@ -11,9 +11,11 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.username.value='analytics-admin';form.elements.token.value='wrong-preview-password';form.requestSubmit(); })()`);
   await wait(anonymous, "!!document.querySelector('.a-login [role=alert]')?.textContent && !document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(anonymous, "document.querySelector('.a-login [name=username]').value"), "analytics-admin");
+  await evaluate(anonymous, `window.addEventListener('beforeunload', event => sessionStorage.setItem('analytics-login-unload-blocked', String(event.defaultPrevented)))`);
   await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.token.value='config scope password fixture';form.requestSubmit(); })()`);
   await wait(anonymous, "!!document.querySelector('#logout') && location.hash==='#tasks'");
   assert.equal(await evaluate(anonymous, "document.querySelectorAll('.a-layout,.a-login').length"), 0, "authenticated classic preference overrides public analytics login hint");
+  assert.equal(await evaluate(anonymous, "sessionStorage.getItem('analytics-login-unload-blocked')"), "false", "successful login does not trigger the unsaved-changes prompt at a theme boundary");
   const page = await createPage();
   const capture = screenshot;
   screenshot = async (target, label) => {
