@@ -172,6 +172,13 @@ try {
     await evaluate(page, "window.__certificateRelease()");
     await delay(100);
     assert.equal(await evaluate(page, "document.querySelectorAll('dialog[open]').length"), 0, "late certificate responses cannot reopen a dialog on another route");
+    if (user === "traffic-reader") {
+      await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#traffic` }, page);
+      await wait(page, "!!document.querySelector('.a-traffic-page [data-traffic-key]') && !document.querySelector('[aria-busy=true]')");
+      assert.deepEqual(await evaluate(page, "[...document.querySelectorAll('.a-traffic-filters [name=agent] option')].map(option=>option.value).filter(Boolean)"), [fixture.owned[user]], "traffic-only account receives authorized node metadata without agents.read");
+      assert.equal(await evaluate(page, "[...document.querySelectorAll('.a-main button')].filter(button=>['添加配额','编辑配额','设置配额','清零','删除','同步配置端口','批量操作'].includes(button.textContent)).length"), 0, "read-only traffic identity has no mutation controls");
+      await screenshot(page, "analytics-traffic-reader");
+    }
   }
   record(`${mode}: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation`);
   const noPermissions = await createPage();

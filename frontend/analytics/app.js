@@ -137,7 +137,7 @@ export function startAnalytics({ app, session }) {
       if (error.name !== "AbortError") announce(error.message, "error");
     } finally {
       pending--;
-      if (control?.isConnected) { control.disabled = disabled; control.removeAttribute("aria-busy"); }
+      if (control?.isConnected) { control.disabled = disabled; control.removeAttribute("aria-busy"); control.dispatchEvent(new Event("mutationend")); }
     }
   }
   function form(fields, label, save) {

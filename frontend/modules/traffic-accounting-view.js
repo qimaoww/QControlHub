@@ -1,24 +1,9 @@
+import { trafficAccountingState } from "./traffic-model.js";
+
 export function renderTrafficAccounting(policy, esc, bytes) {
   if (policy.shared_quota && !["core-api", "nft-dual"].includes(policy.accounting?.source) && policy.enforcement_available !== false && !policy.enforcement_error)
     return '<span class="settings-hint">共享额度 · 监听端口收发</span>';
-  const accounting = policy.accounting;
-  const dual = ["core-api", "nft-dual"].includes(accounting?.source);
-  const raw = String(policy.enforcement_error || "").replace(/^[;\s]+/, "");
-  const scopeOnly = /^dual accounting unavailable: single-protocol policy uses listener-only accounting; (?:dual accounting requires TCP\+UDP because core counters and outbound marks are shared|exclusive listener transport could not be verified)$/.test(raw);
-  const failed = policy.enforcement_available === false || (raw && !scopeOnly);
-  const partialEgress = policy.engine === "mihomo" && accounting?.source === "nft-dual";
-  const tone = failed ? "bad" : dual && !partialEgress ? "ok" : "limited";
-  const title = failed ? "统计异常" : partialEgress ? "双链路 · 范围受限" : dual ? "双链路统计" : "仅监听端口";
-  const outboundTagHint = raw.endsWith("outbound tags must be present and unique")
-    ? "出口标签缺失或重复，无法独立统计。新版 Agent 可补齐缺失项；重复标签须修改配置，不能合并计数。"
-    : /outbounds\[\d+\]\.tag duplicates an earlier outbound;/.test(raw)
-      ? "出口标签重复，无法确定统计归属；请使用不同标签并同步修改路由。"
-      : "";
-  const hint = failed
-    ? outboundTagHint || (raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。")
-    : scopeOnly ? "暂未确认入站协议独占，当前仅统计入口收发。"
-    : !dual ? "独立出口统计尚未生效，当前仅计入口。"
-    : accounting.source === "core-api" ? "内核计数 · 包含入站协议开销" : "网络层计数 · 包含包头及重传";
+  const { accounting, dual, raw, failed, partialEgress, tone, title, hint } = trafficAccountingState(policy);
   const legs = dual ? `<dl class="traffic-accounting-legs">${[
     ["客户端 → 代理", accounting.client_received],
     ["代理 → 客户端", accounting.client_sent],

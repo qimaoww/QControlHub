@@ -31,6 +31,12 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
 			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
 			analyticsScope := store.WithConfigScope(ctx, analyticsUser.ID, false)
+			// This browser fixture declares the current Agent traffic capability.
+			// Runtime/feature state is separate from the metrics sample below.
+			analyticsAgent.Features = append(analyticsAgent.Features, "port-traffic-v1")
+			if err := db.Heartbeat(analyticsScope, analyticsAgent.ID, core.HeartbeatRequest{Features: analyticsAgent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
 			if err := db.UpdateAgentMetrics(analyticsScope, analyticsAgent.ID, core.HostMetrics{
 				PublicIPv4: "93.184.216.34", PublicIPv6: "2606:2800:220:1:248:1893:25c8:1946",
 			}); err != nil {
@@ -59,6 +65,20 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 				admin.call("POST", "/users", core.UserRequest{Username: name, Role: core.RoleUser, Password: "config scope password fixture", Permissions: []core.Permission{permission}}, http.StatusCreated, &user)
 				agent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, user.ID, false), db)
 				owned[name] = agent.ID
+				if name == "traffic-reader" {
+					scope := store.WithConfigScope(ctx, user.ID, false)
+					config := configScopeAPIConfig(t, 23476)
+					config.AgentID = agent.ID
+					config, err = db.SaveAgentConfig(scope, config, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					deploy, err := db.CreateTask(store.WithConfigScope(ctx, admin.userID, true), core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionDeploy, ConfigID: config.ID})
+					if err != nil {
+						t.Fatal(err)
+					}
+					completeConfigScopeAPITask(t, store.WithConfigScope(ctx, admin.userID, true), db, deploy)
+				}
 			}
 			for username, client := range map[string]configScopeAPIClient{"alice": alice, "bob": bob} {
 				token, err := db.CreateEnrollmentToken(store.WithConfigScope(ctx, client.userID, false), core.EnrollmentTokenRequest{Name: username + " node"})

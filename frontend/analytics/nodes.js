@@ -1,3 +1,4 @@
+import { nodeRegion, regionFlag as flagArtwork } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
 import { publicAddressRows } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
@@ -89,13 +90,20 @@ export async function nodesPage(ctx) {
     stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—')));}
   function regionFlag(agent) {
     const region = geoRegionDetails(agent.labels?.region_code) || geoRegionDetails(agent.region_code);
-    const flag = node('span', { className: 'a-probe-flag', role: 'img', 'aria-label': region?.name || '国家／地区未知', title: region?.name || '国家／地区未知' });
-    if (!region) { flag.textContent = '—'; return flag; }
-    flag.dataset.regionCode = region.code;
-    const image = node('img', { src: `/api/v1/region-flags/${region.flagCode.toLowerCase()}`, alt: '', decoding: 'async', draggable: 'false' });
-    image.addEventListener('error', () => { flag.replaceChildren(region.code); }, { once: true });
-    flag.append(image);
-    return flag;
+    const flag = flagArtwork(region);
+    if (!canManage(agent)) { flag.title = region?.name || '国家／地区未知'; return flag; }
+    const trigger = button('', () => chooseRegion(agent), { className: 'a-region-trigger', 'aria-label': `选择国家／地区：${agent.name}`, 'aria-haspopup': 'dialog', title: `${region?.name || '国家／地区未知'} · 选择国家／地区` });
+    trigger.append(flag); return trigger;
+  }
+  function chooseRegion(agent) {
+    if (!canManage(agent)) return;
+    return nodeRegion(ctx, agent, async code => {
+      agent.labels = { ...(agent.labels || {}) };
+      if (code) agent.labels.region_code = code; else { delete agent.labels.region_code; agent.region_code = ''; }
+      draw();
+      try { await load(); }
+      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.announce('国家／地区已保存，节点刷新失败，请刷新重试。', 'error'); }
+    });
   }
   function addresses(agent) {
     const rows = addressRows(agent).filter(row => row.ok);
@@ -213,6 +221,7 @@ export async function nodesPage(ctx) {
       actions(status(agent.status), badge(agent.can_manage === false ? '本人共享实例' : '主实例')),
       muted(agent.id), muted(`${agent.os} / ${agent.arch} · QAgent ${agent.version || '—'}`),
       muted(`最近在线 · ${date(agent.last_seen)}`),
+      manage && button('国家／地区', () => chooseRegion(agent)),
       agent.metrics && grid(
         muted(`CPU · ${agent.metrics.cpu_available ? Number(agent.metrics.cpu_percent).toFixed(1)+'%' : '—'}`),
         muted(`内存 · ${agent.metrics.memory_available ? bytes(agent.metrics.memory_used_bytes)+' / '+bytes(agent.metrics.memory_total_bytes) : '—'}`),

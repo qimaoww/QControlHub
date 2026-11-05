@@ -32,16 +32,21 @@ export function trafficBatch(ctx, policies, agentName, onSaved) {
       if(!ctx.current()||!box.open)return;
       uncertain=null;last={input,results:response.results};
       results.replaceChildren(table(['记录','状态','结果'],response.results.map(item=>[policies.find(policy=>policy.id===item.id)?.name||item.id,({succeeded:'成功',failed:'失败',not_executed:'未执行'})[item.status]||item.status,item.message||'已完成']),{label:'批量操作结果'}));
-      feedback.textContent='';retry.hidden=!response.results.some(item=>item.status==='failed');
-      await onSaved();ctx.announce('批量操作已完成');
+      feedback.textContent='';retry.hidden=!response.results.some(item=>item.status!=='succeeded');
+      const succeeded=response.results.filter(item=>item.status==='succeeded');
+      succeeded.forEach(item=>selected.delete(item.id));
+      choices.forEach(choice=>{const input=choice.querySelector('input');input.checked=selected.has(input.name);});syncSelection();
+      const refreshed=await onSaved();
+      const incomplete=response.results.some(item=>item.status!=='succeeded');
+      ctx.announce(incomplete?'部分操作未完成，请查看结果':refreshed?'批量操作已完成':'操作已完成，列表刷新失败，请重试。',incomplete||!refreshed?'error':'');
     } catch(error) {
       if(error.name==='AbortError')throw error;
-      if(ctx.current()&&box.open){uncertain=input;retry.hidden=false;feedback.textContent=error.message;}
+      if(ctx.current()&&box.open){uncertain=!error.status||error.status>=500?input:null;retry.hidden=!uncertain;feedback.textContent=error.message;}
     }
   }
   const retry=button('重试未完成项',event=>void ctx.mutate(event.currentTarget,async()=>{
     // An uncertain response must replay the identical receipt key and payload.
-    const input=uncertain||{...last.input,request_id:requestID(),ids:last.results.filter(item=>item.status==='failed').map(item=>item.id)};
+    const input=uncertain||{...last.input,request_id:requestID(),ids:last.results.filter(item=>item.status!=='succeeded').map(item=>item.id)};
     if(input.ids.length)await execute(input);
   }));retry.hidden=true;
   const form=ctx.form([operation,all,node('div',{className:'a-stack'},choices),quota,results,feedback,actions(retry)],'执行批量操作',async(values,form)=>{
@@ -61,4 +66,7 @@ export function trafficBatch(ctx, policies, agentName, onSaved) {
   const sync=()=>{const enabled=form.elements.action.value==='quota';ctx.visible(quota,enabled);for(const key of ['limit_bytes','cycle','cycle_anchor','auto_block']){const toggle=form.elements.namedItem(`patch:${key}`),control=toggle.parentElement.parentElement.querySelector('.a-field input,.a-field select');control.disabled=!enabled||!toggle.checked;control.required=!control.disabled;}};
   operation.querySelector('select').addEventListener('change',sync);sync();
   const box=ctx.dialog('流量批量操作',form,{wide:true});
+  const close=()=>box.close();
+  ctx.signal.addEventListener('abort',close,{once:true});
+  box.addEventListener('close',()=>ctx.signal.removeEventListener('abort',close),{once:true});
 }

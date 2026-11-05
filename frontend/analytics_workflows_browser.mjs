@@ -1,9 +1,13 @@
+import { checkAnalyticsTraffic } from './analytics_traffic_browser.mjs';
 import assert from 'node:assert/strict';
 export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record }) {
+  await checkAnalyticsTraffic({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
   const agentID=fixture.analyticsAgent;
   const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-top h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
   const click=async(label,selector='dialog[open]')=>evaluate(page,`[...document.querySelectorAll(${JSON.stringify(selector+' button')})].find(button=>!button.closest('select')&&button.textContent===${JSON.stringify(label)}).click()`);
-  const close=async()=>{await evaluate(page,"document.querySelectorAll('dialog[open]').forEach(box=>box.close())");await wait(page,"!document.querySelector('dialog[open],.a-motion-tail')");};
+  const close=async()=>{await evaluate(page,"document.querySelectorAll('dialog[open]').forEach(box=>box.close())");try { await wait(page,"!document.querySelector('dialog[open],.a-motion-tail')"); }
+    catch(error) { throw new Error(`${error.message}; dialog diagnostics: ${JSON.stringify(await evaluate(page, "({dialogs:[...document.querySelectorAll('dialog[open] h2')].map(el=>el.textContent),tails:document.querySelectorAll('.a-motion-tail').length,animations:document.getAnimations().map(animation=>({id:animation.id,state:animation.playState}))})"))}`); }
+  };
   await navigate('#node-settings');
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0,'initial node monitor has no selection boxes');
   assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-grid')"));
@@ -19,6 +23,33 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
     })()`), 'card/list display both real API address families and the resolved region');
   };
   await checkAddresses();
+  const regionTrigger = `.a-probe[data-agent-id="${agentID}"] .a-region-trigger`;
+  await evaluate(page, `document.querySelector(${JSON.stringify(regionTrigger)}).click()`);
+  await wait(page, "!!document.querySelector('dialog[open] [data-region-choice=JP]') && !document.querySelector('dialog[open] button[type=submit]').disabled");
+  assert.ok(await evaluate(page, "[...document.querySelectorAll('dialog[open] .a-region-options button')].every(button=>!button.textContent.includes('√')&&!button.textContent.includes('✓'))"));
+  assert.ok(await evaluate(page, "getComputedStyle(document.querySelector('dialog[open] [data-region-choice=JP] .a-probe-flag'),'::after').borderTopWidth==='1px'"), 'white flag fields keep a visible frame');
+  await screenshot(page,'analytics-region-picker');
+  await evaluate(page, "(() => {const input=document.querySelector('dialog[open] [name=region_search]');input.value='Germany';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  assert.equal(await evaluate(page, "document.querySelectorAll('dialog[open] [data-region-choice]').length"),1);
+  await evaluate(page, "document.querySelector('dialog[open] [data-region-choice=DE]').click()");
+  await evaluate(page, `window.__regionFetch=window.fetch;window.__regionFail=true;window.fetch=(url,options)=>window.__regionFail&&String(url).endsWith(${JSON.stringify('/agents/'+agentID+'/region')})&&options?.method==='PUT'?(window.__regionFail=false,Promise.resolve(new Response(JSON.stringify({error:'地区保存测试失败'}),{status:503,headers:{'Content-Type':'application/json'}}))):window.__regionFetch(url,options);document.querySelector('dialog[open] [name=region_search]').form.requestSubmit()`);
+  await wait(page, "!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] [role=alert]')].some(item=>item.textContent.includes('地区保存测试失败'))");
+  assert.equal((await api(page,identity,'GET','/agents')).find(agent=>agent.id===agentID).labels.region_code,'JP','failed manual region save preserves confirmed server value');
+  assert.ok(await evaluate(page, "document.querySelector('dialog[open] [data-region-choice=DE]').getAttribute('aria-pressed')==='true'"));
+  await evaluate(page, "document.querySelector('dialog[open] [name=region_search]').form.requestSubmit()");
+  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && !!document.querySelector('.a-probe[data-agent-id="${agentID}"] .a-probe-flag[data-region-code=DE]')`);
+  assert.equal((await api(page,identity,'GET','/agents')).find(agent=>agent.id===agentID).labels.region_code,'DE');
+  await navigate('#traffic');await navigate('#node-settings');
+  assert.ok(await evaluate(page, `!!document.querySelector('.a-probe[data-agent-id="${agentID}"] .a-probe-flag[data-region-code=DE]')`),'manual region survives remount');
+  await evaluate(page, `document.querySelector(${JSON.stringify(regionTrigger)}).click()`);
+  await wait(page, "!!document.querySelector('dialog[open] [data-region-choice=JP]') && !document.querySelector('dialog[open] button[type=submit]').disabled");
+  await click('自动识别');
+  await evaluate(page, "document.querySelector('dialog[open] [name=region_search]').form.requestSubmit()");
+  await wait(page, "!document.querySelector('dialog[open],[aria-busy=true]')");
+  assert.ok(!(await api(page,identity,'GET','/agents')).find(agent=>agent.id===agentID).labels?.region_code,'automatic mode clears only manual override');
+  await api(page,identity,'PUT',`/agents/${agentID}/region`,{country_code:'JP'});
+  await navigate('#traffic');await navigate('#node-settings');
+  await evaluate(page, "window.fetch=window.__regionFetch;delete window.__regionFetch;delete window.__regionFail");
   await screenshot(page,'analytics-probe-cards');await click('列表','.a-main');
   await wait(page,"!!document.querySelector('.a-probe-list') && !document.querySelector('[aria-busy=true]')");
   await checkAddresses();
@@ -128,7 +159,9 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   const removedExit=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
   assert.ok(removedExit.inbounds.some(item=>item.tag==='theme-inbound'&&item.port===23477));
   assert.ok(!removedExit.managed_objects.some(item=>item.tag==='unused-exit'));
-  await navigate('#client-access');await click('修改显示参数','.a-main');
+  await navigate('#client-access');
+  await evaluate(page,`(()=>{const select=document.querySelector('.a-filterbar [name=agent]');select.value=${JSON.stringify(agentID)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+  await click('修改显示参数','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=name]')");
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=name]').form;form.elements.name.value='主题接入名称';form.requestSubmit()})()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('主题接入名称')");
