@@ -24,16 +24,15 @@ const model = createThemePreference({
   },
 });
 assert.equal(effectiveTheme("bad"),"classic");
-assert.equal(effectiveTheme("analytics"),"classic", "incomplete theme is never advertised as available");
+assert.equal(effectiveTheme("analytics"),"analytics");
 assert.equal(themeByID("bad"),null);
-assert.equal(loginTheme(),"classic", "anonymous entry never reads an account preference");
+assert.equal(loginTheme(),"analytics", "public default never reads an account preference");
 assert.equal(loginTheme("unknown"),"classic");
-assert.equal(loginTheme("analytics"),"classic", "unavailable runtime remains guarded at anonymous entry");
+assert.equal(loginTheme("classic"),"classic", "explicit public deployment overrides remain supported");
 assert.equal(loginTheme("?theme=analytics"),"classic", "URLs cannot select an account theme");
 await assert.rejects(model.save("classic"));
 assert.deepEqual(await model.read(),server);
 await assert.rejects(model.save("unknown"));
-await assert.rejects(model.save("analytics"));
 const saving = deferred(); next = saving;
 const first = model.save("classic");
 await assert.rejects(model.save("classic"),/正在保存/);
@@ -45,7 +44,7 @@ server.revision=2;
 await assert.rejects(model.save("classic"),error=>error.status===409);
 assert.equal(model.current.revision,1,"failure preserves last confirmed value");
 await model.read();
-assert.equal((await model.save("classic")).revision,3);
+assert.deepEqual(await model.save("analytics"),{theme_id:"analytics",revision:3});
 const old = deferred(); next=old;
 const oldRead=model.read();
 await model.read();

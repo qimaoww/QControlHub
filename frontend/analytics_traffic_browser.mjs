@@ -61,7 +61,12 @@ export async function checkAnalyticsTraffic({ page, mode, fixture, evaluate, wai
   await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && !!document.querySelector(${JSON.stringify(row)})`);
   assert.equal((await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).used_bytes, 0);
   await click('取消配额', row); await wait(page, "!!document.querySelector('dialog[open]')"); await click('取消配额');
-  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && document.querySelector(${JSON.stringify(row)})?.textContent.includes('持续统计')`);
+  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && document.querySelector(${JSON.stringify(row)})?.textContent.includes('持续统计')`).catch(async error => {
+    await screenshot(page, 'analytics-traffic-quota-failure');
+    const presentation = await evaluate(page, `({dialogs:[...document.querySelectorAll('dialog[open]')].map(box=>box.textContent),row:document.querySelector(${JSON.stringify(row)})?.textContent,busy:[...document.querySelectorAll('[aria-busy=true]')].map(control=>control.textContent),alerts:[...document.querySelectorAll('[role=alert],.a-toast')].map(item=>item.textContent)})`);
+    const stored = (await api(page, identity, 'GET', '/traffic-policies')).find(value=>value.id===policy.id);
+    throw new Error(`${error.message}; quota diagnostics: ${JSON.stringify({presentation,stored})}`);
+  });
   assert.equal((await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).quota_enabled, false);
   await click('设置配额', row);
   await wait(page, "!!document.querySelector('dialog[open] [name=limit_gb]')");

@@ -28,7 +28,7 @@ func TestAccountThemePreference(t *testing.T) {
 		return p
 	}
 	for _, client := range []configScopeAPIClient{admin, alice, bob} {
-		if p := read(client); p.ThemeID != "classic" || p.Revision != 0 {
+		if p := read(client); p.ThemeID != "analytics" || p.Revision != 0 {
 			t.Fatalf("default: %+v", p)
 		}
 	}
@@ -36,10 +36,14 @@ func TestAccountThemePreference(t *testing.T) {
 	if p.ThemeID != "analytics" || p.Revision != 1 {
 		t.Fatalf("save: %+v", p)
 	}
-	if p := read(bob); p.ThemeID != "classic" || p.Revision != 0 {
+	if p := read(bob); p.ThemeID != "analytics" || p.Revision != 0 {
 		t.Fatal("cross-account preference leak")
 	}
 	save(bob, "classic", 0, 200)
+	bobDevice, _ := managementLogin(t, bob.handler, "bob", "config scope password fixture", 200)
+	if p := read(bobDevice); p.ThemeID != "classic" || p.Revision != 1 {
+		t.Fatalf("explicit classic selection did not survive login: %+v", p)
+	}
 	if read(alice).ThemeID != "analytics" {
 		t.Fatal("bob changed alice")
 	}
@@ -74,7 +78,7 @@ func TestAccountThemePreference(t *testing.T) {
 	var named core.User
 	admin.call("POST", "/users", core.UserRequest{Username: "theme-admin", Password: "theme named administrator fixture", Role: core.RoleAdmin}, 201, &named)
 	namedClient, _ := managementLogin(t, admin.handler, "theme-admin", "theme named administrator fixture", 200)
-	if p := read(namedClient); p.ThemeID != "classic" || p.Revision != 0 {
+	if p := read(namedClient); p.ThemeID != "analytics" || p.Revision != 0 {
 		t.Fatal("environment admin shares named admin preference")
 	}
 	for _, method := range []string{"GET", "PUT"} {

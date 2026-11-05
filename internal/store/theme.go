@@ -48,7 +48,9 @@ func (s *Store) themePreference(ctx context.Context, id string, revision int64) 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 81080))`, account); err != nil {
 		return ThemePreference{}, err
 	}
-	current := ThemePreference{ThemeID: "classic"}
+	// Only accounts without a saved selection inherit the public default.
+	// Existing explicit choices, including classic, keep their current revision.
+	current := ThemePreference{ThemeID: "analytics"}
 	err = tx.QueryRow(ctx, `SELECT theme_id,revision FROM account_themes WHERE account_id=$1`, account).Scan(&current.ThemeID, &current.Revision)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ThemePreference{}, err

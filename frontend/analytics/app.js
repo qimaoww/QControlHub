@@ -128,15 +128,20 @@ export function startAnalytics({ app, session }) {
     });
   }
   async function mutate(control, run) {
-    if (pending || control?.disabled) return;
+    if (pending) { announce("操作正在提交，请等待结果。", "error"); return; }
+    if (control?.disabled) return;
     const disabled = control?.disabled;
     if (control) { control.disabled = true; control.setAttribute("aria-busy", "true"); }
     pending++;
+    // A write may replace its form or table cell before its readback finishes.
+    // Keep pending state on the stable app root through the whole operation.
+    app.setAttribute("aria-busy", "true");
     try { return await run(); }
     catch (error) {
       if (error.name !== "AbortError") announce(error.message, "error");
     } finally {
       pending--;
+      if (!pending) app.removeAttribute("aria-busy");
       if (control?.isConnected) { control.disabled = disabled; control.removeAttribute("aria-busy"); control.dispatchEvent(new Event("mutationend")); }
     }
   }

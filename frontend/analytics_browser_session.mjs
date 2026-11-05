@@ -172,5 +172,5 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     if(document.body.dataset.staleClassic || document.querySelector('.interaction-tooltip,[data-motion-isolation]'))throw Error('classic presentation survived disposal');
     replacement.dispose();
   })()`);
-  record(`${mode}: independent analytics runtime against real API; eighteen routes, archive save/history, native modal keyboard focus, responsive viewports, document/CSS isolation; registry remains unavailable until full parity`);
+  record(`${mode}: independent analytics runtime against real API; eighteen routes, archive save/history, native modal keyboard focus, responsive viewports, document/CSS isolation; production catalog offers both themes; full advanced workflow parity remains under review`);
 }

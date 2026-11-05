@@ -93,13 +93,22 @@ try {
     if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
     await call("Page.navigate", { url }, sessionId);
-    await wait(sessionId, "!!document.querySelector('#login-form')");
+    await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
     return sessionId;
   };
   const login = async (page, username) => {
-    await evaluate(page, `(() => { const form = document.querySelector('#login-form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
+    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
+    await wait(page, "!!document.querySelector('#logout,.a-user')");
+    const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    // These business regression suites deliberately select the classic theme.
+    // Default-theme behavior is checked separately through the production entry.
+    const preference = await api(page, identity, "GET", "/preferences/theme");
+    if (preference.theme_id !== "classic") {
+      await api(page, identity, "PUT", "/preferences/theme", {theme_id:"classic",revision:preference.revision});
+      await call("Page.reload", {}, page);
+    }
     await wait(page, "!!document.querySelector('#logout')");
-    return evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
     const result = await evaluate(page, `(async () => { const r = await fetch('/api/v1' + ${JSON.stringify(path)}, {method:${JSON.stringify(method)}, credentials:'same-origin', headers:{'Content-Type':'application/json','X-QControlHub-CSRF':${JSON.stringify(session.csrf_token)}}, ${body === undefined ? "" : `body:JSON.stringify(${JSON.stringify(body)})`} }); return {status:r.status, body:await r.text()}; })()`);
@@ -113,6 +122,39 @@ try {
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
   };
 
+  // No preference row: use the production entry without a preview hint.
+  const defaultPage = await createPage(`${base}/?theme=classic#themes`);
+  assert.ok(await evaluate(defaultPage, "!!document.querySelector('.a-login form') && !new URL(location.href).searchParams.has('theme')"));
+  await evaluate(defaultPage, "window.__defaultDocument=true");
+  const defaultLogin = async () => {
+    await evaluate(defaultPage, `(() => {const form=document.querySelector('.a-login form');form.elements.username.value='default-theme-user';form.elements.token.value='config scope password fixture';form.requestSubmit()})()`);
+    await wait(defaultPage, "document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')");
+  };
+  await defaultLogin();
+  let defaultIdentity = await evaluate(defaultPage, "fetch('/api/v1/auth/session').then(r=>r.json())");
+  assert.deepEqual(await api(defaultPage, defaultIdentity, "GET", "/preferences/theme"), {theme_id:"analytics",revision:0});
+  assert.equal(await evaluate(defaultPage, "window.__defaultDocument"), true, "matching default login keeps the document and avoids a reload prompt");
+  await screenshot(defaultPage, "default-theme-account");
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(defaultPage, "document.querySelector('.a-user [title=退出登录]').click()");
+  await wait(defaultPage, "!!document.querySelector('.a-login form')");
+  await defaultLogin();
+  defaultIdentity = await evaluate(defaultPage, "fetch('/api/v1/auth/session').then(r=>r.json())");
+  assert.deepEqual(await api(defaultPage, defaultIdentity, "GET", "/preferences/theme"), {theme_id:"analytics",revision:0});
+  // A failed stylesheet must recover without changing the stored preference.
+  await call("Network.enable", {}, defaultPage);
+  await call("Network.setBlockedURLs", {urls:["*analytics/theme.css*"]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('[data-select-theme=classic]')");
+  assert.ok(await evaluate(defaultPage, "document.querySelector('main').textContent.includes('所选主题暂不可用')"));
+  assert.equal((await api(defaultPage, defaultIdentity, "GET", "/preferences/theme")).theme_id, "analytics");
+  assert.equal(await evaluate(defaultPage, "document.querySelectorAll('link[href*=\"analytics/theme.css\"]').length"), 0, "failed theme styles are removed");
+  await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
+
   await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });
 
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
@@ -120,15 +162,14 @@ try {
   assert.equal(alice.role, "user"); assert.equal(bob.role, "user"); assert.equal(admin.role, "admin");
   assert.notEqual(alice.user_id, bob.user_id);
   record(`${mode}: three independent browser contexts, real password/cookie/CSRF identities`);
-  // Theme access does not require panel settings or fleet permissions. These
-  // checks intentionally keep the unfinished independent theme unavailable.
+  // Both themes are available to every account, including restricted users.
   for (const [page, identity] of [[a, alice], [manager, admin]]) {
     await evaluate(page, "location.hash='#themes'");
     await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
-    assert.equal(await evaluate(page, "document.querySelectorAll('[data-select-theme]').length"), 1);
+    assert.equal(await evaluate(page, "document.querySelectorAll('[data-select-theme]').length"), 2);
     const preference = await api(page, identity, "GET", "/preferences/theme");
     assert.equal(preference.theme_id, "classic");
-    assert.equal(preference.revision, 0);
+    assert.equal(preference.revision, 1);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"));
     if (mode === "mobile") {
       assert.ok(await evaluate(page, "(() => {const r=document.querySelector('.mobile-account-menu>summary').getBoundingClientRect();return r.width>=44&&r.height>=44&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})()"), "mobile overflow launcher must remain visible for an account with every primary destination");
@@ -137,17 +178,16 @@ try {
       await evaluate(page, "document.querySelector('.mobile-account-menu').open=false");
     }
   }
-  const originalTheme = await api(a, alice, "GET", "/preferences/theme");
-  await api(a, alice, "PUT", "/preferences/theme", { theme_id: "analytics", revision: originalTheme.revision });
-  await reload(a);
-  await wait(a, "document.querySelector('[data-select-theme=classic]')?.disabled===false");
-  assert.ok(await evaluate(a, "document.querySelector('main').textContent.includes('所选主题暂不可用')"));
-  await reload(a, () => evaluate(a, "document.querySelector('[data-select-theme=classic]').click()"));
+  await reload(a, () => evaluate(a, "document.querySelector('[data-select-theme=analytics]').click()"));
+  await wait(a, "document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')");
+  assert.equal((await api(a, alice, "GET", "/preferences/theme")).theme_id, "analytics");
+  assert.equal((await api(b, bob, "GET", "/preferences/theme")).theme_id, "classic");
+  await reload(a, () => evaluate(a, "[...document.querySelectorAll('button')].find(item=>item.dataset.themeID==='classic').click()"));
   await wait(a, "document.querySelector('[data-select-theme=classic]')?.disabled===true");
   assert.equal((await api(a, alice, "GET", "/preferences/theme")).theme_id, "classic");
-  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 0);
+  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 1);
   await screenshot(a, "themes-classic");
-  record(`${mode}: theme page is account scoped, unavailable theme recovers through confirmed API save and reload`);
+  record(`${mode}: both theme pages switch through confirmed account API saves; another account remains unchanged`);
   for (const [user, route, selector] of [["task-reader", "tasks", "[data-task-page]"], ["traffic-reader", "traffic", ".traffic-workspace"]]) {
     const page = await createPage();
     await login(page, user);
@@ -196,7 +236,7 @@ try {
   // holds A's session and preferences. Its next navigation must clear the UI.
   await api(stalePage, staleSession, "POST", "/auth/login", { username: "bob", token: "config scope password fixture" });
   await evaluate(stalePage, "location.hash='#client-access'");
-  await wait(stalePage, "!!document.querySelector('#login-form')");
+  await wait(stalePage, "!!document.querySelector('#login-form,.a-login form')");
   assert.equal((await evaluate(stalePage, "fetch('/api/v1/auth/session').then(r=>r.json())")).user_id, bob.user_id);
   record(`${mode}: replacement cookie cannot populate the old account's page; B's session remains valid`);
   for (const [page, session, user, other] of [[a, alice, "alice", "bob"], [b, bob, "bob", "alice"]]) {
@@ -273,7 +313,7 @@ try {
   await api(a, alice, "GET", "/auth/session", undefined, 401);
   await api(b, bob, "GET", "/auth/session");
   await reload(a);
-  await wait(a, "!!document.querySelector('#login-form')");
+  await wait(a, "!!document.querySelector('#login-form,.a-login form')");
   const switched = await login(a, "bob");
   assert.equal(switched.user_id, bob.user_id);
   assert.deepEqual((await api(a, switched, "GET", "/configs")).map(config => config.id), [cb.id]);

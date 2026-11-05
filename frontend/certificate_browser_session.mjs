@@ -92,13 +92,22 @@ try {
     if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
     await call("Page.navigate", { url }, sessionId);
-    await wait(sessionId, "!!document.querySelector('#login-form')");
+    await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
     return sessionId;
   };
   const login = async (page, username) => {
-    await evaluate(page, `(() => { const form = document.querySelector('#login-form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
+    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
+    await wait(page, "!!document.querySelector('#logout,.a-user')");
+    const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    // These business regression suites deliberately select the classic theme.
+    // Default-theme behavior is checked separately through the production entry.
+    const preference = await api(page, identity, "GET", "/preferences/theme");
+    if (preference.theme_id !== "classic") {
+      await api(page, identity, "PUT", "/preferences/theme", {theme_id:"classic",revision:preference.revision});
+      await call("Page.reload", {}, page);
+    }
     await wait(page, "!!document.querySelector('#logout')");
-    return evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
     const result = await evaluate(page, `(async () => { const r = await fetch('/api/v1' + ${JSON.stringify(path)}, {method:${JSON.stringify(method)}, credentials:'same-origin', headers:{'Content-Type':'application/json','X-QControlHub-CSRF':${JSON.stringify(session.csrf_token)}}, ${body === undefined ? "" : `body:JSON.stringify(${JSON.stringify(body)})`} }); return {status:r.status, body:await r.text()}; })()`);
@@ -324,7 +333,7 @@ try {
   await click(a,'[data-cert-close]');
   await set(a,'[data-cert-search]','alice-private.example.test');
   await wait(a,"document.querySelector('[data-cert-search]')?.value==='alice-private.example.test'");
-  await click(a,'#logout');await wait(a,"!!document.querySelector('#login-form')");
+  await click(a,'#logout');await wait(a,"!!document.querySelector('#login-form,.a-login form')");
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-dialog').length"),0);
   const switched=await login(a,'bob');await open(a);
   assert.equal(await evaluate(a,"document.querySelector('[data-cert-search]').value"),'');

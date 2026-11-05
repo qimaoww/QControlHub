@@ -96,10 +96,12 @@ export async function taskDetail(ctx, taskID) {
   let task = await ctx.api(`/tasks/${pathID(taskID)}`);
   if (!ctx.current()) return;
   const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
-  const output = code(redactDiagnostic(task.output) || "暂无输出");
+  const output = code(redactDiagnostic(task.output).trim());
+  output.hidden = !output.textContent;
   const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
     muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
+  box.classList.add("a-task-dialog");
   let timer, reading = false;
   const stop = () => clearTimeout(timer);
   const active = () => ctx.current() && box.open;
@@ -116,9 +118,11 @@ export async function taskDetail(ctx, taskID) {
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
       const error = diagnosticError(task.error || "");
       if (failure.textContent !== error) failure.textContent = error;
-      if (output.textContent !== (redactDiagnostic(task.output) || "暂无输出")) {
+      const text = redactDiagnostic(task.output).trim();
+      if (output.textContent !== text) {
         const follow = output.scrollHeight-output.scrollTop-output.clientHeight<24;
-        output.textContent = redactDiagnostic(task.output) || "暂无输出";
+        output.textContent = text;
+        output.hidden = !text;
         if(follow)output.scrollTop=output.scrollHeight;
       }
     } finally { reading = false; }
