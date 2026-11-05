@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,52 @@ func TestDeploymentRecoveryRestoresRuntimeState(t *testing.T) {
 					}
 				} else if err != nil || string(data) != tc.content {
 					t.Fatalf("old content not restored: %s %v", data, err)
+				}
+			})
+		}
+	}
+}
+
+func TestFailedRollbackCannotConfirmOldDeploymentFromRestoredBytes(t *testing.T) {
+	const oldContent = `{"inbounds":[{"type":"socks","tag":"old","listen_port":23456}],"outbounds":[{"type":"direct","tag":"direct"}]}`
+	for _, kind := range []string{ServiceManagerSystemd, ServiceManagerOpenRC} {
+		for _, rollbackFails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/rollback-fails=%v", kind, rollbackFails), func(t *testing.T) {
+				dir := t.TempDir()
+				spec := EngineSpec{Binary: filepath.Join(dir, "core"), ConfigPath: filepath.Join(dir, "config.json"), Service: "qagent-sing-box.service"}
+				writeExecutable(t, spec.Binary, "#!/bin/sh\nexit 0\n")
+				if err := os.WriteFile(spec.ConfigPath, []byte(oldContent), 0600); err != nil {
+					t.Fatal(err)
+				}
+				first := filepath.Join(dir, "first")
+				helper := filepath.Join(dir, "services")
+				restart := "if [ ! -e '" + first + "' ]; then touch '" + first + "'; exit 1; fi\nexit 0\n"
+				if rollbackFails {
+					restart = "exit 1\n"
+				}
+				writeExecutable(t, helper, "#!/bin/sh\ncase \"$1 $2\" in *is-active*|*status*) echo active; exit 0 ;; esac\n"+restart)
+				manager := &ServiceManager{kind: kind, executable: helper}
+				e := &Executor{Specs: map[core.Engine]EngineSpec{core.EngineSingBox: spec}, Services: manager}
+				retained := core.Task{ID: "tsk_old", Engine: core.EngineSingBox, ConfigID: "cfg_old", ConfigVersion: 1, ConfigContent: oldContent}
+				if err := e.commitSharedDeployment(spec, retained); err != nil {
+					t.Fatal(err)
+				}
+				draft := retained
+				draft.ID, draft.Action, draft.ConfigVersion = "tsk_failed", core.ActionDeploy, 2
+				draft.ConfigContent = strings.ReplaceAll(oldContent, "23456", "23457")
+				if _, err := e.Execute(context.Background(), draft); err == nil || strings.Contains(err.Error(), "rollback failed") != rollbackFails {
+					t.Fatalf("unexpected apply/rollback result: %v", err)
+				}
+				actual, err := os.ReadFile(spec.ConfigPath)
+				if err != nil || string(actual) != oldContent {
+					t.Fatalf("old bytes were not restored: %s %v", actual, err)
+				}
+				observation := e.deploymentStatus(context.Background(), retained.Engine, spec, "")
+				if (observation.ConfigID == "") != rollbackFails {
+					t.Fatalf("incorrect identity after rollback: %+v", observation)
+				}
+				if err := e.identifyRetainedDeployment(context.Background(), spec, retained); (err != nil) != rollbackFails {
+					t.Fatalf("refresh bypassed unresolved service application: %v", err)
 				}
 			})
 		}

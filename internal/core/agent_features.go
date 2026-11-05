@@ -84,3 +84,7 @@ const AgentFeatureSharedCorePrepare = "shared-core-prepare-v1"
 // Scoped lifecycle commands and version-bound, observed instance state. Never
 // send these commands to an older Agent: it would target the host service.
 const AgentFeatureSharedCoreLifecycle = "shared-core-lifecycle-v1"
+
+// AgentFeatureInstanceStatus verifies retained main-instance identities during
+// status refreshes and reports them after failed lifecycle operations.
+const AgentFeatureInstanceStatus = "core-instance-status-v1"

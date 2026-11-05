@@ -139,6 +139,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
 		core.AgentFeatureIPQuality,
+		core.AgentFeatureInstanceStatus,
 	}
 	if sharedCoreTemplatesSupported(c.executor.Specs, c.executor.serviceManager()) {
 		features = append(features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle)

@@ -180,10 +180,23 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     ctx.navigating = ++editor.navigation;
     editor.syncControls();
     try {
+      if (can("tasks.execute") && can("tasks.read") && ctx.agent.status === "online") {
+        const engines = ctx.agent.can_manage ? ctx.agent.capabilities : ctx.agent.shared_engines || [ctx.engine];
+        for (const engine of engines || [ctx.engine]) {
+          if (!current()) return;
+          const task = await api("/tasks", { method: "POST", body: JSON.stringify({
+            agent_id: ctx.agent.id, engine, action: "status",
+          }) });
+          const result = await deployments.waitForDeployTerminal(task.id);
+          if (!current()) return;
+          if (result.status !== "succeeded") throw new Error(result.error || "实例状态查询失败");
+        }
+      }
+      if (!current()) return;
       await refreshPresetPage();
     } catch (error) {
       if (visible()) {
-        showStatus(`刷新失败：${error.message}。草稿已保留，可重试刷新。`, "error");
+        showStatus(`刷新失败：${error.message}。草稿已保留。`, "error", operationFor(operationKey)?.task);
       }
     } finally {
       ctx.navigating = false;
