@@ -43,7 +43,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := db.UpdateAgentMetrics(analyticsScope, analyticsAgent.ID, core.HostMetrics{
-				PublicIPv4: "93.184.216.34", PublicIPv6: "2606:2800:220:1:248:1893:25c8:1946",
+				PublicIPv4: "93.184.216.34", PublicIPv6: "2606:2800:1234:5678:9abc:def0:25c8:1946",
 			}); err != nil {
 				t.Fatal(err)
 			}

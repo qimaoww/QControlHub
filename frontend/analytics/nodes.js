@@ -107,9 +107,20 @@ export async function nodesPage(ctx) {
   }
   function addresses(agent) {
     const rows = addressRows(agent).filter(row => row.ok);
-    return node('div', { className: 'a-probe-addresses', 'aria-label': '节点 IP 地址' }, rows.length ? rows.map(row =>
+    return node('div', { className: 'a-probe-addresses', 'aria-label': '节点 IP 地址', 'data-ip-stack': rows.length === 2 ? 'dual' : rows[0]?.cls || 'none' }, rows.length ? rows.map(row =>
       node('div', { className: 'a-probe-address', 'data-ip-family': row.cls, title: row.source },
-        muted(row.label), node('span', { dir: 'ltr' }, row.value))) : muted('暂无公网 IP'));
+        muted(row.label), node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, row.value.split(':').flatMap((part, index, parts) => index < parts.length - 1 ? [part + ':', node('wbr')] : [part])),
+          button('', async event => {
+            const control = event.currentTarget;
+            if (control.disabled) return;
+            control.disabled = true;
+            try {
+              await copyText(row.value);
+              if (ctx.current()) ctx.announce(`${row.label} 已复制`);
+            } catch {
+              if (ctx.current()) ctx.announce('复制失败，请重试。', 'error');
+            } finally { if (control.isConnected) control.disabled = false; }
+          }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'));
   }
 
   async function load() {

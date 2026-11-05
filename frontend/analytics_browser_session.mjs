@@ -113,7 +113,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       await chooseScale(100);
     }
   }
-  await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
+  await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call });
   await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });
   await evaluate(page, "window.__animationBeforeFailure=Element.prototype.animate;Element.prototype.animate=function(){throw new Error('injected presentation failure')}");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");

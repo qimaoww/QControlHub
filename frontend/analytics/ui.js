@@ -14,6 +14,7 @@ const icons = {
   palette: '<path d="M12 3a9 9 0 1 0 0 18h1.5a1.5 1.5 0 0 0 1.1-2.5 1.5 1.5 0 0 1 1.1-2.5H18a3 3 0 0 0 3-3 10 10 0 0 0-9-10zM7.5 12h.01M10 7.5h.01M15 7.5h.01M17.5 12h.01"/>',
   menu: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   refresh: '<path d="M20 7v5h-5M4 17v-5h5m11 0a8 8 0 0 0-14-5m-2 5a8 8 0 0 0 14 5"/>',
   logout: '<path d="M10 4H5v16h5m-1-8h12m-4-4 4 4-4 4"/>',
 };

@@ -1,6 +1,6 @@
 import { checkAnalyticsTraffic } from './analytics_traffic_browser.mjs';
 import assert from 'node:assert/strict';
-export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record }) {
+export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call }) {
   await checkAnalyticsTraffic({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
   const agentID=fixture.analyticsAgent;
   const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-top h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
@@ -11,6 +11,9 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await navigate('#node-settings');
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0,'initial node monitor has no selection boxes');
   assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-grid')"));
+  const {targetInfo} = await call('Target.getTargetInfo', {}, page);
+  await call('Browser.grantPermissions', {origin:new URL(await evaluate(page,'location.href')).origin,
+    browserContextId:targetInfo.browserContextId, permissions:['clipboardReadWrite','clipboardSanitizedWrite']});
   const checkAddresses = async () => {
     const agents = await api(page, identity, 'GET', '/agents');
     const agent = agents.find(item => item.id === agentID);
@@ -19,8 +22,29 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
       const identity=[...document.querySelectorAll('.a-probe,.a-probe-identity')].find(item=>item.querySelector('.a-probe-flag[data-region-code="JP"]'));
       return identity && identity.querySelector('[data-ip-family=v4] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv4)}
         && identity.querySelector('[data-ip-family=v6] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv6)}
-        && identity.querySelector('.a-probe-flag').getAttribute('aria-label')==='日本';
+        && identity.querySelector('.a-probe-flag').getAttribute('aria-label')==='日本'
+        && identity.querySelector('[data-ip-stack=dual]').querySelectorAll('.a-ip-copy').length===2
+        && (()=>{const rows=[...identity.querySelectorAll('.a-probe-address')];const copies=rows.map(row=>row.querySelector('button').getBoundingClientRect());return Math.abs(copies[0].right-copies[1].right)<1 && rows.every(row=>row.scrollWidth<=row.clientWidth+1)})()
+        && document.documentElement.scrollWidth<=innerWidth+1;
     })()`), 'card/list display both real API address families and the resolved region');
+    for (const [family, value] of [['v4',agent.metrics.public_ipv4],['v6',agent.metrics.public_ipv6]]) {
+      const selector=`.a-probe-flag[data-region-code="JP"]`;
+      await evaluate(page, `(() => {
+        const identity=[...document.querySelectorAll('.a-probe,.a-probe-identity')].find(item=>item.querySelector(${JSON.stringify(selector)}));
+        window.__ipCopyControl=identity.querySelector('[data-ip-family=${family}] button');
+        window.__ipCopyControl.click();
+      })()`);
+      await wait(page,"!window.__ipCopyControl.disabled && document.querySelector('.a-toast-region').textContent.includes('已复制')");
+      const clipboard = await call('Runtime.evaluate', {expression:'navigator.clipboard.readText()',awaitPromise:true,returnByValue:true,userGesture:true},page);
+      assert.equal(clipboard.result.value,value,`${mode}: ${family} copy writes the exact API address to the real clipboard`);
+      assert.ok(await evaluate(page,"window.__ipCopyControl.getAttribute('aria-label').includes('复制') && !window.__ipCopyControl.textContent.includes('√') && !!window.__ipCopyControl.querySelector('svg')"));
+    }
+  };
+  const captureAddresses = async label => {
+    await evaluate(page, `(() => {const input=document.querySelector('.a-probe-toolbar [name=search]');input.value=${JSON.stringify(agentID)};input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelectorAll('.a-toast [aria-label=关闭通知]').forEach(button=>button.click());})()`);
+    await wait(page, "document.querySelectorAll('[data-ip-stack=dual]').length===1 && !document.querySelector('.a-toast,.a-motion-tail') && [...document.querySelectorAll('.a-probe-flag img')].every(image=>image.complete)");
+    await screenshot(page,label);
+    await evaluate(page, "(() => {const input=document.querySelector('.a-probe-toolbar [name=search]');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
   };
   await checkAddresses();
   const regionTrigger = `.a-probe[data-agent-id="${agentID}"] .a-region-trigger`;
@@ -50,9 +74,11 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await api(page,identity,'PUT',`/agents/${agentID}/region`,{country_code:'JP'});
   await navigate('#traffic');await navigate('#node-settings');
   await evaluate(page, "window.fetch=window.__regionFetch;delete window.__regionFetch;delete window.__regionFail");
-  await screenshot(page,'analytics-probe-cards');await click('列表','.a-main');
+  await captureAddresses('analytics-dual-stack-cards');await click('列表','.a-main');
   await wait(page,"!!document.querySelector('.a-probe-list') && !document.querySelector('[aria-busy=true]')");
   await checkAddresses();
+  await captureAddresses('analytics-dual-stack-list');
+  record(`${mode}: dual-stack cards/list retain both API addresses, align independent copy controls, wrap long IPv6 and write exact IPv4/IPv6 to the real clipboard`);
   await evaluate(page, `(() => { const image=document.querySelector('.a-probe-flag[data-region-code="JP"] img'); if(image) image.dispatchEvent(new Event('error')); })()`);
   assert.equal(await evaluate(page,"document.querySelector('.a-probe-flag[data-region-code=JP]').textContent"),'JP','flag failure keeps a readable region fallback');
   assert.ok(await evaluate(page,"!document.querySelector('.a-main input[type=checkbox], .a-probe-summary, .a-main h1')"));await screenshot(page,'analytics-probe-list');

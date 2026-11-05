@@ -1,5 +1,5 @@
 import { requestConfigSnapshot } from "../modules/config-snapshot.js";
-import { liveConfigReadAction, assertAgentConfigBaseline, submitLiveConfigChange } from "../modules/live-config-state.js";
+import { liveConfigReadAction, submitLiveConfigChange } from "../modules/live-config-state.js";
 import { readPresetRoute } from "../modules/preset-route.js";
 import { diagnosticError } from "../modules/errors.js";
 import { configStudio } from "./config-studio.js";
@@ -84,6 +84,9 @@ export async function liveConfigPage(ctx) {
   const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
   const api = (path, options) => ctx.api(path, { method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });
+  const beforeDeploy = () => {
+    if (!ctx.current()) throw Object.assign(new Error("页面目标已变化，请重新打开配置后提交。"), { deployPreflight: true });
+  };
   const snapshot = async (preferCached = false) => {
     if (!readAction || !canReadHost) throw new Error("当前节点或账号无法读取托管配置。");
     const result = await requestConfigSnapshot({ api, waitForTask: id => waitTask(ctx, id) }, agent, engine, readAction, {
@@ -121,11 +124,7 @@ export async function liveConfigPage(ctx) {
       await submitLiveConfigChange({
         api, agent, engine, intent: values.intent, source, existingAvailable: importSource, savedConfig: saved,
         form: new Map(Object.entries({ ...values, version: saved?.version || 0 })),
-        beforeDeploy: hostManaged ? async () => {
-          if (!source?.content) assertAgentConfigBaseline(undefined, "");
-          const fresh = await snapshot();
-          assertAgentConfigBaseline(source.content, fresh.content);
-        } : undefined,
+        beforeDeploy,
         async submitTask(body) {
           pendingTask = await ctx.api("/tasks", { method: "POST", body });
           return pendingTask;
@@ -215,15 +214,10 @@ export async function liveConfigPage(ctx) {
       liveNotice.textContent = `已保存 · ${date(config.updated_at)}`;
       ctx.setDirty(false);
     },
-    beforeDeploy: hostManaged ? async () => {
-      if (!source?.content) assertAgentConfigBaseline(undefined, "");
-      const fresh = await snapshot();
-      assertAgentConfigBaseline(source.content, fresh.content);
-    } : undefined,
+    beforeDeploy,
   });
   return stack(filterbar(select, flags),
     errorText && notice(errorText),
     inbounds,
-    section("配置源码", node("div", { className: "a-card-body" }, form), actions(sourceTools, read, format, readHistory),
-      hostManaged && mode === "personal" ? "部署前需读取托管配置，以核对节点当前内容。" : null));
+    section("配置源码", node("div", { className: "a-card-body" }, form), actions(sourceTools, read, format, readHistory)));
 }
