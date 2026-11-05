@@ -8,6 +8,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
   configFiles, beforeDeploy, workspaceElement, liveConfig, deployments,
 }) {
   const { recordPendingDeploy, monitorDeployTask } = deployments;
+  const sourceMode = state.data.liveConfigSource;
   let liveSaving = false, liveSaveUncertain = false;
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
@@ -20,7 +21,7 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
       const controls = [...(workspaceElement || formElement).querySelectorAll("button, input, select, textarea")]
         .map(element => [element, element.disabled]);
       const submitter = event.submitter, label = submitter?.textContent;
-      let submitted = false, persisted;
+      let submitted = false, persisted, completed;
       liveSaving = true;
       formElement.dataset.saving = "1";
       formElement.setAttribute("aria-busy", "true");
@@ -63,20 +64,18 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
           source,
           existingAvailable: importSource,
           savedConfig: saved,
-          beforeDeploy: beforeDeploy ? async () => {
-            updateFeedback(status, "正在核验 Agent 当前配置…");
-            if (submitter) updateFeedback(submitter, "正在核验…");
-            await beforeDeploy();
-            updateFeedback(status, "正在保存配置并提交任务…");
-            if (submitter) updateFeedback(submitter, "正在提交…");
-          } : null,
+          beforeDeploy,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
-            recordPendingDeploy(taskId, agent.id, engine);
+            if (accountData !== state.data) return;
             monitorDeployTask(taskId, agent.id, engine);
+            if (state.data.presetOperations?.[`${agent.id}|${engine}`]?.version > persisted?.version) return;
+            recordPendingDeploy(taskId, agent.id, engine);
           },
         });
-        if (accountData !== state.data) return;
+        completed = result;
+        if (accountData !== state.data ||
+            state.data.presetOperations?.[`${agent.id}|${engine}`]?.version > result.saved.version) return;
         if (intent === "save") notify("已保存，尚未部署");
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
@@ -92,10 +91,36 @@ export function bindLiveConfigSubmit({ api, state, notify, confirmAction, submit
       } catch (error) {
         if (accountData !== state.data || !formElement.isConnected) return;
         liveSaveUncertain = !error.deployPreflight && submitted &&
-          Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
-        const message = `${persisted ? `配置已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
+          Boolean(persisted || error.recoverConfigSubmission || !error.status || error.status === 408 || error.status === 409 || error.status >= 500);
+        const message = `${completed ? `配置已保存${completed.task?.id ? "且任务已提交" : ""}，页面刷新失败：` : persisted ? "配置已保存，后续任务未确认：" : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请核对结果后继续。" : ""}`;
         updateFeedback(status, message);
         status.setAttribute("role", "alert");
+        if (completed || error.recoverConfigSubmission) {
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "button small";
+          retry.textContent = completed ? "重新加载配置" : "核对保存结果";
+          const current = () => accountData === state.data && formElement.isConnected &&
+            state.route === "live-config" && state.data.liveAgent === agent.id &&
+            state.data.liveEngine === engine && state.data.liveConfigSource === sourceMode;
+          retry.onclick = async () => {
+            if (!current()) return;
+            retry.disabled = true;
+            try {
+              if (!completed) {
+                const result = await error.recoverConfigSubmission();
+                if (!current()) return;
+                completed = {saved:result.config, task:result.task};
+              }
+              await liveConfig();
+            } catch (recoveryError) {
+              if (!current()) return;
+              updateFeedback(status, recoveryError.code === "config_submission_superseded" ? diagnosticError(recoveryError.message) : `${completed ? "配置已保存，页面刷新失败" : "保存结果暂未确认"}：${diagnosticError(recoveryError.message)}`);
+              status.append(retry);
+            } finally { retry.disabled = false; }
+          };
+          status.append(retry);
+        }
         notify(message, "error");
       } finally {
         liveSaving = false;

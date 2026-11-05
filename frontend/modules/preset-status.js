@@ -80,7 +80,7 @@ function renderPresetStatus() {
 }
 
 function watchPresetOperation(operation) {
-  if (!operation?.task?.id || operation.monitoring || taskTerminal(operation.task) || !can("tasks.read")) return;
+  if (!operation?.task?.id || operation.monitoring || !can("tasks.read")) return;
   const sessionData = state.data;
   const {key, intent, task} = operation;
   const [agentId, engine] = key.split("|");
@@ -95,7 +95,7 @@ function watchPresetOperation(operation) {
     operation.tone = "";
     renderPresetStatus();
   };
-  const waiting = waitForDeployTerminal(task.id, progress);
+  const waiting = taskTerminal(task) ? Promise.resolve(task) : waitForDeployTerminal(task.id, progress);
   if (intent === "deploy") void monitorDeployTask(task.id, agentId, engine);
   void waiting.then(latest => {
     if (!tracked()) return;

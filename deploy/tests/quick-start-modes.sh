@@ -47,6 +47,9 @@ docker() {
                 "ghcr.io/qimaoww/qcontrol-plane:$(bundled_image_tag)" \
                 "ghcr.io/qimaoww/qcontrol-web:$(bundled_image_tag)"
             ;;
+        # Real Compose consumes the override on stdin. Closing the mock early
+        # races the writer and can fail a valid update with SIGPIPE/pipefail.
+        *" -f - up "*) cat >/dev/null ;;
         *" ps -q control-plane "*) printf '%s\n' control-container ;;
         *" ps -q qcontrol-web "*) printf '%s\n' web-container ;;
         *" ps -q postgres "*) printf '%s\n' postgres-container ;;

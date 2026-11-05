@@ -28,8 +28,8 @@ var realityServerNamePresets = []string{
 }
 
 // RealityServerNamePresets returns a copy so callers cannot change the
-// application defaults. Every submitted target is still probed before save;
-// the preset list alone is never treated as proof that a target is usable.
+// application defaults. Reachability is a runtime property; this list does
+// not prove that a target is reachable from a particular Agent.
 func RealityServerNamePresets() []string {
 	return append([]string(nil), realityServerNamePresets...)
 }

@@ -23,7 +23,7 @@ export async function testLiveEditorConverges({ FakeForm, AGENT_ID, ENGINE, KEY,
     const { ctx } = buildContext(state, {
       "GET /agents": () => [makeAgent()],
       "GET /agents/test-agent/configs/xray/workspace": emptyWorkspace,
-      "PUT /agents/test-agent/configs/xray": { config: { id: "lc", version: 2 } },
+      "POST /agents/test-agent/configs/xray/source": { config: { id: "lc", version: 2, content:NEW_CONTENT }, task:{id:"lc-deploy-task", action:"deploy"} },
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
         if (body.action === "deploy") return { id: "lc-deploy-task" };
@@ -38,7 +38,7 @@ export async function testLiveEditorConverges({ FakeForm, AGENT_ID, ENGINE, KEY,
         status: "succeeded", id: p.split("/").pop(),
       }),
       "GET /tasks/editor-read-\\d+/config-snapshot": (_o, path) => ({
-        content: path.includes("editor-read-1/") ? OLD_CONTENT : NEW_CONTENT,
+        content: NEW_CONTENT,
       }),
     });
 
@@ -49,12 +49,8 @@ export async function testLiveEditorConverges({ FakeForm, AGENT_ID, ENGINE, KEY,
 
     assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
       "[F] pending cleared after editor deploy succeeded");
-    assert.ok(editorReadCount >= 2,
-      "[F] forced preflight and post-deploy reads both ran");
-    assert.equal(editorReadCacheHints[0], undefined,
-      "[F] deploy preflight must bypass the 600-second cache");
-    assert.ok(editorReadCacheHints.slice(1).includes(true),
-      "[F] ordinary post-deploy page reads may request the cache");
+    assert.equal(editorReadCount, 1, "[F] deploy only reads back after applying; no preflight read");
+    assert.equal(editorReadCacheHints[0], true);
     assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
       "[F] cache contains post-deploy content after convergence");
   }

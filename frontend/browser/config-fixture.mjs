@@ -134,6 +134,7 @@ export async function createConfigFixture(engine, options = {}) {
     }
     if (request.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.gate) await test.gate;
+      if (test.mutationFailure) throw Object.assign(new Error("测试保存响应中断"), test.mutationFailure);
       if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
       assert(body.expected_version === (saved?.version || 0), "mutation request lost optimistic version");
       test.writes.push({path, ...body});

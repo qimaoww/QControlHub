@@ -67,12 +67,15 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 			return
 		}
 	}
-	config, err := s.store.SaveAgentConfig(request.Context(), input, input.Version)
+	candidate := input
+	candidate.Version++
+	policies, err := s.planShadowsocksRustPolicies(request.Context(), candidate)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.reconcileSavedShadowsocksRustPolicies(request.Context(), config); err != nil {
+	config, err := s.store.SaveAgentConfigWithPolicies(request.Context(), input, input.Version, policies)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
