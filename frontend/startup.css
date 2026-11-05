@@ -1,0 +1,45 @@
+/* Public entry presentation; removed when the selected theme takes over. */
+body:has(> #app > .qch-startup) { margin: 0; }
+.qch-startup {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  box-sizing: border-box; overflow: auto; padding: 32px 24px;
+  background: #fafafa; color: #18181b; color-scheme: light;
+  font: 400 14px/1.6 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.qch-startup-content { display: grid; justify-items: center; gap: 24px; max-width: 100%; text-align: center; }
+.qch-startup-emblem {
+  display: grid; place-items: center; width: 80px; height: 80px;
+  box-sizing: border-box; padding: 10px; border: 1px solid #e4e4e7;
+  border-radius: 24px; background: #fff;
+  box-shadow: 0 6px 24px rgb(24 24 27 / .04), 0 1px 3px rgb(24 24 27 / .03);
+}
+.qch-startup-mark {
+  display: grid; place-items: center; width: 58px; height: 58px;
+  border-radius: 16px; background: #18181b; color: #fff;
+}
+.qch-startup-mark svg { display: block; width: 32px; height: 32px; }
+.qch-startup-signal { stroke-dasharray: 48 48; animation: qch-startup-signal 2.4s ease-in-out infinite; }
+.qch-startup-copy { display: grid; gap: 8px; }
+.qch-startup-name { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.4; letter-spacing: -.4px; }
+.qch-startup-status { margin: 0; color: #62626b; font-size: 13px; line-height: 1.6; }
+.qch-startup-track { width: 144px; height: 3px; overflow: hidden; border-radius: 4px; background: #e4e4e7; }
+.qch-startup-track::after {
+  content: ""; display: block; width: 48px; height: 100%; border-radius: inherit;
+  background: #71717a; animation: qch-startup-travel 1.8s cubic-bezier(.45, 0, .55, 1) infinite alternate;
+}
+.qch-startup-retry {
+  min-height: 44px; padding: 8px 18px; border: 1px solid #18181b; border-radius: 6px;
+  background: #18181b; color: #fff; font: inherit; cursor: pointer;
+}
+.qch-startup-retry:focus-visible { outline: 2px solid #2457ba; outline-offset: 4px; }
+.qch-startup[data-failed] .qch-startup-status { max-width: 280px; }
+.qch-startup[data-failed] .qch-startup-track { display: none; }
+.qch-startup[data-failed] .qch-startup-signal { animation: none; }
+.qch-startup[data-paused] *, .qch-startup[data-paused] *::after { animation-play-state: paused; }
+@keyframes qch-startup-signal { 0%, 100% { stroke-dashoffset: 0; opacity: 1; } 50% { stroke-dashoffset: 4; opacity: .55; } }
+@keyframes qch-startup-travel { from { transform: translateX(0); } to { transform: translateX(96px); } }
+@media (prefers-reduced-motion: reduce) {
+  .qch-startup-signal, .qch-startup-track::after { animation: none; }
+  .qch-startup-track::after { width: 100%; background: #a1a1aa; }
+}

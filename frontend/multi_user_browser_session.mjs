@@ -84,7 +84,7 @@ try {
       socket.removeEventListener("message", onMessage);
     }
   };
-  const createPage = async (url = base) => {
+  const createPage = async (url = base, checkStartup = false) => {
     const { browserContextId } = await call("Target.createBrowserContext");
     const { targetId } = await call("Target.createTarget", { url: "about:blank", browserContextId });
     const { sessionId } = await call("Target.attachToTarget", { targetId, flatten: true });
@@ -92,8 +92,37 @@ try {
     await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, sessionId);
     if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
+    let startupScript;
+    if (checkStartup) {
+      // Hold the real session request to inspect the entry before either theme
+      // mounts. Releasing it continues the normal authenticated bootstrap.
+      startupScript = await call("Page.addScriptToEvaluateOnNewDocument", {source: `
+        const originalFetch = window.fetch;
+        const startupGate = new Promise(resolve => window.__releaseStartup = resolve);
+        window.fetch = (...args) => String(args[0]).endsWith('/auth/session')
+          ? startupGate.then(() => originalFetch(...args)) : originalFetch(...args);
+      `}, sessionId);
+    }
     await call("Page.navigate", { url }, sessionId);
+    if (checkStartup) {
+      await wait(sessionId, "!!window.__releaseStartup && !!document.querySelector('#qch-startup-style')?.sheet");
+      assert.ok(await evaluate(sessionId, `(() => {
+        const screen = document.querySelector('.qch-startup'), box = screen.getBoundingClientRect();
+        return getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight
+          && !document.getAnimations().length && !!document.querySelector('[role=status]');
+      })()`), "entry fills the viewport and remains clear with reduced motion");
+      await screenshot(sessionId, "startup-loading");
+      await call("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:"no-preference"}]}, sessionId);
+      await wait(sessionId, "document.getAnimations().length===2 && document.getAnimations().every(a=>a.playState==='running')");
+      await call("Page.removeScriptToEvaluateOnNewDocument", {identifier:startupScript.identifier}, sessionId);
+      await evaluate(sessionId, "window.__releaseStartup()");
+    }
     await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
+    if (checkStartup) {
+      await wait(sessionId, "!document.querySelector('.qch-startup,#qch-startup-style')");
+      assert.ok(await evaluate(sessionId, "!document.getAnimations().some(a=>a.animationName?.startsWith('qch-startup'))"), "startup animations and stylesheet are released after theme mount");
+      await call("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:"reduce"},{name:"prefers-color-scheme",value:"light"}]}, sessionId);
+    }
     return sessionId;
   };
   const login = async (page, username) => {
@@ -123,7 +152,7 @@ try {
   };
 
   // No preference row: use the production entry without a preview hint.
-  const defaultPage = await createPage(`${base}/?theme=classic#themes`);
+  const defaultPage = await createPage(`${base}/?theme=classic#themes`, true);
   assert.ok(await evaluate(defaultPage, "!!document.querySelector('.a-login form') && !new URL(location.href).searchParams.has('theme')"));
   await evaluate(defaultPage, "window.__defaultDocument=true");
   const defaultLogin = async () => {
@@ -153,6 +182,22 @@ try {
   await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
   await reload(defaultPage);
   await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  // If neither runtime loads, keep an accessible entry and a working retry.
+  await call("Network.setBlockedURLs", {urls:["*/analytics/app.js*", "*/assets/app.js*"]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.qch-startup[data-failed] button')");
+  assert.ok(await evaluate(defaultPage, "!!document.querySelector('.qch-startup [role=alert]') && !document.querySelector('.qch-startup[aria-busy]') && !document.getAnimations().length"));
+  await screenshot(defaultPage, "startup-failure");
+  await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Tab",code:"Tab",windowsVirtualKeyCode:9}, defaultPage);
+  await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Tab",code:"Tab",windowsVirtualKeyCode:9}, defaultPage);
+  assert.ok(await evaluate(defaultPage, "document.activeElement.matches('.qch-startup-retry')"));
+  await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
+  await reload(defaultPage, async () => {
+    await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Enter",code:"Enter",windowsVirtualKeyCode:13,text:"\r"}, defaultPage);
+    await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13}, defaultPage);
+  });
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true],#qch-startup-style')");
+  record(`${mode}: styled startup, reduced motion, animation cleanup, resource failure and keyboard retry`);
   record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
 
   await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });

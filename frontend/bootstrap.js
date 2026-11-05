@@ -3,6 +3,22 @@ import { accountRequest } from "./modules/account-request.js";
 import { effectiveTheme, loginTheme } from "./modules/theme-registry.js";
 
 const app = document.querySelector("#app");
+const startup = app.querySelector(".qch-startup");
+const startupStyle = document.querySelector("#qch-startup-style");
+const startupObserver = new MutationObserver(() => {
+  if (!startup?.isConnected) finishStartup();
+});
+const pauseStartup = () => startup?.toggleAttribute("data-paused", document.hidden);
+function finishStartup(removeStyle = true) {
+  startupObserver.disconnect();
+  document.removeEventListener("visibilitychange", pauseStartup);
+  if (removeStyle) startupStyle?.remove();
+}
+if (startup) {
+  startupObserver.observe(app, { childList: true });
+  document.addEventListener("visibilitychange", pauseStartup);
+  pauseStartup();
+}
 const params = new URL(import.meta.url).searchParams;
 const version = params.get("v");
 const timed = () => AbortSignal.timeout(8000);
@@ -54,7 +70,8 @@ async function start() {
     } catch {
       disposeTheme();
       sheet.link.remove();
-      app.replaceChildren();
+      // Retain the public entry while the fallback theme loads.
+      if (startup) app.replaceChildren(startup);
       document.body.removeAttribute("class");
       app.dataset.themeRecovery = "analytics";
     }
@@ -65,12 +82,23 @@ async function start() {
 }
 
 start().catch(() => {
-  const message = document.createElement("p");
+  finishStartup(false);
+  if (startupStyle && !startupStyle.isConnected) document.head.append(startupStyle);
+  const screen = startup || document.createElement("div");
+  screen.className = "qch-startup";
+  screen.removeAttribute("aria-busy");
+  screen.setAttribute("data-failed", "");
+  const content = screen.querySelector(".qch-startup-content") || screen;
+  const message = screen.querySelector(".qch-startup-status") || document.createElement("p");
+  message.className = "qch-startup-status";
   message.setAttribute("role", "alert");
-  message.textContent = "控制台资源加载失败。";
+  message.textContent = "控制台加载失败，请重试。";
+  if (!screen.contains(message)) content.append(message);
   const retry = document.createElement("button");
   retry.type = "button";
-  retry.textContent = "重新加载";
+  retry.className = "qch-startup-retry";
+  retry.textContent = "重试";
   retry.onclick = () => location.reload();
-  app.replaceChildren(message, retry);
+  content.append(retry);
+  app.replaceChildren(screen);
 });
