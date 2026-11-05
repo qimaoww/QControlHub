@@ -7,8 +7,23 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await navigate('#node-settings');
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0,'initial node monitor has no selection boxes');
   assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-grid')"));
+  const checkAddresses = async () => {
+    const agents = await api(page, identity, 'GET', '/agents');
+    const agent = agents.find(item => item.id === agentID);
+    assert.equal(agent.region_code, 'JP');
+    assert.ok(await evaluate(page, `(() => {
+      const identity=[...document.querySelectorAll('.a-probe,.a-probe-identity')].find(item=>item.querySelector('.a-probe-flag[data-region-code="JP"]'));
+      return identity && identity.querySelector('[data-ip-family=v4] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv4)}
+        && identity.querySelector('[data-ip-family=v6] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv6)}
+        && identity.querySelector('.a-probe-flag').getAttribute('aria-label')==='日本';
+    })()`), 'card/list display both real API address families and the resolved region');
+  };
+  await checkAddresses();
   await screenshot(page,'analytics-probe-cards');await click('列表','.a-main');
   await wait(page,"!!document.querySelector('.a-probe-list') && !document.querySelector('[aria-busy=true]')");
+  await checkAddresses();
+  await evaluate(page, `(() => { const image=document.querySelector('.a-probe-flag[data-region-code="JP"] img'); if(image) image.dispatchEvent(new Event('error')); })()`);
+  assert.equal(await evaluate(page,"document.querySelector('.a-probe-flag[data-region-code=JP]').textContent"),'JP','flag failure keeps a readable region fallback');
   assert.ok(await evaluate(page,"!document.querySelector('.a-main input[type=checkbox], .a-probe-summary, .a-main h1')"));await screenshot(page,'analytics-probe-list');
   assert.equal((await api(page,identity,'GET','/preferences/node-view')).view,'list');
   await navigate('#traffic');await navigate('#node-settings');

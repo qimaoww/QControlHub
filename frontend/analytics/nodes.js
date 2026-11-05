@@ -1,4 +1,6 @@
 import { nodeMetrics } from './node-metrics.js';
+import { publicAddressRows } from '../modules/agent-address-model.js';
+import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
 import { createServiceActionGuard } from '../modules/agent-service-state.js';
@@ -9,6 +11,7 @@ import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
 const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.status);
+const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels || {}, agent.features || []);
 
 export async function nodesPage(ctx) {
   const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view')]);
@@ -43,7 +46,7 @@ export async function nodesPage(ctx) {
   }
   const shownAgents = () => {
     const query = search.querySelector('input').value.trim().toLowerCase();
-    return agents.filter(agent => [agent.name, agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6].some(value => String(value || '').toLowerCase().includes(query)));
+    return agents.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
   };
   const selectable = agent => ctx.can('tasks.execute') &&
     (agent.can_manage !== false || ctx.can('instance.manage', agent));
@@ -84,6 +87,22 @@ export async function nodesPage(ctx) {
   function network(agent){const m=agent.metrics||{},available=agent.status==='online'&&m.network_available;return node('div',{className:'a-probe-network'},
     stack(muted('接收'),node('strong',{},available?`${bytes(m.network_rx_bps)}/s`:'—')),
     stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—')));}
+  function regionFlag(agent) {
+    const region = geoRegionDetails(agent.labels?.region_code) || geoRegionDetails(agent.region_code);
+    const flag = node('span', { className: 'a-probe-flag', role: 'img', 'aria-label': region?.name || '国家／地区未知', title: region?.name || '国家／地区未知' });
+    if (!region) { flag.textContent = '—'; return flag; }
+    flag.dataset.regionCode = region.code;
+    const image = node('img', { src: `/api/v1/region-flags/${region.flagCode.toLowerCase()}`, alt: '', decoding: 'async', draggable: 'false' });
+    image.addEventListener('error', () => { flag.replaceChildren(region.code); }, { once: true });
+    flag.append(image);
+    return flag;
+  }
+  function addresses(agent) {
+    const rows = addressRows(agent).filter(row => row.ok);
+    return node('div', { className: 'a-probe-addresses', 'aria-label': '节点 IP 地址' }, rows.length ? rows.map(row =>
+      node('div', { className: 'a-probe-address', 'data-ip-family': row.cls, title: row.source },
+        muted(row.label), node('span', { dir: 'ltr' }, row.value))) : muted('暂无公网 IP'));
+  }
 
   async function load() {
     const received = list(await ctx.api('/agents'));
@@ -107,9 +126,9 @@ export async function nodesPage(ctx) {
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
     if(view==='cards')results.replaceChildren(node('div',{className:'a-probe-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id},
-        node('header',{className:'a-probe-head'},node('div',{},node('h2',{},agent.name),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
+        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
         selecting&&node('div',{className:'a-probe-choice'},choice(agent)),
-        node('div',{className:'a-probe-body'},metrics(agent),network(agent)),
+        node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
         node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
         node('footer',{className:'a-probe-footer'},controls(agent))))));
     else{
@@ -123,7 +142,7 @@ export async function nodesPage(ctx) {
       const listTable=table([...(selecting?['选择']:[]),'节点','状态','CPU','内存','磁盘','网络速率','操作'],shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
         return [...(selecting?[choice(agent)]:[]),
-          node('div',{className:'a-probe-identity'},node('strong',{},agent.name),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
+          node('div',{className:'a-probe-identity'},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
             muted(agent.can_manage===false?'本人共享实例':'主实例')),
           node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
           compactMeter(m.cpu_percent,online&&m.cpu_available),

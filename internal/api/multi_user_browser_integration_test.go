@@ -31,6 +31,14 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
 			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
 			analyticsScope := store.WithConfigScope(ctx, analyticsUser.ID, false)
+			if err := db.UpdateAgentMetrics(analyticsScope, analyticsAgent.ID, core.HostMetrics{
+				PublicIPv4: "93.184.216.34", PublicIPv6: "2606:2800:220:1:248:1893:25c8:1946",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SetAgentRegionCode(analyticsScope, analyticsAgent.ID, "JP"); err != nil {
+				t.Fatal(err)
+			}
 			analyticsConfig := configScopeAPIConfig(t, 23475)
 			analyticsConfig.AgentID = analyticsAgent.ID
 			analyticsConfig, err := db.SaveAgentConfig(analyticsScope, analyticsConfig, 0)

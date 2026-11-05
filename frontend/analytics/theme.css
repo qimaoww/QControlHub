@@ -295,6 +295,15 @@ strong, b { font-weight: 600; }
 .a-probe-head > div { min-width: 0; display: grid; gap: 6px; }
 .a-probe-head h2 { font-size: 16px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; margin: 0; }
 .a-probe-head .a-badge { flex: 0 0 auto; }
+.a-probe-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.a-probe-name > :is(h2,strong) { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.a-probe-flag { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 18px; overflow: hidden; border-radius: 3px; background: var(--tint); color: var(--muted); font-size: 10px; line-height: 1; box-shadow: inset 0 0 0 1px #0000000a; }
+.a-probe-flag img { width: 100%; height: 100%; object-fit: cover; }
+.a-probe-addresses { display: grid; gap: 5px; min-width: 0; }
+.a-probe-address { display: grid; grid-template-columns: 32px minmax(0,1fr); align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.a-probe-address .a-muted { font-size: 11px; }
+.a-probe-address > [dir] { min-width: 0; overflow-wrap: anywhere; }
+.a-probe-addresses > .a-muted { font-size: 12px; }
 .a-probe-body { padding: 4px 20px 20px; display: grid; gap: 20px; }
 .a-probe-meters { display: grid; gap: 14px; min-width: 180px; font-variant-numeric: tabular-nums; }
 .a-probe-meter { display: grid; gap: 7px; }
