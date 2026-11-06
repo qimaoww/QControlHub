@@ -8,7 +8,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Renaming/deleting a preset must not leave inbound selectors pointing at the

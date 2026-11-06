@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: ${{ inputs.paths }}
         key: ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', '!.ci-cache/**') }}

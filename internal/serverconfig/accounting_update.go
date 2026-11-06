@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // AccountingUpdateSource removes only unchanged generated artifacts from a

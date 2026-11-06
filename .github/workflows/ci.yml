@@ -20,7 +20,7 @@ jobs:
   debian:
     name: Debian / systemd
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.27.3-bookworm
     timeout-minutes: 35
     services:
       postgres:
@@ -41,7 +41,7 @@ jobs:
       QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qcontrolhub?sslmode=disable
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
           package-manager-cache: false
 
       - name: Require a schema version bump for schema changes
@@ -120,7 +120,7 @@ jobs:
 
       - name: Upload Debian timing evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-timings-debian
           path: .ci-report
@@ -147,11 +147,11 @@ jobs:
           --health-retries 12
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Pull and identify the Alpine toolchain
         id: alpine-toolchain
-        run: sh .github/scripts/container-toolchain.sh golang:1.26.10-alpine
+        run: sh .github/scripts/container-toolchain.sh golang:1.27.3-alpine
 
       - name: Restore Alpine Go objects and modules
         uses: ./.github/actions/go-cache
@@ -172,7 +172,7 @@ jobs:
             -v "$PWD/.ci-cache/alpine-build:/cache/build" \
             -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -e VERSION="${{ github.sha }}" \
-            -v "$PWD:/src" -w /src golang:1.26.10-alpine sh -euxc '
+            -v "$PWD:/src" -w /src golang:1.27.3-alpine sh -euxc '
               # Module smoke uses zh Intl.DisplayNames. Chromium previously
               # supplied full ICU data transitively; keep that data explicitly.
               sh .github/scripts/ci-time.sh dependencies apk add --no-cache bash coreutils curl findutils git icu-data-full libcap make nftables nodejs openrc openssl postgresql-client jq
@@ -196,7 +196,7 @@ jobs:
 
       - name: Upload Alpine timing evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-timings-alpine
           path: .ci-report
@@ -211,14 +211,14 @@ jobs:
       GOMODCACHE: ${{ github.workspace }}/.ci-cache/sandbox-mod
       QCH_SANDBOX_GOCACHE: ${{ github.workspace }}/.ci-cache/sandbox-build
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
       - name: Pull and identify the sandbox toolchain
         id: sandbox-toolchain
-        run: sh .github/scripts/container-toolchain.sh golang:1.26.10-bookworm
+        run: sh .github/scripts/container-toolchain.sh golang:1.27.3-bookworm
       - name: Restore sandbox Go objects and modules
         uses: ./.github/actions/go-cache
         with:
@@ -239,7 +239,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -293,7 +293,7 @@ jobs:
           sh .github/scripts/run-ci-container.sh --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
-            -w /src golang:1.26.10-alpine sh -ec '
+            -w /src golang:1.27.3-alpine sh -ec '
               apk add --no-cache python3 openrc libcap openssl coreutils nftables iproute2 >/dev/null
               QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh --prepare-agent
               mkdir /binaries
@@ -327,7 +327,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Validate Compose configuration
         env:
           POSTGRES_PASSWORD: ci-postgres-password
@@ -338,7 +338,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Build all images with shared objects
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@v7
         env:
           VERSION: ${{ github.sha }}
         with:
@@ -361,7 +361,7 @@ jobs:
       matrix:
         target: [qcontrol-plane, qagent, qcontrol-web]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Require every necessary job to succeed
         env:
           QCH_CI_NEEDS: ${{ toJSON(needs) }}
@@ -388,7 +388,7 @@ jobs:
             image: qcontrol-web
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

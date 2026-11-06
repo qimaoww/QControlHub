@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Import through the real subscription parser and native YAML, using the test

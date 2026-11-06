@@ -20,8 +20,8 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"go.yaml.in/yaml/v4"
 	"golang.org/x/net/dns/dnsmessage"
-	"gopkg.in/yaml.v3"
 )
 
 // This test needs a real systemd manager, root and an official Mihomo binary.

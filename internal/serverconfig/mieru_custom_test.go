@@ -8,8 +8,8 @@ import (
 	"github.com/enfein/mieru/v3/apis/trafficpattern"
 	"github.com/enfein/mieru/v3/pkg/appctl/appctlpb"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"go.yaml.in/yaml/v4"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
 )
 
 func testMieruCustomPattern() *MieruCustomPattern {

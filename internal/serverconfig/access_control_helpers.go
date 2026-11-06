@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func mainlandInboundExists(engine core.Engine, root map[string]any, tag string, port int) bool {

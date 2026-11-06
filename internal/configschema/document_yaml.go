@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func mergeYAMLListItem(content, generatedContent, listKey, matchKey, matchValue, operation string, replacedKeys map[string]struct{}) (string, error) {

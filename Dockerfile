@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 
-FROM golang:1.26.10-alpine AS build-base
+FROM golang:1.27.3-alpine AS build-base
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath \
     && mv /out/control-plane /out/qcontrol-plane \
     && mv /out/agent /out/qagent
 
-FROM alpine:3.22 AS runtime-base
+FROM alpine:3.24 AS runtime-base
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \

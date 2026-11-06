@@ -7,7 +7,7 @@ import (
 
 	"filippo.io/edwards25519"
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func generateMihomo(input Input) (string, error) {

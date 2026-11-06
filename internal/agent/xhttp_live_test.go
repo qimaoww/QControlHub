@@ -26,8 +26,8 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"go.yaml.in/yaml/v4"
 	"golang.org/x/net/http2"
-	"gopkg.in/yaml.v3"
 )
 
 // No Internet endpoint is contacted. TLS and CDN-style endpoints terminate in

@@ -16,7 +16,7 @@ writeFileSync(config, JSON.stringify({ browser: { browserName: "chromium", launc
 const session = `qch-logs-${label}`;
 function cli(...args) {
   const executable = process.env.PLAYWRIGHT_CLI || "npx";
-  const prefix = process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.22", "playwright-cli"];
+  const prefix = process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.23", "playwright-cli"];
   const result = spawnSync(executable, [...prefix, `-s=${session}`, ...args], { encoding: "utf8" });
   if (result.status !== 0 || result.stdout.includes("### Error")) throw new Error(result.stdout + result.stderr);
 }
