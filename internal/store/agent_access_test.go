@@ -316,7 +316,6 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 	for _, check := range []func() error{
 		func() error { return db.SetAgentName(alice, agent.ID, "unauthorized") },
 		func() error { return db.SetAgentRegionCode(alice, agent.ID, "US") },
-		func() error { return db.SetAgentKomariUUID(alice, agent.ID, "unauthorized") },
 		func() error { return db.SetAgentClientAddress(alice, agent.ID, "foreign.example") },
 		func() error { return db.SetAgentEngineCapability(alice, agent.ID, core.EngineMihomo, false) },
 		func() error { _, err := db.EnrollmentCommandForAgent(alice, agent.ID); return err },

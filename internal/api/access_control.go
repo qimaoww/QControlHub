@@ -11,6 +11,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 type mainlandAccessResource struct {
@@ -171,24 +172,19 @@ func (s *Server) putMainlandAccessPolicy(w http.ResponseWriter, request *http.Re
 			writeError(w, http.StatusBadRequest, "当前配置中不存在匹配的入站标签和端口")
 			return
 		}
-		saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
-			AgentID: config.AgentID, Name: config.Name, Description: config.Description,
-			Engine: config.Engine, Content: config.Content,
-		}, input.ExpectedVersion)
+		desired := reconcileShadowsocksRustPolicies(entries, existingPolicies, agent.ID, config.Version+1,
+			input.BlockMainlandDestination, canonicalTag, input.Port, input.BlockMainlandSource, true)
+		if desired == nil {
+			desired = []core.MainlandAccessPolicy{}
+		}
+		saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), config, input.ExpectedVersion,
+			store.ConfigMutationOptions{Action: core.Action(input.Intent), MainlandPolicies: desired})
 		if err != nil {
 			writeStoreError(w, err)
 			return
 		}
-		desired := reconcileShadowsocksRustPolicies(entries, existingPolicies, agent.ID, saved.Version,
-			input.BlockMainlandDestination, canonicalTag, input.Port, input.BlockMainlandSource, true)
-		if err := s.store.ReplaceMainlandAccessPolicies(request.Context(), agent.ID, saved.Version, desired); err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
-		if !ok {
-			return
-		}
+		task.ConfigContent = ""
+
 		s.recordAudit(request, "agent_config.mainland_access_saved", saved.ID, canonicalTag+" "+input.Intent)
 		writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 		return
@@ -216,18 +212,16 @@ func (s *Server) putMainlandAccessPolicy(w http.ResponseWriter, request *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
+	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), core.Config{
 		AgentID: config.AgentID, Name: config.Name, Description: config.Description,
 		Engine: config.Engine, Content: content,
-	}, input.ExpectedVersion)
+	}, input.ExpectedVersion, store.ConfigMutationOptions{Action: core.Action(input.Intent)})
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
-	if !ok {
-		return
-	}
+	task.ConfigContent = ""
+
 	s.recordAudit(request, "agent_config.mainland_access_saved", saved.ID, input.Tag+" "+input.Intent)
 	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 }

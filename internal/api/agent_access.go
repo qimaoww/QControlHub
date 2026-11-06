@@ -185,7 +185,7 @@ func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Req
 		}
 		administration := request.Method != http.MethodGet && request.Method != http.MethodHead &&
 			!strings.Contains(path, "/configs") && !strings.HasSuffix(path, "/client-address")
-		administration = administration || strings.HasSuffix(path, "/sharing") || strings.HasSuffix(path, "/komari")
+		administration = administration || strings.HasSuffix(path, "/sharing")
 		if err := s.store.CheckAgentAccess(request.Context(), request.PathValue("id"), administration); err != nil {
 			writeStoreError(w, err)
 			return false

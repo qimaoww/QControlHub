@@ -99,20 +99,12 @@ function renderLogin(message = "") {
 }
 
 const routeModules = createRouteModuleLoader({
-  async themes() {
-    const { installThemes } = await import("./modules/themes.js");
-    return installThemes({ api, state, shell, esc, notify });
-  },
   async dashboard() {
     const { installDashboard } = await import("./modules/dashboard.js");
     return installDashboard({
       api, state, can, esc, engineName, heartbeat, statusTone, ago, short,
       actionName, bytes, rate, shell, notify,
     });
-  },
-  async "ip-quality"() {
-    const { installIPQuality } = await import("./modules/ip-quality.js");
-    return installIPQuality({ api, state, shell, can, esc, date, notify, confirmAction });
   },
   async agents() {
     const { installAgents } = await import("./modules/agents.js");
@@ -155,38 +147,12 @@ const routeModules = createRouteModuleLoader({
       actionName, statusTone, notify, confirmAction, shell,
     });
   },
-  async "client-connections"() {
-    const { installClientConnections } = await import("./modules/client-connections.js");
-    return installClientConnections({ api, state, shell, esc, engineName, date });
-  },
-  async "core-logs"() {
-    const { installCoreLogs } = await import("./modules/core-logs.js");
-    return installCoreLogs({
-      api, state, engines, can, esc, engineName, date, shell,
-    });
-  },
   async traffic() {
     const { installTraffic } = await import("./modules/traffic.js");
     return installTraffic({
       api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
       notify, confirmAction,
     });
-  },
-  async "access-control"() {
-    const { installAccessControl } = await import("./modules/access-control.js");
-    return installAccessControl({
-      api, state, can, esc, engineName, shell, notify, confirmAction,
-    });
-  },
-  async "system-bbr"() {
-    const { installSystemBBR } = await import("./modules/system-bbr.js");
-    return installSystemBBR({
-      api, state, can, esc, date, shell, notify, confirmAction,
-    });
-  },
-  async certificates() {
-    const { installCertificates } = await import("./modules/certificates.js");
-    return installCertificates({api,state,esc,date,shell,notify,confirmAction});
   },
   async settings() {
     const { installSettings } = await import("./modules/settings.js");

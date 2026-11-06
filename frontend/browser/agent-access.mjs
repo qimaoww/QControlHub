@@ -1,97 +1,79 @@
-import { assert, waitFor, assertNoPersistentEnrollment } from "./assertions.mjs";
+import { assert, waitFor, delay } from './assertions.mjs';
+import { startNativeNodes } from './agent-detail-actions.mjs';
+
+const button = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
+const modal = () => [...document.querySelectorAll('dialog[open]')].at(-1);
+const fits = root => {
+  assert.ok(document.documentElement.scrollWidth <= innerWidth, '节点页面横向溢出');
+  const rect = root.getBoundingClientRect();
+  assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && root.scrollWidth <= root.clientWidth + 1, '节点或弹窗被裁切');
+};
+const settings = async id => {
+  button('查看设置', document.querySelector(`.a-probe[data-agent-id="${id}"]`)).click();
+  return await waitFor(() => modal()?.textContent.includes('节点设置') && modal(), '节点设置未加载');
+};
+const close = async box => { box.querySelector('[aria-label=关闭]').click(); await waitFor(() => !box.isConnected, '节点设置未关闭'); };
 
 export async function testEmptyRuntime() {
-await waitFor(() => document.querySelector(".empty.large"), "空列表没有渲染 empty state");
-  assertNoPersistentEnrollment();
-  assert.ok(document.querySelector("[data-open-enrollment]"), "空列表有权限用户缺少添加节点入口");
-  assert.equal(document.querySelector("#batch-form"), null);
+  await startNativeNodes();
+  assert.ok(document.querySelector('.a-empty')?.textContent.includes('暂无节点'), '空节点缺少空状态');
+  assert.ok(button('添加节点'), '有权限用户缺少添加节点入口');
+  assert.equal(document.querySelector('dialog'), null, '空列表自动展开添加节点');
+  assert.equal(document.querySelector('.a-probe-batch form'), null, '空列表直接显示批量表单');
+  fits(document.querySelector('.a-main'));
 }
 
 export async function testSharedNodeRuntime({ mode, testAPI, populatedAgents }) {
-const assertSharedStatusOrder = (root) => {
-    const badge = root.querySelector(".agent-shared-badge");
-    const status = root.querySelector("[data-agent-status-label]");
-    assert.ok(badge && status, "共享节点缺少共享标记或在线状态");
-    const badgeRect = badge.getBoundingClientRect(), statusRect = status.getBoundingClientRect();
-    assert.ok(badge.nextElementSibling?.matches("[data-agent-presence]"), "共享标记未紧邻在线状态左侧");
-    assert.ok(badgeRect.right <= statusRect.left, "共享标记没有显示在在线状态左侧");
-    assert.ok(Math.abs((badgeRect.top + badgeRect.bottom - statusRect.top - statusRect.bottom) / 2) <= 1,
-      "共享标记与在线状态没有同排对齐");
-    if (mode === "shared-node-mobile") {
-      assert.equal(innerWidth, 390, "手机回归没有使用真实的 390px 视口");
-      assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
-      const rect = root.getBoundingClientRect();
-      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && root.scrollWidth <= root.clientWidth + 1,
-        `手机共享节点列表或详情被裁切：${root.className}; left=${rect.left}, right=${rect.right}, viewport=${innerWidth}, scroll=${root.scrollWidth}, client=${root.clientWidth}`);
-    }
-  };
-  await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");
-  assert.equal(document.querySelectorAll(".node-card .agent-shared-badge").length, 1, "自有和共享节点没有明确区分");
-  const sharedCard = document.querySelector('.node-card[data-agent-node="alpha"]');
-  assertSharedStatusOrder(sharedCard);
-  assert.equal(sharedCard.getAttribute("href"), "#settings-node-alpha", "共享节点卡片绕过了节点管理");
-  assert.equal(sharedCard.querySelector(".node-card-open").textContent.trim(), "查看节点");
-  assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
-  sharedCard.click();
-  await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
-  assertSharedStatusOrder(document.querySelector(".node-operations-workspace"));
-  assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
-  assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
-  assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
-  assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="restart"]').disabled, false, "节点管理未保留本人实例重启");
-  assert.equal(document.querySelector('[data-task-engine="mihomo"][data-task-action="stop"]').disabled, false, "节点管理未保留本人实例停止");
-  assert.equal(document.querySelector('[data-instance-version="mihomo"]').textContent, "运行 · 有修改待部署");
-  assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-core-uninstall], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
-  if (mode === "shared-node-mobile") {
-    for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
-      const element = document.querySelector(selector), rect = element.getBoundingClientRect();
-      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1,
-        `手机共享详情被裁切：${selector}`);
-    }
-  }
-  document.querySelector('[data-node-tab="agent"]').click();
-  assert.equal(document.querySelector("[data-agent-timezone]"), null, "共享节点显示了宿主时区控件");
-  assert.ok(document.querySelector('[data-node-panel="agent"] a[href="#my-quota"]'), "共享身份页缺少分配入口");
-  assert.ok(document.querySelector(".node-operations-workspace").scrollWidth <= document.querySelector(".node-operations-workspace").clientWidth + 1, "共享节点详情横向溢出");
-  location.hash = "#settings-node-bravo";
-  await waitFor(() => document.querySelector('[data-agent-name-form="bravo"]'), "自有节点管理未保留");
-  assert.ok(document.querySelector('[data-agent-sharing="bravo"]'), "自有节点不能继续分享");
-  assert.equal(document.querySelector(".agent-shared-badge"), null, "自有节点被标记为共享");
-  if (mode === "shared-node-mobile") {
-    const card = document.querySelector(".service-mihomo");
-    const actions = card.querySelector(".core-runtime-actions");
-    assert.ok(card.querySelector("[data-core-uninstall]"), "手机自有节点缺少卸载入口");
-    assert.ok(actions.scrollWidth <= actions.clientWidth + 1 && card.scrollWidth <= card.clientWidth + 1,
-      "手机自有节点内核操作被裁切");
-  }
-  location.hash = "#settings-node-alpha";
-  await waitFor(() => document.querySelector('[data-config="alpha"]'), "重新打开共享节点失败");
+  await startNativeNodes();
+  const shared = document.querySelector('.a-probe[data-agent-id="alpha"]');
+  assert.ok(shared.textContent.includes('本人共享实例') && shared.textContent.includes('在线'), '共享节点缺少归属或状态');
+  assert.equal([...document.querySelectorAll('.a-probe')].filter(card => card.textContent.includes('本人共享实例')).length, 1, '自有节点被标记为共享');
+  assert.ok(button('添加节点'), '共享接收者无法添加自有节点');
+  if (mode.endsWith('mobile')) { assert.equal(innerWidth, 390); assert.ok(matchMedia('(pointer:coarse)').matches); }
+  fits(shared);
+  const box = await settings('alpha'); fits(box);
+  assert.equal(box.querySelectorAll('[data-core-installed]').length, 1, '共享详情显示未授权内核');
+  const core = box.querySelector('[data-refresh-key=mihomo]');
+  assert.ok(core.querySelector('a[href*="live-config"]'), '共享内核缺少独立配置入口');
+  assert.ok(!button('重启服务', core).disabled && !button('停止服务', core).disabled, '共享接收者不能操作本人实例');
+  assert.ok(core.textContent.includes('运行 · 有修改待部署'), '共享详情丢失保存与运行配置差异');
+  assert.ok(!box.querySelector('[data-engine-capability],input[name=name],[data-agent-timezone]'), '共享详情暴露宿主设置');
+  for (const label of ['国家／地区', '卸载内核', '升级 Agent', '删除节点', '查看安装命令', '保存名称']) assert.ok(!button(label, box), `共享详情暴露宿主管理：${label}`);
+  assert.ok(box.textContent.includes('所有者') && box.textContent.includes('端口'), '共享详情缺少授权范围');
+  await close(box);
+  const own = await settings('bravo'); fits(own);
+  assert.ok(own.querySelector('input[name=name]') && button('卸载内核', own), '自有节点丢失管理入口');
+  assert.ok(!own.textContent.includes('本人共享实例'), '自有节点显示共享身份');
+  await close(own);
+  let reopened = await settings('alpha');
+  const beforeTasks = testAPI.submittedTasks.length;
+  button('重启服务', reopened.querySelector('[data-refresh-key=mihomo]')).click();
+  const confirmation = await waitFor(() => modal() !== reopened && modal()?.textContent.includes('重启服务') && modal(), '共享实例重启没有确认');
+  testAPI.agents[0].runtime.mihomo.instance.id = 'reallocated-instance';
+  button('重启服务', confirmation).click();
+  await waitFor(() => !reopened.isConnected && !document.querySelector('#app[aria-busy=true]'), '实例变化后仍保留旧设置');
+  assert.equal(testAPI.submittedTasks.length, beforeTasks, '旧设置操作了重新分配的共享实例');
+  reopened = await settings('alpha');
   testAPI.agents = [populatedAgents[1]];
-  document.querySelector("[data-agent-refresh]").click();
-  await waitFor(() => document.querySelector("[data-node-missing]"), "撤销后仍保留共享详情");
-  assert.equal(document.querySelector('[data-config="alpha"]'), null, "撤销后保留旧配置操作入口");
+  button('刷新', document.querySelector('.a-top')).click();
+  await waitFor(() => !reopened.isConnected && !document.querySelector('.a-probe[data-agent-id="alpha"]'), '撤销后仍保留共享详情或操作');
 }
 
 export async function testReadonlyRuntime({ testAPI }) {
-await waitFor(() => document.querySelector(".workspace-main"), "只读聚合页没有完成渲染");
-  assertNoPersistentEnrollment();
-  assert.equal(document.querySelector("[data-open-enrollment]"), null);
-  assert.equal(document.querySelector("#batch-form"), null);
-  location.hash = "#settings-node-alpha";
-  const renameForm = await waitFor(() => document.querySelector('[data-agent-name-form="alpha"]'), "只读节点详情未完成渲染");
-  assert.equal(renameForm.querySelector("input").disabled, true, "只读用户可编辑节点名称");
-  assert.equal(renameForm.querySelector("button").disabled, true, "只读用户可提交改名");
-  assert.equal(document.querySelector('.service-mihomo [data-core-uninstall]')?.disabled, true, "只读用户可卸载内核");
-  assert.equal(document.querySelector("[data-region-edit]"), null, "只读用户不应编辑旗帜");
-  renameForm.requestSubmit();
-  assert.equal(testAPI.calls.some((call) => call.method === "PUT" && call.path.endsWith("/name")), false, "只读用户触发改名请求");
-  assert.equal(
-    testAPI.calls.some((call) => call.path === "/enrollment-tokens"),
-    false,
-    "无 enrollment.manage 权限不应读取添加记录",
-  );
-  location.hash = "#client-access";
-  await waitFor(() => document.querySelector(".client-profile-row"), "只读客户端页未渲染");
-  assert.equal(document.querySelector("[data-client-display-open]"),null,"只读用户可修改端口名称");
-  await waitFor(() => document.querySelector('.client-access-node-card [data-region-avatar] img[src="/api/v1/region-flags/cn"]'), "只读用户客户端旗帜没有显示");
+  await startNativeNodes();
+  assert.ok(!button('添加节点') && !button('批量操作'), '只读用户可添加或批量操作节点');
+  const box = await settings('alpha');
+  assert.equal(box.querySelector('input[name=name]'), null, '只读用户可修改节点名称');
+  assert.ok(button('卸载内核', box)?.disabled, '只读用户可卸载内核');
+  assert.ok(!button('国家／地区', box), '只读用户可修改国家／地区');
+  for (const form of box.querySelectorAll('form')) form.requestSubmit();
+  await delay(20);
+  assert.ok(!testAPI.calls.some(call => call.method === 'PUT' && /\/(name|time-zone)$/.test(call.path)), '只读用户提交节点设置');
+  assert.ok(!testAPI.calls.some(call => call.path === '/enrollment-tokens'), '无权限时读取添加记录');
+  await close(box);
+  location.hash = '#client-access';
+  await waitFor(() => document.querySelector('[data-client-agent]'), '只读客户端页未渲染');
+  assert.ok(!button('修改显示参数'), '只读用户可修改客户端参数');
+  await waitFor(() => document.querySelector('[data-client-agent] .a-probe-flag img[src="/api/v1/region-flags/cn"]'), '只读客户端国家／地区旗帜缺失');
+  fits(document.querySelector('.a-main'));
 }

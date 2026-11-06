@@ -1,38 +1,51 @@
-import { bindConfigFiles } from './modules/config-files.js';
-import { bindConfigRestrictions } from './modules/config-restrictions.js';
-const assert = (v,m) => {if(!v) throw Error(m);};
-const wait = async check => {const end=Date.now()+3000;while(!check()){if(Date.now()>end)throw Error('restriction wait timeout');await new Promise(r=>setTimeout(r,10));}};
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+import { assert, pause, waitFor, createConfigFixture } from './browser/config-fixture.mjs';
+const form=()=>[...document.querySelectorAll('dialog[open] form')].at(-1);
+const alerts=()=>[...document.querySelectorAll('.a-toast[role=alert],dialog .a-notice')].map(node=>node.textContent).join(' ');
 export async function testConfigRestrictionsRuntime(){
- for(const engine of ['xray','sing-box','mihomo','ss-rust']) {
-  for(const locked of [false,true]) {
-   document.body.innerHTML='<form id="restriction-fixture"><section data-code-editor><header class="code-editor-toolbar"><div class="code-file-meta"><b>config.json</b></div></header><textarea data-code-input></textarea></section></form>';
-   const form=document.querySelector('form'),input=form.querySelector('textarea');
-   input.value=JSON.stringify({inbounds:[{tag:'first',port:1080,listen_port:1080},{tag:'second',port:2080,listen_port:2080}]});input.readOnly=locked;
-   const original=input.value,files=bindConfigFiles(form,engine,()=>{});
-   const abort=new AbortController();
-   const state={route:'live-config',navigationEpoch:1,routeSignal:abort.signal,data:{liveAgent:'node',liveEngine:engine}};
-   let accept=false, saved=0, writes=[], notices=[],hold=null;
-   const entries=['first','second'].map((tag,i)=>({agent_id:'node',engine,tag,port:1080+i*1000,config_version:3,agent_status:'online',agent_name:'Node',block_mainland_source:false,block_mainland_destination:false}));
-   await bindConfigRestrictions({form,files,agent:{id:'node'},engine,saved:{version:3},sourceMode:'managed',sourceMatches:false,state,esc,engineName:v=>v,can:()=>!locked,
-    confirmAction:async()=>accept,notify:msg=>notices.push(msg),onSaved:async()=>saved++,api:async(path,opts={})=>{
-     if(opts.method==='PUT'){writes.push(JSON.parse(opts.body));return {config:{content:original},task:{id:'task-123'}};}
-     if(hold)await hold;return entries;
-    }});
-   const button=form.querySelector('[data-config-access-open]');assert(button.disabled,'common must not open restrictions');
-   const tabs=form.querySelectorAll(files?'[data-config-file]':'[data-access-inbound]');tabs[files?2:1].click();
-   assert(!button.disabled,'inbound must enable restrictions');button.click();await wait(()=>document.querySelector('dialog[open]'));
-   let dialog=document.querySelector('dialog');assert(dialog.textContent.includes('second · :2080'),'wrong selected inbound');
-   if(locked){assert(!dialog.querySelector('[type=submit]'),'readonly actions exposed');assert(dialog.querySelector('input[type=checkbox]').disabled,'readonly checkbox editable');}
-   else{
-    const checkbox=dialog.querySelector('input[type=checkbox]');checkbox.click();dialog.querySelector('[data-access-close]').click();await new Promise(r=>setTimeout(r,20));assert(dialog.open,'dirty cancel discarded state');
-    dialog.querySelector('[data-access-intent=deploy]').click();await new Promise(r=>setTimeout(r,20));assert(writes.length===0,'canceled deploy wrote');
-    dialog.querySelector('[data-access-intent=validate]').click();await wait(()=>saved===1);assert(writes[0].tag==='second'&&writes[0].port===2080&&writes[0].expected_version===3,'wrong write target/version');assert(!dialog.isConnected,'saved modal remains');
-    input.value+='\n';input.dispatchEvent(new Event('input'));button.click();await new Promise(r=>setTimeout(r,20));assert(!document.querySelector('dialog'),'dirty source allowed mutation');assert(notices.some(n=>n.includes('源码')),'missing dirty message');
-    input.value=input.value.slice(0,-1);input.dispatchEvent(new Event('input'));
-   }
-   if(dialog.isConnected) {abort.abort();assert(!dialog.isConnected,'route left orphan dialog');}
-   else {let release;hold=new Promise(r=>release=r);button.click();state.data={};release();await new Promise(r=>setTimeout(r,20));assert(!document.querySelector('dialog'),'late response opened stale session modal');}
+  for(const engine of ['xray','sing-box','mihomo','ss-rust'])for(const readonly of [false,true])for(const shared of [false,true]){
+    const test=await createConfigFixture(engine,{readonly,shared});
+    try{
+      assert(![...document.querySelectorAll('.a-rail a')].some(link=>link.getAttribute('href')==='#access-control'),'retired policy navigation remains');
+      test.select('second');test.click('access');await waitFor(()=>form()?.elements.block_mainland_source,'inbound policy did not open');
+      const editor=form(),box=test.topDialog();
+      assert(box.textContent.includes('second')&&box.textContent.includes('21002'),'policy selected another inbound');
+      assert(box.textContent.includes(shared?'共享实例':'主实例'),'policy lost instance ownership');
+      const locked=readonly||(shared&&engine==='ss-rust');
+      assert(editor.elements.block_mainland_source.disabled===locked,'policy write permission boundary changed');
+      assert(Boolean(editor.querySelector('[type=submit]'))===!locked,'readonly policy exposes submission');
+      if(engine==='ss-rust')assert(editor.elements.block_mainland_destination.disabled,'multi-port Rust target restriction enabled');
+      if(locked)continue;
+      editor.elements.block_mainland_source.click();test.topDialog().querySelector('[aria-label=关闭]').click();await pause();
+      assert(form()===editor&&editor.elements.block_mainland_source.checked,'canceling dirty close lost policy draft');
+      editor.requestSubmit();await pause();assert(!test.accessWrites?.length,'canceled deployment wrote policy');
+      test.confirm=true;test.accessError=409;editor.requestSubmit();await waitFor(()=>alerts().includes('测试访问限制保存失败')&&!editor.hasAttribute('aria-busy'),'policy conflict hid error');
+      assert(!test.accessWrites?.length&&editor.elements.block_mainland_source.checked,'policy conflict lost draft or wrote');
+      test.accessError=null;let release;test.accessGate=new Promise(resolve=>{release=resolve});editor.requestSubmit();editor.requestSubmit();await pause();
+      assert(editor.getAttribute('aria-busy')==='true'&&editor.querySelector('fieldset').disabled,'pending policy is mutable');
+      box.querySelector('[aria-label=关闭]').click();await pause();assert(box.open,'pending policy closed');release();
+      await waitFor(()=>test.accessWrites?.length===1&&!test.root.hasAttribute('aria-busy'),'policy write did not settle');
+      const written=test.accessWrites[0];assert(written.tag==='second'&&written.port===21002&&written.expected_version===1&&written.intent==='deploy'&&written.block_mainland_source,'policy lost exact target, CAS, restriction or deployment');
+      assert(test.sawTaskDetails,'accepted policy did not open deployment task');test.topDialog()?.close();await pause();
+      test.click('access');await waitFor(()=>form()?.elements.block_mainland_source,'saved policy did not reopen');assert(form().elements.block_mainland_source.checked,'saved policy not restored');test.topDialog().querySelector('[aria-label=关闭]').click();await pause();
+      const input=document.querySelector('.a-main [name=content]');input.value+='\n ';input.dispatchEvent(new Event('input',{bubbles:true}));
+      test.click('access');await waitFor(()=>alerts().includes('源码有未保存修改'),'dirty source did not block policy');assert(!form(),'dirty source opened mutating policy');
+    }finally{test.dispose()}
   }
- }
+  for(const engine of ['xray','sing-box'])for(const readonly of [false,true])for(const legacy of [false,true]){
+    const test=await createConfigFixture(engine,{readonly,plan:{protocol:'wireguard',block_mainland_source:legacy}});
+    try{
+      test.click('access');await waitFor(()=>form()?.elements.block_mainland_source,'WireGuard policy did not open');
+      const editor=form();
+      assert(editor.elements.block_mainland_source.checked===legacy,'legacy WireGuard source restriction was lost');
+      assert(editor.elements.block_mainland_source.disabled===(readonly||!legacy),'WireGuard source boundary changed');
+      assert(editor.elements.block_mainland_destination.disabled===readonly,'WireGuard destination policy was unnecessarily disabled');
+      assert(editor.textContent.includes('公网来源限制须在节点防火墙配置'),'WireGuard source limitation was hidden');
+      if(legacy&&!readonly){
+        test.confirm=true;editor.elements.block_mainland_source.click();editor.requestSubmit();
+        await waitFor(()=>test.accessWrites?.length===1&&!test.root.hasAttribute('aria-busy'),'legacy WireGuard source restriction could not be cleared');
+        assert(!test.accessWrites[0].block_mainland_source,'WireGuard legacy source rule was retained');
+      }
+    }finally{test.dispose()}
+  }
+  const late=await createConfigFixture('xray');let release;late.accessReadGate=new Promise(resolve=>{release=resolve});late.click('access');await pause();late.dispose();const next=await createConfigFixture('sing-box');release();await pause();assert(!form(),'previous account policy response entered new target');next.dispose();
 }

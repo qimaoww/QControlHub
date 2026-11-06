@@ -106,12 +106,12 @@ func TestConfigManagementAppliedStatusAndAllDisabledOwnership(t *testing.T) {
 		t.Fatalf("unsent state: %+v %v", status, err)
 	}
 	state := serverconfig.ManagedState{Disabled: []serverconfig.ManagedResource{{Section: "listeners", Tag: "first"}}}
-	saved, _, err = db.SaveAgentConfigManagement(ctx, saved, saved.Version, state, core.ActionDeploy)
+	saved, queuedTask, err := db.SaveAgentConfigManagement(ctx, saved, saved.Version, state, core.ActionDeploy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	status, err = db.ConfigManagementDeployment(ctx, saved.ID, saved.Version)
-	if err != nil || status.State != "deploying" {
+	if err != nil || status.State != "deploying" || status.TaskID != queuedTask.ID || status.TaskStatus != "pending" {
 		t.Fatalf("queued deploy: %+v %v", status, err)
 	}
 	claim, err := db.ClaimTask(ctx, agent.ID)
@@ -122,7 +122,7 @@ func TestConfigManagementAppliedStatusAndAllDisabledOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err = db.ConfigManagementDeployment(ctx, saved.ID, saved.Version)
-	if err != nil || status.State != "applied" {
+	if err != nil || status.State != "applied" || status.TaskID != queuedTask.ID || status.TaskStatus != "succeeded" {
 		t.Fatalf("applied stopped revision: %+v %v", status, err)
 	}
 	var running bool

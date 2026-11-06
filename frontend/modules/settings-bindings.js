@@ -43,8 +43,6 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         agent_core_log_rotate_count: number("agent_core_log_rotate_count"), metric_retention_days: number("metric_retention_days"),
         audit_retention_days: number("audit_retention_days"), task_retention_days: number("task_retention_days"),
         config_revision_retention: number("config_revision_retention"), webhook_url: data.get("webhook_url"),
-        komari_url: data.get("komari_url"), komari_api_key: data.get("komari_api_key"),
-        clear_komari_api_key: data.has("clear_komari_api_key"),
         notify_task_failed: data.has("notify_task_failed"), notify_agent_offline: data.has("notify_agent_offline"),
         notify_agent_online: data.has("notify_agent_online"), notify_traffic_quota: data.has("notify_traffic_quota"),
       };

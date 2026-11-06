@@ -1,4 +1,4 @@
-import { geoRegionDetails } from "./regions.js";
+import { geoRegionDetails } from "./region-model.js";
 
 export function connectionDateInput(value) {
   const date = new Date(value);

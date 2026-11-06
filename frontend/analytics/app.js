@@ -8,22 +8,9 @@ import { createPermissionChecker } from "../modules/permissions.js";
 import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
 import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog } from "./ui.js";
-import { dashboardPage, tasksPage, quotaPage } from "./operations.js";
 import { createNotifications } from "./notifications.js";
-import { nodesPage } from "./nodes.js";
-import { archivePage } from "./configs.js";
-import { themePage } from "./themes.js";
-import { logsPage, connectionsPage } from "./observability.js";
-import { clientAccessPage } from "./client-access.js";
-import { accessControlPage } from "./access-control.js";
-import { tcpPage } from "./tcp.js";
-import { liveConfigPage } from "./live-config.js";
-import { substorePage } from "./substore.js";
-import { settingsPage } from "./settings.js";
-import { trafficPage } from "./traffic.js";
-import { usersPage } from "./users.js";
-import { ipQualityPage } from "./ip-quality.js";
-import { certificatesPage } from "./certificates.js";
+import { createRouteModuleLoader } from "../modules/route-loader.js";
+import { createRouteWarmup } from "../modules/route-warmup.js";
 
 const destinations = [
   ["概览", [["dashboard", "仪表盘", "grid", "overview.read"]]],
@@ -38,7 +25,7 @@ const destinations = [
   ["运维", [
     ["tasks", "任务", "list", "tasks.read"], ["core-logs", "日志", "list", "core-logs.read"],
     ["client-connections", "客户端连接", "activity", "core-logs.read"],
-    ["traffic", "流量", "activity", "traffic.read"], ["access-control", "访问控制", "shield", "agent-config.read"],
+    ["traffic", "流量", "activity", "traffic.read"],
     ["system-bbr", "TCP 调优", "settings", "system-bbr.read"], ["ip-quality", "IP 质量", "activity", "agents.read"],
   ]],
   ["面板", [
@@ -46,12 +33,23 @@ const destinations = [
     ["my-quota", "共享与额度", "users", "agent-access.read"], ["themes", "主题", "palette", "agent-access.read"],
   ]],
 ];
-const pages = {
-  dashboard: dashboardPage, "node-settings": nodesPage, tasks: tasksPage,
-  "my-quota": quotaPage, "archive-config": archivePage, themes: themePage,
-  "certificates": certificatesPage, "ip-quality": ipQualityPage, "users": usersPage, "traffic": trafficPage, "settings": settingsPage, "substore-sync": substorePage, "live-config": liveConfigPage, "access-control": accessControlPage, "system-bbr": tcpPage,
-  "core-logs": logsPage, "client-connections": connectionsPage, "client-access": clientAccessPage,
+const pageModules = {
+  dashboard: ['dashboard', 'dashboardPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
+  'my-quota': ['quota', 'quotaPage'], 'archive-config': ['archives', 'archivePage'], themes: ['themes', 'themePage'],
+  certificates: ['certificates', 'certificatesPage'], 'ip-quality': ['ip-quality', 'ipQualityPage'], users: ['users', 'usersPage'],
+  traffic: ['traffic', 'trafficPage'], settings: ['settings', 'settingsPage'], 'substore-sync': ['substore-sync', 'substorePage'],
+  'live-config': ['configs', 'liveConfigPage'], 'system-bbr': ['system-bbr', 'tcpPage'],
+  'core-logs': ['core-logs', 'logsPage'], 'client-connections': ['client-connections', 'connectionsPage'], 'client-access': ['client-access', 'clientAccessPage'],
 };
+const pageModuleName = route => pageModules[route]?.[0] || 'dashboard';
+const routeModules = createRouteModuleLoader({
+  dashboard: () => import('./operations.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
+  agents: () => import('./nodes.js'), archives: () => import('./configs.js'), themes: () => import('./themes.js'),
+  certificates: () => import('./certificates.js'), 'ip-quality': () => import('./ip-quality.js'), users: () => import('./users.js'),
+  traffic: () => import('./traffic.js'), settings: () => import('./settings.js'), 'substore-sync': () => import('./substore.js'),
+  configs: () => import('./live-config.js'), 'system-bbr': () => import('./tcp.js'),
+  'core-logs': () => import('./observability.js'), 'client-connections': () => import('./observability.js'), 'client-access': () => import('./client-access.js'),
+});
 
 // The new runtime never imports the classic shell or its renderers. It owns
 // its listeners, dialogs and pending requests for the whole document lifetime.
@@ -63,24 +61,29 @@ export function startAnalytics({ app, session }) {
   setStorageAccount(session);
   const can = createPermissionChecker(state);
   const lifetime = new AbortController();
+  const warmup = createRouteWarmup(routeModules, { moduleName: pageModuleName, signal: lifetime.signal });
+  warmup.bindNavigationPreload();
   let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0;
   let currentHash = location.hash, route = "", dialogSequence = 0, navigation = 0;
   const layout = node("div", { className: "a-layout" });
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
   const notifications = createNotifications(presentation);
   const work = node("div", { className: "a-work" });
-  let drawer, shellTitle, navigationToggle, pageActions;
+  let drawer, shellTitle, navigationToggle, pageActions, refreshButton, pageRefresh;
   document.body.className = "analytics";
   app.replaceChildren(layout);
   applyAppearance();
 
   const api = async (path, options = {}) => {
     const bound = state.session;
+    const data = state.data;
+    const writing = !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method || 'GET').toUpperCase());
+    if (writing) delete data.analyticsTrafficSnapshot;
     const result = await accountRequest(path, {
       ...options, session: bound, signal: options.signal || lifetime.signal,
       isCurrent: () => state.session === bound && !lifetime.signal.aborted,
       onUnauthorized: message => login(message),
-    });
+    }).finally(() => { if (writing) delete data.analyticsTrafficSnapshot; });
     if (path === "/settings" && state.session === bound && !lifetime.signal.aborted) {
       state.data.settings = result;
       applyAppearance(result);
@@ -89,6 +92,8 @@ export function startAnalytics({ app, session }) {
   };
   const watch = createSessionWatch({ api, state, onAccessChanged: () => {
     routeAbort?.abort();
+    document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
+    setStorageAccount(state.session);
     state.data = {};
     applyAppearance();
     dirty = false;
@@ -113,7 +118,11 @@ export function startAnalytics({ app, session }) {
       if (pending || box.onRequestClose) event.preventDefault();
       if (!pending && box.onRequestClose) void box.onRequestClose();
     });
-    box.addEventListener("close", () => { notifications.position(); box.remove(); if (active?.isConnected) active.focus(); }, { once: true });
+    box.addEventListener("close", () => {
+      const restore = document.activeElement === document.body || box.contains(document.activeElement);
+      notifications.position(); box.remove();
+      if (restore && active?.isConnected) active.focus();
+    }, { once: true });
     openDialog(box);
     notifications.position();
     return box;
@@ -121,7 +130,7 @@ export function startAnalytics({ app, session }) {
   async function confirm(message, label = "确认") {
     return new Promise(resolve => {
       const box = dialog(label, stack(node("p", {}, message), actions(
-        button("取消", () => box.close()),
+        button("取消", () => box.close(), { autofocus: true }),
         button(label, () => { resolve(true); box.close(); }, { tone: "primary" }),
       )));
       box.addEventListener("close", () => resolve(false), { once: true });
@@ -150,6 +159,17 @@ export function startAnalytics({ app, session }) {
     const submit = node("button", { type: "submit", className: "a-button primary" }, label);
     const controls = node("fieldset", { className: "a-form-fields a-stack" }, fields);
     const element = node("form", { className: "a-stack" }, controls, feedback, actions(submit));
+    element.addEventListener("invalid", event => {
+      event.preventDefault();
+      for (let parent = event.target.parentElement; parent && parent !== element; parent = parent.parentElement)
+        if (parent.tagName === "DETAILS") parent.open = true;
+      const first = [...element.elements].find(control => control.willValidate && !control.validity.valid);
+      if (first === event.target) {
+        first.focus();
+        const inline = document.getElementById(first.getAttribute("aria-errormessage"));
+        feedback.textContent = inline?.matches(".a-validation") ? "" : first.validity.customError ? first.validationMessage : first.validity.valueMissing ? "请填写此项。" : "请检查此项的格式或取值范围。";
+      }
+    }, true);
     element.addEventListener("submit", event => {
       event.preventDefault();
       if (pending || submit.disabled) return;
@@ -162,7 +182,6 @@ export function startAnalytics({ app, session }) {
         catch (error) {
           if (error.name === "AbortError") return;
           feedback.textContent = error.message;
-          throw error;
         } finally {
           controls.disabled = false;
           element.removeAttribute("aria-busy");
@@ -176,7 +195,7 @@ export function startAnalytics({ app, session }) {
       node("a", { className: "a-brand", href: "#dashboard" }, node("span", { className: "a-mark" }, icon("brand")), "QControlHub"),
       mobile && button("", () => drawer.close(), { glyph: "close", title: "关闭导航", className: "a-icon-button a-drawer-close" }),
       node("nav", { "aria-label": "主导航" }, destinations.map(([group, entries]) => {
-        const allowed = entries.filter(([, , , permission]) => can(permission));
+        const allowed = entries.filter(([id, , , permission]) => id === "themes" || can(permission));
         if (!allowed.length) return null;
         return node("div", { className: "a-nav-group" }, node("p", { className: "a-nav-label" }, group),
           allowed.map(([id, title, glyph]) => node("a", {
@@ -216,7 +235,7 @@ export function startAnalytics({ app, session }) {
       navigationToggle.setAttribute("aria-expanded", String(!matchMedia("(max-width: 56rem)").matches && !layout.classList.contains("a-collapsed")));
       shellTitle = node("h1", { className: "a-top-title" }, title);
       const top = node("header", { className: "a-top" }, node("div", { className: "a-top-inner" },
-        navigationToggle, shellTitle, actions(pageActions = actions(), button("刷新", () => void refresh(), { glyph: "refresh" }))));
+        navigationToggle, shellTitle, actions(pageActions = actions(), refreshButton = button("刷新", () => void refresh(), { glyph: "refresh" }))));
       work.replaceChildren(top, main);
       layout.replaceChildren(node("a", {
         href: "#content", className: "a-button a-skip",
@@ -238,6 +257,15 @@ export function startAnalytics({ app, session }) {
     return true;
   }
   async function refresh() {
+    if (pageRefresh) {
+      if (pending || refreshButton.disabled) return;
+      const epoch = routeEpoch, read = pageRefresh;
+      refreshButton.disabled = true;
+      try { await read(); }
+      catch (error) { if (epoch === routeEpoch && error.name !== 'AbortError') announce(error.message, 'error'); }
+      finally { if (epoch === routeEpoch) refreshButton.disabled = false; }
+      return;
+    }
     if (!await leave()) return;
     await render();
   }
@@ -300,21 +328,25 @@ export function startAnalytics({ app, session }) {
     routeAbort?.abort();
     routeAbort = new AbortController();
     const signal = routeAbort.signal, epoch = ++routeEpoch;
+    pageRefresh = null;
     const previousRoute = route;
     route = routeForHash(location.hash);
     if (route === "dashboard" && !can("overview.read")) route = "my-quota";
-    if (["agents", "agent-config"].includes(route)) route = "live-config";
+    if (["agents", "agent-config", "access-control"].includes(route)) route = "live-config";
     const entry = destinations.flatMap(([, entries]) => entries).find(([id]) => id === route);
     const title = entry?.[1] || "控制台";
     shell(title);
+    refreshButton.hidden = false; refreshButton.disabled = false;
     document.title = `${title} · QControlHub`;
     const stage = node("div", { className: "a-stack", "aria-busy": "true" }, empty("正在加载…"));
     main.append(stage);
     let stagedActions = [];
     const context = {
       pageActions(...items) { stagedActions = items; },
+      onRefresh(read, { local = false } = {}) { if (!signal.aborted && epoch === routeEpoch) { pageRefresh = read; refreshButton.hidden = local; } },
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
       can, session: state.session, signal, state, dialog, confirm, mutate, form, announce,
+      motion,
       refresh, visible: (...args) => motion ? motion.visible(...args) : (args[0].hidden = !args[1]), setDirty(value) { dirty = value; },
       async switchTheme(save) {
         if (pending || !await leave()) return false;
@@ -326,20 +358,23 @@ export function startAnalytics({ app, session }) {
       current: () => !signal.aborted && epoch === routeEpoch && Boolean(state.session),
     };
     try {
-      if (entry && !can(entry[3])) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
-      if (can("settings.read") && !state.data.settings) {
-        await context.api("/settings");
-        if (!context.current()) return;
-      }
-      const page = pages[route];
-      if (!page) {
+      if (entry && route !== "themes" && !can(entry[3])) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
+      const descriptor = pageModules[route];
+      if (!descriptor) {
         stage.replaceChildren(notice("页面不存在。"));
         return;
       }
+      const [module] = await Promise.all([
+        routeModules.load(descriptor[0]),
+        can('settings.read') && !state.data.settings ? context.api('/settings') : null,
+      ]);
+      if (!context.current()) return;
+      const page = module[descriptor[1]];
       const content = await page(context);
       if (context.current()) {
         pageActions.replaceChildren(...stagedActions);
         stage.replaceChildren(content);
+        warmup.scheduleRouteWarmup(route);
         if (previousRoute !== route) motion?.page(stage);
       }
     } catch (error) {
@@ -354,12 +389,15 @@ export function startAnalytics({ app, session }) {
     const nextHash = location.hash;
     if (nextHash === currentHash) return;
     const attempt = ++navigation;
+    const targetControl = document.activeElement?.matches('.a-target-form select[name]') ? document.activeElement.name : "";
     const allowed = await leave();
     if (attempt !== navigation) return;
     if (!allowed) { history.replaceState(null, "", currentHash || "#dashboard"); return; }
     currentHash = nextHash;
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
     await render();
+    if (attempt === navigation && targetControl)
+      main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({ preventScroll: true });
   }, { signal: lifetime.signal });
   window.addEventListener("beforeunload", event => {
     if (!state.session || (!dirty && !pending)) return;

@@ -31,8 +31,8 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
 			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
 			analyticsScope := store.WithConfigScope(ctx, analyticsUser.ID, false)
-			// Exercise an explicitly saved classic choice at the analytics login boundary.
-			if _, err := db.SaveTheme(analyticsScope, "classic", 0); err != nil {
+			// Keep a saved account preference at the login boundary.
+			if _, err := db.SaveTheme(analyticsScope, "analytics", 0); err != nil {
 				t.Fatal(err)
 			}
 			admin.call("POST", "/users", core.UserRequest{Username: "default-theme-user", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)

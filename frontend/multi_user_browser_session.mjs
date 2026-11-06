@@ -129,14 +129,7 @@ try {
     await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
-    // These business regression suites deliberately select the classic theme.
-    // Default-theme behavior is checked separately through the production entry.
-    const preference = await api(page, identity, "GET", "/preferences/theme");
-    if (preference.theme_id !== "classic") {
-      await api(page, identity, "PUT", "/preferences/theme", {theme_id:"classic",revision:preference.revision});
-      await call("Page.reload", {}, page);
-    }
-    await wait(page, "!!document.querySelector('#logout')");
+    await wait(page, "!!document.querySelector('.a-user')");
     return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
@@ -175,8 +168,8 @@ try {
   await call("Network.enable", {}, defaultPage);
   await call("Network.setBlockedURLs", {urls:["*analytics/theme.css*"]}, defaultPage);
   await reload(defaultPage);
-  await wait(defaultPage, "!!document.querySelector('[data-select-theme=classic]')");
-  assert.ok(await evaluate(defaultPage, "document.querySelector('main').textContent.includes('所选主题暂不可用')"));
+  await wait(defaultPage, "!!document.querySelector('.qch-startup[data-failed] button')");
+  assert.ok(await evaluate(defaultPage, "document.querySelector('.qch-startup [role=alert]').textContent.includes('加载失败')"));
   assert.equal((await api(defaultPage, defaultIdentity, "GET", "/preferences/theme")).theme_id, "analytics");
   assert.equal(await evaluate(defaultPage, "document.querySelectorAll('link[href*=\"analytics/theme.css\"]').length"), 0, "failed theme styles are removed");
   await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
@@ -207,53 +200,42 @@ try {
   assert.equal(alice.role, "user"); assert.equal(bob.role, "user"); assert.equal(admin.role, "admin");
   assert.notEqual(alice.user_id, bob.user_id);
   record(`${mode}: three independent browser contexts, real password/cookie/CSRF identities`);
-  // Both themes are available to every account, including restricted users.
+  // Every account has the sole runtime; saved choices remain account scoped.
   for (const [page, identity] of [[a, alice], [manager, admin]]) {
     await evaluate(page, "location.hash='#themes'");
-    await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
-    assert.equal(await evaluate(page, "document.querySelectorAll('[data-select-theme]').length"), 2);
+    await wait(page, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
     const preference = await api(page, identity, "GET", "/preferences/theme");
-    assert.equal(preference.theme_id, "classic");
-    assert.equal(preference.revision, 1);
+    assert.equal(preference.theme_id, "analytics");
+    await api(page, identity, "PUT", "/preferences/theme", {theme_id:"analytics",revision:preference.revision});
+    await api(page, identity, "PUT", "/preferences/theme", {theme_id:"analytics",revision:preference.revision}, 409);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"));
-    if (mode === "mobile") {
-      assert.ok(await evaluate(page, "(() => {const r=document.querySelector('.mobile-account-menu>summary').getBoundingClientRect();return r.width>=44&&r.height>=44&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})()"), "mobile overflow launcher must remain visible for an account with every primary destination");
-      await evaluate(page, "document.querySelector('.mobile-account-menu').open=true");
-      assert.ok(await evaluate(page, "document.querySelector('.mobile-account-menu [href=\"#themes\"]').getClientRects().length>0"));
-      await evaluate(page, "document.querySelector('.mobile-account-menu').open=false");
-    }
   }
-  await reload(a, () => evaluate(a, "document.querySelector('[data-select-theme=analytics]').click()"));
-  await wait(a, "document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')");
-  assert.equal((await api(a, alice, "GET", "/preferences/theme")).theme_id, "analytics");
-  assert.equal((await api(b, bob, "GET", "/preferences/theme")).theme_id, "classic");
-  await reload(a, () => evaluate(a, "[...document.querySelectorAll('button')].find(item=>item.dataset.themeID==='classic').click()"));
-  await wait(a, "document.querySelector('[data-select-theme=classic]')?.disabled===true");
-  assert.equal((await api(a, alice, "GET", "/preferences/theme")).theme_id, "classic");
-  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 1);
-  await screenshot(a, "themes-classic");
-  record(`${mode}: both theme pages switch through confirmed account API saves; another account remains unchanged`);
-  for (const [user, route, selector] of [["task-reader", "tasks", "[data-task-page]"], ["traffic-reader", "traffic", ".traffic-workspace"]]) {
+  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 0, "another account preference is unchanged");
+  record(`${mode}: sole theme, optimistic conflict and account isolation`);
+  for (const [user, route, selector] of [["task-reader", "tasks", ".a-main table"], ["traffic-reader", "traffic", ".a-traffic-page"]]) {
     const page = await createPage();
     await login(page, user);
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
-    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
-    assert.ok(await evaluate(page, "!document.querySelector('.workspace-main .alert.error')"));
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(route === "tasks" ? "任务" : "流量")} && !document.querySelector('[aria-busy=true]')`);
+    assert.ok(await evaluate(page, "![...document.querySelectorAll('.a-main [role=alert]')].some(el=>el.textContent.trim())"));
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth <= innerWidth + 1"));
-    assert.equal(await evaluate(page, "document.querySelector('[data-sync-label]').textContent"), user === "traffic-reader" ? "1 个节点在线" : "节点状态未知");
+    if (user === "traffic-reader") {
+      const scoped = await api(page, await evaluate(page, "fetch('/api/v1/auth/session').then(r=>r.json())"), "GET", "/traffic-policies?view=page");
+      assert.equal(scoped.agents.length, 1, "traffic permission includes authorized node metadata");
+    }
     await screenshot(page, user);
     await evaluate(page, "location.hash='#certificates'");
-    await wait(page, "!!document.querySelector('[data-cert-accounts]')");
-    await evaluate(page, "document.querySelector('[data-cert-accounts]').click()");
-    await wait(page, "!!document.querySelector('dialog[open] [data-cert-http-grant]')");
+    await wait(page, "[...document.querySelectorAll('.a-main button')].some(el=>el.textContent==='账号与认证授权') && !document.querySelector('[aria-busy=true]')");
+    await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(el=>el.textContent==='账号与认证授权').click()");
+    await wait(page, "!!document.querySelector('dialog[open] select[name=agent_id]')");
     const nodes = await evaluate(page, "[...document.querySelectorAll('dialog[open] select[name=agent_id] option')].map(option=>option.value).filter(Boolean)");
     assert.deepEqual(nodes, [fixture.owned[user]], "certificate HTTP authorization must use the owned-node scope without agents.read");
-    await evaluate(page, "document.querySelector('[data-cert-close]').click()");
+    await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
     // Delay the real response rather than replacing its authorization/data.
-    await evaluate(page, `(() => { const original=window.fetch; window.__certificateRelease=null; window.__certificateWaiting=false; window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certificateWaiting=true;await new Promise(done=>window.__certificateRelease=done);}return response;};document.querySelector('[data-cert-accounts]').click();})()`);
+    await evaluate(page, `(() => { const original=window.fetch; window.__certificateRelease=null; window.__certificateWaiting=false; window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certificateWaiting=true;await new Promise(done=>window.__certificateRelease=done);}return response;};[...document.querySelectorAll('.a-main button')].find(el=>el.textContent==='账号与认证授权').click();})()`);
     await wait(page, "window.__certificateWaiting");
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
-    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(route === "tasks" ? "任务" : "流量")} && !document.querySelector('[aria-busy=true]')`);
     await evaluate(page, "window.__certificateRelease()");
     await delay(100);
     assert.equal(await evaluate(page, "document.querySelectorAll('dialog[open]').length"), 0, "late certificate responses cannot reopen a dialog on another route");
@@ -269,12 +251,12 @@ try {
   const noPermissions = await createPage();
   await login(noPermissions, "no-permissions");
   await evaluate(noPermissions, "location.hash='#themes'");
-  await wait(noPermissions, "!!document.querySelector('[data-select-theme=classic]')");
-  assert.ok(await evaluate(noPermissions, "!document.querySelector('.workspace-main .alert.error')"));
-  assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.dock-nav a[href=\"#live-config\"]').length"), 0);
+  await wait(noPermissions, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(await evaluate(noPermissions, "![...document.querySelectorAll('.a-main [role=alert]')].some(el=>el.textContent.trim())"));
+  assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.a-rail a[href=\"#live-config\"]').length"), 0);
   await evaluate(noPermissions, "location.hash='#live-config'");
-  await wait(noPermissions, "document.querySelector('.workspace-main .alert.error')?.textContent.includes('无权查看配置')");
-  assert.ok(await evaluate(noPermissions, "!document.querySelector('.live-config-empty')"), "permission denial must not look like a resource-free account");
+  await wait(noPermissions, "document.querySelector('.a-main [role=alert]')?.textContent.includes('没有访问此页面的权限')");
+  assert.ok(await evaluate(noPermissions, "!document.querySelector('.a-main form')"), "permission denial must not look like a resource-free account");
   const stalePage = await createPage();
   const staleSession = await login(stalePage, "alice");
   // The cookie belongs to B after another tab logs in, while this page still
@@ -295,9 +277,9 @@ try {
     agents = await api(page, session, "GET", "/agents");
     assert.ok(agents.some(agent => agent.id === fixture.shared && !agent.can_manage));
     await evaluate(page, "location.hash='#node-settings'");
-    await wait(page, "document.querySelectorAll('[data-agent-node]').length===2");
-    assert.equal(await evaluate(page, "document.querySelectorAll('[data-node-batch-toggle]').length"), 0,
-      "one owned node plus a shared instance must not expose a host batch entry");
+    await wait(page, "document.querySelectorAll('[data-agent-id]').length===2");
+    assert.equal(await evaluate(page, "[...document.querySelectorAll('[data-agent-id]')].find(el=>el.textContent.includes('本人共享实例'))?.querySelectorAll('[title=共享]').length || 0"), 0,
+      "a shared instance never exposes host sharing management");
   }
   record(`${mode}: owned nodes isolated; pending shares denied, accepted shares visible without host management`);
   const archiveInput = { name: "private archive", engine: "mihomo", content: "mixed-port: 22001\n" };
@@ -329,19 +311,19 @@ try {
     await evaluate(before, "location.hash='#tasks'");
     await wait(before, `!!document.querySelector('[data-retry="${taskA.id}"]')`);
     await evaluate(before, `document.querySelector('[data-retry="${taskA.id}"]').click()`);
-    await wait(before, "!!document.querySelector('[data-confirm-dialog][open]')");
-    assert.ok(await evaluate(before, "document.querySelector('[data-confirm-message]').textContent.includes('当前配置')"));
+    await wait(before, "!!document.querySelector('dialog[open]')");
+    assert.ok(await evaluate(before, "document.querySelector('dialog[open] .a-dialog-body').textContent.includes('当前配置')"));
     await screenshot(before, "before");
   }
   await evaluate(a, "location.hash='#tasks'");
   await wait(a, `!!document.querySelector('[data-retry="${taskA.id}"]')`);
   assert.equal(await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').textContent`), "重试配置");
   await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').click()`);
-  await wait(a, "!!document.querySelector('[data-confirm-dialog][open]')");
-  assert.ok(await evaluate(a, "document.querySelector('[data-confirm-message]').textContent.includes('配置已有更新')"));
-  assert.ok(await evaluate(a, "!document.querySelector('[data-confirm-message]').textContent.includes('安装稳定版')"));
+  await wait(a, "!!document.querySelector('dialog[open]')");
+  assert.ok(await evaluate(a, "document.querySelector('dialog[open] .a-dialog-body').textContent.includes('配置已有更新')"));
+  assert.ok(await evaluate(a, "!document.querySelector('dialog[open] .a-dialog-body').textContent.includes('安装稳定版')"));
   await screenshot(a, "after");
-  await evaluate(a, "document.querySelector('[data-confirm-accept]').click()");
+  await evaluate(a, "[...document.querySelectorAll('dialog[open] button')].find(el=>el.textContent==='重试任务').click()");
   await wait(a, "document.body.textContent.includes('保存后配置已发生变化')");
   assert.ok(await evaluate(a, "document.documentElement.scrollWidth <= innerWidth + 1"));
   await api(a, alice, "POST", `/tasks/${taskA.id}/retry`, {}, 409);

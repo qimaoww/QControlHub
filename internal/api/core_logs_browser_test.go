@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,13 +81,20 @@ func runCoreLogsBrowser(t *testing.T, mode string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent := enrollTaskAPIAgent(t, ctx, db, credential.Token, name+" 节点 · 日志隔离验证")
+			nodeName := name + " 节点 · 日志隔离验证"
+			if name == "logs-admin" {
+				nodeName += " · " + strings.Repeat("长节点名称", 12)
+			}
+			agent := enrollTaskAPIAgent(t, ctx, db, credential.Token, nodeName)
 			if _, err := conn.Exec(ctx, `UPDATE agents SET capabilities='["mihomo","xray","sing-box","ss-rust"]'::jsonb,supported_capabilities='["mihomo","xray","sing-box","ss-rust"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 				t.Fatal(err)
 			}
 			runtime := map[core.Engine]core.RuntimeState{}
 			for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
 				runtime[engine] = core.RuntimeState{Installed: true, ServiceStatus: "active", CoreLogStatus: "active"}
+				if name == "logs-admin" && engine == core.EngineSingBox {
+					runtime[engine] = core.RuntimeState{Installed: true, ServiceStatus: "active", CoreLogStatus: "failed", CoreLogError: "permission denied: " + strings.Repeat("long-source-diagnostic ", 12)}
+				}
 			}
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: runtime, Features: []string{core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureCoreLogInstances, core.AgentFeatureSharedEngines, core.AgentFeatureSharedTraffic, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureIndependentEgress}}); err != nil {
 				t.Fatal(err)
@@ -119,7 +127,11 @@ func runCoreLogsBrowser(t *testing.T, mode string) {
 						for offset := 0; offset < count; offset += core.MaxCoreLogBatchEntries {
 							entries := []core.CoreLogEntry{}
 							for n := offset; n < min(offset+core.MaxCoreLogBatchEntries, count); n++ {
-								entries = append(entries, core.CoreLogEntry{Engine: engine, InstanceID: share, Service: core.CoreLogService(engine, share, "systemd"), Level: "info", Message: recipient + " · 独立实例 service started"})
+								message := recipient + " · 独立实例 service started"
+								if recipient == "bob" && engine == core.EngineShadowsocksRust && n == 0 {
+									message += "\n" + strings.Repeat("IPv6 [2001:db8:1234:5678:90ab:cdef:1234:5678]:443 -> destination.example:443; ", 40)
+								}
+								entries = append(entries, core.CoreLogEntry{Engine: engine, InstanceID: share, Service: core.CoreLogService(engine, share, "systemd"), Level: "info", Message: message})
 							}
 							id, _ := core.NewID("log")
 							if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: id, Entries: entries}); err != nil {

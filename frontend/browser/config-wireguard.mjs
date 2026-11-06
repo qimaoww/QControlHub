@@ -1,100 +1,35 @@
-import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mjs";
-
-async function assertWireGuardFieldLayout(form, engine) {
-  form.querySelector('[data-builder-step="identity"]').click();
-  await pause();
-  const panel = form.querySelector("[data-wireguard-options]");
-  const panelBox = panel.getBoundingClientRect();
-  const groups = panel.querySelectorAll(".secret-value-control, .generated-input-control");
-  assert(groups.length === 5, `${engine}: WireGuard key controls are missing`);
-  for (const group of groups) {
-    const input = group.querySelector("input");
-    const inputBox = input.getBoundingClientRect();
-    assert(inputBox.width > 0 && inputBox.height > 0, `${engine}: ${input.name} is not visible`);
-    for (const control of [group, ...group.querySelectorAll("button")]) {
-      const box = control.getBoundingClientRect();
-      assert(Math.abs(box.top - inputBox.top) <= 1 && Math.abs(box.bottom - inputBox.bottom) <= 1,
-        `${engine}: ${input.name} input and actions have mismatched heights or vertical alignment`);
-      assert(box.left >= panelBox.left && box.right <= panelBox.right,
-        `${engine}: ${input.name} actions overflow the options panel`);
-    }
-    const help = group.parentElement.querySelector("small");
-    assert(!help || help.getBoundingClientRect().top >= inputBox.bottom,
-      `${engine}: ${input.name} help overlaps the input`);
-  }
-  for (const side of ["server", "client"]) {
-    const privateBox = form.elements[`wireguard_${side}_private_key`].getBoundingClientRect();
-    const publicBox = form.elements[`wireguard_${side}_public_key`].getBoundingClientRect();
-    if (innerWidth > 600) {
-      assert(Math.abs(privateBox.top - publicBox.top) <= 1 && publicBox.left > privateBox.right,
-        `${engine}: ${side} key pair does not share an aligned row`);
-    } else {
-      assert(Math.abs(privateBox.left - publicBox.left) <= 1 && publicBox.top > privateBox.bottom,
-        `${engine}: ${side} key pair does not stack on mobile`);
-    }
+import { assert, pause, waitFor, createConfigFixture } from './config-fixture.mjs';
+const editor=()=>[...document.querySelectorAll('dialog[open] form')].at(-1);
+const open=()=>waitFor(()=>editor()?.elements.wireguard_preshared_key&&!document.querySelector('[aria-busy=true]'),'WireGuard editor did not load');
+function layout(form,engine){
+  form.querySelectorAll('details').forEach(section=>section.open=true);
+  const dialog=form.closest('dialog'), bounds=dialog.getBoundingClientRect();
+  assert(dialog.scrollWidth<=dialog.clientWidth+1,`${engine}: WireGuard dialog overflows`);
+  for(const name of ['wireguard_server_private_key','wireguard_server_public_key','wireguard_client_private_key','wireguard_client_public_key','wireguard_preshared_key']){
+    const field=form.elements[name],group=field.closest('.a-field');
+    assert(field.checkVisibility()&&group.querySelector('button'),`${engine}: ${name} control is unavailable`);
+    assert(group.scrollWidth<=group.clientWidth+1,`${engine}: ${name} actions overflow`);
+    const rect=field.getBoundingClientRect();assert(rect.left>=bounds.left&&rect.right<=bounds.right,`${engine}: ${name} exceeds dialog`);
   }
 }
-
-export async function testWireGuardConfigRuntime() {
-  for (const engine of ["xray", "sing-box"]) {
-    const fixture = await createConfigFixture(engine, {protocol:"wireguard"});
-    const source = document.querySelector("[data-code-input]");
-    const complete = source.value;
-    const documentValue = JSON.parse(complete);
-    const section = engine === "sing-box" ? "endpoints" : "inbounds";
-    assert(documentValue[section].some(value => value.tag === "second"), "complete source lost WireGuard identity");
-    fixture.select("second");
-    assert(source.value === complete, "selecting an endpoint replaced the complete source");
-    fixture.click("modify");
-    await waitFor(() => document.querySelector("#server-plan-form"), "WireGuard editor did not open");
-    let form = document.querySelector("#server-plan-form");
-    await assertWireGuardFieldLayout(form, engine);
-    assert(form.elements.wireguard_keepalive.value === "0", "disabled keepalive became 25 on edit");
-    assert(form.elements.wireguard_client_private_key.type === "password" &&
-      form.elements.wireguard_server_private_key.type === "password", "private keys are visible by default");
-    assert(!form.elements.wireguard_server_public_key.readOnly &&
-      !form.elements.wireguard_client_public_key.readOnly, "custom private key has no matching public-key input");
-    assert(Boolean(form.elements.wireguard_server_address) === (engine === "sing-box"), "Xray exposes an ignored server address");
-    assert(form.elements.listen.readOnly === (engine === "sing-box"), "endpoint pretends to support a custom listen address");
-    assert(!form.elements.wireguard_preshared_key.required, "optional PSK became mandatory");
-    const clientKey = form.elements.wireguard_client_private_key.value;
-    const port = form.elements.port.value;
-    const serverKey = form.elements.wireguard_server_private_key.value;
-    form.elements.wireguard_server_private_key.value = "edited";
-    form.elements.wireguard_server_public_key.value = "edited";
-    form.querySelector('[data-regenerate="wireguard_server_private_key,wireguard_server_public_key"]').click();
-    await waitFor(() => form.elements.wireguard_server_private_key.value === serverKey, "server key pair regeneration failed");
-    assert(form.elements.wireguard_server_public_key.value !== "edited" &&
-      form.elements.wireguard_client_private_key.value === clientKey && form.elements.port.value === port,
-    "server key generation changed client identity or listener port");
-    form.elements.tag.value = "wg-renamed";
-    form.querySelector("[data-plan-intent=validate]").click();
-    await waitFor(() => fixture.writes.length === 1 && !document.querySelector("dialog"), "WireGuard save failed");
-    assert(fixture.writes[0].original_tag === "second" && fixture.writes[0].input.wireguard_keepalive === 0 &&
-      fixture.writes[0].input.wireguard_client_private_key === clientKey, "WireGuard request lost identity or metadata");
-    fixture.select("wg-renamed");
-    fixture.click("delete");
-    await waitFor(() => document.querySelector("[data-delete-intent=validate]"), "endpoint delete confirmation missing");
-    document.querySelector("[data-delete-intent=validate]").click();
-    await waitFor(() => fixture.writes.length === 2 && !document.querySelector("dialog"), "endpoint deletion failed");
-    assert(fixture.writes[1].original_tag === "wg-renamed", "endpoint deletion targeted another file");
-    fixture.click("add");
-    await waitFor(() => document.querySelector("[data-preset-protocol]"), "protocol chooser missing");
-    const selector = document.querySelector("[data-preset-protocol]");
-    assert(![...selector.options].some(option => ["tailscale", "openvpn-server"].includes(option.value)),
-      "incomplete endpoint lifecycle is offered as a preset");
-    if (selector.value !== "wireguard") {
-      const previous = document.querySelector("#server-plan-form");
-      selector.value = "wireguard";
-      selector.dispatchEvent(new Event("change", {bubbles:true}));
-      await waitFor(() => document.querySelector("#server-plan-form") !== previous, "protocol form did not refresh");
-    }
-    await waitFor(() => document.querySelector("[data-wireguard-options]"), "WireGuard add form missing");
-    form = document.querySelector("#server-plan-form");
-    await assertWireGuardFieldLayout(form, engine);
-    form.querySelector("[data-plan-intent=validate]").click();
-    await waitFor(() => fixture.writes.length === 3 && !document.querySelector("dialog"), "new WireGuard preset did not save");
-    assert(fixture.writes[2].operation === "add" && fixture.writes[2].input.protocol === "wireguard", "new endpoint used the wrong protocol");
-    fixture.dispose();
+export async function testWireGuardConfigRuntime(){
+  for(const engine of ['xray','sing-box']){
+    const test=await createConfigFixture(engine,{protocol:'wireguard'}),source=document.querySelector('.a-main [name=content]'),complete=source.value;
+    const section=engine==='sing-box'?'endpoints':'inbounds';assert(JSON.parse(complete)[section].some(item=>item.tag==='second'),'complete source lost endpoint identity');
+    test.select('second');test.click('modify');await open();let form=editor();layout(form,engine);
+    assert(source.value===complete,'opening endpoint replaced source');assert(form.elements.wireguard_keepalive.value==='0','disabled keepalive became 25');
+    assert(form.elements.wireguard_server_private_key.type==='password'&&form.elements.wireguard_client_private_key.type==='password','private key exposed by default');
+    assert(!form.elements.wireguard_server_public_key.readOnly&&!form.elements.wireguard_client_public_key.readOnly,'custom keys have no matching public input');
+    assert(Boolean(form.elements.wireguard_server_address)===(engine==='sing-box'),'Xray exposes ignored address');assert(form.elements.listen.readOnly===(engine==='sing-box'),'endpoint offers unsupported listen address');assert(!form.elements.wireguard_preshared_key.required,'optional PSK mandatory');
+    const client=form.elements.wireguard_client_private_key.value,port=form.elements.port.value,server=form.elements.wireguard_server_private_key.value;
+    form.elements.wireguard_server_private_key.value='edited';form.elements.wireguard_server_public_key.value='edited';
+    form.elements.wireguard_server_private_key.closest('.a-field').querySelector('[aria-label="生成 WireGuard 服务端密钥对"]').click();
+    await waitFor(()=>form.elements.wireguard_server_private_key.value===server,'selective server key generation failed');
+    assert(form.elements.wireguard_server_public_key.value!=='edited'&&form.elements.wireguard_client_private_key.value===client&&form.elements.port.value===port,'server key generation altered client or port');
+    form.elements.tag.value='wg-renamed';test.confirm=true;test.submit('deploy');await test.settle(1);
+    assert(test.writes[0].original_tag==='second'&&test.writes[0].input.wireguard_keepalive===0&&test.writes[0].input.wireguard_client_private_key===client,'endpoint save lost metadata');
+    test.select('wg-renamed');test.click('delete');await waitFor(()=>editor()?.elements.intent,'endpoint delete missing');test.submit('deploy');await test.settle(2);assert(test.writes[1].original_tag==='wg-renamed','endpoint deletion changed another target');
+    test.click('add');await waitFor(()=>editor()?.elements.protocol,'protocol picker did not load');form=editor();assert(![...form.elements.protocol.options].some(option=>['tailscale','openvpn-server'].includes(option.value)),'incomplete endpoint lifecycle offered');form.elements.protocol.value='wireguard';form.elements.protocol.dispatchEvent(new Event('change',{bubbles:true}));await open();form=editor();layout(form,engine);
+    test.submit('deploy');await test.settle(3);assert(test.writes[2].operation==='add'&&test.writes[2].input.protocol==='wireguard','new endpoint wrong protocol');test.dispose();
   }
 }

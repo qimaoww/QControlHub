@@ -2,7 +2,7 @@ import { installAgentFixture } from "./browser/agent-fixture.mjs";
 import { testCapabilitySettingsRuntime } from "./browser/capability-settings.mjs";
 import { testAgentBatchLayout } from "./browser/agent-batch-layout.mjs";
 import { testAdminRuntime } from "./browser/agent-actions.mjs";
-import { testWriteOnlyCoreUninstall } from "./browser/agent-detail-actions.mjs";
+import { testWriteOnlyCoreUninstall, testNativeNodeTaskLifecycle } from "./browser/agent-detail-actions.mjs";
 import { testEmptyRuntime, testSharedNodeRuntime, testReadonlyRuntime } from "./browser/agent-access.mjs";
 import { testEnrollmentLayoutRuntime } from "./browser/enrollment.mjs";
 import { testUsersLayoutRuntime } from "./browser/users-layout.mjs";
@@ -11,7 +11,7 @@ import { testPortNamesAndRuntimeRefresh, testClientNodeOrderRuntime } from "./br
 import { testClientLayoutRuntime } from "./browser/client-layout.mjs";
 import { testSystemTCPRuntime } from "./browser/system-tcp.mjs";
 import { testLargeLogRuntime, testLogPreferenceRestoreRuntime } from "./browser/core-logs.mjs";
-import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
+import { testTrafficLayoutRuntime, testDenseTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
 import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
 import { testSelectionRuntime } from "./browser/selections.mjs";
@@ -19,19 +19,37 @@ import { testCardCoordinateRuntime } from "./browser/card-coordinates.mjs";
 import { testCardMoveRuntime } from "./browser/card-movement.mjs";
 import { testMotionRuntime } from "./browser/motion.mjs";
 import { testPopupRuntime } from "./browser/popups.mjs";
-import { assert, waitFor } from "./browser/assertions.mjs";
 import { testAgentTimeZoneLayout } from "./browser/agent-time-zone-layout.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith("select-menus")) {
+  if (mode.startsWith("task-retry")) {
+    if (new URLSearchParams(location.search).get('preview') === 'tasks-live') {
+      const { testLiveTaskRuntime } = await import('./browser/task-live.mjs');
+      await testLiveTaskRuntime(true);
+    }
+    const { testEditedRetryDialog } = await import("./browser/task-retry.mjs");
+    await testEditedRetryDialog(new URLSearchParams(location.search).has("preview"));
+    if (!new URLSearchParams(location.search).has('preview')) {
+      const { testLiveTaskRuntime } = await import('./browser/task-live.mjs');
+      await testLiveTaskRuntime();
+    }
+  } else if (mode.startsWith("select-menus")) {
     const {testSelectMenusRuntime} = await import("./browser/select-menus.mjs");
     await testSelectMenusRuntime();
   } else if (mode === "archive-engines") {
     const { testArchiveEnginesRuntime } = await import("./browser/archive-engines.mjs");
     await testArchiveEnginesRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode.startsWith("agent-time-zone-layout")) {
+    await testAgentTimeZoneLayout(scenario);
+  } else if (mode.startsWith("capabilities-settings")) {
+    await testCapabilitySettingsRuntime(scenario);
+  } else if (mode.startsWith("config-layout")) {
+    await testConfigLayoutRuntime(scenario);
+  } else if (mode.startsWith("bbr")) {
+    await testSystemTCPRuntime(scenario, new URLSearchParams(location.search).has("preview"));
   } else if (mode.startsWith("connections")) {
     const { testClientConnectionsRuntime } = await import("./browser/client-connections.mjs");
     await testClientConnectionsRuntime(new URLSearchParams(location.search).has("preview"));
@@ -63,65 +81,57 @@ try {
   } else if (mode === "config-migration") {
     const {testConfigMigrationRuntime} = await import("./config_migration_browser_runtime.mjs");
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode.startsWith("node-task-lifecycle")) {
+    await testNativeNodeTaskLifecycle(scenario);
+  } else if (mode === 'admin') {
+    await testAdminRuntime(scenario);
+  } else if (mode.startsWith("batch-layout")) {
+    const { testAgentBatchActions } = await import('./browser/agent-batch-actions.mjs');
+    await testAgentBatchActions(scenario);
+    await testAgentBatchLayout(scenario);
+  } else if (mode === "empty") {
+    await testEmptyRuntime(scenario);
+  } else if (mode.startsWith("shared-node")) {
+    await testSharedNodeRuntime(scenario);
+  } else if (mode === "readonly") {
+    await testReadonlyRuntime(scenario);
+  } else if (mode.startsWith("regions")) {
+    await testRegionRuntime(scenario);
+  } else if (mode.startsWith("enrollment")) {
+    await testEnrollmentLayoutRuntime(scenario);
+  } else if (mode.startsWith("shell-layout")) {
+    await testShellLayoutRuntime(scenario);
+  } else if (mode === "uninstall-writeonly") {
+    await testWriteOnlyCoreUninstall(scenario);
+  } else if (mode === "ports" || mode === "ports-mobile") {
+    await testPortNamesAndRuntimeRefresh(scenario);
+  } else if (mode.startsWith("client-layout")) {
+    await testClientLayoutRuntime(scenario);
+  } else if (mode.startsWith("client-order")) {
+    await testClientNodeOrderRuntime(scenario);
+  } else if (mode.startsWith("traffic-layout")) {
+    await (mode.includes("dense") ? testDenseTrafficLayoutRuntime : testTrafficLayoutRuntime)(scenario);
+  } else if (mode.startsWith("users-layout")) {
+    await testUsersLayoutRuntime(scenario);
+  } else if (mode === "logs" || mode === "logs-mobile") {
+    await testLargeLogRuntime(scenario);
+  } else if (mode === "logs-restore") {
+    await testLogPreferenceRestoreRuntime(scenario);
+  } else if (mode.startsWith('motion-cards-coordinates')) {
+    await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode.startsWith('motion-cards')) {
+    await testCardMoveRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode.startsWith('motion-selection')) {
+    await testSelectionRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode.startsWith('motion-popup')) {
+    await testPopupRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode.startsWith('motion')) {
+    await testMotionRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode === 'tasks-preview') {
+    const { testEditedRetryDialog } = await import('./browser/task-retry.mjs');
+    await testEditedRetryDialog(true);
   } else {
-    if (mode === "logs" || mode === "logs-mobile") {
-      const { testCoreLogFilterLayout } = await import("./browser/core-log-filter-layout.mjs");
-      await testCoreLogFilterLayout();
-    }
-    await import("./app.js");
-    if (mode === "tasks-preview" && new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
-    else if (mode.startsWith("agent-time-zone-layout")) await testAgentTimeZoneLayout({ testAPI: scenario.testAPI || window.__agentsBrowserTestAPI, mode });
-    else if (mode.startsWith("motion-cards-coordinates")) await testCardCoordinateRuntime(scenario, new URLSearchParams(location.search).has("preview"));
-    else if (mode.startsWith("motion-cards")) await testCardMoveRuntime(scenario, new URLSearchParams(location.search).has("preview"));
-    else if (mode.startsWith("motion-selection")) await testSelectionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
-    else if (mode.startsWith("motion-popup")) await testPopupRuntime(scenario, new URLSearchParams(location.search).has("preview"));
-    else if (mode.startsWith("motion")) await testMotionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
-    else if (mode === "traffic-layout-dense" || mode === "traffic-layout-dense-mobile") {
-      const cards = await waitFor(() => document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card").length === 17
-        && document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card"), "dense traffic cards did not load");
-      const grid = document.querySelector(".traffic-policy-grid");
-      assert.equal(getComputedStyle(grid).gridTemplateColumns.split(" ").length, mode.endsWith("-mobile") ? 1 : 4, "dense traffic grid should use the expected columns");
-      assert.ok(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, "dense traffic grid overflows horizontally");
-      assert.ok([...cards].every(card => card.querySelector(".traffic-card-node .traffic-card-port code")?.textContent && card.querySelector(".traffic-card-core .engine-badge")), "port must sit beside the node name on every dense card");
-      const first = cards[0];
-      assert.notEqual(getComputedStyle(first.querySelector(".traffic-card-core .engine-badge")).color,
-        getComputedStyle(first.querySelector(".traffic-card-config strong")).color, "core badge lost its engine color");
-      assert.notEqual(getComputedStyle(first.querySelector("[data-traffic-monitor-delete]")).color,
-        getComputedStyle(first.querySelector("[data-traffic-reset]")).color, "delete action lost its danger color");
-      assert.notEqual(getComputedStyle(first.querySelector(".traffic-policy-status.ok")).backgroundColor,
-        "rgba(0, 0, 0, 0)", "normal status lost its theme badge");
-      for (const card of cards) {
-        const frame = card.getBoundingClientRect();
-        const header = card.querySelector(".traffic-card-header");
-        assert.ok(header.getBoundingClientRect().height <= 110, "dense traffic card header grew too tall");
-        if (mode.endsWith("-mobile")) assert.ok(card.querySelector("footer").getBoundingClientRect().height <= 96, "dense traffic card actions grew too tall on mobile");
-        for (const selector of [".traffic-card-facts", ".traffic-card-actions"]) {
-          const content = card.querySelector(selector)?.getBoundingClientRect();
-          if (content) assert.ok(content.left >= frame.left - 1 && content.right <= frame.right + 1, `${selector} spills outside a dense traffic card`);
-        }
-      }
-      if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
-    }
-    else if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
-    else if (mode.startsWith("config-layout")) await testConfigLayoutRuntime(scenario);
-    else if (mode.startsWith("shell-layout")) await testShellLayoutRuntime(scenario);
-    else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime(scenario);
-    else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
-    else if (mode.startsWith("bbr")) await testSystemTCPRuntime(scenario);
-    else if (mode.startsWith("batch-layout")) await testAgentBatchLayout(scenario);
-    else if (mode === "admin") await testAdminRuntime(scenario);
-    else if (mode === "uninstall-writeonly") await testWriteOnlyCoreUninstall(scenario);
-    else if (mode.startsWith("client-order")) await testClientNodeOrderRuntime(scenario);
-    else if (mode.startsWith("client-layout")) await testClientLayoutRuntime(scenario);
-    else if (mode === "ports" || mode === "ports-mobile") await testPortNamesAndRuntimeRefresh(scenario);
-    else if (mode === "regions") await testRegionRuntime(scenario);
-    else if (mode === "empty") await testEmptyRuntime(scenario);
-    else if (mode.startsWith("enrollment")) await testEnrollmentLayoutRuntime(scenario);
-    else if (mode.startsWith("users-layout")) await testUsersLayoutRuntime(scenario);
-    else if (mode.startsWith("shared-node")) await testSharedNodeRuntime(scenario);
-    else if ((mode === "logs" || mode === "logs-mobile")) await testLargeLogRuntime(scenario);
-    else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime(scenario);
-    else await testReadonlyRuntime(scenario);
+    throw new Error(`Unknown browser smoke mode: ${mode}`);
   }
   document.documentElement.dataset.browserSmoke = "passed";
   if (!new URLSearchParams(location.search).has("preview"))

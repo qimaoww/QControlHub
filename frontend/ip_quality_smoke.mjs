@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { createIPQualityController } from "./modules/ip-quality-controller.js";
-import { createIPQualityView } from "./modules/ip-quality-view.js";
-import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
-import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary, ipQualityReportRecord, ipQualityTiming } from "./modules/ip-quality-model.js";
-import { createIPQualityCalendarView } from "./modules/ip-quality-calendar-view.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary, ipQualityReportRecord, ipQualityTiming, validateIPQualityHistory, ipQualityNodeList } from "./modules/ip-quality-model.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
 assert.equal(validIPQualityDate("2026-2-03"), false);
@@ -17,7 +13,6 @@ assert.equal(ipQualityValue("0.47%"), "0.47%");
 assert.deepEqual(ipQualitySummary([{ status: "succeeded" }, { status: "running" }, { status: "failed" }]),
   { total: 3, succeeded: 1, running: 1, failed: 1 });
 
-const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const report = {
   Head: { IP: "203.0.113.1", Version: "fixture" },
   Info: { Organization: '<img src=x onerror="alert(1)">', ASN: "64500" }, Type: {},
@@ -29,6 +24,13 @@ const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online",
 const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
 const fixtureDates = [ipQualityToday(), nextIPQualityDay(ipQualityToday(), -1), "2025-09-11", "2025-09-12", "2025-09-13", "2025-09-14", "2025-09-15", "2025-09-16"];
 const history = (day, records = []) => ({ date: day, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", dates: fixtureDates, records, schedules: [] });
+const pendingHistory = history("", [{ task_id: "pending-check", agent_id: "alpha", status: "pending" }]);
+assert.equal(validateIPQualityHistory(pendingHistory, "", pendingHistory.timezone), pendingHistory);
+assert.throws(() => validateIPQualityHistory({ ...pendingHistory, records: [null] }, "", pendingHistory.timezone));
+assert.throws(() => validateIPQualityHistory(pendingHistory, "2026-09-01", pendingHistory.timezone));
+assert.throws(() => validateIPQualityHistory({ ...pendingHistory, records: [{ ...pendingHistory.records[0],
+  last_successful: { task_id: "foreign-check", agent_id: "beta", status: "succeeded", result: { reports: [report] } },
+}] }, "", pendingHistory.timezone), "another node's previous report must never replace the selected node's image");
 const timingRecord = {status: "running", created_at: "2026-10-17T05:58:00Z", started_at: "2026-10-17T05:58:37Z"};
 const timingNow = Date.parse("2026-10-17T06:00:00Z");
 assert.equal(ipQualityTiming(timingRecord, timingNow), "已执行 1 分 23 秒");
@@ -38,97 +40,30 @@ for (const status of ["succeeded","failed","canceled"]) {
 }
 assert.equal(ipQualityTiming({...timingRecord,started_at:"invalid"},timingNow), "");
 assert.equal(ipQualityTiming({...timingRecord,started_at:"2026-10-18T00:00:00Z"},timingNow), "");
-let markup = "";
-const viewState = { data: {} };
-const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
-const renderDay = (date, records = [], agents = [agent, legacyAgent], options = {}) =>
-  render({ date, timezone: "UTC", history: history(date, records), agents, submitting: new Set(), editable: () => true, ...options });
+// Native DOM/report behavior is covered by browser/ip-quality*.mjs. Keep
+// selection and fallback contracts against the shared production model here.
 const todayRecord = { task_id: "task-1", agent_id: "alpha", status: "succeeded", result: { reports: [report] } };
-renderDay("2025-09-16", [todayRecord]);
-assert.ok(markup.includes("&lt;img"));
-assert.ok(!markup.includes("<img"));
-assert.ok(markup.includes("<dd>未知</dd>"));
-assert.ok(markup.includes("<dd>否</dd>"));
-assert.ok(markup.includes("0.47%"));
-assert.ok(!markup.includes("演示"));
-assert.ok(!markup.includes("/ 100"));
-assert.ok(!markup.includes('style="'));
-assert.ok(markup.includes("xykt/IPQuality"));
-assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run button");
-assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
-assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
-assert.ok(markup.includes("data-ip-quality-latest"), "history has no return-to-latest control");
-// The page shows one node, and publishes the same list the sidebar renders.
-assert.equal(markup.match(/data-ip-quality-panel=/g).length, 1, "the page rendered more than one node");
-assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "the recorded node is not the selected panel");
-assert.equal(viewState.data.ipQualityAgent, "alpha", "selection was not published for the sidebar");
-assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "history offered nodes without records");
-assert.deepEqual(viewState.data.ipQualityNodes[0], { id: "alpha", name: "Node A", note: "已完成", dot: "ok" },
-  "the sidebar projection lost its per-node status");
-renderDay(ipQualityToday());
-assert.ok(markup.includes("data-ip-quality-run"), "today lost its run button");
-assert.ok(markup.includes("data-ip-quality-schedule"), "today lost its schedule controls");
-assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"], "today hid a managed node");
-assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.note), ["当天未检测", "需升级 Agent"],
-  "the sidebar lost its per-node status");
-// A remembered node that the day does not list falls back to the first visible
-// one, so the sidebar highlight and the panel can never disagree.
-viewState.data.ipQualityAgent = "beta";
-renderDay("2025-09-16", [todayRecord]);
-assert.equal(viewState.data.ipQualityAgent, "alpha", "history kept a node it does not list");
-// A foreground read with no data yet must not drop the selection or blink the
-// sidebar away: only a completed read may publish an empty node list.
-viewState.data.ipQualityAgent = "beta";
-render({ date: ipQualityToday(), timezone: "UTC", agents: [], submitting: new Set(), editable: () => true, loading: true });
-assert.equal(viewState.data.ipQualityAgent, "beta", "a loading read dropped the selected node");
-assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "a loading read cleared the sidebar");
-assert.ok(markup.includes("正在读取检测记录…"));
-render({ date: ipQualityToday(), timezone: "UTC", agents: [agent], submitting: new Set(), editable: () => true, loading: true });
-assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "nodes should appear before history finishes");
-assert.ok(markup.includes("正在读取这台节点的检测记录…"));
-assert.ok(markup.includes("读取中"));
-assert.ok(markup.includes("<strong>—</strong>"), "missing history must not look like zero detections");
-assert.ok(markup.includes('data-ip-quality-run="alpha" disabled'), "partial reads must not enable mutations");
-assert.equal(viewState.data.ipQualityNodes[0].note, "正在读取记录");
-render({ date: ipQualityToday(), timezone: "UTC", agents: [agent], submitting: new Set(), editable: () => true,
-  readFailed: true, error: "无法读取" });
-assert.ok(markup.includes("读取失败"));
-assert.ok(!markup.includes("请稍候"));
-assert.ok(!markup.includes('ip-quality-badge unknown"><i></i>未检测'), "failed read must not look like an empty result");
-renderDay("2025-09-16", []);
-assert.ok(markup.includes("当天没有检测记录"));
-assert.ok(!markup.includes("data-ip-quality-panel"), "history rendered nodes without records");
-assert.deepEqual(viewState.data.ipQualityNodes, [], "history listed nodes without records");
-render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [], submitting: new Set(), editable: () => false });
-assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
-assert.ok(!markup.includes("data-ip-quality-run"));
-
 const oldReport = { ...todayRecord, finished_at: "2026-09-20T06:05:00Z",
   archives: [{ family: 4, sha256: "abc", rendered_at: "2026-09-20T06:05:00Z" }] };
-renderDay(ipQualityLatest, [oldReport]);
-assert.ok(markup.includes('data-ip-quality-latest aria-pressed="true"'));
-assert.ok(markup.includes('data-ip-quality-date data-selected-date=""'), "latest was presented as a specific day");
-assert.ok(markup.includes("2026-09-20T06:05:00Z"), "latest did not show the actual report time");
-assert.ok(markup.includes('data-ip-quality-run="alpha">立即检测'), "old report prevented a fresh check");
-assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"]);
+const historicalNodes = ipQualityNodeList([agent, legacyAgent], [todayRecord], false, "beta");
+assert.equal(historicalNodes.selected.id, "alpha", "history retained an unlisted selection");
+assert.deepEqual(historicalNodes.items, [{ id: "alpha", name: "Node A", note: "已完成", dot: "ok" }]);
+const todayNodes = ipQualityNodeList([agent, legacyAgent], [], true, "beta");
+assert.equal(todayNodes.selected.id, "beta");
+assert.deepEqual(todayNodes.items.map(item => item.note), ["当天未检测", "需升级 Agent"]);
+assert.equal(ipQualityNodeList([agent], [], true, "", "", true).items[0].note, "尚未检测");
+assert.equal(ipQualityNodeList([agent], [], true, "", "正在读取记录").items[0].note, "正在读取记录");
+assert.equal(ipQualityNodeList([agent], [], true, "", "读取失败").items[0].note, "读取失败");
+assert.deepEqual(ipQualityNodeList([agent], [], false).items, []);
+assert.equal(ipQualityNodeList([agent], [], false).selected, null);
 for (const status of ["pending", "running", "failed", "canceled"]) {
-  renderDay(ipQualityLatest, [{ task_id: "new-task", agent_id: "alpha", status, last_successful: oldReport }]);
-  assert.ok(markup.includes("上次成功检测"), `${status}: retained report was not labeled`);
-  assert.ok(markup.includes("203.0.113.1"), `${status}: lost the successful report`);
-  assert.ok(markup.includes('/ip-quality/task-1/archives/4'), `${status}: wrong archive task`);
-  assert.ok(!markup.includes('/ip-quality/new-task/archives/4'), `${status}: report attributed to latest task`);
+  assert.equal(ipQualityReportRecord({ ...todayRecord, status, last_successful: oldReport }, ipQualityLatest, "UTC"), oldReport);
 }
-renderDay("2025-09-16", [{ task_id: "new-task", agent_id: "alpha", status: "failed", last_successful: oldReport }]);
-assert.ok(!markup.includes("203.0.113.1"), "history showed a successful report from a different day");
 const sameDayReport = { ...oldReport, created_at: "2025-09-15T23:30:00Z" };
 const repeatedCheck = { task_id: "repeated", agent_id: "alpha", status: "running", last_successful: sameDayReport };
 assert.equal(ipQualityReportRecord(repeatedCheck, "2025-09-16", "Asia/Shanghai"), sameDayReport);
 assert.equal(ipQualityReportRecord(repeatedCheck, "2025-09-16", "UTC"), null, "fallback crossed the requested local day");
 assert.equal(ipQualityReportRecord({ ...repeatedCheck, agent_id: "beta" }, ipQualityLatest, "UTC"), null, "fallback crossed nodes");
-renderDay(ipQualityLatest, []);
-assert.ok(markup.includes("首次报告"));
-assert.equal(viewState.data.ipQualityNodes[0].note, "尚未检测");
-
 assert.deepEqual(ipQualityAvailableDates(["2024-02-29", "2024-02-29", "2024-02-30", "2024-01-01", "2999-01-01"]), ["2024-02-29", "2024-01-01"]);
 assert.equal(nextIPQualityMonth("2024-01", -1), "2023-12");
 assert.equal(nextIPQualityMonth("2024-12", 1), "2025-01");
@@ -138,60 +73,6 @@ assert.equal(ipQualityHistoryNeighbor(sparseDates, ipQualityLatest, -1), "2024-0
 assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-03-02", -1), "2024-02-29");
 assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-02-29", 1), "2024-03-02");
 assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-01-01", -1), "");
-const calendarMarkup = createIPQualityCalendarView({ esc })({ date: "2024-02-29", dates: sparseDates, month: "2024-02", timezone: "UTC" });
-assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-29"[^>]*aria-pressed="true"[^>]*title="查看检测记录"/);
-assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-28"[^>]* disabled/);
-assert.ok(!calendarMarkup.includes("2024-02-30"), "calendar invented a day in a leap month");
-assert.match(createIPQualityCalendarView({ esc })({ date: ipQualityLatest, dates: [], timezone: "UTC" }), /暂无检测记录/);
-// Retention can remove the selected date and its remembered month during a refresh.
-for (const month of ["2024-01", undefined]) {
-  const prunedCalendar = createIPQualityCalendarView({ esc })({
-    date: "2024-01-01", month, dates: ["2024-04-05", "2024-03-02"], timezone: "UTC",
-  });
-  assert.match(prunedCalendar, /data-ip-quality-date-option="2024-03-02"[^>]*title="查看检测记录"/,
-    "expired selection did not return the calendar to a retained month");
-  assert.match(prunedCalendar, /data-ip-quality-month="2024-02"[^>]* disabled/);
-  assert.match(prunedCalendar, /data-ip-quality-month="2024-04"[^>]*aria-label="下个月">/);
-}
-const newerCalendar = createIPQualityCalendarView({ esc })({
-  date: "2024-05-01", month: "2024-05", dates: ["2024-04-05", "2024-03-02"], timezone: "UTC",
-});
-assert.match(newerCalendar, /data-ip-quality-date-option="2024-04-05"[^>]*title="查看检测记录"/);
-assert.match(newerCalendar, /data-ip-quality-month="2024-05"[^>]* disabled/);
-const emptyCalendar = createIPQualityCalendarView({ esc })({
-  date: "2024-01-01", month: "2024-01", dates: [], timezone: "UTC",
-});
-assert.match(emptyCalendar, new RegExp(`data-ip-quality-date-option="${ipQualityToday()}"[^>]* disabled`));
-assert.match(emptyCalendar, /暂无检测记录/);
-
-const renderReport = createIPQualityReportView({ esc });
-const blacklistReport = {
-  ...report,
-  Mail: { ...report.Mail, DNSBlacklist: { Total: 439, Clean: 411, Marked: 28, Blacklisted: 0 } },
-};
-assert.ok(renderReport(blacklistReport).includes("<dt>干净</dt><dd>411</dd>"));
-// Risk factors are evidence, not a menu: every provider value renders inline.
-const factorMarkup = renderReport(report);
-assert.ok(factorMarkup.includes('<section class="ip-quality-factor"><strong>代理</strong>'), "a risk factor is not rendered inline");
-assert.ok(!factorMarkup.includes('class="ip-quality-factor"><summary'), "a risk factor is folded behind a disclosure");
-assert.ok(factorMarkup.includes("<dt>IPQS</dt><dd>否</dd>"), "a risk factor lost its provider value");
-const ipv6Report = { ...blacklistReport, Head: { ...report.Head, IP: "2001:db8::1" } };
-const originalIPv6Report = JSON.stringify(ipv6Report);
-const ipv6Markup = renderReport(ipv6Report);
-assert.ok(ipv6Markup.includes("未检测（仅支持 IPv4）"));
-assert.ok(!ipv6Markup.includes("<dt>干净</dt>"), "IPv4 blacklist counts were attributed to IPv6");
-assert.ok(ipv6Markup.includes("&quot;Total&quot;: 439"), "source JSON lost the upstream values");
-assert.equal(JSON.stringify(ipv6Report), originalIPv6Report, "rendering rewrote the source report");
-
-renderDay(ipQualityLatest, [oldReport], [agent], { submitting: new Set([agent.id]), creating: new Set([agent.id]) });
-assert.ok(markup.includes("任务创建中…"));
-assert.ok(markup.includes("任务创建中，正在等待控制面确认"));
-renderDay(ipQualityLatest, [oldReport], [agent], {creationErrors:new Map([[agent.id,"任务创建失败（请求 ID：req_" + "a".repeat(100) + ") <img>"]])});
-assert.ok(markup.includes("任务创建失败"));
-assert.ok(markup.includes("&lt;img&gt;"));
-assert.ok(markup.includes("203.0.113.1"), "creation failure erased last successful report");
-assert.ok(markup.includes('data-ip-quality-run="alpha">立即检测'), "creation failure kept button disabled");
-
 const originalDocument = globalThis.document;
 globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
 try {
@@ -419,13 +300,4 @@ try {
   state.data={}; await controller.load();
   assert.equal(views.at(-1).creationErrors.size,0,"another account inherited creation errors");
 } finally { globalThis.document=savedDocument; }
-console.log("IP quality model, rendering, request races and mutation guards passed");
-
-const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_id: "task-1", archives: [
-  { family: 4, rendered_at: "2026-09-19T00:00:00Z", sha256: "abc" },
-] });
-assert.ok(archiveMarkup.includes('<img src="/api/v1/ip-quality/task-1/archives/4"'));
-assert.ok(archiveMarkup.includes('?download=1'));
-assert.ok(archiveMarkup.includes("存档信息"));
-assert.ok(!archiveMarkup.includes("Report.Check.Place"), "browser must never contact the upstream report host");
-assert.ok(!archiveMarkup.includes("iframe") && !archiveMarkup.includes("<svg"), "SVG must remain an inert image");
+console.log("IP quality model, selection, request races and mutation guards passed");

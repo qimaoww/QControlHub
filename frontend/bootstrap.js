@@ -48,7 +48,7 @@ async function start() {
     history.replaceState(null, "", entryURL);
   }
   let session = null;
-  let selected = "classic";
+  let selected = "analytics";
   try {
     session = await accountRequest("/auth/session", { signal: timed() });
     if (session) {
@@ -61,24 +61,17 @@ async function start() {
 
   if (!session) selected = loginTheme(document.querySelector('meta[name="qch-login-theme"]')?.content);
 
-  if (selected === "analytics") {
-    const sheet = style("./analytics/theme.css", "analytics");
-    try {
-      const [runtime] = await Promise.all([import(asset("./analytics/app.js")), sheet.ready]);
-      runtime.startAnalytics({ app, session });
-      return;
-    } catch {
-      disposeTheme();
-      sheet.link.remove();
-      // Retain the public entry while the fallback theme loads.
-      if (startup) app.replaceChildren(startup);
-      document.body.removeAttribute("class");
-      app.dataset.themeRecovery = "analytics";
-    }
+  const sheet = style("./analytics/theme.css", "analytics");
+  try {
+    const [runtime] = await Promise.all([import(asset("./analytics/app.js")), sheet.ready]);
+    runtime.startAnalytics({ app, session });
+  } catch (error) {
+    disposeTheme();
+    sheet.link.remove();
+    if (startup) app.replaceChildren(startup);
+    document.body.removeAttribute("class");
+    throw error;
   }
-  const sheet = style("./app.css", "classic");
-  await sheet.ready;
-  await import(asset("./app.js"));
 }
 
 start().catch(() => {

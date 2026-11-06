@@ -126,17 +126,39 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		InboundTargets: []configInboundTargetResource{},
 		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
-	if config.ID != "" {
-		result.Config = &config
-		result.Management, err = s.store.ConfigManagementState(request.Context(), config.ID, config.Version)
-		if err != nil {
-			writeStoreError(w, err)
-			return
+	if config.ID != "" || request.PathValue("snapshot") != "" {
+		previewChanged := false
+		if snapshot := request.PathValue("snapshot"); snapshot != "" {
+			var content string
+			content, err = s.store.ReadTaskConfigSnapshot(request.Context(), snapshot, agent.ID, engine)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			previewChanged = content != config.Content
+			config.Content = content
+			config.AgentID, config.Engine = agent.ID, engine
+			if config.Name == "" {
+				config.Name = agent.Name + " · " + string(engine)
+			}
 		}
-		result.Deployment, err = s.store.ConfigManagementDeployment(request.Context(), config.ID, config.Version)
-		if err != nil {
-			writeStoreError(w, err)
-			return
+		result.Config = &config
+		if config.ID != "" {
+			result.Management, err = s.store.ConfigManagementState(request.Context(), config.ID, config.Version)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			result.Deployment, err = s.store.ConfigManagementDeployment(request.Context(), config.ID, config.Version)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+		}
+		if previewChanged {
+			result.Deployment.State = "pending"
+			result.Deployment.TaskID = ""
+			result.Deployment.TaskStatus = ""
 		}
 		result.ManagedObjects, err = serverconfig.ManagedObjects(engine, config.Content, result.Management)
 		if err != nil {
@@ -162,9 +184,11 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
 			})
 		}
-		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
-			writeInternalError(w, err)
-			return
+		if config.ID != "" {
+			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
+				writeInternalError(w, err)
+				return
+			}
 		}
 		if engine == core.EngineShadowsocksRust {
 			destination := false

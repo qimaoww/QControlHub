@@ -1,84 +1,51 @@
-import { assert, waitFor } from "./assertions.mjs";
+import { assert, waitFor, delay } from './assertions.mjs';
+import { startNativeNodes } from './agent-detail-actions.mjs';
+
 export async function testAgentOverview({ testAPI }) {
-
-await waitFor(() => document.querySelector(".node-card-grid"), "聚合页没有渲染节点卡片");
-  const komariInline = await waitFor(
-    () => {
-      const inline = document.querySelector('[data-komari-link="alpha"]');
-      return inline?.querySelector("[data-komari-traffic]")?.textContent ===
-        "4.0 GB / 10.0 GB"
-        ? inline
-        : null;
-    },
-    "Komari 流量没有载入网络资源格",
-  );
-  assert.equal(komariInline.closest(".node-card-network") !== null, true);
-  assert.equal(
-    komariInline.querySelector("[data-komari-traffic]").textContent,
-    "4.0 GB / 10.0 GB",
-  );
-  assert.match(
-    komariInline.querySelector("[data-komari-cycle]").textContent,
-    /\d{1,2}\.\d{1,2}–\d{1,2}\.\d{1,2}/,
-  );
-  assert.equal(Number(komariInline.querySelector("[data-komari-progress]").value), 40);
-  const alphaAvatar = document.querySelector('[data-agent-node="alpha"] [data-region-avatar]');
-  const alphaFlag = await waitFor(
-    () => alphaAvatar.querySelector('img[src="/api/v1/region-flags/cn"]'),
-    "节点地区没有渲染统一 SVG 旗帜",
-  );
-  await waitFor(() => alphaFlag.complete && alphaFlag.naturalWidth > 0, "节点地区 SVG 旗帜没有载入");
-  assert.equal(alphaAvatar.textContent, "");
-  assert.equal(alphaAvatar.classList.contains("has-region"), true);
-  assert.equal(alphaAvatar.title, "中国台湾 (TW) · 点击选择国家/地区旗帜");
-  assert.equal(alphaAvatar.getAttribute("aria-label"), "选择国家/地区旗帜：中国台湾 (TW)");
-  // A node whose region the list already resolved renders its flag without a
-  // per-node lookup; that is what keeps a node grid from costing one request
-  // per card on a link where a single read takes about a second.
-  await waitFor(() => {
-    const flag = document.querySelector(
-      '[data-agent-node="bravo"] [data-region-avatar] img[src="/api/v1/region-flags/sg"]',
-    );
-    return flag?.complete && flag.naturalWidth > 0 ? flag : null;
-  }, "节点列表内联地区没有渲染旗帜");
-  assert.equal(
-    testAPI.calls.some(
-      (call) => call.method === "GET" && call.path === "/agents/bravo/region",
-    ),
-    false,
-    "列表已解析地区的节点不应再逐节点查询地区",
-  );
-  await waitFor(() => {
-    const inline = document.querySelector('[data-komari-link="delta"]');
-    return inline?.querySelector("[data-komari-traffic]")?.textContent ===
-      "5.0 GB / 20.0 GB"
-      ? inline
-      : null;
-  }, "节点列表内联 Komari 资源没有渲染月流量");
-  assert.equal(
-    testAPI.calls.some(
-      (call) => call.method === "GET" && call.path === "/agents/delta/komari",
-    ),
-    false,
-    "列表已内联 Komari 资源的节点不应再逐节点读取",
-  );
-  assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
-  assert.ok(
-    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),
-    "绑定 Komari UUID 后必须保留原实时网络内容",
-  );
-  assert.equal(
-    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-total]"),
-    null,
-    "绑定 Komari UUID 后应只替换原累计网络内容",
-  );
-  assert.ok(
-    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-rate"]'),
-    "未绑定 Komari UUID 的节点必须保留原实时网络内容",
-  );
-  assert.ok(
-    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-total"]'),
-    "未绑定 Komari UUID 的节点必须保留原累计网络内容",
-  );
-
+  await startNativeNodes();
+  const button = text => [...document.querySelectorAll('button')].find(item => item.textContent === text);
+  const card = id => document.querySelector(`.a-probe[data-agent-id="${id}"]`);
+  const flag = await waitFor(() => card('alpha').querySelector('img[src="/api/v1/region-flags/cn"]'), '节点地区没有统一 SVG 旗帜');
+  await waitFor(() => flag.complete && flag.naturalWidth > 0, '节点旗帜没有载入');
+  assert.equal(flag.parentNode.getAttribute('aria-label'), '中国台湾', '节点地区无可读名称');
+  assert.equal(flag.parentNode.title, '中国台湾 (TW)', '节点地区缺少名称及代号');
+  await waitFor(() => card('bravo').querySelector('img[src="/api/v1/region-flags/sg"]'), '内联地区未渲染');
+  assert.ok(!testAPI.calls.some(call => call.path === '/agents/bravo/region'), '已有内联地区仍逐节点查询');
+  const network = card('alpha').querySelector('.a-probe-network');
+  assert.ok(network.textContent.includes('/s') && network.textContent.includes('累计'), '节点丢失速率或累计流量');
+  const stableCard = card('alpha'), search = document.querySelector('input[name=search]');
+  search.focus(); search.value = 'ALPHA'; search.dispatchEvent(new Event('input', { bubbles: true }));
+  search.setSelectionRange(1, 3);
+  assert.equal(document.activeElement, search, `筛选前未取得焦点：${document.activeElement?.outerHTML}`);
+  const filteredCard = card('alpha');
+  testAPI.agents[0].metrics.network_rx_bps = 2048;
+  testAPI.agents[0].metrics.network_rx_bytes = 2 ** 30;
+  button('刷新').click();
+  await waitFor(() => card('alpha').querySelector('.a-probe-network').textContent.includes('2\u00a0KB/s'), '网络速率未刷新');
+  assert.equal(card('alpha'), filteredCard, '刷新重建节点卡片');
+  assert.equal(document.activeElement, search, `刷新丢失搜索焦点：${document.activeElement?.outerHTML}`);
+  assert.equal(search.selectionStart, 1, '刷新丢失文本选择');
+  assert.equal(search.value, 'ALPHA', '刷新重置筛选');
+  assert.ok(card('alpha').textContent.includes('累计 1\u00a0GB'), '累计收发量未刷新');
+  assert.ok(stableCard.isConnected, '搜索重建已存在卡片');
+  search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true }));
+  button('列表').click();
+  await waitFor(() => document.querySelector('.a-probe-list'), '列表视图未切换');
+  assert.ok(document.querySelector('.a-probe-list').textContent.includes('累计接收'), '列表缺少累计流量');
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '视图保存未结束');
+  testAPI.nodeView.revision++;
+  button('卡片').click();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && document.querySelector('.a-toast.error')?.textContent.includes('冲突'), '视图并发冲突未反馈');
+  assert.ok(document.querySelector('.a-probe-list'), '冲突未采用服务端当前视图');
+  button('卡片').click(); await waitFor(() => card('alpha'), '卡片视图未恢复');
+  assert.equal(testAPI.nodeView.view, 'cards', '视图未保存到 API');
+  const stable = card('alpha');
+  testAPI.agentsFailure = true; button('刷新').click();
+  await waitFor(() => document.querySelector('[role=status]')?.textContent.includes('更新失败'), '读取失败未保留状态');
+  assert.equal(card('alpha'), stable, '失败清空有效节点');
+  await waitFor(() => !button('刷新').disabled, '失败后刷新未解锁');
+  testAPI.agentsFailure = false; button('刷新').click();
+  await waitFor(() => document.querySelector('[role=status]')?.textContent === '正在实时更新', '节点读取未恢复');
+  await delay(20);
+  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, '节点列表横向溢出');
 }

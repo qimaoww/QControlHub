@@ -34,7 +34,6 @@ const routeAliases = Object.freeze({
   "settings-runtime": "settings",
   "settings-data": "settings",
   "settings-notify": "settings",
-  "settings-komari": "settings",
   "settings-cnip": "settings",
   "settings-certificates": "settings",
   "settings-deployment": "settings",

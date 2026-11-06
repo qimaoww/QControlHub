@@ -34,3 +34,9 @@ export const storagePolicyName = (value) =>
       critical: "仅保存严重错误",
       off: "已停止保存新日志",
     })[value] || "保存策略不可见";
+
+export function coreLogStoragePolicy(settings, readable) {
+  if (!readable) return '保存策略不可见';
+  const days = Number(settings?.core_log_retention_days);
+  return [storagePolicyName(settings?.core_log_minimum_level), Number.isInteger(days) && days > 0 ? `保留 ${days} 天` : ''].filter(Boolean).join(' · ');
+}

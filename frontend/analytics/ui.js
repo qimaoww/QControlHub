@@ -1,3 +1,4 @@
+import { listen, patch } from "./live-dom.js";
 import { currentTheme } from "../modules/theme-lifecycle.js";
 let fieldID = 0;
 const icons = {
@@ -9,6 +10,7 @@ const icons = {
   shield: '<path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11zM9 12l2 2 4-4"/>',
   activity: '<path d="M3 17h3l3-10 4 13 3-8h5"/>',
   list: '<path d="M9 6h12M9 12h12M9 18h12M3 6h.01M3 12h.01M3 18h.01"/>',
+  grip: '<path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/>',
   users: '<circle cx="9" cy="8" r="3"/><path d="M2 20v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2m4 0v-2a4 4 0 0 0-3-4m-2-9a3 3 0 0 1 0 6"/>',
   settings: '<path d="M4 6h16M4 12h16M4 18h16"/><path d="M9 4v4m6 2v4m-6 2v4"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18h1.5a1.5 1.5 0 0 0 1.1-2.5 1.5 1.5 0 0 1 1.1-2.5H18a3 3 0 0 0 3-3 10 10 0 0 0-9-10zM7.5 12h.01M10 7.5h.01M15 7.5h.01M17.5 12h.01"/>',
@@ -23,7 +25,7 @@ export function node(tag, attrs = {}, ...children) {
   const element = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value === false || value == null) continue;
-    if (key.startsWith("on")) element.addEventListener(key.slice(2), value);
+    if (key.startsWith("on")) listen(element, key.slice(2), value);
     else if (key === "className") element.className = value;
     else element.setAttribute(key, value === true ? "" : String(value));
   }
@@ -42,6 +44,12 @@ export function icon(name) {
 
 export const button = (label, onclick, { tone = "", disabled = false, glyph, title, className = "", ...attrs } = {}) =>
   node("button", { className: `a-button ${tone} ${className}`, type: "button", onclick, disabled, title, ...attrs }, glyph && icon(glyph), label);
+export function dragHandle(id, label, disabled = false) {
+  const handle = node("button", { type: "button", className: "a-icon", "data-node-drag": id,
+    "aria-label": `拖动调整 ${label} 的顺序`, "aria-pressed": "false", title: "拖动调整顺序；方向键移动，Esc 取消", disabled }, icon("grip"));
+  handle.querySelector("svg").setAttribute("stroke-width", "2.6");
+  return handle;
+}
 export const link = (label, href, tone = "") => node("a", { className: `a-button ${tone}`, href }, label);
 export const badge = (value, tone = "") => node("span", { className: `a-badge ${tone}` }, value);
 export const actions = (...items) => node("div", { className: "a-actions" }, items);
@@ -120,33 +128,47 @@ export function autoFilter(ctx, fields, load, resetValues = {}) {
 }
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 
-export function table(columns, rows, { emptyText, paginate = 12, label = "记录" } = {}) {
+export function table(columns, rows, { emptyText, paginate = 12, label = "记录", rowKey, motion = true, columnWidths } = {}) {
   const body = node("tbody");
   const scroll = node("div", { className: "a-table-scroll", tabindex: "0", role: "region", "aria-label": label },
-    node("table", {}, node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col", "data-column": title }, title)))), body));
-  if (!rows.length) return empty(emptyText);
+    node("table", {}, columnWidths && node("colgroup", {}, columnWidths.map(width => node("col", { width }))),
+      node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col", "data-column": title }, title)))), body));
+
   if (columns.length === 2) scroll.classList.add("a-table-pairs");
   const previous = button("上一页", () => show(page - 1));
   const next = button("下一页", () => show(page + 1));
   const count = node("span", { className: "a-muted", "aria-live": "polite" });
-  const size = paginate || rows.length;
-  const last = Math.ceil(rows.length / size);
+  let size = paginate || Math.max(1, rows.length);
+  let last = Math.max(1, Math.ceil(rows.length / size));
   let page = 1;
-  function show(value) {
+  function show(value, animate = motion) {
     page = Math.max(1, Math.min(last, value));
-    body.replaceChildren(...rows.slice((page - 1) * size, page * size).map(row =>
-      node("tr", {}, (typeof row === "function" ? row() : row).map((cell, index) => node("td", { "data-column": columns[index] }, cell ?? "—")))));
-    count.textContent = `共 ${rows.length} 条 · 第 ${page} / ${last} 页`;
+    patch(body, node("tbody", {}, rows.slice((page - 1) * size, page * size).map((row, index) =>
+      node("tr", rowKey ? { "data-refresh-key": rowKey(row, (page - 1) * size + index) } : {}, (typeof row === "function" ? row() : row).map((cell, index) => node("td", { "data-column": columns[index] }, cell ?? "—"))))));
+    const summary = `共 ${rows.length} 条 · 第 ${page} / ${last} 页`;
+    if (count.textContent !== summary) count.textContent = summary;
     previous.disabled = page === 1;
     next.disabled = page === last;
-    currentTheme("analytics")?.motion?.list(body);
+    if (animate) currentTheme("analytics")?.motion?.list(body);
   }
   show(1);
-  return node("div", {}, scroll, last > 1 && node("div", { className: "a-pagination" }, count, actions(previous, next)));
+  const noRows = empty(emptyText);
+  noRows.hidden = rows.length > 0;
+  scroll.hidden = !rows.length;
+  const pagination = node("div", { className: "a-pagination" }, count, actions(previous, next));
+  pagination.hidden = last <= 1;
+  const result = node("div", {}, noRows, scroll, pagination);
+  result.tableState = { signature: JSON.stringify([columns, paginate, label, columnWidths, emptyText]), rows };
+  result.updateRows = value => { rows = value; result.tableState.rows = value; if (!paginate) size = Math.max(1, rows.length); last = Math.max(1, Math.ceil(rows.length / size)); show(page, false); pagination.hidden = last <= 1; noRows.hidden = rows.length > 0; scroll.hidden = !rows.length; };
+  result.reconcileTable = fresh => {
+    if (result.tableState.signature !== fresh.tableState?.signature) return false;
+    result.updateRows(fresh.tableState.rows); return true;
+  };
+  return result;
 }
 
 export function field(label, name, value = "", attrs = {}) {
-  const { options, multiline, hint, ...attributes } = attrs;
+  const { options, multiline, hint, suggestions, ...attributes } = attrs;
   let input;
   if (options) {
     input = node("select", { name, ...attributes }, options.map(item => {
@@ -155,6 +177,15 @@ export function field(label, name, value = "", attrs = {}) {
     }));
     input.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
     input.value = value;
+    input.addEventListener('keydown', event => {
+      const option = document.activeElement;
+      if (event.key !== 'Tab' || !input.matches(':open') || option?.tagName !== 'OPTION' || !input.contains(option) || option.matches(':disabled')) return;
+      if (input.value !== option.value) {
+        input.value = option.value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
   } else if (multiline) {
     input = node("textarea", { name, rows: multiline, ...attributes });
     input.defaultValue = input.value = value ?? "";
@@ -165,9 +196,12 @@ export function field(label, name, value = "", attrs = {}) {
     input = node("input", { name, value: value ?? "", ...attributes });
   }
   if (!input.id) input.id = `a-field-${++fieldID}`;
+  const choices = suggestions?.length ? node('datalist', { id: `${input.id}-choices` },
+    suggestions.map(value => node('option', { value }, value))) : null;
+  if (choices) input.setAttribute('list', choices.id);
   const helper = hint && node("span", { className: "a-field-hint", id: `${input.id}-hint` }, hint);
   if (helper) input.setAttribute("aria-describedby", helper.id);
-  return node("div", { className: "a-field" }, node("label", { className: "a-field-label", for: input.id }, label), input, helper);
+  return node("div", { className: "a-field" }, node("label", { className: "a-field-label", for: input.id }, label), input, helper, choices);
 }
 
 export const formData = form => Object.fromEntries(new FormData(form));
@@ -199,5 +233,25 @@ export async function copyText(value) {
 export function openDialog(box) {
   if (!document.querySelector('dialog:modal,.a-modal-tail'))
     document.documentElement.style.setProperty('--a-modal-scrollbar-gap', `${innerWidth - document.documentElement.getBoundingClientRect().width}px`);
+  const focusScope = new AbortController();
+  const outside = event => {
+    const rect = box.getBoundingClientRect();
+    return event.target === box && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+  };
+  let backdropPress = false;
+  box.addEventListener('pointerdown', event => { backdropPress = outside(event); }, { signal: focusScope.signal });
+  box.addEventListener('click', event => {
+    const dismiss = backdropPress && outside(event); backdropPress = false;
+    if (dismiss && box.dispatchEvent(new Event('cancel', { cancelable: true }))) box.close();
+  }, { signal: focusScope.signal });
+  box.addEventListener('keydown', event => {
+    if (event.key !== 'Tab') return;
+    const controls = [...box.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')]
+      .filter(control => control.tabIndex >= 0 && !control.matches(':disabled,[inert]') && control.getClientRects().length && getComputedStyle(control).visibility !== 'hidden');
+    const first = controls[0], last = controls.at(-1);
+    if (first && event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (last && !event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }, { signal: focusScope.signal });
+  box.addEventListener('close', () => focusScope.abort(), { once: true });
   box.showModal();
 }

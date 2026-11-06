@@ -1,3 +1,4 @@
+export { readXHTTPOptions } from "./inbound-options-model.js";
 import { bindEvent } from "./refresh.js";
 import { setVisible } from "./presence-motion.js";
 
@@ -21,31 +22,6 @@ export function xhttpProtocolOptions(plan, protocol) {
   const split = group ? "" : `<details class="preset-option-panel xhttp-options"${download ? " open" : ""}><summary><b>上下行分离 · 独立下载端点</b></summary><label class="plan-check"><input type="checkbox" name="xhttp_split" value="1"${download ? " checked" : ""}><span><b>启用独立下载参数</b></span></label><div data-xhttp-download${download ? "" : " hidden"}><div class="plan-fields two">${input("xhttp_download_address", "下载连接地址", download?.address)}${input("xhttp_download_port", "下载连接端口", download?.port || plan.client_port || plan.port, "", "number")}${input("xhttp_download_sni", "下载 SNI", security.serverName || (tls ? plan.tls_server_name : plan.reality_server_name))}${input("xhttp_download_host", "下载 XHTTP Host", settings.host)}${tls ? input("xhttp_download_alpn", "下载 TLS ALPN", security.alpn?.join(",") || "h2") : ""}</div><button class="button small" type="button" data-xhttp-swap>交换上传与下载地址</button><div class="plan-fields one"><p class="tls-help">两个端点使用同一入站与路径；Reality 双栈需监听 ::。交换仅改变地址与端口。</p></div></div></details>`;
   const advanced = `<details class="preset-option-panel xhttp-options"><summary><b>XHTTP 高级参数</b></summary><div class="plan-fields two">${protocol.uses_reality && !group ? input("reality_target", "公网 Reality target", plan.reality_target, "公网域名:端口；留空使用 SNI:443。") : ""}${protocol.uses_reality ? input("reality_server_names", "允许的 Reality SNI", plan.reality_server_names || plan.reality_server_name, "逗号分隔，须包含客户端 SNI。") : ""}${group ? input("xhttp_backend_port", "内部 XHTTP 端口", plan.xhttp_backend_port, "仅监听 127.0.0.1，须与所有实例端口不同。", "number") + input("xhttp_tls_port", "本地 TLS 目标端口", plan.xhttp_tls_port, "仅监听 127.0.0.1，由受管 Nginx 提供。", "number") : ""}</div><div class="plan-fields one"><label>客户端 extra（完整 JSON）<textarea name="xhttp_extra" rows="6" spellcheck="false">${esc(plan.xhttp_extra || "{}")}</textarea><small>stream-one 不支持分离；xmux 的 maxConcurrency 与 maxConnections 至少一项为 0。旧 cMaxLifetimeMs 须换算为 hMaxReusableSecs（秒）。</small></label><label>服务端 extra（JSON）<textarea name="xhttp_server_extra" rows="5" spellcheck="false">${esc(plan.xhttp_server_extra || "{}")}</textarea><small>例如 scMaxEachPostBytes、scMaxBufferedPosts、noSSEHeader。不要填写客户端 downloadSettings / xmux。</small></label></div><div class="plan-fields one"><p class="tls-help">两端需 Xray ≥ 24.12.15；完整参数可导出 Xray JSON。</p></div></details>`;
   return basic + tlsPanel + split + advanced;
-}
-
-export function readXHTTPOptions(form, protocol, values) {
-  if (!protocol?.transports?.includes("xhttp")) return {};
-  const extra = object(values.get("xhttp_extra") || "{}");
-  const group = isXHTTPGroup(protocol.key);
-  if (!group && values.get("xhttp_split") === "1") {
-    const tls = protocol.key === "vless-xhttp-tls";
-    const d = extra.downloadSettings ||= {};
-    Object.assign(d, {address:values.get("xhttp_download_address") || "", port:Number(values.get("xhttp_download_port")), network:"xhttp", security:tls ? "tls" : "reality"});
-    const security = d[tls ? "tlsSettings" : "realitySettings"] ||= {};
-    Object.assign(security, {serverName:values.get("xhttp_download_sni") || "", fingerprint:security.fingerprint || "chrome"});
-    if (tls) Object.assign(security, {allowInsecure:false, alpn:(values.get("xhttp_download_alpn") || "h2").split(",").map(x => x.trim()).filter(Boolean), fingerprint:values.get("xhttp_download_alpn")?.trim() === "http/1.1" ? "unsafe" : security.fingerprint === "unsafe" ? "chrome" : security.fingerprint});
-    else Object.assign(security, {publicKey:values.get("reality_public_key") || "", shortId:values.get("reality_short_id") || ""});
-    const x = d.xhttpSettings ||= {};
-    Object.assign(x, {path:values.get("transport_path"), host:values.get("xhttp_download_host") || "", mode:x.mode || "auto"});
-  } else if (!group && form.dataset.xhttpSplitChanged === "true") delete extra.downloadSettings;
-  object(values.get("xhttp_server_extra") || "{}");
-  return {
-    xhttp_mode:values.get("xhttp_mode") || "auto", xhttp_extra:JSON.stringify(extra), xhttp_server_extra:values.get("xhttp_server_extra") || "{}",
-    client_address:values.get("client_address") || "", client_port:Number(values.get("client_port") || 0), client_host:values.get("client_host") || "",
-    tls_client_alpn:values.get("tls_client_alpn") || "", xhttp_cdn:values.get("xhttp_cdn") || "none", reality_target:values.get("reality_target") || "", reality_server_names:values.get("reality_server_names") || "",
-    xhttp_tls_address:values.get("xhttp_tls_address") || "", xhttp_tls_client_port:Number(values.get("xhttp_tls_client_port") || 0), xhttp_tls_host:values.get("xhttp_tls_host") || "", xhttp_backend_port:Number(values.get("xhttp_backend_port") || 0), xhttp_tls_port:Number(values.get("xhttp_tls_port") || 0),
-    ...(group ? {certificate_path:values.get("certificate_path") || "", private_key_path:values.get("private_key_path") || ""} : {}),
-  };
 }
 
 export function bindXHTTPOptions(form) {

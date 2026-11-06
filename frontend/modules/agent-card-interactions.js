@@ -3,7 +3,7 @@ import { bindCardMove } from "./card-move.js";
 import { saveNodeOrder, orderNodesBySavedOrder } from "./node-order.js";
 import { openRegionPicker } from "./regions.js";
 
-export function createAgentCardInteractions({ api, state, esc, notify }, { can, cardInteractions, loadRegionDisplay, loadKomariDisplay }) {
+export function createAgentCardInteractions({ api, state, esc, notify }, { can, cardInteractions, loadRegionDisplay }) {
   const copyTimers = new Map();
   let cancelCardDrag = () => {};
   function enableCardDrag(grid) {
@@ -21,7 +21,6 @@ export function createAgentCardInteractions({ api, state, esc, notify }, { can, 
     const agent = agentsByID.get(root.dataset.agentMetrics);
     if (!agent) return;
     loadRegionDisplay(agent, root);
-    if (root.querySelector("[data-komari-link]")) loadKomariDisplay(agent, root);
   });
   document.querySelectorAll("[data-region-edit]").forEach((button) => {
     button.onclick = (event) => {

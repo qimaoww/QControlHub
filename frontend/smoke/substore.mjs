@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 
-import {
-  filterSubStoreProfiles,
-  groupSubStoreProfiles,
-  installSubStoreSync,
-  subStoreAddressChoices,
-  subStoreProfileNodeCount,
-  subStoreSelectionPayload,
-} from "../modules/substore-sync.js";
+import { filterSubStoreProfiles, groupSubStoreProfiles, subStoreAddressChoices, subStoreProfileNodeCount, subStoreSelectionPayload } from "../modules/substore-model.js";
+import { installSubStoreSync } from "../modules/substore-sync.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {

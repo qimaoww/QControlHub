@@ -1,24 +1,21 @@
-import assert from "node:assert/strict";
-import { createAccessControlView } from "./modules/access-control-view.js";
-import { createDisplayHelpers } from "./modules/formatting.js";
+import assert from 'node:assert/strict';
+import { inboundAccessState } from './analytics/access-control.js';
 
-const { esc } = createDisplayHelpers({data:{}});
-let editable = true;
-const { card } = createAccessControlView({state:{}, esc, engineName:value => value, shell:() => {}},
-  {editable:() => editable});
-const sourceInput = html => html.match(/<input[^>]*name="block_mainland_source"[^>]*>/)?.[0] || "";
-for (const engine of ["xray", "sing-box"]) {
-  const entry = {engine, kind:"wireguard", tag:"wg", port:51820, agent_status:"online"};
-  const html = card(entry);
-  assert.match(sourceInput(html), /disabled/, "WireGuard must not offer ineffective public source blocking");
-  assert.match(html, /公网来源限制须在节点防火墙配置/);
-  assert.doesNotMatch(html.match(/<input[^>]*name="block_mainland_destination"[^>]*>/)[0], /disabled/,
-    "WireGuard destination blocking remains available");
-  const old = card({...entry, block_mainland_source:true});
-  assert.match(sourceInput(old), /checked/);
-  assert.doesNotMatch(sourceInput(old), /disabled/, "operators can clear a legacy source rule");
+const agent = { status: 'online' };
+const state = (engine, entry = {}, options = {}) => inboundAccessState({ agent, engine, entry, siblings: [entry], can: () => true, ...options });
+for (const engine of ['xray', 'sing-box']) {
+  const wireguard = { kind: 'wireguard', tag: 'wg', port: 51820 };
+  assert.equal(state(engine, wireguard).sourceEditable, false, 'WireGuard must not offer ineffective public source blocking');
+  assert.equal(state(engine, wireguard).destinationEditable, true, 'WireGuard destination blocking remains available');
+  assert.equal(state(engine, { ...wireguard, block_mainland_source: true }).sourceEditable, true, 'operators can clear a legacy source rule');
+  assert.equal(state(engine, { ...wireguard, block_mainland_source: true }, { can: () => false }).sourceEditable, false, 'readonly users cannot clear a legacy source rule');
 }
-assert.doesNotMatch(sourceInput(card({kind:"vless"})), /disabled/, "ordinary source policy remains editable");
-editable = false;
-assert.match(sourceInput(card({kind:"wireguard", block_mainland_source:true})), /disabled/);
-console.log("Access control source policy smoke passed");
+assert.equal(state('xray', { kind: 'vless' }).sourceEditable, true, 'ordinary source policy remains editable');
+for (const permission of ['agent-config.write', 'tasks.execute']) {
+  assert.equal(state('xray', {}, { can: value => value !== permission }).editable, false, `policy requires ${permission}`);
+}
+assert.equal(state('xray', {}, { agent: { status: 'offline' } }).editable, false, 'offline policies cannot deploy');
+assert.equal(state('ss-rust', {}, { agent: { status: 'online', shared_allocation: {} } }).editable, false, 'shared Rust policy cannot change host firewall');
+assert.equal(state('ss-rust', {}, { siblings: [{}, {}] }).destinationEditable, false, 'Rust multi-port target policy must remain disabled');
+assert.equal(state('ss-rust', {}, { siblings: [{}, {}] }).sourceEditable, true, 'Rust multi-port source firewall remains independently editable');
+console.log('Native inbound policy permissions, tunnel boundaries and legacy rule removal passed');

@@ -1,6 +1,20 @@
 export const ipQualityFeature = "ip-quality-v2";
 export const ipQualityLatest = "latest";
 
+export function validateIPQualityHistory(history, date, timezone) {
+  const reportsValid = result => Array.isArray(result?.reports) && result.reports.every(report => report && typeof report === "object");
+  const archivesValid = archives => archives == null || Array.isArray(archives) && archives.every(archive => archive && typeof archive === "object");
+  if (!Array.isArray(history?.records) || !Array.isArray(history?.dates) || !Array.isArray(history?.schedules) ||
+      (history.date || ipQualityLatest) !== (date || ipQualityLatest) || history.timezone !== timezone ||
+      history.schedules.some(schedule => !schedule?.agent_id) || history.records.some(record =>
+        !record?.task_id || !record.agent_id || !["pending", "running", "succeeded", "failed", "canceled"].includes(record.status) ||
+        record.result && !reportsValid(record.result) || !archivesValid(record.archives) ||
+        record.last_successful && (record.last_successful.agent_id !== record.agent_id || record.last_successful.status !== "succeeded" ||
+          !reportsValid(record.last_successful.result) || !archivesValid(record.last_successful.archives))))
+    throw new Error("检测记录返回无效或日期不匹配，已保留已有报告。");
+  return history;
+}
+
 export function ipQualityReportRecord(record, date, timezone) {
   if (record?.status === "succeeded" && record.result?.reports?.length) return record;
   const previous = record?.last_successful;

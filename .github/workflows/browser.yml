@@ -65,7 +65,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
-          apt-get install --no-install-recommends --yes chromium
+          apt-get install --no-install-recommends --yes chromium xvfb xdotool
       - name: Run the complete real-browser matrix
         run: sh .github/scripts/ci-time.sh browser make browser-checks
       - name: Upload scene timings and diagnostics
@@ -114,7 +114,7 @@ jobs:
             -v "$PWD/.ci-cache/alpine-build:/cache/build" \
             -v "$PWD/.ci-cache/alpine-mod:/cache/mod" \
             -v "$PWD:/src" -w /src golang:1.26.10-alpine sh -ec '
-              apk add --no-cache bash chromium make nodejs
+              apk add --no-cache bash chromium make nodejs xvfb xdotool
               sh .github/scripts/ci-time.sh browser make browser-checks
             '
       - name: Upload scene timings and diagnostics

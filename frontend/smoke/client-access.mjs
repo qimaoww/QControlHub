@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
 import { clientAccessExport } from "../modules/client-access-model.js";
 
-import {
-  copyClientValue,
-  clientAccessAddressChoices,
-  clientAccessEntryForAddress,
-  filterClientAccessEntries,
-  groupClientAccessEntries,
-  installClientAccess,
-  normalizeClientAccessFilters,
-} from "../modules/client-access.js";
+import { copyClientValue, installClientAccess } from "../modules/client-access.js";
+import { clientAccessAddressChoices, clientAccessEntryForAddress, filterClientAccessEntries, groupClientAccessEntries, normalizeClientAccessFilters } from "../modules/client-access-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop, previousDocument }) {

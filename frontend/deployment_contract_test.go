@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,7 +101,6 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	for _, required := range []string{
 		`/assets/startup.css?v=__QCH_STARTUP_CSS_VERSION__`,
 		`/assets/bootstrap.js?v=__QCH_JS_VERSION__`,
-		`classic=__QCH_CSS_VERSION__`,
 		`analytics=__QCH_ANALYTICS_CSS_VERSION__`,
 	} {
 		if !strings.Contains(content, required) {
@@ -116,11 +116,12 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
 		}
 	}
-	if !strings.Contains(string(dockerfile), `modules/[^\"]+\\.js`) || !strings.Contains(string(dockerfile), `?v=${js_version}`) {
-		t.Error("Dockerfile does not add the aggregate JavaScript cache key to module imports")
-	}
-	if !strings.Contains(string(dockerfile), `import\\(\"\\./modules/`) {
-		t.Error("Dockerfile does not add the aggregate JavaScript cache key to lazy module imports")
+	// Run the build expressions against both quote conventions and lazy imports.
+	output := rewriteModuleCacheImports(t, "import { a } from './a.js';\nimport { b } from \"../b.js\";\nimport('./c.js');\nimport(\"../d.js\");\nimport('https://example.test/e.js');\n")
+	for _, path := range []string{"./a.js?v=cache-test", "../b.js?v=cache-test", "./c.js?v=cache-test", "../d.js?v=cache-test", "https://example.test/e.js'"} {
+		if !strings.Contains(output, path) {
+			t.Errorf("module cache transformation missing %q: %s", path, output)
+		}
 	}
 	if !strings.Contains(string(dockerfile), `js_content_version`) || !strings.Contains(string(dockerfile), `${VERSION}`) {
 		t.Error("Dockerfile JavaScript cache key must include both content and release version")
@@ -140,6 +141,28 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	if !strings.Contains(string(dockerfile), `-exec gzip -9 -k {} +`) {
 		t.Error("web image does not precompress static JavaScript and CSS")
 	}
+}
+
+func rewriteModuleCacheImports(t *testing.T, source string) string {
+	t.Helper()
+	dockerfile := mustReadFrontendFile(t, "../Dockerfile")
+	var expressions []string
+	for _, line := range strings.Split(string(dockerfile), "\n") {
+		if strings.Contains(line, "-e ") && strings.Contains(line, "?v=${js_version}") {
+			expressions = append(expressions, strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\")))
+		}
+	}
+	if len(expressions) != 2 {
+		t.Fatalf("expected static and lazy cache expressions, got %d", len(expressions))
+	}
+	expressions[len(expressions)-1] = strings.TrimSuffix(expressions[len(expressions)-1], "{} +")
+	command := exec.Command("sh", "-c", "js_version=cache-test; sed -E "+strings.Join(expressions, " "))
+	command.Stdin = strings.NewReader(source)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("module cache expressions failed: %s: %v", output, err)
+	}
+	return string(output)
 }
 
 func TestSPAModulesArePublished(t *testing.T) {

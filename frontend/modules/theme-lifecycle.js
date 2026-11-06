@@ -1,6 +1,6 @@
 // Own presentation resources, never requests, business commits or focus policy.
 let active;
-const sheets = { classic: "/app.css", analytics: "/analytics/theme.css" };
+const sheets = { analytics: "/analytics/theme.css" };
 export const currentTheme = id => !id || active?.id === id ? active : null;
 export function disposeTheme() { active?.dispose(); }
 export function mountTheme(id, createMotion) {

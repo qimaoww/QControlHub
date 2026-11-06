@@ -1,152 +1,95 @@
-import { assert } from "./assertions.mjs";
-import { createCoreLogView } from "../modules/core-log-view.js";
-import { createCoreLogBindings } from "../modules/core-log-bindings.js";
+import { assert, waitFor } from './assertions.mjs';
 
-// Render the production toolbar before app startup, with isolated synthetic
-// sources and records. No network, account preferences or live data are used.
-export async function testCoreLogFilterLayout() {
-  const app = document.querySelector("#app");
-  const root = document.createElement("main");
-  root.className = "workspace-main";
-  root.style.fontSize = "var(--text-body)";
-  app.replaceChildren(root);
-  const bodyClass = document.body.className;
-  const theme = document.documentElement.getAttribute("data-theme");
-  document.body.className = "app-body page-core-logs";
-  const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
-  const names = { mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS Rust" };
-  const agent = { id: "fixture", name: "Fixture", status: "online" };
-  const state = { route: "core-logs", data: { coreLogAutoRefresh: false, coreLogPhase: "ready", coreLogFilters: {} } };
-  const ctx = {
-    state, engines, can: () => false, esc: String, engineName: engine => names[engine], date: String,
-    shell: markup => { root.innerHTML = markup; },
-  };
-  const view = createCoreLogView(ctx);
-  const render = () => {
-    view(state.data.coreLogEntries || [], [agent], state.data.coreLogFilters);
-    bind(state.data.coreLogFilters);
-  };
-  const bind = createCoreLogBindings(ctx, {
-    renderCoreLogs: render, rememberSelection() {},
-    coreLogs() { assert.fail("local filters must not fetch"); }, poller: { start() {}, stop() {} },
-  });
-  const sources = available => {
-    state.data.coreLogSources = available.map(engine => ({ agent_id: agent.id, instance_id: "main", engine, status: "active" }));
-  };
-  const records = counts => {
-    state.data.coreLogEntries = engines.flatMap((engine, index) => Array.from({ length: counts[index] }, (_, row) => ({
-      id: index * 10000 + row, agent_id: agent.id, instance_id: "main", engine, level: "info",
-      message: "Synthetic layout fixture", logged_at: "2026-10-28T00:00:00Z",
-    })));
-    render();
-  };
-  const buttons = () => [...root.querySelectorAll("[data-core-log-engine]")];
-  const boxes = () => buttons().map(button => {
-    const { x, y, width, height } = button.getBoundingClientRect();
-    return [x, y, width, height];
-  });
-  // A zero-size inline box exposes the text baseline, not its line-box center.
-  const baseline = element => {
-    const probe = document.createElement("i");
-    probe.style.cssText = "display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline;font-size:0;line-height:0";
-    element.append(probe);
-    const y = probe.getBoundingClientRect().top;
-    probe.remove();
-    return y;
-  };
+// Exercise the production theme's controls while source grants and result
+// counts change. Legacy button geometry becomes native field alignment;
+// authorization, exact counts, local filtering and focus assertions remain.
+export async function testCoreLogFilterLayout({ testAPI }) {
+  location.hash = '#core-logs';
+  await waitFor(() => document.querySelector('[data-log-filters]') && !document.querySelector('.a-main [aria-busy=true]'), '日志筛选未加载');
+  const root = document.querySelector('.a-main');
+  const form = root.querySelector('[data-log-filters]');
+  const button = text => [...form.querySelectorAll('button')].find(item => item.textContent === text);
+  if (button('暂停更新')) button('暂停更新').click();
+  button('清除筛选').click();
+  const originalSources = testAPI.logSources, originalCounts = testAPI.logCounts;
+  const engines = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
+  const select = form.elements.engine;
   const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const refresh = async () => {
+    const before = testAPI.calls.length;
+    button('刷新').click();
+    await waitFor(() => testAPI.calls.length > before && !root.querySelector('[aria-busy=true]'), '日志筛选刷新未完成');
+  };
+  const change = (control, value) => { control.value = value; control.dispatchEvent(new Event('change', { bubbles: true })); };
+  const geometry = () => [...form.querySelectorAll('.a-form-grid > .a-field')].map(field => {
+    const control = field.querySelector('input,select');
+    const bounds = control.getBoundingClientRect();
+    return [bounds.x, bounds.y, bounds.width, bounds.height];
+  });
   try {
-    sources(engines);
-    records([317, 6, 11, 1000]);
-    assert.equal(buttons().map(button => button.querySelector("b").textContent).join(","), "1334,317,6,11,1000");
-    for (const color of ["light", "dark"]) {
-      document.documentElement.dataset.theme = color;
-      for (const scale of [1, 1.5]) {
-        root.style.setProperty("--ui-font-scale", scale);
-        for (const width of [320, 390, 540, 680, 960, 1280, 1680]) {
-          root.style.width = `${width}px`;
-          await frame();
-          assert.equal(root.querySelector('#core-log-filters select[name="agent_id"]'), null, "the workspace must not duplicate the sidebar node selector");
-          assert.ok(root.querySelector('#core-log-filters select[name="instance_id"]'), "the workspace keeps the user/instance selector");
-          const group = root.querySelector(".core-log-engine-filter>div").getBoundingClientRect();
-          const geometry = boxes();
-          for (const [index, button] of buttons().entries()) {
-            const [x, y, w, h] = geometry[index];
-            assert.ok(x >= group.left - 1 && x + w <= group.right + 1, "engine option escapes its container");
-            assert.equal(h, geometry[0][3], "engine option heights differ");
-            const name = button.querySelector("span");
-            assert.ok(name.scrollWidth <= name.clientWidth + 1, `engine name must stay complete (${width}px, ${scale}x, ${color}, ${name.textContent}: ${name.clientWidth}/${name.scrollWidth})`);
-            const label = name.getBoundingClientRect();
-            const count = button.querySelector("b").getBoundingClientRect();
-            assert.ok(label.right <= count.left && count.right <= x + w - 1 && label.left >= x, "engine label/count overlap or clip");
-            if (index && y > geometry[index - 1][1]) assert.ok(Math.abs(x - group.left - 5) < 1, "wrapped row must start at the leading edge");
-          }
-          const firstBaseline = baseline(buttons()[0].querySelector("span")) - geometry[0][1];
-          for (const button of root.querySelectorAll("[data-core-log-engine],[data-core-log-level]")) {
-            const nameBaseline = baseline(button.querySelector("span"));
-            assert.ok(Math.abs(nameBaseline - baseline(button.querySelector("b"))) < .1, "filter name/count text baselines must align");
-            assert.ok(Math.abs(nameBaseline - button.getBoundingClientRect().top - firstBaseline) < .1, "engine/level buttons must share the same text baseline offset");
-          }
-          const toolbar = root.querySelector(".core-log-filters").getBoundingClientRect();
-          for (const control of root.querySelectorAll(".core-log-filter-fields>*,.core-log-filter-tools>*")) {
-            const rect = control.getBoundingClientRect();
-            assert.ok(rect.left >= toolbar.left && rect.right <= toolbar.right, "neighboring filter overflows");
-          }
-          const workspace = root.querySelector(".core-log-workspace");
-          const em = parseFloat(getComputedStyle(workspace).fontSize);
-          const fields = [...root.querySelector(".core-log-filter-fields").children];
-          if (workspace.clientWidth >= 112 * em) {
-            assert.ok(fields.every(field => Math.abs(field.getBoundingClientRect().top - fields[0].getBoundingClientRect().top) < 1), `wide toolbar fields must align (${JSON.stringify({width,scale,color,clientWidth:workspace.clientWidth,em,fields:fields.map(field=>({class:field.className,gridColumn:getComputedStyle(field).gridColumn,top:field.getBoundingClientRect().top,height:field.getBoundingClientRect().height}))})})`);
-          } else if (workspace.clientWidth >= 84 * em) {
-            const [scope, engine, level] = fields.map(field => field.getBoundingClientRect());
-            assert.ok(engine.top > scope.top && Math.abs(engine.top - level.top) < 1, `medium toolbar must place the instance first and align engine/level (${JSON.stringify({width,scale,color,clientWidth:workspace.clientWidth,em,fields:fields.map(field=>({class:field.className,gridColumn:getComputedStyle(field).gridColumn,top:field.getBoundingClientRect().top,height:field.getBoundingClientRect().height}))})})`);
-          }
-          const tools = [...root.querySelector(".core-log-filter-tools").children];
-          if (workspace.clientWidth > 44 * em) {
-            assert.ok(tools.every(tool => Math.abs(tool.getBoundingClientRect().bottom - tools[0].getBoundingClientRect().bottom) < 1), "search, limit and reset must align on one row");
-            assert.ok(tools[0].getBoundingClientRect().width > tools[1].getBoundingClientRect().width && tools[0].getBoundingClientRect().width > tools[2].getBoundingClientRect().width, "search should stay wider than limit/reset controls");
-            assert.ok(tools[0].getBoundingClientRect().width <= 24 * em + 1, "keyword search must stay compact on wide workspaces");
-            assert.ok(tools[1].getBoundingClientRect().left - tools[0].getBoundingClientRect().right <= 13, "limit should remain beside keyword search");
-          }
-          const selected = buttons()[1];
-          selected.click();
-          selected.focus({ preventScroll: true });
-          const selectedBoxes = boxes();
-          for (const count of [0, 1, 9, 10, 99, 100, 999, 1000]) {
-            const scroll = root.scrollTop;
-            records([0, 0, 0, count]);
-            await frame();
-            assert.equal(document.activeElement, selected, "count updates must preserve the focused button");
-            assert.equal(root.scrollTop, scroll, "count updates must preserve scroll position");
-            assert.equal(state.data.coreLogFilters.engine, "mihomo");
-            assert.equal(selected.getAttribute("aria-pressed"), "true");
-            assert.equal(JSON.stringify(boxes()), JSON.stringify(selectedBoxes), "one-to-four-digit counts must not move or resize controls");
-          }
-          await Promise.all(selected.getAnimations().map(animation => animation.finished.catch(() => {})));
-          const levelSelected = root.querySelector('[data-core-log-level][aria-pressed=true]');
-          for (const property of ["border", "borderRadius", "boxShadow", "backgroundColor"]) {
-            assert.equal(getComputedStyle(selected)[property], getComputedStyle(levelSelected)[property], `engine selection must reuse the existing button ${property}`);
-          }
-          for (const property of ["padding", "borderRadius", "fontWeight", "backgroundColor", "color"]) {
-            assert.equal(getComputedStyle(selected.querySelector("b"))[property], getComputedStyle(levelSelected.querySelector("b"))[property], `engine counts must reuse the existing badge ${property}`);
-          }
-        }
+    testAPI.longLogs = false;
+    testAPI.logSources = engines.map(engine => ({ agent_id: 'alpha', name: 'Alpha', instance_id: 'main', engine, status: 'active', grant_revision: 'layout' }));
+    testAPI.logCounts = [317, 6, 11, 1000];
+    await refresh();
+    assert.equal([...select.options].map(option => option.textContent.split(' · ').at(-1)).join(','), '1334,317,6,11,1000', '内核筛选丢失精确结果数量');
+    change(select, 'mihomo');
+    const reads = testAPI.calls.length;
+    change(form.elements.level, 'error');
+    change(form.elements.level, '');
+    assert.equal(testAPI.calls.length, reads, '本地内核和级别筛选请求了远端数据库');
+    await Promise.all(root.getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect.getComputedTiming().endTime)).map(animation => animation.finished.catch(() => {})));
+    for (const value of [innerWidth]) {
+      await frame();
+      const fields = [...form.querySelectorAll('.a-form-grid > .a-field')];
+      const container = form.getBoundingClientRect();
+      for (const field of fields) {
+        const label = field.querySelector('label').getBoundingClientRect();
+        const control = field.querySelector('input,select').getBoundingClientRect();
+        assert.ok(control.left >= container.left - 1 && control.right <= container.right + 1, `筛选控件超出容器：${value}`);
+        assert.ok(Math.abs(control.left - label.left) < 1 && control.top >= label.bottom, '字段标签与控件未对齐');
+        assert.ok(field.scrollWidth <= field.clientWidth + 1, '字段文字或控件溢出');
+      }
+      const geometryBefore = JSON.stringify(geometry());
+      select.focus({ preventScroll: true });
+      const scroll = document.scrollingElement.scrollTop;
+      for (const count of [0, 1, 9, 10, 99, 100, 999, 1000]) {
+        testAPI.logCounts = [0, 0, 0, count];
+        await refresh(); await frame();
+        assert.equal(document.activeElement, select, '数量更新丢失筛选焦点');
+        assert.equal(select.value, 'mihomo', '数量更新丢失内核筛选');
+        assert.equal(document.scrollingElement.scrollTop, scroll, '数量更新改变阅读位置');
+        assert.equal(JSON.stringify(geometry()), geometryBefore, '一至四位数量使筛选控件移动或变宽');
+        assert.ok(select.options[4].textContent.endsWith(` · ${count}`), '内核数量未随数据更新');
       }
     }
-    for (const available of [[], ["xray"], ["xray", "ss-rust"], engines]) {
-      sources(available);
-      state.data.coreLogFilters = {};
-      records([0, 0, 0, 0]);
-      assert.equal(buttons().map(button => button.value).join(","), ["", ...available].join(","), "options must follow authorized sources, including zero counts");
-      buttons().at(-1).click();
-      assert.equal(buttons().filter(button => button.getAttribute("aria-pressed") === "true").length, 1);
-      root.querySelector("[data-reset-core-logs]").click();
-      assert.equal(buttons()[0].getAttribute("aria-pressed"), "true");
+    for (const available of [[], ['xray'], ['xray', 'ss-rust'], engines]) {
+      testAPI.logSources = available.map(engine => ({ agent_id: 'alpha', name: 'Alpha', instance_id: 'main', engine, status: 'active', grant_revision: available.join(':') }));
+      testAPI.logCounts = [0, 0, 0, 0];
+      await refresh();
+      assert.equal([...select.options].map(option => option.value).join(','), ['', ...available].join(','), '零日志时筛选项未遵守授权来源');
+      change(select, available.at(-1) || '');
+      assert.equal(select.selectedOptions.length, 1, '内核选择出现多个选中项');
+      button('清除筛选').click();
+      assert.equal(select.value, '', '清除筛选没有恢复全部获授权内核');
     }
+    const longUser = 'shared-user-without-spaces'.repeat(4);
+    const longNode = '长节点名称'.repeat(30);
+    testAPI.logSources = engines.map(engine => ({ agent_id: 'alpha', name: longNode, instance_id: 'shared-long', owner_id: 'recipient', username: longUser, engine, status: 'active', grant_revision: 'long-shared' }));
+    testAPI.logCounts = [1, 1, 1, 1];
+    await refresh();
+    change(form.elements.instance_id, 'shared-long');
+    await waitFor(() => !root.querySelector('[aria-busy=true]') && root.querySelector('[data-log-entry]')?.textContent.includes(longUser), '共享实例日志没有显示真实使用用户');
+    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, '长节点或用户名撑破日志页面');
+    for (const heading of root.querySelectorAll('[data-log-entry] p')) assert.ok(heading.scrollWidth <= heading.clientWidth + 1, '长日志来源标签溢出');
+    root.querySelector('[data-source-status]').click();
+    const detail = document.querySelector('dialog[data-log-sources]');
+    await Promise.all(detail.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
+    assert.ok(detail.textContent.includes(longUser) && detail.textContent.includes(longNode), '采集状态丢失共享用户或长节点名称');
+    assert.ok(detail.scrollWidth <= detail.clientWidth + 1, '长来源信息撑破弹窗');
+    assert.ok([...detail.querySelectorAll('.a-table-scroll')].every(table => table.scrollWidth <= table.clientWidth + 1), '来源状态和时间需横向滚动才能查看');
+    detail.querySelector('[aria-label=关闭]').click();
   } finally {
-    app.replaceChildren();
-    document.body.className = bodyClass;
-    if (theme === null) document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.setAttribute("data-theme", theme);
+    testAPI.logSources = originalSources;
+    testAPI.logCounts = originalCounts;
   }
 }

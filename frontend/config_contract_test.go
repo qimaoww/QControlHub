@@ -9,7 +9,7 @@ import (
 func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	form := string(mustReadFrontendFile(t, "modules/server-plan-form.js"))
 	content := form + "\n" + frontendSources(t,
-		"modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js")
+		"modules/inbound-options-model.js", "modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js")
 	start := strings.Index(form, "export function bindServerPlanRegeneration")
 	if start < 0 {
 		t.Fatal("server-plan-form.js is missing the isolated server-plan regeneration handler")

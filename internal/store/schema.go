@@ -3,9 +3,14 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 88
+const currentSchemaVersion = 90
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS account_traffic_orders (
+ account_id text PRIMARY KEY,
+ port_keys text[] NOT NULL DEFAULT '{}',
+ revision bigint NOT NULL CHECK (revision > 0)
+);
 CREATE TABLE IF NOT EXISTS account_node_views (
  account_id text PRIMARY KEY,
  view text NOT NULL CHECK (view IN ('cards', 'list')),
@@ -1059,4 +1064,10 @@ $$;
 DROP TRIGGER IF EXISTS panel_users_revoke_api_keys ON panel_users;
 CREATE TRIGGER panel_users_revoke_api_keys BEFORE UPDATE OR DELETE ON panel_users
  FOR EACH ROW EXECUTE FUNCTION revoke_admin_api_keys_for_user();
+UPDATE account_themes SET theme_id='analytics' WHERE theme_id='classic';
+ALTER TABLE account_themes DROP CONSTRAINT IF EXISTS account_themes_theme_id_check;
+ALTER TABLE account_themes ADD CONSTRAINT account_themes_theme_id_check CHECK (theme_id='analytics');
+ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_url;
+ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_api_key;
+UPDATE agents SET labels=labels - 'komari_uuid' WHERE labels ? 'komari_uuid';
 `

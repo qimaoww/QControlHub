@@ -72,3 +72,22 @@ console.log("Account node order queue, migration race, conflict, failure and sta
  const restored = createNodeOrderSync(async () => ({ ids: ["b", "a"], revision: 4 }), blocked);
  await restored.load(); assert.deepEqual(restored.ids(), ["b", "a"], "database reads survive blocked local storage");
 }
+// Port sorting uses the same account queue and CAS behavior with its own key.
+{
+ const values = new Map([['ports', JSON.stringify(['node:443', 'revoked:443', 'node:8443'])]]);
+ const portStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+ let server = { ids: [], revision: 0 };
+ const calls = [];
+ const ports = createNodeOrderSync(async (path, options) => {
+  assert.equal(path, '/preferences/traffic-order');
+  calls.push(options);
+  if (options) { const body = JSON.parse(options.body); assert.equal(body.revision, server.revision); server = { ids: body.ids, revision: server.revision + 1 }; }
+  return server;
+ }, portStorage, () => true, true, { endpoint: '/preferences/traffic-order', key: 'ports', migrationIDs: ids => ids.filter(id => id.startsWith('node:')) });
+ await ports.load();
+ assert.deepEqual(ports.ids(), ['node:443', 'node:8443'], 'authorized legacy port order was not migrated');
+ assert.equal(JSON.parse(calls[1].body).initialize, true);
+ await ports.save(['node:8443', 'node:443']);
+ assert.deepEqual(JSON.parse(portStorage.getItem('ports')), server.ids);
+ assert.equal(portStorage.getItem(nodeCardOrderKey), null, 'port sorting overwrote fleet order');
+}

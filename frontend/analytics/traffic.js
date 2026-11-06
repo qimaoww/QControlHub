@@ -2,15 +2,31 @@ import { trafficBatch } from './traffic-batch.js';
 import { trafficSync } from './traffic-sync.js';
 import { trafficDetails } from './traffic-details.js';
 import { trafficTable } from './traffic-table.js';
-import { mergeTrafficPorts, trafficPolicyEditable, eligibleAgents, policyStatus, policyStatusKey, trafficRateForDisplay, protocolName, dateInputValue } from '../modules/traffic-model.js';
+import { bindNodeOrdering } from './node-ordering.js';
+import { nodeName } from './node-region.js';
+import { mergeTrafficPorts, orderTrafficItems, trafficCardIdentity, trafficPolicyEditable, trafficCardOrderKey, eligibleAgents, policyStatus, policyStatusKey, trafficRateForDisplay, protocolName, dateInputValue, reusableTrafficSnapshot } from '../modules/traffic-model.js';
+import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
+import { accountStorage } from '../modules/account-storage.js';
 import { createPoller } from '../modules/poller.js';
-import { filterbar, node, button, actions, stack, section, badge, field, muted, list, pathID } from './ui.js';
-import { bytes, date } from './operations.js';
+import { filterbar, node, button, dragHandle, actions, stack, section, badge, field, muted, list, pathID } from './ui.js';
+import { bytes } from './operations.js';
 
 export async function trafficPage(ctx) {
+  const data = ctx.state.data, session = ctx.session;
+  const epoch = data.analyticsTrafficEpoch = (data.analyticsTrafficEpoch || 0) + 1;
   const agents = [], endpoints = [];
   let byID = new Map();
-  const policies = [], results = trafficTable(['节点 / 归属', '端口 / 协议', '状态', '用量 / 配额', '速率', '操作']);
+  let details;
+  const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
+  const portOrdering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current, true, { endpoint: "/preferences/traffic-order", key: trafficCardOrderKey,
+    migrationIDs: ids => { const visible = new Set(mergeTrafficPorts(policies, endpoints).map(trafficCardIdentity)); return ids.filter(id => visible.has(id)); },
+  });
+  const savedTrafficCardOrder = () => portOrdering.ids();
+  let savedView = 'cards';
+  try { savedView = accountStorage.getItem('qcontrolhub:traffic-view') === 'list' ? 'list' : 'cards'; } catch { /* The view remains usable without storage. */ }
+  const policies = [], results = trafficTable(['节点 / 归属', '端口 / 协议', '状态', '累计流量', '累计接收', '累计发送', '操作'], {
+    view: savedView, canSwitch: () => !dragging.active(), onViewChange: view => { try { accountStorage.setItem('qcontrolhub:traffic-view', view); } catch { /* In-memory view remains selected. */ } },
+  });
   const initial = ctx.state.data.analyticsTrafficFilters || {};
   const route = new URLSearchParams(location.hash.split('?')[1] || '');
   const search = field('搜索端口', 'search', initial.search || '', { type: 'search', placeholder: '节点、名称、内核或端口' });
@@ -22,6 +38,17 @@ export async function trafficPage(ctx) {
   const controls = [search, scope, agentFilter, engineFilter, statusFilter];
   const refreshStatus = muted('');
   let readSequence = 0, readController, lastError = false;
+  const allItems = () => orderTrafficItems(mergeTrafficPorts(policies, endpoints), savedTrafficCardOrder(), ordering.ids());
+  const dragging = bindNodeOrdering(ctx, results.root, {
+    enabled: () => !document.querySelector('dialog.a-dialog[open]'),
+    order: () => allItems().filter(item => matchesFilter(item.policy || item.endpoint)).map(item => item.key),
+    save: async ids => {
+      const selected = new Set(ids), incoming = [...ids];
+      const all = allItems(), identities = new Map(all.map(item => [item.key, trafficCardIdentity(item)]));
+      const complete = all.map(item => identities.get(selected.has(item.key) ? incoming.shift() : item.key));
+      await portOrdering.save(complete);
+    }, redraw: () => draw(), saved: '端口顺序已保存',
+  });
   function currentFilters() { return Object.fromEntries(controls.map(root => { const input = root.querySelector('input,select'); return [input.name, input.value]; })); }
   function matchesFilter(value) {
     const filters = currentFilters(), agent = byID.get(value.agent_id);
@@ -38,41 +65,57 @@ export async function trafficPage(ctx) {
       return Object.assign(retained, value);
     }));
   }
-  async function reload({ quiet = false } = {}) {
+  async function reload({ quiet = false, initial = false } = {}) {
     readController?.abort(); readController = new AbortController();
     const expected = ++readSequence;
     const signal = AbortSignal.any([ctx.signal, readController.signal]);
     try {
       const canReadNodes = ctx.can('agents.read');
-      const [page, ports, nodes] = await Promise.all([
+      const cached = initial && reusableTrafficSnapshot(data.analyticsTrafficSnapshot, { data, session, canRead: canReadNodes, epoch });
+      const [[page, ports, nodes]] = await Promise.all([cached ? Promise.resolve([cached.policies, cached.endpoints, cached.agents]) : Promise.all([
         ctx.api(canReadNodes ? '/traffic-policies' : '/traffic-policies?view=page', { signal }),
         ctx.api('/traffic-endpoints', { signal }), canReadNodes ? ctx.api('/agents', { signal }) : [],
-      ]);
+      ]), ordering.load()]);
       if (!ctx.current() || expected !== readSequence) return false;
-      keepObjects(agents, list(canReadNodes ? nodes : page.agents), value => value.id); byID = new Map(agents.map(agent => [agent.id, agent]));
-      keepObjects(policies, list(canReadNodes ? page : page.policies), value => value.id);
+      keepObjects(agents, list(cached || canReadNodes ? nodes : page.agents), value => value.id); byID = new Map(agents.map(agent => [agent.id, agent]));
+      keepObjects(policies, list(cached || canReadNodes ? page : page.policies), value => value.id);
       keepObjects(endpoints, list(ports), value => `${value.agent_id}:${value.engine}:${value.port}:${value.protocol}:${value.owner_id}`);
+      await portOrdering.load();
+      if (!ctx.current() || expected !== readSequence) return false;
+      if (!cached) data.analyticsTrafficSnapshot = { data, session, canRead: canReadNodes, epoch, at: Date.now(),
+        agents: structuredClone(agents), policies: structuredClone(policies), endpoints: structuredClone(endpoints) };
       const select = agentFilter.querySelector('select'), selected = firstAgent ?? select.value;
       firstAgent = null;
-      const options = [['', '全部节点'], ...agents.map(agent => [agent.id, agent.name])];
-      const fingerprint = JSON.stringify(options);
-      if (select.dataset.options !== fingerprint) {
-        select.replaceChildren(select.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
-        select.value = options.some(([value]) => value === selected) ? selected : '';
+      const ordered = orderNodesBySavedOrder(agents, ordering.ids());
+      const fingerprint = JSON.stringify(ordered.map(agent => [agent.id, agent.name, agent.labels?.region_code, agent.region_code]));
+      if (select.dataset.options !== fingerprint && !select.matches(':open')) {
+        select.replaceChildren(select.querySelector('button'), node('option', { value: '' }, '全部节点'),
+          ...ordered.map(agent => node('option', { value: agent.id }, nodeName(ctx, agent))));
+        select.value = ordered.some(agent => agent.id === selected) ? selected : '';
         select.dataset.options = fingerprint;
       }
       refreshStatus.textContent = ''; lastError = false;
-      if (!document.querySelector('dialog.a-dialog[open]')) draw();
+      if (details?.box.open) {
+        const policy = policies.find(value => value.id === details.policyID);
+        if (policy) details.update(policy, byID.get(policy.agent_id));
+        else { details.box.close(); ctx.announce('此端口已不可访问，请重新选择。', 'error'); }
+      }
+      if (!dragging.active() && !document.querySelector('dialog.a-dialog[open]')) draw();
       return true;
     } catch (error) {
       if (!ctx.current() || expected !== readSequence || error.name === 'AbortError') return false;
+      if ([401, 403, 404].includes(error.status)) {
+        delete data.analyticsTrafficSnapshot;
+        agents.length = policies.length = endpoints.length = 0; byID.clear();
+        details?.box.close(); draw();
+      }
       if (!quiet) throw error;
       refreshStatus.textContent = '刷新失败，保留上次数据'; refreshStatus.title = error.message;
       if (!lastError) ctx.announce(error.message, 'error');
       lastError = true; return false;
     }
   }
-  const poller = createPoller({ run: () => reload({ quiet: true }), isActive: () => ctx.current() && !document.hidden && !document.querySelector('dialog.a-dialog[open]'), delay: () => 2000 });
+  const poller = createPoller({ run: () => reload({ quiet: true }), isActive: () => ctx.current() && !document.hidden && !document.querySelector('dialog.a-dialog[open]:not([data-traffic-details]):not([data-traffic-sync])'), delay: () => 2000 });
   const stop = () => { readController?.abort(); poller.stop(); };
   ctx.signal.addEventListener('abort', stop, { once: true });
   document.addEventListener('visibilitychange', () => document.hidden ? poller.stop() : void poller.trigger(), { signal: ctx.signal });
@@ -136,33 +179,62 @@ export async function trafficPage(ctx) {
     await ctx.mutate(control, async () => { await ctx.api(`/traffic-policies/${pathID(policy.id)}${options[2]}`, { method: options[3] }); await afterWrite(options[4]); });
   }
   function draw(reset = false) {
-    const all = mergeTrafficPorts(policies, endpoints);
+    if (dragging.active()) return;
+    const all = allItems();
     const items = all.filter(item => matchesFilter(item.policy || item.endpoint));
     results.update(items.map(item => {
       const value = item.policy || item.endpoint, agent = byID.get(value.agent_id);
       const writable = !!item.policy && trafficPolicyEditable(value, agent, ctx.can);
       const sampledAt = value.last_collected_at || value.last_reported_at;
       const rate = number => value.enforcement_available === false ? 0 : trafficRateForDisplay(number, sampledAt, agent?.status);
-      return { key: item.key, cells: [
-        stack(agent?.name || value.agent_id, muted(value.owner_name || (value.is_current_user ? '当前用户' : '其他用户')), muted(value.shared_quota || value.share_id ? '共享实例' : '主实例')),
-        stack(node('strong', {}, `:${value.port}`), muted(`${value.engine} · ${protocolName(value.protocol)}`), muted(value.name)),
-        item.policy ? stack(badge(...policyStatus(value, agent)), muted(date(sampledAt))) : badge('等待同步', 'warn'),
-        item.policy ? stack(`${bytes(value.used_bytes)} / ${value.quota_enabled === false ? '持续统计' : bytes(value.limit_bytes)}`, muted(`接收 ${bytes(value.received_bytes)} · 发送 ${bytes(value.sent_bytes)}`), muted(value.period_start ? `${dateInputValue(value.period_start)} 至 ${dateInputValue(value.period_end)}` : '等待周期确认')) : '—',
-        item.policy ? stack(`接收 ${bytes(rate(value.receive_bps))}/s`, muted(`发送 ${bytes(rate(value.send_bps))}/s`)) : '—',
-        actions(item.policy && button('统计详情', () => trafficDetails(ctx, value, agent)),
-          writable && button(value.quota_enabled === false ? '设置配额' : '编辑配额', () => edit(value)),
-          !item.policy && eligibleAgents([agent].filter(Boolean)).length > 0 && ctx.can('traffic.manage', agent) && button('设置配额', () => edit(null, value)),
-          writable && button('清零', event => void change(value, event.currentTarget, 'reset')),
-          writable && value.quota_enabled !== false && button('取消配额', event => void change(value, event.currentTarget, 'quota')),
-          writable && button('删除', event => void change(value, event.currentTarget, 'monitoring'), { tone: 'danger' })),
+      const controls = () => actions(
+        item.policy && button('统计详情', () => { details = trafficDetails(ctx, value, agent, { canManage: policy => trafficPolicyEditable(policy, byID.get(policy.agent_id), ctx.can), change }); }),
+        writable && button(value.quota_enabled === false ? '设置配额' : '编辑配额', () => edit(value)),
+        !item.policy && eligibleAgents([agent].filter(Boolean)).length > 0 && ctx.can('traffic.manage', agent) && button('设置配额', () => edit(null, value)),
+        dragHandle(item.key, `端口 ${value.port}`));
+      const state = () => item.policy ? badge(...policyStatus(value, agent)) : badge('等待同步', 'warn');
+      const identity = () => stack(node('span', {}, agent?.name || value.agent_id), !value.is_current_user && muted(value.owner_name || '其他用户'), (value.shared_quota || value.share_id) && muted('共享实例'));
+      const cumulative = () => item.policy ? bytes(value.used_bytes) : '—';
+      const transfer = (label, counter, speed) => stack(muted(label), node('b', {}, item.policy ? bytes(value[counter]) : '—'), muted(item.policy ? `当前 ${bytes(rate(value[speed]))}/s` : '等待采样'));
+      const [amount, unit = ''] = cumulative().split('\u00a0');
+      return { key: item.key, card: () => node('article', { className: 'a-card a-probe', 'data-traffic-key': item.key },
+        node('div', { className: 'a-probe-head' }, node('div', {},
+          node('h2', {}, agent?.name || value.agent_id),
+          actions(node('b', {}, String(value.port)), muted(`${value.engine} · ${protocolName(value.protocol)}`)),
+          !value.is_current_user && muted(value.owner_name || '其他用户'),
+          (value.shared_quota || value.share_id) && muted('共享实例')), node('div', {}, state())),
+        node('div', { className: 'a-stat' },
+          muted('累计流量'), actions(node('strong', {}, amount), muted(unit)),
+          item.policy && value.quota_enabled !== false && muted(`配额 ${bytes(value.limit_bytes)}`),
+          node('div', { className: 'a-probe-network' }, transfer('累计接收', 'received_bytes', 'receive_bps'), transfer('累计发送', 'sent_bytes', 'send_bps'))),
+        node('div', { className: 'a-probe-footer' }, controls())), cells: [
+        identity(),
+        stack(node('strong', {}, `${value.port}`), muted(`${value.engine} · ${protocolName(value.protocol)}`)),
+        item.policy ? actions(badge(...policyStatus(value, agent))) : badge('等待同步', 'warn'),
+        stack(node('strong', {}, cumulative()), item.policy && value.quota_enabled !== false && muted(`配额 ${bytes(value.limit_bytes)}`)),
+        item.policy ? stack(bytes(value.received_bytes), muted(`${bytes(rate(value.receive_bps))}/s`)) : '—',
+        item.policy ? stack(bytes(value.sent_bytes), muted(`${bytes(rate(value.send_bps))}/s`)) : '—',
+        controls(),
       ] };
     }), reset, all.length ? '没有符合筛选条件的端口' : '暂无已部署端口，成功部署配置后显示流量监控');
   }
-  await reload();
-  const toolbar = filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, controls), actions(
-    ctx.can('traffic.manage') && button('同步配置端口', () => trafficSync(ctx, { agentName: id => byID.get(id)?.name || id, matches: matchesFilter, onSaved: () => reload({ quiet: true }) })),
-    ctx.can('traffic.manage') && button('批量操作', () => trafficBatch(ctx, policies.filter(policy => matchesFilter(policy) && trafficPolicyEditable(policy, byID.get(policy.agent_id), ctx.can)), id => byID.get(id)?.name || id, () => reload({ quiet: true }))),
+  await reload({ initial: true });
+  const advanced = node('div', { className: 'a-filter-fields a-traffic-filters', hidden: true }, scope, engineFilter, statusFilter);
+  const manage = actions();
+  manage.hidden = true;
+  const toolbar = filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter), actions(
+    button('更多筛选', event => { advanced.hidden = !advanced.hidden; event.currentTarget.setAttribute('aria-expanded', String(!advanced.hidden)); }, { 'aria-expanded': 'false' }),
+    button('管理', event => { manage.hidden = !manage.hidden; event.currentTarget.setAttribute('aria-expanded', String(!manage.hidden)); }, { 'aria-expanded': 'false' }),
     ctx.can('traffic.manage') && button('添加配额', () => edit(), { tone: 'primary', disabled: !eligibleAgents(agents).some(agent => ctx.can('traffic.manage', agent)) })));
+  manage.append(
+    ...(ctx.can('traffic.manage') ? [button('同步配置端口', event => {
+      const control = event.currentTarget;
+      if (control.disabled) return;
+      control.disabled = true;
+      const box = trafficSync(ctx, { agentName: id => byID.get(id)?.name || id, matches: matchesFilter, onSaved: () => reload({ quiet: true }) });
+      box.addEventListener('close', () => { control.disabled = false; }, { once: true });
+    })] : []),
+    ...(ctx.can('traffic.manage') ? [button('批量操作', () => trafficBatch(ctx, policies.filter(policy => matchesFilter(policy) && trafficPolicyEditable(policy, byID.get(policy.agent_id), ctx.can)), id => byID.get(id)?.name || id, () => reload({ quiet: true })))] : []));
   const reset = [...toolbar.querySelectorAll('button')].find(button => button.textContent === '重置');
   reset?.replaceWith(button('重置', () => {
     const defaults = { search: '', scope: 'current', agent: '', engine: '', status: '' };
@@ -171,7 +243,8 @@ export async function trafficPage(ctx) {
   }));
   for (const root of controls) root.addEventListener(root === search ? 'input' : 'change', () => { ctx.state.data.analyticsTrafficFilters = currentFilters(); draw(true); });
   poller.start();
-  const content = stack(toolbar, refreshStatus, section(null, results.root));
+  ctx.onRefresh(() => reload({ quiet: true }));
+  const content = stack(toolbar, advanced, manage, refreshStatus, results.root);
   content.classList.add('a-traffic-page');
   return content;
 }

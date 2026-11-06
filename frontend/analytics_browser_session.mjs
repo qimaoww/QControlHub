@@ -1,4 +1,6 @@
+import { checkAnalyticsNodeBatch } from "./analytics_node_batch_browser.mjs";
 import { checkAnalyticsMotion } from "./analytics_motion_browser.mjs";
+import { checkAnalyticsObservability } from "./analytics_observability_browser.mjs";
 import { checkAnalyticsWorkflows } from "./analytics_workflows_browser.mjs";
 import assert from "node:assert/strict";
 
@@ -11,11 +13,11 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.username.value='analytics-admin';form.elements.token.value='wrong-preview-password';form.requestSubmit(); })()`);
   await wait(anonymous, "!!document.querySelector('.a-login [role=alert]')?.textContent && !document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(anonymous, "document.querySelector('.a-login [name=username]').value"), "analytics-admin");
-  await evaluate(anonymous, `window.addEventListener('beforeunload', event => sessionStorage.setItem('analytics-login-unload-blocked', String(event.defaultPrevented)))`);
+  await evaluate(anonymous, `window.__sameLoginDocument=true;window.addEventListener('beforeunload', event => sessionStorage.setItem('analytics-login-unload-blocked', String(event.defaultPrevented)))`);
   await evaluate(anonymous, `(() => { const form=document.querySelector('.a-login form');form.elements.token.value='config scope password fixture';form.requestSubmit(); })()`);
-  await wait(anonymous, "!!document.querySelector('#logout') && location.hash==='#tasks'");
-  assert.equal(await evaluate(anonymous, "document.querySelectorAll('.a-layout,.a-login').length"), 0, "authenticated classic preference overrides public analytics login hint");
-  assert.equal(await evaluate(anonymous, "sessionStorage.getItem('analytics-login-unload-blocked')"), "false", "successful login does not trigger the unsaved-changes prompt at a theme boundary");
+  await wait(anonymous, "!!document.querySelector('.a-user') && location.hash==='#tasks'");
+  assert.equal(await evaluate(anonymous, "document.querySelectorAll('.a-layout').length"), 1, "legacy theme preference uses the sole analytics runtime");
+  assert.equal(await evaluate(anonymous, "window.__sameLoginDocument"), true, "successful login keeps the document without an unsaved-changes prompt");
   const page = await createPage();
   const capture = screenshot;
   screenshot = async (target, label) => {
@@ -26,7 +28,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
   await wait(page, "document.querySelector('.a-top h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page, `document.querySelectorAll('link[href*="app.css"],.workspace-main,.app-dock').length`), 0);
-  assert.equal(await evaluate(page, "document.querySelectorAll('.a-stat').length"), 4);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.a-stat').length"), 8);
   assert.ok(await evaluate(page, "document.querySelector('.a-chart')?.getAttribute('aria-label').includes('流量')"));
   await evaluate(page, "document.fonts.ready.then(()=>true)");
   assert.ok(await evaluate(page, `document.fonts.check('500 14px "Analytics Sans"')`));
@@ -62,17 +64,18 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     if (width === 1920 || width === 3840 || width === 844) await screenshot(page, `analytics-dashboard-${width}x${height}`);
   }
   await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);
-  for (const [route, title] of [["settings", "面板设置"], ["users", "用户管理"], ["traffic", "流量"], ["ip-quality", "IP 质量"], ["certificates", "证书"], ["node-settings", "节点"], ["live-config", "实时配置"], ["access-control", "访问控制"], ["system-bbr", "TCP 调优"], ["substore-sync", "订阅同步"], ["tasks", "任务"], ["core-logs", "日志"], ["client-connections", "客户端连接"], ["client-access", "客户端接入"], ["my-quota", "共享与额度"], ["themes", "主题"], ["archive-config", "配置档案"]]) {
+  for (const [route, title] of [["settings", "面板设置"], ["users", "用户管理"], ["traffic", "流量"], ["ip-quality", "IP 质量"], ["certificates", "证书"], ["node-settings", "节点"], ["live-config", "实时配置"], ["access-control", "实时配置"], ["system-bbr", "TCP 调优"], ["substore-sync", "订阅同步"], ["tasks", "任务"], ["core-logs", "日志"], ["client-connections", "客户端连接"], ["client-access", "客户端接入"], ["my-quota", "共享与额度"], ["themes", "主题"], ["archive-config", "配置档案"]]) {
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
     await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(title)} && !document.querySelector('[aria-busy=true]')`);
-    assert.equal(await evaluate(page, "[...document.querySelectorAll('.a-main [role=alert]')].filter(item=>item.textContent.trim()).length"), 0, `${route}: real API did not fail`);
+    assert.deepEqual(await evaluate(page, "[...document.querySelectorAll('.a-main [role=alert]')].map(item=>item.textContent.trim()).filter(Boolean)"), [], `${route}: real API did not fail`);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `${route}: no page overflow`);
     assert.equal(await evaluate(page, "document.querySelectorAll('.a-main > .a-heading, .a-main h1').length"), 0, `${route}: page title appears only in the top bar`);
     if (route === "core-logs" && mode === "desktop") {
       assert.ok(await evaluate(page, `(() => {
         const controls=[...document.querySelectorAll('.a-filter-form .a-field input,.a-filter-form .a-field select,.a-filter-form button[type=submit]')].map(el=>el.getBoundingClientRect());
-        return controls.length===4 && !document.querySelector('.a-filter-form button[type=submit]') && Math.max(...controls.map(rect=>rect.top))-Math.min(...controls.map(rect=>rect.top))<2;
-      })()`), "automatic log filters share one compact desktop row without a confirmation button");
+        const rows=new Map();controls.forEach(rect=>{const key=Math.round(rect.top/10);const row=rows.get(key)||[];row.push(rect.top);rows.set(key,row);});
+        return controls.length===6 && !document.querySelector('.a-filter-form button[type=submit]') && [...rows.values()].every(row=>Math.max(...row)-Math.min(...row)<2);
+      })()`), "complete log scope and content filters keep aligned rows without a confirmation button");
     }
     await screenshot(page, `analytics-${route}`);
     if (route === "settings") {
@@ -113,8 +116,12 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       await chooseScale(100);
     }
   }
+  await checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record });
   await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call });
   await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });
+  await checkAnalyticsNodeBatch({ page, mode, fixture, evaluate, wait, screenshot, record });
+  await evaluate(page, "location.hash='#archive-config'");
+  await wait(page, "document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
   await evaluate(page, "window.__animationBeforeFailure=Element.prototype.animate;Element.prototype.animate=function(){throw new Error('injected presentation failure')}");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
   await wait(page, "!!document.querySelector('dialog[open] form')");
@@ -149,28 +156,21 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     await wait(page, "!document.querySelector('dialog.a-drawer[open]')");
   }
   await evaluate(page, "location.hash='#themes'");
-  await wait(page, "[...document.querySelectorAll('button')].some(item=>item.dataset.themeID==='classic') && !document.querySelector('[aria-busy=true]')");
-  await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.dataset.themeID==='classic').click()");
-  // The test entry replaced its URL with the production route, so the
-  // confirmed save reloads through the real gateway.
-  await wait(page, "!!document.querySelector('[data-select-theme=classic]')");
-  assert.equal(await evaluate(page, `document.querySelectorAll('link[href*="analytics/theme.css"],.a-layout').length`), 0);
-  assert.equal((await api(page, identity, "GET", "/preferences/theme")).theme_id, "classic");
-  await screenshot(page, "analytics-switched-classic");
+  await wait(page, "!!document.querySelector('[data-theme-i-d=analytics]') || !![...document.querySelectorAll('button')].find(item=>item.dataset.themeID==='analytics')");
+  assert.equal(await evaluate(page, "document.querySelectorAll('[data-theme-i-d=classic]').length"), 0);
+  assert.equal((await api(page, identity, "GET", "/preferences/theme")).theme_id, "analytics");
+  await screenshot(page, "analytics-only-theme");
   await evaluate(page, `(async () => {
     const lifecycle=await import('/assets/modules/theme-lifecycle.js');
-    const classic=await import('/assets/modules/motion.js');
     const {createAnalyticsMotion}=await import('/assets/analytics/motion.js');
-    const old=lifecycle.currentTheme('classic');
-    classic.enterSurface(document.querySelector('.theme-picker-card'));
-    old.frame(()=>{document.body.dataset.staleClassic='frame'});
-    old.timer(()=>{document.body.dataset.staleClassic='timer'},40);
+    const old=lifecycle.currentTheme('analytics');
+    old.frame(()=>{document.body.dataset.staleTheme='frame'});
+    old.timer(()=>{document.body.dataset.staleTheme='timer'},40);
     const replacement=lifecycle.mountTheme('analytics',createAnalyticsMotion);
-    if(old.current() || document.getAnimations().length)throw Error('classic animation retained ownership');
-    if(!document.querySelector('link[href*=\\"app.css\\"]').disabled)throw Error('classic stylesheet remained active');
+    if(old.current() || document.getAnimations().length)throw Error('old lifecycle retained ownership');
     await new Promise(resolve=>setTimeout(resolve,80));
-    if(document.body.dataset.staleClassic || document.querySelector('.interaction-tooltip,[data-motion-isolation]'))throw Error('classic presentation survived disposal');
+    if(document.body.dataset.staleTheme)throw Error('disposed presentation survived');
     replacement.dispose();
   })()`);
-  record(`${mode}: independent analytics runtime against real API; eighteen routes, archive save/history, native modal keyboard focus, responsive viewports, document/CSS isolation; production catalog offers both themes; full advanced workflow parity remains under review`);
+  record(`${mode}: analytics runtime, account theme compatibility, archive save/history, keyboard focus, responsive viewports and lifecycle cleanup`);
 }

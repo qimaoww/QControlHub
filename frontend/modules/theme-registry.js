@@ -1,7 +1,6 @@
 // Theme identity is independent of the classic shell's light/dark mode.
 // Keep routes explicit: a theme must own every renderer before being offered.
 export const themes = Object.freeze([
-  Object.freeze({ id: "classic", name: "经典", description: "QControlHub 原有界面", available: true }),
   Object.freeze({ id: "analytics", name: "简析", description: "以数据卡片和表格为主的独立界面", available: true }),
 ]);
 
@@ -11,7 +10,7 @@ export function themeByID(id) {
 
 export function effectiveTheme(id) {
   const theme = themeByID(id);
-  return theme?.available ? theme.id : "classic";
+  return theme?.available ? theme.id : "analytics";
 }
 
 // Anonymous presentation uses the public deployment default. Account choices

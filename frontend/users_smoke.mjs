@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatSharedPorts, mergeUserAllocation, parseSharedPorts, sharedLimitBytes, sharedLimitGiB, sharedPortsLabel } from "./modules/users.js";
+import { formatSharedPorts, mergeUserAllocation, parseSharedPorts, sharedLimitBytes, sharedLimitGiB, sharedPortsLabel } from "./modules/user-model.js";
 
 assert.deepEqual(parseSharedPorts(" 31002，31001\n31003 "), [31001, 31002, 31003]);
 assert.deepEqual(parseSharedPorts(""), []);

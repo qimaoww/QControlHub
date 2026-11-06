@@ -56,27 +56,27 @@ for (const match of readFileSync(appPath, "utf8").matchAll(/\b(?:from\s*|import\
   assert.equal(dependencies.has(dependency), true, "the application must import an existing production module");
   visitFromApplication(dependency);
 }
-for (const path of dependencies.keys()) {
-  assert.equal(reachable.has(path), true, `${path} is not reachable from the application`);
-}
 
 console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy the module boundary contract`);
 
 // Independent UI can share transport and business models, never classic DOM
 // renderers or the application shell, including through transitive imports.
 const sharedLogic = new Set([
+  "card-move-scroll.js",
+  "core-log-preferences.js", "core-log-scope.js", "core-log-read.js", "core-log-cache.js", "core-log-model.js", "core-log-projection.js", "core-log-source-status.js", "client-connection-model.js", "client-connection-cache.js",
+  "inbound-options-model.js", "archive-draft-model.js", "config-defaults.js", "config-mutations.js",
   "account-request.js", "account-storage.js", "agent-service-state.js",
-  "agent-address-model.js", "region-model.js",
+  "agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js",
   "core-install-state.js", "core-install-source.js", "xray-api.js", "enrollment-command.js",
-  "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js",
-  "code-format.js",
+  "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "outbound-preset-controller.js",
+  "code-format.js", "core-log-selection.js",
   "certificate-order.js", "record-display.js", "client-access-model.js", "config-snapshot.js", "dashboard-model.js",
-  "errors.js", "ip-quality-model.js", "live-config-state.js", "node-order.js",
-  "permissions.js", "poller.js", "preset-route.js", "routes.js",
-  "session-watch.js", "substore-model.js", "system-bbr-model.js",
-  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "user-model.js",
+  "errors.js", "ip-quality-model.js", "ip-quality-controller.js", "live-config-state.js", "node-order.js",
+  "permissions.js", "poller.js", "preset-route.js", "routes.js", "route-loader.js", "route-warmup.js",
+  "session-watch.js", "substore-model.js", "system-bbr-model.js", "system-bbr-presets.js",
+  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "shared-instance-model.js", "traffic-order.js", "user-model.js",
 ]);
-for (const name of ["agent-address-model.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js"]) {
+for (const name of ["agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "config-mutations.js", "shared-instance-model.js", "traffic-order.js"]) {
   assert.doesNotMatch(readFileSync(resolve(modulesDir, name), "utf8"), /innerHTML|document\.(?:createElement|querySelector|getElementById)|\.classList\b|\.animate\(/, `${name}: shared logic must not render either theme`);
 }
 const analyticsRoot = resolve(root, "analytics");
@@ -98,3 +98,9 @@ for (const name of readdirSync(analyticsRoot).filter(name => name.endsWith(".js"
   assert.ok(independent.has(resolve(analyticsRoot, name)), `${name}: unreachable independent theme module`);
 }
 console.log(`analytics: ${independent.size} independent UI and shared logic modules satisfy the boundary contract`);
+
+// Shared business models remain production code when only the native theme
+// uses them after the corresponding classic route has been retired.
+for (const path of dependencies.keys()) {
+  assert.ok(reachable.has(path) || independent.has(path), `${path} is not reachable from a production entrypoint`);
+}

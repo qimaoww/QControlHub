@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { commonConfigFields, renderCommonFieldStudio, renderConfigSourceStudio, renderFieldEditor, renderFieldRail, renderGlobalFieldStudio, revealSelectedFields } from "./modules/config-fields.js";
+import { commonConfigFields } from "./modules/config-field-model.js";
+import { renderCommonFieldStudio, renderConfigSourceStudio, renderFieldEditor, renderFieldRail, renderGlobalFieldStudio, revealSelectedFields } from "./modules/config-fields.js";
 import { renderSSRustFieldStudio, ssRustFieldGroups } from "./modules/ss-rust-fields.js";
 
 const fields = [

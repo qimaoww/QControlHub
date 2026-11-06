@@ -1,6 +1,5 @@
 import { recordDate } from "./record-display.js";
 import { mergeTrafficPorts, trafficInUserScope } from "./traffic-model.js";
-import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 import { installedEngineCount } from "./agent-service-state.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
@@ -9,14 +8,6 @@ import { settingsDirectoryMarkup } from "./settings-nav.js";
 export function createShellContext({ state, can, esc, engineName, date, ago, engines }) {
 function contextMarkup(title) {
   if (state.route === "themes") return "";
-  if (state.route === "client-connections") return clientConnectionSidebar({ state, esc, engineName });
-  if (state.route === "ip-quality") {
-    // One node at a time: the page owns the selection and publishes the exact
-    // list it renders, so the sidebar can never link to a node the panel hides.
-    const nodes = state.data.ipQualityNodes || [];
-    const selected = state.data.ipQualityAgent || "";
-    return `<div class="context-section-label"><span>选择节点</span><b>${nodes.length}</b></div><nav class="context-list" aria-label="IP 质量检测节点">${nodes.map((node) => `<a class="${selected === node.id ? "active" : ""}" href="#ip-quality" data-ip-quality-agent="${esc(node.id)}"><i class="status-dot ${esc(node.dot)}"></i><span><strong>${esc(node.name)}</strong><small>${esc(node.note)}</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
-  }
   if (state.route === "certificates") return "";
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
@@ -88,16 +79,6 @@ function contextMarkup(title) {
           `<a class="${(state.data.taskFilters?.status || "") === status ? "active" : ""}" href="#tasks" data-task-status-filter="${status}">${text}</a>`,
       )
       .join("")}</nav>`;
-  if (state.route === "system-bbr") {
-    const agents = orderNodesBySavedOrder(state.data.agents || []);
-    const selected = state.data.bbrAgent || "";
-    return `<a class="context-primary ${selected ? "" : "active"}" href="#system-bbr">全部节点</a><div class="context-section-label"><span>系统 BBR</span><b>${agents.length}</b></div><nav class="context-list" aria-label="系统 BBR 节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#system-bbr-agent-${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("system-bbr-v1") ? "系统 TCP 参数" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
-  }
-  if (state.route === "core-logs") {
-    const agents = orderNodesBySavedOrder(state.data.coreLogAgents || []);
-    const selected = state.data.coreLogFilters?.agent_id || "";
-    return `<a class="context-primary ${selected ? "" : "active"}" href="#core-logs" data-core-log-agent="">全部节点日志</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="内核日志节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#core-logs" data-core-log-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("core-logs-v1") ? "集中日志已启用" : "需升级 Agent"}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有节点</p>"}</nav>`;
-  }
   if (state.route === "traffic") {
     const agents = orderNodesBySavedOrder(state.data.agents || []);
     const items = mergeTrafficPorts(state.data.trafficPolicies || [], state.data.trafficEndpoints || []).filter(item => trafficInUserScope(item.policy || item.endpoint, state.data.trafficFilters));
@@ -106,29 +87,7 @@ function contextMarkup(title) {
     const selected = state.data.trafficFilters?.agent_id || "";
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span>${agentPresenceMarkup(agent.status)}</a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
-  if (state.route === "access-control") {
-    const entries = state.data.accessControls || [];
-    const agents = [];
-    const seen = new Set();
-    for (const entry of entries) {
-      if (seen.has(entry.agent_id)) continue;
-      seen.add(entry.agent_id);
-      agents.push({
-        id: entry.agent_id,
-        name: entry.agent_name,
-        status: entry.agent_status,
-        count: entries.filter((item) => item.agent_id === entry.agent_id).length,
-        enabled: entries.filter(
-          (item) =>
-            item.agent_id === entry.agent_id &&
-            (item.block_mainland_destination || item.block_mainland_source),
-        ).length,
-      });
-    }
-    const selected = state.data.accessControlAgent || "";
-    const orderedAgents = orderNodesBySavedOrder(agents);
-    return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${orderedAgents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${orderedAgents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span>${agentPresenceMarkup(agent.status)}</a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
-  }
+
   if (state.route === "settings")
     // The page syncs the selected entry once it has rendered its sections.
     return settingsDirectoryMarkup({ can });

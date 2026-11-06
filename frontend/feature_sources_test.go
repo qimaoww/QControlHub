@@ -27,18 +27,10 @@ func frontendFeatureSources(t *testing.T, route string) string {
 			"modules/substore-sync.js", "modules/substore-model.js", "modules/substore-view.js",
 			"modules/substore-bindings.js", "modules/substore-selections.js", "modules/substore-targets.js", "modules/card-masonry.js",
 		},
-		"modules/system-bbr.js": {
-			"modules/system-bbr.js", "modules/system-bbr-model.js", "modules/system-bbr-view.js", "modules/system-bbr-editor.js",
-			"modules/system-bbr-presets.js",
-		},
 		"modules/traffic.js": {
 			"modules/traffic.js", "modules/traffic-model.js", "modules/traffic-view.js", "modules/traffic-accounting-view.js",
 			"modules/traffic-bindings.js", "modules/traffic-forms.js", "modules/traffic-form-view.js", "modules/traffic-form-model.js",
 			"modules/traffic-order.js", "modules/traffic-card-interactions.js", "modules/traffic-sync-dialog.js",
-		},
-		"modules/core-logs.js": {
-			"modules/core-logs.js", "modules/core-log-model.js", "modules/core-log-view.js",
-			"modules/core-log-selection.js", "modules/core-log-bindings.js", "modules/core-log-source-status.js",
 		},
 		"modules/tasks.js": {
 			"modules/tasks.js", "modules/task-model.js", "modules/task-view.js", "modules/task-bindings.js", "modules/task-timeline.js",

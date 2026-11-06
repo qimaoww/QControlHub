@@ -1,4 +1,6 @@
 import { createPoller, createRefreshChannel, reconcileView } from "./refresh.js";
+import { panelMetricUsage } from './dashboard-model.js';
+export { panelMetricUsage } from './dashboard-model.js';
 
 const finiteCounter = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 const clampPercent = (value) => Math.min(100, Math.max(0, value));
@@ -8,14 +10,6 @@ const icons = {
   disk: '<path d="m5 4-3 10v5a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-5L19 4Z"/><path d="M2 14h20M6 17h.01M10 17h.01"/>',
   network: '<path d="M7 3v16m-4-4 4 4 4-4M17 21V5m-4 4 4-4 4 4"/>',
 };
-
-export function panelMetricUsage(metrics, kind) {
-  if (!metrics?.[`${kind}_available`]) return null;
-  if (kind === "cpu") return finiteCounter(metrics.cpu_percent) ? clampPercent(metrics.cpu_percent) : null;
-  const used = metrics[`${kind}_used_bytes`], total = metrics[`${kind}_total_bytes`];
-  return finiteCounter(used) && finiteCounter(total) && total > 0
-    ? clampPercent(used / total * 100) : null;
-}
 
 export function renderPanelMetrics(metrics, {
   esc, bytes, rate, failed = false, pending = false, now = Date.now(),

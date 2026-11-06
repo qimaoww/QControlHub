@@ -37,30 +37,26 @@ export async function testIPQualityScenarios({ fixture, refresh, card }) {
       await refresh();
       const record = scenario.records[0];
       const reports = record?.result?.reports || [];
-      const images = [...card().querySelectorAll(".ip-quality-archive img")];
+      const images = [...card().querySelectorAll("img")];
       assert.equal(images.length, record?.archives?.length || 0, `${scenario.id}: stale/missing archive`);
       await waitFor(() => images.every((image) => image.complete && image.naturalWidth > 0), `${scenario.id}: image failed to load`);
       for (const image of images) {
         assert.equal(image.naturalWidth, 608, `${scenario.id}: title widened the 72-column report`);
       }
-      const addresses = [...card().querySelectorAll(".ip-quality-addresses .ip-quality-address-value")];
-      assert.equal(addresses.length, reports.length, `${scenario.id}: stale/missing address`);
-      addresses.forEach((address, index) => {
-        assert.equal(address.textContent, reports[index].Head.IP, `${scenario.id}: address was truncated or changed`);
-        const box = address.closest("dd").getBoundingClientRect();
-        const range = document.createRange();
-        range.selectNodeContents(address);
-        for (const fragment of range.getClientRects()) {
-          assert.ok(fragment.left >= box.left - 1 && fragment.right <= box.right + 1,
-            `${scenario.id}: address overflows its field`);
-        }
-      });
+      assert.equal(card().querySelectorAll("a[download]").length, images.length, `${scenario.id}: download missing`);
+      assert.equal(card().querySelector("table"), null, "archive was replaced by a structured report");
+      for (let index = 0; index < images.length; index++) {
+        const family = record.archives[index].family;
+        assert.ok(images[index].src.includes(`${record.task_id}/archives/${family}`), `${scenario.id}: wrong family/task archive`);
+        const box = images[index].getBoundingClientRect();
+        assert.ok(Math.abs(box.width / box.height - images[index].naturalWidth / images[index].naturalHeight) < .01, `${scenario.id}: distorted report`);
+      }
       assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, `${scenario.id}: viewport overflow`);
       if (innerWidth <= 480 && matchMedia("(pointer:coarse)").matches) {
         assert.ok(card().getBoundingClientRect().width >= innerWidth - 40,
           `${scenario.id}: sidebar squeezed the mobile report`);
       }
-      if (scenario.id.includes("missing")) assert.ok(card().textContent.includes("未知"), "missing data became a score");
+      if (!images.length) assert.ok(card().querySelector(".a-empty")?.textContent, `${scenario.id}: no-report feedback missing`);
     }
   } finally {
     fixture.records = original;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { archiveDraftDirty, bindArchiveDraft, createArchiveDraft } from "../modules/archive-drafts.js";
+import { archiveDraftDirty, createArchiveDraft } from "../modules/archive-draft-model.js";
+import { bindArchiveDraft } from "../modules/archive-drafts.js";
 import { configDefaults } from "../modules/config-defaults.js";
 import { bindCodeEditors } from "../modules/code-editor.js";
 

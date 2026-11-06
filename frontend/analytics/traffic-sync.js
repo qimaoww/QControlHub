@@ -1,8 +1,8 @@
-import { node, button, actions, stack, table, field, muted, notice, list } from './ui.js';
+import { node, button, actions, stack, table, field, badge, muted, notice, list } from './ui.js';
 import { protocolName } from '../modules/traffic-model.js';
 
 export function trafficSync(ctx, { agentName, matches, onSaved }) {
-  const rows = node('div'), feedback = notice('');
+  const rows = node('div', { className: 'a-traffic-list' }), feedback = notice('');
   let choices = [], snapshot = '', generation = 0, loading = false, request;
   const selected = new Set();
   const labels = { new: '新增', changed: '变更', removed: '移除，历史保留', unchanged: '无变更', deleted: '已删除，可恢复' };
@@ -34,6 +34,7 @@ export function trafficSync(ctx, { agentName, matches, onSaved }) {
   });
   form.querySelector('button[type=submit]').addEventListener('mutationend', selection);
   const box = ctx.dialog('同步配置端口', form, { wide: true });
+  box.setAttribute('data-traffic-sync', '');
   async function load() {
     const expected = ++generation;
     request?.abort(); request = new AbortController();
@@ -47,7 +48,7 @@ export function trafficSync(ctx, { agentName, matches, onSaved }) {
         const toggle = field('同步', `port:${index}`, false, { type: 'checkbox', disabled: !!entry.blocked_reason, onchange(event) { event.target.checked ? selected.add(index) : selected.delete(index); selection(); } });
         return [toggle, stack(agentName(entry.agent_id), muted(entry.owner_name || (entry.is_current_user ? '当前用户' : '其他用户')), muted(entry.share_id ? '共享实例' : '主实例')),
           stack(entry.previous_port ? `旧 ${entry.previous_port} · 新 ${entry.port}` : String(entry.port), muted(protocolName(entry.protocol))), entry.engine,
-          labels[entry.kind] || entry.kind, entry.blocked_reason ? notice(entry.blocked_reason, 'warn') : ({ pending: '待部署', uncertain: '部署未确认', retained: '旧端口', applied: '已部署' })[entry.deployment_status] || entry.deployment_status || '已部署'];
+          labels[entry.kind] || entry.kind, stack(actions(badge(({ pending: '待部署', uncertain: '部署未确认', retained: '旧端口', applied: '已部署' })[entry.deployment_status] || entry.deployment_status || '已部署', entry.blocked_reason ? 'warn' : '')), entry.blocked_reason && muted(entry.blocked_reason))];
       }), { label: '端口同步预览', paginate: 0, emptyText: '当前筛选范围内暂无可同步端口' }));
     } catch (error) { if (ctx.current() && box.open && expected === generation && error.name !== 'AbortError') { rows.replaceChildren(muted('无法读取端口')); feedback.textContent = error.message; } }
     finally { if (expected === generation) { loading = false; scan.disabled = false; selection(); } }
@@ -56,4 +57,5 @@ export function trafficSync(ctx, { agentName, matches, onSaved }) {
   ctx.signal.addEventListener('abort', stop, { once: true });
   box.addEventListener('close', () => { request?.abort(); ctx.signal.removeEventListener('abort', stop); }, { once: true });
   selection(); void load();
+  return box;
 }

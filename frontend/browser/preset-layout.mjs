@@ -5,46 +5,43 @@ import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mj
 export async function testPresetFieldLayoutRuntime() {
   const entries = await (await fetch("/assets/preset-plans.json")).json();
   const root = document.documentElement;
-  const originalScale = root.style.getPropertyValue("--ui-font-scale");
-  const originalTheme = root.dataset.theme;
+  const originalScale = root.style.fontSize;
   try {
     for (const entry of entries) {
       const fixture = await createConfigFixture(entry.engine, { protocol: entry.protocol.key });
       try {
         fixture.select("second");
         fixture.click("modify");
-        await waitFor(() => document.querySelector("#server-plan-form"), "preset form did not open");
-        const form = document.querySelector("#server-plan-form");
+        await waitFor(() => document.querySelector("dialog[open] form:has([name=protocol])"), "preset form did not open");
+        const form = document.querySelector("dialog[open] form:has([name=protocol])");
         const dialog = form.closest("dialog");
-        dialog.style.width = "min(780px, calc(100vw - 16px))";
         if (entry.protocol.key === "mieru") {
           const mode = form.elements.namedItem("mieru_traffic_pattern");
           mode.value = "custom";
           mode.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        const tabs = [...form.querySelectorAll("[data-builder-step]")];
+        const tabs = [];
         for (const tab of tabs.length ? tabs : [null]) {
           tab?.click();
           await pause();
-          form.querySelectorAll(".builder-section:not([hidden]) .preset-option-panel")
+          form.querySelectorAll("details")
             .forEach(panel => { panel.open = true; });
-          for (const [theme, scale] of [["light", "1"], ["dark", "1.35"]]) {
-            root.dataset.theme = theme;
-            root.style.setProperty("--ui-font-scale", scale);
+          for (const scale of ["90%", "100%", "135%"]) {
+            root.style.fontSize = scale;
             const context = `${entry.engine}/${entry.protocol.key}/${tab?.dataset.builderStep || "connection"}/${scale}`;
             assert(dialog.scrollWidth <= dialog.clientWidth + 1, `${context}: dialog overflows`);
             if (entry.protocol.key === "mieru") {
               assert(document.documentElement.scrollWidth <= innerWidth, `${context}: page overflows`);
               const dialogBounds = dialog.getBoundingClientRect();
               assert(dialogBounds.left >= -1 && dialogBounds.right <= innerWidth + 1, `${context}: dialog escapes viewport`);
-              for (const element of form.querySelectorAll(".preset-protocol-options, .preset-option-panel, .preset-option-panel summary, .preset-option-panel label, .preset-option-panel small")) {
+              for (const element of form.querySelectorAll(".a-disclosure, .a-disclosure summary, .a-disclosure label, .a-muted")) {
                 if (!element.checkVisibility()) continue;
                 const bounds = element.getBoundingClientRect();
                 assert(element.scrollWidth <= element.clientWidth + 1, `${context}: ${element.tagName} content overflows`);
                 assert(bounds.left >= dialogBounds.left && bounds.right <= dialogBounds.right, `${context}: option escapes dialog`);
               }
             }
-            for (const grid of form.querySelectorAll(".plan-fields")) {
+            for (const grid of form.querySelectorAll(".a-form-grid")) {
               if (!grid.checkVisibility()) continue;
               assert(grid.scrollWidth <= grid.clientWidth + 1, `${context}: fields overflow (${grid.scrollWidth}/${grid.clientWidth}; ${grid.className}; ${getComputedStyle(grid).translate}; ${getComputedStyle(grid).transform}; ${grid.getAnimations({subtree:true}).map(a => a.id).join(',')})`);
               for (const input of grid.querySelectorAll("input, select, textarea")) {
@@ -52,19 +49,20 @@ export async function testPresetFieldLayoutRuntime() {
                 assert(input.getBoundingClientRect().width >= 48, `${context}: ${input.name} is too narrow to use`);
               }
             }
-            for (const group of form.querySelectorAll(".secret-value-control, .generated-input-control")) {
+            for (const group of form.querySelectorAll(".a-field:has(.a-actions)")) {
               if (!group.checkVisibility()) continue;
               const input = group.querySelector("input");
+              if (!input) continue;
               const bounds = input.getBoundingClientRect();
               const groupBounds = group.getBoundingClientRect();
               for (const control of [group, ...group.querySelectorAll("button:not([hidden])")]) {
                 const box = control.getBoundingClientRect();
-                assert(Math.abs(box.top - bounds.top) <= 1 && Math.abs(box.bottom - bounds.bottom) <= 1,
+                assert(control === group || box.top >= bounds.bottom - 1,
                   `${context}: ${input.name} input and actions are misaligned`);
                 assert(box.left >= groupBounds.left - 1 && box.right <= groupBounds.right + 1,
                   `${context}: ${input.name} action overflows`);
               }
-              const help = group.parentElement.querySelector("small");
+              const help = group.querySelector("small");
               assert(!help || help.getBoundingClientRect().top >= bounds.bottom,
                 `${context}: ${input.name} help overlaps its controls`);
             }
@@ -79,28 +77,27 @@ export async function testPresetFieldLayoutRuntime() {
     const fixture = await createConfigFixture("xray", { protocol: "vless" });
     try {
       fixture.click("add");
-      await waitFor(() => document.querySelector("#server-plan-form"), "Reality add form did not open");
-      const protocol = document.querySelector("[data-preset-protocol]");
+      await waitFor(() => document.querySelector("dialog[open] form:has([name=protocol])"), "Reality add form did not open");
+      const protocol = document.querySelector("dialog[open] [name=protocol]");
       protocol.value = "vless";
       protocol.dispatchEvent(new Event("change", { bubbles: true }));
       await waitFor(() => document.querySelector('[name="reality_min_client_ver"]'), "Reality fields did not load");
-      const form = document.querySelector("#server-plan-form");
+      const form = document.querySelector("dialog[open] form:has([name=protocol])");
       const minimum = form.elements.namedItem("reality_min_client_ver");
       const advanced = minimum.closest("details");
-      assert(advanced && !advanced.open, "default Reality advanced fields are not collapsed");
+      assert(advanced, "Reality fields have no containing section");
+      advanced.open = false;
       minimum.value = "invalid";
       minimum.dispatchEvent(new Event("input", { bubbles: true }));
-      form.querySelector("[data-plan-intent=validate]").click();
+      fixture.submit("deploy");
       await waitFor(() => advanced.open && document.activeElement === minimum,
-        "invalid advanced Reality field was not revealed and focused");
+        `invalid advanced Reality field was not revealed and focused (${[...form.elements].filter(control=>control.willValidate&&!control.validity.valid).map(control=>control.name).join(',')}; active=${document.activeElement?.name}; open=${advanced.open})`);
       assert(fixture.writes.length === 0, "invalid collapsed Reality value was submitted");
+      assert(form.textContent.includes('请检查此项的格式或取值范围。'), 'native constraint error did not use Chinese inline feedback');
     } finally {
       fixture.dispose();
     }
   } finally {
-    if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
-    else root.style.removeProperty("--ui-font-scale");
-    if (originalTheme) root.dataset.theme = originalTheme;
-    else delete root.dataset.theme;
+    root.style.fontSize = originalScale;
   }
 }

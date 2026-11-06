@@ -1,3 +1,4 @@
+import { tcpButton, tcpClose, tcpConfirmation, tcpAccept, tcpCancel, tcpField, tcpSelected, tcpError, tcpSelectedKeys, tcpSettle } from "./system-tcp-controls.mjs";
 import { assert, delay, waitFor } from "./assertions.mjs";
 
 const bbrSettings = {
@@ -12,38 +13,22 @@ const bbrSettings = {
 };
 
 function assertDraft(editor, expected) {
-  const selected = [...editor.querySelectorAll("[data-tcp-selected]:checked")]
-    .map((input) => input.dataset.tcpSelected).sort();
+  const selected = tcpSelectedKeys(editor);
   assert.equal(selected.join(","), Object.keys(expected).sort().join(","), "BBR 预设选择了错误的参数");
   for (const [key, value] of Object.entries(expected))
-    assert.equal(editor.querySelector(`[data-tcp-value="${key}"]`).value, value, `BBR 预设取值错误：${key}`);
-}
-
-export function fillBBRPresetWithoutTask({ card, testAPI }) {
-  const before = testAPI.tcpMutations.length;
-  const callsBefore = testAPI.calls.length;
-  card().querySelector('[data-bbr-dialog-open="bbr-editor-alpha"]').click();
-  const editor = card().querySelector(".bbr-editor");
-  const preset = editor.querySelector('[data-tcp-preset="bbr-32m"]');
-  assert.ok(preset && !preset.disabled, "无任务读权限时 BBR 预设不可用");
-  preset.click();
-  assertDraft(editor, bbrSettings);
-  assert.equal(document.querySelector("[data-confirm-dialog][open]"), null, "填入 BBR 预设弹出了应用确认");
-  assert.equal(testAPI.tcpMutations.length, before, "填入 BBR 预设直接提交了任务");
-  assert.equal(testAPI.calls.length, callsBefore, "填入 BBR 预设触发了 API 请求");
-  editor.querySelector("[data-bbr-dialog-close]").click();
+    assert.equal(tcpField(editor, key).value, value, `BBR 预设取值错误：${key}`);
 }
 
 export async function testSystemTCPPresets({ card, editor, openEditor, refresh, testAPI, mode }) {
   const preset = () => editor().querySelector('[data-tcp-preset="bbr-32m"]');
-  const field = (key) => editor().querySelector(`[data-tcp-value="${key}"]`);
-  const select = (key) => editor().querySelector(`[data-tcp-selected="${key}"]`);
+  const field = (key) => tcpField(editor(), key);
+  const select = (key) => tcpSelected(editor(), key);
   const edit = (key, value) => {
     field(key).value = value;
     field(key).dispatchEvent(new Event("input", { bubbles: true }));
   };
   const before = testAPI.tcpMutations.length;
-  if (editor().open) editor().querySelector("[data-bbr-dialog-close]").click();
+  if (editor().open) tcpClose(editor());
   if (mode === "bbr-mobile") {
     assert.ok(matchMedia("(pointer: coarse)").matches, "移动 BBR 测试未启用触摸指针");
     assert.ok(innerWidth <= 420, "移动 BBR 测试未使用窄视口");
@@ -58,12 +43,12 @@ export async function testSystemTCPPresets({ card, editor, openEditor, refresh, 
   const merged = { ...bbrSettings, "net.ipv4.tcp_ecn": "0" };
   assertDraft(editor(), merged);
   assert.ok(editor().matches(":modal"), "填入预设关闭了参数编辑器");
-  assert.equal(document.querySelector("[data-confirm-dialog][open]"), null, "填入 BBR 预设进入了确认流程");
+  assert.equal(tcpConfirmation(), null, "填入 BBR 预设进入了确认流程");
   assert.equal(testAPI.tcpMutations.length, before, "填入预设直接修改了节点");
   assert.equal(testAPI.calls.length, callsBefore, "填入预设触发了 API 请求");
-  assert.equal(document.querySelector('[data-refresh-key="bbr-bravo"] [data-tcp-selected]:checked'), null, "预设污染了其他节点的草稿");
-  editor().querySelector("[data-bbr-dialog-close]").click();
-  assert.ok(!card().querySelector("[data-bbr-draft-label]").hidden, "预设草稿没有显示在节点入口");
+  assert.equal(document.querySelector('[data-refresh-key="bravo"] input[type=checkbox]:checked'), null, "预设污染了其他节点的草稿");
+  tcpClose(editor());
+  assert.ok(card().textContent.includes("有草稿"), "预设草稿没有显示在节点入口");
   openEditor();
   assertDraft(editor(), merged);
   await refresh();
@@ -98,13 +83,13 @@ export async function testSystemTCPPresets({ card, editor, openEditor, refresh, 
   preset().click();
   assertDraft(editor(), bbrSettings);
   editor().querySelector("form").requestSubmit();
-  const confirmation = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "预设提交没有请求确认");
+  const confirmation = await waitFor(() => tcpConfirmation(), "预设提交没有请求确认");
   for (const [key, value] of Object.entries(bbrSettings))
     assert.ok(confirmation.textContent.includes(`${key}: ${agent.metrics.bbr.parameters[key]} → ${value}`), `预设确认缺少参数差异：${key}`);
   assert.ok(preset().disabled, "确认期间仍可改写预设草稿");
   await refresh();
   assert.ok(preset().disabled, "后台刷新解除了确认期间的预设锁定");
-  confirmation.querySelector("[data-confirm-cancel]").click();
+  tcpCancel(confirmation);
   await waitFor(() => !preset().disabled, "取消应用后预设未解锁");
   assert.equal(testAPI.tcpMutations.length, before, "取消预设确认仍提交了任务");
   assertDraft(editor(), bbrSettings);
@@ -113,7 +98,7 @@ export async function testSystemTCPPresets({ card, editor, openEditor, refresh, 
   assertDraft(editor(), bbrSettings);
 
   editor().querySelector("form").requestSubmit();
-  (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "预设重试没有确认弹窗")).querySelector("[data-confirm-accept]").click();
+  tcpAccept(await waitFor(tcpConfirmation, "预设重试没有确认弹窗"));
   await waitFor(() => testAPI.tcpMutations.length === before + 1, "预设任务未提交");
   await waitFor(() => !editor().open, "预设提交成功未关闭编辑器");
   const payload = testAPI.tcpMutations.at(-1);
@@ -123,7 +108,8 @@ export async function testSystemTCPPresets({ card, editor, openEditor, refresh, 
   assert.equal(Object.keys(payload.tcp_settings).sort().join(","), Object.keys(bbrSettings).sort().join(","), "预设任务包含多余或遗漏的参数");
   for (const [key, value] of Object.entries(bbrSettings))
     assert.equal(payload.tcp_settings[key], value, `预设任务参数错误：${key}`);
-  assert.ok(preset().disabled, "等待执行时仍允许填入预设");
+  assert.ok(tcpButton(card(), "自定义参数").disabled, "等待执行时仍允许编辑参数");
+  await tcpSettle();
   testAPI.tcpTasks[0].status = "succeeded";
   await refresh();
   openEditor();

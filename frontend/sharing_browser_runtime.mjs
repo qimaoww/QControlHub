@@ -1,164 +1,135 @@
-import { createAgentSharing } from "./modules/agent-sharing.js";
+import { startAnalytics } from './analytics/app.js';
+import { assert, waitFor, delay } from './browser/assertions.mjs';
 
-const assert = (value, message) => { if (!value) throw new Error(message); };
-const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
-  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-})[char]);
-const waitFor = async (check, message) => {
-  const deadline = performance.now() + 3000;
-  while (!check()) {
-    if (performance.now() > deadline) throw new Error(message);
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-};
-const input = (element, value) => {
-  element.value = value;
-  element.dispatchEvent(new Event("input", { bubbles: true }));
-};
-
+// Exercise the same quota route, modal, mutation locks and session lifetime
+// shipped by the independent theme, with deterministic API responses.
 export async function testAgentSharingRuntime() {
-  const state = { data: {}, session: { user_id: "alice", role: "user" }, navigationEpoch: 1 };
-  const agent = { id: "own", name: "Alice own Agent", can_manage: true, capabilities: ["mihomo", "xray"], features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"] };
-  let sharing = { revision: 2, shares: [{ id: "shr_bob", username: "bob", user_id: "bob-id", status: "accepted", invitation_revision: 2, engines: ["mihomo"], ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
-  const writes = [], notifications = [];
-  let hold = false, release, gates = 0, confirm = true;
-  const editor = createAgentSharing({
-    state, esc, can: () => true, notify: message => notifications.push(message),
-    confirmAction: async () => confirm,
-    api: async (path, options = {}) => {
-      assert(path === "/agents/own/sharing", "borrowed host queried owner sharing");
-      if (options.method) {
-        const body = JSON.parse(options.body);
-        writes.push(body);
+  const nativeFetch = globalThis.fetch;
+  let session = { user_id: 'alice', username: 'alice', role: 'user', permissions: ['overview.read', 'agents.read', 'agents.manage', 'agent-access.read', 'settings.read'], csrf_token: 'sharing-fixture' };
+  const agent = { id: 'own', name: 'Alice 自有节点', can_manage: true, status: 'online', capabilities: ['mihomo', 'xray'], features: ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1'] };
+  let sharing = { revision: 2, shares: [{ id: 'shr_bob', username: 'bob', user_id: 'bob-id', status: 'accepted', invitation_revision: 2, engines: ['mihomo'], ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
+  const writes = [], reads = [];
+  let hold = false, release, rejectRead = false;
+  const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+  globalThis.fetch = async (url, options = {}) => {
+    if (!String(url).startsWith('/api/v1')) return nativeFetch(url, options);
+    const path = String(url).slice('/api/v1'.length), method = options.method || 'GET';
+    reads.push({path,method});
+    if (path === '/auth/session') return reply(session);
+    if (path === '/settings') return reply({});
+    if (path === '/agents') return reply([agent]);
+    if (path === '/agent-access') return reply({ isolated: false, shares: [] });
+    if (path === '/preferences/node-order') return reply({agent_ids:['own'],revision:1});
+    if (path === '/overview') return reply({});
+    if (path === '/agents/own/sharing') {
+      if (method === 'PUT') {
+        assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), session.csrf_token, '共享保存缺少 CSRF');
+        const body = JSON.parse(options.body); writes.push(body);
         if (hold) await new Promise(resolve => { release = resolve; });
-        if (body.revision !== sharing.revision) throw new Error("共享分配已变更，请重新读取");
+        if (body.revision !== sharing.revision) return reply({error:'共享分配已变更，请重新读取'},409);
         sharing = { revision: sharing.revision + 1, shares: body.shares.map(row => ({
-          ...row, id: `shr_${row.username}`, user_id: `${row.username}-id`, used_bytes: 64,
-          status: row.reinvite ? "pending" : sharing.shares.find(share => share.username === row.username)?.status || "pending", reinvite: false,
+          ...row, id: `shr_${row.username}`, user_id: `${row.username}-id`, used_bytes:64,
+          status: row.reinvite ? 'pending' : sharing.shares.find(share => share.username === row.username)?.status || 'pending', reinvite:false,
         })) };
-      }
-      return structuredClone(sharing);
-    },
-  }, { begin: () => { gates++; return () => { gates--; }; } });
-  const dialog = () => document.querySelector(".agent-sharing-dialog");
-  const form = () => dialog().querySelector("form");
+      } else if (rejectRead) return reply({error:'共享读取失败'},503);
+      return reply(structuredClone(sharing));
+    }
+    throw new Error(`Unexpected sharing API: ${method} ${path}`);
+  };
+  const styles = document.createElement('link'); styles.rel='stylesheet'; styles.href='/assets/analytics/theme.css'; document.head.append(styles);
+  await new Promise((resolve,reject)=>{styles.onload=resolve;styles.onerror=reject;});
+  const boot = async () => {
+    window.dispatchEvent(new Event('pagehide'));
+    document.querySelectorAll('dialog.a-dialog').forEach(box=>box.close());
+    document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'native-sharing-test'}));
+    history.replaceState(null,'','#my-quota');
+    startAnalytics({app:document.querySelector('#native-sharing-test'),session});
+    await waitFor(()=>document.querySelector('.a-main')?.textContent.includes(agent.can_manage ? '共享 Agent 设置' : '暂无共享记录')&&!document.querySelector('.a-main [aria-busy=true]'),'共享与额度未加载');
+  };
+  const dialog = () => [...document.querySelectorAll('dialog[open]')].at(-1);
+  const form = () => dialog()?.querySelector('form');
   const field = name => form().querySelector(`[name="${name}"]`);
-  await editor.open({ ...agent, can_manage: false });
-  assert(!dialog(), "borrowed host opened sharing controls");
-  await editor.open({ ...agent, features: agent.features.filter(feature => feature !== "independent-egress-v1") });
-  assert(dialog().querySelector(".alert.error:not([hidden])")?.textContent.includes("升级 Agent"),
-    "missing independent-egress capability was shown as compatible");
-  editor.close();
-  await editor.open(agent);
-  assert(gates === 1 && field("username").readOnly, "existing recipients or refresh gate not protected");
-  assert(form().querySelectorAll('[name="engines"]').length === 2, "sharing offered unsupported engines");
-  field("engines").click();
-  form().requestSubmit();
-  await waitFor(() => dialog().querySelector("[data-sharing-error]").textContent.includes("内核"), "empty engine allocation has no inline error");
-  assert(writes.length === 0, "implicit engine allocation reached the API");
-  field("engines").click();
-  dialog().querySelector("[data-recipient-add]").click();
-  assert(form().querySelectorAll("[data-recipient]").length === 2 && editor.hasUnsavedChanges(), "new recipient was not captured");
-  dialog().querySelector("[data-recipient-remove]").click();
-  assert(form().querySelectorAll("[data-recipient]").length === 1 && !editor.hasUnsavedChanges(), "removing an accidental blank recipient lost the original allocation");
-  input(field("ports"), "0,21001");
-  form().requestSubmit();
-  await waitFor(() => !dialog().querySelector("[data-sharing-error]").hidden, "invalid port has no inline error");
-  assert(writes.length === 0, "invalid port reached API");
-  assert(field("ports").placeholder.includes("21000-21100"), "owner sharing has no port-range example");
-  for (const [ports, error] of [["21000-21256", "256"], ["21000-21002,21001", "重叠"], ["10084-10087", "保留"]]) {
-    input(field("ports"), ports);
-    form().requestSubmit();
-    assert(dialog().querySelector("[data-sharing-error]").textContent.includes(error), `invalid range has no specific error: ${ports}`);
-    assert(writes.length === 0, "invalid owner-sharing range reached the API");
+  const button = (text, root = dialog()) => [...root.querySelectorAll('button')].find(control=>control.textContent===text);
+  const input = (control,value) => {control.value=value;control.dispatchEvent(new Event('input',{bubbles:true}));};
+  const submit = () => form().requestSubmit();
+  const errors = () => [...document.querySelectorAll('.a-dialog .a-notice,.a-toast.error')].filter(el=>el.checkVisibility()).map(el=>el.textContent).join(' ');
+  const idle = () => !document.querySelector('#native-sharing-test[aria-busy=true],dialog[open] form[aria-busy=true]');
+  const close = async () => {dialog().querySelector('[aria-label=关闭]').click();await waitFor(()=>!dialog(),'共享弹窗未关闭');await delay(30);};
+  const open = async () => {
+    document.querySelector('[data-sharing-agent=own]').click();
+    await waitFor(()=>fieldSafe()&&idle(),'共享设置未就绪');
+  };
+  const fieldSafe = () => form()?.querySelector('[name=ports]');
+  const reload = async accept => {
+    button('重新读取').click();
+    await waitFor(()=>dialog()?.querySelector('h2')?.textContent==='重新读取','缺少重新读取确认');
+    button(accept?'重新读取':'取消').click();
+    await waitFor(()=>fieldSafe()&&idle(),'重新读取未结束');await delay(30);
+  };
+  try {
+    agent.can_manage=false;await boot();
+    assert.ok(!document.querySelector('[data-sharing-agent]'),'共享用户可转授权节点');
+    assert.ok(!reads.some(call=>call.path.endsWith('/sharing')),'共享用户读取所有者共享分配');
+    agent.can_manage=true;agent.features=agent.features.filter(feature=>feature!=='independent-egress-v1');
+    await boot();await open();
+    assert.ok(errors().includes('升级 Agent')&&form().querySelector('[type=submit]').disabled,'缺少能力仍允许保存');
+    input(field('ports'),'21004');submit();await delay(30);assert.equal(writes.length,0,'缺少能力产生写入');await close();
+    agent.features.push('independent-egress-v1');await boot();await open();
+    assert.ok(field('username').readOnly&&form().querySelectorAll('[name=engines]').length===2,'接收用户或内核范围不正确');
+    assert.ok(form().querySelector('[type=submit]').disabled,'无变化仍要求保存');
+    field('engines').click();submit();await waitFor(()=>errors().includes('内核'),'未选择内核无错误');
+    assert.equal(writes.length,0,'空内核提交到 API');field('engines').click();
+    assert.ok(form().querySelector('[type=submit]').disabled,'恢复原值仍要求保存');
+    button('添加用户').click();assert.equal(form().querySelectorAll('[name=username]').length,2);
+    button('移除').click();assert.ok(form().querySelector('[type=submit]').disabled,'移除临时空行仍要求保存');
+    for (const [ports,error] of [['0,21001','不能'],['21000-21256','256'],['21000-21002,21001','重叠'],['10084-10087','保留']]) {
+      input(field('ports'),ports);submit();await waitFor(()=>errors().includes(error),`无端口校验：${ports}`);assert.equal(writes.length,0);
+    }
+    assert.ok(field('ports').placeholder.includes('21000-21100'));
+    input(field('ports'),'21003 - 21005, 22000');form().querySelector('[name=engines][value=xray]').click();
+    await close();await open();
+    assert.equal(field('ports').value,'21003 - 21005, 22000','重新打开丢失草稿');
+    assert.ok(form().querySelector('[name=engines][value=xray]').checked,'重新打开丢失内核草稿');
+    sharing.revision++;submit();await waitFor(()=>errors().includes('已变更')&&idle(),'冲突无反馈');
+    assert.equal(field('ports').value,'21003 - 21005, 22000');
+    await reload(false);assert.equal(field('ports').value,'21003 - 21005, 22000','取消读取丢失草稿');
+    rejectRead=true;await reload(true);assert.equal(field('ports').value,'21003 - 21005, 22000','读取失败丢失草稿');assert.ok(errors().includes('共享读取失败'));rejectRead=false;
+    await reload(true);assert.equal(field('ports').value,'21003');assert.ok(!errors().includes('已变更'),'成功重新读取仍显示旧冲突');assert.ok(!form().querySelector('[name=engines][value=xray]').checked);
+    assert.ok(form().querySelector('[type=submit]').disabled,'重新读取仍要求保存');
+    input(field('ports'),'21000 - 21100，22000');input(field('limit_gib'),'2.5');input(field('http_domains'),'auth.example.test\napi.example.test');hold=true;
+    submit();submit();await waitFor(()=>release,'保存未开始');
+    assert.equal(writes.length,2,'重复保存未阻止');assert.ok(field('ports').matches(':disabled'),'提交中可编辑');
+    dialog().querySelector('[aria-label=关闭]').click();assert.ok(form(),'提交中可关闭并绕过锁定');
+    hold=false;release();release=null;await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled,'保存后仍要求保存');
+    assert.equal(sharing.shares[0].limit_bytes,2.5*1024**3);
+    assert.equal(sharing.shares[0].ports.join(','),[...Array.from({length:101},(_,i)=>21000+i),22000].join(','));
+    assert.equal(sharing.shares[0].username,'bob');assert.equal(field('ports').value,'21000-21100, 22000');
+    assert.equal(writes.at(-1).shares[0].engines.join(','),'mihomo','保存扩大内核分配');
+    assert.equal(writes.at(-1).shares[0].http_domains.join(','),'auth.example.test,api.example.test','HTTP-01 域名未保存');
+    assert.ok(dialog().scrollWidth<=dialog().clientWidth+1,'共享弹窗横向溢出');
+    for(const [text,expected] of [['0',[0]],['',[]],['21001-21003',[21001,21002,21003]],['0',[0]]]) {
+      input(field('ports'),text);await close();await open();assert.equal(field('ports').value,text,'空端口或无限制草稿丢失');
+      const before=writes.length;submit();await waitFor(()=>writes.length===before+1&&idle()&&form().querySelector('[type=submit]').disabled,'端口模式保存失败');
+      assert.equal(JSON.stringify(sharing.shares[0].ports),JSON.stringify(expected));assert.equal(field('ports').value,text);
+      assert.equal(sharing.shares[0].limit_bytes,2.5*1024**3);assert.equal(sharing.shares[0].used_bytes,64);
+    }
+    input(field('limit_gib'),'3');submit();await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled,'额度保存未结束');
+    assert.equal(JSON.stringify(sharing.shares[0].ports),'[0]','修改额度丢失无限制端口');
+    await close();sharing.shares[0].engines=['xray'];agent.capabilities=['mihomo'];await boot();await open();
+    assert.ok(form().querySelector('[name=engines][value=xray]')?.checked&&dialog().textContent.includes('xray · 不可用'),'不可用的已有内核分配被丢弃');
+    input(field('limit_gib'),'4');submit();await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled,'已有分配保存未结束');
+    assert.equal(writes.at(-1).shares[0].engines.join(','),'xray','额度保存静默移除已有内核');
+    await close();sharing.shares[0].engines=['mihomo'];agent.capabilities=['mihomo','xray'];sharing.shares[0].status='rejected';sharing.revision++;await boot();await open();
+    assert.ok(dialog().textContent.includes('已拒绝'));button('重新邀请').click();assert.ok(dialog().textContent.includes('待发送'));
+    await close();await open();assert.ok(button('重新邀请').disabled,'重新打开重复邀请');
+    submit();await waitFor(()=>dialog()?.textContent.includes('待接受')&&idle(),'重新邀请未变成待接受');
+    assert.ok(writes.at(-1).shares[0].reinvite&&!button('重新邀请'),'重新邀请未显式提交');
+    const savedWrites=writes.length;await close();await open();assert.ok(form().querySelector('[type=submit]').disabled,'保存后重新打开仍要求保存');submit();await delay(30);assert.equal(writes.length,savedWrites);
+    input(field('ports'),'21003, 21005');hold=true;submit();await waitFor(()=>release,'账号切换保存未开始');
+    session={...session,user_id:'carol',username:'carol'};agent.can_manage=false;await boot();hold=false;release();await delay(60);
+    assert.ok(!dialog()&&!document.querySelector('.a-toast'),'旧账号结果进入新账号');
+    assert.ok(!document.querySelector('[data-sharing-agent]'),'新账号获得旧账号共享入口');
+  } finally {
+    window.dispatchEvent(new Event('pagehide'));document.querySelectorAll('dialog.a-dialog').forEach(box=>box.close());styles.remove();globalThis.fetch=nativeFetch;
   }
-  input(field("ports"), "21003 - 21005, 22000");
-  form().querySelector('[name="engines"][value="xray"]').click();
-  editor.close();
-  assert(editor.hasUnsavedChanges() && gates === 0, "closing lost the account-scoped draft or leaked the refresh gate");
-  await editor.open(agent);
-  assert(field("ports").value === "21003 - 21005, 22000", "reopening did not restore the range draft");
-  assert(form().querySelector('[name="engines"][value="xray"]').checked, "reopening lost explicit engine allocation");
-  sharing.revision++;
-  form().requestSubmit();
-  await waitFor(() => dialog().querySelector("[data-sharing-error]").textContent.includes("已变更"), "stale revision did not surface conflict");
-  assert(editor.hasUnsavedChanges() && field("ports").value === "21003 - 21005, 22000", "conflict lost the unsaved range");
-  confirm = false;
-  dialog().querySelector("[data-sharing-reload]").click();
-  await Promise.resolve();
-  assert(field("ports").value === "21003 - 21005, 22000", "canceling reload discarded the range draft");
-  confirm = true;
-  dialog().querySelector("[data-sharing-reload]").click();
-  await waitFor(() => field("ports").value === "21003", "confirmed reload did not recover current revision");
-  assert(!editor.hasUnsavedChanges(), "reload retained stale draft");
-  assert(!form().querySelector('[name="engines"][value="xray"]').checked, "reload retained stale engine allocation");
-
-  input(field("ports"), "21000 - 21100，22000");
-  input(field("limit_gib"), "2.5");
-  hold = true;
-  form().requestSubmit();
-  form().requestSubmit();
-  await waitFor(() => Boolean(release), "save never started");
-  assert(writes.length === 2 && field("ports").disabled, "save was duplicated or editable while pending");
-  editor.close();
-  await editor.open(agent);
-  assert(field("ports").disabled, "reopen bypassed in-flight lock");
-  const finish = release; release = null; hold = false; finish();
-  await waitFor(() => !field("ports").disabled && !editor.hasUnsavedChanges(), "save did not settle reopened dialog");
-  assert(sharing.shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB conversion changed the allowance");
-  assert(sharing.shares[0].username === "bob" && sharing.shares[0].ports.join(",") === [...Array.from({ length: 101 }, (_, index) => 21000 + index), 22000].join(","),
-    "owner sharing changed the recipient or did not submit the complete port range");
-  assert(field("ports").value === "21000-21100, 22000", "saved owner-sharing range expanded into a long input");
-  assert(writes.at(-1).shares[0].engines.join(",") === "mihomo", "save widened engine allocation");
-  assert(dialog().scrollWidth <= dialog().clientWidth + 1, "sharing dialog overflows mobile viewport");
-  assert(dialog().querySelector("header>div").getBoundingClientRect().width > 200,
-    "header text was squeezed into the inherited traffic icon column");
-
-  for (const [text, expected] of [["0", [0]], ["", []], ["21001-21003", [21001, 21002, 21003]], ["0", [0]]]) {
-    input(field("ports"), text);
-    editor.close();
-    await editor.open(agent);
-    assert(field("ports").value === text, "reopening lost a blank or unrestricted port draft");
-    const before = writes.length;
-    form().requestSubmit();
-    await waitFor(() => writes.length === before + 1 && !editor.hasUnsavedChanges(), "port mode did not save");
-    assert(JSON.stringify(sharing.shares[0].ports) === JSON.stringify(expected), `wrong saved port mode: ${text}`);
-    assert(field("ports").value === text, "saved port mode did not round-trip in the owner editor");
-    assert(sharing.shares[0].limit_bytes === 2.5 * 1024 ** 3 && sharing.shares[0].used_bytes === 64,
-      "changing port mode changed traffic quota or usage");
-  }
-  input(field("limit_gib"), "3");
-  form().requestSubmit();
-  await waitFor(() => !editor.hasUnsavedChanges(), "quota edit did not save");
-  assert(sharing.shares[0].ports.join(",") === "0", "quota-only edit cleared unrestricted port authority");
-
-  editor.close();
-  sharing.shares[0].status = "rejected";
-  sharing.revision++;
-  await editor.open(agent);
-  assert(dialog().querySelector("[data-share-status]").textContent === "已拒绝", "owner cannot see recipient rejection");
-  dialog().querySelector("[data-recipient-reinvite]").click();
-  assert(editor.hasUnsavedChanges() && dialog().querySelector("[data-share-status]").textContent === "待发送", "reinvite was not staged explicitly");
-  editor.close();
-  await editor.open(agent);
-  assert(dialog().querySelector("[data-recipient-reinvite]").disabled, "reopening lost staged reinvitation");
-  form().requestSubmit();
-  await waitFor(() => dialog().querySelector("[data-share-status]").textContent === "待接受", "reinvite did not become pending");
-  assert(writes.at(-1).shares[0].reinvite && !dialog().querySelector("[data-recipient-reinvite]"), "reinvite was not explicit or could be immediately duplicated");
-
-  input(field("ports"), "21003, 21005");
-  hold = true;
-  form().requestSubmit();
-  await waitFor(() => Boolean(release), "logout race save never started");
-  const notificationsBefore = notifications.length;
-  state.data = {};
-  state.session = { user_id: "carol", role: "user" };
-  state.navigationEpoch++;
-  editor.close();
-  release();
-  await waitFor(() => gates === 0, "logout retained an interaction gate");
-  await new Promise(resolve => setTimeout(resolve, 30));
-  assert(!dialog() && !editor.hasUnsavedChanges(), "previous account restored sharing data after logout");
-  assert(notifications.length === notificationsBefore, "old account save notified the new account");
-  assert(Object.keys(state.data).length === 0, "old account populated the new account cache");
 }

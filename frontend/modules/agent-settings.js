@@ -241,34 +241,7 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
       }
     });
   });
-  document.querySelectorAll("[data-komari-form]").forEach((form) => {
-    const can = (capability) => permission(capability, agentsByID.get(form.dataset.komariForm)) && agentsByID.get(form.dataset.komariForm)?.can_manage !== false;
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      if (!can("agents.manage")) return;
-      const uuid = String(new FormData(form).get("uuid") || "").trim();
-      const agentID = form.dataset.komariForm;
-      const button = form.querySelector("button[type=submit]");
-      if (button) button.disabled = true;
-      try {
-        await api(`/agents/${encodeURIComponent(agentID)}/komari`, {
-          method: "PUT",
-          body: JSON.stringify({ uuid }),
-        });
-        const agent = agentsByID.get(agentID);
-        if (agent) {
-          agent.labels = { ...(agent.labels || {}) };
-          if (uuid) agent.labels.komari_uuid = uuid;
-          else delete agent.labels.komari_uuid;
-        }
-        await refreshAgentPage();
-        notify(uuid ? "Komari 服务器已关联" : "Komari 服务器关联已清除");
-      } catch (error) {
-        notify(error.message, "error");
-        if (button) button.disabled = false;
-      }
-    };
-  });
+
 
   };
 }

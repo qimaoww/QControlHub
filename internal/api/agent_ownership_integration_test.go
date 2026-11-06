@@ -115,12 +115,12 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 		t.Fatalf("owned reinstall changed identity: %+v %v", reinstalled, err)
 	}
 	settings := core.DefaultPanelSettings()
-	settings.PanelName, settings.KomariURL, settings.KomariAPIKey = "Alice panel", "https://komari.example", "alice-private-key"
+	settings.PanelName = "Alice panel"
 	settings.AgentMetricsIntervalSeconds = 5
 	alice.call("PUT", "/settings", settings, http.StatusOK, nil)
 	for _, client := range []configScopeAPIClient{admin, bob} {
 		body := client.call("GET", "/settings", nil, http.StatusOK, nil)
-		if bytes.Contains(body, []byte("Alice panel")) || bytes.Contains(body, []byte("komari.example")) {
+		if bytes.Contains(body, []byte("Alice panel")) {
 			t.Fatal("personal panel settings leaked to another account")
 		}
 	}
@@ -154,7 +154,6 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 		{"GET", "/sharing", nil}, {"PUT", "/sharing", request},
 		{"PUT", "/name", map[string]string{"name": "stolen"}}, {"DELETE", "", nil},
 		{"POST", "/enrollment-command", nil}, {"POST", "/enrollment-token", nil},
-		{"GET", "/komari", nil},
 	} {
 		bob.call(operation.method, "/agents/"+own.ID+operation.path, operation.body, http.StatusForbidden, nil)
 	}

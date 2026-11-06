@@ -1,66 +1,89 @@
-import { assert, waitFor } from "./assertions.mjs";
+import { assert, delay, waitFor } from './assertions.mjs';
 
 export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
-const form = await waitFor(() => document.querySelector("#settings-form"), "系统设置未加载");
-  const inputs = [...form.querySelectorAll('#settings-engines input[role="switch"]')];
-  assert.equal(inputs.length, 4, "全局设置应显示四个内核开关");
-  assert.equal(form.querySelector("#settings-engines .settings-toggle"), null, "不再使用大块复选框卡片");
-  assert.ok(inputs[0].checked && !inputs[1].checked, "默认能力状态错误");
-  assert.equal(getComputedStyle(inputs[0]).appearance, "none", "开关不应使用浏览器默认复选框样式");
-  for (const link of document.querySelectorAll('[aria-label="设置目录"] a')) {
-    assert.equal(link.querySelector("span").textContent, document.querySelector(`${link.hash} .settings-section-number`).textContent, "目录与设置分区编号须一致");
+  const styles = document.createElement('link'); styles.rel = 'stylesheet'; styles.href = '/assets/analytics/theme.css';
+  const styled = new Promise((resolve, reject) => { styles.onload = resolve; styles.onerror = reject; }); document.head.append(styles); await styled;
+  const session = await (await fetch('/api/v1/auth/session')).json();
+  (await import('../analytics/app.js')).startAnalytics({ app: document.querySelector('#app'), session });
+  const form = await waitFor(() => document.querySelector('#panel-settings-form'), '面板设置未加载');
+  const inputs = [...form.querySelectorAll('[name^="engine:"]')];
+  const save = document.querySelector('.a-top [form="panel-settings-form"]');
+  const status = () => form.querySelector('[role=status]').textContent;
+  const changed = (name, value) => {
+    const input = form.elements.namedItem(name); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const settled = async () => { await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '设置提交未结束'); await delay(30); };
+  const writes = () => testAPI.calls.filter(call => call.path === '/settings' && call.method === 'PUT').length;
+  assert.equal(inputs.length, 4, '缺少默认内核能力'); assert.ok(inputs[0].checked && !inputs[1].checked, '默认内核状态错误');
+  assert.equal(form.querySelectorAll('[role=status]').length, 1, '重复保存状态');
+  const acme = form.elements.acme_email;
+  assert.ok(acme && acme.type === 'email' && !acme.required, '缺少可选证书邮箱');
+  assert.equal(form.querySelector('[name*="komari"]'), null, '仍保留 Komari 字段');
+  assert.ok(!document.querySelector('.a-main').textContent.includes('修订'), '设置泄露内部修订标识');
+  const page = document.querySelector('.a-main');
+  assert.match(page.textContent, /控制面发行版本/); assert.match(page.textContent, /QAgent 安装包版本/); assert.match(page.textContent, /可信代理/);
+  if (mode.endsWith('-readonly')) {
+    assert.ok(inputs.every(input => input.disabled), '只读用户可改内核'); assert.ok(acme.disabled, '只读用户可改邮箱'); assert.equal(save, null, '只读用户出现保存入口');
+    form.requestSubmit(); await delay(40); assert.equal(writes(), 0, '只读表单提交触发写入'); return;
   }
-  assert.equal(form.querySelectorAll("[data-settings-state]").length, 1, "设置页只保留一处保存状态");
-  assert.equal(form.querySelector("header p:empty, .settings-toggle small:empty"), null, "省略说明后不应留下空文案行");
-  const acme = form.querySelector('#settings-certificates [name="acme_email"]');
-  assert.ok(acme && acme.type === "email" && !acme.required, "证书申请应提供可选的邮箱输入");
-  if (!mode.endsWith("-readonly")) {
-    assert.ok(form.querySelector("[data-settings-state]").getBoundingClientRect().height > 0,
-      "手机和桌面都应显示保存状态");
+  assert.ok(save && save.form === form && !form.contains(save), '顶部保存按钮未关联完整表单');
+  assert.equal(document.querySelectorAll('button[form="panel-settings-form"]').length, 1, '同一设置重复保存入口');
+  assert.ok(save.disabled, '未修改时仍要求保存'); assert.equal(status(), '已保存');
+  for (const ratio of [0, 0.5, 1]) {
+    window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * ratio); await delay(70);
+    const rect = save.getBoundingClientRect();
+    assert.ok(rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth + 1, '滚动后保存不可达');
+    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, '设置布局横向溢出');
   }
-  if (new URLSearchParams(location.search).has("preview")) return;
-  if (mode.endsWith("-readonly")) {
-    assert.ok(inputs.every(input => input.disabled), "只读用户不得修改全局能力");
-    assert.ok(acme.disabled, "只读用户不得修改证书邮箱");
-    assert.equal(form.querySelector("[data-save-settings]"), null, "只读页不得提供保存入口");
-    return;
-  }
-  const ipv4 = form.querySelector('[name="cnip_ipv4_url"]'), ipv6 = form.querySelector('[name="cnip_ipv6_url"]');
-  assert.ok(ipv4 && ipv6 && !form.querySelector('[name="cnip_format"]'), "CN IP sources must use automatic format and both families");
-  const save = form.querySelector("[data-save-settings]");
-  assert.ok(save.disabled, "初始状态不应需要保存");
-  acme.value = "not-an-email";
-  assert.ok(!acme.checkValidity(), "邮箱格式错误应触发表单校验");
-  acme.value = "certs@example.test";
-  ipv4.value = "https://example.com/cn.mmdb";
-  ipv6.value = "https://example.com/cn6.srs";
-  form.elements.client_connection_retention_days.value = "45";
-  inputs[1].click();
-  assert.ok(!save.disabled, "切换应标记待保存");
-  assert.notEqual(getComputedStyle(inputs[1].closest("label").querySelector(".when-enabled")).display, "none", "状态文字须随开关即时更新");
-  testAPI.settingsFailure = true;
-  form.requestSubmit(save);
-  await waitFor(() => !save.disabled && document.body.textContent.includes("数据已发生变化或存在冲突"), "保存失败未恢复操作或未显示中文提示");
-  assert.ok(inputs[1].checked, "保存失败须保留选择");
-  testAPI.settingsFailure = false;
-  for (const input of inputs) if (input.checked) input.click();
-  form.requestSubmit(save);
-  await waitFor(() => testAPI.settings.revision === 2, "全局能力未保存");
-  assert.equal(testAPI.settings.client_connection_retention_days, 45, "source IP retention missing from settings save");
-  assert.equal(testAPI.settings.acme_email, "certs@example.test", "证书邮箱未保存");
-  assert.equal(testAPI.settings.default_agent_engines.length, 0, "必须允许全部关闭");
-  assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value, "IPv4 source missing from save");
-  assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value, "IPv6 source missing from save");
-  assert.equal(testAPI.settings.cnip_source.format, "auto", "format must be automatic");
-  assert.ok(save.disabled, "保存成功后应清除待保存状态");
-  const currentForm = await waitFor(() => {
-    const current = document.querySelector("#settings-form");
-    return current?.getAttribute("aria-busy") !== "true" && current;
-  }, "保存请求未结束");
-  const currentACME = currentForm.elements.acme_email;
-  currentACME.value = "";
-  currentACME.dispatchEvent(new Event("input", { bubbles: true }));
-  currentForm.requestSubmit(currentForm.querySelector("[data-save-settings]"));
-  await waitFor(() => testAPI.settings.revision === 3, "证书邮箱清空未保存");
-  assert.equal(testAPI.settings.acme_email, "", "必须允许明确清空证书邮箱");
+  window.scrollTo(0, 0);
+  const ipv4 = form.elements.cnip_ipv4_url, ipv6 = form.elements.cnip_ipv6_url;
+  assert.ok(ipv4 && ipv6 && !form.querySelector('[name=cnip_format]'), '地址库未保留双栈与自动格式');
+  changed('panel_name', '暂存名称'); assert.ok(!save.disabled); changed('panel_name', testAPI.settings.panel_name); assert.ok(save.disabled, '改回原值后仍要求保存');
+  changed('acme_email', 'not-an-email'); assert.ok(!acme.checkValidity(), '邮箱格式未验证');
+  const beforeInvalid = writes(); form.requestSubmit(); await delay(50); assert.equal(writes(), beforeInvalid, '非法邮箱进入 API'); assert.equal(document.activeElement, acme, '邮箱校验未聚焦字段');
+  changed('acme_email', 'certs@example.test'); changed('cnip_ipv4_url', 'https://example.com/cn.mmdb'); changed('cnip_ipv6_url', 'https://example.com/cn6.srs'); changed('client_connection_retention_days', '45');
+  changed('agent_heartbeat_interval_seconds', '30');
+  assert.ok(!form.elements.agent_offline_threshold_seconds.checkValidity(), '缺少心跳与离线阈值联动校验');
+  form.requestSubmit(); await delay(40); assert.equal(writes(), beforeInvalid, '无效节点上报策略进入 API'); changed('agent_heartbeat_interval_seconds', '15');
+  inputs[1].click(); assert.ok(!save.disabled, '切换未标记待保存');
+  testAPI.settingsFailure = true; form.requestSubmit();
+  await waitFor(() => page.textContent.includes('数据已发生变化或存在冲突'), '失败未显示中文错误'); await settled();
+  assert.ok(!save.disabled && inputs[1].checked, '失败丢失草稿或锁死按钮'); assert.match(status(), /保存失败/);
+  testAPI.settingsFailure = false; for (const input of inputs) if (input.checked) input.click();
+  form.requestSubmit(); await waitFor(() => testAPI.settings.revision === 2, '默认能力未保存'); await settled();
+  assert.equal(testAPI.settings.client_connection_retention_days, 45, '连接保留期未保存'); assert.equal(testAPI.settings.acme_email, 'certs@example.test', '邮箱未保存'); assert.equal(testAPI.settings.default_agent_engines.length, 0, '不允许关闭所有默认内核');
+  assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value); assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value); assert.equal(testAPI.settings.cnip_source.format, 'auto');
+  assert.ok(save.disabled, '保存后仍要求保存'); assert.equal(status(), '已保存');
+  changed('acme_email', ''); form.requestSubmit(); await waitFor(() => testAPI.settings.revision === 3, '邮箱清空未保存'); await settled(); assert.equal(testAPI.settings.acme_email, '');
+  const beforePending = writes(); let release;
+  testAPI.settingsGate = new Promise(resolve => { release = resolve; });
+  changed('panel_description', '正在提交'); form.requestSubmit(); form.requestSubmit();
+  await waitFor(() => form.getAttribute('aria-busy') === 'true', '未进入提交状态');
+  assert.equal(writes(), beforePending + 1, '重复提交产生多个请求'); assert.ok(save.disabled && form.querySelector('fieldset').disabled, '提交未锁定表单'); assert.equal(status(), '正在保存…');
+  // A queued input arriving after the captured request must remain a draft.
+  changed('panel_description', '后续输入'); release(); await waitFor(() => testAPI.settings.revision === 4, '延迟保存未结束'); await settled(); testAPI.settingsGate = null;
+  assert.equal(testAPI.settings.panel_description, '正在提交', '请求没有保留提交快照'); assert.equal(form.elements.panel_description.value, '后续输入', '完成请求覆盖后续输入'); assert.ok(!save.disabled, '后续输入被误判为已保存');
+  form.requestSubmit(); await waitFor(() => testAPI.settings.revision === 5, '后续草稿未保存'); await settled(); assert.equal(testAPI.settings.panel_description, '后续输入'); assert.ok(save.disabled);
+  const refresh = async () => {
+    const before = testAPI.calls.filter(call => call.method === 'GET' && call.path === '/settings').length;
+    [...document.querySelectorAll('.a-top button')].find(button => button.textContent === '刷新').click();
+    await waitFor(() => testAPI.calls.filter(call => call.method === 'GET' && call.path === '/settings').length > before, '设置刷新未读取 API');
+    await delay(30);
+  };
+  changed('panel_description', '保留的刷新草稿');
+  await waitFor(()=>!document.getAnimations().some(animation=>animation.id.startsWith('analytics-')), '设置反馈未结束');
+  const description = form.elements.panel_description;
+  description.focus(); description.setSelectionRange(1, 4); window.scrollTo({top:120,behavior:'instant'});
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const scroll = scrollY;
+  testAPI.settings.panel_description = '其他会话的设置'; testAPI.settings.revision++;
+  await refresh();
+  assert.equal(document.querySelector('#panel-settings-form'), form, '刷新重建设置表单');
+  assert.equal(description.value, '保留的刷新草稿', '刷新覆盖设置草稿');
+  assert.equal(document.activeElement, description, '刷新丢失设置焦点'); assert.equal(description.selectionStart, 1); assert.equal(description.selectionEnd, 4);
+  assert.equal(scrollY, scroll, '刷新改变设置滚动位置');
+  assert.ok(page.textContent.includes('设置已由其他会话修改'), '其他会话修改没有提示');
+  form.requestSubmit(); await settled(); assert.ok(status().includes('保存失败'), '草稿刷新偷偷采用新修订编号');
+  changed('panel_description', '后续输入'); await refresh();
+  assert.equal(description.value, '其他会话的设置', '无草稿刷新未同步当前设置'); assert.ok(save.disabled);
+  if (new URLSearchParams(location.search).has('preview')) await new Promise(() => {});
 }

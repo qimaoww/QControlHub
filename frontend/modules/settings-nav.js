@@ -12,7 +12,7 @@ let readingSuspendedUntil = 0;
 // The API Key section renders only for administrators, so its entry follows the
 // same permission and the sidebar can never link to a hidden section.
 export function settingsDirectoryMarkup({ can }) {
-  return `<nav class="context-menu" aria-label="设置目录"><a href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-cnip"><span>07</span>CN IP 数据源</a><a href="#settings-certificates"><span>08</span>证书申请</a><a href="#settings-deployment"><span>09</span>部署状态</a>${can("admin") ? '<a href="#settings-api-keys"><span>10</span>API Key</a>' : ""}</nav>`;
+  return `<nav class="context-menu" aria-label="设置目录"><a href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-cnip"><span>07</span>CN IP 数据源</a><a href="#settings-certificates"><span>08</span>证书申请</a><a href="#settings-deployment"><span>09</span>部署状态</a>${can("admin") ? '<a href="#settings-api-keys"><span>10</span>API Key</a>' : ""}</nav>`;
 }
 
 function sectionHash(value) {

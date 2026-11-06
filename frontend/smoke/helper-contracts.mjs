@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { diagnoseTask } from "../modules/task-model.js";
 
-import { komariCycleRange, geoRegionDetails, komariResetDay } from "../modules/agents.js";
+import { geoRegionDetails } from "../modules/region-model.js";
 
 import { renderTrafficAccounting } from "../modules/traffic.js";
 
@@ -13,32 +13,6 @@ assert.match(diagnoseTask(tlsFailure).advice,/网络超时/);
 assert.match(diagnoseTask(tlsFailure).rollback,/已恢复/);
 assert.match(diagnoseTask({...tlsFailure,error:tlsFailure.error+"；反代恢复失败"}).rollback,/回滚失败/);
 
-assert.equal(
-  komariCycleRange(27, new Date(2026, 7, 20)),
-  "7.27–8.27",
-  "Komari cycle before reset uses the previous and current reset dates",
-);
-assert.equal(
-  komariCycleRange(27, new Date(2026, 7, 30)),
-  "8.27–9.27",
-  "Komari cycle after reset uses the current and next reset dates",
-);
-assert.equal(
-  komariCycleRange(31, new Date(2026, 1, 15)),
-  "1.31–2.28",
-  "Komari cycle clamps a 31st reset day in a short month",
-);
-assert.equal(
-  komariCycleRange(27, new Date(2026, 0, 20)),
-  "12.27–1.27",
-  "Komari cycle crosses a year boundary",
-);
-assert.equal(komariCycleRange(0, new Date(2026, 7, 20)), "", "invalid reset day is unavailable");
-assert.equal(
-  komariResetDay({ billing_cycle: 30, expired_at: "2026-08-27T00:00:00Z" }),
-  27,
-  "monthly Komari expiry supplies a reset day when the API omits one",
-);
 assert.deepEqual(
   geoRegionDetails("TW"),
   { code: "TW", flagCode: "CN", name: "中国台湾" },

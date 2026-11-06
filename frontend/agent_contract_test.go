@@ -7,39 +7,32 @@ import (
 )
 
 func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
-	app := frontendSources(t, "modules/shell-context.js", "modules/session-api.js")
-	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-card-interactions.js")
-	order := string(mustReadFrontendFile(t, "modules/node-order.js"))
-
-	if !strings.Contains(order, `export const nodeCardOrderKey = "qcontrolhub:node-card-order"`) {
-		t.Fatal("shared node ordering must retain the existing localStorage key")
-	}
-	if strings.Count(app, "orderNodesBySavedOrder(") != 8 {
-		t.Fatalf("all eight node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
-	}
-	for _, required := range []string{
-		`import { configureNodeOrder, refreshNodeOrder } from "./node-order.js";`,
-		`import { orderNodesBySavedOrder } from "./node-order.js";`,
-		`if (path === "/agents" && method === "GET" && session) void refreshNodeOrder()?.catch(() => {});`,
-		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
-		`const orderedAgents = orderNodesBySavedOrder(agents);`,
-		`const agents = orderNodesBySavedOrder(state.data.agents || []);`,
-		`<nav class="context-list" aria-label="访问限制节点">${orderedAgents.map`,
-	} {
-		if !strings.Contains(app, required) {
-			t.Errorf("node sidebar shared ordering is missing %q", required)
+	order := frontendSources(t, "modules/node-order.js")
+	for _, marker := range []string{`export const nodeCardOrderKey = "qcontrolhub:node-card-order"`, `export function createNodeOrderSync`, `endpoint = "/preferences/node-order"`, `api(endpoint`, `revision: order.revision`, `error.status !== 409`, `orderUnconfirmed`, `onStorageAccountChange`} {
+		if !strings.Contains(order, marker) {
+			t.Errorf("account-scoped shared node ordering missing %q", marker)
 		}
 	}
-	for _, required := range []string{
-		`orderedNodeList(agents)`,
-		`saveNodeOrder(cards.map(card => card.dataset.agentNode))`,
+	// Native pages own selectors and cards instead of duplicate shell sidebars.
+	for path, markers := range map[string][]string{
+		"analytics/live-config.js":   {`await readOrderedNodes(ctx.api)`},
+		"analytics/configs.js":       {`readOrderedNodes(ctx.api)`},
+		"analytics/nodes.js":         {`orderNodesBySavedOrder(agents, ordering.ids())`, `bindNodeOrdering`},
+		"analytics/observability.js": {`orderNodesBySavedOrder(coreLogSourceAgents(sources), nodeOrder)`},
+		"analytics/traffic.js":       {`orderNodesBySavedOrder(agents, ordering.ids())`},
+		"analytics/client-access.js": {`orderNodesBySavedOrder(list(agents), ordering.ids())`},
+		"analytics/connections.js":   {`orderNodesBySavedOrder(sources.map`, `connectionQuery(filters, target, nodeOrder)`},
+		"analytics/substore.js":      {`savedNodeOrder()`, `groupSubStoreProfiles`},
+		"analytics/tcp.js":           {`orderNodesBySavedOrder(list(agents), order?.ids)`},
+		"analytics/ip-quality.js":    {`orderNodesBySavedOrder(list(snapshot.agents), nodeOrder)`},
+		"analytics/operations.js":    {`orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids)`},
 	} {
-		if !strings.Contains(agents, required) {
-			t.Errorf("node settings drag ordering is not using shared persistence: missing %q", required)
+		content := frontendSources(t, path)
+		for _, marker := range markers {
+			if !strings.Contains(content, marker) {
+				t.Errorf("%s shared ordering missing %q", path, marker)
+			}
 		}
-	}
-	if !strings.Contains(agents, `import { orderedNodeList } from "./node-order.js";`) {
-		t.Error("node settings must migrate the legacy browser-wide order through the shared module")
 	}
 }
 
@@ -72,11 +65,11 @@ func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 }
 
 func TestSystemBBRCardsUseDraggedNodeSettingsOrder(t *testing.T) {
-	module := frontendFeatureSources(t, "modules/system-bbr.js")
+	module := frontendSources(t, "analytics/tcp.js")
 	for _, required := range []string{
-		`import { orderNodesBySavedOrder } from "./node-order.js";`,
-		`agents = orderNodesBySavedOrder(`,
-		`agents.filter((agent) => agent.can_manage !== false),`,
+		`import { orderNodesBySavedOrder } from '../modules/node-order.js';`,
+		`orderNodesBySavedOrder(list(agents), order?.ids)`,
+		`agent.can_manage !== false`,
 	} {
 		if !strings.Contains(module, required) {
 			t.Errorf("system BBR cards are not using shared node ordering: missing %q", required)

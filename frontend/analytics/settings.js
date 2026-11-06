@@ -28,7 +28,9 @@ export async function settingsPage(ctx) {
   const writable = ctx.can("settings.manage");
   const input = (name, label, attrs = {}) => field(label, name, settings[name], { ...attrs, disabled: !writable });
   const numeric = numericFields.map(([name, label, options]) => input(name, label, { options }));
-  const saveState = notice("", "ok");
+  const saveState = muted("已保存");
+  saveState.setAttribute("role", "status");
+  let baseline, phase = "idle";
   const content = [
     section("基础设置", node("div", { className: "a-card-body a-form-grid" },
       input("panel_name", "面板名称", { required: true, maxlength: 40 }),
@@ -39,9 +41,14 @@ export async function settingsPage(ctx) {
       input("default_config_editor", "默认配置编辑器", { options: [["structured", "结构化编辑"], ["source", "源码编辑"]] }))),
     section("默认内核能力", node("div", { className: "a-card-body a-actions" },
       engineIDs.map(engine => field(engine, `engine:${engine}`, settings.default_agent_engines?.includes(engine), { type: "checkbox", disabled: !writable })))),
-    section("运行与数据保留", node("div", { className: "a-card-body a-form-grid a-settings-metrics" },
-      numeric, input("core_log_minimum_level", "日志最低级别", { options: [["debug", "调试"], ["info", "信息"], ["warning", "警告"], ["error", "错误"], ["critical", "严重错误"], ["off", "关闭"]] }),
+    section("节点上报", node("div", { className: "a-card-body a-stack" },
+      muted("仅影响当前账号及自有节点，借用节点不受影响。"),
+      node("div", { className: "a-form-grid a-settings-metrics" }, [2, 3, 4, 8].map(index => numeric[index])))),
+    section("任务", node("div", { className: "a-card-body a-form-grid a-settings-metrics" }, [0, 1, 5, 6, 7].map(index => numeric[index]))),
+    section("日志", node("div", { className: "a-card-body a-form-grid a-settings-metrics" },
+      numeric.slice(9, 12), input("core_log_minimum_level", "日志最低级别", { options: [["debug", "调试"], ["info", "信息"], ["warning", "警告"], ["error", "错误"], ["critical", "严重错误"], ["off", "关闭"]] }),
       input("client_connection_retention_days", "客户端连接保留天数", { type: "number", min: 0, max: 3650 }))),
+    section("数据清理", node("div", { className: "a-card-body a-form-grid a-settings-metrics" }, numeric.slice(12))),
     section("证书与地址库", node("div", { className: "a-card-body a-form-grid" },
       input("acme_email", "ACME 邮箱", { type: "email" }),
       field("大陆 IPv4 数据源", "cnip_ipv4_url", settings.cnip_source?.ipv4_url || "", { type: "url", disabled: !writable }),
@@ -49,49 +56,106 @@ export async function settingsPage(ctx) {
     section("通知", node("div", { className: "a-card-body a-stack" },
       input("webhook_url", "Webhook 地址", { type: "url", maxlength: 500 }),
       actions(toggles.map(([name, label]) => input(name, label, { type: "checkbox" }))))),
-    section("Komari", node("div", { className: "a-card-body a-form-grid" },
-      input("komari_url", "Komari 地址", { type: "url", maxlength: 500 }),
-      field("API Key", "komari_api_key", "", { type: "password", autocomplete: "new-password", maxlength: 500, disabled: !writable, hint: "留空保留当前密钥" }),
-      field("清除已存 API Key", "clear_komari_api_key", false, { type: "checkbox", disabled: !writable }))),
     saveState,
   ];
   const form = ctx.form(content, "保存设置", async (values, element) => {
     if (!writable) return;
+    const submitted = snapshot();
     const body = { ...values, revision: settings.revision,
       default_agent_engines: engineIDs.filter(engine => element.elements.namedItem(`engine:${engine}`).checked),
       cnip_source: { ipv4_url: values.cnip_ipv4_url, ipv6_url: values.cnip_ipv6_url, format: "auto" },
-      clear_komari_api_key: element.elements.clear_komari_api_key.checked,
     };
     delete body.cnip_ipv4_url;
     delete body.cnip_ipv6_url;
     for (const engine of engineIDs) delete body[`engine:${engine}`];
     for (const [name] of toggles) body[name] = element.elements.namedItem(name).checked;
     for (const name of [...numericFields.map(([key]) => key), "ui_font_scale", "client_connection_retention_days"]) body[name] = Number(body[name]);
-    const saved = await ctx.api("/settings", { method: "PUT", body });
-    if (!ctx.current()) return;
-    settings = saved;
-    ctx.setDirty(false);
-    element.elements.komari_api_key.value = "";
-    element.elements.clear_komari_api_key.checked = false;
-    saveState.textContent = "已保存";
-    ctx.announce("设置已保存");
+    phase = "saving"; sync();
+    try {
+      const saved = await ctx.api("/settings", { method: "PUT", body });
+      if (!ctx.current()) return;
+      settings = saved;
+      baseline = submitted;
+      phase = "idle"; sync();
+      ctx.announce("设置已保存");
+    } catch (error) {
+      if (ctx.current()) { phase = "failed"; sync(); }
+      throw error;
+    }
   });
-  form.addEventListener("input", () => ctx.setDirty(true));
-  if (!writable) form.querySelector('button[type="submit"]').remove();
-  const updateResult = node("div");
+  const submit = form.querySelector('button[type="submit"]');
+  form.id = "panel-settings-form";
+  const snapshot = () => JSON.stringify([...form.elements].filter(control => control.name)
+    .map(control => [control.name, control.type === "checkbox" ? control.checked : control.value]));
+  function sync() {
+    if (!ctx.current()) return;
+    const changed = writable && snapshot() !== baseline;
+    ctx.setDirty(changed);
+    submit.disabled = !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
+    saveState.textContent = phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
+    const heartbeat = form.elements.agent_heartbeat_interval_seconds, offline = form.elements.agent_offline_threshold_seconds;
+    offline.setCustomValidity(Number(offline.value) < Number(heartbeat.value) * 3 ? "离线阈值不得少于心跳间隔的 3 倍。" : "");
+  }
+  baseline = snapshot();
+  const changed = () => {
+    if (phase !== "saving") phase = "idle";
+    form.querySelector(':scope > .a-notice')?.replaceChildren();
+    sync();
+  };
+  form.addEventListener("input", changed);
+  form.addEventListener("change", changed);
+  submit.addEventListener("mutationend", sync);
+  const refreshState = notice('');
+  let refreshSequence = 0;
+  ctx.onRefresh(async () => {
+    const sequence = ++refreshSequence;
+    const latest = await ctx.api('/settings');
+    if (!ctx.current() || sequence !== refreshSequence) return;
+    if (snapshot() !== baseline || phase === 'saving') {
+      refreshState.textContent = latest.revision !== settings.revision ? '设置已由其他会话修改，当前草稿已保留。' : '';
+      return;
+    }
+    settings = latest;
+    for (const control of [...form.elements].filter(control => control.name)) {
+      const name = control.name;
+      const value = name.startsWith('engine:') ? latest.default_agent_engines?.includes(name.slice(7))
+        : name === 'cnip_ipv4_url' ? latest.cnip_source?.ipv4_url || ''
+        : name === 'cnip_ipv6_url' ? latest.cnip_source?.ipv6_url || '' : latest[name];
+      if (control.type === 'checkbox') control.checked = Boolean(value);
+      else if (control.value !== String(value ?? '')) control.value = value ?? '';
+    }
+    baseline = snapshot(); phase = 'idle'; refreshState.textContent = ''; sync();
+  });
+  sync();
+  if (!writable) submit.remove();
+  else {
+    submit.setAttribute("form", form.id);
+    // The existing sticky page header keeps the real form submit reachable.
+    ctx.pageActions(submit);
+  }
+  const updateResult = muted("尚未检查更新");
+  updateResult.setAttribute("role", "status");
   const check = button("检查更新", event => void ctx.mutate(event.currentTarget, async () => {
-    const result = await ctx.api("/settings/check-update", { method: "POST" });
-    updateResult.replaceChildren(notice(result.update_available ? `发现更新：${result.latest_version}` : result.comparable ? `已是最新发行版：${result.latest_version}` : `当前可用发行版：${result.latest_version}`, "ok"));
+    updateResult.textContent = "正在检查更新…";
+    try {
+      const result = await ctx.api("/settings/check-update", { method: "POST" });
+      if (ctx.current()) updateResult.textContent = result.update_available ? `发现更新：${result.latest_version}` : result.comparable ? `已是最新发行版：${result.latest_version}` : `当前可用发行版：${result.latest_version}`;
+    } catch (error) {
+      if (ctx.current()) updateResult.textContent = `检查失败：${error.message}`;
+    }
   }));
   const security = [
     ["控制面安全传输", deployment.secure_transport], ["数据库 TLS 校验", deployment.database_tls_verified],
     ["配置加密", deployment.config_encryption_configured], ["Webhook 签名", deployment.webhook_signing_configured],
   ];
   const extra = stack(section("部署状态", node("div", { className: "a-card-body" }, stack(
-    table(["项目", "状态"], security.map(([name, enabled]) => [name, badge(enabled ? "已配置" : "未配置", enabled ? "ok" : "warn")])),
+    table(["项目", "状态"], [...security.map(([name, enabled]) => [name, badge(enabled ? "已配置" : "未配置", enabled ? "ok" : "warn")]),
+      ["可信代理", `${deployment.trusted_proxy_count ?? 0} 条网段`],
+      ["控制面发行版本", deployment.control_plane_version || "尚未上报"],
+      ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
     updateResult, actions(check)))));
   if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
-  return stack(form, extra);
+  return stack(form, refreshState, extra);
 }
 
 async function apiKeys(ctx) {

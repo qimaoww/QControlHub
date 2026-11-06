@@ -3,12 +3,34 @@ import assert from 'node:assert/strict';
 export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call }) {
   await checkAnalyticsTraffic({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
   const agentID=fixture.analyticsAgent;
-  const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-top h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
+  const navigate=async hash=>{await evaluate(page,`location.hash=${JSON.stringify(hash)}`);await wait(page,`location.hash===${JSON.stringify(hash)} && document.querySelector('.a-top h1')?.textContent===${JSON.stringify(hash.startsWith('#live-config')?'实时配置':hash==='#node-settings'?'节点':hash==='#client-access'?'客户端接入':hash==='#traffic'?'流量':hash==='#my-quota'?'共享与额度':'配置档案')} && !document.querySelector('[aria-busy=true]')`);};
   const click=async(label,selector='dialog[open]')=>evaluate(page,`[...document.querySelectorAll(${JSON.stringify(selector+' button')})].find(button=>!button.closest('select')&&button.textContent===${JSON.stringify(label)}).click()`);
   const close=async()=>{await evaluate(page,"document.querySelectorAll('dialog[open]').forEach(box=>box.close())");try { await wait(page,"!document.querySelector('dialog[open],.a-motion-tail')"); }
     catch(error) { throw new Error(`${error.message}; dialog diagnostics: ${JSON.stringify(await evaluate(page, "({dialogs:[...document.querySelectorAll('dialog[open] h2')].map(el=>el.textContent),tails:document.querySelectorAll('.a-motion-tail').length,animations:document.getAnimations().map(animation=>({id:animation.id,state:animation.playState}))})"))}`); }
   };
+  const confirmDeploy = async (task = true) => {
+    await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='部署并重启')");
+    await click('部署并重启');
+    if (!task) return;
+    await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='任务详情')");
+    await close();
+  };
   await navigate('#node-settings');
+  const originalOrder = await evaluate(page,"[...document.querySelectorAll('[data-node-drag]')].map(control=>control.dataset.nodeDrag)");
+  assert.ok(originalOrder.length > 1, 'ordering exercises multiple real nodes');
+  await evaluate(page,"window.__orderHandle=document.querySelector('[data-node-drag]');window.__orderHandle.focus()");
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown',code:'ArrowDown'},page);
+  await call('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowDown',code:'ArrowDown'},page);
+  await wait(page,`document.querySelectorAll('[data-node-drag]')[1]?.dataset.nodeDrag===${JSON.stringify(originalOrder[0])}`);
+  const movedOrder = await evaluate(page,"[...document.querySelectorAll('[data-node-drag]')].map(control=>control.dataset.nodeDrag)");
+  const persistedOrder = await api(page,identity,'GET','/preferences/node-order');
+  assert.deepEqual(persistedOrder.ids.filter(id=>originalOrder.includes(id)),movedOrder,'keyboard reorder is saved through the account API');
+  assert.ok(await evaluate(page,"window.__orderHandle===document.querySelectorAll('[data-node-drag]')[1] && document.activeElement===window.__orderHandle"),'reorder retains the original focused handle');
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowUp',code:'ArrowUp'},page);
+  await call('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowUp',code:'ArrowUp'},page);
+  await wait(page,`JSON.stringify([...document.querySelectorAll('[data-node-drag]')].map(control=>control.dataset.nodeDrag))===${JSON.stringify(JSON.stringify(originalOrder))}`);
+  assert.deepEqual((await api(page,identity,'GET','/preferences/node-order')).ids.filter(id=>originalOrder.includes(id)),originalOrder,'restored order persists independently of metrics refresh');
+  await evaluate(page,"delete window.__orderHandle");
   assert.equal(await evaluate(page,"document.querySelectorAll('.a-main input[type=checkbox]').length"),0,'initial node monitor has no selection boxes');
   assert.ok(await evaluate(page,"!!document.querySelector('.a-probe-grid')"));
   const {targetInfo} = await call('Target.getTargetInfo', {}, page);
@@ -125,38 +147,56 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"document.querySelector('.a-toast [aria-label=关闭通知]').click()");
 
   await screenshot(page,'analytics-node-settings');await click('查看指标历史');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('指标历史')) && !document.querySelector('[aria-busy=true]')");await close();
-  await evaluate(page,`document.querySelector(${JSON.stringify('[data-agent-id="'+agentID+'"]')}).querySelectorAll('footer button')[1].click()`);
+  await close(); await navigate('#my-quota');
+  await evaluate(page,`document.querySelector(${JSON.stringify('[data-sharing-agent="'+agentID+'"]')}).click()`);
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('共享 Agent')) && !document.querySelector('[aria-busy=true]')");await click('添加用户');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.querySelector('[name=username]').value='alice';form.querySelector('[name=ports]').value='23450-23451';form.querySelector('[name=limit_gib]').value='1';form.querySelector('[name=engines]').checked=true;form.requestSubmit()})()");
   await wait(page,"document.querySelector('.a-toast-region')?.textContent.includes('共享设置已保存') && !document.querySelector('[aria-busy=true]')");
   const sharing=await api(page,identity,'GET',`/agents/${agentID}/sharing`);assert.deepEqual(sharing.shares[0].ports,[23450,23451]);assert.equal(sharing.shares[0].status,'pending');
+  assert.ok(await evaluate(page,"document.querySelector('dialog[open] button[type=submit]').disabled"),'saved sharing has no pending submission');
+  await evaluate(page,"document.querySelector('dialog[open] [aria-label=关闭]').click()");
+  await wait(page,"!document.querySelector('dialog[open]')");
+  assert.ok(await evaluate(page,"!document.querySelector('dialog[open]')"),'closing saved sharing does not ask to save again');
   await screenshot(page,'analytics-node-sharing');await close();await api(page,identity,'PUT',`/agents/${agentID}/sharing`,{revision:sharing.revision,shares:[]});
   await navigate(`#live-config?agent=${agentID}&engine=mihomo`);await click('添加入站','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=tag]') && !document.querySelector('[aria-busy=true]')");await screenshot(page,'analytics-inbound-editor');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=tag]').form;form.elements.tag.value='theme-inbound';form.elements.port.value='23477';form.requestSubmit()})()");
+  await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('theme-inbound')");
   const workspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);assert.ok(workspace.inbounds.some(input=>input.tag==='theme-inbound'&&input.port===23477));assert.ok(workspace.config?.version);await close();
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
   await click('展开源码','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");await screenshot(page,'analytics-config-files');
   await api(page,identity,'PUT',`/agents/${agentID}/configs/mihomo`,{name:workspace.config.name,description:workspace.config.description,content:workspace.config.content,version:workspace.config.version});
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
+  await confirmDeploy(false);
   await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] [role=alert]')].some(item=>item.textContent)");
   assert.ok(await evaluate(page,"!!document.querySelector('dialog[open] [name=content]')?.value"),'a stale save preserves the editor and draft');
   assert.equal((await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`)).config.version,workspace.config.version+1);
   await close();await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
+  await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");
   assert.equal((await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`)).config.version,workspace.config.version+2);
   // Exercise the saved target state separately from actual deployment: queued
-  // validation must not claim a listener was stopped on the remote Agent.
+  // deployment must not claim a listener was stopped on the remote Agent.
   const cancelPending = async () => {
     for (const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status))) await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
   };
   await cancelPending();
+  await evaluate(page,"(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('theme-inbound'));[...row.querySelectorAll('button')].find(button=>button.textContent==='访问限制').click()})()");
+  await wait(page,"!!document.querySelector('dialog[open] [name=block_mainland_destination]') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(await evaluate(page,"document.querySelector('dialog[open]').textContent.includes('主实例')"),'inbound policy identifies the actual instance');
+  await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=block_mainland_destination]');globalThis.__policyInput=input;globalThis.__policyChecked=input.checked;input.checked=!input.checked;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();globalThis.__policyScroll=scrollY})()");
+  await evaluate(page,"new Promise(resolve=>setTimeout(resolve,6500))");
+  assert.ok(await evaluate(page,"globalThis.__policyInput===document.querySelector('dialog[open] [name=block_mainland_destination]') && globalThis.__policyInput.checked!==globalThis.__policyChecked && document.activeElement===globalThis.__policyInput && scrollY===globalThis.__policyScroll"),'continuous deployment polling preserves the real modal, draft, focus and scroll');
+  await screenshot(page,'analytics-inbound-access-live');
+  await evaluate(page,"(()=>{globalThis.__policyInput.checked=globalThis.__policyChecked;[...document.querySelectorAll('dialog[open] button')].find(button=>button.getAttribute('aria-label')==='关闭').click();delete globalThis.__policyInput;delete globalThis.__policyChecked;delete globalThis.__policyScroll})()");
+  await wait(page,"!document.querySelector('dialog[open]')");
   for (const [enabled,label] of [[false,'停用'],[true,'启用']]) {
     await evaluate(page,`(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('theme-inbound'));const button=[...row.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)});if(!button)throw new Error('port state action missing');button.click()})()`);
     await wait(page,"!!document.querySelector('dialog[open] [name=intent]') && !document.querySelector('[aria-busy=true]')");
     await evaluate(page,"document.querySelector('dialog[open] [name=intent]').form.requestSubmit()");
+    await confirmDeploy();
     await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>/配置对象$/.test(title.textContent))");
     const updated=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
     const object=updated.managed_objects.find(item=>item.tag==='theme-inbound');
@@ -173,6 +213,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('添加出站','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=fragment]')");
   await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=fragment]');input.value='name: unused-exit\\ntype: http\\nserver: 127.0.0.1\\nport: 443\\n';input.form.requestSubmit()})()");
+  await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('unused-exit')");
   await close();await cancelPending();
   const exitWorkspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
@@ -180,6 +221,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('unused-exit'));[...row.querySelectorAll('button')].find(button=>button.textContent==='删除').click()})()");
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='删除出站')");
   await evaluate(page,"document.querySelector('dialog[open] [name=intent]').form.requestSubmit()");
+  await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && !document.querySelector('.a-main').textContent.includes('unused-exit')");
   await close();await cancelPending();
   const removedExit=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
@@ -206,9 +248,9 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await screenshot(page,'analytics-traffic-batch');await close();
   await navigate(`#live-config?agent=${fixture.analyticsXray}&engine=xray`);await click('出站','.a-main');await click('添加并绑定');
   await wait(page,"!!document.querySelector('dialog[open] [name=fragment]') && !document.querySelector('[aria-busy=true]')");
-  await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=protocol]');input.form.requestSubmit()})()");
-  await wait(page,"document.querySelector('dialog[open] [name=fragment]')?.value.includes('freedom') && !document.querySelector('[aria-busy=true]')");
+  await wait(page,"document.querySelector('dialog[open] [data-outbound-protocol]')?.value==='direct' && document.querySelector('dialog[open] [name=fragment]')?.value.includes('freedom') && document.querySelector('dialog[open] [name=fragment]').readOnly && !document.querySelector('[aria-busy=true]')");
   await evaluate(page,"document.querySelector('dialog[open] [name=fragment]').form.requestSubmit()");
+  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(item=>item.textContent==='部署并重启')");await click('部署并重启');
   await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] h2')].some(item=>item.textContent==='任务详情')");await close();
   const xray=await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`);
   const document=JSON.parse(xray.config.content);assert.ok(document.outbounds.some(item=>item.tag==='exit-23479'));assert.ok(document.routing.rules.some(item=>item.inboundTag?.includes('theme-xray')&&item.outboundTag==='exit-23479'));
@@ -216,9 +258,10 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('[aria-busy=true]')");
   assert.ok(await evaluate(page,"!document.querySelector('dialog[open] [name=file]') && document.querySelector('dialog[open] [name=content]').value.includes('inbounds') && document.querySelector('dialog[open] [name=content]').value.includes('outbounds')"));await screenshot(page,'analytics-xray-files');
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
+  await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && ![...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");
   assert.equal((await api(page,identity,'GET',`/agents/${fixture.analyticsXray}/configs/xray/workspace`)).config.version,xray.config.version+1);
-  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/validation task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and complete-source save and persistent port target enable/disable and unbound outbound add/delete passed`);
+  await navigate('#archive-config');record(`${mode}: analytics enrollment command, owner name save, revisioned pending share allocation, actual inbound generation/save/deployment task, configuration-file conflict/draft preservation and save/readback, and client display save/readback, traffic batch reset receipts, Xray outbound preset/binding and complete-source save and persistent port target enable/disable and unbound outbound add/delete passed`);
   // Filters query real endpoints without a confirmation button. Delay an old
   // response to exercise rapid changes and navigation during a pending query.
   await evaluate(page,"location.hash='#tasks'");

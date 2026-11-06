@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { liveConfigEngineEligible, liveConfigEditorState, liveConfigReadAction, liveConfigSnapshotReusable, submitLiveConfigChange } from "../modules/configs.js";
+import { liveConfigEngineEligible, liveConfigEditorState, liveConfigReadAction, liveConfigSnapshotReusable, submitLiveConfigChange } from "../modules/live-config-state.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import {
-  installTraffic, mergeTrafficPorts, orderTrafficItems, trafficCardIdentity,
-} from "./modules/traffic.js";
+import { installTraffic } from "./modules/traffic.js";
+import { mergeTrafficPorts, orderTrafficItems, trafficCardIdentity } from "./modules/traffic-model.js";
 import { nodeCardOrderKey } from "./modules/node-order.js";
 
 const mixedItems = Object.freeze([

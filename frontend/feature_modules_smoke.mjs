@@ -3,7 +3,6 @@ import * as agents from "./modules/agents.js";
 import * as addresses from "./modules/agent-addresses.js";
 import * as batch from "./modules/agent-batch.js";
 import * as drag from "./modules/agent-card-drag.js";
-import * as komari from "./modules/agent-komari.js";
 import * as coreActions from "./modules/agent-core-actions.js";
 import * as agentRefresh from "./modules/agent-refresh.js";
 import * as configs from "./modules/configs.js";
@@ -18,7 +17,6 @@ for (const [facade, owner, names] of [
   [agents, addresses, ["formatHostPort", "manualConnectionAddressNote", "publicAddressRows", "updatePublicIPDisplays"]],
   [agents, batch, ["batchAgentEligibility", "batchSelectAllState"]],
   [agents, drag, ["animateNodeCardDrop", "clearNodeCardDragState", "nodeCardDropIndex"]],
-  [agents, komari, ["komariCycleRange", "komariResetDay"]],
   [agents, coreActions, ["developmentSourceVisible", "coreSourceForInstall"]],
   [agents, agentRefresh, ["agentStructureSignature"]],
   [configs, plan, ["bindServerPlanRegeneration", "readServerPlanInput"]],
@@ -41,42 +39,5 @@ try {
   if (previousLocation) Object.defineProperty(globalThis, "location", previousLocation);
   else delete globalThis.location;
 }
-
-const requests = [];
-const state = { data: {} };
-const display = komari.createAgentKomariDisplay({
-  api: (path) => new Promise((resolve, reject) => requests.push({ path, resolve, reject })),
-  state,
-  esc: String,
-  bytes: String,
-});
-const root = { querySelector: () => null };
-const agent = { id: "alpha", labels: { komari_uuid: "binding-one" } };
-display.loadKomariDisplay(agent, root);
-display.loadKomariDisplay(agent, root);
-assert.equal(requests.length, 1, "repeated cards must share an in-flight Komari read");
-requests[0].resolve({ uuid: "binding-one", server: { uuid: "binding-one" } });
-await new Promise(setImmediate);
-display.loadKomariDisplay(agent, root);
-assert.equal(requests.length, 1, "a rebuilt card must reuse account-scoped data");
-
-state.data = {};
-display.loadKomariDisplay(agent, root);
-assert.equal(requests.length, 2, "switching accounts must discard the previous Komari cache");
-requests[1].reject(new Error("temporary provider failure"));
-await new Promise(setImmediate);
-assert.equal(state.data.agentKomari.alpha, undefined, "a failed read must remain retryable");
-display.loadKomariDisplay(agent, root);
-assert.equal(requests.length, 3);
-requests[2].resolve({ uuid: "binding-one", server: { uuid: "binding-one" } });
-await new Promise(setImmediate);
-display.loadKomariDisplay({
-  ...agent,
-  labels: { komari_uuid: "binding-two" },
-  komari: { uuid: "binding-two", traffic_used: 10 },
-}, root);
-assert.equal(requests.length, 3, "a new inline binding must render without another request");
-assert.equal(state.data.agentKomari.alpha.uuid, "binding-two");
-assert.equal(state.data.agentKomari.alpha.link.server.traffic_used, 10);
 
 console.log("Focused feature module API and account isolation smoke passed");

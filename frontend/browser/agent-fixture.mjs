@@ -45,7 +45,7 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1", "core-uninstall-v1
 const populatedAgents = [
   {
     ...onlineAgent("alpha"),
-    labels: { komari_uuid: "komari-alpha" },
+    labels: {},
     metrics: {
       cpu_available: true,
       cpu_percent: 18.6,
@@ -70,22 +70,7 @@ const populatedAgents = [
   // carries the code and must not need a per-node lookup request.
   { ...onlineAgent("bravo"), region_code: "SG" },
   { ...onlineAgent("charlie"), status: "offline" },
-  // The control plane inlines the Komari resource it already cached, so this
-  // node renders its monthly traffic without a request of its own.
-  {
-    ...onlineAgent("delta", []),
-    labels: { komari_uuid: "komari-delta" },
-    komari: {
-      uuid: "komari-delta",
-      name: "Osaka edge-02",
-      billing_cycle: 30,
-      traffic_limit: 21474836480,
-      traffic_limit_type: "sum",
-      traffic_used: 5368709120,
-      traffic_used_available: true,
-      traffic_reset_day: 1,
-    },
-  },
+  { ...onlineAgent("delta", []) },
 ];
 populatedAgents[0].time_zone = {
   mode: "custom", time_zone: "America/New_York", applied_time_zone: "America/New_York",
@@ -284,11 +269,19 @@ const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners
 if (mode.startsWith("motion")) testAPI.settings = { panel_name: "Motion preview", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 if (mode.startsWith("capabilities-settings")) {
   location.hash = "#settings-engines";
-  testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
+  testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1,
+    time_zone: "browser", time_display: "absolute-relative", ui_font_scale: 100, default_config_editor: "structured", default_agent_engines: ["mihomo", "sing-box"],
+    task_page_size: 100, task_poll_interval_ms: 600, agent_heartbeat_interval_seconds: 15, agent_metrics_interval_seconds: 1, agent_offline_threshold_seconds: 45,
+    task_stale_timeout_seconds: 120, install_task_stale_timeout_seconds: 360, task_max_attempts: 3, public_ip_probe_interval_seconds: 300,
+    core_log_minimum_level: "debug", core_log_retention_days: 7, client_connection_retention_days: 30, agent_core_log_max_mib: 16, agent_core_log_rotate_count: 1,
+    metric_retention_days: 7, audit_retention_days: 90, task_retention_days: 0, config_revision_retention: 0,
+    webhook_url: "", notify_task_failed: true, notify_agent_offline: true, notify_agent_online: true, notify_traffic_quota: true, acme_email: "", cnip_source: null,
+  };
 }
 if (mode.startsWith("config-layout")) {
   testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
   testAPI.layoutTasks = new Map();
+  testAPI.layoutConfigs = new Map();
   location.hash = "#live-config";
 }
 if (mode === "uninstall-writeonly")
@@ -334,6 +327,28 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (path === '/preferences/node-view') {
+    testAPI.nodeView ||= { view: 'cards', revision: 1 };
+    if (method === 'PUT') {
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), 'browser-test-csrf');
+      const body = JSON.parse(options.body);
+      if (body.revision !== testAPI.nodeView.revision) return json({ error: 'node view revision conflict' }, 409);
+      assert.ok(['cards', 'list'].includes(body.view), '节点视图提交非法值');
+      testAPI.nodeView = { view: body.view, revision: testAPI.nodeView.revision + 1 };
+    }
+    return json(testAPI.nodeView);
+  }
+  if (path === "/preferences/traffic-order") {
+    testAPI.trafficOrder ||= { ids: JSON.parse(accountStorage.getItem("qcontrolhub:traffic-card-order") || "[]"), revision: 1 };
+    if (method === "PUT") {
+      assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "browser-test-csrf");
+      if (testAPI.failTrafficOrder) return json({ error: "fixture save failed" }, 503);
+      const input = JSON.parse(options.body);
+      if (input.revision !== testAPI.trafficOrder.revision) return json({ error: "traffic order revision conflict" }, 409);
+      testAPI.trafficOrder = { ids: input.ids, revision: testAPI.trafficOrder.revision + 1 };
+    }
+    return json(testAPI.trafficOrder);
+  }
   if (path === "/preferences/node-order") {
     testAPI.nodeOrder ||= JSON.parse(accountStorage.getItem("qch:test:node-order") || "null") || { ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "null") || testAPI.agents.map(agent => agent.id), revision: 1 };
     if (method === "PUT") {
@@ -358,6 +373,7 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
+    if (path === "/traffic-usage") return json({days:[]});
     if (path === "/traffic-policies") return json((testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy })));
     if (path === "/traffic-endpoints") return json([...(testAPI.trafficPolicies || []).filter(p => p.deployment_confirmed !== false), ...(testAPI.trafficEndpoints || [])].map(endpoint => ({ is_current_user: true, ...endpoint })));
     if (path === "/traffic-endpoints/sync") {
@@ -382,18 +398,41 @@ window.fetch = async (input, options = {}) => {
     }
   }
   if (mode.startsWith("config-layout")) {
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "browser-test-csrf");
     if (path === "/access-controls") return json(testAPI.agents.flatMap(agent => ["xray","sing-box"].flatMap(engine => ["socks-in","http-in"].map((tag,i) => ({agent_id:agent.id,agent_name:agent.name,agent_status:agent.status,engine,tag,port:i?8080:1080,config_version:8,block_mainland_destination:!i,block_mainland_source:Boolean(i)})))));
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
-      const engine = path.split("/")[4];
-      return json({config:{id:"cfg-layout",version:8,name:"节点实际配置",content:layoutConfig(engine)},inbound_targets:["socks-in","http-in"].map((tag,i)=>({tag,port:i?8080:1080,kind:i?"http":"socks"}))});
+      const [, , agentID, , engine] = path.split("/"), key = `${agentID}-${engine}`;
+      if (!testAPI.layoutConfigs.has(key)) testAPI.layoutConfigs.set(key, {id:`cfg-layout-${key}`,agent_id:agentID,engine,version:8,name:"节点实际配置",description:"",updated_at:"2026-11-05T10:00:00Z",content:layoutConfig(engine)});
+      return json({agent:testAPI.agents.find(agent=>agent.id===agentID),config:testAPI.layoutConfigs.get(key),
+        catalog:{fields:[{key:"dns",label:"DNS",scope:"global"}]},present_fields:{dns:true},
+        inbound_targets:["socks-in","http-in"].map((tag,i)=>({tag,port:i?8080:1080,kind:i?"http":"socks"}))});
+    }
+    if (path.endsWith("/fields/dns")) return json({key:"dns",version:8,present:true,fragment:'{"servers":["1.1.1.1","8.8.8.8"]}'});
+    if (/^\/configs\/cfg-layout-[^/]+\/revisions(?:\/\d+)?$/.test(path)) {
+      const config = [...testAPI.layoutConfigs.values()].find(item=>item.id===path.split("/")[2]);
+      return json(/\/\d+$/.test(path)?config:[config]);
+    }
+    if (method === "POST" && /^\/agents\/[^/]+\/configs\/[^/]+\/source$/.test(path)) {
+      const [, , agentID, , engine] = path.split("/"), key = `${agentID}-${engine}`, previous = testAPI.layoutConfigs.get(key), input = JSON.parse(options.body);
+      if (input.version !== previous.version || input.intent !== "deploy") return json({error:"配置已变化或部署方式无效"},409);
+      if (testAPI.layoutSaveGate) await testAPI.layoutSaveGate;
+      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"}; testAPI.layoutConfigs.set(key,saved);
+      const task = {id:options.headers?.["X-Config-Task-ID"] || `layout-${testAPI.layoutTasks.size}`,agent_id:agentID,engine,config_id:saved.id,config_version:saved.version,action:"deploy",status:"succeeded"};
+      testAPI.layoutTasks.set(task.id,task);return json({config:saved,task});
+    }
+    if (method === "PUT" && /^\/agents\/[^/]+\/configs\/[^/]+$/.test(path)) {
+      const [, , agentID, , engine] = path.split("/"), key = `${agentID}-${engine}`, previous = testAPI.layoutConfigs.get(key), input = JSON.parse(options.body);
+      if (input.version !== previous.version) return json({error:"配置已变化"},409);
+      if (testAPI.layoutSaveGate) await testAPI.layoutSaveGate;
+      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"}; testAPI.layoutConfigs.set(key,saved); return json(saved);
     }
     if (path === "/tasks" && method === "POST") {
       const input = JSON.parse(options.body);
       const task = {id:`layout-${testAPI.layoutTasks.size}`,status:"succeeded",...input};
       testAPI.layoutTasks.set(task.id,task);return json(task);
     }
-    if (path.startsWith("/tasks/layout-")) {
+    if (path.startsWith("/tasks/") && testAPI.layoutTasks.has(path.split("/")[2])) {
       const task = testAPI.layoutTasks.get(path.split("/")[2]);
       return json(path.endsWith("/config-snapshot")?{content:layoutConfig(task.engine)}:task);
     }
@@ -446,6 +485,7 @@ window.fetch = async (input, options = {}) => {
       : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
     return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
+  if (mode.startsWith("users-layout") && method === "GET" && path === "/agent-directory") return json(testAPI.agents);
   if (mode.startsWith("users-layout") && method === "GET" && path === "/users")
     return json(testAPI.users);
   if (mode.startsWith("users-layout") && /^\/users\/[^/]+\/agent-access$/.test(path)) {
@@ -480,10 +520,13 @@ window.fetch = async (input, options = {}) => {
   if (method === "PUT" && path === "/settings" && (mode.startsWith("capabilities-settings") || mode.startsWith("motion"))) {
     if (testAPI.settingsGate) await testAPI.settingsGate;
     if (testAPI.settingsFailure) return json({ error: "settings save failed" }, 409);
-    testAPI.settings = { ...JSON.parse(options.body), revision: testAPI.settings.revision + 1 };
+    const body = JSON.parse(options.body);
+    assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "browser-test-csrf");
+    if (body.revision !== testAPI.settings.revision) return json({error: "settings revision conflict"}, 409);
+    testAPI.settings = { ...body, revision: testAPI.settings.revision + 1 };
     return json(testAPI.settings);
   }
-  if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
+  if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"}, testAPI.agentsFailure === 403 ? 403 : 503);
   if (method === "GET" && path === "/agents") {
     if (testAPI.agentsGate) await testAPI.agentsGate;
     if (mode === "bbr-preview") {
@@ -492,14 +535,14 @@ window.fetch = async (input, options = {}) => {
     }
     return json(mode === "empty" ? [] : testAPI.agents);
   }
-  if (method === "GET" && path === "/core-log-sources") return json(testAPI.agents.flatMap(agent => ["mihomo", "xray", "sing-box", "ss-rust"].map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"",username:"主实例",features:agent.features,status:agent.status === "offline" ? "offline" : (agent.features || []).includes("core-logs-v1") ? agent.runtime?.[engine]?.core_log_status || "pending" : "unsupported",grant_revision:"fixture"}))));
+  if (method === "GET" && path === "/core-log-sources") return json(testAPI.logSources || testAPI.agents.flatMap(agent => ["mihomo", "xray", "sing-box", "ss-rust"].map(engine => ({agent_id:agent.id,name:agent.name,instance_id:"main",engine,owner_id:"",username:"主实例",features:agent.features,status:agent.status === "offline" ? "offline" : (agent.features || []).includes("core-logs-v1") ? agent.runtime?.[engine]?.core_log_status || "pending" : "unsupported",grant_revision:"fixture"}))));
   if (method === "GET" && path === "/core-logs" && (mode.startsWith("logs") || mode.startsWith("motion"))) {
     const limit = Number(url.searchParams.get("limit") || 1000);
     const agent = url.searchParams.get("agent_id") || "alpha";
     if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
     if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (testAPI.logFailure) return json({ error: "temporary log failure" }, testAPI.logFailure);
-    const etag = `"fixture:${agent}:${limit}:${testAPI.logNewCount || 0}:${Boolean(testAPI.longLogs)}:${testAPI.logRevision || 0}"`;
+    const etag = `"fixture:${agent}:${limit}:${testAPI.logNewCount || 0}:${Boolean(testAPI.longLogs)}:${testAPI.logRevision || 0}:${testAPI.logCounts || ''}"`;
     const conditional = new Headers(options.headers).get("If-None-Match");
     testAPI.logResponses ||= [];
     if (conditional === etag) {
@@ -508,13 +551,13 @@ window.fetch = async (input, options = {}) => {
     }
     testAPI.logResponses.push({ agent, limit, status: 200, conditional });
     return json(["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
-      Array.from({ length: limit }, (_, index) => ({
-        id: engineIndex * 10000 + (index < (testAPI.logNewCount || 0) ? 9000 + testAPI.logNewCount - index : index + 1 - (testAPI.logNewCount || 0)), agent_id: agent, engine, level: "warning",
+      Array.from({ length: Math.min(limit, testAPI.logCounts?.[engineIndex] ?? limit) }, (_, index) => ({
+        id: engineIndex * 10000 + (index < (testAPI.logNewCount || 0) ? 9000 + testAPI.logNewCount - index : index + 1 - (testAPI.logNewCount || 0)), agent_id: agent, instance_id: url.searchParams.get("instance_id") || "main", engine, level: "warning",
         message: `${agent} ${engine} pressure entry ${index - (testAPI.logNewCount || 0)}${testAPI.logRevision ? " corrected" : ""}${testAPI.longLogs ? " 长日志连接内容".repeat(180) : ""}`, logged_at: "2026-09-06T00:00:00Z",
       }))), 200, { ETag: etag });
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
-  if (method === "GET" && path === "/client-access" && (mode.startsWith("client-order") || mode.startsWith("client-layout")))
+  if (method === "GET" && path === "/client-access" && testAPI.clientAccessEntries)
     return json(testAPI.clientAccessEntries);
   if (method === "GET" && path === "/client-access" && ["ports","ports-mobile","shell-layout","shell-layout-mobile","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
@@ -610,20 +653,6 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.regionLookupGate) await testAPI.regionLookupGate;
     return json({ ip: "8.8.8.8", country_code });
   }
-  if (method === "GET" && path === "/agents/alpha/komari")
-    return json({
-      uuid: "komari-alpha",
-      server: {
-        uuid: "komari-alpha",
-        name: "Tokyo edge-01",
-        billing_cycle: 30,
-        expired_at: "2026-08-27T00:00:00Z",
-        traffic_limit: 10737418240,
-        traffic_limit_type: "sum",
-        traffic_used: 4294967296,
-        traffic_used_available: true,
-      },
-    });
   if (method === "GET" && path === "/enrollment-tokens") return json(testAPI.enrollmentRecords);
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json(testAPI.savedConfigs.filter((item) => path.includes(item.agent_id)));
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);

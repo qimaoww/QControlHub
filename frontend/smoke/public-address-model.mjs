@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { manualConnectionAddressNote, publicAddressRows } from "../modules/agents.js";
+import { manualConnectionAddressNote, publicAddressRows } from "../modules/agent-address-model.js";
 export async function run() {
 // Dual-stack public address display regressions.
 const ipRows = publicAddressRows({

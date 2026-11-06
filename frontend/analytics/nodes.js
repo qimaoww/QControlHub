@@ -1,26 +1,49 @@
-import { nodeRegion, regionFlag as flagArtwork } from './node-region.js';
+import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
+import { accountStorage } from "../modules/account-storage.js";
+import { nodeTimeZone } from "./node-time-zone.js";
+import { openNodeBatch } from "./node-batch.js";
+import { bindNodeOrdering } from "./node-ordering.js";
+import { patch, poll } from "./live-dom.js";
+import { nodeRegion, nodeRegionFlag } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
+import { metricTrack } from './metric-track.js';
+import { nodeDeleteControl } from './node-delete.js';
 import { publicAddressRows } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
 import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { enrollmentInstallCommand } from '../modules/enrollment-command.js';
-import { parseSharedPorts, formatSharedPorts, sharedLimitBytes, sharedLimitGiB } from '../modules/user-model.js';
-import { copyText, node, button, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
+import { formatSharedPorts } from '../modules/user-model.js';
+import { sharedInstancePresentation } from '../modules/shared-instance-model.js';
+import { copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
 import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
 const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.status);
 const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels || {}, agent.features || []);
-
 export async function nodesPage(ctx) {
   const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view')]);
   let agents = list(receivedAgents), preference = savedView;
+  let liveTable, loadSequence = 0;
+  const dialogUpdates = new Set();
+  const actionBusy = new Set();
+  const uninstallTasks = ctx.state.data.coreUninstallTasks ||= {};
+  const coreKey = (agent, engine) => `${agent.id}:${engine}`;
+  const refreshState = muted('正在实时更新');
+  refreshState.setAttribute('role', 'status');
+  const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
+  await ordering.load();
+  const sort = field('排序', 'node_sort', ctx.state.data.nodeSort || 'saved', { options: [['saved', '保存顺序'], ['name', '节点名称']] });
+  sort.querySelector('select').addEventListener('change', () => { ctx.state.data.nodeSort = sort.querySelector('select').value; draw(); });
   const canManage = agent => ctx.can('agents.manage', agent) && agent.can_manage !== false;
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
+  const dragging = bindNodeOrdering(ctx, results, {
+    enabled: () => sort.querySelector('select').value === 'saved' && !selecting,
+    order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
+  });
   const selected = new Set();
   let view = preference.view === 'list' ? 'list' : 'cards', selecting = false;
   const batchBar = node('div', {className:'a-probe-batch'});
@@ -47,7 +70,8 @@ export async function nodesPage(ctx) {
   }
   const shownAgents = () => {
     const query = search.querySelector('input').value.trim().toLowerCase();
-    return agents.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
+    const ordered = sort.querySelector('select').value === 'name' ? [...agents].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN')) : orderNodesBySavedOrder(agents, ordering.ids());
+    return ordered.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
   };
   const selectable = agent => ctx.can('tasks.execute') &&
     (agent.can_manage !== false || ctx.can('instance.manage', agent));
@@ -76,21 +100,22 @@ export async function nodesPage(ctx) {
   function meter(label,value,available,detail){
     const percent=Math.min(100,Math.max(0,Number(value)||0));
     return node('div',{className:'a-probe-meter'},node('div',{className:'a-probe-meter-label'},muted(label),node('strong',{},available?`${percent.toFixed(1)}%`:'—')),
-      node('div',{className:'a-probe-track','aria-hidden':'true'},node('span',{style:`width:${available?percent:0}%`,className:percent>90?'bad':percent>75?'warn':''})),detail&&muted(available?detail:'暂无数据'));
+      metricTrack(percent, available),detail&&muted(available?detail:'暂无数据'));
   }
   function metrics(agent){const m=agent.metrics||{},online=agent.status==='online';return node('div',{className:'a-probe-meters'},
     meter('CPU',m.cpu_percent,online&&m.cpu_available),
     meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
+  function dragControl(agent) { return dragHandle(agent.id, agent.name, selecting || sort.querySelector('select').value !== 'saved'); }
   function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
     button(compact?'设置':'查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent)),{title:'查看设置'}),
-    canManage(agent)&&button(compact?'共享':'共享 Agent',event=>void ctx.mutate(event.currentTarget,()=>sharing(agent)),{title:'共享 Agent'}));}
+    dragControl(agent));}
   function network(agent){const m=agent.metrics||{},available=agent.status==='online'&&m.network_available;return node('div',{className:'a-probe-network'},
-    stack(muted('接收'),node('strong',{},available?`${bytes(m.network_rx_bps)}/s`:'—')),
-    stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—')));}
+    stack(muted('接收'),node('strong',{},available?`${bytes(m.network_rx_bps)}/s`:'—'),muted(`累计 ${m.network_available ? bytes(m.network_rx_bytes) : '—'}`)),
+    stack(muted('发送'),node('strong',{},available?`${bytes(m.network_tx_bps)}/s`:'—'),muted(`累计 ${m.network_available ? bytes(m.network_tx_bytes) : '—'}`)));}
   function regionFlag(agent) {
     const region = geoRegionDetails(agent.labels?.region_code) || geoRegionDetails(agent.region_code);
-    const flag = flagArtwork(region);
+    const flag = nodeRegionFlag(ctx, agent);
     if (!canManage(agent)) { flag.title = region?.name || '国家／地区未知'; return flag; }
     const trigger = button('', () => chooseRegion(agent), { className: 'a-region-trigger', 'aria-label': `选择国家／地区：${agent.name}`, 'aria-haspopup': 'dialog', title: `${region?.name || '国家／地区未知'} · 选择国家／地区` });
     trigger.append(flag); return trigger;
@@ -124,55 +149,95 @@ export async function nodesPage(ctx) {
   }
 
   async function load() {
-    const received = list(await ctx.api('/agents'));
-    if (!ctx.current()) return;
-    agents = received;
+    const sequence = ++loadSequence;
+    let received;
+    let uninstallStates;
+    try {
+      [received, uninstallStates] = await Promise.all([
+        ctx.api('/agents'),
+        ctx.can('tasks.read') ? Promise.all(Object.entries(uninstallTasks).map(async ([key, id]) => {
+          try { return [key, id, await ctx.api(`/tasks/${pathID(id)}`)]; }
+          catch (error) { if (error.name === 'AbortError') throw error; return [key, id, null]; }
+        })) : [],
+      ]);
+      received = list(received);
+    }
+    catch (error) {
+      if (error.status === 403 && ctx.current() && sequence === loadSequence) {
+        agents = []; selected.clear(); draw(true);
+        dialogUpdates.forEach(update => update());
+      }
+      throw error;
+    }
+    if (!ctx.current() || sequence !== loadSequence) return;
+    for (const [key, id, task] of uninstallStates) if (task && taskTerminal(task) && uninstallTasks[key] === id) delete uninstallTasks[key];
+    const existing = new Map(agents.map(agent => [agent.id, agent]));
+    agents = received.map(agent => { const current = existing.get(agent.id); if (!current) return agent; for (const name of Object.keys(current)) if (!(name in agent)) delete current[name]; return Object.assign(current, agent); });
+    if (refreshState.textContent !== '正在实时更新') refreshState.textContent = '正在实时更新';
     for (const id of selected) if (!agents.some(agent => agent.id === id)) selected.delete(id);
-    draw();
+    draw(true);
+    dialogUpdates.forEach(update => update());
   }
   async function submit(agent, engine, action, extra = {}) {
     const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action, ...extra } });
     if (!ctx.current()) return;
     ctx.announce('任务已提交');
+    if (action === 'uninstall' && ctx.can('tasks.read') && !taskTerminal(task)) {
+      uninstallTasks[coreKey(agent, engine)] = task.id;
+      dialogUpdates.forEach(update => update());
+    }
     if (ctx.can('tasks.read')) await taskDetail(ctx, task.id);
     return task;
   }
-  function draw() {
+  function draw(live = false) {
+    if (dragging.active()) return;
     const shown = shownAgents();
     for (const id of selected) if (!shown.some(agent => agent.id === id && selectable(agent))) selected.delete(id);
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
-    drawBatch();
+    if (!live) drawBatch();
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
-    if(view==='cards')results.replaceChildren(node('div',{className:'a-probe-grid'},shown.map(agent=>
+    if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id},
         node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
         selecting&&node('div',{className:'a-probe-choice'},choice(agent)),
         node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
         node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
-        node('footer',{className:'a-probe-footer'},controls(agent))))));
+        node('footer',{className:'a-probe-footer'},controls(agent)))));
+      if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
+    }
     else{
       const compactMeter = (value, available, detail) => {
         const percent = Math.min(100,Math.max(0,Number(value)||0));
         return node('div',{className:'a-probe-cell',title:available?detail:'暂无数据'},
           node('strong',{},available?`${percent.toFixed(1)}%`:'—'),
-          node('div',{className:'a-probe-track','aria-hidden':'true'},node('span',{style:`width:${available?percent:0}%`,className:percent>90?'bad':percent>75?'warn':''})),
+          metricTrack(percent, available),
           detail&&muted(available?detail:'暂无数据'));
       };
-      const listTable=table([...(selecting?['选择']:[]),'节点','状态','CPU','内存','磁盘','网络速率','操作'],shown.map(agent=>{
+      const columns = [...(selecting?['选择']:[]),'节点','状态','CPU','内存','磁盘','网络速率','操作'];
+      const rows = shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
         return [...(selecting?[choice(agent)]:[]),
-          node('div',{className:'a-probe-identity'},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
+          node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
             muted(agent.can_manage===false?'本人共享实例':'主实例')),
           node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
           compactMeter(m.cpu_percent,online&&m.cpu_available),
           compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
           compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
           node('div',{className:'a-probe-rates'},node('div',{},muted('接收'),node('span',{},online&&m.network_available?`${bytes(m.network_rx_bps)}/s`:'—')),
-            node('div',{},muted('发送'),node('span',{},online&&m.network_available?`${bytes(m.network_tx_bps)}/s`:'—'))),
+            node('div',{},muted('发送'),node('span',{},online&&m.network_available?`${bytes(m.network_tx_bps)}/s`:'—')),
+            muted(`累计接收 ${m.network_available ? bytes(m.network_rx_bytes) : '—'}`), muted(`累计发送 ${m.network_available ? bytes(m.network_tx_bytes) : '—'}`)),
           node('div',{className:'a-probe-row-actions'},controls(agent,true))];
-      }),{label:'节点监控'});
-      results.replaceChildren(node('div',{className:'a-card a-probe-list'},listTable));
+      });
+      if (live && liveTable) liveTable.updateRows(rows);
+      else {
+        const widths = { '选择': 64, '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络速率': 180, '操作': 190 };
+        liveTable = table(columns, rows, {label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
+        results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
+      }
     }
+    results.querySelectorAll('input[type=checkbox]').forEach(input => {
+      if (input.name.startsWith('select:')) input.checked = selected.has(input.name.slice(7));
+    });
   }
 
   function command(created) {
@@ -182,12 +247,21 @@ export async function nodesPage(ctx) {
     }))));
   }
   async function enrollment() {
-    const records = node('div', {}, muted('正在读取添加记录…'));
+    const records = node('div', { className: 'a-traffic-list' }, muted('正在读取添加记录…'));
+    const historyTitle = node('summary', {}, '添加记录');
+    const history = node('details', { className: 'a-disclosure' }, historyTitle, node('div', { className: 'a-disclosure-body' }, records));
+    let loaded = false, changed = false;
     async function reload() {
       const tokens = list(await ctx.api('/enrollment-tokens'));
       if (!ctx.current() || !box.isConnected) return;
-      records.replaceChildren(table(['节点', '添加时间', '状态', '操作'], tokens.map(token => [token.name, date(token.created_at), token.revoked_at ? '已撤销' : token.used_count ? '已接入' : '等待接入', actions(
-        token.command_available && button('安装命令', event => void ctx.mutate(event.currentTarget, async () => command(await ctx.api(`/enrollment-tokens/${pathID(token.id)}/command`, { method: 'POST' })))),
+      historyTitle.textContent = `添加记录 · ${tokens.length}`;
+      if (!loaded) { history.open = tokens.length > 0; loaded = true; }
+      records.replaceChildren(table(['节点', '添加时间', '状态', '操作'], tokens.map(token => [token.name, date(token.created_at), badge(token.revoked_at ? '已撤销' : token.used_count ? '已接入' : '等待接入', token.revoked_at ? '' : token.used_count ? 'ok' : 'warn'), actions(
+        token.command_available && button('安装命令', event => void ctx.mutate(event.currentTarget, async () => {
+          const created = await ctx.api(`/enrollment-tokens/${pathID(token.id)}/command`, { method: 'POST' });
+          if (!ctx.current() || !box.open) return;
+          changed = false; ctx.setDirty(false); box.close(); command(created);
+        })),
         button('删除记录', async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm('删除此添加记录？已接入的节点不会被卸载。', '删除记录') || !ctx.current()) return;
@@ -196,14 +270,20 @@ export async function nodesPage(ctx) {
       )]), { label: '节点添加记录' }));
     }
     const form = ctx.form([
-      field('节点名称', 'name', '', { required: true, maxlength: 100 }),
+      field('节点名称', 'name', '', { required: true, maxlength: 100, autofocus: true }),
       field('对管理员隐藏此节点', 'admin_hidden', false, { type: 'checkbox' }),
     ], '生成安装命令', async (values, form) => {
       const created = await ctx.api('/enrollment-tokens', { method: 'POST', body: { name: values.name.trim(), admin_hidden: form.elements.admin_hidden.checked } });
       if (!ctx.current()) return;
-      command(created); await reload();
+      changed = false; ctx.setDirty(false); box.close(); command(created);
     });
-    const box = ctx.dialog('添加节点', stack(form, section('添加记录', records)), { wide: true });
+    for (const type of ['input', 'change']) form.addEventListener(type, () => { changed = Boolean(form.elements.name.value || form.elements.admin_hidden.checked); ctx.setDirty(changed); });
+    const box = ctx.dialog('添加节点', stack(form, history));
+    box.onRequestClose = async () => {
+      if (changed && !await ctx.confirm('放弃未保存的节点添加信息？', '放弃更改')) return;
+      ctx.setDirty(false); box.close();
+    };
+    box.addEventListener('close', () => ctx.setDirty(false), { once: true });
     void reload().catch(error => {
       if (ctx.current() && box.open && error.name !== 'AbortError') records.replaceChildren(notice(error.message));
     });
@@ -216,11 +296,9 @@ export async function nodesPage(ctx) {
     function drawDirectory() {
       content.replaceChildren(table(['节点', '所有者', '状态', '内核', '操作'], entries.map(entry => [
         stack(entry.name, muted(entry.id)), entry.owner_username || '未分配账号', status(entry.status), (entry.capabilities || []).join(' · '),
-        button('删除节点', async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm(`删除“${entry.name}”？关联数据将被清理，节点上的 QAgent 不会被卸载。`, '删除节点') || !ctx.current()) return;
-          await ctx.mutate(control, async () => { await ctx.api(`/agents/${pathID(entry.id)}`, { method: 'DELETE' }); entries.splice(entries.indexOf(entry), 1); drawDirectory(); await load(); });
-        }, { tone: 'danger' }),
+        nodeDeleteControl(ctx, entry, { available: () => box.open && ctx.can('users.manage'), onDeleted() {
+          entries.splice(entries.indexOf(entry), 1); agents = agents.filter(agent => agent.id !== entry.id); drawDirectory(); draw(true);
+        }, refresh: load }),
       ]), { label: '节点目录' }));
     }
     drawDirectory(); return box;
@@ -228,7 +306,10 @@ export async function nodesPage(ctx) {
   async function settings(agent) {
     const base = `/agents/${pathID(agent.id)}`;
     const manage = canManage(agent);
-    const facts = section('节点信息', node('div', { className: 'a-card-body' }, stack(
+    const settingsScope = () => JSON.stringify([agent.can_manage !== false, agent.owner_id || '', agent.shared_allocation?.owner_id || '',
+      engineIDs.map(engine => agent.runtime?.[engine]?.instance?.id || '')]);
+    const openedScope = settingsScope();
+    const renderFacts = () => section('节点信息', node('div', { className: 'a-card-body' }, stack(
       actions(status(agent.status), badge(agent.can_manage === false ? '本人共享实例' : '主实例')),
       muted(agent.id), muted(`${agent.os} / ${agent.arch} · QAgent ${agent.version || '—'}`),
       muted(`最近在线 · ${date(agent.last_seen)}`),
@@ -237,73 +318,118 @@ export async function nodesPage(ctx) {
         muted(`CPU · ${agent.metrics.cpu_available ? Number(agent.metrics.cpu_percent).toFixed(1)+'%' : '—'}`),
         muted(`内存 · ${agent.metrics.memory_available ? bytes(agent.metrics.memory_used_bytes)+' / '+bytes(agent.metrics.memory_total_bytes) : '—'}`),
         muted(`磁盘 · ${agent.metrics.disk_available ? bytes(agent.metrics.disk_used_bytes)+' / '+bytes(agent.metrics.disk_total_bytes) : '—'}`),
-        muted(`网络 · ${agent.metrics.network_available ? '接收 '+bytes(agent.metrics.network_rx_bps)+'/s · 发送 '+bytes(agent.metrics.network_tx_bps)+'/s' : '—'}`)),
+        stack(muted(`网络 · ${agent.metrics.network_available ? '接收 '+bytes(agent.metrics.network_rx_bps)+'/s · 发送 '+bytes(agent.metrics.network_tx_bps)+'/s' : '—'}`), muted(`累计 · ${agent.metrics.network_available ? '接收 '+bytes(agent.metrics.network_rx_bytes)+' · 发送 '+bytes(agent.metrics.network_tx_bytes) : '—'}`))),
       agent.shared_allocation && stack(muted(`所有者 · ${agent.shared_allocation.owner_username || '—'}`),
         muted(`端口 · ${formatSharedPorts(agent.shared_allocation.ports) || '未分配'}`),
         muted(`流量 · ${bytes(agent.shared_allocation.used_bytes)} / ${agent.shared_allocation.limit_bytes ? bytes(agent.shared_allocation.limit_bytes) : '不限量'}`)),
     )));
-    const sections = [facts];
+    const facts = renderFacts();
+    const sections = [facts], settingsUpdates = [];
     if(ctx.can('metrics.read'))sections.push(section('资源指标',node('div',{className:'a-card-body'},button('查看指标历史',event=>void ctx.mutate(event.currentTarget,()=>nodeMetrics(ctx,agent))))));
     if (manage) {
       sections.push(section('Agent 设置', node('div', { className: 'a-card-body' }, stack(
         ctx.form([field('节点名称', 'name', agent.name, { required: true, maxlength: 100 })], '保存名称', async values => {
-          const saved = await ctx.api(`${base}/name`, { method: 'PUT', body: { name: values.name.trim() } });
-          if (!ctx.current()) return;
+          const name = values.name.trim();
+          if (!name || [...name].length > 100 || /[\u0000-\u001f\u007f-\u009f]/u.test(name)) throw new Error('节点名称须为 1–100 个字符，且不能包含控制字符');
+          if (!box.open || settingsScope() !== openedScope || !canManage(agent)) return;
+          const saved = await ctx.api(`${base}/name`, { method: 'PUT', body: { name } });
+          if (!ctx.current() || !box.open || settingsScope() !== openedScope || !canManage(agent)) return;
           agent.name = saved.name; box.querySelector('.a-dialog-head h2').textContent = `${agent.name} · 节点设置`; await load(); ctx.announce('名称已保存');
         }),
         agent.can_hide && ctx.form([field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' })], '保存可见性', async (_, form) => {
           const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: form.elements.admin_hidden.checked } });
           agent.admin_hidden = saved.admin_hidden; ctx.announce('可见性已保存'); await load();
         }),
-        ctx.form([field('Komari UUID', 'uuid', agent.labels?.komari_uuid || '', { maxlength: 100 })], '保存 Komari 关联', async values => {
-          await ctx.api(`${base}/komari`, { method: 'PUT', body: values }); ctx.announce('Komari 关联已保存'); await load();
-        }),
+
       ))));
-      let zone = agent.time_zone || {};
-      const zoneStatus = notice(zone.error || (zone.time_zone ? `当前时区 · ${zone.time_zone}` : '尚未设置'));
-      const zoneForm = ctx.form([
-        grid(field('时区模式', 'mode', zone.mode || 'auto', { options: [['auto', '自动检测'], ['custom', '手动设置']] }),
-          field('IANA 时区', 'time_zone', zone.time_zone || '', { placeholder: 'Asia/Shanghai', maxlength: 100 })), zoneStatus,
-      ], '应用时区', async (values, form) => {
-        if (values.mode === 'custom' && !values.time_zone.trim()) throw new Error('请输入 IANA 时区');
-        zone = await ctx.api(`${base}/time-zone`, { method: 'PUT', body: { mode: values.mode, time_zone: values.mode === 'custom' ? values.time_zone.trim() : '', revision: zone.revision || 0, retry: values.mode === 'auto' } });
-        form.elements.time_zone.value = zone.time_zone || '';
-        zoneStatus.textContent = zone.error || (zone.status === 'pending' ? '已保存，等待节点应用' : zone.status === 'unsupported' ? '当前 Agent 不支持时区设置' : `已保存 · ${zone.time_zone || '自动检测'}`);
-      });
-      zoneForm.elements.mode.addEventListener('change', () => { zoneForm.elements.time_zone.disabled = zoneForm.elements.mode.value !== 'custom'; });
-      zoneForm.elements.time_zone.disabled = zoneForm.elements.mode.value !== 'custom';
-      sections.push(section('时区', node('div', { className: 'a-card-body' }, zoneForm)));
       sections.push(section('内核能力', node('div', { className: 'a-card-body a-stack' }, (agent.supported_capabilities || engineIDs).map(engine => {
-        const form = ctx.form([field(engine, 'enabled', agent.capabilities.includes(engine), { type: 'checkbox' })], '保存能力', async (_, element) => {
+        const transitionState = notice('');
+        const form = ctx.form([field(engine, 'enabled', agent.capabilities.includes(engine), { type: 'checkbox' }), transitionState], '保存能力', async (_, element) => {
+          if (!canManage(agent) || ['pending', 'running'].includes(agent.capability_transitions?.[engine]?.status)) return;
           const received = await ctx.api(`${base}/capabilities/${engine}`, { method: 'PUT', body: { enabled: element.elements.enabled.checked } });
           ctx.announce(received.task_id ? '启停任务已提交，成功后更新能力' : '内核能力已更新'); await load();
           if (received.task_id && ctx.can('tasks.read')) await taskDetail(ctx, received.task_id);
         });
+        let savedEnabled = agent.capabilities.includes(engine);
+        const update = () => {
+          const input = form.elements.enabled, latest = agent.capabilities.includes(engine);
+          const transition = agent.capability_transitions?.[engine];
+          const waiting = ['pending', 'running'].includes(transition?.status);
+          if (waiting || form.getAttribute('aria-busy') !== 'true' && (input.checked === savedEnabled || input.checked === latest)) {
+            input.checked = latest; savedEnabled = latest;
+          }
+          input.disabled = !canManage(agent) || waiting;
+          form.querySelector('[type=submit]').disabled = !canManage(agent) || waiting || form.getAttribute('aria-busy') === 'true';
+          transitionState.textContent = waiting ? `${transition.enabled ? '启动' : '停止'}${transition.status === 'pending' ? '排队中' : '执行中'}`
+            : ['failed', 'canceled'].includes(transition?.status) ? `上次启停失败或取消${transition.error ? `：${transition.error}` : ''}` : '';
+        };
+        settingsUpdates.push(update);
+        form.querySelector('[type=submit]').addEventListener('mutationend', update);
+        form.elements.enabled.dataset.engineCapability = engine;
+        update();
         return form;
       }))));
     }
-    for (const engine of agent.capabilities || []) {
-      const runtime = agent.runtime?.[engine] || {};
-      const reason = coreInstallBlockReason(agent, engine, ctx.can);
-      const controls = actions(['status', 'start', 'stop', 'restart'].map(action => button(actionName(action), async event => {
-        const control = event.currentTarget;
-        if (action !== 'status' && !await ctx.confirm(`对 ${agent.name} 的 ${engine} 执行“${actionName(action)}”？`, actionName(action)) || !ctx.current()) return;
-        await ctx.mutate(control, () => submit(agent, engine, action));
-      }, { disabled: guard(action, agent.status === 'online', runtime.installed, runtime.service_status, agent, engine) })));
-      const install = button(runtime.installed ? '切换版本' : agent.can_manage === false ? '准备内核' : '安装内核', () => installCore(agent, engine), { disabled: Boolean(reason), title: reason || '安装或切换内核版本' });
-      const uninstall = manage && ctx.can('host.manage', agent) && ctx.can('tasks.execute') && agent.features?.includes('core-uninstall-v1') && button('卸载内核', async event => {
-        const control = event.currentTarget;
-        if (!await ctx.confirm(`卸载 ${engine}？目标服务会停止，当前连接将断开，已保存配置保留。`, '卸载内核') || !ctx.current()) return;
-        await ctx.mutate(control, () => submit(agent, engine, 'uninstall'));
-      }, { tone: 'danger', disabled: agent.status !== 'online' || !runtime.installed || Boolean(runtime.existing_config_unsupported_reason) });
-      sections.push(section(engine, node('div', { className: 'a-card-body' }, stack(
-        actions(status(runtime.service_status), muted(runtime.version || '尚未安装')),
-        runtime.instance && stack(muted(runtime.instance.id), runtime.instance.reason && notice(runtime.instance.reason), runtime.instance.restriction && notice(runtime.instance.restriction)),
-        runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
-        controls, actions(install, uninstall, ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
-          runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`)),
-      ))));
+    if (agent.can_manage !== false) {
+      const zone = nodeTimeZone(ctx, agent, () => canManage(agent));
+      sections.push(zone.view); settingsUpdates.push(zone.update);
     }
+    const runtimes = node('div', { className: 'a-stack' });
+    sections.push(runtimes);
+    const renderRuntimes = () => {
+      if (runtimes.querySelector('[aria-busy=true]')) return;
+      const fresh = node('div', { className: 'a-stack' });
+      const engines = [...new Set([...(agent.capabilities || []), ...(agent.can_manage !== false ? Object.keys(agent.runtime || {}).filter(engine => agent.runtime[engine]?.installed) : [])])];
+      for (const engine of engines) {
+        const renderService = () => {
+          const runtime = agent.runtime?.[engine] || {};
+          const instance = sharedInstancePresentation(agent, engine);
+          const enabled = agent.capabilities?.includes(engine);
+          const busy = actionBusy.has(coreKey(agent, engine));
+          const uninstallReason = () => !agents.includes(agent) || agent.can_manage === false || !ctx.can('host.manage', agent) || !ctx.can('tasks.execute') ||
+            !agent.features?.includes('core-uninstall-v1') || agent.status !== 'online' || !agent.runtime?.[engine]?.installed ||
+            Boolean(agent.runtime?.[engine]?.existing_config_unsupported_reason) || Boolean(uninstallTasks[coreKey(agent, engine)]);
+          const reason = coreInstallBlockReason(agent, engine, ctx.can);
+          const controls = actions(['status', 'start', 'stop', 'restart'].map(action => button(actionName(action), async event => {
+            const control = event.currentTarget;
+            const key = coreKey(agent, engine);
+            if (actionBusy.has(key)) return;
+            actionBusy.add(key); control.disabled = true;
+            try {
+              if (action !== 'status' && !await ctx.confirm(`对 ${agent.name} 的 ${engine} 执行“${actionName(action)}”？`, actionName(action)) || !ctx.current()) return;
+              await ctx.mutate(null, async () => {
+                await load();
+                const latest = agent.runtime?.[engine] || {};
+                if (!ctx.current() || !box.open || settingsScope() !== openedScope || !agents.includes(agent) || !agent.capabilities?.includes(engine) || guard(action, agent.status === 'online', latest.installed, latest.service_status, agent, engine)) return;
+                await submit(agent, engine, action);
+              });
+            } finally { actionBusy.delete(key); if (ctx.current()) dialogUpdates.forEach(update => update()); }
+          }, { disabled: !enabled || busy || guard(action, agent.status === 'online', runtime.installed, runtime.service_status, agent, engine) })));
+          const install = button(runtime.installed ? '切换版本' : agent.can_manage === false ? '准备内核' : '安装内核', () => installCore(agent, engine), { disabled: Boolean(reason), title: reason || '安装或切换内核版本' });
+          const uninstall = runtime.installed && button('卸载内核', async event => {
+            const control = event.currentTarget;
+            const key = coreKey(agent, engine);
+            if (actionBusy.has(key) || uninstallReason()) return;
+            actionBusy.add(key); control.disabled = true;
+            try {
+              if (!await ctx.confirm(`卸载 ${engine}？目标服务会停止，内核文件将删除，已保存配置保留。`, '卸载内核') || !ctx.current()) return;
+              await ctx.mutate(null, async () => { await load(); if (ctx.current() && !uninstallReason()) await submit(agent, engine, 'uninstall'); });
+            } finally { actionBusy.delete(key); if (ctx.current()) dialogUpdates.forEach(update => update()); }
+          }, { tone: 'danger', disabled: busy || uninstallReason() });
+          return section(engine, node('div', { className: 'a-card-body' }, stack(
+            actions(instance ? badge(instance.label, instance.tone) : status(runtime.service_status === 'running' ? 'active' : runtime.service_status), !enabled && badge('能力已关闭', 'warn'), muted(runtime.version || (runtime.installed ? '版本未上报' : '尚未安装'))),
+            instance && stack(muted(instance.version), instance.reason && notice(instance.reason)),
+            runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
+            controls, actions(install, agent.can_manage !== false && uninstall, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
+              runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`)),
+          )));
+        };
+        const view = renderService();
+        view.dataset.refreshKey = engine; view.dataset.coreInstalled = agent.runtime?.[engine]?.installed ? '1' : '0'; view.dataset.capabilityEnabled = agent.capabilities?.includes(engine) ? '1' : '0'; fresh.append(view);
+      }
+      patch(runtimes, fresh);
+    };
+    renderRuntimes();
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(sections, actions(
       ctx.can('host.manage',agent) && button('升级 Agent',async event=>{
         const control=event.currentTarget;
@@ -311,13 +437,20 @@ export async function nodesPage(ctx) {
         await ctx.mutate(control,()=>submit(agent,undefined,'upgrade-agent'));
       },{disabled:agent.status!=='online'||!agent.features?.includes('agent-self-upgrade-v1'),title:agent.features?.includes('agent-self-upgrade-v1')?'升级 QAgent':'当前 Agent 需重新执行安装命令'}),
       manage && agent.enrollment_command_available && button('查看安装命令', event => void ctx.mutate(event.currentTarget, async () => command(await ctx.api(`${base}/enrollment-command`, { method: 'POST' })))),
-      manage && button('共享 Agent', event => void ctx.mutate(event.currentTarget, () => sharing(agent))),
-      manage && button('删除节点', async event => {
-        const control = event.currentTarget;
-        if (!await ctx.confirm(`删除“${agent.name}”？关联数据将被清理，节点上的 QAgent 不会被卸载。`, '删除节点') || !ctx.current()) return;
-        await ctx.mutate(control, async () => { await ctx.api(base, { method: 'DELETE' }); box.close(); await load(); ctx.announce('节点已删除'); });
-      }, { tone: 'danger' }),
+      manage && nodeDeleteControl(ctx, agent, { available: () => box.open && settingsScope() === openedScope && canManage(agent), onDeleted() {
+        agents = agents.filter(value => value.id !== agent.id); box.close(); draw(true);
+      }, refresh: load }),
     )), { wide: true });
+    const update = () => {
+      if (!box.open || !ctx.current()) { dialogUpdates.delete(update); return; }
+      if (!agents.some(value => value.id === agent.id) || settingsScope() !== openedScope || manage && !canManage(agent)) { box.close(); dialogUpdates.delete(update); return; }
+      patch(facts, renderFacts());
+      settingsUpdates.forEach(refresh => refresh());
+      renderRuntimes();
+    };
+    dialogUpdates.add(update);
+    box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
+    ctx.signal.addEventListener('abort', () => { dialogUpdates.delete(update); box.close(); }, { once: true });
   }
   function installCore(agent, engine) {
     const shared = agent.can_manage === false;
@@ -342,76 +475,24 @@ export async function nodesPage(ctx) {
     form.elements.release_channel.addEventListener('change', sync); sync();
     ctx.dialog(`${agent.name} · ${engine}`, form);
   }
-  async function sharing(agent) {
-    let saved = await ctx.api(`/agents/${pathID(agent.id)}/sharing`);
-    if (!ctx.current()) return;
-    const rows = node('div', { className: 'a-stack' });
-    const feedback = notice('');
-    const form = ctx.form([rows, button('添加用户', () => add({ enabled: true })), feedback], '保存共享设置', async () => {
-      const shares = [...rows.children].map(row => ({
-        username: row.querySelector('[name=username]').value.trim(), enabled: row.querySelector('[name=enabled]').checked,
-        ports: parseSharedPorts(row.querySelector('[name=ports]').value), limit_bytes: sharedLimitBytes(row.querySelector('[name=limit_gib]').value),
-        engines: [...row.querySelectorAll('[name=engines]:checked')].map(input => input.value),
-        http_domains: row.querySelector('[name=http_domains]').value.split(/[\n,，]+/).map(value => value.trim()).filter(Boolean),
-        reinvite: row.dataset.reinvite === 'true',
-      }));
-      const received = await ctx.api(`/agents/${pathID(agent.id)}/sharing`, { method: 'PUT', body: { revision: saved.revision, shares } });
-      if (!ctx.current()) return;
-      saved = received; rows.replaceChildren(); saved.shares.forEach(add); ctx.setDirty(false); feedback.textContent = ''; ctx.announce('共享设置已保存');
-    });
-    function add(share) {
-      const engines = node('div', { className: 'a-actions' }, (agent.supported_capabilities || agent.capabilities).map(engine => field(engine, 'engines', list(share.engines).includes(engine), { type: 'checkbox', value: engine })));
-      const row = section(share.username || '新用户', node('div', { className: 'a-card-body a-stack' },
-        grid(field('用户名', 'username', share.username || '', { required: true, maxlength: 64, readonly: Boolean(share.user_id) }),
-          field('总额度 · GiB', 'limit_gib', sharedLimitGiB(share.limit_bytes), { type: 'number', min: 0, max: 8388607, step: 'any', required: true })),
-        field('端口', 'ports', formatSharedPorts(share.ports), { placeholder: '21000-21100, 22000', hint: '留空未分配，0 表示不限端口' }), engines,
-        field('HTTP-01 允许域名', 'http_domains', list(share.http_domains).join('\n'), { multiline: 2 }),
-        actions(field('启用共享', 'enabled', share.enabled !== false, { type: 'checkbox' }),
-          share.status === 'rejected' && button('重新邀请', event => { row.dataset.reinvite = 'true'; event.currentTarget.disabled = true; row.querySelector('[name=enabled]').checked = true; ctx.setDirty(true); }),
-          !share.user_id && button('移除', () => { row.remove(); ctx.setDirty(true); })),
-        share.user_id && muted(`已用 ${bytes(share.used_bytes)} · ${share.status === 'accepted' ? '已接受' : share.status === 'rejected' ? '已拒绝' : '等待接受'}`),
-      ));
-      rows.append(row);
-    }
-    saved.shares.forEach(add);
-    form.addEventListener('input', () => ctx.setDirty(true));
-    const supported = ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1'].every(feature => agent.features?.includes(feature));
-    if (!supported) form.querySelector('button[type=submit]').disabled = true;
-    const box = ctx.dialog(`${agent.name} · 共享 Agent`, stack(!supported && notice('请先升级 Agent，再启用共享'), form), { wide: true });
-    box.onRequestClose = async () => {
-      if (box.querySelector('form[aria-busy=true]')) return;
-      if (!await ctx.confirm('关闭共享设置？尚未保存的修改将丢弃。', '关闭共享设置') || !ctx.current()) return;
-      ctx.setDirty(false); box.close();
-    };
-  }
-  function batch() {
-    const chosen = agents.filter(agent => selected.has(agent.id));
-    if (!chosen.length) { ctx.announce('请先选择节点', 'error'); return; }
-    const output = node('div');
-    const form = ctx.form([
-      muted(`已选择 ${chosen.length} 个节点`),
-      grid(field('内核', 'engine', 'mihomo', { options: engineIDs }), field('操作', 'action', 'status', { options: [['status', '查询状态'], ['start', '启动'], ['restart', '重启'], ['stop', '停止']] })), output,
-    ], '执行批量操作', async values => {
-      if (!await ctx.confirm(`对选中节点执行“${actionName(values.action)}”？不符合条件的节点会跳过。`, '执行批量操作') || !ctx.current()) return;
-      const rows = [];
-      for (const agent of chosen) {
-        if (!ctx.current()) break;
-        const runtime = agent.runtime?.[values.engine] || {};
-        if (guard(values.action, agent.status === 'online', runtime.installed, runtime.service_status, agent, values.engine)) { rows.push([agent.name, '已跳过，当前状态或权限不适用']); continue; }
-        try { const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine: values.engine, action: values.action } }); rows.push([agent.name, actions('已提交', ctx.can('tasks.read') && button('任务详情', () => void taskDetail(ctx, task.id)))]); }
-        catch (error) { if (error.name === 'AbortError') throw error; rows.push([agent.name, error.message]); }
-        output.replaceChildren(table(['节点', '结果'], rows, { label: '批量操作结果' }));
-      }
-    });
-    ctx.dialog('批量操作', form, { wide: true });
-  }
+  function batch() { openNodeBatch(ctx, () => agents, selected); }
+
+  const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : '更新失败，保留上次数据'; };
+  poll({ ...ctx, onRefreshError: failedRefresh }, load);
+  ctx.onRefresh(async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } });
   draw(); search.querySelector('input').addEventListener('input', draw);
-  const deepID = location.hash.match(/^#(?:settings-node|node)-([^?]+)/)?.[1];
-  if (deepID) { const agent = agents.find(agent => agent.id === deepID); if (agent) queueMicrotask(() => { if (ctx.current()) void settings(agent); }); }
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
+  const deepID = location.hash.match(/^#(?:settings-node-|node-(?!settings(?:\?|$)))([^?]+)/)?.[1]
+    || new URLSearchParams(location.hash.split('?')[1] || '').get('agent');
+  if (deepID) queueMicrotask(() => {
+    if (!ctx.current()) return;
+    const agent = agents.find(agent => agent.id === deepID);
+    if (agent) void settings(agent);
+    else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
+  });
+  return stack(node('div', { className: 'a-probe-toolbar' }, search, sort, actions(
     cardToggle, listToggle,
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
     batchToggle,
-  )), batchBar, results);
+  )), refreshState, batchBar, results);
 }

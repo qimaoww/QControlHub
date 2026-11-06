@@ -1,15 +1,22 @@
-import { clientAccessAddressChoices, clientAccessEntryForAddress, clientAccessExport, filterClientAccessEntries, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
+import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessEntryForAddress, clientAccessExport, filterClientAccessEntries, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
+import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
+import { accountStorage } from '../modules/account-storage.js';
+import { nodeRegionFlag } from './node-region.js';
+import { patch, listen } from './live-dom.js';
 import { filterbar, copyText, node, button, actions, stack, section, table, badge, field, muted, list, notice, link, pathID } from './ui.js';
 
 export async function clientAccessPage(ctx) {
-  let entries = list(await ctx.api('/client-access'));
-  const agents = ctx.can('agents.read') ? list(await ctx.api('/agents')) : [];
+  const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
+  let [entries, agents] = await Promise.all([ctx.api('/client-access'), ctx.can('agents.read') ? ctx.api('/agents') : [], ordering.load()]);
+  entries = list(entries); agents = orderNodesBySavedOrder(list(agents), ordering.ids());
   const search = field('搜索接入配置', 'search', '', { type: 'search', placeholder: '节点、协议、入站或地址' });
-  const agentFilter = field('节点', 'agent', '', { options: [['', '全部节点'], ...[...new Map(entries.map(entry => [entry.agent_id, entry.agent_name || entry.agent_id]))]] });
+  const agentOptions = () => [['', '全部节点'], ...groupClientAccessEntries(entries, agents).map(group => [group.agent_id, group.entries[0].agent_name || group.agent_id])];
+  const agentFilter = field('节点', 'agent', '', { options: agentOptions() });
   const engineFilter = field('内核', 'engine', '', { options: [['', '全部内核'], ...new Set(entries.map(entry => entry.engine))] });
   const format = field('导出格式', 'format', loadClientDisplayFormat(), { options: [['url', 'URL'], ['mihomo', 'Mihomo YAML']] });
   const result = node('div', { className: 'a-stack' });
   const addressModes = new Map();
+  let readSequence = 0;
   const urls = new Set(), timers = new Set();
   ctx.signal.addEventListener('abort', () => { urls.forEach(url => URL.revokeObjectURL(url)); timers.forEach(clearTimeout); urls.clear(); timers.clear(); }, { once: true });
   function download(value, name, type = 'text/plain;charset=utf-8') {
@@ -37,7 +44,7 @@ export async function clientAccessPage(ctx) {
     const profile = item.profile || {};
     const exports = [];
     const primary = clientAccessExport(item, format.querySelector('select').value);
-    if (primary.value) exports.push(secret(primary.format, primary.value, format.querySelector('select').value === 'mihomo'));
+    if (primary.value) exports.push(secret(primary.format, primary.value));
     if (primary.error) exports.push(notice(primary.error));
     const variants = profile.variants?.length ? profile.variants : profile.xray_json ? [{ name: 'Xray 客户端配置', profile }] : [];
     for (const variant of variants) {
@@ -48,7 +55,7 @@ export async function clientAccessPage(ctx) {
         secret('完整 Xray JSON', value.xray_json, true), button('下载 JSON', () => download(value.xray_json, 'xray-client.json', 'application/json')),
       ))));
     }
-    if (profile.uri && !primary.value && !profile.xray_json) exports.push(secret(profile.format || '原生配置', profile.uri, true));
+    if (format.querySelector('select').value === 'url' && profile.uri && !primary.value && !profile.xray_json) exports.push(secret(profile.format || '原生配置', profile.uri, true));
     ctx.dialog(`${item.protocol || entry.engine} · 参数详情`, stack(
       actions(badge(entry.engine), muted(item.tag), muted(`端口 ${item.port}`)),
       ...list(profile.fields).map(part => part.secret ? secret(part.label, part.value) : field(part.label, 'parameter', part.value, { readonly: true })),
@@ -56,6 +63,7 @@ export async function clientAccessPage(ctx) {
     ), { wide: true });
   }
   function display(entry, item) {
+    let changed = false;
     const selector = { engine: entry.engine, tag: item.tag, port: Number(item.port) };
     const originalAddress = item.address_overridden ? item.address || '' : '';
     const choices = clientAccessAddressChoices(entry);
@@ -72,7 +80,7 @@ export async function clientAccessPage(ctx) {
       if (!ctx.current()) return;
       ctx.setDirty(false); box.close(); await reload(); ctx.announce('客户端显示参数已保存');
     });
-    form.addEventListener('input', () => ctx.setDirty(true));
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { changed = true; ctx.setDirty(true); });
     const box = ctx.dialog('修改显示参数', stack(form, item.address_overridden && button('恢复自动识别', async event => {
       const control = event.currentTarget;
       if (!await ctx.confirm('清除当前端口的手动连接地址？', '恢复自动识别') || !ctx.current()) return;
@@ -82,45 +90,61 @@ export async function clientAccessPage(ctx) {
       });
     })));
     box.onRequestClose = async () => {
-      if (!await ctx.confirm('关闭显示参数？尚未保存的修改将丢弃。', '关闭') || !ctx.current()) return;
+      if (changed && !await ctx.confirm('关闭显示参数？尚未保存的修改将丢弃。', '关闭') || !ctx.current()) return;
       ctx.setDirty(false); box.close();
     };
   }
   async function reload() {
-    const received = list(await ctx.api('/client-access'));
-    if (!ctx.current()) return;
-    entries = received; draw();
+    const sequence = ++readSequence;
+    const [received, nodes] = await Promise.all([ctx.api('/client-access'), ctx.can('agents.read') ? ctx.api('/agents') : [], ordering.load()]);
+    if (!ctx.current() || sequence !== readSequence) return;
+    entries = list(received); agents = orderNodesBySavedOrder(list(nodes), ordering.ids());
+    const picker = agentFilter.querySelector('select'), selected = picker.value;
+    const options = agentOptions(), fingerprint = JSON.stringify(options);
+    if (picker.dataset.options !== fingerprint) {
+      picker.replaceChildren(picker.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
+      picker.dataset.options = fingerprint;
+    }
+    picker.value = agentOptions().some(([value]) => value === selected) ? selected : '';
+    draw();
   }
   function draw() {
-    const shown = filterClientAccessEntries(entries, { query: search.querySelector('input').value, agent: agentFilter.querySelector('select').value, engine: engineFilter.querySelector('select').value });
-    result.replaceChildren(...shown.map(entry => {
+    const shown = filterClientAccessEntries(groupClientAccessEntries(entries, agents).flatMap(group => group.entries).map(entry =>
+      clientAccessEntryForAddress(entry, addressModes.get(JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || ''])) || 'auto')),
+    { query: search.querySelector('input').value, agent: agentFilter.querySelector('select').value, engine: engineFilter.querySelector('select').value });
+    const cards = shown.map(entry => {
       // Bind the selection to the real instance identity, never to list order.
       const key = JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || '']);
       const choices = clientAccessAddressChoices(entry);
-      const selected = clientAccessEntryForAddress(entry, addressModes.get(key) || 'auto');
-      const address = choices.length ? field('预览地址', 'address', addressModes.get(key) || 'auto', { options: choices.map(choice => [choice.value, choice.label]) }) : muted(selected.address || '暂无接入地址');
-      address.querySelector('select')?.addEventListener('change', event => { addressModes.set(key, event.target.value); draw(); });
+      const selected = entry;
+      const address = choices.length ? field('预览地址', 'address', addressModes.get(key) || 'auto', { id: `client-address-${encodeURIComponent(key)}`, options: choices.map(choice => [choice.value, choice.label]) }) : muted(selected.address || '暂无接入地址');
+      const addressSelect = address.querySelector('select');
+      if (addressSelect) listen(addressSelect, 'change', event => { addressModes.set(key, event.target.value); draw(); });
       const agent = agents.find(agent => agent.id === entry.agent_id);
-      return section(entry.agent_name || entry.agent_id, stack(node('div', { className: 'a-card-body' }, address),
+      const card = section(node('span', { className: 'a-probe-name' }, nodeRegionFlag(ctx, agent), entry.agent_name || entry.agent_id), stack(node('div', { className: 'a-card-body' }, address),
         entry.error && node('div', { className: 'a-card-body' }, notice(entry.error)),
-        table(['入站', '协议', '客户端', '操作'], list(selected.profiles).map(item => {
+        node('div', { className: 'a-traffic-list' }, table(['入站', '协议', '客户端', '操作'], list(selected.profiles).map(item => {
           const exported = clientAccessExport(item, format.querySelector('select').value);
-          return [stack(item.tag || '—', muted(`端口 ${item.port}`)), item.protocol || '—', item.client_name || entry.client_name || '—', actions(
+          return [stack(item.tag || '—', muted(`端口 ${item.port}`)), stack(item.protocol || '—', exported.error && muted(exported.error)), item.client_name || entry.client_name || item.tag || '—', actions(
             button('参数详情', () => details(entry, item)),
             button('复制', event => void copy(exported.value, event.currentTarget), { disabled: Boolean(exported.error || !exported.value) }),
             button('下载', () => download(exported.value, `client-${entry.engine}.${format.querySelector('select').value === 'mihomo' ? 'yaml' : 'txt'}`), { disabled: Boolean(exported.error || !exported.value) }),
             agent && ctx.can('agents.manage', agent) && button('修改显示参数', () => display(entry, item)),
           )];
-        }), { label: '客户端接入' }),
+        }), { label: '客户端接入', rowKey: row => row[0].firstChild.textContent + ':' + row[0].lastChild.textContent })),
         ctx.can('agent-config.read') && node('div', { className: 'a-card-body' }, link('服务端配置', `#live-config?agent=${pathID(entry.agent_id)}&engine=${pathID(entry.engine)}`)),
       ), badge(entry.engine));
-    }));
-    if (!shown.length) result.replaceChildren(stack(
+      card.dataset.clientAgent = entry.agent_id; card.dataset.clientEngine = entry.engine; card.dataset.refreshKey = key;
+      return card;
+    });
+    const content = shown.length ? cards : [stack(
       node('p', { className: 'a-empty' }, entries.length ? '没有符合条件的接入配置' : '部署服务端入站后生成客户端配置'),
-      !entries.length && ctx.can('agents.read') && actions(link('前往节点设置', '#node-settings'))));
+      !entries.length && ctx.can('agents.read') && actions(link('前往节点设置', '#node-settings')))];
+    patch(result, node('div', { className: 'a-stack' }, content));
   }
   search.querySelector('input').addEventListener('input', draw);
   for (const control of [agentFilter, engineFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
+  ctx.onRefresh(reload);
   draw();
-  return stack(filterbar(node('div', { className: 'a-filter-fields' }, search, agentFilter, engineFilter, format)), result);
+  return stack(filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter, engineFilter, format)), result);
 }

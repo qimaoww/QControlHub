@@ -1,102 +1,133 @@
-import { ipQualityReportRecord, ipQualityBlockReason, ipQualityValue, ipQualityEntries, ipQualityStatusName } from "../modules/ip-quality-model.js";
-import { autoFilter, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, query, code } from "./ui.js";
+import { patch } from "./live-dom.js";
+import { nodeName } from "./node-region.js";
+import { createIPQualityController } from "../modules/ip-quality-controller.js";
+import { ipQualityLatest, ipQualityToday, ipQualityReportRecord, ipQualityBlockReason, ipQualityFeature, ipQualityNodeList, ipQualityTiming, ipQualityStatusName } from "../modules/ip-quality-model.js";
+import { orderNodesBySavedOrder, savedNodeOrder } from "../modules/node-order.js";
+import { node, button, actions, stack, grid, section, badge, field, muted, list, pathID, notice } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
 
-export async function ipQualityPage(ctx) {
-  const agents = list(await ctx.api("/agents"));
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  let history = await ctx.api(query("/ip-quality", { timezone }));
-  let selectedID = agents.some(agent => agent.id === ctx.state.data.ipQualityNode) ? ctx.state.data.ipQualityNode : agents[0]?.id;
+export function ipQualityPage(ctx) {
+  let nodeOrder = savedNodeOrder();
+  const orderReady = ctx.api('/preferences/node-order').then(order => {
+    if (ctx.current() && Array.isArray(order?.ids)) nodeOrder = order.ids;
+  }).catch(() => {});
   const navigation = node("nav", { className: "a-ipq-nodes", "aria-label": "检测节点" });
   const results = node("div", { className: "a-ipq-detail a-stack" });
-  const filter = autoFilter(ctx, [
-    field("检测日期", "date", "", { options: [["", "最新检测"], ...list(history.dates).map(day => [day, day])] }),
-  ], async (values, _, request) => {
-    const received = await request.api(query("/ip-quality", { date: values.date, timezone }));
-    if (!request.current()) return;
-    history = received;
-    draw();
-  });
-  filter.classList.add("a-ipq-filter");
-  const display = value => ipQualityValue(value).replace(/(?:\x1b|\\x1b|x1b)\[[0-?]*[ -/]*[@-~]/gi, "");
-  const facts = entries => node("dl", { className: "a-ipq-facts" }, entries.map(([key,value]) => node("div", {}, node("dt", {}, key), node("dd", {}, display(value)))));
-  function reportView(report) {
-    const pairs = data => table(["来源", "结果"], ipQualityEntries(data).map(([name,value]) => [name,display(value)]));
-    const factorNames = { CountryCode: "国家 / 地区", Proxy: "代理", Tor: "Tor", VPN: "VPN", Server: "数据中心", Abuser: "滥用", Robot: "机器人" };
-    const factors = ipQualityEntries(report.Factor);
-    const providers = [...new Set(factors.flatMap(([,values]) => ipQualityEntries(values).map(([name]) => name)))];
-    const factorTable = table(["来源", ...factors.map(([name]) => factorNames[name] || name)],
-      providers.map(provider => [provider, ...factors.map(([,values]) => display(values?.[provider]))]));
-    const details = node("details", {}, node("summary", {}, "上游原始 JSON"), code(JSON.stringify(report, null, 2)));
-    return stack(
-      section(report.Head?.IP || "IP 检测报告", facts([
-        ["ASN", report.Info?.ASN], ["运营商", report.Info?.Organization], ["地区", report.Info?.Region?.Name],
-        ["城市", report.Info?.City?.Name], ["检测时间", report.Head?.Time], ["脚本发行版本", report.Head?.Version],
-      ])),
-      grid(section("风险评分", pairs(report.Score)), section("IP 用途", pairs(report.Type?.Usage))),
-      section("风险因子", factorTable),
-      section("流媒体与 AI", table(["平台", "状态", "区域", "类型"], ipQualityEntries(report.Media).map(([name, value]) => [
-        name, display(value?.Status), display(value?.Region), display(value?.Type),
-      ]))),
-      section("邮件连通性", pairs(Object.fromEntries(ipQualityEntries(report.Mail).filter(([name]) => name !== "DNSBlacklist")))),
-      section("DNS 黑名单", pairs(report.Mail?.DNSBlacklist)), details);
-  }
-  function draw() {
-    const byID = new Map(list(history.records).map(record => [record.agent_id, record]));
-    const schedules = new Map(list(history.schedules).map(schedule => [schedule.agent_id, schedule]));
-    navigation.replaceChildren(...agents.map(agent => {
-      const record = byID.get(agent.id);
-      return button(stack(node("strong", {}, agent.name), muted(record ? ipQualityStatusName(record.status) : "暂无检测记录")), () => {
-        selectedID = agent.id; ctx.state.data.ipQualityNode = agent.id; draw();
-      }, { className: "a-ipq-node", "aria-pressed": String(agent.id === selectedID) });
-    }));
-    const agent = agents.find(agent => agent.id === selectedID);
-    if (!agent) { results.replaceChildren(node("p", { className: "a-empty" }, "暂无可检测的节点")); return; }
-    {
-      const record = byID.get(agent.id);
-      const report = ipQualityReportRecord(record, history.date || "latest", timezone);
-      const blocked = ipQualityBlockReason(agent, record);
-      const editable = ctx.can("agents.manage", agent) && ctx.can("tasks.execute");
-      const tools = actions(
-        editable && button("立即检测", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm(`在 ${agent.name} 运行 IP 质量检测？`, "开始检测") || !ctx.current()) return;
-          await ctx.mutate(control, async () => {
-            const task = await ctx.api("/ip-quality", { method: "POST", body: { agent_id: agent.id } });
-            ctx.announce("检测任务已提交");
-            if (ctx.can("tasks.read")) await taskDetail(ctx, task.id);
-          });
-        }, { disabled: Boolean(blocked), title: blocked }),
-        editable && button(schedules.get(agent.id)?.enabled ? "关闭定时检测" : "启用定时检测", event => void ctx.mutate(event.currentTarget, async () => {
-          const saved = await ctx.api(`/ip-quality/schedules/${pathID(agent.id)}`, { method: "PUT", body: { enabled: !schedules.get(agent.id)?.enabled } });
-          schedules.set(agent.id, saved);
-          history = await ctx.api(query("/ip-quality", { date: history.date, timezone }));
-          draw();
-          ctx.announce("定时检测设置已保存");
-        })));
-      const archives = report?.archives || [];
-      const archiveViews = archives.map(archive => {
-        const link = `/api/v1/ip-quality/${pathID(report.task_id)}/archives/${archive.family}`;
-        const image = node("img", { src: link, alt: `${agent.name} IPv${archive.family} 检测报告`, loading: "lazy", className: "a-report-image" });
-        const error = notice("", "error");
-        const retry = button("重新加载图片", () => { image.src = `${link}?reload=${Date.now()}`; error.textContent = ""; ctx.visible(retry, false); });
-        ctx.visible(retry, false);
-        image.addEventListener("error", () => { error.textContent = "报告图片加载失败，可重试或查看结构化报告。"; ctx.visible(retry, true); });
-        return button(`IPv${archive.family} 报告图片`, () => ctx.dialog(`${agent.name} · IPv${archive.family}`, stack(image, error, retry), { wide: true }));
-      });
-      results.replaceChildren(section(agent.name, node("div", { className: "a-card-body" }, stack(
-        actions(status(agent.status), record ? status(record.status) : badge("尚未检测"),
-          badge(schedules.get(agent.id)?.enabled ? "定时检测已启用" : "定时检测已关闭")),
-        record && muted(`检测时间 · ${date(record.finished_at || record.created_at)}`),
-        blocked && muted(blocked),
-        record?.error && notice(record.error),
-        report && report !== record && muted("显示最近一次成功报告"),
-        archiveViews.length > 0 && actions(archiveViews),
-        !report && node("p", { className: "a-empty" }, record?.status === "succeeded" ? "检测已完成，暂无可用报告" : ["pending", "running"].includes(record?.status) ? "检测进行中，可在任务详情查看状态" : "暂无报告，可运行检测或切换日期查看记录"),
-      )), tools), ...list(report?.result?.reports).map(reportView));
+  const archiveStates = new Map();
+  const loading = muted("正在读取检测记录…");
+  loading.setAttribute("role", "status");
+  const dateField = field("检测日期", "date", "", { options: [["", "最新检测"]] });
+  const select = dateField.querySelector("select");
+  const reset = button("重置", () => { select.value = ""; void controller.load(ipQualityLatest); });
+  const filter = node("form", { className: "a-stack a-filter-form a-auto-filter a-ipq-filter", onsubmit(event) {
+    event.preventDefault(); void controller.load(select.value || ipQualityLatest);
+  } }, node("fieldset", { className: "a-form-fields a-stack" }, dateField), actions(reset));
+  select.addEventListener("change", () => void controller.load(select.value || ipQualityLatest));
+  const state = {
+    get data() { return ctx.state.data; },
+    get route() { return ctx.current() ? "ip-quality" : ""; },
+    navigationEpoch: 0, routeSignal: ctx.signal,
+  };
+  state.data.ipQualityAgent ||= state.data.ipQualityNode;
+  const controller = createIPQualityController({ state, can: ctx.can, notify: ctx.announce, confirmAction: ctx.confirm,
+    api: async (path, options = {}) => {
+      const read = ctx.api(path, { ...options, body: typeof options.body === "string" ? JSON.parse(options.body) : options.body });
+      if (path === '/agents') { const [value] = await Promise.all([read, orderReady]); return value; }
+      return read;
+    },
+  }, draw);
+  function draw(snapshot) {
+    if (!ctx.current()) return;
+    const { history, date: selectedDate, timezone, loading: reading, readFailed, submitting, creating, creationErrors, editable } = snapshot;
+    loading.textContent = readFailed ? "读取失败，保留已有报告" : reading ? "正在读取检测记录…" : "正在实时更新";
+    loading.title = snapshot.error || "";
+    const available = snapshot.availableDates || [];
+    const dates = selectedDate === ipQualityLatest || available.includes(selectedDate) ? available : [selectedDate, ...available];
+    const signature = JSON.stringify(dates);
+    if (select.dataset.dates !== signature && document.activeElement !== select) {
+      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")),
+        node("option", { value: "" }, "最新检测"), ...dates.map(day => node("option", { value: day }, day)));
+      select.dataset.dates = signature;
     }
+    if (document.activeElement !== select) select.value = selectedDate === ipQualityLatest ? "" : selectedDate;
+    select.disabled = !history && !dates.length; reset.disabled = !history && !dates.length;
+    filter.toggleAttribute("aria-busy", Boolean(reading));
+    const canOperate = selectedDate === ipQualityLatest || selectedDate === ipQualityToday();
+    const records = list(history?.records), schedules = new Map(list(history?.schedules).map(schedule => [schedule.agent_id, schedule]));
+    const byID = new Map(list(snapshot.agents).map(agent => [agent.id, agent]));
+    const nodes = ipQualityNodeList(orderNodesBySavedOrder(list(snapshot.agents), nodeOrder), records, canOperate, state.data.ipQualityAgent,
+      history ? "" : readFailed ? "读取失败" : "正在读取记录", selectedDate === ipQualityLatest);
+    if (nodes.selected) state.data.ipQualityAgent = nodes.selected.id;
+    patch(navigation, node("nav", { className: "a-ipq-nodes", "aria-label": "检测节点" }, nodes.items.map(item =>
+      button(stack(nodeName(ctx, byID.get(item.id)), muted(item.note)), () => controller.select(item.id), {
+        className: "a-ipq-node", "data-refresh-key": item.id, "aria-pressed": String(item.id === nodes.selected?.id),
+      }))));
+    const agent = nodes.selected;
+    if (!agent) {
+      results.replaceChildren(node("p", { className: "a-empty" }, !history ? readFailed ? "检测记录读取失败，可刷新重试" : "正在读取检测记录…" : selectedDate === ipQualityLatest ? "暂无可检测的节点" : "所选日期暂无检测记录"));
+      return;
+    }
+    const record = records.find(record => record.agent_id === agent.id);
+    const report = ipQualityReportRecord(record, selectedDate, timezone);
+    const reason = !history ? "正在读取检测记录" : !canOperate ? "历史记录不能提交检测" : ipQualityBlockReason(agent, record);
+    const blocked = readFailed ? "请先刷新检测记录" : reason;
+    const pending = submitting?.has(agent.id);
+    const tools = actions(
+      canOperate && editable(agent) && button(creating?.has(agent.id) ? "任务创建中…" : "立即检测", () => void controller.runCheck(agent.id), { disabled: Boolean(blocked || pending), title: blocked, "data-ip-quality-run": agent.id }),
+      canOperate && editable(agent) && button(schedules.get(agent.id)?.enabled ? "关闭定时检测" : "启用定时检测", () => void controller.setSchedule(agent.id, !schedules.get(agent.id)?.enabled), { "data-ip-quality-schedule": agent.id, "aria-pressed": String(Boolean(schedules.get(agent.id)?.enabled)), disabled: Boolean(!history || readFailed || pending || !schedules.get(agent.id)?.enabled && !agent.features?.includes(ipQualityFeature)) }),
+      record?.task_id && ctx.can("tasks.read") && button("任务详情", () => void taskDetail(ctx, record.task_id)));
+    const archives = list(report?.archives).map(archive => {
+      const key = `${report.task_id}:${archive.family}`;
+      if (!archiveStates.has(key)) archiveStates.set(key, { failed: false, reload: 0 });
+      const state = archiveStates.get(key);
+      const link = `/api/v1/ip-quality/${pathID(report.task_id)}/archives/${archive.family}`;
+      const preview = `${link}?layout=aligned`;
+      const update = (image, failed) => {
+        state.failed = failed;
+        if (!failed && image.naturalWidth && image.naturalHeight) {
+          state.width = image.naturalWidth; state.height = image.naturalHeight;
+          image.setAttribute("width", state.width); image.setAttribute("height", state.height);
+        }
+        const view = image.closest("section");
+        if (!view) return;
+        view.querySelector("[role=alert]").textContent = failed ? "报告图片加载失败，请重试。" : "";
+        view.querySelector("[data-report-retry]").hidden = !failed;
+      };
+      const image = node("img", { src: state.reload ? `${preview}&reload=${state.reload}` : preview,
+        width: state.width, height: state.height,
+        alt: `${agent.name} IPv${archive.family} 检测报告`, loading: "lazy", className: "a-report-image",
+        onerror: event => update(event.currentTarget, true), onload: event => update(event.currentTarget, false) });
+      const retry = button("重新加载图片", event => {
+        state.reload++;
+        const image = event.currentTarget.closest("section").querySelector("img");
+        update(image, false); image.src = `${preview}&reload=${state.reload}`;
+      }, { "data-report-retry": "", hidden: !state.failed });
+      const view = section(`IPv${archive.family} 报告`, node("div", { className: "a-card-body" }, stack(
+        node("a", { href: preview, target: "_blank", rel: "noopener noreferrer", "aria-label": `查看 IPv${archive.family} 报告原图`, title: "查看原图" }, image),
+        notice(state.failed ? "报告图片加载失败，请重试。" : "", "error"), retry)),
+        node("a", { className: "a-button", href: link, download: "" }, "下载报告"));
+      view.dataset.refreshKey = key;
+      return view;
+    });
+    const timing = ipQualityTiming(record);
+    const lifecycle = record && `${record.status === "pending" ? "排队中，等待 Agent 领取" : record.status === "running" ? "执行中" : ipQualityStatusName(record.status)}${timing ? ` · ${timing}` : ""}`;
+    const summary = section(agent.name,
+      node("div", { className: "a-card-body" }, stack(
+        actions(canOperate && status(agent.status), record ? status(record.status) : badge(!history ? "正在读取" : "尚未检测"), canOperate && badge(schedules.get(agent.id)?.enabled ? "定时检测已启用" : "定时检测已关闭")),
+        record && muted(lifecycle),
+        ["pending", "running"].includes(record?.status) && muted("检测可能需要数分钟，耗时受节点网络和探测源影响。"),
+        (report || record) && actions(muted(report && report !== record ? "上次成功检测" : "检测时间"), node("time", { datetime: (report || record).finished_at || (report || record).created_at }, date((report || record).finished_at || (report || record).created_at))),
+        reason && muted(reason), record?.error && notice(record.error), creationErrors?.get(agent.id) && notice(creationErrors.get(agent.id)),
+        report && report !== record && muted(["pending", "running"].includes(record.status) ? "新检测进行中，保留上次成功报告" : "最新检测未成功，保留上次成功报告"),
+        !archives.length && node("p", { className: "a-empty" }, report ? "该记录没有报告图片" : !history ? reading ? "正在读取检测记录…" : "检测记录读取失败，可刷新重试" : snapshot.recordsRemoved?.has(agent.id) ? "检测记录已移除" : record?.status === "succeeded" ? "检测已完成，暂无可用报告" : ["pending", "running"].includes(record?.status) ? "检测进行中，可在任务详情查看状态" : "暂无报告，可运行检测或切换日期查看记录"),
+      )), tools);
+    summary.dataset.ipQualityPanel = agent.id;
+    patch(results, node("div", { className: "a-ipq-detail a-stack" }, summary,
+      archives.length > 1 ? grid(archives) : archives));
   }
-
-  draw();
-  return stack(filter, node("div", { className: "a-ipq-layout" }, navigation, results));
+  ctx.signal.addEventListener("abort", () => { controller.dispose(); archiveStates.clear(); }, { once: true });
+  ctx.onRefresh(() => controller.load());
+  void controller.load();
+  return stack(filter, loading, node("div", { className: "a-ipq-layout" }, navigation, results),
+    node("p", { className: "a-muted" }, node("a", { href: "https://github.com/xykt/IPQuality", target: "_blank", rel: "noopener noreferrer" }, "xykt/IPQuality"), " · AGPL-3.0"));
 }

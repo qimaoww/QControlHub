@@ -58,7 +58,7 @@ func TestXrayAPIMigrationDeleteAndRestore(t *testing.T) {
 					var result configMutationResult
 					client.call("POST", base+"/server-inbounds", payload, http.StatusOK, &result)
 					if strings.Contains(result.Config.Content, "HandlerService") || strings.Contains(result.Config.Content, "8443") || !strings.Contains(result.Config.Content, "LoggerService") || !strings.Contains(result.Config.Content, "example.test") {
-						t.Fatal("migration removed unrelated resources or kept the target")
+						t.Fatalf("migration contract: mutable=%t targetToken=%t logger=%t domain=%t remainingPorts=%+v", strings.Contains(result.Config.Content, "HandlerService"), strings.Contains(result.Config.Content, "8443"), strings.Contains(result.Config.Content, "LoggerService"), strings.Contains(result.Config.Content, "example.test"), serverconfig.DiscoverTrafficPorts(core.EngineXray, result.Config.Content))
 					}
 					want := 0
 					if remaining {

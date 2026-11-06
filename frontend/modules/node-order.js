@@ -8,7 +8,7 @@ const cached = storage => {
 
 // Each instance belongs to one authenticated account lifetime. Reads and writes
 // share a queue so a slow poll cannot overwrite a later gesture.
-export function createNodeOrderSync(api, storage, isCurrent = () => true, canMigrate = true) {
+export function createNodeOrderSync(api, storage, isCurrent = () => true, canMigrate = true, { endpoint = "/preferences/node-order", key = nodeCardOrderKey, migrationIDs = (ids, value) => ids.filter(id => value.ids.includes(id)) } = {}) {
   let order = null, queue = Promise.resolve(), reading = null;
   const current = () => { if (!isCurrent()) throw new DOMException("Account changed", "AbortError"); };
   const apply = value => {
@@ -17,8 +17,8 @@ export function createNodeOrderSync(api, storage, isCurrent = () => true, canMig
       throw new Error("Invalid node order response");
     order = { ids: clean(value.ids), revision: value.revision };
     try {
-      storage.setItem(nodeCardOrderKey, JSON.stringify(order.ids));
-      storage.setItem(`${nodeCardOrderKey}:server`, "true");
+      storage.setItem(key, JSON.stringify(order.ids));
+      storage.setItem(`${key}:server`, "true");
     } catch {}
     return order;
   };
@@ -31,20 +31,19 @@ export function createNodeOrderSync(api, storage, isCurrent = () => true, canMig
     current();
     // Capture the old scoped preference before caching the server response.
     let legacy = [];
-    try { if (canMigrate && !storage.getItem(`${nodeCardOrderKey}:server`)) legacy = cached(storage); } catch {}
-    const value = await api("/preferences/node-order");
+    try { if (canMigrate && !storage.getItem(`${key}:server`)) legacy = clean(JSON.parse(storage.getItem(key))); } catch {}
+    const value = await api(endpoint);
     current();
     if (value.revision === 0 && legacy.length) {
-      const visible = new Set(value.ids);
-      const ids = legacy.filter(id => visible.has(id));
+      const ids = clean(migrationIDs(legacy, value));
       if (ids.length) {
-        return apply(await api("/preferences/node-order", { method: "PUT", body: JSON.stringify({ ids, revision: 0, initialize: true }) }));
+        return apply(await api(endpoint, { method: "PUT", body: JSON.stringify({ ids, revision: 0, initialize: true }) }));
       }
     }
     return apply(value);
   }
   return {
-    ids: () => order?.ids ?? cached(storage),
+    ids: () => order?.ids ?? (() => { try { return clean(JSON.parse(storage.getItem(key))); } catch { return []; } })(),
     load() {
       if (!reading) {
         const result = enqueue(read);
@@ -61,13 +60,13 @@ export function createNodeOrderSync(api, storage, isCurrent = () => true, canMig
         for (let attempt = 0; attempt < 3; attempt++) {
           current();
           try {
-            apply(await api("/preferences/node-order", { method: "PUT", body: JSON.stringify({ ids: subset, revision: order.revision }) }));
+            apply(await api(endpoint, { method: "PUT", body: JSON.stringify({ ids: subset, revision: order.revision }) }));
             return true;
           } catch (error) {
             current();
             // Also reconcile an ambiguous failure after the database committed.
             try {
-              const actual = apply(await api("/preferences/node-order"));
+              const actual = apply(await api(endpoint));
               const selected = new Set(subset);
               if (JSON.stringify(actual.ids.filter(id => selected.has(id))) === JSON.stringify(subset)) return true;
             } catch {
@@ -116,4 +115,16 @@ export function orderNodesBySavedOrder(nodes = [], saved = savedNodeOrder()) {
 }
 export function orderedNodeList(nodes = [], storage) {
   return orderNodesBySavedOrder(nodes, savedNodeOrder(storage));
+}
+
+// Pages with a node picker read the account order alongside authorized nodes.
+// Sorting never expands the returned node scope or grants resource permissions.
+export async function readOrderedNodes(api) {
+  const [nodes, preference] = await Promise.all([
+    api('/agents'), api('/preferences/node-order').catch(error => {
+      if (error.name === 'AbortError') throw error;
+      return null;
+    }),
+  ]);
+  return orderNodesBySavedOrder(Array.isArray(nodes) ? nodes : [], preference?.ids || savedNodeOrder());
 }

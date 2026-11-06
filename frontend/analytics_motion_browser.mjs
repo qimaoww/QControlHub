@@ -122,14 +122,14 @@ export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, w
   await evaluate(page, `(async () => {
     const lifecycle=await import('/assets/modules/theme-lifecycle.js');const old=lifecycle.currentTheme('analytics');
     old.frame(()=>{document.body.dataset.staleMotion='frame'});old.timer(()=>{document.body.dataset.staleMotion='timer'},40);
-    const replacement=lifecycle.mountTheme('classic',()=>({}));
+    old.dispose();
     if(old.current())throw Error('old theme retained ownership');
     if(document.querySelector('.a-motion-tail,.a-tooltip'))throw Error('old temporary paint survived');
     if(document.getAnimations().some(a=>a.id.startsWith('analytics-')))throw Error('old animation survived');
     if(!document.querySelector('link[href*=\\"analytics/theme.css\\"]').disabled)throw Error('old stylesheet remained active');
     await new Promise(resolve=>setTimeout(resolve,80));
     if(document.body.dataset.staleMotion)throw Error('old queued callback ran');
-    replacement.dispose();
+    const replacement=lifecycle.mountTheme('analytics',()=>({}));replacement.dispose();
   })()`);
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#archive-config` }, page);
   await wait(page, "document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");

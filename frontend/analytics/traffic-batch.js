@@ -5,7 +5,7 @@ const requestID=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>
 export function trafficBatch(ctx, policies, agentName, onSaved) {
   const selected=new Set(), results=node('div'), feedback=notice('');
   let uncertain=null,last=null;
-  const choices=policies.map(policy=>field(`${agentName(policy.agent_id)} · ${policy.engine} · :${policy.port}`,policy.id,false,{type:'checkbox',onchange:event=>{event.target.checked?selected.add(policy.id):selected.delete(policy.id);syncSelection();}}));
+  const choices=policies.map(policy=>field(`${agentName(policy.agent_id)} · ${policy.engine} · ${policy.port}`,policy.id,false,{type:'checkbox',onchange:event=>{event.target.checked?selected.add(policy.id):selected.delete(policy.id);syncSelection();}}));
   const all = field('全选', 'select-all', false, { type: 'checkbox', disabled: !policies.length, onchange(event) {
     policies.forEach(policy => event.target.checked ? selected.add(policy.id) : selected.delete(policy.id));
     choices.forEach(choice => { choice.querySelector('input').checked = event.target.checked; });

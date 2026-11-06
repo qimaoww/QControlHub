@@ -1,7 +1,7 @@
-import { installConfigPages } from "./modules/configs.js";
+import { startAnalytics } from "./analytics/app.js";
 import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
 import { nodeCardOrderKey } from "./modules/node-order.js";
-import { installSubStoreSync, subStoreSelectionPayload } from "./modules/substore-sync.js";
+import { subStoreSelectionPayload } from "./modules/substore-model.js";
 import { testSubStoreCardLayout } from "./browser/substore-layout.mjs";
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -35,7 +35,7 @@ async function configFixture({ writable = true, executable = false, installed = 
   const api = async (path, options = {}) => {
     records.calls.push(path);
     if (path === "/agents") return [agent];
-    if (path.endsWith("/workspace")) return { config: workspace };
+    if (path.endsWith("/workspace")) return { agent, config: workspace, deployment:{state:"pending",service_status:"unknown"} };
     if (path === "/configs") return archives;
     if (path.includes("/revisions")) return [];
     if (options.method === "PUT") {
@@ -46,62 +46,67 @@ async function configFixture({ writable = true, executable = false, installed = 
     }
     throw new Error(`unexpected configuration API: ${path}`);
   };
-  const pages = installConfigPages({ state, api, optionalAPI: api, engines: ["mihomo"],
-    can: permission => permissions.has(permission), esc, engineName: value => value, conciseVersion: () => "test",
-    date: String, ago: String, bytes: String, confirmAction: async () => true,
-    notify: message => records.notifications.push(message), bindCodeEditors: () => {},
-    shell: markup => { document.body.innerHTML = markup; },
-    submitTask: async task => { records.tasks.push(task); return { id: "fixture-task" }; },
-  });
+  permissions.add("tasks.read");
+  if (owned && executable) permissions.add("host.manage");
+  const session = {...state.session,username:"alice",permissions:[...permissions],csrf_token:"fixture"};
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, request = {}) => {
+    if (!String(url).startsWith("/api/v1")) return nativeFetch(url,request);
+    const path = String(url).slice("/api/v1".length);
+    const value = path === "/auth/session" ? session : await api(path,request);
+    return new Response(JSON.stringify(value),{status:200,headers:{"Content-Type":"application/json"}});
+  };
+  const styles = document.createElement("link"); styles.rel="stylesheet";styles.href="/assets/analytics/theme.css";
+  const loaded = new Promise((resolve,reject)=>{styles.onload=resolve;styles.onerror=reject;});document.head.append(styles);await loaded;
+  const mount = async hash => {
+    window.dispatchEvent(new Event("pagehide"));
+    history.replaceState(null,"",hash); document.body.replaceChildren(Object.assign(document.createElement("div"),{id:"config-scope-test"}));
+    startAnalytics({app:document.querySelector("#config-scope-test"),session});
+    await waitFor(()=>document.querySelector(".a-main textarea[name=content],.a-main [aria-label=配置档案]")&&!document.querySelector(".a-main [aria-busy=true]"),"actual analytics workspace did not load");
+  };
+  const pages = {liveConfig:()=>mount("#live-config?agent=shared&engine=mihomo"),archiveConfigs:()=>mount("#archive-config")};
   await pages.liveConfig();
-  return { state, pages, records, archives };
+  const dispose = () => {window.dispatchEvent(new Event("pagehide"));document.querySelectorAll("dialog.a-dialog").forEach(box=>box.close());styles.remove();globalThis.fetch=nativeFetch;};
+  return { state, pages, records, archives, dispose };
 }
 
 export async function testConfigScopeRuntime(preview = false) {
-  if (preview) {
-    await configFixture();
-    return;
+  const editor = () => document.querySelector('.a-main textarea[name="content"]');
+  const form = () => editor().form;
+  const button = (label,scope=document) => [...scope.querySelectorAll("button")].find(control=>control.textContent===label);
+  if (preview) {await configFixture();return;}
+  for (const options of [{}, {installed:false,saved:false}]) {
+    const test = await configFixture(options);
+    assert(editor() && !editor().readOnly,"private workspace must remain editable without task permission or an installed core");
+    assert(!editor().value.includes("other-user-runtime-secret"),"private editor inherited a shared-host snapshot");
+    assert(![...document.querySelector('.a-target-form [name="source"]').options].some(option=>option.value!=="personal"),"borrower can read shared-host configuration");
+    assert(form().elements.intent.type==="hidden"&&form().elements.intent.value==="deploy"&&form().querySelector('[type=submit]').disabled,"user without execution permission was offered deployment");
+    editor().value="mixed-port: 23001\n# saved-private-draft\n";editor().dispatchEvent(new Event("input",{bubbles:true}));form().requestSubmit();
+    await new Promise(resolve=>setTimeout(resolve,30));
+    assert(test.records.tasks.length===0&&test.records.writes.length===0,"user without execution permission submitted a save or task");
+    assert(editor().value.includes("saved-private-draft")&&!form().textContent.includes("部署成功"),"blocked deployment lost draft or claimed success");test.dispose();
   }
-  for (const options of [{}, { installed: false, saved: false }]) {
-    const { records } = await configFixture(options);
-    const editor = document.querySelector("[data-code-input]");
-    assert(editor && !editor.readOnly, "private workspace must be editable without task permission or an installed core");
-    assert(!editor.value.includes("other-user-runtime-secret"), "private editor inherited the shared host snapshot");
-    assert(!document.querySelector("[data-read-current], [data-auto-read-current], [data-live-source]"), "private editor offered shared-host configuration reads");
-    assert(document.querySelector('[data-live-intent="save"]'), "save-only users cannot save their configuration");
-    assert(!document.querySelector('[data-live-intent="deploy"], [data-live-intent="validate"]'), "save-only user was offered task execution");
-    editor.value = "mixed-port: 23001\n# saved-private-draft\n";
-    document.querySelector('[data-live-intent="save"]').click();
-    await waitFor(() => records.notifications.includes("已保存，尚未部署"), "personal save did not complete");
-    assert(records.writes.length === 1 && records.tasks.length === 0, "save-only operation submitted a task");
-    assert(records.writes[0].content.includes("saved-private-draft"), "personal save lost edited content");
-  }
-  await configFixture({ executable: true });
-  assert(document.querySelector('[data-live-intent="save"]') && document.querySelector('[data-live-intent="deploy"]'), "authorized user must have separate save and deploy controls");
-  assert(document.body.textContent.includes("本人端口 21001"), "shared workspace must identify the recipient's allocated resources");
-  assert(document.querySelector('a[href="#settings-node-shared"]')?.textContent.includes("实例管理"), "shared workspace lost its node management link");
-  assert(!document.querySelector("[data-task-action], [data-instance-version]"), "shared runtime status or lifecycle controls leaked into the configuration page");
-  assert([...document.querySelectorAll(".live-engine-status")].every(badge => badge.textContent === "配置待核实"), "shared configuration badges must describe the unknown configuration, without borrowing host runtime status");
-  const owned = await configFixture({ owned: true });
-  assert(document.querySelector('[data-live-source="managed"]') && document.querySelector('[data-live-source="import"]'), "owner cannot explicitly read/import its host configuration");
-  assert(!owned.records.calls.includes("/tasks") && !owned.records.tasks.length, "owner's personal editor auto-read a host snapshot");
-  await configFixture({ writable: false });
-  assert(document.querySelector("[data-code-input]").readOnly && !document.querySelector("[data-live-intent]"), "read-only workspace is writable");
-
-  const { state, pages, records } = await configFixture();
-  state.route = "archive-config";
-  state.data.archiveConfigId = "foreign-stale-selection";
-  await pages.archiveConfigs();
-  assert(state.data.archiveConfigId === "archive_1", "stale foreign archive selection was retained");
-  assert(!records.calls.includes("/templates"), "archive reader requested an unauthorized template list");
-  state.data.archiveConfigId = "archive_2";
-  await pages.archiveConfigs();
-  assert(document.querySelector("[data-code-input]").value.includes("22002"), "second personal configuration cannot be selected");
+  const shared=await configFixture({executable:true});
+  assert(form().elements.intent.type==="hidden"&&form().elements.intent.value==="deploy"&&form().querySelector('[type=submit]').textContent==="保存并部署"&&!form().querySelector('[type=submit]').disabled,"authorized recipient cannot save and deploy its own configuration");
+  assert(document.querySelector('.a-main').textContent.includes("本人端口 · 21001"),"shared workspace lacks recipient port scope");
+  assert(document.querySelector('a[href="#settings-node-shared"]')?.textContent==="实例管理","shared workspace lacks instance management");
+  assert(!button("读取托管配置")&&!button("读取系统配置"),"shared borrower was offered host snapshots");
+  assert(!button("启动")&&!button("重启"),"lifecycle controls leaked into source editing");shared.dispose();
+  const owner=await configFixture({owned:true,executable:true});
+  assert([...document.querySelector('.a-target-form [name="source"]').options].some(option=>option.value==="managed")&&[...document.querySelector('.a-target-form [name="source"]').options].some(option=>option.value==="import"),"owner cannot explicitly select authorized host sources");
+  assert(!owner.records.tasks.length&&!owner.records.calls.includes("/tasks"),"personal source auto-read a host snapshot");owner.dispose();
+  const readonly=await configFixture({writable:false});assert(editor().readOnly&&!form().querySelector('button[type="submit"]'),"read-only workspace is writable");readonly.dispose();
+  const archive=await configFixture();archive.state.data.archiveConfigId="foreign-stale-selection";await archive.pages.archiveConfigs();
+  const rows=[...document.querySelectorAll('[aria-label="配置档案"] tbody tr')];
+  assert(rows.length===2&&!document.querySelector('textarea[name="content"]'),"stale archive selection opened a foreign source");
+  assert(!archive.records.calls.includes("/templates"),"archive reader requested unauthorized templates");
+  button("查看与编辑",rows[1]).click();await waitFor(()=>document.querySelector('dialog textarea[name="content"]'),"second personal archive did not open");
+  assert(document.querySelector('dialog textarea[name="content"]').value.includes("22002"),"archive selection loaded the wrong personal source");archive.dispose();
 }
 
 async function subStoreFixture(manage = true) {
   const state = { route: "substore-sync", navigationEpoch: 1,
-    data: { agents: [{ id: "shared", labels: { region_code: "HK" } }] },
+    data: { agents: [{ id: "shared", labels: { region_code: "HK" } }, { id:"alpha" }, { id:"charlie" }] },
     session: { role: "user", user_id: "alice" } };
   setStorageAccount(state.session);
   accountStorage.setItem(nodeCardOrderKey, JSON.stringify(["shared", "charlie", "alpha"]));
@@ -118,14 +123,20 @@ async function subStoreFixture(manage = true) {
   ];
   const stale = { ...active, config_id: "cfg_previous", default_name: "失效的旧配置", available: false, addresses: [] };
   const selections = new Map([["url-group", [{ ...stale, custom_name: stale.default_name, selected: true }]], ["mihomo-group", []]]);
-  const calls = [];
+  const calls = [], test = {};
   const api = async (path, options = {}) => {
     const input = options.body ? JSON.parse(options.body) : null;
     calls.push({ path, method: options.method || "GET", input });
+    if (path === "/auth/session") return session;
+    if (path === "/agents") return state.data.agents;
+    if (path === "/preferences/node-order") return {ids:["shared","charlie","alpha"],revision:1};
+    if (path === "/substore-sync/run") {const target=targets.find(item=>item.id===input.target_id);target.last_synced_at="2026-11-06T00:00:00Z";return {node_count:(selections.get(target.id)||[]).reduce((n,p)=>n+(p.address_mode==="both"?2:1),0)};}
     if (path === "/agents/alpha/region") return { country_code: "SG" };
     if (path === "/agents/charlie/region") return { country_code: "US" };
     if (path === "/substore-sync/remote-targets") return [];
     if (path === "/substore-sync/selections") {
+      if(test.selectionGate)await test.selectionGate;
+      if(test.selectionFailure)throw Object.assign(new Error("同步选择保存暂不可用"),{status:503});
       selections.set(input.target_id, input.selections);
       return input.selections;
     }
@@ -152,78 +163,77 @@ async function subStoreFixture(manage = true) {
     }
     throw new Error(`unexpected Sub-Store API ${path}`);
   };
-  const render = installSubStoreSync({ state, api, can: permission => permission === "agents.read" || permission === "settings.manage" && manage,
-    esc, engineName: value => value, notify: () => {},
-    shell: markup => { document.body.innerHTML = markup; },
-  });
+  const session={...state.session,username:"alice",csrf_token:"fixture",permissions:["client-access.read","agents.read",...(manage?["settings.manage"]:[])]};
+  const nativeFetch=globalThis.fetch;
+  globalThis.fetch=async(url,request={})=>{
+    if(!String(url).startsWith("/api/v1"))return nativeFetch(url,request);
+    try {
+      const value=await api(String(url).slice("/api/v1".length),request);
+      return new Response(JSON.stringify(value),{status:200,headers:{"Content-Type":"application/json"}});
+    } catch(error) {if(!error.status)throw error;return new Response(JSON.stringify({error:error.message}),{status:error.status,headers:{"Content-Type":"application/json"}});}
+  };
+  const styles=document.createElement("link");styles.rel="stylesheet";styles.href="/assets/analytics/theme.css";
+  const loaded=new Promise((resolve,reject)=>{styles.onload=resolve;styles.onerror=reject;});document.head.append(styles);await loaded;
+  const render=async()=>{
+    window.dispatchEvent(new Event("pagehide"));history.replaceState(null,"","#substore-sync");
+    document.body.replaceChildren(Object.assign(document.createElement("div"),{id:"substore-scope-test"}));
+    startAnalytics({app:document.querySelector("#substore-scope-test"),session});
+    await waitFor(()=>document.querySelector('[aria-label=同步节点] [data-refresh-key]')&&!document.querySelector('.a-main [aria-busy=true]'),"analytics Sub-Store did not load");
+  };
   await render();
-  return { state, render, targets, calls, active };
+  const dispose=()=>{window.dispatchEvent(new Event("pagehide"));document.querySelectorAll("dialog.a-dialog").forEach(box=>box.close());styles.remove();globalThis.fetch=nativeFetch;};
+  return {state,render,targets,calls,active,selections,test,dispose};
 }
 
 export async function testSubStoreScopeRuntime(preview = false) {
-  const fixture = await subStoreFixture();
-  assert(document.querySelector('.substore-agent-card [data-region-avatar="shared"] img[src="/api/v1/region-flags/hk"]'), "Sub-Store should use the node's saved flag");
-  await waitFor(() => document.querySelector('.substore-agent-card [data-region-avatar="alpha"] img[src="/api/v1/region-flags/sg"]'), "Sub-Store should resolve an automatic node flag");
-  const alphaCard = document.querySelector('.substore-agent-card [data-region-avatar="alpha"]').closest('.substore-agent-card');
-  assert(!alphaCard.querySelector('.substore-node-preview'), "generated sync names must not repeat the card's node and profile names");
-  const charlieCard = document.querySelector('.substore-agent-card [data-region-avatar="charlie"]').closest('.substore-agent-card');
-  assert(charlieCard.querySelector('.substore-node-source b')?.textContent === "Charlie 节点", "SS-Rust uses the configured client name as its primary label");
-  assert(charlieCard.querySelector('.substore-node-source small')?.textContent.includes("charlie-tag"), "SS-Rust keeps its inbound tag for identification");
-  if (preview) {
-    document.querySelector("[data-substore-target-edit]").click();
-    return;
-  }
+  const fixture=await subStoreFixture();
+  const button=(text,scope=document)=>[...scope.querySelectorAll("button")].find(control=>control.textContent===text);
+  const row=id=>[...document.querySelectorAll("[aria-label=同步节点] [data-refresh-key]")].find(row=>JSON.parse(row.dataset.refreshKey)[3]===id);
+  const target=()=>document.querySelector('.a-main [name="target"]');
+  const change=(control,value)=>{control.value=value;control.dispatchEvent(new Event("change",{bubbles:true}));};
+  const settled=()=>waitFor(()=>!document.querySelector('#substore-scope-test[aria-busy=true]'),"Sub-Store operation did not settle");
+  const openSettings=async()=>{button("组设置").click();await waitFor(()=>document.querySelector('dialog form [name="sync_format"]'),"group editor did not open");return document.querySelector('dialog form');};
+  assert(document.querySelector('[data-substore-region="shared"] img[src="/api/v1/region-flags/hk"]'),"saved node flag missing");
+  await waitFor(()=>document.querySelector('[data-substore-region="alpha"] img[src="/api/v1/region-flags/sg"]'),"automatic flag missing");
+  assert(row("cfg_charlie").textContent.includes("Charlie 节点")&&row("cfg_charlie").textContent.includes("charlie-tag"),"SS-Rust client name or inbound identity missing");
+  assert([...new Set([...document.querySelectorAll('[aria-label=同步节点] [data-refresh-key]')].map(row=>JSON.parse(row.dataset.refreshKey)[0]))].join(",")==="shared,charlie,alpha","saved node order was lost");
+  if(preview){await openSettings();return;}
   testSubStoreCardLayout();
-  assert(
-    [...document.querySelectorAll(".substore-agent-card>header strong")].map(node => node.textContent).join(",") === "共享主机,Charlie 主机,Alpha 主机",
-    "Sub-Store cards did not follow the saved node order",
-  );
-  document.querySelector("[data-substore-remove]").click();
-  await waitFor(() => !document.querySelector("[data-substore-remove]"), "stale selection was not removed");
-  document.querySelector("[data-substore-add]").click();
-  await waitFor(() => document.querySelector("[data-substore-parameters-form]"), "current configuration selection did not render");
-  testSubStoreCardLayout();
-  let form = document.querySelector("[data-substore-parameters-form]");
-  form.elements.custom_name.value = "我的双栈节点";
-  form.elements.address_mode.value = "both";
-  form.requestSubmit();
-  await waitFor(() => fixture.calls.some(call => call.input?.selections?.[0]?.address_mode === "both"), "address mode was not saved");
-  const selected = fixture.calls.filter(call => call.path === "/substore-sync/selections").at(-1).input.selections;
-  assert(selected.length === 1 && selected[0].config_id === "cfg_current", "same-tag old/new configurations shared a selector key");
-  await fixture.render();
-  document.querySelector("[data-substore-target-edit]").click();
-  form = document.querySelector("[data-substore-target-form]");
-  const dialog = document.querySelector("[data-substore-target-dialog]");
-  await Promise.all(dialog.getAnimations().map(animation => animation.finished));
-  const body = dialog.querySelector(".traffic-edit-body");
-  assert(body.scrollWidth <= body.clientWidth + 1, "sync group options overflow the dialog");
-  const footer = form.querySelector("footer").getBoundingClientRect();
-  assert(footer.bottom <= innerHeight && footer.bottom <= dialog.getBoundingClientRect().bottom, "sync group save controls are clipped");
-  if (innerWidth <= 820) {
-    const options = [...form.querySelectorAll('[name="sync_format"]')].map(input => input.closest("label").getBoundingClientRect());
-    assert(options[1].top >= options[0].bottom, "narrow sync format options must stack");
-  }
-  assert(form.querySelector('[name="sync_format"][value="url"]').checked, "URL format was not restored");
-  form.querySelector('[name="sync_format"][value="mihomo"]').click();
-  form.requestSubmit();
-  await waitFor(() => fixture.targets[0].sync_format === "mihomo" && !document.querySelector("[data-substore-target-dialog]").open, "Mihomo format did not persist");
-  document.querySelector('[data-substore-target="mihomo-group"]').click();
-  await waitFor(() => fixture.state.data.subStoreSync.target_id === "mihomo-group", "second sync group did not load");
-  document.querySelector("[data-substore-target-edit]").click();
-  form = document.querySelector("[data-substore-target-form]");
-  assert(form.querySelector('[name="sync_format"][value="mihomo"]').checked, "per-group format was not restored");
-  form.querySelector('[name="sync_format"][value="url"]').click();
-  form.requestSubmit();
-  await waitFor(() => fixture.targets[1].sync_format === "url" && !document.querySelector("[data-substore-target-dialog]").open, "URL format did not persist");
-  assert(fixture.targets[0].sync_format === "mihomo", "changing a group changed another group's format");
-  document.querySelector('[data-substore-target="url-group"]').click();
-  await waitFor(() => fixture.state.data.subStoreSync.target_id === "url-group", "first group did not reload");
-  fixture.active.mihomo_error = "Mihomo 不支持此安全选项，请选择 URL 格式";
-  await fixture.render();
-  assert(document.querySelector("[data-substore-select]").disabled && document.querySelector("[data-substore-run]").disabled, "unsupported Mihomo security options remained syncable");
-  assert(document.body.textContent.includes("请选择 URL"), "unsupported format reason is hidden");
-  const readonly = await subStoreFixture(false);
-  assert(!document.querySelector("[data-substore-target-edit], [data-substore-add], [data-substore-remove], [data-substore-parameters-form]"), "read-only user can edit sync groups");
-  assert([...document.querySelectorAll("[data-substore-select]")].every(input => input.disabled), "read-only selectors remain enabled");
-  assert(readonly.calls.every(call => call.method === "GET"), "read-only rendering wrote sync settings");
+  assert(row("cfg_previous").querySelector('[name="selected"]').disabled,"stale source remains selectable");
+  assert(button("立即同步").disabled,"stale selected source remains syncable");
+  button("移除选择",row("cfg_previous")).click();button("保存所选节点").click();await settled();
+  assert(!row("cfg_previous"),"stale selection was not removed");
+  // Checkbox changes carry checked state, rather than their string value.
+  const selected=row("cfg_current").querySelector('[name="selected"]');selected.checked=true;selected.dispatchEvent(new Event("change",{bubbles:true}));
+  const name=row("cfg_current").querySelector('[name="name"]');name.value="我的双栈节点";name.dispatchEvent(new Event("input",{bubbles:true}));
+  change(row("cfg_current").querySelector('[name="address"]'),"both");
+  button("组设置").click();assert(!document.querySelector('dialog[open]'),"group editor can discard pending selection changes");
+  fixture.test.selectionFailure=true;button("保存所选节点").click();await settled();
+  assert(row("cfg_current").querySelector('[name="name"]').value==="我的双栈节点"&&row("cfg_current").querySelector('[name="selected"]').checked&&!button("保存所选节点").disabled,"save failure lost draft or prevented retry");
+  fixture.test.selectionFailure=false;
+  let finish;fixture.test.selectionGate=new Promise(resolve=>{finish=resolve;});
+  const before=fixture.calls.filter(call=>call.path==="/substore-sync/selections").length;
+  button("保存所选节点").click();await waitFor(()=>fixture.calls.filter(call=>call.path==="/substore-sync/selections").length===before+1,"selection retry not submitted");
+  assert(row("cfg_current").querySelector('[name="selected"]').matches(":disabled"),"pending selection can still be edited");
+  button("保存所选节点").click();assert(fixture.calls.filter(call=>call.path==="/substore-sync/selections").length===before+1,"duplicate selection write");
+  finish();fixture.test.selectionGate=null;await settled();
+  const saved=fixture.calls.filter(call=>call.path==="/substore-sync/selections").at(-1).input.selections;
+  assert(saved.length===1&&saved[0].config_id==="cfg_current"&&saved[0].address_mode==="both"&&saved[0].custom_name==="我的双栈节点","old/new same-tag sources were mixed or dual-stack choice was lost");
+  assert(button("保存所选节点").disabled&&!button("立即同步").disabled,"saved selection still dirty or cannot sync");
+  let form=await openSettings();
+  assert(form.elements.sync_format.value==="url","URL format was not restored");
+  for(const control of [form.elements.sync_format,form.querySelector('button[type="submit"]')]) {const r=control.getBoundingClientRect();assert(r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,"group settings or save control clipped");}
+  change(form.elements.sync_format,"mihomo");form.requestSubmit();await settled();
+  assert(fixture.targets[0].sync_format==="mihomo"&&!document.querySelector('dialog[open]'),"Mihomo format did not persist");
+  change(target(),"mihomo-group");await settled();assert(target().value==="mihomo-group","second group did not load");
+  form=await openSettings();assert(form.elements.sync_format.value==="mihomo","per-group format was not restored");change(form.elements.sync_format,"url");form.requestSubmit();await settled();
+  assert(fixture.targets[1].sync_format==="url"&&fixture.targets[0].sync_format==="mihomo","format edit affected another group");
+  change(target(),"url-group");await settled();
+  fixture.active.mihomo_error="Mihomo 不支持此安全选项，请选择 URL 格式";await fixture.render();
+  assert(row("cfg_current").querySelector('[name="selected"]').disabled&&button("立即同步").disabled,"unsupported Mihomo security options remain syncable");
+  assert(row("cfg_current").textContent.includes("请选择 URL"),"unsupported format reason hidden");fixture.dispose();
+  const readonly=await subStoreFixture(false);
+  assert(!button("组设置")&&!button("移除选择")&&!button("保存所选节点"),"read-only user can edit sync groups");
+  assert([...document.querySelectorAll('[name="selected"],[name="name"],[name="address"]')].every(control=>control.disabled),"read-only controls enabled");
+  assert(readonly.calls.every(call=>call.method==="GET"),"read-only rendering wrote settings");readonly.dispose();
 }

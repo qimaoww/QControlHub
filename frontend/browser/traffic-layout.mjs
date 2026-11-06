@@ -1,180 +1,255 @@
 import { assert, waitFor } from "./assertions.mjs";
+import { startAnalytics } from "../analytics/app.js";
 import { accountStorage } from "../modules/account-storage.js";
 
 export async function testTrafficLayoutRuntime({ testAPI }) {
-    await waitFor(()=>document.querySelectorAll(".traffic-accounting-panel").length===4,"traffic accounting cards did not load");
-    const cardNodes = () => [...document.querySelectorAll(".traffic-policy-grid > [data-traffic-agent-card]")].map(card => card.dataset.trafficAgentCard).join(",");
-    const sidebarNodes = () => [...document.querySelectorAll(".context-list [data-context-traffic-agent]")].map(link => link.dataset.contextTrafficAgent).join(",");
-    assert.equal(cardNodes(), "alpha,delta,bravo,charlie", "default traffic cards must follow saved node order");
-    assert.equal(cardNodes(), sidebarNodes(), "default traffic cards and the node sidebar must agree");
-    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), null, "default rendering must not freeze a custom card order");
-    assert.equal(document.querySelectorAll(".traffic-accounting-panel.bad").length,1,"scope limitation must not be rendered as an error");
-    assert.equal(document.querySelectorAll(".traffic-accounting-details[open]").length,0,"diagnostics should be collapsed initially");
-    assert.equal(document.querySelectorAll(".traffic-status-dialog[open]").length,0,"status dialogs must start closed");
-    document.querySelector("[data-traffic-status-open]").click();
-    assert.ok(document.querySelector(".traffic-status-dialog").open,"status button should open dialog");
-    const details = document.querySelector(".traffic-accounting-details"); details.querySelector("summary").click();
-    assert.ok(details.open && details.textContent.includes("single-protocol"),"original diagnostic inaccessible");
-    if (!new URLSearchParams(location.search).has("preview")) {
-      const dialog = document.querySelector(".traffic-status-dialog");
-      const policy = testAPI.trafficPolicies[0];
-      policy.enforcement_error = "API connection refused";
-      await waitFor(()=>dialog.textContent.includes("API connection refused"),"open status dialog did not refresh failure");
-      assert.ok(dialog.open && dialog.querySelector("details").open,"refresh closed dialog or details");
-      policy.enforcement_error = "";
-      policy.accounting = {source:"core-api",client_received:1024,client_sent:2048,target_received:4096,target_sent:8192};
-      await waitFor(()=>dialog.textContent.includes("双链路统计") && !dialog.textContent.includes("API connection refused"),"open dialog did not recover");
-      const previousLegs = dialog.querySelector(".traffic-accounting-legs").textContent;
-      policy.accounting.target_sent = 16384;
-      await waitFor(()=>dialog.querySelector(".traffic-accounting-legs").textContent !== previousLegs,"open dialog counters did not refresh");
-      assert.ok(dialog.open && dialog.querySelector("details").open,"counter refresh closed dialog or details");
-    }
-    details.querySelector("summary").click();
-    document.querySelector("[data-traffic-status-close]").click();
-    assert.ok(!document.querySelector(".traffic-status-dialog").open,"status dialog should close");
-    document.querySelector("[data-traffic-edit-open]").click();
-    const editDialog = document.querySelector("[data-traffic-edit-dialog][open]");
-    const root = document.documentElement;
-    const originalScale = root.style.getPropertyValue("--ui-font-scale");
+    await startTrafficTheme();
+    const trafficReads = () => testAPI.calls.filter(call => call.path.startsWith('/traffic-policies') || call.path === '/traffic-endpoints').length;
+    const revisit = async () => {
+      location.hash = '#themes';
+      await waitFor(() => document.querySelector('[data-theme-i-d]') || document.querySelector('.a-preview'), 'theme route did not load');
+      location.hash = '#traffic';
+      await waitFor(() => document.querySelector('.a-traffic-page [data-traffic-key]'), 'traffic snapshot return failed');
+    };
+    const firstReads = trafficReads();
+    await revisit();
+    assert.equal(trafficReads(), firstReads, 'returning within the account snapshot window repeated traffic reads');
+    const clock = Date.now;
     try {
-      for (const scale of ["1", "1.35"]) {
-        root.style.setProperty("--ui-font-scale", scale);
-        for (const animation of editDialog.getAnimations()) animation.finish();
-        const bounds = editDialog.getBoundingClientRect();
-        assert.ok(bounds.top >= -1 && bounds.bottom <= innerHeight + 1, "quota dialog extends outside the viewport");
-        assert.ok(editDialog.scrollWidth <= editDialog.clientWidth + 1, "quota dialog overflows horizontally");
-        for (const button of editDialog.querySelectorAll("footer button")) {
-          const box = button.getBoundingClientRect();
-          assert.ok(box.top >= bounds.top && box.bottom <= bounds.bottom && box.bottom <= innerHeight,
-            "quota actions must remain visible when the form body scrolls");
-        }
-        const body = editDialog.querySelector(".traffic-edit-body").getBoundingClientRect();
-        const footer = editDialog.querySelector("footer").getBoundingClientRect();
-        assert.ok(body.bottom <= footer.top + 1, "quota fields overlap the actions");
-      }
-    } finally {
-      if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
-      else root.style.removeProperty("--ui-font-scale");
-      editDialog.querySelector("[data-traffic-edit-close]").click();
-    }
-    const quota = document.querySelector('[data-traffic-edit-form] [name="limit_gb"]');
-    assert.ok(quota && !quota.required && quota.value === "" && quota.checkValidity(), "monitor-only quota must allow an empty value");
-    quota.value = "0";
-    assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
-    quota.value = "";
-    if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
-    testAPI.nodeOrder = { ids: ["bravo", "alpha", "delta", "charlie"], revision: testAPI.nodeOrder.revision + 1 };
-    await waitFor(() => cardNodes() === "bravo,alpha,delta,charlie", "polling did not apply the updated node order");
-    assert.equal(cardNodes(), sidebarNodes(), "polling must keep cards and the sidebar in the same node order");
-    accountStorage.setItem("qcontrolhub:traffic-card-order", JSON.stringify(["charlie:8445", "alpha:8443"]));
-    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "custom traffic order must take priority over node order");
-    document.querySelector('[href="#traffic-agent-bravo"]').click();
-    await waitFor(() => cardNodes() === "bravo", "node filtering did not keep the selected node's card");
-    document.querySelector('[href="#traffic-all"]').click();
-    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "clearing a filter did not restore custom card order");
+      const expired = clock() + 31000;
+      Date.now = () => expired;
+      await revisit();
+      assert.equal(trafficReads(), firstReads + 2, 'expired traffic snapshot did not reload policies and configured ports');
+    } finally { Date.now = clock; }
+    [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '列表').click();
+    const cardNodes = () => [...document.querySelectorAll('.a-traffic-list tbody tr')].map(row => testAPI.trafficPolicies.find(policy => row.dataset.trafficKey === `policy:${policy.id}`)?.agent_id).join(',');
+    const selectedNodes = () => [...document.querySelector('[name="agent"]').options].slice(1).map(option => option.value).join(',');
+    assert.equal(cardNodes(), "alpha,delta,bravo,charlie", "traffic rows must follow saved node order");
+    assert.equal(cardNodes(), selectedNodes(), "rows and node picker order disagree");
+    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), "[]", "rendering must not freeze a custom order");
+    const button = (text, root = document) => [...root.querySelectorAll('button')].find(button => button.textContent === text);
+    const active = () => [...document.querySelectorAll('dialog[open]')].at(-1);
+    const close = async box => {
+      box.querySelector('[aria-label="关闭"]').click();
+      await waitFor(() => !box.isConnected, 'dialog did not close');
+    };
+    button('统计详情').click();
+    let detailDialog = await waitFor(() => active(), 'statistics dialog missing');
+    assert.ok(!detailDialog.querySelector('h2').textContent.includes(':8443'), 'standalone port retains colon');
+    const diagnostic = detailDialog.querySelector('details');
+    assert.ok(!diagnostic.open, 'diagnostics must start collapsed');
+    diagnostic.querySelector('summary').click();
+    assert.ok(diagnostic.open && diagnostic.textContent.includes('single-protocol'), 'original diagnostic inaccessible');
+    assert.ok(detailDialog.textContent.includes('仅监听端口') && !detailDialog.textContent.includes('统计异常'), 'scope limitation rendered as error');
+    const policy = testAPI.trafficPolicies[0];
+    policy.enforcement_error = 'API connection refused';
+    await waitFor(() => detailDialog.textContent.includes('API connection refused'), 'open status dialog did not refresh failure');
+    assert.ok(detailDialog.open && diagnostic.open, 'refresh closed dialog or diagnostics');
+    policy.enforcement_error = '';
+    policy.accounting = {source:'core-api',client_received:1024,client_sent:2048,target_received:4096,target_sent:8192};
+    await waitFor(() => detailDialog.textContent.includes('双链路统计') && !detailDialog.textContent.includes('API connection refused'), 'open dialog did not recover');
+    const previous = detailDialog.textContent;
+    policy.accounting.target_sent = 16384;
+    await waitFor(() => detailDialog.textContent !== previous, 'open counters did not refresh');
+    assert.ok(detailDialog.open, 'counter refresh closed dialog');
+    await close(detailDialog);
+    button('统计详情', document.querySelectorAll('.a-traffic-list tbody tr')[2]).click();
+    detailDialog = await waitFor(() => active(), 'failure detail missing');
+    assert.ok(detailDialog.textContent.includes('统计异常'), 'real accounting failure not rendered as error');
+    await close(detailDialog);
+    button('设置配额').click();
+    const editDialog = await waitFor(() => active()?.querySelector('form') && active(), 'quota editor missing');
+    await fitDialog(editDialog);
+    const quota = editDialog.querySelector('[name="limit_gb"]');
+    assert.ok(quota && !quota.required && Number(quota.value) === 0 && quota.checkValidity(), 'monitor-only quota must allow no limit');
+    quota.value = ''; assert.ok(quota.checkValidity(), 'empty quota must be valid');
+    quota.value = '0'; assert.ok(quota.checkValidity(), 'zero quota must be valid');
+    await close(editDialog);
+    if (new URLSearchParams(location.search).has('preview')) { document.documentElement.dataset.trafficPreview = 'ready'; await new Promise(() => {}); }
+    testAPI.nodeOrder = {ids:['bravo','alpha','delta','charlie'],revision:testAPI.nodeOrder.revision + 1};
+    await waitFor(() => cardNodes() === 'bravo,alpha,delta,charlie', 'polling did not apply updated node order');
+    assert.equal(cardNodes(), selectedNodes(), 'polling row/picker order disagree');
+    testAPI.trafficOrder = {ids:['charlie:8445','alpha:8443'],revision:testAPI.trafficOrder.revision + 1};
+    await waitFor(() => cardNodes() === 'charlie,alpha,bravo,delta', 'custom port order must take priority');
+    const picker = document.querySelector('[name="agent"]');
+    picker.value = 'bravo'; picker.dispatchEvent(new Event('change',{bubbles:true}));
+    assert.equal(cardNodes(),'bravo','node filtering did not keep selected node');
+    picker.value = ''; picker.dispatchEvent(new Event('change',{bubbles:true}));
+    assert.equal(cardNodes(),'charlie,alpha,bravo,delta','clearing filter lost custom order');
     const posts = () => testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync" && call.method === "POST").length;
     const openSync = async () => {
-      document.querySelector("[data-traffic-sync]").click();
-      return waitFor(() => document.querySelector("[data-traffic-sync-dialog][open]"), "sync selection dialog did not open");
+      button('同步配置端口').click();
+      return waitFor(() => document.querySelector('dialog[data-traffic-sync][open]'), "sync selection dialog did not open");
     };
     let dialog = await openSync();
-    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "candidates did not load");
+    await waitFor(() => dialog.querySelectorAll('input[name^="port:"]').length === 3, "candidates did not load");
     assert.equal(posts(), 0, "preview must not write");
-    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "nothing selected by default");
-    assert.ok(dialog.textContent.includes("已删除 · 可恢复") && dialog.textContent.includes("新增"), "candidate types missing");
-    dialog.querySelector("[data-sync-close]").click();
+    assert.ok(dialog.querySelector('[type=submit]').disabled, "nothing selected by default");
+    assert.ok(dialog.textContent.includes("已删除，可恢复") && dialog.textContent.includes("新增"), "candidate types missing");
+    await close(dialog);
     assert.equal(posts(), 0, "cancel must not write");
-    assert.ok(!document.querySelector("[data-traffic-sync]").disabled, "cancel must unlock sync");
+    assert.ok(!button('同步配置端口').disabled, "cancel must unlock sync");
     testAPI.trafficPreviewFailure = true;
     dialog = await openSync();
-    await waitFor(() => !dialog.querySelector("[data-sync-retry]").disabled && !dialog.querySelector("[data-sync-error]").hidden, "preview failure must allow retry");
-    assert.ok(dialog.querySelector("[data-sync-error]").textContent.includes("服务器处理失败"), "Chinese preview error hidden");
+    await waitFor(() => !button('重新扫描',dialog).disabled && [...dialog.querySelectorAll('.a-notice')].some(item => item.textContent), "preview failure must allow retry");
+    assert.ok(dialog.textContent.includes("服务器处理失败"), "Chinese preview error hidden");
     testAPI.trafficPreviewFailure = false;
-    dialog.querySelector("[data-sync-retry]").click();
-    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "retry did not load");
-    dialog.querySelector("[data-sync-all]").click();
-    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 3, "select all failed");
-    dialog.querySelector('[data-sync-choice="2"]').click();
-    assert.ok(dialog.querySelector("[data-sync-all]").indeterminate, "partial selection indicator missing");
+    button('重新扫描',dialog).click();
+    await waitFor(() => dialog.querySelectorAll('input[name^="port:"]').length === 3, "retry did not load");
+    dialog.querySelector('[name=select-all]').click();
+    assert.equal(dialog.querySelectorAll('input[name^="port:"]:checked').length, 3, "select all failed");
+    dialog.querySelector('input[name="port:2"]').click();
+    assert.ok(dialog.querySelector('[name=select-all]').indeterminate, "partial selection indicator missing");
     const reads = testAPI.calls.filter(call => call.path === "/traffic-policies").length;
     await waitFor(() => testAPI.calls.filter(call => call.path === "/traffic-policies").length > reads, "background poll stopped");
-    assert.ok(dialog.open && dialog.querySelectorAll("[data-sync-choice]:checked").length === 2, "polling reset selection");
-    assert.ok(document.querySelector("[data-traffic-sync]").disabled, "polling unlocked duplicate dialog");
+    assert.ok(dialog.open && dialog.querySelectorAll('input[name^="port:"]:checked').length === 2, "polling reset selection");
+    assert.ok(button('同步配置端口').disabled, "polling unlocked duplicate dialog");
     testAPI.trafficSyncFailure = true;
-    dialog.querySelector("[data-sync-submit]").click();
-    await waitFor(() => posts() === 1 && !dialog.querySelector("[data-sync-submit]").disabled
-      && !dialog.querySelector("[data-sync-error]").hidden
-      && dialog.querySelector("[data-sync-error]").textContent.includes("服务器处理失败"), "Chinese mutation error hidden");
-    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 2, "failure lost selection");
+    dialog.querySelector('[type=submit]').click();
+    await waitFor(() => posts() === 1 && !dialog.querySelector('[type=submit]').disabled
+      && [...dialog.querySelectorAll('.a-notice')].some(item => item.textContent)
+      && dialog.textContent.includes("服务器处理失败"), "Chinese mutation error hidden");
+    assert.equal(dialog.querySelectorAll('input[name^="port:"]:checked').length, 2, "failure lost selection");
     testAPI.trafficSyncFailure = false;
     let finish;
     testAPI.trafficSyncGate = new Promise(resolve => { finish = resolve; });
-    dialog.querySelector("[data-sync-submit]").click();
-    dialog.querySelector("[data-sync-submit]").click();
+    dialog.querySelector('[type=submit]').click();
+    dialog.querySelector('[type=submit]').click();
     assert.equal(posts(), 2, "duplicate submission not blocked");
-    assert.ok(dialog.querySelector("[data-sync-close]").disabled, "pending mutation close must be disabled");
+    dialog.querySelector('[aria-label=关闭]').click();
+    assert.ok(dialog.open && dialog.isConnected, 'pending mutation must prevent close');
     assert.equal(JSON.stringify(testAPI.trafficSelection), JSON.stringify([{agent_id:"alpha",port:443},{agent_id:"bravo",port:9443}]), "must send only selected identities");
     assert.equal(testAPI.trafficSnapshot, "scan-version-1", "submit must carry the scanned configuration snapshot");
     finish();
-    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]") && !document.querySelector("[data-traffic-sync]").disabled, "success did not close and unlock");
+    await waitFor(() => !document.querySelector('dialog[data-traffic-sync]') && !button('同步配置端口').disabled, "success did not close and unlock");
     assert.equal(testAPI.trafficCandidates.length, 1, "unselected candidate changed");
     testAPI.trafficSyncGate = null;
     dialog = await openSync();
-    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 1, "reopen did not reload remaining candidates");
-    dialog.querySelector("[data-sync-close]").click();
+    await waitFor(() => dialog.querySelectorAll('input[name^="port:"]').length === 1, "reopen did not reload remaining candidates");
+    await close(dialog);
     testAPI.trafficCandidates = [];
     dialog = await openSync();
-    await waitFor(() => dialog.textContent.includes("暂无需要同步的端口"), "empty state missing");
-    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "empty list allows write");
-    dialog.querySelector("[data-sync-close]").click();
+    await waitFor(() => dialog.textContent.includes("当前筛选范围内暂无可同步端口"), "empty state missing");
+    assert.ok(dialog.querySelector('[type=submit]').disabled, "empty list allows write");
+    await close(dialog);
     let finishPreview;
     testAPI.trafficPreviewGate = new Promise(resolve => { finishPreview = resolve; });
     await openSync();
     location.hash = "#node-settings";
-    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]"), "navigation left a modal behind");
+    await waitFor(() => !document.querySelector('dialog[data-traffic-sync]'), "navigation left a modal behind");
     finishPreview();
     assert.equal(posts(), 2, "navigation must not write");
     testAPI.trafficPreviewGate = null;
     location.hash = "#traffic";
-    await waitFor(() => !document.querySelector(".workspace-main[aria-busy]") && document.querySelector("[data-traffic-sync]"), "traffic return failed");
+    await waitFor(() => !document.querySelector(".a-main [aria-busy]") && button('同步配置端口'), "traffic return failed");
     testAPI.trafficCandidates = [{agent_id:"alpha",name:"late selection",engine:"xray",port:11443,protocol:"both",kind:"new"}];
     dialog = await openSync();
-    await waitFor(() => dialog.querySelector("[data-sync-choice]"), "late selection missing");
-    dialog.querySelector("[data-sync-choice]").click();
+    await waitFor(() => dialog.querySelector('input[name^="port:"]'), "late selection missing");
+    dialog.querySelector('input[name^="port:"]').click();
     testAPI.trafficSyncGate = new Promise(resolve => { finish = resolve; });
-    dialog.querySelector("[data-sync-submit]").click();
+    dialog.querySelector('[type=submit]').click();
     assert.equal(posts(), 3, "selected navigation test did not submit");
     location.hash = "#node-settings";
-    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]"), "pending write dialog survived navigation");
+    await waitFor(() => location.hash === '#traffic', 'pending write navigation was not blocked');
+    assert.ok(dialog.open, 'blocked navigation lost pending dialog');
+    await startTrafficTheme('#node-settings');
+    assert.ok(!document.querySelector('dialog[data-traffic-sync]'), 'ended account lifetime left pending dialog');
     finish();
     await waitFor(() => testAPI.trafficCandidates.length === 0, "late mutation did not finish");
-    assert.ok(!document.querySelector("[data-traffic-sync]"), "late mutation returned to traffic route");
+    assert.ok(!button('同步配置端口'), "late mutation returned to traffic route");
     testAPI.trafficSyncGate = null;
     location.hash = "#traffic";
-    await waitFor(() => document.querySelector("[data-traffic-sync]"), "traffic return before expiry failed");
+    await waitFor(() => button('同步配置端口'), "traffic return before expiry failed");
     testAPI.trafficCandidates = [
       {agent_id:"alpha",name:"stable protocol",engine:"sing-box",port:25103,previous_port:25101,protocol:"tcp",kind:"changed",deployment_status:"pending",blocked_reason:"已保存但尚未部署"},
       {agent_id:"alpha",name:"active protocol",engine:"sing-box",port:25101,protocol:"tcp",kind:"unchanged",deployment_status:"applied"},
     ];
     dialog = await openSync();
-    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 2, "versioned candidates missing");
-    assert.ok(dialog.textContent.includes("25101 → 25103") && dialog.textContent.includes("待部署"), "port/deployment change missing");
-    assert.ok(dialog.querySelector('[data-sync-choice="0"]').disabled, "undeployed port is selectable");
-    dialog.querySelector("[data-sync-all]").click();
-    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 1, "select all included blocked port");
+    await waitFor(() => dialog.querySelectorAll('input[name^="port:"]').length === 2, "versioned candidates missing");
+    assert.ok(dialog.textContent.includes("旧 25101 · 新 25103") && dialog.textContent.includes("待部署"), "port/deployment change missing");
+    assert.ok(dialog.querySelector('input[name="port:0"]').disabled, "undeployed port is selectable");
+    dialog.querySelector('[name=select-all]').click();
+    assert.equal(dialog.querySelectorAll('input[name^="port:"]:checked').length, 1, "select all included blocked port");
     testAPI.trafficSyncStale = true;
-    dialog.querySelector("[data-sync-submit]").click();
+    dialog.querySelector('[type=submit]').click();
     await waitFor(() => dialog.textContent.includes("候选已失效"), "stale submission did not clear choices");
-    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "stale candidate remains submittable");
+    assert.ok(dialog.querySelector('[type=submit]').disabled, "stale candidate remains submittable");
     testAPI.trafficSyncStale = false;
-    dialog.querySelector("[data-sync-retry]").click();
-    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 2, "rescan did not refresh choices");
-    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 0, "rescan retained old selection");
+    button('重新扫描',dialog).click();
+    await waitFor(() => dialog.querySelectorAll('input[name^="port:"]').length === 2, "rescan did not refresh choices");
+    assert.equal(dialog.querySelectorAll('input[name^="port:"]:checked').length, 0, "rescan retained old selection");
     const bounds = dialog.getBoundingClientRect();
     assert.ok(bounds.left >= -1 && bounds.right <= innerWidth + 1 && dialog.scrollWidth <= dialog.clientWidth + 1, "sync dialog overflows viewport");
-    dialog.querySelector("[data-sync-close]").click();
+    await close(dialog);
     testAPI.trafficPreviewUnauthorized = true;
-    document.querySelector("[data-traffic-sync]").click();
-    await waitFor(() => document.querySelector("#login-form"), "expired session did not reach login");
-    assert.ok(!document.querySelector("[data-traffic-sync-dialog]"), "expired session left an orphan modal blocking login");
+    button('同步配置端口').click();
+    await waitFor(() => document.querySelector("#analytics-login-form") || document.querySelector(".a-login form"), "expired session did not reach login");
+    assert.ok(!document.querySelector('dialog[data-traffic-sync]'), "expired session left an orphan modal blocking login");
+}
+
+async function startTrafficTheme(route = '#traffic') {
+  window.dispatchEvent(new Event('pagehide'));
+  document.querySelectorAll('link[rel=stylesheet]').forEach(link=>link.remove());
+  const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/assets/analytics/theme.css'});
+  document.head.append(style);
+  await new Promise((resolve,reject)=>{style.onload=resolve;style.onerror=reject;});
+  document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'app'}));
+  history.replaceState(null,'',route);
+  const session=await(await fetch('/api/v1/auth/session')).json();
+  startAnalytics({app:document.querySelector('#app'),session});
+  await waitFor(()=>document.querySelector(route === '#traffic' ? '.a-traffic-page [data-traffic-key]' : '.a-probe'),'native theme did not load');
+}
+async function fitDialog(dialog) {
+  await Promise.all(dialog.getAnimations({subtree:true}).filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})));
+  assert.ok(dialog.scrollWidth<=dialog.clientWidth+1,'quota dialog overflows horizontally');
+  const bounds=dialog.getBoundingClientRect();
+  assert.ok(bounds.top>=-1&&bounds.bottom<=innerHeight+1,'quota dialog outside viewport');
+  for(const control of dialog.querySelectorAll('input,select,button')) {
+    control.scrollIntoView({block:'nearest'});
+    const box=control.getBoundingClientRect();
+    assert.ok(box.left>=bounds.left-1&&box.right<=bounds.right+1&&box.top>=0&&box.bottom<=innerHeight+1,'quota control unreachable');
+  }
+}
+export async function testDenseTrafficLayoutRuntime() {
+  await startTrafficTheme();
+  [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '列表').click();
+  const rows=()=>document.querySelectorAll('.a-traffic-list tbody tr');
+  assert.equal(rows().length,12,'dense traffic must page rather than create every row');
+  assert.ok(document.querySelector('.a-main').textContent.includes('第 1 / 2 页'),'dense count missing');
+  const all=[];
+  const inspect=()=>{for(const row of rows()){
+    const port=row.querySelector('[data-column="端口 / 协议"] strong');
+    assert.match(port.textContent,/^\d+$/,'standalone port includes a colon');
+    assert.ok(row.querySelector('[data-column="端口 / 协议"]').textContent.includes('TCP'),'protocol lost');
+    assert.ok(![...row.querySelectorAll('button')].some(control=>['删除','清零','排序'].includes(control.textContent)),'low frequency actions crowded the list');
+    assert.ok(row.querySelector('.a-badge'),'status lost theme badge');
+    all.push(row.dataset.trafficKey);
+  }};
+  inspect();
+  [...rows()[0].querySelectorAll('button')].find(control=>control.textContent==='统计详情').click();
+  const detail=document.querySelector('dialog[open]');
+  assert.ok([...detail.querySelectorAll('button')].find(control=>control.textContent==='删除')?.classList.contains('danger'),'delete lost danger styling in details');
+  detail.querySelector('[aria-label=关闭]').click();
+  [...document.querySelectorAll('.a-main button')].find(control=>control.textContent==='下一页').click();
+  assert.equal(rows().length,5,'dense final page lost records');inspect();
+  assert.equal(new Set(all).size,17,'dense pagination repeats or drops records');
+  const records = [...rows()].map(row => ({ key: row.dataset.trafficKey, total: row.querySelector('[data-column="累计流量"] strong').textContent, receive: row.querySelector('[data-column="累计接收"] .a-stack').firstChild.textContent, send: row.querySelector('[data-column="累计发送"] .a-stack').firstChild.textContent }));
+  const view = name => [...document.querySelectorAll('.a-main button')].find(button => button.textContent === name);
+  view('卡片').click();
+  const cards = [...document.querySelectorAll('article[data-traffic-key]')];
+  assert.equal(cards.length,5,'card view lost current page');
+  cards.forEach((card,index) => {
+    assert.equal(card.dataset.trafficKey, records[index].key,'view switch changed port targets');
+    assert.equal(card.querySelector('.a-stat > .a-actions').textContent.replace(/\s/g,''), records[index].total.replace(/\s/g,''),'card total differs from list');
+    const values = [...card.querySelectorAll('.a-probe-network b')].map(value=>value.textContent);
+    assert.equal(values[0],records[index].receive,'card missing cumulative receive');
+    assert.equal(values[1],records[index].send,'card missing cumulative send');
+    assert.ok(card.textContent.includes('累计流量') && card.textContent.includes('累计接收') && card.textContent.includes('累计发送'),'card cumulative labels missing');
+  });
+  view('列表').click();
+  assert.equal(rows().length,5,'switching views reset pagination');
+  assert.ok(document.querySelector('.a-main').textContent.includes('第 2 / 2 页'),'view switch lost page position');
+
+  assert.ok(document.documentElement.scrollWidth<=innerWidth,'dense page overflows horizontally');
+  if(new URLSearchParams(location.search).has('preview')) { document.documentElement.dataset.trafficPreview = 'ready'; await new Promise(()=>{}); }
 }

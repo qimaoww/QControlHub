@@ -79,15 +79,28 @@ export function checkStyles(root = repositoryRoot, manifest = styleManifest) {
     throw new Error("generated frontend/app.css differs; run make generate-styles");
 }
 
+export function renderThemeStyles(root = repositoryRoot) {
+  const path = "frontend/analytics/theme-source.css";
+  const bytes = readFileSync(resolve(root, path));
+  validateStyleSlice(bytes.toString("utf8"), path);
+  return bytes;
+}
+
+export function checkThemeStyles(root = repositoryRoot) {
+  if (!renderThemeStyles(root).equals(readFileSync(resolve(root, "frontend/analytics/theme.css"))))
+    throw new Error("generated frontend/analytics/theme.css differs; run make generate-styles");
+}
+
 export function writeStyles() {
   writeFileSync(resolve(repositoryRoot, "frontend/app.css"), renderStyles());
+  writeFileSync(resolve(repositoryRoot, "frontend/analytics/theme.css"), renderThemeStyles());
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
     if (process.argv.length !== 3 || !["--check", "--write"].includes(process.argv[2]))
       throw new Error("usage: node scripts/generate-styles.mjs --check|--write");
-    if (process.argv[2] === "--check") checkStyles();
+    if (process.argv[2] === "--check") { checkStyles(); checkThemeStyles(); }
     else writeStyles();
   } catch (error) {
     console.error(error.message);

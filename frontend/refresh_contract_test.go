@@ -90,13 +90,15 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"input.defaultValue = address",
 			`button.form?.elements.namedItem("address")`,
 		},
-		"modules/core-logs.js": {
+		"analytics/observability.js": {
 			"createPoller({",
-			"createCoreLogProjection(engines)",
-			"data-core-log-engine",
-			"data-core-log-level",
-			"data-refresh-key=\"core-log-${esc(entry.id)}\"",
-			"data-refresh-scroll",
+			"readCoreLogWindow(ctx.api, params",
+			"previous: entries",
+			"filterCoreLogEntries(entries, filters)",
+			"ctx.signal.addEventListener(\"abort\"",
+			"serial === revision",
+			"if (page && anchor)",
+			"刷新失败，保留上次数据",
 		},
 		"modules/tasks.js": {
 			"const reconciled = reconcileView(existingCard, freshCard)",
@@ -178,10 +180,7 @@ func TestPanelReadsAndNodeRegionsAvoidPerRenderRequests(t *testing.T) {
 			t.Errorf("node list region rendering is missing %q", required)
 		}
 	}
-	if !strings.Contains(read("modules/agent-komari.js"), "state.data.agentKomari") ||
-		!strings.Contains(read("modules/agents.js"), "createAgentKomariDisplay({") {
-		t.Error("node cards must cache the Komari read per node")
-	}
+
 	if !strings.Contains(read("module_smoke.mjs"), `import "./panel_reads_smoke.mjs"`) {
 		t.Error("frontend smoke must execute the panel read cache runtime")
 	}

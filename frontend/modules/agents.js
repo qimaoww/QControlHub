@@ -1,7 +1,6 @@
 import { bindEvent, createInteractionGate } from "./refresh.js";
 import { bindCodeEditors } from "./code-editor.js";
 import { createAgentEnrollment } from "./agent-enrollment.js";
-import { createAgentKomariDisplay } from "./agent-komari.js";
 import { createAgentSharing } from "./agent-sharing.js";
 import { createRegionDisplay } from "./regions.js";
 import { createAgentView } from "./agent-view.js";
@@ -15,7 +14,6 @@ import { bindAgentWorkspace, compactPresetPage } from "./agent-workspace.js";
 export { developmentSourceVisible, coreSourceForInstall } from "./agent-core-actions.js";
 export { agentStructureSignature } from "./agent-refresh.js";
 export { batchAgentEligibility, batchSelectAllState } from "./agent-batch.js";
-export { komariCycleRange, komariResetDay } from "./agent-komari.js";
 export { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "./agent-card-drag.js";
 export { formatHostPort, manualConnectionAddressNote, publicAddressRows, updatePublicIPDisplays } from "./agent-addresses.js";
 export { geoRegionDetails } from "./regions.js";
@@ -27,17 +25,16 @@ export function installAgents(ctx) {
   const cardInteractions = createInteractionGate();
   const sharing = createAgentSharing(ctx, cardInteractions);
   const loadRegionDisplay = createRegionDisplay(ctx);
-  const komari = createAgentKomariDisplay({ api, state, esc, bytes });
   const enrollment = createAgentEnrollment({ ...ctx, refreshAgentPage });
   const { showCommand } = enrollment;
   const core = createAgentCoreActions(ctx, { refreshAgentPage });
   const { submitTask } = core;
-  const cards = createAgentCardInteractions(ctx, { can, cardInteractions, loadRegionDisplay, loadKomariDisplay: komari.loadKomariDisplay });
+  const cards = createAgentCardInteractions(ctx, { can, cardInteractions, loadRegionDisplay });
+  const renderAgentView = createAgentView(ctx, { can });
   const batch = createAgentBatchController(ctx, { renderAgentPage, cancelCardDrag: cards.cancel });
   const refresh = createAgentRefresh(ctx, { can, cardInteractions, renderAgentPage, syncBatchSnapshot: batch.syncSnapshot, loadRegionDisplay });
   const { pollAgentMetrics, updateAgentMetrics, requestAgentStructureRefresh } = refresh;
   const bindAgentSettings = createAgentSettings(ctx, { refreshAgentPage });
-  const renderAgentView = createAgentView(ctx, { can, ...komari });
   let agentPageRequest = 0;
 
 async function agents(options = {}) {

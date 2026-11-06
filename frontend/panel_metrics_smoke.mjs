@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { panelMetricUsage, renderPanelMetrics } from "./modules/panel-metrics.js";
+import { panelMetricUsage } from "./modules/dashboard-model.js";
+import { renderPanelMetrics } from "./modules/panel-metrics.js";
 
 const now = Date.parse("2026-09-14T09:00:00Z");
 const metrics = {

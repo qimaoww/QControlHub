@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { agentClockSyncPresentation, agentTimeZoneEffective, agentTimeZoneStatus, updateAgentTimeZone } from "../modules/agent-time-zone.js";
+import { agentClockSyncPresentation, agentTimeZoneEffective, agentTimeZoneStatus } from "../modules/agent-time-zone-model.js";
+import { updateAgentTimeZone } from "../modules/agent-time-zone.js";
 
 const configured = { mode: "custom", time_zone: "America/New_York", applied_time_zone: "America/New_York", status: "applied" };
 

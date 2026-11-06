@@ -17,7 +17,7 @@ type ThemePreference struct {
 
 var ErrThemeConflict = errors.New("theme preference revision changed")
 
-func ValidThemeID(id string) bool { return id == "classic" || id == "analytics" }
+func ValidThemeID(id string) bool { return id == "analytics" }
 
 func (s *Store) ReadTheme(ctx context.Context) (ThemePreference, error) {
 	return s.themePreference(ctx, "", 0)
@@ -49,11 +49,14 @@ func (s *Store) themePreference(ctx context.Context, id string, revision int64) 
 		return ThemePreference{}, err
 	}
 	// Only accounts without a saved selection inherit the public default.
-	// Existing explicit choices, including classic, keep their current revision.
+	// Legacy classic choices map to analytics without changing their CAS revision.
 	current := ThemePreference{ThemeID: "analytics"}
 	err = tx.QueryRow(ctx, `SELECT theme_id,revision FROM account_themes WHERE account_id=$1`, account).Scan(&current.ThemeID, &current.Revision)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ThemePreference{}, err
+	}
+	if current.ThemeID == "classic" {
+		current.ThemeID = "analytics"
 	}
 	if id != "" {
 		if current.Revision != revision {

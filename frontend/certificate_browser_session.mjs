@@ -99,14 +99,7 @@ try {
     await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
-    // These business regression suites deliberately select the classic theme.
-    // Default-theme behavior is checked separately through the production entry.
-    const preference = await api(page, identity, "GET", "/preferences/theme");
-    if (preference.theme_id !== "classic") {
-      await api(page, identity, "PUT", "/preferences/theme", {theme_id:"classic",revision:preference.revision});
-      await call("Page.reload", {}, page);
-    }
-    await wait(page, "!!document.querySelector('#logout')");
+    await wait(page, "!!document.querySelector('.a-user')");
     return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
@@ -126,19 +119,19 @@ try {
   const alice=await login(a,"alice"), bob=await login(b,"bob");
   const click=async(page,selector)=>evaluate(page,`document.querySelector(${JSON.stringify(selector)}).click()`);
   const set=async(page,selector,value)=>evaluate(page,`(() => {const field=document.querySelector(${JSON.stringify(selector)});field.value=${JSON.stringify(value)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  const open=async(page)=>{await evaluate(page,"location.hash='#certificates'");await wait(page,"!!document.querySelector('[data-cert-create]')")};
+  const open=async(page)=>{await evaluate(page,"location.hash='#certificates'");await wait(page,"!!document.querySelector('[data-certificate-create=self-signed]')")};
   await open(a);
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),0);
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-card,.context-steps').length"),0);
-  await click(a,"[data-cert-accounts]");await wait(a,"!!document.querySelector('[data-cert-new-dns]')");await click(a,"[data-cert-new-dns]");await wait(a,"!!document.querySelector('[data-cert-account-form]')");
+  await click(a,"[data-certificate-accounts-open]");await wait(a,"!!document.querySelector('[data-certificate-new-dns]')");await click(a,"[data-certificate-new-dns]");await wait(a,"!!document.querySelector('[data-certificate-account]')");
   await set(a,'[name=name]','Alice DNS');await set(a,'[name=zone]','example.test');await set(a,'[name=token]','local-browser-fixture-token');
-  await evaluate(a,"document.querySelector('[data-cert-account-form]').requestSubmit()");
-  await wait(a,"!!document.querySelector('[data-cert-new-dns]')");
+  await evaluate(a,"document.querySelector('[data-certificate-account]').requestSubmit()");
+  await wait(a,"!!document.querySelector('[data-certificate-new-dns]') && !document.querySelector('[data-certificate-account],[aria-busy=true]')");
   assert.equal((await api(a,alice,'GET','/certificate-accounts')).length,1);
   assert.deepEqual(await api(b,bob,'GET','/certificate-accounts'),[]);
-  await click(a,'[data-cert-close]');await click(a,'[data-cert-create]');await wait(a,"!!document.querySelector('[name=source]')");await set(a,'[name=source]','self-signed');await wait(a,"!!document.querySelector('[name=days]')");
-  await set(a,'[name=name]','边缘入口证书');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-cert-form]').requestSubmit()");
-  await wait(a,"!!document.querySelector('[data-cert-share]')");
+  await click(a,'dialog[open]:last-of-type [aria-label=关闭]');await click(a,'[data-certificate-create=self-signed]');await wait(a,"!!document.querySelector('[name=days]')");
+  await set(a,'[name=name]','边缘入口证书');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-certificate-form]').requestSubmit()");
+  await wait(a,"!!document.querySelector('[data-certificate-grant-open]')");
   const cert=(await api(a,alice,'GET','/certificates')).items[0];assert.equal(cert.version,1);assert.equal(cert.owner_id,alice.user_id);
   await api(b,bob,'GET',`/certificates/${cert.id}`,undefined,404);
   // Clearly isolated presentation fixtures. Authorized reads still hit the real
@@ -163,104 +156,107 @@ try {
       return response;
     };
   })()`);
-  const detailText=()=>evaluate(a,"document.querySelector('.cert-dialog').textContent");
-  const refreshOrder=async patch=>{await evaluate(a,`Object.assign(window.certificateOrderFixture.order,${JSON.stringify(patch)})`);await click(a,'[data-cert-reload]');};
-  await refreshOrder({});await wait(a,"document.querySelector('.cert-dialog').textContent.includes('尚未执行')");
+  const detailText=()=>evaluate(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent");
+  const refreshOrder=async patch=>{await evaluate(a,`Object.assign(window.certificateOrderFixture.order,${JSON.stringify(patch)})`);await click(a,'[data-certificate-refresh]');};
+  await refreshOrder({});await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('尚未执行')");
   assert.doesNotMatch(await detailText(),/第 0 次|v1/);
-  await evaluate(a,"(() => {document.querySelector('[data-cert-reload]').focus();const content=document.querySelector('[data-cert-modal-content]');content.scrollTop=100;window.certificateScroll=content.scrollTop;window.certificateOrderFixture.order.status='running';window.certificateOrderFixture.order.stage='preparing';window.certificateOrderFixture.order.attempt=1;})()");
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('首次执行中')");
-  assert.equal(await evaluate(a,"document.activeElement.hasAttribute('data-cert-reload')"),true,'poll lost keyboard focus');
-  assert.equal(await evaluate(a,"document.querySelector('[data-cert-modal-content]').scrollTop"),await evaluate(a,"window.certificateScroll"),'poll lost scroll');
+  await evaluate(a,"(() => {document.querySelector('[data-certificate-refresh]').focus();const content=document.querySelector('[data-certificate-id] .a-dialog-body');content.scrollTop=100;window.certificateScroll=content.scrollTop;window.certificateOrderFixture.order.status='running';window.certificateOrderFixture.order.stage='preparing';window.certificateOrderFixture.order.attempt=1;})()");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('首次执行中')");
+  assert.equal(await evaluate(a,"document.activeElement.hasAttribute('data-certificate-refresh')"),true,'poll lost keyboard focus');
+  assert.equal(await evaluate(a,"document.querySelector('[data-certificate-id] .a-dialog-body').scrollTop"),await evaluate(a,"window.certificateScroll"),'poll lost scroll');
   await refreshOrder({status:'waiting_dns',stage:'waiting_dns',challenges:[{type:'dns-01',domain:'example.test',name:'_acme-challenge.example.test',value:'synthetic-txt-value',status:'pending'}]});
-  await wait(a,"!!document.querySelector('[data-cert-continue]')");
+  await wait(a,"!!document.querySelector('[data-certificate-action$=continue]')");
   assert.match(await detailText(),/等待人工 DNS 操作/);
   assert.match(await detailText(),/_acme-challenge.example.test/);
-  await evaluate(a,"document.querySelector('[data-cert-continue]').click();document.querySelector('[data-cert-continue]').click()");
+  await evaluate(a,"document.querySelector('[data-certificate-action$=continue]').click();document.querySelector('[data-certificate-action$=continue]').click()");
   assert.equal(await evaluate(a,"window.certificateOrderFixture.requests"),1);
-  assert.equal(await evaluate(a,"document.querySelector('[data-cert-cancel]').disabled"),true);
+  assert.equal(await evaluate(a,"document.querySelector('[data-certificate-action$=synthetic-order]').disabled"),true);
   await evaluate(a,"window.certificateOrderFixture.release()");
-  await wait(a,"!document.querySelector('[data-cert-continue]').disabled");
+  await wait(a,"!document.querySelector('[data-certificate-action$=continue]').disabled");
   assert.match(await detailText(),/synthetic-txt-value/);
   await refreshOrder({status:'queued',stage:'retry',attempt:2,error:'not found',next_attempt:'2026-11-02T04:06:06Z'});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('等待自动重试')");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('等待自动重试')");
   assert.match(await detailText(),/已执行 2 次.*后台将自动继续申请/s);
   assert.match(await detailText(),/暂无法确认具体资源或原因/);
   await refreshOrder({status:'failed',stage:'cleanup',method:'dns-api',attempt:8,created_at:'2026-11-02T06:18:04Z',next_attempt:'2026-11-02T06:23:04Z',error:'验证资源清理失败，将重试',failure_stage:'validating',challenges:[]});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('原始申请错误未保留')");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('原始申请错误未保留')");
   assert.match(await detailText(),/已执行 8 次/);
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1920,height:mode==='mobile'?844:1080,deviceScaleFactor:1,mobile:mode==='mobile'},a);
-  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await evaluate(a,"Array.from(document.querySelectorAll('dialog.a-dialog h2')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
   await screenshot(a,'order-legacy-failure');
   await refreshOrder({error:'读取 ACME 申请账号失败：申请账号解密失败，请联系管理员检查当前及旧加密密钥',failure_stage:'preparing',cleanup_error:''});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('旧加密密钥')");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('旧加密密钥')");
   assert.doesNotMatch(await detailText(),/本人申请账号是否仍可用/);
   await screenshot(a,'order-account-decryption');
 
   await refreshOrder({error:'DNS TXT 尚未传播：_acme-challenge.example.test',cleanup_error:'DNS API 返回 HTTP 503，请检查凭据与区域权限'});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('清理失败：DNS API 返回 HTTP 503')");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('清理失败：DNS API 返回 HTTP 503')");
   assert.match(await detailText(),/DNS TXT 尚未传播/);
   assert.match(await detailText(),/下次清理/);
-  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await evaluate(a,"Array.from(document.querySelectorAll('dialog.a-dialog h2')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
   await screenshot(a,'order-failed-cleanup');
   for(const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[1920,1080,2],[1280,800,1],[1024,768,1],[768,1024,1],[390,844,1],[844,390,1],[320,568,1]]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:dpr,mobile:width<768},a);
     await call('Emulation.setTouchEmulationEnabled',{enabled:width<768},a);
     await delay(50);
-    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && document.querySelector('.cert-dialog').getBoundingClientRect().right<=innerWidth+1"),true,'order detail overflow at '+width+'x'+height+' DPR '+dpr);
+    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && document.querySelector('dialog.a-dialog[open]:last-of-type').getBoundingClientRect().right<=innerWidth+1"),true,'order detail overflow at '+width+'x'+height+' DPR '+dpr);
   }
   for(const status of ['succeeded','canceled']){
     await refreshOrder({status,stage:'complete'});
-    await wait(a,`Array.from(document.querySelectorAll('.cert-dialog .status-label')).some(e=>e.textContent===${JSON.stringify(status==='succeeded'?'签发成功':'已取消')})`);
+    await wait(a,`Array.from(document.querySelectorAll('dialog.a-dialog .a-badge')).some(e=>e.textContent===${JSON.stringify(status==='succeeded'?'签发成功':'已取消')})`);
     assert.doesNotMatch(await detailText(),/后台将自动继续申请|not found/);
   }
   await refreshOrder({status:'succeeded',stage:'cleanup',error:'',cleanup_error:'DNS API 返回 HTTP 503'});
-  await wait(a,"document.querySelector('.cert-dialog').textContent.includes('验证资源待清理') && document.querySelector('.cert-dialog').textContent.includes('签发成功')");
+  await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('验证资源待清理') && document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('签发成功')");
   assert.match(await detailText(),/签发成功/);
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1920,height:mode==='mobile'?844:1080,deviceScaleFactor:1,mobile:mode==='mobile'},a);
-  await evaluate(a,"Array.from(document.querySelectorAll('.cert-dialog h3')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
+  await evaluate(a,"Array.from(document.querySelectorAll('dialog.a-dialog h2')).find(e=>e.textContent==='申请与续期记录').scrollIntoView({block:'start'})");
   await screenshot(a,'order-success-cleanup');
   await refreshOrder({status:'succeeded',stage:'complete',cleanup_error:'',next_attempt:null});
-  await wait(a,"!document.querySelector('.cert-dialog').textContent.includes('清理失败')");
+  await wait(a,"!document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('清理失败')");
   assert.doesNotMatch(await detailText(),/下次清理|验证资源待清理/);
   await screenshot(a,'order-success-complete');
   await evaluate(a,"window.fetch=window.certificateOrderFixture.original;delete window.certificateOrderFixture");
-  await click(a,'[data-cert-reload]');await wait(a,"!document.querySelector('.cert-dialog').textContent.includes('验证资源待清理')");
+  await click(a,'[data-certificate-refresh]');await wait(a,"!document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('验证资源待清理')");
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},a);
   record(mode+': synthetic order presentation: live polling/focus/scroll, DNS continuation single submit and recovery, retries, terminal cleanup, dates and 9 CSS viewport/DPR combinations passed');
 
-  await click(a,'[data-cert-share]');await wait(a,"!!document.querySelector('[data-cert-grant-form]')");await set(a,'[name=username]','bob');await evaluate(a,"document.querySelector('[data-cert-grant-form]').requestSubmit()");await wait(a,"!!document.querySelector('[data-cert-revoke]')");
-  await open(b);await wait(b,`!!document.querySelector('[data-cert-detail="${cert.id}"]')`);
+  await click(a,'[data-certificate-grant-open]');await wait(a,"!!document.querySelector('[data-certificate-grant]')");await set(a,'[name=username]','bob');await evaluate(a,"document.querySelector('[data-certificate-grant]').requestSubmit()");await wait(a,"!!document.querySelector('[data-certificate-action$=grants]')");
+  await open(b);await wait(b,`!!document.querySelector('[data-certificate-detail="${cert.id}"]')`);
   assert.equal((await api(b,bob,'GET','/certificates')).items[0].owned,false);
-  await evaluate(b,`location.hash='#live-config?agent=${fixture.shared}&engine=mihomo'`);await wait(b,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='＋ 增加入站')");
-  await evaluate(b,"Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='＋ 增加入站').click()");await wait(b,"!!document.querySelector('.config-inbound-dialog select')");
-  await evaluate(b,"(() => {const s=document.querySelector('.config-inbound-dialog select');s.value='trojan';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await evaluate(b,`location.hash='#live-config?agent=${fixture.shared}&engine=mihomo'`);await wait(b,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='添加入站')");
+  await evaluate(b,"Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='添加入站').click()");await wait(b,"!!document.querySelector('dialog.a-dialog select')");
+  await evaluate(b,"(() => {const s=document.querySelector('dialog.a-dialog [name=protocol]');s.value='trojan';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
   await wait(b,`!!document.querySelector('[name=panel_certificate_id] option[value="${cert.id}"]')`);
   assert.equal(await evaluate(b,`document.querySelector('[name=panel_certificate_id] option[value="${cert.id}"]').parentElement.label`),'授权给我的证书');
   const localPath=await evaluate(b,"document.querySelector('[name=certificate_path]').value");
   await set(b,'[name=panel_certificate_id]',cert.id);
-  assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').closest('label').hidden"),true);
+  assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').closest('.a-field').hidden"),true);
   await set(b,'[name=panel_certificate_id]','');
   assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').value"),localPath);
-  assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').closest('label').hidden"),false);
+  assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').closest('.a-field').hidden"),false);
   await set(b,'[name=panel_certificate_id]',cert.id);
   assert.equal(await evaluate(b,"document.querySelector('[name=certificate_path]').value"),`/etc/qcontrolhub/panel-certificates/${cert.id}/cert.pem`);
-  await evaluate(b,"document.querySelector('[data-builder-step=security]')?.click()");
+  await evaluate(b,"document.querySelector('[name=panel_certificate_id]').scrollIntoView({block:'center'})");
   assert.ok(await evaluate(b,"document.documentElement.scrollWidth <= innerWidth+1"));
   record(`${mode}: real UI DNS-account save, self-signed issuance, owner isolation, UI share, authorized protocol selector and protected path markers passed`);
   await screenshot(b,'certificate-selector');
   for (const [width,height] of mode==='mobile'?[[390,844],[844,390],[768,1024]]:[[1920,1080],[3840,2160],[1280,800],[540,720]]) {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},b);
-    for (const theme of ['light','dark','modern']) {
+    for (const theme of ['analytics']) {
       await evaluate(b,`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
       await evaluate(b,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-      await click(b,'[name=panel_certificate_id]');
-      await wait(b,"!!document.querySelector('[role=listbox][popover]')");
-      const bounds=await evaluate(b,"(() => {const e=document.querySelector('[role=listbox][popover]');const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth+1,width:innerWidth,height:innerHeight}})()");
+      const point=await evaluate(b,"(() => {const select=document.querySelector('[name=panel_certificate_id]');select.scrollIntoView({block:'center'});const r=select.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+      await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point},b);
+      await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point},b);
+      await wait(b,"document.querySelector('[name=panel_certificate_id]').matches(':open')");
+      const bounds=await evaluate(b,"(() => {const options=[...document.querySelector('[name=panel_certificate_id]').options].map(option=>option.getBoundingClientRect()).filter(rect=>rect.width&&rect.height);return {left:Math.min(...options.map(r=>r.left)),right:Math.max(...options.map(r=>r.right)),top:Math.min(...options.map(r=>r.top)),bottom:Math.max(...options.map(r=>r.bottom)),overflow:document.documentElement.scrollWidth>innerWidth+1,width:innerWidth,height:innerHeight}})()");
       assert.ok(bounds.left>=-1&&bounds.right<=bounds.width+1&&bounds.top>=-1&&bounds.bottom<=bounds.height+1&&!bounds.overflow,JSON.stringify(bounds));
-      const occlusion=await evaluate(b,"(() => {const s=document.querySelector('[name=panel_certificate_id]').getBoundingClientRect(),p=document.querySelector('[role=listbox][popover]').getBoundingClientRect(),body=document.querySelector('.config-inbound-body').getBoundingClientRect(),footer=document.querySelector('.config-inbound-dialog .builder-actions').getBoundingClientRect();return {selectTop:s.top,selectBottom:s.bottom,bodyTop:body.top,footerTop:footer.top,popupBottom:p.bottom}})()");
-      assert.ok(occlusion.selectTop>=occlusion.bodyTop-1&&occlusion.selectBottom<=occlusion.footerTop+1&&occlusion.popupBottom<=occlusion.footerTop+1,JSON.stringify(occlusion));
+      const occlusion=await evaluate(b,"(() => {const s=document.querySelector('[name=panel_certificate_id]').getBoundingClientRect(),body=document.querySelector('.a-dialog-body').getBoundingClientRect(),footer=document.querySelector('dialog.a-dialog button[type=submit]').getBoundingClientRect();return {selectTop:s.top,selectBottom:s.bottom,bodyTop:body.top,footerTop:footer.top}})()");
+      assert.ok(occlusion.selectTop>=occlusion.bodyTop-1&&occlusion.selectBottom<=occlusion.footerTop+1,JSON.stringify(occlusion));
       await screenshot(b,`certificate-menu-${theme}-${width}x${height}`);
-      await evaluate(b,"document.querySelector('[name=panel_certificate_id]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+      for(const type of ['keyDown','keyUp']) await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27},b);
+      await wait(b,"!document.querySelector('[name=panel_certificate_id]').matches(':open') && !!document.querySelector('dialog.a-dialog[open]')");
     }
   }
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},b);
@@ -269,77 +265,79 @@ try {
   // An already-open recipient detail must lose its stale content when the
   // owner revokes access; the read poll must distinguish 404 from outages.
   const c=await createPage(), recipient=await login(c,'bob');
-  await open(c);await click(c,`[data-cert-detail="${cert.id}"]`);
-  await wait(c,`!!document.querySelector('.cert-dialog[data-cert-detail-id="${cert.id}"]')`);
+  await open(c);await click(c,`[data-certificate-detail="${cert.id}"]`);
+  await wait(c,`!!document.querySelector('dialog.a-dialog[data-certificate-id="${cert.id}"]')`);
   await api(a,alice,'DELETE',`/certificates/${cert.id}/grants`,{username:'bob'},204);
-  await wait(c,`!document.querySelector('.cert-dialog') && !document.querySelector('[data-cert-detail="${cert.id}"]')`);
+  await wait(c,`!document.querySelector('dialog.a-dialog[open]:last-of-type') && !document.querySelector('[data-certificate-detail="${cert.id}"]')`);
   await api(c,recipient,'GET',`/certificates/${cert.id}`,undefined,404);
   await api(a,alice,'POST',`/certificates/${cert.id}/grants`,{username:'bob'},204);
   record(`${mode}: revoked certificate detail and list disappear without navigation or manual refresh`);
 
-  await click(c,'[data-cert-create]');await wait(c,"!!document.querySelector('[data-cert-form]')");
   await evaluate(c,`(() => {
     const original=window.fetch;window.__certRestoreFetch=()=>{window.fetch=original};
     const gate=new Promise(resolve=>{window.__certRelease=resolve});
     window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certBlocked=true;await gate}return response};
   })()`);
-  await set(c,'[name=source]','self-signed');await wait(c,'window.__certBlocked');
+  await click(c,'[data-certificate-create=acme]');await wait(c,'window.__certBlocked && !!document.querySelector("dialog.a-dialog[open]")');
   for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27},c);
-  await wait(c,"!document.querySelector('.cert-dialog')");
+  await wait(c,"!document.querySelector('dialog.a-dialog[open]:last-of-type')");
   await evaluate(c,'window.__certRestoreFetch();window.__certRelease()');await delay(500);
-  assert.equal(await evaluate(c,"document.querySelectorAll('.cert-dialog').length"),0);
+  assert.equal(await evaluate(c,"document.querySelectorAll('dialog.a-dialog').length"),0);
   record(`${mode}: Escape closes a certificate form and invalidates its delayed real resource response`);
 
   // Node enrollment uses the existing source dialog and never edits a config.
   const nativeBefore=await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo');
-  await click(a,'[data-cert-close]');await click(a,'[data-cert-sources]');
-  await wait(a,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.owner_source+'"][data-cert-source-action="enroll"]')+")");
-  const enrollSelector='[data-source="'+fixture.owner_source+'"][data-cert-source-action="enroll"]';
-  await click(a,enrollSelector);await wait(a,"!!document.querySelector('[data-confirm-dialog][open]')");
-  await click(a,'[data-confirm-cancel]');
+  await click(a,'dialog[open]:last-of-type [aria-label=关闭]');await click(a,'[data-certificate-sources-open]');
+  await wait(a,"!!document.querySelector("+JSON.stringify('[data-certificate-source="'+fixture.owner_source+'"][data-certificate-source-action="enroll"]')+")");
+  const enrollSelector='[data-certificate-source="'+fixture.owner_source+'"][data-certificate-source-action="enroll"]';
+  await click(a,enrollSelector);await wait(a,"!!document.querySelector('dialog.a-dialog[open]:last-of-type')");
+  await click(a,'dialog[open]:last-of-type .a-dialog-body button:not(.primary)');
   assert.equal((await api(a,alice,'GET','/certificates')).items.some(item=>item.source_id===fixture.owner_source),false);
-  await click(a,enrollSelector);await wait(a,"!!document.querySelector('[data-confirm-dialog][open]')");await click(a,'[data-confirm-accept]');
+  await click(a,enrollSelector);await wait(a,"!!document.querySelector('dialog.a-dialog[open]:last-of-type')");await click(a,'dialog[open]:last-of-type .a-dialog-body button.primary');
   await wait(a,"fetch('/api/v1/certificates').then(r=>r.json()).then(d=>d.items.some(i=>i.source_id==="+JSON.stringify(fixture.owner_source)+"))");
   const nativeCert=(await api(a,alice,'GET','/certificates')).items.find(item=>item.source_id===fixture.owner_source);
   assert.equal(nativeCert.source,'node');assert.equal(nativeCert.renewal_manager,'external');assert.equal(nativeCert.auto_renew,false);
   await api(b,bob,'GET','/certificates/'+nativeCert.id,undefined,404);
   await api(b,bob,'PUT','/certificate-managed-sources/'+fixture.owner_source,{action:'enroll'},404);
   assert.deepEqual(await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo'),nativeBefore);
-  await click(a,'[data-cert-sources]');await wait(a,"!!document.querySelector("+JSON.stringify('[data-cert-detail="'+nativeCert.id+'"]')+")");
-  await click(a,'[data-cert-detail="'+nativeCert.id+'"]');await wait(a,"document.querySelector('.cert-dialog')?.textContent.includes('原有方式续期')");
-  assert.equal(await evaluate(a,"document.querySelector('.cert-dialog').textContent.includes('Caddy 自动续期')"),false);
+  await click(a,'[data-certificate-sources-open]');await wait(a,"!!document.querySelector("+JSON.stringify('[data-certificate-detail="'+nativeCert.id+'"]')+")");
+  await click(a,'[data-certificate-detail="'+nativeCert.id+'"]');await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type')?.textContent.includes('原有方式续期')");
+  assert.equal(await evaluate(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('Caddy 自动续期')"),false);
   await screenshot(a,'node-certificate-detail');
-  await click(a,'[data-cert-sources]');await wait(a,"document.querySelector('.cert-dialog h2')?.textContent==='节点来源'");
+  await click(a,'[data-certificate-sources-open]');await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type h2')?.textContent==='节点证书来源'");
   for(const [width,height] of [[1920,1080],[3840,2160],[1280,800],[1024,768],[768,1024],[390,844],[844,390],[320,568]]) {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768},a);
     await call('Emulation.setTouchEmulationEnabled',{enabled:width<768},a);
     await delay(100);
-    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && (()=>{const r=document.querySelector('.cert-dialog').getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1&&r.top>=-1&&r.bottom<=innerHeight+1})()"),true,'source layout overflow at '+width+'x'+height);
+    assert.equal(await evaluate(a,"document.documentElement.scrollWidth<=innerWidth+1 && (()=>{const r=document.querySelector('dialog.a-dialog[open]:last-of-type').getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1&&r.top>=-1&&r.bottom<=innerHeight+1})()"),true,'source layout overflow at '+width+'x'+height);
     await screenshot(a,'node-sources-'+width+'x'+height);
   }
   for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9},a);
-  assert.equal(await evaluate(a,"!!document.activeElement.closest('.cert-dialog')"),true);
+  assert.equal(await evaluate(a,"!!document.activeElement.closest('dialog.a-dialog')"),true);
   await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},a);
   for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27},b);
-  await open(b);await click(b,'[data-cert-sources]');await wait(b,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.shared_source+'"][data-cert-source-action="enroll"]')+")");
-  assert.equal(await evaluate(b,"!!document.querySelector("+JSON.stringify('[data-source="'+fixture.owner_source+'"]')+")"),false);
-  await click(b,'[data-source="'+fixture.shared_source+'"][data-cert-source-action="enroll"]');await wait(b,"!!document.querySelector('[data-confirm-dialog][open]')");await click(b,'[data-confirm-accept]');
+  await wait(b,"document.querySelector('dialog[open]:last-of-type h2')?.textContent==='放弃更改'");
+  await click(b,'dialog[open]:last-of-type .a-dialog-body button.primary');
+  await wait(b,"!document.querySelector('[name=panel_certificate_id]')");
+  await open(b);await click(b,'[data-certificate-sources-open]');await wait(b,"!!document.querySelector("+JSON.stringify('[data-certificate-source="'+fixture.shared_source+'"][data-certificate-source-action="enroll"]')+")");
+  assert.equal(await evaluate(b,"!!document.querySelector("+JSON.stringify('[data-certificate-source="'+fixture.owner_source+'"]')+")"),false);
+  await click(b,'[data-certificate-source="'+fixture.shared_source+'"][data-certificate-source-action="enroll"]');await wait(b,"!!document.querySelector('dialog.a-dialog[open]:last-of-type')");await click(b,'dialog[open]:last-of-type .a-dialog-body button.primary');
   await wait(b,"fetch('/api/v1/certificates').then(r=>r.json()).then(d=>d.items.some(i=>i.source_id==="+JSON.stringify(fixture.shared_source)+"))");
   const sharedNative=(await api(b,bob,'GET','/certificates')).items.find(item=>item.source_id===fixture.shared_source);
   assert.equal(sharedNative.owned,true);await api(a,alice,'GET','/certificates/'+sharedNative.id,undefined,404);
   record(mode+': explicit native enrollment, canceled consent, unchanged TLS config, shared source isolation, 8 responsive viewports and keyboard focus passed');
 
   // Reuse the same document and installed route module across real logins.
-  await click(a,'[data-cert-close]');
-  await set(a,'[data-cert-search]','alice-private.example.test');
-  await wait(a,"document.querySelector('[data-cert-search]')?.value==='alice-private.example.test'");
-  await click(a,'#logout');await wait(a,"!!document.querySelector('#login-form,.a-login form')");
-  assert.equal(await evaluate(a,"document.querySelectorAll('.cert-dialog').length"),0);
+  await click(a,'dialog[open]:last-of-type [aria-label=关闭]');
+  await set(a,'[name=search]','alice-private.example.test');
+  await wait(a,"document.querySelector('[name=search]')?.value==='alice-private.example.test'");
+  await click(a,'[title=退出登录]');await wait(a,"!!document.querySelector('#login-form,.a-login form')");
+  assert.equal(await evaluate(a,"document.querySelectorAll('dialog.a-dialog').length"),0);
   const switched=await login(a,'bob');await open(a);
-  assert.equal(await evaluate(a,"document.querySelector('[data-cert-search]').value"),'');
-  await wait(a,`!!document.querySelector('[data-cert-detail="${cert.id}"]')`);
-  await click(a,'[data-cert-accounts]');await wait(a,"!!document.querySelector('[data-cert-new-dns]')");
-  assert.equal(await evaluate(a,"document.querySelector('.cert-dialog').textContent.includes('Alice DNS')"),false);
+  assert.equal(await evaluate(a,"document.querySelector('[name=search]').value"),'');
+  await wait(a,`!!document.querySelector('[data-certificate-detail="${cert.id}"]')`);
+  await click(a,'[data-certificate-accounts-open]');await wait(a,"!!document.querySelector('[data-certificate-new-dns]')");
+  assert.equal(await evaluate(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('Alice DNS')"),false);
   assert.deepEqual(await api(a,switched,'GET','/certificate-accounts'),[]);
   record(`${mode}: same-browser logout/login clears private filters, dialogs and credential-account state`);
 

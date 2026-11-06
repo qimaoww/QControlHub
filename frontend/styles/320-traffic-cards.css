@@ -5,7 +5,7 @@
 /* Stacked traffic segments share a square edge; only the outside corners are rounded. */
 .traffic-month-chart path{cursor:help}.traffic-month-chart g:hover path{filter:brightness(1.12)}
 @media(max-width:520px) and (pointer:coarse){.traffic-control-panel>.traffic-filters{grid-template-columns:1fr}.traffic-workspace>.traffic-policy-grid{grid-template-columns:1fr}}
-@media(max-width:520px) and (pointer:coarse){:is(.node-komari-settings,.node-name-settings) form{grid-template-columns:1fr}:is(.node-komari-settings,.node-name-settings) form button{justify-self:start}}
+@media(max-width:520px) and (pointer:coarse){.node-name-settings form{grid-template-columns:1fr}.node-name-settings form button{justify-self:start}}
 /* Rewritten traffic policy card. */
 /* Keep the listener identity visible before usage and actions. */
 .traffic-workspace .traffic-policy-card>header.traffic-card-header{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;justify-content:stretch;gap:0;min-width:0;min-height:0;padding:0}

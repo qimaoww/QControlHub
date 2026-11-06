@@ -119,6 +119,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 			writeInternalError(w, err)
 			return
 		}
+		s.resolveAgentRegions(request, agents)
 		type trafficAgent struct {
 			ID           string        `json:"id"`
 			Name         string        `json:"name"`
@@ -126,6 +127,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 			CanManage    bool          `json:"can_manage"`
 			Capabilities []core.Engine `json:"capabilities"`
 			Features     []string      `json:"features"`
+			RegionCode   string        `json:"region_code"`
 		}
 		sources := make([]trafficAgent, 0, len(agents))
 		for _, agent := range agents {
@@ -135,7 +137,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 					features = append(features, feature)
 				}
 			}
-			sources = append(sources, trafficAgent{agent.ID, agent.Name, agent.Status, agent.CanManage, agent.Capabilities, features})
+			sources = append(sources, trafficAgent{agent.ID, agent.Name, agent.Status, agent.CanManage, agent.Capabilities, features, agent.RegionCode})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"policies": policies, "agents": sources})
 		return

@@ -289,6 +289,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("rebuild validated client source history: %w", err)
 		}
 	}
+	if appliedVersion < 89 {
+		if err := s.retireKomariSettings(ctx, tx); err != nil {
+			return fmt.Errorf("retire obsolete integration settings: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
 	}

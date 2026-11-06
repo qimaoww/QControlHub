@@ -1,11 +1,11 @@
 import { trafficAccountingState } from "../modules/traffic-model.js";
 import assert from "node:assert/strict";
 
-import { batchAgentEligibility, batchSelectAllState } from "../modules/agents.js";
+import { batchAgentEligibility, batchSelectAllState } from "../modules/agent-batch.js";
 
-import { coreLogFilterCounts, filterCoreLogEntries } from "../modules/core-logs.js";
+import { coreLogFilterCounts, filterCoreLogEntries } from "../modules/core-log-model.js";
 
-import { trafficRateForDisplay } from "../modules/traffic.js";
+import { trafficRateForDisplay } from "../modules/traffic-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run() {

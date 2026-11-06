@@ -1,27 +1,19 @@
 import assert from "node:assert/strict";
 import * as dashboard from "./modules/dashboard.js";
 import * as settings from "./modules/settings.js";
-import * as access from "./modules/access-control.js";
-import * as tcp from "./modules/system-bbr.js";
 import * as client from "./modules/client-access.js";
 import * as substore from "./modules/substore-sync.js";
 import * as tasks from "./modules/tasks.js";
-import * as logs from "./modules/core-logs.js";
 import * as traffic from "./modules/traffic.js";
 import * as users from "./modules/users.js";
-import * as quality from "./modules/ip-quality.js";
 import { createTaskView } from "./modules/task-view.js";
 
 const boundaries = [
-  [quality, "installIPQuality"],
   [dashboard, "installDashboard", "dashboard-model", ["dashboardTrafficMonthDays", "aggregateDashboardTrafficDays"]],
   [settings, "installSettings"],
-  [access, "installAccessControl"],
-  [tcp, "installSystemBBR", "system-bbr-model", ["systemBBRFeature", "systemBBRActions", "validateTCPSelection", "systemBBRState"]],
   [client, "installClientAccess", "client-access-model", ["normalizeClientAccessFilters", "filterClientAccessEntries", "groupClientAccessEntries", "clientAccessAddressChoices", "clientAccessEntryForAddress"]],
   [substore, "installSubStoreSync", "substore-model", ["filterSubStoreProfiles", "groupSubStoreProfiles", "subStoreSelectionPayload", "subStoreAddressChoices", "subStoreProfileNodeCount", "subStoreAddressModeLabel"]],
   [tasks, "installTasks", "task-model", ["coreSourceName", "coreSourceLabel"]],
-  [logs, "installCoreLogs", "core-log-model", ["filterCoreLogEntries", "coreLogFilterCounts"]],
   [traffic, "installTraffic", "traffic-model", ["trafficCardIdentity", "orderTrafficItems", "mergeVisibleTrafficCardOrder", "trafficRateForDisplay", "mergeTrafficPorts"]],
   [users, "installUsers", "user-model", ["userPermissions", "parseSharedPorts", "formatSharedPorts", "sharedPortsLabel", "selectedSharedEngines", "sharedLimitBytes", "sharedLimitGiB", "agentShareStatus", "mergeUserAllocation"]],
 ];
@@ -42,7 +34,6 @@ for (const [module, installer, owner, helpers] of boundaries) {
     page.closeInvitation();
   } else {
     assert.equal(typeof page, "function", `${installer} preserves its callable API`);
-    if (installer === "installAccessControl") assert.equal(typeof page.open, "function");
   }
   if (owner) {
     const focused = await import(`./modules/${owner}.js`);

@@ -13,7 +13,7 @@ const isMain = Boolean(process.argv[1]) &&
 const productionCSP = (await readFile(join(root, "nginx.conf"), "utf8"))
   .match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
 assert.ok(productionCSP, "browser smoke must read the production content security policy");
-const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/app.css?v=motion-smoke"></head><body><div id="app"><div class="boot">测试载入中</div></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>`;
+const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/analytics/theme.css"></head><body><div id="app"><div class="a-empty">测试载入中</div></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>`;
 
 const mime = (path) =>
   path.endsWith(".css")
@@ -32,8 +32,7 @@ const server = createServer(async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     if (process.env.QCH_BROWSER_SMOKE_DEBUG) process.stderr.write(`${path}\n`);
     if (path === "/" || path === "/agents-browser-smoke.html") {
-      if (url.searchParams.get("mode")?.startsWith("dashboard") || url.searchParams.get("mode")?.startsWith("ip-quality") || url.searchParams.get("mode")?.startsWith("select-menus"))
-        response.setHeader("Content-Security-Policy", productionCSP);
+      response.setHeader("Content-Security-Policy", productionCSP);
       response.writeHead(200, { "Content-Type": mime(".html") });
       response.end(html);
       return;
@@ -82,9 +81,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     let file;
-    if (path === "/assets/app.css") file = join(root, "app.css");
-    else if (path === "/assets/app.js") file = join(root, "app.js");
-    else if (path === "/assets/agents_browser_runtime.mjs")
+    if (path === "/assets/agents_browser_runtime.mjs")
       file = join(root, "agents_browser_runtime.mjs");
     else if (path === "/assets/config_restrictions_browser_runtime.mjs")
       file = join(root, "config_restrictions_browser_runtime.mjs");
@@ -104,6 +101,8 @@ const server = createServer(async (request, response) => {
       file = join(root, "dashboard_browser_runtime.mjs");
     else if (/^\/assets\/browser\/[a-z0-9-]+\.mjs$/.test(path))
       file = join(root, "browser", path.slice("/assets/browser/".length));
+    else if (path.startsWith("/assets/analytics/"))
+      file = join(root, "analytics", path.slice("/assets/analytics/".length));
     else if (path.startsWith("/assets/modules/"))
       file = join(root, "modules", path.slice("/assets/modules/".length));
     if (!file) {
@@ -260,6 +259,75 @@ async function driveMotionGestures(send, mobile) {
   }
 }
 
+async function driveEnrollmentKeys(send) {
+  for (;;) {
+    let result;
+    try { result = await send('Runtime.evaluate', {
+      expression: `new Promise(resolve => { const timer = setInterval(() => {
+        if (window.__enrollmentKey || window.__enrollmentKeysDone || document.documentElement.dataset.browserSmoke) {
+          clearInterval(timer); resolve(window.__enrollmentKey || null);
+        }
+      }, 10); })`, awaitPromise: true, returnByValue: true,
+    }); } catch (error) {
+      if (!/Execution context was destroyed|Cannot find context/.test(error.message)) throw error;
+      await delay(25); continue;
+    }
+    const request = result.result?.value;
+    if (!request) return;
+    const key = { key: request.key, code: request.key, windowsVirtualKeyCode: request.key === 'Tab' ? 9 : 27, modifiers: request.shift ? 8 : 0 };
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    await send('Runtime.evaluate', { expression: 'window.__enrollmentKey = null' });
+  }
+}
+
+const pickerWindows = new Map();
+async function driveSelectMenuInputs(send, display) {
+  for (;;) {
+    let response;
+    try { response = await send('Runtime.evaluate', {
+      expression: `new Promise(resolve => { const timer = setInterval(() => {
+        if (window.__selectMenuInput || document.documentElement.dataset.browserSmoke) {
+          clearInterval(timer); resolve(window.__selectMenuInput || null);
+        }
+      }, 10); })`, awaitPromise: true, returnByValue: true,
+    }); } catch (error) {
+      if (!/Execution context was destroyed|Cannot find context/.test(error.message)) throw error;
+      await delay(25); continue;
+    }
+    const request = response.result?.value;
+    if (!request) return;
+    if (request.action === 'open') {
+      const result = await send('Runtime.evaluate', {
+        expression: `document.querySelector(${JSON.stringify(request.selector)}).showPicker()`, userGesture: true,
+      });
+      assert.ok(!result.exceptionDetails, result.exceptionDetails?.exception?.description || 'native picker did not open');
+    } else if (request.action === 'text') {
+      const env={...process.env,DISPLAY:display};
+      assert.equal(spawnSync('xdotool',['windowfocus',pickerWindows.get(display).id],{env,timeout:3000}).status,0,'native input window lost focus');
+      assert.equal(spawnSync('xdotool',['type','--clearmodifiers','--delay','20',request.text],{env,timeout:3000}).status,0,'native input typing failed');
+      for(let attempt=0;attempt<100;attempt++){const windows=spawnSync('xdotool',['search','--onlyvisible','--pid',pickerWindows.get(display).pid],{env,timeout:3000}).stdout?.toString().trim().split('\n')||[];if(windows.length>1)break;await delay(25)}
+    } else if (request.action === 'click') {
+      const point = await inputPoint(send, request.point);
+      await send('Input.dispatchMouseEvent', {type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
+      await send('Input.dispatchMouseEvent', {type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});
+    } else if (request.native) {
+      const names = {ArrowDown:'Down',ArrowUp:'Up',Enter:'Return',Escape:'Escape'};
+      const keys=request.keys || [request.key];
+      assert.ok(display && keys.every(key=>names[key]), 'native datalist keys require an isolated display');
+      const result = spawnSync('xdotool', ['key','--delay','150',...keys.map(key=>names[key])], {env:{...process.env,DISPLAY:display},timeout:3000});
+      assert.equal(result.status, 0, result.stderr?.toString() || 'native picker keyboard input failed');
+      await delay(200);
+    } else {
+      const key = {key:request.key,code:request.code || request.key,windowsVirtualKeyCode:request.keyCode};
+      if (request.text) key.text = request.text;
+      await send('Input.dispatchKeyEvent', {type:request.text?'keyDown':'rawKeyDown',...key});
+      await send('Input.dispatchKeyEvent', {type:'keyUp',...key});
+    }
+    await send('Runtime.evaluate', {expression:'window.__selectMenuInput = null'});
+  }
+}
+
 async function driveCardMoveGestures(send, mobile) {
   const evaluate = async expression => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
   const wait = expression => evaluate(`new Promise(resolve => { const timer = setInterval(() => {
@@ -318,7 +386,7 @@ async function driveCardMoveGestures(send, mobile) {
 }
 
 
-export async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode, diagnostics = {}) {
+export async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode, diagnostics = {}, mode = "", display) {
   diagnostics.cdp = { state: "connecting" };
   diagnostics.runtimeExceptions = [];
   diagnostics.consoleErrors = [];
@@ -430,7 +498,9 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
         error => { diagnostics.cdp.subscriptions[method] = diagnosticText(error.message || error); },
       );
     }
-    if (motionMode) await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    const enrollmentKeys = ['enrollment', 'enrollment-mobile', 'admin'].includes(mode);
+    const selectMenuInputs = mode.startsWith('select-menus');
+    if (motionMode || enrollmentKeys) await send("Emulation.setFocusEmulationEnabled", { enabled: true });
     if (navigateURL) {
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
     }
@@ -467,6 +537,14 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
       assert.equal(result.result?.value, zoom, "browser must apply the requested zoom");
     }
     if (navigateURL) await send("Page.navigate", { url: navigateURL });
+    if (enrollmentKeys) await Promise.race([
+      driveEnrollmentKeys(send),
+      delay(30000).then(() => { throw new Error('native modal keyboard input timed out'); }),
+    ]);
+    if (selectMenuInputs) await Promise.race([
+      send('Page.bringToFront').then(() => driveSelectMenuInputs(send, display)),
+      delay(30000).then(() => { throw new Error('native select input timed out'); }),
+    ]);
     // Popup/selection suites need focus emulation, but publish no drag input.
     // Full popup playback now samples all 36 theme/route combinations.
     // Its deadline covers this extra choreography; interaction budgets are unchanged.
@@ -474,7 +552,10 @@ export async function observeSmokeResult(webSocketURL, navigateURL, mobile, redu
       navigateURL?.includes("mode=motion-cards") ? driveCardMoveGestures(send, mobile) : driveMotionGestures(send, mobile),
       delay(navigateURL?.includes("mode=motion-cards") ? 90000 : 30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
-    const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") || navigateURL?.includes("mode=ip-quality") ? 60000 : 45000);
+    // Preset recovery observes real three-second polls for all four engines
+    // in both owner and shared workspaces before the full protocol catalog.
+    // Inbound coverage observes real polling transitions in both personal and shared instances.
+    const deadline = Date.now() + (mode.startsWith("presets") || navigateURL?.includes("mode=presets") ? 120000 : mode.startsWith("config-inbounds") ? 90000 : navigateURL?.includes("mode=motion-popup") || navigateURL?.includes("mode=ip-quality") ? 60000 : 45000);
     let evaluation;
     while (!evaluation && Date.now() < deadline) {
       try {
@@ -560,18 +641,33 @@ async function runMode(mode) {
   };
   let profile;
   let child;
+  let displayChild, display;
   let stderr = "";
   try {
     assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
     profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
     activeProfiles.add(profile);
     await chmod(profile, 0o700);
-    const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || mode.startsWith("agent-time-zone-layout-mobile") || ["presets-mobile", "logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    if (mode.startsWith('select-menus')) {
+      assert.equal(spawnSync('which',['xdotool']).status, 0, 'native picker validation requires xdotool');
+      displayChild = spawn('Xvfb',['-displayfd','3','-screen','0','1280x1000x24','-nolisten','tcp'], {detached:true,stdio:['ignore','ignore','pipe','pipe']});
+      activeBrowsers.add(displayChild);
+      display = ':' + await Promise.race([
+        new Promise((resolve,reject) => {
+          let output='';
+          displayChild.stdio[3].on('data',chunk=>{output+=chunk;if(output.includes('\n'))resolve(output.trim())});
+          displayChild.once('error',reject);displayChild.once('exit',code=>reject(new Error(`Xvfb exited before ready: ${code}`)));
+        }),
+        delay(5000).then(()=>{throw new Error('isolated picker display did not start') }),
+      ]);
+      assert.match(display,/^:\d+$/,'invalid isolated picker display');
+    }
+    const mobile = (mode.startsWith("ip-quality") && mode.includes("mobile")) || (mode.startsWith("motion-cards") && mode.includes("mobile")) || mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || mode.startsWith("agent-time-zone-layout-mobile") || ["select-menus-mobile", "task-retry-mobile", "node-task-lifecycle-mobile", "presets-mobile", "logs-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile || mode.startsWith("motion") || mode.endsWith("reduced") ? "about:blank" : url;
     child = spawn(
       chrome,
       [
-        "--headless=new",
+        ...(display ? [] : ["--headless=new"]),
         ...(process.env.QCH_BROWSER_SMOKE_DPR ? [`--force-device-scale-factor=${Number(process.env.QCH_BROWSER_SMOKE_DPR)}`] : []),
         "--no-sandbox",
         "--disable-gpu",
@@ -595,7 +691,7 @@ async function runMode(mode) {
         "--remote-debugging-port=0",
         initialURL,
       ],
-      { detached: true, stdio: ["ignore", "ignore", "pipe"] },
+      { detached: true, stdio: ["ignore", "ignore", "pipe"], env:{...process.env,...(display?{DISPLAY:display}:{})} },
     );
     activeBrowsers.add(child);
     child.once("error", error => { diagnostics.browser.error = diagnosticText(error.message); });
@@ -622,8 +718,20 @@ async function runMode(mode) {
     timing.startupMs = performance.now() - started;
     testStarted = performance.now();
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
+    if(display) {
+      let windows;
+      for(let attempt=0;attempt<100;attempt++) {
+        windows=spawnSync('xdotool',['search','--onlyvisible','--pid',String(child.pid)],{env:{...process.env,DISPLAY:display},timeout:3000});
+        if(windows.status===0)break;
+        await delay(25);
+      }
+      assert.equal(windows.status,0,'native picker browser window was not found');
+      const focus=spawnSync('xdotool',['windowfocus',windows.stdout.toString().trim().split('\n')[0]],{env:{...process.env,DISPLAY:display},timeout:3000});
+      assert.equal(focus.status,0,'native picker browser did not receive focus');
+      pickerWindows.set(display,{id:windows.stdout.toString().trim().split('\n')[0],pid:String(child.pid)});
+    }
     const gestureMode = mode.startsWith("motion-cards") || ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
-    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode, diagnostics);
+    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode, diagnostics, mode, display);
     assert.equal(
       result?.status,
       "passed",
@@ -641,6 +749,8 @@ async function runMode(mode) {
     const cleanupStarted = performance.now();
     timing.testMs = testStarted ? cleanupStarted - testStarted : null;
     if (child) await stopBrowser(child);
+    if (displayChild) await stopBrowser(displayChild);
+    pickerWindows.delete(display);
     if (profile) await rm(profile, {
       recursive: true,
       force: true,
@@ -659,7 +769,7 @@ async function runMode(mode) {
 }
 
 if (isMain) try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "agent-time-zone-layout,agent-time-zone-layout-mobile,agent-time-zone-layout-readonly,select-menus,select-menus-mobile,motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,archive-engines,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,presets-mobile,ip-quality,ip-quality-mobile,ip-quality-readonly,ip-quality-reduced,ip-quality-mobile-reduced";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "agent-time-zone-layout,agent-time-zone-layout-mobile,agent-time-zone-layout-readonly,select-menus,select-menus-mobile,motion-cards-coordinates,motion-cards-coordinates-reduced,motion-cards-coordinates-mobile,motion-cards-coordinates-mobile-reduced,motion-cards,motion-cards-reduced,motion-cards-mobile,motion-cards-mobile-reduced,motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,node-task-lifecycle,node-task-lifecycle-mobile,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-mobile,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,archive-engines,task-retry,task-retry-mobile,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,presets-mobile,ip-quality,ip-quality-mobile,ip-quality-readonly,ip-quality-reduced,ip-quality-mobile-reduced";
   const selected = modes.split(",");
   assert.ok(selected.every(mode => /^[a-z0-9-]+$/.test(mode)), "invalid browser mode");
   assert.equal(new Set(selected).size, selected.length, "duplicate browser mode");

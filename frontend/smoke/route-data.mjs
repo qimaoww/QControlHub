@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 
-import {
-  aggregateDashboardTrafficDays,
-  dashboardTrafficMonthDays,
-  installDashboard,
-} from "../modules/dashboard.js";
+import { aggregateDashboardTrafficDays, dashboardTrafficMonthDays } from "../modules/dashboard-model.js";
+import { installDashboard } from "../modules/dashboard.js";
 
 import { installTasks } from "../modules/tasks.js";
-import { summarizeDashboardTraffic } from "../modules/dashboard-model.js";
+import { summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic } from "../modules/dashboard-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {
@@ -93,6 +90,25 @@ try {
   const emptyTrend = summarizeDashboardTraffic(aggregateDashboardTrafficDays([], "2024-02"), "2024-02", "2024-02-01T00:00:00Z");
   assert.equal(emptyTrend.averageBytes, 0, "empty current-month traffic has a zero average");
   assert.equal(emptyTrend.peakDay, null, "empty traffic must not invent a peak date");
+  const now = Date.parse('2026-11-06T10:00:00Z');
+  const network = { network_available: true, network_rx_bps: 12, network_tx_bps: 8, collected_at: new Date(now).toISOString() };
+  const fleet = summarizeDashboardNodes([
+    { id: 'one', name: 'same', status: 'online', runtime: { xray: { installed: true, service_status: 'active' } }, metrics: network },
+    { id: 'two', name: 'same', status: 'offline', runtime: { xray: { installed: true, service_status: 'active' } }, metrics: network },
+    { id: 'three', status: 'online', runtime: { mihomo: { installed: true, service_status: 'inactive' } }, metrics: { ...network, collected_at: new Date(now - 16000).toISOString() } },
+  ], now);
+  assert.equal(fleet.running, 1, 'offline cached service state must not count as running');
+  assert.equal(fleet.installed, 3, 'same display names must not merge different instances');
+  assert.equal(fleet.sampled, 1, 'offline and stale rates must not enter the live total');
+  assert.equal(fleet.receiveBPS + fleet.sendBPS, 20);
+  assert.deepEqual(rankDashboardTraffic([
+    { agent_id: 'one', day: '2026-11-01', received_bytes: 10, sent_bytes: 5 },
+    { agent_id: 'one', day: '2026-11-02', received_bytes: 2, sent_bytes: 3 },
+    { agent_id: 'two', day: '2026-11-01', received_bytes: 3, sent_bytes: 4 },
+    { agent_id: 'two', day: '2026-12-01', received_bytes: 9000 },
+    { agent_id: 'two', day: '2026-11-07', received_bytes: 9000 },
+  ], '2026-11', '2026-11-06'), [{ agentID: 'one', used: 20 }, { agentID: 'two', used: 7 }], 'ranking sums all authorized port rows in the selected month and excludes future days');
+  assert.deepEqual(rankDashboardTraffic([{agent_id:'one',day:'2026-11-01',received_bytes:10}], '2026-11', '2026-11-06', ['one','two','three']), [{agentID:'one',used:10},{agentID:'three',used:0},{agentID:'two',used:0}], 'authorized zero-usage nodes remain available without fabricating traffic');
   assert.match(dashboardMarkup, /aria-label="流量趋势摘要"/, "dashboard exposes the trend summary");
 
   const taskCalls = [];

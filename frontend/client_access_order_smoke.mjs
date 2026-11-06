@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
-import {
-  filterClientAccessEntries, groupClientAccessEntries, installClientAccess,
-} from "./modules/client-access.js";
+import { filterClientAccessEntries, groupClientAccessEntries } from "./modules/client-access-model.js";
+import { installClientAccess } from "./modules/client-access.js";
 import { nodeCardOrderKey } from "./modules/node-order.js";
 
 const previousDocument = globalThis.document;

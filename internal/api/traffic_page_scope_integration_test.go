@@ -17,6 +17,11 @@ func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) 
 	shared := enrollConfigScopeAPIAgent(t, ctx, db)
 	grantConfigScopeAPIAgent(t, ctx, db, shared, alice, 21001)
 	grantConfigScopeAPIAgent(t, ctx, db, shared, bob, 21002)
+	for id, code := range map[string]string{own.ID: "JP", shared.ID: "HK", foreign.ID: "US"} {
+		if err := db.SetAgentRegionCode(ctx, id, code); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, agent := range []core.Agent{own, foreign, shared} {
 		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: append(agent.Features, "port-traffic-v1"), Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
 			t.Fatal(err)
@@ -29,9 +34,10 @@ func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) 
 	alice.call("GET", "/agents", nil, http.StatusForbidden, nil)
 	var page struct {
 		Agents []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CanManage bool   `json:"can_manage"`
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			CanManage  bool   `json:"can_manage"`
+			RegionCode string `json:"region_code"`
 		} `json:"agents"`
 		Policies []core.PortTrafficPolicy `json:"policies"`
 	}
@@ -42,6 +48,9 @@ func TestTrafficPageMetadataUsesTrafficPermissionAndResourceScope(t *testing.T) 
 	for _, source := range page.Agents {
 		if source.CanManage != (source.ID == own.ID) {
 			t.Fatalf("owned/shared node confused: %+v", source)
+		}
+		if want := map[string]string{own.ID: "JP", shared.ID: "HK"}[source.ID]; source.RegionCode != want {
+			t.Fatalf("traffic-only account lost node region: %+v, want %s", source, want)
 		}
 	}
 	for _, field := range []string{`"metrics"`, `"runtime"`, `"labels"`, `"owner_id"`, `"content"`} {

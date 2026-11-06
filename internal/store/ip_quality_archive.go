@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -51,10 +52,23 @@ func (s *Store) GetIPQualityArchive(ctx context.Context, taskID string, family i
 	args := []any{taskID, family}
 	where := ownerClause(ctx, "t.owner_id", &args) + agentAdministrationClause(ctx, "t.agent_id", &args)
 	var archive core.IPQualityArchive
-	err := s.pool.QueryRow(ctx, `SELECT r.family,r.sha256,r.rendered_at,r.content
+	var source []byte
+	err := s.pool.QueryRow(ctx, `SELECT r.family,r.sha256,r.rendered_at,r.content,p.result
 		FROM ip_quality_archives r JOIN tasks t ON t.id=r.task_id JOIN agents a ON a.id=t.agent_id
+		LEFT JOIN ip_quality_reports p ON p.task_id=t.id
 		WHERE r.task_id=$1 AND r.family=$2 AND a.revoked_at IS NULL`+where, args...).Scan(
-		&archive.Family, &archive.SHA256, &archive.RenderedAt, &archive.Content)
+		&archive.Family, &archive.SHA256, &archive.RenderedAt, &archive.Content, &source)
+	if err == nil && len(source) > 0 {
+		var result core.IPQualityResult
+		if json.Unmarshal(source, &result) == nil {
+			for index, report := range result.Reports {
+				if core.IPQualityReportFamily(report) == family && index < len(result.ReportsText) {
+					archive.SourceText = result.ReportsText[index]
+					break
+				}
+			}
+		}
+	}
 	archive.Size = len(archive.Content)
 	return archive, mapError(err)
 }

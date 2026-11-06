@@ -102,35 +102,35 @@ func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
 }
 
 func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "app.js"))
+	app := string(mustReadFrontendFile(t, "analytics/app.js"))
 	for _, module := range []string{
-		"dashboard", "agents", "client-access", "substore-sync", "configs",
-		"tasks", "core-logs", "traffic", "access-control", "system-bbr",
-		"settings", "users",
+		"operations", "nodes", "client-access", "substore", "configs", "live-config",
+		"observability", "traffic", "tcp", "settings", "users", "themes", "ip-quality", "certificates",
 	} {
-		lazyImport := fmt.Sprintf(`import("./modules/%s.js")`, module)
+		lazyImport := fmt.Sprintf(`import('./%s.js')`, module)
 		if !strings.Contains(app, lazyImport) {
 			t.Errorf("route module %q is not loaded lazily", module)
 		}
-		staticImport := fmt.Sprintf(`from "./modules/%s.js"`, module)
-		if strings.Contains(app, staticImport) {
+		if strings.Contains(app, fmt.Sprintf(`from "./%s.js"`, module)) || strings.Contains(app, fmt.Sprintf(`from './%s.js'`, module)) {
 			t.Errorf("route module %q is still part of the eager application graph", module)
 		}
 	}
 	warmup := string(mustReadFrontendFile(t, "modules/route-warmup.js"))
 	for _, required := range []string{
 		`createRouteModuleLoader({`,
-		`createRouteWarmup(routeModules)`,
+		`createRouteWarmup(routeModules, { moduleName: pageModuleName, signal: lifetime.signal })`,
 		`bindNavigationPreload();`,
-		`routeModules.preload(routeModuleNames[route] || "dashboard")`,
+		`routeModules.preload(moduleName(route))`,
 		`document.addEventListener("pointerover", preloadNavigationRoute`,
 		`document.addEventListener("pointerdown", preloadNavigationRoute`,
 		`document.addEventListener("focusin", preloadNavigationRoute`,
 		`window.requestIdleCallback(warm, { timeout: 1500 })`,
 		`connection?.saveData`,
 		`connection?.effectiveType?.includes("2g")`,
-		`const routeModulePromise = routeModules.load(`,
-		`const sharedDataPromise = Promise.all([`,
+		`const [module] = await Promise.all([`,
+		`routeModules.load(descriptor[0])`,
+		`if (!context.current()) return;`,
+		`signal?.addEventListener('abort', stopRouteWarmup`,
 	} {
 		if !strings.Contains(app+warmup, required) {
 			t.Errorf("route loading performance contract is missing %q", required)

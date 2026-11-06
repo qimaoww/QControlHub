@@ -81,6 +81,8 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		Name                  string             `json:"name"`
 		Description           string             `json:"description"`
 		Intent                string             `json:"intent"`
+		Fragment              *string            `json:"fragment"`
+		SnapshotTaskID        string             `json:"snapshot_task_id"`
 		Input                 serverconfig.Input `json:"input"`
 	}
 	mutationError := func(message string) {
@@ -107,6 +109,38 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	if input.Operation == "add" && input.OriginalTag != "" {
 		mutationError("新增入站不能携带原入站标识")
+		return
+	}
+	if input.Fragment != nil {
+		if input.Operation != "modify" || input.InstallIfMissing || input.DisableMutableAPI || input.OriginalTag == "" {
+			mutationError("原生入站编辑仅支持修改当前入站")
+			return
+		}
+		current, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
+		if err != nil && !(errors.Is(err, store.ErrNotFound) && input.SnapshotTaskID != "") {
+			writeStoreError(w, err)
+			return
+		}
+		if current.ID == "" {
+			current.AgentID, current.Engine, current.Name = agent.ID, engine, agent.Name+" · "+string(engine)
+		}
+		if current.Version != input.ExpectedVersion {
+			writeStoreError(w, store.ErrConflict)
+			return
+		}
+		source := current.Content
+		if input.SnapshotTaskID != "" {
+			if !s.sessionAllows(request, core.PermissionTasksRead) {
+				writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
+				return
+			}
+			source, err = s.store.ReadTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+		}
+		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent)
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {
@@ -145,9 +179,28 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeStoreError(w, store.ErrConflict)
 		return
 	}
-	if errors.Is(currentErr, store.ErrNotFound) && input.Operation != "add" {
+	if errors.Is(currentErr, store.ErrNotFound) && input.Operation != "add" && input.SnapshotTaskID == "" {
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
+	}
+	if input.SnapshotTaskID != "" {
+		if !s.sessionAllows(request, core.PermissionTasksRead) {
+			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
+			return
+		}
+		var snapshot string
+		snapshot, err = s.store.ReadTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		current.AgentID, current.Engine = agent.ID, engine
+		current.Content, err = s.accountingUpdateSource(request.Context(), current, snapshot)
+		if err != nil {
+			mutationError(err.Error())
+			return
+		}
+		currentErr = nil
 	}
 	content := generated
 	var existingShadowsocksRustPolicies []core.MainlandAccessPolicy

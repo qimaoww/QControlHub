@@ -27,7 +27,6 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		`href="#settings-runtime"><span>03</span>任务与同步`,
 		`href="#settings-data"><span>04</span>数据与日志`,
 		`href="#settings-notify"><span>05</span>事件通知`,
-		`href="#settings-komari"><span>06</span>Komari 联动`,
 		`href="#settings-certificates"><span>08</span>证书申请`,
 		`href="#settings-deployment"><span>09</span>部署状态`,
 		`href="#settings-api-keys"><span>10</span>API Key`,
@@ -62,12 +61,12 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		t.Error("app shell must apply the persisted typography scale")
 	}
 
-	module := []byte(frontendFeatureSources(t, "modules/core-logs.js"))
+	module := []byte(frontendSources(t, "analytics/observability.js", "modules/core-log-model.js"))
 	moduleContent := string(module)
 	if !strings.Contains(moduleContent, `})[value] || "保存策略不可见"`) {
 		t.Error("core-log storage policy must be explicit when settings are unavailable")
 	}
-	if !strings.Contains(moduleContent, `can("settings.read")`) {
+	if !strings.Contains(moduleContent, `coreLogStoragePolicy(data.settings, ctx.can('settings.read'))`) {
 		t.Error("core-log storage policy visibility must follow the independent settings.read permission")
 	}
 	if strings.Contains(moduleContent, `state.data.settings?.core_log_minimum_level || "debug"`) {

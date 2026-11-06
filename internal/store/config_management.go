@@ -107,6 +107,8 @@ func (s *Store) compileConfigManagementRuntime(ctx context.Context, db storeExec
 type ConfigManagementDeployment struct {
 	State         string `json:"state"`
 	ServiceStatus string `json:"service_status"`
+	TaskID        string `json:"task_id,omitempty"`
+	TaskStatus    string `json:"task_status,omitempty"`
 }
 
 func (s *Store) ConfigManagementDeployment(ctx context.Context, id string, version int) (ConfigManagementDeployment, error) {
@@ -148,18 +150,19 @@ func (s *Store) ConfigManagementDeployment(ctx context.Context, id string, versi
 	} else if appliedID == id && appliedVersion == version {
 		result.State = "applied"
 	}
-	var taskStatus string
-	err = s.pool.QueryRow(ctx, `SELECT status FROM tasks WHERE agent_id=$1 AND engine=$2 AND owner_id=$3
+	err = s.pool.QueryRow(ctx, `SELECT id,status FROM tasks WHERE agent_id=$1 AND engine=$2 AND owner_id=$3
 		AND config_id=$4 AND config_version=$5 AND action='deploy' AND shared_instance=$6 AND shared_traffic_id=$7
-		ORDER BY created_at DESC,id DESC LIMIT 1`, config.AgentID, config.Engine, config.OwnerID, id, version, !agent.CanManage, sharedID).Scan(&taskStatus)
+		ORDER BY created_at DESC,id DESC LIMIT 1`, config.AgentID, config.Engine, config.OwnerID, id, version, !agent.CanManage, sharedID).Scan(&result.TaskID, &result.TaskStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return result, err
 	}
-	switch taskStatus {
+	switch result.TaskStatus {
 	case "pending", "running":
 		result.State = "deploying"
-	case "failed", "canceled":
+	case "failed":
 		result.State = "failed"
+	case "canceled":
+		result.State = "canceled"
 	}
 	return result, nil
 }

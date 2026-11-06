@@ -6,7 +6,7 @@ export function createAnalyticsMotion(scope) {
   // A quick departure and a long, damped arrival preserve spatial continuity.
   // These are analytics' own timings, independent of classic motion.
   const ease = "cubic-bezier(.16,1,.3,1)", exitEase = "cubic-bezier(.4,0,.7,.2)";
-  let tooltip, tooltipOwner, tipTimer;
+  let tooltip, tooltipOwner, tooltipAnchor, tipTimer;
   function stop(element) { active.get(element)?.(); }
   function play(element, frames, { duration = 220, delay = 0, name = "component", easing = ease, settled = () => {} } = {}) {
     if (!element?.isConnected || !scope.enabled() || !element.animate) { settled(); return () => {}; }
@@ -56,8 +56,8 @@ export function createAnalyticsMotion(scope) {
   };
   function stopTail(tail) { [...active.keys()].filter(target => tail.contains(target)).forEach(stop); }
   function clearTails() { tails.forEach(tail => { stopTail(tail); tail.remove(); }); tails.clear(); }
-  function retire(element, { modal = false } = {}) {
-    if (!scope.enabled() || !element.isConnected) return;
+  function floatingCopy(element, modal = false) {
+    if (!element.isConnected) return;
     const rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height || rect.bottom < 0 || rect.top > innerHeight) return;
     let clone = element.cloneNode(true);
@@ -80,8 +80,25 @@ export function createAnalyticsMotion(scope) {
       if (!copy) return;
       if ('value' in part && 'value' in copy) copy.value = part.value;
       if ('checked' in part && 'checked' in copy) copy.checked = part.checked;
+      if (part.tagName === 'SELECT' && copy.tagName === 'SELECT') [...part.options].forEach((option, index) => { if (copy.options[index]) copy.options[index].selected = option.selected; });
     });
     clone.querySelectorAll('.a-toast-region').forEach(region=>region.remove());
+    if (element.tagName === 'TR') {
+      // Keep native table/column styling around a lifted row. A bare TR in
+      // the top layer loses cell layout and inherits a transparent surface.
+      const row = clone;
+      const table = element.closest('table').cloneNode(false);
+      table.removeAttribute('id');
+      const columns = element.closest('table').querySelector(':scope > colgroup');
+      if (columns) table.append(columns.cloneNode(true));
+      const body = document.createElement('tbody'); body.append(row); table.append(body);
+      clone = document.createElement('div');
+      clone.className = element.closest('.a-table-scroll')?.className || 'a-table-scroll';
+      clone.append(table);
+      clone.style.overflow = 'hidden';
+      clone.style.backgroundColor = getComputedStyle(element.closest('.a-card') || document.body).backgroundColor;
+      clone.style.color = paint.color;
+    }
     clone.inert = true; clone.setAttribute("aria-hidden", "true");
     clone.removeAttribute("popover");
     Object.assign(clone.style, { display: "block", position: "fixed", inset: "auto", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", maxHeight: "none", pointerEvents: "none", transform: "none" });
@@ -91,6 +108,51 @@ export function createAnalyticsMotion(scope) {
     host.append(clone); document.body.append(host); tails.add(host);
     try { host.showPopover(); } catch { host.remove(); tails.delete(host); return; }
     originalParts.forEach((part, index) => { const copy = cloneParts[index]; if (copy) { copy.scrollTop = part.scrollTop; copy.scrollLeft = part.scrollLeft; } });
+    return { host, clone, rect, paint };
+  }
+  function lift(element) {
+    const floating = floatingCopy(element);
+    if (!floating) return null;
+    const { host, clone, rect } = floating;
+    host.dataset.dragPreview = "";
+    let tracking;
+    const placeholder = element.animate([{ opacity: .25 }, { opacity: .25 }], { duration: 1, fill: 'both' });
+    placeholder.id = 'analytics-drag-placeholder';
+    return {
+      move(x, y) {
+        tracking?.cancel();
+        tracking = clone.animate([{ translate: `${x}px ${y}px` }, { translate: `${x}px ${y}px` }], { duration: 1, fill: 'both' });
+        tracking.id = 'analytics-drag-follow';
+      },
+      close() { tracking?.cancel(); placeholder.cancel(); host.remove(); tails.delete(host); },
+      rect,
+    };
+  }
+  function reorder(elements, change) {
+    const previous = new Map(elements.map(element => [element, element.getBoundingClientRect()]));
+    const scrollers = new Map();
+    for (const element of elements) for (let parent = element.parentElement; parent; parent = parent.parentElement)
+      if (!scrollers.has(parent)) scrollers.set(parent, { left: parent.scrollLeft, top: parent.scrollTop });
+    elements.forEach(stop);
+    change();
+    // Reading geometry flushes native scroll anchoring before restoring the
+    // reader's scroll position. Moving a focused record must not scroll to it.
+    elements.forEach(element => element.getBoundingClientRect());
+    scrollers.forEach((position, element) => {
+      if (element.scrollLeft !== position.left || element.scrollTop !== position.top) element.scrollTo({ ...position, behavior: 'instant' });
+    });
+    if (!scope.enabled()) return;
+    for (const element of elements) {
+      const before = previous.get(element), after = element.getBoundingClientRect();
+      if (before.left !== after.left || before.top !== after.top)
+        play(element, [{ translate: `${before.left - after.left}px ${before.top - after.top}px` }, { translate: '0 0' }], { name: 'reorder', duration: 220 });
+    }
+  }
+  function retire(element, { modal = false } = {}) {
+    if (!scope.enabled()) return;
+    const floating = floatingCopy(element, modal);
+    if (!floating) return;
+    const { host, clone, rect, paint } = floating;
     if (modal) {
       // The surface leaves against a held scrim; the scrim clears last. Never
       // fade the full host, which would double-paint a form over the live page.
@@ -147,13 +209,13 @@ export function createAnalyticsMotion(scope) {
   function hideTip() {
     scope.clearTimer(tipTimer);
     if (tooltipOwner) {
-      tooltipOwner.title = tooltipOwner.dataset.aMotionTitle || "";
+      tooltipOwner.setAttribute('title', tooltipOwner.dataset.aMotionTitle || "");
       delete tooltipOwner.dataset.aMotionTitle;
       if (tooltipOwner.dataset.aMotionDescription === "true") tooltipOwner.removeAttribute("aria-description");
       delete tooltipOwner.dataset.aMotionDescription;
     }
     if (tooltip) { stop(tooltip); tooltip.remove(); }
-    tooltip = tooltipOwner = null;
+    tooltip = tooltipOwner = tooltipAnchor = null;
   }
   function showTip(owner) {
     hideTip();
@@ -168,6 +230,7 @@ export function createAnalyticsMotion(scope) {
     document.body.append(tooltip);
     try { tooltip.showPopover(); } catch { hideTip(); return; }
     const rect = owner.getBoundingClientRect(), box = tooltip.getBoundingClientRect();
+    tooltipAnchor = rect;
     tooltip.style.left = `${Math.max(8, Math.min(innerWidth - box.width - 8, rect.left + (rect.width - box.width) / 2))}px`;
     tooltip.style.top = `${Math.max(8, rect.top > box.height + 12 ? rect.top - box.height - 6 : rect.bottom + 6)}px`;
     reveal(tooltip, "tooltip");
@@ -176,7 +239,7 @@ export function createAnalyticsMotion(scope) {
     const element = event.target;
     if (!element.matches?.('details.a-disclosure')) return;
     const body = element.querySelector('.a-disclosure-body');
-    if (element.open) reveal(body, "field"); else if (body) stop(body);
+    if (element.open) reveal(body, "field"); else if (body) { stop(body); if (body.contains(document.activeElement)) element.querySelector('summary')?.focus({ preventScroll: true }); }
   }, { capture: true });
   scope.listen(document, "beforetoggle", event => {
     const element = event.target;
@@ -203,10 +266,19 @@ export function createAnalyticsMotion(scope) {
     const owner = event.target.closest?.('[title]');
     if (owner) { scope.clearTimer(tipTimer); tipTimer = scope.timer(() => showTip(owner), 100); }
   });
-  for (const event of ["pointerout", "focusout", "pointerdown", "keydown", "scroll"])
-    scope.listen(document, event, hideTip, { capture: true });
+  for (const event of ["pointerout", "focusout", "pointerdown", "keydown"])
+    scope.listen(document, event, event => {
+      if (event.type === 'pointerout' && event.pointerType === 'touch' && tooltipOwner === document.activeElement) return;
+      hideTip();
+    }, { capture: true });
+  scope.listen(document, 'scroll', () => {
+    if (!tooltipOwner || !tooltipAnchor) return;
+    const rect = tooltipOwner.getBoundingClientRect();
+    if (!tooltipOwner.isConnected || ['left','top','width','height'].some(key => Math.abs(rect[key] - tooltipAnchor[key]) > .5)) hideTip();
+  }, { capture: true });
   scope.listen(window, "hashchange", () => { clearTails(); hideTip(); });
   scope.listen(window, "resize", () => { clearTails(); hideTip(); });
+  const validationMessage = control => control.validity.customError ? control.validationMessage : control.validity.valueMissing ? "请填写此项。" : "请检查此项的格式或取值范围。";
   function clearValidation(control) {
     const error = invalid.get(control);
     if (!error) return;
@@ -230,16 +302,23 @@ export function createAnalyticsMotion(scope) {
       invalid.set(control,error);
       control.setAttribute('aria-invalid','true'); control.setAttribute('aria-errormessage',label.id);
     }
-    error.label.textContent = control.validationMessage;
+    error.label.textContent = validationMessage(control);
     const first = [...(control.form?.elements || [control])].find(item => item.willValidate && !item.validity.valid);
     if (first === control) control.focus();
   }, { capture: true });
   for (const event of ['input','change']) scope.listen(document,event, event => {
     const control = event.target, error = invalid.get(control);
     if (!error) return;
-    if (control.validity.valid) clearValidation(control); else error.label.textContent = control.validationMessage;
+    if (control.validity.valid) clearValidation(control); else error.label.textContent = validationMessage(control);
   });
   const observer = new MutationObserver(records => {
+    if (tooltipOwner && !tooltipOwner.isConnected) hideTip();
+    if (tooltipOwner?.hasAttribute('title')) {
+      const text = tooltipOwner.getAttribute('title');
+      tooltipOwner.dataset.aMotionTitle = text; tooltipOwner.removeAttribute('title');
+      if (tooltipOwner.dataset.aMotionDescription === 'true') tooltipOwner.setAttribute('aria-description', text);
+      tooltip.textContent = text;
+    }
     const candidates = new Set();
     for (const record of records) {
       const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
@@ -254,7 +333,7 @@ export function createAnalyticsMotion(scope) {
     for (const control of invalid.keys()) if (!control.isConnected) clearValidation(control);
     candidates.forEach(element => { if (element.isConnected && !element.closest('.a-motion-tail,[hidden],dialog:not([open])')) feedback(element); });
   });
-  observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title'] });
   scope.onSuspend(cancel);
   scope.own(() => { observer.disconnect(); cancel(); [...invalid.keys()].forEach(clearValidation); });
   return {
@@ -267,7 +346,7 @@ export function createAnalyticsMotion(scope) {
       groups.slice(0, 2).forEach((group, index) => play(group,
         [{ opacity: 0, translate: "0 10px" }, { opacity: 1, translate: "0 0" }],
         { name: index ? "page-follow" : "page", duration: 320, delay: index * 40 }));
-    }, visible,
+    }, visible, tooltip: showTip, lift, reorder,
     notificationExit: element => retire(element),
     navigation: layout => {
       clearTails();
