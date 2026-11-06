@@ -1,190 +1,146 @@
 package frontend
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
 
+// These contracts follow the shipped runtime. The classic shell's DOM and
+// request orchestration must not stand in for native refresh behavior.
 func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
-	read := func(path string) string {
-		t.Helper()
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(content)
-	}
-	app := frontendSources(t, "app.js", "modules/session-api.js", "modules/shell-view.js")
-	refresh := read("modules/refresh.js")
-	for _, required := range []string{
-		"createSessionAPI({ state, renderLogin })",
-		"const shell = createShellView({",
-		"combineAbortSignals(options.signal, routeSignal)",
-		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
-		"reconcileView(currentView, template.content.firstElementChild",
-		"const routeChanged = !previousMain || previousRoute !== state.route",
-		"previousMain.dataset.refreshKey !== workspaceKey",
-		"if (routeChanged || viewChanged)",
-		`enterWorkspace(renderedMain,`,
-		"cancelMotion(renderedMain)",
-		"const hasSharedData =",
-		"const sharedDataPromise = Promise.all([",
-		"const panelReads = createPanelReads(",
-		`readPanelData("overview", { live: state.route === "dashboard" })`,
-		`readPanelData("settings", { live: state.route === "settings" })`,
-		"function primeRouteTransition()",
-		"main.inert = true",
-		"main.classList.add(\"is-route-pending\")",
-		"if (nextRoute !== renderedRoute)",
-		"data-refresh-key=\"context-${esc(contextKey)}\"",
-		"state.navigationEpoch += 1",
-		"cancelActive: () => routeController?.abort()",
-		`routeModules.peek("agents")?.cancelAgentInteractions()`,
-		"confirmResolver?.(false)",
-		"state.route = \"login\"",
-		"if (!state.session || state.route === \"login\") return",
-		"if (renderedRoute === state.route) notify(error.message",
-	} {
-		if !strings.Contains(app, required) {
-			t.Errorf("app refresh coordination is missing %q", required)
-		}
-	}
-	for _, required := range []string{
-		"export function reconcileView",
-		"export function createRefreshChannel",
-		`export { createPoller } from "./poller.js";`,
-		"export function createInteractionGate",
-		"const preserveInert = current.classList?.contains(\"desktop-app\") && current.inert",
-		"scope !== getScope()",
-		"state.active.focus({ preventScroll: true })",
-		`typeof current.isEqualNode === "function"`,
-	} {
-		if !strings.Contains(refresh, required) {
-			t.Errorf("shared refresh runtime is missing %q", required)
-		}
-	}
-	if !strings.Contains(read("modules/poller.js"), "export function createPoller") {
-		t.Error("shared poller must remain a named export in its UI-independent module")
-	}
 	contracts := map[string][]string{
-		"modules/agents.js": {
-			"createInteractionGate()",
-			"requestAgentStructureRefresh()",
-			"cardInteractions.activeCount() > 0",
-			"cardInteractions.cancel()",
-			"createAgentRefresh(ctx,",
-			"refresh.markRendered(",
+		"analytics/app.js": {
+			"const bound = state.session;",
+			"isCurrent: () => state.session === bound && !lifetime.signal.aborted",
+			"routeAbort?.abort();",
+			"const signal = routeAbort.signal, epoch = ++routeEpoch;",
+			"signal: options.signal || signal",
+			"current: () => !signal.aborted && epoch === routeEpoch && Boolean(state.session)",
+			"const epoch = routeEpoch, read = pageRefresh;",
+			"if (epoch === routeEpoch && error.name !== 'AbortError')",
+			"if (pending || refreshButton.disabled) return;",
+			"if (context.current())",
+			"if (previousRoute !== route) motion?.page(stage)",
+			"if (pending) { announce(",
+			"if (dirty && !await confirm(",
+			"if (attempt !== navigation) return;",
+			"state.session = null;",
+			"state.data = {};",
+			"watch.stop();",
+			"box.close()",
+			"box.addEventListener(\"close\", () => resolve(false)",
+			"lifetime.abort(); routeAbort?.abort(); watch.stop();",
 		},
-		"modules/agent-view.js": {
-			"data-refresh-key=\"agent-${esc(agent.id)}\"",
+		"modules/account-request.js": {
+			"headers[\"X-QControlHub-CSRF\"] = session.csrf_token",
+			"credentials: \"same-origin\", cache: \"no-store\"",
+			"{ isLogin: path === \"/auth/login\", isCurrent, onUnauthorized",
 		},
-		"modules/agent-refresh.js": {
-			"createRefreshChannel({",
-			"getScope: () => state.navigationEpoch",
-			"syncBatchSnapshot(items)",
+		"modules/errors.js": {
+			"if (!isCurrent()) throw new DOMException(\"Account changed\", \"AbortError\")",
+			"options?.signal?.aborted",
 		},
-		"modules/client-access.js": {
-			"createRefreshChannel({",
-			"getScope: () => state.navigationEpoch",
-			"input.defaultValue = address",
-			`button.form?.elements.namedItem("address")`,
+		"analytics/live-dom.js": {
+			"export function patch(current, fresh)",
+			"if (current.data !== fresh.data) current.data = fresh.data",
+			"if (current.getAttribute(attr.name) !== attr.value)",
+			"if (control) return current;",
+			"current.tagName === 'DETAILS' && attr.name === 'open'",
+			"const keyed = new Map(",
+			"current.moveBefore(child, current.childNodes[index] || null)",
+			"current.childNodes[index] !== child",
+			"export function poll(ctx, run, delay = 2000)",
+			"if (!ctx.current() || running) return;",
+			"if (!document.hidden) await run();",
+			"if (ctx.current()) timer = setTimeout(tick, delay)",
+			"ctx.signal.addEventListener('abort', stop",
+		},
+		"analytics/nodes.js": {
+			"if (!ctx.current() || sequence !== loadSequence) return;",
+			"if (dragging.active()) return;",
+			"patch(results.firstElementChild, fresh)",
+			"dialogUpdates.forEach(update => update())",
+			"liveTable.updateRows(rows)",
+			"poll({ ...ctx, onRefreshError: failedRefresh }, load)",
+			"if (error.status === 403",
+			"agents = []; selected.clear(); draw(true)",
+		},
+		"analytics/client-access.js": {
+			"if (!ctx.current() || sequence !== readSequence) return;",
+			"patch(result, node('div'",
+			"JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || ''])",
+			"card.dataset.refreshKey = key",
+			"ctx.onRefresh(reload)",
+			"ctx.setDirty(true)",
 		},
 		"analytics/observability.js": {
-			"createPoller({",
-			"readCoreLogWindow(ctx.api, params",
-			"previous: entries",
-			"filterCoreLogEntries(entries, filters)",
-			"ctx.signal.addEventListener(\"abort\"",
-			"serial === revision",
-			"if (page && anchor)",
-			"刷新失败，保留上次数据",
+			"createPoller({", "readCoreLogWindow(ctx.api, params",
+			"previous: entries", "filterCoreLogEntries(entries, filters)",
+			"ctx.signal.addEventListener(\"abort\"", "serial === revision",
+			"if (page && anchor)", "刷新失败，保留上次数据",
 		},
-		"modules/tasks.js": {
-			"const reconciled = reconcileView(existingCard, freshCard)",
-			"api(`/tasks?${query}`, { signal })",
+		"analytics/operations.js": {
+			"patch(resourceGrid,", "patch(overviewGrid,", "patch(trafficTotals,",
+			"rowKey: row => row[5].dataset.taskId",
+			"const sequence = ++readSequence",
+			"if (!ctx.current() || sequence !== readSequence) return;",
+			"if (!ctx.current() || requests.get(key) !== controller) return;",
+			"AbortSignal.any([ctx.signal, controller.signal])",
+			"readings.delete(key); states.set(key, \"denied\")",
+			"刷新失败 · 保留上次采样", "更新失败，保留上次数据",
+			"query(\"/traffic-usage\", { month })",
+			"can(\"panel-metrics.read\")", "\"/panel-metrics\"",
+			"orderNodesBySavedOrder(", "poll(ctx, refresh)",
 		},
-		"modules/dashboard.js": {
-			"api(`/traffic-usage?month=${encodeURIComponent(trafficMonth)}`",
-			"data-dashboard-traffic-month",
-			"data-dashboard-traffic-dialog",
-			"trafficDetailsDialog.showModal()",
-			`can("panel-metrics.read")`,
-			"panelMetrics.mount()",
-			"orderNodesBySavedOrder(agents)",
+		"analytics/traffic.js": {
+			"createPoller({", "bindNodeOrdering(ctx, results",
+			"if (!ctx.current() || expected !== readSequence)",
+			"!dragging.active() && !document.querySelector('dialog.a-dialog[open]')",
+			"readController?.abort(); poller.stop();",
+			"details.update(policy, byID.get(policy.agent_id))",
+			"[401, 403, 404].includes(error.status)",
+			"delete data.analyticsTrafficSnapshot",
+			"trafficRateForDisplay(", "'auto_block'", "刷新失败，保留上次数据",
 		},
-		"modules/panel-metrics.js": {
-			"createPoller({",
-			"createRefreshChannel({",
-			`api("/panel-metrics", { signal })`,
-			"!document.hidden",
-			`scope?.addEventListener("abort", stop`,
-			"state.session === session",
-			"reconcileView(root, template.content.firstElementChild)",
-			"刷新失败 · 保留上次数据",
-		},
-		"modules/traffic.js": {
-			"createPoller({",
-			"data-refresh-key=\"traffic-policy-${esc(policy.id)}\"",
-			"data-traffic-card-key=\"${esc(trafficCardIdentity(item))}\"",
-			"qcontrolhub:traffic-card-order",
-			"enableTrafficCardDrag(cardGrid",
-			"trafficRateForDisplay(policy.receive_bps",
-			"data-traffic-filter=\"engine\"",
-			"data-traffic-edit-dialog",
-			"class=\"traffic-edit-dialog traffic-create-dialog\"",
-			"dialog?.showModal()",
-			"name=\"auto_block\"",
+		"analytics/traffic-table.js": {
+			"if (card) patch(card, fresh)", "else patch(old, next)",
 		},
 	}
 	for path, markers := range contracts {
-		content := frontendFeatureSources(t, path)
+		content := string(mustReadFrontendFile(t, path))
 		for _, marker := range markers {
 			if !strings.Contains(content, marker) {
-				t.Errorf("%s refresh contract is missing %q", path, marker)
+				t.Errorf("%s native refresh contract is missing %q", path, marker)
 			}
 		}
 	}
-	if !strings.Contains(read("module_smoke.mjs"), `import "./refresh_smoke.mjs"`) {
-		t.Error("frontend smoke must execute the refresh interaction runtime")
-	}
 }
 
-// Node grids and the application shell render on every navigation. These
-// contracts keep the two shapes that made a page switch cost a request per
-// card: per-node region lookups and a per-route shell refetch.
 func TestPanelReadsAndNodeRegionsAvoidPerRenderRequests(t *testing.T) {
-	read := func(path string) string {
-		t.Helper()
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(content)
+	app := string(mustReadFrontendFile(t, "analytics/app.js"))
+	if !strings.Contains(app, "can('settings.read') && !state.data.settings ? context.api('/settings') : null") {
+		t.Error("the native shell must reuse the current account's settings across route changes")
 	}
-	for _, required := range []string{
-		"export function createPanelReads(",
-		"overview: 30_000",
-		"settings: 300_000",
+	if !strings.Contains(app, "state.data = {};") {
+		t.Error("authorization and login changes must invalidate the shell's account data")
+	}
+	// Overview is owned and polled by the dashboard, not refetched by every
+	// shell render. Cache TTLs in the retired shell are no longer its contract.
+	if strings.Contains(app, "api('/overview')") || strings.Contains(app, `api("/overview")`) {
+		t.Error("the native shell must not fetch dashboard data for unrelated routes")
+	}
+	regions := string(mustReadFrontendFile(t, "analytics/node-region.js"))
+	for _, marker := range []string{
+		"geoRegionDetails(agent?.labels?.region_code) || geoRegionDetails(agent?.region_code)",
+		"Object.hasOwn(agent, 'region_code')",
+		"ctx.state.data.agentRegions ||= new Map()",
+		"let entry = cache.get(key)", "cache.set(key, entry)",
+		"ctx.api(`/agents/${pathID(agent.id)}/region`)",
+		"ctx.current() && flag.isConnected",
+		"if (cache.get(key) === entry) cache.delete(key)",
 	} {
-		if !strings.Contains(read("modules/panel-reads.js"), required) {
-			t.Errorf("panel read cache is missing %q", required)
+		if !strings.Contains(regions, marker) {
+			t.Errorf("native region cache is missing %q", marker)
 		}
-	}
-	regions := read("modules/regions.js")
-	for _, required := range []string{
-		"geoRegionDetails(agent.region_code)",
-		"state.data.agentRegions",
-	} {
-		if !strings.Contains(regions, required) {
-			t.Errorf("node list region rendering is missing %q", required)
-		}
-	}
-
-	if !strings.Contains(read("module_smoke.mjs"), `import "./panel_reads_smoke.mjs"`) {
-		t.Error("frontend smoke must execute the panel read cache runtime")
-	}
-	if !strings.Contains(regions, "api(`/agents/${encodeURIComponent(agent.id)}/region`)") {
-		t.Error("nodes without a resolved region still need the per-node fallback")
 	}
 }

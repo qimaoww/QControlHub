@@ -94,7 +94,7 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 }
 
 func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
-	app := frontendSources(t, "app.js", "modules/routes.js", "modules/shell-context.js")
+	app := frontendSources(t, "analytics/app.js", "analytics/live-config.js", "modules/routes.js", "modules/shell-context.js")
 	agents := frontendSources(t, "modules/agents.js", "modules/agent-view.js")
 	styles, err := os.ReadFile("app.css")
 	if err != nil {
@@ -114,8 +114,9 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 	}
 	for _, required := range []string{
 		`if (hash.startsWith("preset-node-")) return "live-config";`,
-		`state.data.liveAgent = hash.slice(12);`,
-		`let hash = presetSelection ? "live-config"`,
+		`const selection = readPresetRoute(location.hash) || {};`,
+		`location.hash.match(/^#preset-node-(.+)$/)?.[1]`,
+		`'live-config': ['configs', 'liveConfigPage']`,
 	} {
 		if !strings.Contains(string(app), required) {
 			t.Errorf("preset sidebar routing is missing %q", required)

@@ -85,11 +85,11 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 }
 
 func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
-	app := frontendSources(t, "app.js", "modules/shell-context.js")
+	app := frontendSources(t, "analytics/app.js", "modules/shell-context.js")
 	module := frontendFeatureSources(t, "modules/substore-sync.js")
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	for _, required := range []string{
-		`installSubStoreSync`, `async "substore-sync"()`, `href="#client-access"`,
+		`installSubStoreSync`, `'substore-sync': ['substore-sync', 'substorePage']`, `href="#client-access"`,
 		`import { orderNodesBySavedOrder } from "./node-order.js";`,
 		`groupSubStoreProfiles(filtered, agents)`,
 		`data-substore-settings-dialog`, `dialog?.showModal()`, `data-substore-run`,

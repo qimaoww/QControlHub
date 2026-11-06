@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,21 +41,8 @@ function visit(path, chain = []) {
 }
 for (const path of dependencies.keys()) visit(path);
 
-const reachable = new Set();
-function visitFromApplication(path) {
-  if (reachable.has(path)) return;
-  reachable.add(path);
-  for (const dependency of dependencies.get(path) || []) visitFromApplication(dependency);
-}
-const appPath = resolve(root, "app.js");
-for (const match of readFileSync(resolve(root, "bootstrap.js"), "utf8").matchAll(/from\s*["'](\.\/modules\/[^"']+)["']/g)) {
-  visitFromApplication(resolve(root, match[1]));
-}
-for (const match of readFileSync(appPath, "utf8").matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
-  const dependency = resolve(dirname(appPath), match[1]);
-  assert.equal(dependencies.has(dependency), true, "the application must import an existing production module");
-  visitFromApplication(dependency);
-}
+assert.equal(existsSync(resolve(root, "app.js")), false, "the retired classic entrypoint must not return");
+assert.equal(existsSync(resolve(modulesDir, "classic-motion.js")), false, "the retired classic lifecycle must not return");
 
 console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy the module boundary contract`);
 
@@ -99,12 +86,6 @@ for (const name of readdirSync(analyticsRoot).filter(name => name.endsWith(".js"
 }
 console.log(`analytics: ${independent.size} independent UI and shared logic modules satisfy the boundary contract`);
 
-// Shared business models remain production code when only the native theme
-// uses them after the corresponding classic route has been retired.
-for (const path of dependencies.keys()) {
-  assert.ok(reachable.has(path) || independent.has(path), `${path} is not reachable from a production entrypoint`);
-}
-
 // The production image must ship exactly the active runtime's shared graph.
 // Legacy modules retained while their tests migrate cannot enter the image.
 for (const match of readFileSync(resolve(root, "bootstrap.js"), "utf8").matchAll(/from\s*["'](\.\/modules\/[^"']+)["']/g)) {
@@ -120,3 +101,31 @@ const shipped = moduleCopies[0][1].trim().split(/\s+/).map(source => {
 assert.equal(new Set(shipped).size, shipped.length, "duplicate shared runtime asset");
 assert.deepEqual(shipped.sort(), [...independent].filter(path => dirname(path) === modulesDir).sort(),
   "the image must include every active dependency and exclude retired UI modules");
+
+// Retained classic code is test-only while its business contracts migrate.
+// Require an actual test consumer instead of pretending a dead entrypoint is
+// production reachability. The native graph and image boundary stay separate.
+const tested = new Set();
+function visitTest(path) {
+  if (tested.has(path)) return;
+  tested.add(path);
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
+    visitTest(resolve(dirname(path), match[1]));
+  }
+}
+function visitTestDirectory(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) visitTestDirectory(path);
+    else if (entry.name.endsWith(".mjs")) visitTest(path);
+    else if (entry.name.endsWith("_test.go")) {
+      for (const match of readFileSync(path, "utf8").matchAll(/"(modules\/[a-z0-9-]+\.js)"/g)) visitTest(resolve(root, match[1]));
+    }
+  }
+}
+visitTestDirectory(root);
+for (const path of dependencies.keys()) {
+  assert.ok(independent.has(path) || tested.has(path), `${path} has neither an active runtime nor a retained test consumer`);
+}
+console.log(`legacy: ${files.filter(name => !independent.has(resolve(modulesDir, name))).length} modules retained only for migration tests`);
