@@ -136,17 +136,16 @@ revealSelectedFields(root);
 assert.equal(scroller.scrollLeft, 412, "already-visible fields do not move the rail");
 assert.equal(scroller.scrollTop, 81);
 
-// Keep the visual contract scoped: other work-in-progress theme changes do not
-// mask regressions in this component, and the full app contract still runs.
-const css = readFileSync(new URL("app.css", import.meta.url), "utf8").split("/* Field workspaces share")[1];
-assert.ok(css, "shared field workspace stylesheet exists");
-assert.match(css, /grid-template-columns:minmax\(0,1fr\) auto/);
-assert.match(css, /@container field-studio \(max-width:660px\)/);
-assert.match(css, /max-height:460px/);
-assert.match(css, /text-overflow:ellipsis;white-space:nowrap/);
-assert.match(css, /background:var\(--code-canvas\)/);
-assert.match(css, /@media\(pointer:coarse\)/);
-assert.ok(!/#[0-9a-f]{3,8}\b/i.test(css), "field surfaces inherit both themes instead of hard-coding colors");
-assert.ok(!/font-size:[1-9]\d*(?:\.\d+)?px/.test(css), "field typography follows the panel font scale");
+// The shipped native editor owns these surfaces. Keep the legacy field
+// model/serialization assertions above until their behavior is migrated too.
+const css = readFileSync(new URL("analytics/theme.css", import.meta.url), "utf8");
+assert.match(css, /\.a-form-grid \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+assert.match(css, /\.a-field \{[^}]*min-width: 0/);
+assert.match(css, /\.a-field textarea \{ resize: vertical/);
+assert.match(css, /\.a-code \{ max-height: 55dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var\(--tint\)/);
+assert.match(css, /\.a-code, \.a-editor textarea \{[^}]*font-size: var\(--text-label\)/);
+assert.match(css, /@media \(max-width: 40rem\)/);
+assert.match(css, /\.a-form-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
+assert.match(css, /\.a-button, \.a-nav-link, \.a-check, \.a-field input, \.a-field select \{ min-height: 44px/);
 
 console.log("Config field studio smoke passed");

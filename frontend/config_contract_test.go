@@ -81,79 +81,45 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 			t.Errorf("safe Sudoku preset must not expose %q", forbidden)
 		}
 	}
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	native := frontendSources(t, "analytics/config-studio.js", "analytics/ui.js")
+	// The native select replaces the retired two-row protocol catalogue. Every
+	// eligible protocol must remain reachable without depending on old CSS.
+	for _, marker := range []string{
+		`field('协议','protocol'`, `options:protocols.map(protocol=>[protocol.key,protocol.name])`,
+		`input = node("select"`, `options.map(item =>`,
+	} {
+		if !strings.Contains(native, marker) {
+			t.Errorf("native protocol catalogue missing %q", marker)
+		}
 	}
-	if !strings.Contains(string(styles), ".protocol-catalog-wide.protocol-two-rows .protocol-browser>nav{display:grid") ||
-		!strings.Contains(content, `protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1`) ||
-		!strings.Contains(content, `String(Math.ceil(workspace.protocols.length / 2))`) ||
-		!strings.Contains(content, `"vless-enc-xhttp-reality-vision": "VLESS-ENC-XHTTP-Vision-uTLS-REALITY"`) {
-		t.Error("large protocol preset catalogs must render as exactly two rows")
+	if !strings.Contains(styles, ".a-field select") || !strings.Contains(styles, ".a-form-grid") {
+		t.Error("native protocol fields must use the responsive form controls")
 	}
 }
 
 func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
-	app := frontendSources(t, "analytics/app.js", "analytics/live-config.js", "modules/routes.js", "modules/shell-context.js")
-	agents := frontendSources(t, "modules/agents.js", "modules/agent-view.js")
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	const sidebarPresetLink = `href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
-	if !strings.Contains(string(app), sidebarPresetLink) {
-		t.Error("preset sidebar nodes must start from the per-node preset anchor")
-	}
-	if !strings.Contains(string(app), `state.data.selectedAgent === agent.id ? "active" : ""`) {
-		t.Error("preset sidebar must retain the selected node active state")
-	}
-	const settingsDetailLink = `href="#settings-node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
-	if strings.Contains(string(app), settingsDetailLink) {
-		t.Error("preset sidebar nodes must not enter the node settings workflow")
-	}
-	for _, required := range []string{
+	app := frontendSources(t, "analytics/app.js", "analytics/live-config.js", "modules/routes.js", "modules/preset-route.js")
+	for _, marker := range []string{
 		`if (hash.startsWith("preset-node-")) return "live-config";`,
 		`const selection = readPresetRoute(location.hash) || {};`,
 		`location.hash.match(/^#preset-node-(.+)$/)?.[1]`,
 		`'live-config': ['configs', 'liveConfigPage']`,
+		`selection.agentId`, `const selectedEngine = selection.engine || "";`,
+		`if (requested && !available.some(agent => agent.id === requested))`,
+		`此节点不可用，或当前账号无权访问。`, `available.find(agent => agent.id === requested)`,
+		`engines.includes(selectedEngine) ? selectedEngine`,
+		`/agents/${pathID(target.id)}/configs/${pathID(engine)}`,
+		`const targetField = field("节点", "agent", target.id`,
 	} {
-		if !strings.Contains(string(app), required) {
-			t.Errorf("preset sidebar routing is missing %q", required)
+		if !strings.Contains(app, marker) {
+			t.Errorf("native scoped preset routing missing %q", marker)
 		}
 	}
-	for _, required := range []string{
-		`? selectedAgent`,
-		`? [selectedAgent]`,
-		`class="preset-node-workspace workspace-panel machine-body"`,
-		`id="preset-node-${esc(agent.id)}"`,
-		`<h2>节点内核</h2>`,
-		`const prefix = presetMode ? "preset-node" : "settings-node";`,
-		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
-	} {
-		if !strings.Contains(agents, required) {
-			t.Errorf("focused preset workspace is missing %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		`<details class="machine-workspace"`,
-		`<summary class="machine-header"`,
-		`<header class="node-page-intro"><div><p class="eyebrow">节点配置</p>`,
-		`agent.id === state.data.selectedAgent ? "open" : ""`,
-	} {
-		if strings.Contains(agents, forbidden) {
-			t.Errorf("focused preset workspace still renders node accordion contract %q", forbidden)
-		}
-	}
-
-	const presetSingleColumnRule = `.preset-node-workspace>.service-canvas>.service-grid{grid-template-columns:minmax(0,1fr)}`
-	if strings.Count(string(styles), presetSingleColumnRule) != 1 {
-		t.Error("selected preset workspace must define one scoped, shrinkable service-grid column")
-	}
-	const globalSingleColumnRule = `.service-grid{grid-template-columns:minmax(0,1fr)}`
-	for _, line := range strings.Split(string(styles), "\n") {
-		if strings.TrimSpace(line) == globalSingleColumnRule {
-			t.Error("preset layout must not force every service grid into one column")
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	for _, marker := range []string{`.a-stack { display: grid; grid-template-columns: minmax(0, 1fr)`, `.a-form-grid`, `.a-field select`} {
+		if !strings.Contains(styles, marker) {
+			t.Errorf("native focused configuration layout missing %q", marker)
 		}
 	}
 }

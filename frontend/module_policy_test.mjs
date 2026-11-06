@@ -42,6 +42,8 @@ function visit(path, chain = []) {
 for (const path of dependencies.keys()) visit(path);
 
 assert.equal(existsSync(resolve(root, "app.js")), false, "the retired classic entrypoint must not return");
+for (const name of ["app.css", "styles"])
+  assert.equal(existsSync(resolve(root, name)), false, `retired classic styles must not return: ${name}`);
 assert.equal(existsSync(resolve(modulesDir, "classic-motion.js")), false, "the retired classic lifecycle must not return");
 
 console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy the module boundary contract`);

@@ -37,30 +37,30 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 }
 
 func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "modules/shell-view.js"))
-	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-batch-view.js", "modules/agent-batch-controller.js")
-	styles := string(mustReadFrontendFile(t, "app.css"))
-	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
-		t.Fatal("node settings must not repeat its page title in a separate introduction panel")
-	}
-	if strings.Contains(agents, `class="node-batch-panel"`) {
-		t.Fatal("node settings must not reserve an inline row for batch operations")
-	}
+	agents := frontendSources(t, "analytics/nodes.js", "analytics/node-batch.js")
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
 	for _, required := range []string{
-		`data-node-batch-toggle`,
-		`data-node-batch-card`,
-		`data-batch-checkbox`,
-		`class="node-batch-bar"`,
-		`data-close-node-batch`,
-		`: "node-card-grid"`,
+		`let view = preference.view === 'list' ? 'list' : 'cards', selecting = false;`,
+		`const batchToggle = ctx.can('tasks.execute')`, `batchBar.hidden = !selecting`,
+		`batchToggle.hidden = selecting`, `all.querySelector('input').indeterminate`,
+		`selected.clear(); draw()`, `className:'a-probe-choice'`, `selecting?['选择']:[]`,
+		`disabled: !selectable(agent)`, `agent.can_manage !== false || ctx.can('instance.manage', agent)`,
+		`openedScopes.get(agent.id)?.get(options.engine)`, `if (!ctx.can('tasks.execute'))`,
+		`if (scope(agent, options.engine) !==`, `row.retry.disabled = busy`,
 	} {
-		if !strings.Contains(app+agents, required) {
-			t.Errorf("node batch selection is missing %q", required)
+		if !strings.Contains(agents, required) {
+			t.Errorf("native node selection missing %q", required)
 		}
 	}
-	if !strings.Contains(styles, `.node-batch-bar{position:fixed`) ||
-		!strings.Contains(styles, `.node-card.batch-selecting.selected`) {
-		t.Fatal("node batch mode must use a floating action bar and visible card selection")
+	for _, required := range []string{".a-probe-grid { display: grid;", ".a-probe-batch[hidden] { display: none; }", ".a-probe-choice", ".a-probe-list"} {
+		if !strings.Contains(styles, required) {
+			t.Errorf("native node selection styles missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"node-page-intro", "node-batch-panel"} {
+		if strings.Contains(agents, forbidden) {
+			t.Errorf("native node settings retains a redundant panel: %q", forbidden)
+		}
 	}
 }
 
@@ -136,33 +136,34 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 }
 
 func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
-	module := string(mustReadFrontendFile(t, "modules/agents.js")) + "\n" +
-		string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
-	css := string(mustReadFrontendFile(t, "app.css"))
-	app := string(mustReadFrontendFile(t, "modules/shell-view.js"))
-	if strings.Contains(app, `href="#enrollment"`) || !strings.Contains(app, `type="button" data-open-enrollment`) {
-		t.Fatal("populated and empty node settings must expose a top dialog button without changing routes")
-	}
-	if strings.Contains(module, `class="enrollment-sheet"`) {
-		t.Fatal("node settings must not retain the persistent enrollment sheet")
-	}
-	if strings.Contains(css, `.node-settings-page>.enrollment-sheet{display:block}`) || strings.Contains(css, `.node-settings-page>.enrollment-sheet:not([open]){display:block}`) {
-		t.Fatal("effective CSS must not force a persistent enrollment sheet visible")
-	}
-	for _, marker := range []string{
-		`role="dialog" aria-modal="true"`,
-		`aria-labelledby="enrollment-dialog-title"`,
-		`aria-describedby="enrollment-dialog-description"`,
-		`data-enrollment-history-list`,
-		`删除仅撤销凭据，不影响已注册节点。`,
-		`添加记录刷新失败，部署命令未受影响`,
+	nodes := string(mustReadFrontendFile(t, "analytics/nodes.js"))
+	dialogs := frontendSources(t, "analytics/app.js", "analytics/ui.js")
+	css := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	for _, required := range []string{
+		`const box = ctx.dialog('添加节点', stack(form, history))`, `ctx.dialog('QAgent 安装命令'`,
+		`enrollmentInstallCommand(created)`, `field('节点名称', 'name', ''`,
+		`field('对管理员隐藏此节点', 'admin_hidden', false`, `添加记录 · ${tokens.length}`,
+		`ctx.api('/enrollment-tokens')`, `/enrollment-tokens/${pathID(token.id)}/command`,
+		`token.command_available`, `token.revoked_at`, `if (!ctx.current() || !box.isConnected) return`,
+		`删除此添加记录？已接入的节点不会被卸载。`, `box.onRequestClose = async () =>`,
+		`放弃未保存的节点添加信息？`,
 	} {
-		if !strings.Contains(module, marker) {
-			t.Errorf("enrollment dialog contract is missing %q", marker)
+		if !strings.Contains(nodes, required) {
+			t.Errorf("native enrollment dialog missing %q", required)
 		}
 	}
-	if !strings.Contains(css, `.modal-backdrop{position:fixed`) || !strings.Contains(css, `.enrollment-history`) {
-		t.Fatal("effective CSS must render the dialog backdrop and enrollment history")
+	for _, required := range []string{`const box = node("dialog"`, `"aria-labelledby": heading.id`, `box.showModal()`, `event.key !== 'Tab'`, `active?.focus`, `box.addEventListener("cancel"`} {
+		if !strings.Contains(dialogs, required) {
+			t.Errorf("native modal accessibility missing %q", required)
+		}
+	}
+	for _, required := range []string{".a-dialog::backdrop { position: fixed;", ".a-dialog-body", ".a-disclosure-body"} {
+		if !strings.Contains(css, required) {
+			t.Errorf("native enrollment styles missing %q", required)
+		}
+	}
+	if strings.Contains(nodes, "enrollment-sheet") {
+		t.Fatal("enrollment must not retain a persistent panel")
 	}
 }
 

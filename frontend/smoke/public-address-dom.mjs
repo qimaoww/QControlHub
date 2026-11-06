@@ -2,64 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatHostPort, updatePublicIPDisplays } from "../modules/agents.js";
 export async function run() {
-// CSS contract: the IPv4/IPv6 badge must override the <i> default italic and
-// must not regress to the old tiny sizes; card and detail address text must
-// keep the readability floor while staying on a single ellipsizing line.
+// The native node surface must keep address families upright and readable,
+// wrap long IPv6 values, and reserve the adjacent copy control's hit target.
 {
-  const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
-  assert.equal(
-    /font-size:[1-9]\d*(?:\.\d+)?px/.test(css),
-    false,
-    "positive pixel font sizes must use the shared typography scale",
-  );
-  assert.equal(
-    /line-height:\d+(?:\.\d+)?px/.test(css),
-    false,
-    "pixel line heights must use the shared typography scale",
-  );
-  assert.equal(
-    css.includes(".settings-section>.settings-hint{padding:0 20px 18px"),
-    true,
-    "settings helper text keeps the section's horizontal and bottom padding",
-  );
-  assert.equal(
-    css.includes(".settings-section header p,.settings-hint{min-width:0;overflow-wrap:anywhere}"),
-    true,
-    "settings copy wraps instead of overflowing its card",
-  );
-  const badge = /\.ip-family\{[^}]*\}/.exec(css)?.[0] || "";
-  assert.equal(
-    badge.includes("font-style:normal"),
-    true,
-    ".ip-family must override the <i> default italic",
-  );
-  assert.equal(
-    /\.ip-family\{[^}]*font-size:8px/.test(css),
-    false,
-    ".ip-family badge size must not regress to 8px",
-  );
-  const cardCode = /\.card-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
-  const publicCode = /\.public-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
-  assert.equal(
-    /font-size:var\(--text-small\)/.test(cardCode),
-    true,
-    "card address text must be at least 11px before the shared scale",
-  );
-  assert.equal(
-    /font-size:var\(--text-small\)/.test(publicCode),
-    true,
-    "detail address text must be at least 12px before the shared scale",
-  );
-  assert.equal(
-    /\.card-ip-row code\{[^}]*font-size:9px/.test(css),
-    false,
-    "card address size must not regress to 9px",
-  );
-  assert.equal(
-    css.includes(".card-ip-row code{min-width:0;max-width:calc(100% - 72px);flex:0 1 auto"),
-    true,
-    "card copy control must stay next to the address",
-  );
+  const css = readFileSync(new URL("../analytics/theme.css", import.meta.url), "utf8");
+  const nodes = readFileSync(new URL("../analytics/nodes.js", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../analytics/ui.js", import.meta.url), "utf8");
+  assert.match(nodes, /muted\(row.label\)/);
+  assert.match(ui, /muted = \(message\) => node\("span"/);
+  assert.match(css, /\.a-probe-address \{[^}]*font-size: 12px/);
+  assert.match(css, /\.a-probe-address \.a-muted \{ font-size: 11px/);
+  assert.match(css, /\.a-probe-address-value \{[^}]*grid-template-columns: minmax\(0,1fr\) auto/);
+  assert.match(css, /\.a-probe-address-value > \[dir\] \{ min-width: 0; overflow-wrap: anywhere/);
+  assert.match(css, /\.a-ip-copy.a-button \{ flex: none/);
+  assert.match(css, /@media \(pointer: coarse\) \{ \.a-ip-copy.a-button \{ width: 44px; min-height: 44px/);
 }
 
 assert.equal(

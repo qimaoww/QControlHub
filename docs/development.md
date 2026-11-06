@@ -45,7 +45,6 @@ COLUMNS=40 NO_COLOR=1 bash scripts/preview-quick-start.sh update
 - 后端入口位于 [cmd/](../cmd)，业务模块位于 [internal/](../internal)。
 - 前端页面与共享模块位于 [frontend/](../frontend)，模块 smoke 与真实浏览器夹具分别在 `frontend/smoke/`、`frontend/browser/`。
 - 部署脚本修改 [deploy/modules/](../deploy/modules) 中的源模块，再运行 `make generate-deploy-scripts`；用 `make deploy-modules-check` 检查生成结果。
-- 样式源位于 [frontend/styles/](../frontend/styles)，修改后运行 `make generate-styles` 生成 `frontend/app.css`，用 `make styles-check` 核对。
 - [install_assets.go](../install_assets.go) 显式嵌入部署脚本、服务模板与 [examples/configs/](../examples/configs)；二进制升级使用这些资源。各模块 `testdata/` 中的报告、数据库和协议文件供自动化测试读取。
 
 ## 前端交互约定

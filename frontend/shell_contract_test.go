@@ -2,102 +2,57 @@ package frontend
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
 
 func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
-	content := frontendSources(t, "modules/shell-view.js", "modules/shell-icons.js")
-	start := strings.Index(content, "  const links = [")
-	if start < 0 {
-		t.Fatal("shell-view.js is missing the sidebar navigation list")
+	content := string(mustReadFrontendFile(t, "analytics/app.js"))
+	start, end := strings.Index(content, "const destinations = ["), strings.Index(content, "const pageModules =")
+	if start < 0 || end <= start {
+		t.Fatal("native navigation groups are missing")
 	}
-	end := strings.Index(content[start:], "  ];\n  const linkPermissions")
-	if end < 0 {
-		t.Fatal("shell-view.js sidebar navigation list has no closing boundary")
-	}
-	navigation := content[start : start+end]
+	navigation := content[start:end]
 	previous := -1
-	for _, route := range []string{
-		"dashboard", "node-settings", "live-config", "system-bbr", "ip-quality",
-		"client-access", "substore-sync", "traffic", "client-connections", "core-logs", "tasks",
-	} {
-		position := strings.Index(navigation, `"`+route+`"`)
-		if position < 0 {
-			t.Errorf("sidebar navigation is missing route %q", route)
-			continue
-		}
+	for _, group := range []string{`["概览"`, `["节点与配置"`, `["运维"`, `["面板"`} {
+		position := strings.Index(navigation, group)
 		if position <= previous {
-			t.Errorf("sidebar route %q is outside the expected workflow order", route)
+			t.Errorf("native navigation group out of order: %q", group)
 		}
 		previous = position
 	}
-	if strings.Contains(navigation, `"settings"`) {
-		t.Error("settings must remain separated from the primary desktop navigation")
-	}
-	if strings.Contains(navigation, `"agents"`) || strings.Contains(content, `["agents", "内核预设"]`) {
-		t.Error("preset actions belong in the configuration page, not standalone desktop or mobile navigation")
-	}
-	for _, required := range []string{
-		`const dockIcons = Object.freeze({`,
-		`["node-settings", "节点", dockIcons.server]`,
-		`["live-config", "配置", dockIcons.fileCode]`,
-		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
-		`["substore-sync", "同步", dockIcons.refreshCw, true]`,
-		`["traffic", "流量", dockIcons.chart, true]`,
-		`["core-logs", "日志", dockIcons.logs, true]`,
-		`["tasks", "任务", dockIcons.listChecks, true]`,
-		`["themes", "主题", dockIcons.sliders, true]`,
-		`["themes", "主题"]`,
-		`class="dock-settings`,
-		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
-		`summary class="${mobileMoreActive ? "active" : ""}"`,
-		`["ip-quality", "IP 质量", dockIcons.gauge, true]`,
-		`const navGroups = {`,
-		`groupStart ? " dock-group-start" : ""`,
-	} {
-		if !strings.Contains(content, required) {
-			t.Errorf("sidebar navigation is missing responsive icon contract %q", required)
+	for _, route := range []string{"dashboard", "node-settings", "live-config", "archive-config", "client-access", "substore-sync", "certificates", "tasks", "core-logs", "client-connections", "traffic", "system-bbr", "ip-quality", "settings", "users", "my-quota", "themes"} {
+		if strings.Count(navigation, `["`+route+`",`) != 1 {
+			t.Errorf("native navigation must expose exactly one %s destination", route)
 		}
 	}
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
+	for _, forbidden := range []string{`"agents"`, `"access-control"`, `"agent-config"`} {
+		if strings.Contains(navigation, forbidden) {
+			t.Errorf("duplicate configuration navigation: %s", forbidden)
+		}
 	}
-	for _, required := range []string{
-		`.dock-nav .dock-mobile-secondary{display:none}`,
-		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)`,
-		`.mobile-account-menu{position:relative;z-index:110;grid-column:auto;`,
-		`.dock-nav{display:contents!important}`,
-		`.dock-nav a,.mobile-account-menu>summary{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px`,
-		`,.page-agents .release-channel-options label{min-height:44px}`,
-		`.mobile-account-menu>summary.active`,
-		`.mobile-account-menu a,.mobile-account-menu button`,
-		`.page-access-control .access-control-card form.is-dirty>footer{position:fixed;z-index:85;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));left:8px`,
-		`.app-dock:is(:hover,:has(:focus-visible)){width:var(--dock-rail-expanded)`,
-		`.app-dock .dock-nav a.dock-group-start::after{`,
-	} {
-		if !strings.Contains(string(styles), required) {
-			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)
+	for _, required := range []string{`const allowed = entries.filter`, `can(permission)`, `rail(true)`, `"aria-label": "主导航"`, `"aria-current": route === id ? "page" : null`, `matchMedia("(max-width: 56rem)")`, `openDialog(opened)`, `navigationToggle?.setAttribute("aria-expanded", "false")`} {
+		if !strings.Contains(content, required) {
+			t.Errorf("native navigation permission/responsive contract missing %q", required)
+		}
+	}
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	for _, required := range []string{`.a-rail nav {`, `overflow: auto`, `.a-drawer { width: min(288px, 88vw)`, `.a-layout > .a-rail { display: none; }`, `.a-drawer .a-rail`, `min-height: 44px`} {
+		if !strings.Contains(styles, required) {
+			t.Errorf("native navigation styles missing %q", required)
 		}
 	}
 }
 
 func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
-	app, err := os.ReadFile("modules/login-page.js")
-	if err != nil {
-		t.Fatal(err)
+	content := frontendSources(t, "analytics/app.js", "analytics/ui.js")
+	for _, required := range []string{`field("用户名", "username", "", { autocomplete: "username", required: true`, `field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true`, `node("label"`, `node("span", {}, label)`} {
+		if !strings.Contains(content, required) {
+			t.Errorf("native login label/autocomplete contract missing %q", required)
+		}
 	}
-	content := string(app)
-	if strings.Contains(content, `name="username" type="text" value="admin"`) {
+	if strings.Contains(content, `field("用户名", "username", "admin"`) {
 		t.Fatal("login username must not be prefilled with admin")
-	}
-	if !strings.Contains(content, `name="username" type="text" autocomplete="username"`) {
-		t.Fatal("login username must retain browser autocomplete support")
-	}
-	if !strings.Contains(content, `<label>用户名<input name="username"`) {
-		t.Fatal("login username must have a persistent label, not only a placeholder")
 	}
 }
 

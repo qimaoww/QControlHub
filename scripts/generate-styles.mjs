@@ -6,17 +6,16 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 export const repositoryRoot = resolve(dirname(scriptPath), "..");
 export const styleManifest = JSON.parse(
-  readFileSync(resolve(repositoryRoot, "frontend/styles/manifest.json"), "utf8"),
+  readFileSync(resolve(repositoryRoot, "frontend/analytics/styles.json"), "utf8"),
 );
 
-function sourceFiles(root, directory = resolve(root, "frontend/styles")) {
+function sourceFiles(root, directory = resolve(root, "frontend/analytics")) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(root, path);
     const name = relative(root, path).split(sep).join("/");
     if (!entry.isFile()) throw new Error(`style source must be a regular file: ${name}`);
-    if (name === "frontend/styles/manifest.json") return [];
-    if (!name.endsWith(".css")) throw new Error(`unexpected style source: ${name}`);
+    if (!name.endsWith(".css") || name === "frontend/analytics/theme.css") return [];
     return [name];
   }).sort();
 }
@@ -25,8 +24,8 @@ export function validateStyleManifest(manifest = styleManifest, files = sourceFi
   if (!Array.isArray(manifest) || !manifest.length) throw new Error("style manifest must be a nonempty ordered array");
   const listed = new Set();
   for (const path of manifest) {
-    if (typeof path !== "string" || !/^frontend\/styles\/[a-z0-9/_-]+\.css$/.test(path))
-      throw new Error(`style module must stay under frontend/styles: ${path}`);
+    if (typeof path !== "string" || !/^frontend\/analytics\/[a-z0-9/_-]+\.css$/.test(path) || path === "frontend/analytics/theme.css")
+      throw new Error(`style source must stay under frontend/analytics and exclude the generated output: ${path}`);
     if (listed.has(path)) throw new Error(`duplicate style module: ${path}`);
     listed.add(path);
   }
@@ -75,32 +74,19 @@ export function renderStyles(root = repositoryRoot, manifest = styleManifest) {
 }
 
 export function checkStyles(root = repositoryRoot, manifest = styleManifest) {
-  if (!renderStyles(root, manifest).equals(readFileSync(resolve(root, "frontend/app.css"))))
-    throw new Error("generated frontend/app.css differs; run make generate-styles");
-}
-
-export function renderThemeStyles(root = repositoryRoot) {
-  const path = "frontend/analytics/theme-source.css";
-  const bytes = readFileSync(resolve(root, path));
-  validateStyleSlice(bytes.toString("utf8"), path);
-  return bytes;
-}
-
-export function checkThemeStyles(root = repositoryRoot) {
-  if (!renderThemeStyles(root).equals(readFileSync(resolve(root, "frontend/analytics/theme.css"))))
+  if (!renderStyles(root, manifest).equals(readFileSync(resolve(root, "frontend/analytics/theme.css"))))
     throw new Error("generated frontend/analytics/theme.css differs; run make generate-styles");
 }
 
 export function writeStyles() {
-  writeFileSync(resolve(repositoryRoot, "frontend/app.css"), renderStyles());
-  writeFileSync(resolve(repositoryRoot, "frontend/analytics/theme.css"), renderThemeStyles());
+  writeFileSync(resolve(repositoryRoot, "frontend/analytics/theme.css"), renderStyles());
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
     if (process.argv.length !== 3 || !["--check", "--write"].includes(process.argv[2]))
       throw new Error("usage: node scripts/generate-styles.mjs --check|--write");
-    if (process.argv[2] === "--check") { checkStyles(); checkThemeStyles(); }
+    if (process.argv[2] === "--check") { checkStyles(); }
     else writeStyles();
   } catch (error) {
     console.error(error.message);
