@@ -19,6 +19,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   }
   await testInboundDeploymentRuntime();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
+  await testInboundProtocolChanges();
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {
     const test = await fixture(engine); test.click('modify'); await ready();
     const form = editor(), source = form.elements.credential?.value;
@@ -55,7 +56,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     }
     test.click('modify'); await ready(); let form=editor();
     assert(form.elements.tag.value==='second'&&form.elements.port.value==='21002','modify targeted another inbound');
-    assert(form.elements.protocol.disabled,'editing lets a user silently replace the selected protocol');
+    assert(!form.elements.protocol.disabled,'modify protocol selector is locked');
     form.elements.tag.value='renamed';form.elements.tag.dispatchEvent(new Event('input',{bubbles:true}));
     test.confirm=false;close(test); await pause(); assert(editor()===form&&form.elements.tag.value==='renamed','canceling close lost draft');
     form.elements.port.value='23002';test.confirm=true;test.submit('deploy');await test.settle(3);
@@ -127,6 +128,42 @@ export async function testConfigInboundsRuntime(preview = false) {
   selector.value=original;selector.dispatchEvent(new Event('change',{bubbles:true}));await waitFor(()=>editor().elements.tag.value==='protocol-specific-draft','protocol draft was not restored');drafts.dispose();
   const refresh=await fixture('xray');refresh.click('add');await ready();refresh.failRefresh=true;refresh.confirm=true;refresh.submit('deploy');await refresh.settle(1);assert(document.querySelector('.a-main').textContent.includes('配置已保存且任务已提交，状态读取失败'),'durable mutation was reported failed after readback error');refresh.failRefresh=false;refresh.clickButton('重新读取状态');await waitFor(()=>![...document.querySelectorAll('.a-main .a-notice')].some(message=>message.checkVisibility()&&message.textContent.includes('配置已保存且任务已提交，状态读取失败')),'readback recovery missing');assert(refresh.writes.length===1,'readback recovery repeated mutation');refresh.dispose();
   await testConfigOutboundsRuntime();await testCommonConfigRuntime();
+}
+
+export async function testInboundProtocolChanges() {
+  for (const engine of ['xray','sing-box','mihomo','ss-rust']) for (const shared of [false,true]) {
+    const test=await fixture(engine,{protocol:'ss2022',shared});test.select('second');test.click('modify');await ready();
+    const target=['xray','mihomo'].includes(engine)?'vmess':'shadowsocks';
+    const password=target==='vmess'?'00000000-0000-4000-8000-000000000001':'retained-new-password';
+    const form=editor(), selector=form.elements.protocol, original=selector.value, credential=form.elements.credential.value;
+    const choose=key=>{selector.value=key;selector.dispatchEvent(new Event('change',{bubbles:true}));};
+    const loaded=key=>waitFor(()=>selector.value===key&&form.elements.credential&&!form.querySelector('[type=submit]').disabled,'changed protocol did not load');
+    assert(!selector.disabled&&[...selector.options].some(option=>option.value===target),'modify cannot select another supported protocol');
+    if(engine==='sing-box')assert(![...selector.options].some(option=>option.value==='wireguard'),'native endpoint migration offered by inbound-only API');
+    form.elements.tag.value='retained-tag';form.elements.port.value='23459';form.elements.port.dispatchEvent(new Event('input',{bubbles:true}));
+    test.planError=true;choose(target);
+    await waitFor(()=>form.textContent.includes('协议方案读取失败'),'protocol failure feedback missing');
+    assert(selector.value===original&&form.elements.credential.value===credential&&form.elements.port.value==='23459'&&!form.querySelector('[type=submit]').disabled,'failed switch lost the active draft');
+    test.planError=false;
+    let release;test.planGate=new Promise(resolve=>{release=resolve;});choose(target);
+    assert(form.querySelector('[type=submit]').disabled&&form.elements.port.matches(':disabled'),'loading protocol allows stale fields to submit or change');
+    choose(original);await loaded(original);release();test.planGate=null;await pause();
+    assert(selector.value===original&&form.elements.credential.value===credential,'late plan overwrote newer protocol selection');
+    choose(target);await loaded(target);
+    assert(form.elements.tag.value==='retained-tag'&&form.elements.port.value==='23459'&&form.elements.credential.value!==credential&&!form.elements.method?.value.startsWith('2022-'),'switch lost identity or reused incompatible authentication');
+    form.elements.credential.value=password;form.elements.credential.dispatchEvent(new Event('input',{bubbles:true}));
+    choose(original);await loaded(original);assert(form.elements.credential.value===credential,'original protocol draft lost its credential');
+    choose(target);await loaded(target);assert(form.elements.credential.value===password,'new protocol draft was regenerated on return');
+    test.confirm=false;test.clickButton('完整入站配置',test.topDialog());await pause();
+    assert(editor()===form&&selector.value===target&&!test.writes.length,'canceling edit-mode switch discarded protocol draft');
+    test.confirm=true;test.submit('deploy');await test.settle(1);
+    const saved=test.writes[0];assert(saved.operation==='modify'&&saved.original_tag==='second'&&saved.expected_version===1&&!saved.install_if_missing&&saved.input.protocol===target&&saved.input.tag==='retained-tag'&&saved.input.port===23459&&saved.input.credential===password,'protocol mutation lost target, version or draft');
+    test.dispose();
+  }
+  const offline=await fixture('xray',{offline:true,protocol:'ss2022'});offline.click('modify');await ready();
+  let form=editor();form.elements.protocol.value='trojan';form.elements.protocol.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>form.elements.tls_enabled,'TLS protocol did not replace old fields');
+  assert(form.elements.tls_enabled.checked&&!form.elements.method&&form.querySelector('[type=submit]').disabled&&!form.elements.protocol.disabled,'offline protocol switch lost TLS rules or enabled deployment');offline.dispose();
 }
 
 async function testNodeConfigHistory(){

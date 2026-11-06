@@ -4,6 +4,7 @@ const form=()=>dialog()?.querySelector('form:has([name=mutation])');
 const alerts=()=>[...document.querySelectorAll('.a-toast[role=alert],.a-dialog .a-notice')].filter(item=>item.checkVisibility()).map(item=>item.textContent).join(' ');
 const source=()=>document.querySelector('.a-main [name=content]');
 async function operation(test,kind){
+  await waitFor(()=>!test.root.hasAttribute('aria-busy'),'previous common operation did not release its lock');
   test.common();await waitFor(form,'common editor missing');
   form().elements.mutation.value=kind;form().elements.mutation.dispatchEvent(new Event('change',{bubbles:true}));
   await waitFor(()=>!form()?.textContent.includes('正在读取配置项'),'common operation did not load');
@@ -37,6 +38,7 @@ export async function testCommonConfigRuntime(){
     assert(test.writes[1].expected_version===2&&protectedStructure(test)===structure,'common modify changed unrelated target');
     const before=JSON.parse(test.saved().content);await operation(test,'delete');await field('dns');assert(form().elements.fragment.readOnly&&form().elements.fragment.value.includes('9.9.9.9'),'delete has no readonly preview');
     test.confirm=false;test.submit('deploy');await pause();assert(test.writes.length===2&&form(),'canceled common delete wrote data');assert(test.confirmations.at(-1).message.includes('dns')&&test.confirmations.at(-1).message.includes('重启'),'delete confirmation lacks field/deploy impact');
+    await waitFor(()=>!form().hasAttribute('aria-busy'),'canceled common delete did not release its form');
     test.confirm=true;test.submit('deploy');await test.settle(3);delete before.dns;
     assert(test.writes[2].mutation==='delete'&&test.writes[2].expected_version===3&&test.writes[2].fragment===''&&JSON.stringify(JSON.parse(test.saved().content))===JSON.stringify(before),'delete changed more than selected field');
     await operation(test,'add');assert([...form().elements.key.options].some(option=>option.value==='dns'),'deleted field cannot be re-added');test.dispose();

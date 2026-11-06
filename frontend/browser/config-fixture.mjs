@@ -150,6 +150,7 @@ export async function createConfigFixture(engine, options = {}) {
     }
     if (path.endsWith("/plans")) {
       if (test.planGate) await test.planGate;
+      if (test.planError) throw Object.assign(new Error("协议方案读取失败"), {status:503});
       const entry = entries.find(item => item.protocol.key === body.protocol);
       return {...structuredClone(entry.plan), ...body.input,
         ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(entry.plan,key)).map(key=>[key,entry.plan[key]])),

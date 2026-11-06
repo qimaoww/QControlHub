@@ -133,8 +133,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       if (!found) throw new Error('入站已变化，请重新选择');
       input = found;
     }
-    const protocolSelect = field('协议','protocol',input?.protocol || current.protocols[0]?.key,{options:current.protocols.map(protocol=>[protocol.key,protocol.name]),disabled:operation!=='add'});
-    const area = node('div',{className:'a-stack'}), feedback=notice('');
+    const originalProtocol = current.protocols.find(item => item.key === input?.protocol);
+    // Native sing-box endpoints and inbounds have different identities in the API.
+    const protocols = operation === 'modify' && engine === 'sing-box'
+      ? current.protocols.filter(item => Boolean(item.uses_endpoint) === Boolean(originalProtocol?.uses_endpoint)) : current.protocols;
+    const protocolSelect = field('协议','protocol',input?.protocol || protocols[0]?.key,{options:protocols.map(protocol=>[protocol.key,protocol.name])});
+    const area = node('fieldset',{className:'a-form-fields a-stack'}), feedback=notice('');
+    const protocolHint = muted('保存后将切换协议，客户端需更新接入配置。'); protocolHint.hidden = true;
     let protocol, baseline, request=0, revision=0, box, initialInput=input;
     const protocolDrafts = new Map();
     if (!ctx.current()) return;
@@ -153,13 +158,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     });
     const native = input && operation === 'modify' && button('完整入站配置',async event=>{
       const control = event.currentTarget;
-      if (baseline && JSON.stringify(read()) !== JSON.stringify(baseline) && !await ctx.confirm('切换编辑方式会放弃当前参数修改，确定继续？','切换编辑方式')) return;
+      if (baseline && (protocol.key !== input.protocol || JSON.stringify(read()) !== JSON.stringify(baseline)) && !await ctx.confirm('切换编辑方式会放弃当前参数修改，确定继续？','切换编辑方式')) return;
       if (!ctx.current()) return;
       ctx.setDirty(false); box.close();
       await ctx.mutate(control,()=>inboundSource(input));
     });
-    const form = ctx.form([protocolSelect,area,actions(regenerate,native),intents(),feedback],'保存并部署',async values=>{
-      if(!protocol || !baseline) throw new Error('请等待方案加载');
+    const form = ctx.form([protocolSelect,area,actions(regenerate,native),protocolHint,intents(),feedback],'保存并部署',async values=>{
+      if(!protocol || !baseline || protocol.key !== form.elements.protocol.value) throw new Error('请等待方案加载');
       const payload=read();
       if(!await preparing(values.intent))return;
       if(operation==='add' && !agent.runtime?.[engine]?.installed) {
@@ -188,7 +193,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const control=key=>field(key==='credential'?protocol.credential_label||labels[key]:labels[key]||key,key,key==='panel_certificate_id'?certificateID:typeof plan[key]==='object'?JSON.stringify(plan[key]||{},null,2):plan[key]??(booleans.has(key)?false:''),{...(booleans.has(key)?{type:'checkbox',value:'1'}:numeric.has(key)?{type:'number',min:0,max:key.includes('port')?65535:undefined}:multiline.has(key)?{multiline:4,spellcheck:false}:/credential|private_key|password|auth_key|preshared_key|seed|decryption/.test(key)?{type:'password',autocomplete:'new-password'}:{}),...(options(key)?{options:options(key)}:{}),...(key==='reality_server_name'?{suggestions:current.reality_presets}:{}),required:['tag','listen','port'].includes(key),readonly:key==='listen'&&engine==='sing-box'&&protocol.uses_wireguard,maxlength:multiline.has(key)?undefined:2000});
       const sections=[node('div',{className:'a-form-grid'},keys.map(control))];
       if(protocol.transport_config)sections.push(group('传输',node('div',{className:'a-form-grid'},['transport','transport_path','transport_host','transport_http_method','flow'].map(control)),true));
-      if(protocol.supports_tls||protocol.requires_tls)sections.push(group('TLS',node('div',{className:'a-form-grid'},['tls_enabled','tls_server_name','tls_alpn','tls_client_alpn','certificate_path','private_key_path','panel_certificate_id','tls_client_certificate',...(protocol.supports_managed_tls?['tls_mode','tls_acme_email','tls_public_port']:[])].map(control)),protocol.requires_tls));
+      if(protocol.supports_tls||protocol.requires_tls)sections.push(group('TLS',node('div',{className:'a-form-grid'},['tls_enabled','tls_server_name','tls_alpn','tls_client_alpn','certificate_path','private_key_path','panel_certificate_id','tls_client_certificate',...(protocol.supports_managed_tls?['tls_mode','tls_acme_email','tls_public_port']:[])].map(control)),Boolean(plan.tls_enabled||protocol.requires_tls)));
       if(isXHTTPGroup(protocol.key))sections.push(group('TLS/CDN 入口',grid(...['tls_server_name','tls_alpn','tls_client_alpn','certificate_path','private_key_path'].map(control)),true));
       if(protocol.uses_reality||protocol.key==='vless')sections.push(group('Reality',node('div',{className:'a-form-grid'},['reality_enabled','reality_private_key','reality_public_key','reality_short_id','reality_server_name','reality_target','reality_server_names',...(protocol.supports_reality_mldsa?['reality_min_client_ver','reality_mldsa65_seed','reality_mldsa65_verify']:[])].map(control)),protocol.uses_reality));
       if(protocol.uses_vless_encryption)sections.push(group('VLESS Encryption',grid(control('vless_decryption'),control('vless_encryption')),true));
@@ -240,26 +245,50 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     }
     async function choose() {
       const epoch = ++request;
-      const selected = current.protocols.find(item => item.key === form.elements.protocol.value);
+      const selected = protocols.find(item => item.key === form.elements.protocol.value);
       if (!selected) return;
+      const previous = baseline || protocolDrafts.get(protocol?.key);
       baseline = null;
       const submit = form.querySelector('button[type=submit]');
-      submit.disabled = true; feedback.textContent = '正在读取协议方案…';
+      submit.disabled = area.disabled = regenerate.disabled = true;
+      if (native) native.disabled = true;
+      feedback.textContent = '正在读取协议方案…';
       try {
-        const generated = operation === 'add' ? protocolDrafts.get(selected.key) || initialInput || await ctx.api(`${base}/plans`, { method: 'POST', body: { protocol: selected.key } }) : input;
-        initialInput = null;
+        let generated = protocolDrafts.get(selected.key) || (initialInput?.protocol === selected.key ? initialInput : null);
+        if (!generated) {
+          generated = await ctx.api(`${base}/plans`, { method: 'POST', body: { protocol: selected.key } });
+          if (operation === 'modify') {
+            // Retain the inbound's address and routing identity, never reuse
+            // another protocol's authentication, transport or TLS parameters.
+            for (const key of ['tag','listen','port','username','client_address','client_port','client_host','listener_routing_mark','listener_rule','listener_proxy','block_mainland_destination','block_mainland_source','ss_rust_dns','ss_rust_outbound_bind_addr','ss_rust_ipv6_first'])
+              if (Object.hasOwn(previous || input, key)) generated[key] = (previous || input)[key];
+          }
+        }
         if (epoch !== request || !ctx.current() || !box.isConnected) return;
+        initialInput = null;
+        area.disabled = regenerate.disabled = false;
+        if (native) native.disabled = false;
         protocol = selected; render(generated);
+        protocolHint.hidden = operation !== 'modify' || selected.key === input.protocol;
         const reason = operation === 'add' && !agent.runtime?.[engine]?.installed ? coreInstallBlockReason(current.agent, engine, ctx.can, { automatic: true }) : '';
         feedback.textContent = reason || (!execute ? '节点当前离线，草稿可继续编辑，上线后重新打开再提交。' : ''); submit.disabled = !execute || Boolean(reason);
       } catch (error) {
-        if (epoch === request && ctx.current() && box.isConnected && error.name !== 'AbortError') feedback.textContent = error.message;
+        if (epoch !== request || !ctx.current() || !box.isConnected || error.name === 'AbortError') return;
+        baseline = previous;
+        if (protocol && baseline) {
+          form.elements.protocol.value = protocol.key;
+          area.disabled = regenerate.disabled = false;
+          if (native) native.disabled = false;
+          submit.disabled = !execute;
+        }
+        feedback.textContent = error.message;
       }
     }
     form.addEventListener('input', () => { revision++; });
     form.addEventListener('change', () => { revision++; });
     form.elements.protocol.addEventListener('change', () => {
-      if (protocol && baseline) protocolDrafts.set(protocol.key, read());
+      try { if (protocol && baseline) protocolDrafts.set(protocol.key, read()); }
+      catch (error) { form.elements.protocol.value = protocol.key; feedback.textContent = error.message; return; }
       void choose();
     });
     box=ctx.dialog(operation==='add'?'添加入站':`修改入站 · ${input.tag}`,form,{wide:true});

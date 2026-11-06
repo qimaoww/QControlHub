@@ -40,6 +40,7 @@ export async function testConfigOutboundsRuntime() {
     await openOutbound(test,'bind');form=outboundForm();assert(outboundInput().readOnly,'existing binding preview is editable');
     form.elements.tag.value='direct';form.elements.tag.dispatchEvent(new Event('change',{bubbles:true}));assert(outboundInput().value.includes('direct'),'binding preview does not follow selected exit');
     test.confirm=false;test.submit('deploy');await pause();assert(test.writes.length===2&&outboundForm(),'canceling rebinding wrote data');
+    await waitFor(()=>!form.hasAttribute('aria-busy')&&!form.querySelector('[type=submit]').disabled,'canceled rebinding did not release its form');
     test.confirm=true;test.submit('deploy');await test.settle(3);await openOutbound(test,'modify');test.submit('deploy');
     await waitFor(()=>alert().includes('共享出口'),'default/shared exit was not protected');assert(test.writes.length===3,'default exit changed through one inbound');
     outboundDialog().querySelector('[aria-label=关闭]').click();await pause();
