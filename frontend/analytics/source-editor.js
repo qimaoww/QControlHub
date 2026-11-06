@@ -38,4 +38,3 @@ export function bindSourceEditorTools(ctx, form, engine, original, changed, writ
   update();
   return update;
 }
-

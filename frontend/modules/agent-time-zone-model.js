@@ -25,4 +25,3 @@ export function agentClockSyncPresentation(clockSync) {
       : `${offset >= 0 ? "+" : ""}${offset.toFixed(3)} ms`,
   };
 }
-

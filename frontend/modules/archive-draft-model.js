@@ -14,4 +14,3 @@ export function archiveDraftDirty(draft) {
   return draft.name !== draft.originalName || draft.description !== draft.originalDescription ||
     [...draft.sources.values()].some(source => source.content !== source.original);
 }
-
