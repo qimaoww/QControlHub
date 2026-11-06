@@ -111,9 +111,14 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, placeholder := range []string{"__QCH_CSS_VERSION__", "__QCH_JS_VERSION__", "__QCH_ANALYTICS_CSS_VERSION__", "__QCH_STARTUP_CSS_VERSION__"} {
+	for _, placeholder := range []string{"__QCH_JS_VERSION__", "__QCH_ANALYTICS_CSS_VERSION__", "__QCH_STARTUP_CSS_VERSION__"} {
 		if !strings.Contains(string(dockerfile), placeholder) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
+		}
+	}
+	for _, retired := range []string{"COPY frontend/app.js ", "COPY frontend/app.css ", "__QCH_CSS_VERSION__", "/assets/app.js", "/assets/app.css"} {
+		if strings.Contains(string(dockerfile), retired) || strings.Contains(content, retired) {
+			t.Errorf("web entrypoint/build retains retired classic asset %q", retired)
 		}
 	}
 	// Run the build expressions against both quote conventions and lazy imports.

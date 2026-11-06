@@ -70,11 +70,9 @@ LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
       org.opencontainers.image.licenses="GPL-3.0-only"
 
 COPY frontend/index.html /usr/share/nginx/html/index.html
-COPY frontend/app.js /usr/share/nginx/html/assets/app.js
 COPY frontend/bootstrap.js /usr/share/nginx/html/assets/bootstrap.js
 COPY frontend/analytics /usr/share/nginx/html/assets/analytics
 COPY frontend/modules /usr/share/nginx/html/assets/modules
-COPY frontend/app.css /usr/share/nginx/html/assets/app.css
 COPY frontend/startup.css /usr/share/nginx/html/assets/startup.css
 COPY deploy/remote/install-agent.sh /usr/share/nginx/html/install-agent.sh
 COPY deploy/bootstrap-core-services.sh /usr/share/nginx/html/install-assets/deploy/bootstrap-core-services.sh
@@ -98,8 +96,7 @@ COPY frontend/nginx.conf /etc/nginx/nginx.conf
 RUN sed 's#http://control-plane:8080#http://127.0.0.1:8080#g' /etc/nginx/nginx.conf > /tmp/nginx.check.conf \
     && nginx -t -c /tmp/nginx.check.conf \
     && rm -f /tmp/nginx.check.conf
-RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
-    && startup_css_version="$(sha256sum /usr/share/nginx/html/assets/startup.css | cut -c1-16)" \
+RUN startup_css_version="$(sha256sum /usr/share/nginx/html/assets/startup.css | cut -c1-16)" \
     && analytics_css_version="$(sha256sum /usr/share/nginx/html/assets/analytics/theme.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \
     && js_version="${js_content_version}-$(printf '%s' "${VERSION}" | sha256sum | cut -c1-10)" \
@@ -107,7 +104,6 @@ RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)"
       -e "s#(from[[:space:]]+)(['\"])(\\.\\.?/[^'\"?]+\\.js)['\"]#\\1\\2\\3?v=${js_version}\\2#g" \
       -e "s#(import\\([[:space:]]*)(['\"])(\\.\\.?/[^'\"?]+\\.js)['\"]#\\1\\2\\3?v=${js_version}\\2#g" {} + \
     && sed -i \
-      -e "s/__QCH_CSS_VERSION__/${css_version}/g" \
       -e "s/__QCH_STARTUP_CSS_VERSION__/${startup_css_version}/g" \
       -e "s/__QCH_ANALYTICS_CSS_VERSION__/${analytics_css_version}/g" \
       -e "s/__QCH_JS_VERSION__/${js_version}/g" \
