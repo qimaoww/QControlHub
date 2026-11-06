@@ -150,7 +150,8 @@ export async function editUserAllocations(ctx, user) {
     const labelCells = () => allocations.querySelectorAll('td').forEach(cell => { cell.dataset.label = cell.dataset.column; });
     labelCells();
     allocations.addEventListener('click', labelCells);
-    savedView.replaceChildren(tools, allocations, owned.length > 0 && node('details', { className: 'a-disclosure' }, node('summary', {}, `自有节点 · ${owned.length}`), node('div', { className: 'a-disclosure-body' }, owned.map(agent => node('p', {}, agent.name)))));
+    savedView.replaceChildren(tools, allocations);
+    if (owned.length) savedView.append(node('details', { className: 'a-disclosure' }, node('summary', {}, `自有节点 · ${owned.length}`), node('div', { className: 'a-disclosure-body' }, owned.map(agent => node('p', {}, agent.name)))));
   }
   const content = stack(savedView, feedback);
   draw();

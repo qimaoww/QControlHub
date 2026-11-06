@@ -72,6 +72,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     await close(); await idle(); button('共享资源', row('bob')).click();
     await waitFor(() => dialog()?.dataset.userAllocation === 'bob', '另一用户共享未打开');
     assert.ok(!form() && dialog().textContent.includes('暂无记录'), '未分配用户继承其他账号的结果或草稿');
+    assert.ok(!dialog().textContent.includes('false') && !dialog().querySelector('details'), '没有自有节点时出现布尔值或空的自有节点区域');
     button('分配节点', dialog()).click();
     same([...form().elements.agent_id.options].map(option => option.value), ['', 'owned', 'shared', 'other', 'new'], '候选节点沿用了其他用户的归属或分配');
     assert.ok(!form().querySelector('[name=engines]:checked'), '新分配默认扩大内核授权');
