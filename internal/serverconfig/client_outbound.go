@@ -154,7 +154,9 @@ func singBoxClientOutbound(input Input, address, serverName string) (map[string]
 			out["flow"] = input.Flow
 		}
 		if protocol == "vmess" {
-			out["security"], out["alter_id"] = "auto", 0
+			// sing-box maps auto to zero when TLS is enabled. Current Xray
+			// rejects that mode, so export an explicit interoperable AEAD.
+			out["security"], out["alter_id"] = "aes-128-gcm", 0
 		}
 	case "socks":
 		out["version"], out["username"], out["password"] = "5", input.Username, input.Credential

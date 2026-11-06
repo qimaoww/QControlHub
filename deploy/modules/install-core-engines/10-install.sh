@@ -10,10 +10,10 @@ for tool in curl find gunzip install jq sha256sum tar unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
 
-mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-linux-amd64-v1-v1.19.29.gz"
-xray_zip="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip"
-singbox_tgz="https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-linux-amd64.tar.gz"
-ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.24.0/shadowsocks-v1.24.0.x86_64-unknown-linux-${linux_libc}.tar.xz"
+mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz"
+xray_zip="https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip"
+singbox_tgz="https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz"
+ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/shadowsocks-v1.25.0.x86_64-unknown-linux-${linux_libc}.tar.xz"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -51,11 +51,11 @@ atomic_install() {
   mv -f "$staged" "$core_dir/$2" || { rm -f "$staged"; return 1; }
 }
 
-echo '== mihomo v1.19.29 =='
+echo '== mihomo v1.19.33 =='
 version_output=$(qch_stage_gzip_binary "$work/mihomo.gz" "$work/mihomo" -v)
 printf '%s\n' "$version_output" | head -n1
 
-echo '== xray v26.3.27 =='
+echo '== xray v26.10.31 =='
 mkdir -p "$work/xray"
 unzip -o -q "$work/xray.zip" -d "$work/xray"
 version_output=$("$work/xray/xray" version)
@@ -68,7 +68,7 @@ for asset in geoip.dat geosite.dat; do
   [ -f "$work/xray/$asset" ] || { printf '%s\n' "Xray release is missing $asset" >&2; exit 1; }
 done
 
-echo '== sing-box v1.13.16 =='
+echo '== sing-box v1.14.4 =='
 mkdir -p "$work/sb"
 tar -xzf "$work/sing-box.tgz" -C "$work/sb"
 singbox_binary=$(find "$work/sb" -type f -name sing-box -print -quit)
@@ -76,7 +76,7 @@ singbox_binary=$(find "$work/sb" -type f -name sing-box -print -quit)
 version_output=$("$singbox_binary" version)
 printf '%s\n' "$version_output" | head -n1
 
-echo '== Shadowsocks Rust v1.24.0 =='
+echo '== Shadowsocks Rust v1.25.0 =='
 mkdir -p "$work/ssrust"
 tar -xJf "$work/shadowsocks-rust.txz" -C "$work/ssrust"
 ssserver_binary=$(find "$work/ssrust" -type f -name ssserver -print -quit)

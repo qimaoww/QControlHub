@@ -19,6 +19,37 @@ func nativeWSOriginRun(t *testing.T, engine core.Engine, binary, content string,
 	if engine == core.EngineSingBox {
 		return singBoxRun(t, binary, "native-ws-origin", content)
 	}
+	if engine == core.EngineXray {
+		// New Xray releases default to bundled public roots. Keep verification
+		// enabled and explicitly select the system store containing our test CA.
+		var root map[string]any
+		if err := json.Unmarshal([]byte(content), &root); err != nil {
+			t.Fatal(err)
+		}
+		outbounds, _ := root["outbounds"].([]any)
+		for _, item := range outbounds {
+			outbound := item.(map[string]any)
+			stream, _ := outbound["streamSettings"].(map[string]any)
+			if security, ok := stream["tlsSettings"].(map[string]any); ok && certPath != "" {
+				security["useSystemCA"] = true
+			}
+			if outbound["protocol"] == "freedom" {
+				// The actual echo target is local; newer Xray blocks private
+				// destinations by default. Permit only this fixture's loopback.
+				settings, _ := outbound["settings"].(map[string]any)
+				if settings == nil {
+					settings = map[string]any{}
+					outbound["settings"] = settings
+				}
+				settings["finalRules"] = []any{map[string]any{"action": "allow", "ip": []string{"127.0.0.0/8", "::1/128"}}}
+			}
+		}
+		encoded, err := json.Marshal(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content = string(encoded)
+	}
 	dir := t.TempDir()
 	config := filepath.Join(dir, "server.json")
 	if err := os.WriteFile(config, []byte(content), 0600); err != nil {
