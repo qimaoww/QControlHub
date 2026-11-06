@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -261,7 +263,7 @@ func testPlainWebSocketClientRoutingLive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), source, input.Port, "")
+			originLogs := nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), source, input.Port, "")
 			metadata, _ := MarshalClientMetadata(input)
 			parsed, ok := Parse(engine, source)
 			if !ok {
@@ -291,6 +293,22 @@ func testPlainWebSocketClientRoutingLive(t *testing.T) {
 			echo, clientPort := singBoxEcho(t, "tcp"), singBoxFreePort(t)
 			client, _ := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"type": "direct", "listen": "127.0.0.1", "listen_port": clientPort, "network": "tcp", "override_address": "127.0.0.1", "override_port": echo}}, "outbounds": []any{outbound}})
 			logs := singBoxRun(t, nativeWSTestBinary(t, core.EngineSingBox), "plain-ws-client", string(client))
+			if engine == core.EngineMihomo {
+				// Mihomo binds its listener before tunnel.OnRunning. Warm up
+				// only this controlled echo path; keep the strict payload and
+				// exported-client assertions below after forwarding is ready.
+				deadline := time.Now().Add(3 * time.Second)
+				for {
+					err := singBoxEchoRoundTrip("tcp", clientPort)
+					if err == nil {
+						break
+					}
+					if !errors.Is(err, io.EOF) || time.Now().After(deadline) {
+						t.Fatalf("plaintext WS forwarding not ready: %v\n%s\n%s", err, originLogs(), logs())
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+			}
 			if err := singBoxEchoRoundTrip("tcp", clientPort); err != nil {
 				t.Fatalf("plaintext WS payload: %v\n%s", err, logs())
 			}
