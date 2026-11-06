@@ -104,3 +104,19 @@ console.log(`analytics: ${independent.size} independent UI and shared logic modu
 for (const path of dependencies.keys()) {
   assert.ok(reachable.has(path) || independent.has(path), `${path} is not reachable from a production entrypoint`);
 }
+
+// The production image must ship exactly the active runtime's shared graph.
+// Legacy modules retained while their tests migrate cannot enter the image.
+for (const match of readFileSync(resolve(root, "bootstrap.js"), "utf8").matchAll(/from\s*["'](\.\/modules\/[^"']+)["']/g)) {
+  visitIndependent(resolve(root, match[1]));
+}
+const dockerfile = readFileSync(resolve(root, "../Dockerfile"), "utf8").replace(/\\\r?\n/g, " ");
+const moduleCopies = [...dockerfile.matchAll(/^COPY ([^\n]+) \/usr\/share\/nginx\/html\/assets\/modules\/\s*$/gm)];
+assert.equal(moduleCopies.length, 1, "the web image must explicitly copy its shared runtime modules");
+const shipped = moduleCopies[0][1].trim().split(/\s+/).map(source => {
+  assert.match(source, /^frontend\/modules\/[a-z0-9-]+\.js$/, "do not package the entire legacy module directory");
+  return resolve(root, "..", source);
+});
+assert.equal(new Set(shipped).size, shipped.length, "duplicate shared runtime asset");
+assert.deepEqual(shipped.sort(), [...independent].filter(path => dirname(path) === modulesDir).sort(),
+  "the image must include every active dependency and exclude retired UI modules");
