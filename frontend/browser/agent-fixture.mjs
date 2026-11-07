@@ -588,6 +588,11 @@ window.fetch = async (input, options = {}) => {
       if (payload.name !== undefined) testAPI.profileNames[payload.profile.port] = payload.name;
       if (payload.address_mode !== undefined) testAPI.profileModes[payload.profile.port] = payload.address_mode;
       if (payload.address !== undefined) testAPI.profileAddresses[payload.profile.port] = payload.address;
+    } else if (payload.address !== undefined) {
+      const agent = testAPI.agents.find(agent => agent.id === 'alpha');
+      agent.labels = { ...agent.labels };
+      for (const key of ['client_address', 'public_host', 'public_ip']) delete agent.labels[key];
+      if (payload.address) agent.labels.client_address = payload.address;
     }
     return json(payload);
   }

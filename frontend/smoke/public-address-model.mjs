@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 
-import { manualConnectionAddressNote, publicAddressRows } from "../modules/agent-address-model.js";
+import { manualConnectionAddressNote, publicAddressRows, nodeAddressSetting } from "../modules/agent-address-model.js";
 export async function run() {
+assert.deepEqual(nodeAddressSetting(), { mode: 'auto', address: '', source: '自动获取' });
+for (const key of ['client_address', 'public_host', 'public_ip']) {
+  assert.equal(nodeAddressSetting({ [key]: 'edge.example' }).mode, 'manual');
+  assert.equal(nodeAddressSetting({ [key]: 'edge.example' }).address, 'edge.example');
+}
+assert.equal(nodeAddressSetting({ client_address: 'first.example', public_host: 'second.example' }).address, 'first.example');
 // Dual-stack public address display regressions.
 const ipRows = publicAddressRows({
   observed_public_ip: "93.184.216.34",

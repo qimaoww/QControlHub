@@ -2,7 +2,7 @@ import { agentTimeZoneStatus, agentTimeZoneEffective, agentClockSyncPresentation
 import { node, section, field, actions, muted, pathID } from './ui.js';
 
 // Keep the draft's compare-and-swap revision separate from live acknowledgments.
-export function nodeTimeZone(ctx, agent, canManage) {
+export function nodeTimeZone(ctx, agent, canManage, form) {
   let latest = { ...agent.time_zone }, baseline = { ...latest }, busy = false, failure = '', focus;
   const state = muted(''), effective = muted(''), clockStatus = muted(''), clockOffset = muted('');
   state.dataset.timezoneStatus = ''; effective.dataset.timezoneApplied = '';
@@ -10,14 +10,16 @@ export function nodeTimeZone(ctx, agent, canManage) {
   const current = () => ctx.current() && form.isConnected;
   const values = () => ({ mode: form.elements.mode.value, time_zone: form.elements.time_zone.value });
   const same = (a, b) => (a.mode || 'auto') === (b.mode || 'auto') && (a.time_zone || '') === (b.time_zone || '');
-  const form = ctx.form([
+  const fields = [
     node('div', { className: 'a-grid' },
       field('模式', 'mode', latest.mode || 'auto', { options: [['auto', '自动检测'], ['custom', '手动设置']] }),
       field('IANA 时区', 'time_zone', latest.time_zone || '', { maxlength: 100, 'aria-label': 'IANA 时区',
         suggestions: ['UTC','Asia/Shanghai','Asia/Hong_Kong','Asia/Tokyo','Asia/Singapore','Europe/London','Europe/Berlin','America/New_York','America/Los_Angeles','Australia/Sydney'] })),
     actions(state, effective),
     actions(muted('系统时钟同步'), clockStatus, clockOffset),
-  ], '应用', async input => {
+  ];
+  async function save() {
+    const input = values();
     if (!canManage()) return;
     if (input.mode === 'custom' && !input.time_zone.trim()) throw new Error('请输入 IANA 时区，例如 Asia/Shanghai');
     const submitted = values();
@@ -36,18 +38,15 @@ export function nodeTimeZone(ctx, agent, canManage) {
         form.elements.time_zone.value = latest.time_zone || '';
       }
       baseline = { ...latest };
-      ctx.announce('时区设置已保存');
     } catch (error) {
       if (current()) failure = error.message;
       throw error;
     } finally { busy = false; if (current()) sync(); }
-  });
+  }
   form.dataset.agentTimezoneForm = agent.id;
   const submit = form.querySelector('button[type=submit]');
   submit.dataset.timezoneSubmit = '';
-  form.elements.mode.dataset.timezoneMode = '';
-  form.elements.time_zone.dataset.timezoneInput = '';
-  const view = section('Agent 进程时区', node('div', { className: 'a-card-body' }, form));
+  const view = section('Agent 进程时区', node('div', { className: 'a-card-body a-stack' }, fields));
   view.dataset.agentTimezone = agent.id;
   function sync() {
     const mode = form.elements.mode, input = form.elements.time_zone, allowed = canManage();
@@ -58,7 +57,7 @@ export function nodeTimeZone(ctx, agent, canManage) {
     input.placeholder = mode.value === 'auto' ? '等待检测' : 'Asia/Shanghai';
     input.setCustomValidity(mode.value === 'custom' && !input.value.trim() ? '请输入 IANA 时区，例如 Asia/Shanghai' : '');
     submit.disabled = !allowed || pending;
-    submit.textContent = mode.value === 'auto' && latest.time_zone ? '重新检测' : '应用';
+    mode.dataset.timezoneMode = ''; input.dataset.timezoneInput = '';
     form.dataset.timezoneRevision = String(baseline.revision || 0);
     state.textContent = busy ? mode.value === 'auto' ? '检测中' : '保存中' : failure || agentTimeZoneStatus({ ...agent, time_zone: latest });
     effective.textContent = agentTimeZoneEffective(latest); effective.hidden = !effective.textContent;
@@ -79,13 +78,12 @@ export function nodeTimeZone(ctx, agent, canManage) {
     sync();
   }
   form.addEventListener('submit', () => { focus = document.activeElement; }, true);
-  form.addEventListener('input', () => { failure = ''; sync(); });
-  form.addEventListener('change', () => { failure = ''; sync(); });
+  form.addEventListener('input', event => { if (['mode', 'time_zone'].includes(event.target.name)) failure = ''; sync(); });
+  form.addEventListener('change', event => { if (['mode', 'time_zone'].includes(event.target.name)) failure = ''; sync(); });
   submit.addEventListener('mutationend', () => {
     if (!current()) return;
     sync();
     if (focus?.isConnected && form.contains(focus) && document.activeElement === document.body) focus.focus({ preventScroll: true });
   });
-  sync();
-  return { view, update };
+  return { view, update, save, dirty: () => !same(values(), baseline) || Boolean(failure) };
 }
