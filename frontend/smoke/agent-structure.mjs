@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { coreSourceForInstall, developmentSourceVisible } from "../modules/core-install-source.js";
 import { installAgents } from "../modules/agents.js";
-import { coreSourceLabel, coreSourceName } from "../modules/tasks.js";
+import { coreSourceLabel, coreSourceName } from "../modules/task-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {

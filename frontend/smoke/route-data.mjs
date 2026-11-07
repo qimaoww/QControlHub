@@ -2,17 +2,10 @@ import assert from "node:assert/strict";
 
 import { aggregateDashboardTrafficDays, dashboardTrafficMonthDays } from "../modules/dashboard-model.js";
 
-import { installTasks } from "../modules/tasks.js";
 import { summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic } from "../modules/dashboard-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
-export async function run({ noop }) {
-const routeDataDocument = globalThis.document;
-globalThis.document = {
-  querySelector: () => null,
-  querySelectorAll: () => [],
-};
-try {
+export async function run() {
   // Native dashboard API selection, monthly history, details, day tooltips,
   // permission boundaries and CSP are exercised by dashboard browser modes.
   // Keep all shared numerical/date/ordering edge cases here.
@@ -67,80 +60,6 @@ try {
   ], '2026-11', '2026-11-06'), [{ agentID: 'one', used: 20 }, { agentID: 'two', used: 7 }], 'ranking sums all authorized port rows in the selected month and excludes future days');
   assert.deepEqual(rankDashboardTraffic([{agent_id:'one',day:'2026-11-01',received_bytes:10}], '2026-11', '2026-11-06', ['one','two','three']), [{agentID:'one',used:10},{agentID:'three',used:0},{agentID:'two',used:0}], 'authorized zero-usage nodes remain available without fabricating traffic');
 
-  const taskCalls = [];
-  const taskTimers = new Map();
-  let nextTaskTimer = 1;
-  let taskNow = 1_000;
-  const taskState = { route: "tasks", data: {} };
-  const renderTasks = installTasks(
-    new Proxy(
-      {
-        state: taskState,
-        actions: [],
-        can: permission => ["agents.read", "settings.read"].includes(permission),
-        api: async (path) => {
-          taskCalls.push(path);
-          if (path === "/agents" || path.startsWith("/tasks?")) return [];
-          if (path === "/settings") return { task_poll_interval_ms: 600 };
-          assert.fail(`unexpected task polling API path ${path}`);
-        },
-        shell: noop,
-        setTimer: (callback) => {
-          const id = nextTaskTimer++;
-          taskTimers.set(id, callback);
-          return id;
-        },
-        clearTimer: (id) => taskTimers.delete(id),
-        now: () => taskNow,
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-  await renderTasks({ settings: { task_poll_interval_ms: 600 } });
-  assert.equal(
-    taskCalls.filter((path) => path === "/settings").length,
-    0,
-    "initial task render reuses bootstrap settings",
-  );
-  assert.equal(taskTimers.size, 1, "task page schedules one polling timer");
-  const poll = [...taskTimers.values()][0];
-  taskTimers.clear();
-  await poll();
-  assert.equal(
-    taskCalls.filter((path) => path === "/settings").length,
-    0,
-    "background task polling does not refetch unchanged settings",
-  );
-  assert.equal(
-    taskCalls.filter((path) => path.startsWith("/tasks?")).length,
-    2,
-    "each task refresh issues one task request",
-  );
-  assert.equal(
-    taskCalls.filter((path) => path === "/agents").length,
-    1,
-    "background task polling reuses the cached node list",
-  );
-  assert.equal(taskTimers.size, 1, "task polling keeps a single timer");
-  const expiredPoll = [...taskTimers.values()][0];
-  taskTimers.clear();
-  taskNow += 30_001;
-  await expiredPoll();
-  assert.equal(
-    taskCalls.filter((path) => path === "/settings").length,
-    1,
-    "task polling refreshes cached settings after the bounded interval",
-  );
-  assert.equal(
-    taskCalls.filter((path) => path === "/agents").length,
-    2,
-    "task polling refreshes the cached node list after the bounded interval",
-  );
-  assert.equal(taskTimers.size, 1, "expired settings refresh keeps one timer");
-  taskTimers.clear();
-} finally {
-  if (routeDataDocument === undefined) delete globalThis.document;
-  else globalThis.document = routeDataDocument;
-}
-
+  // Task cache, poll timer and directory assertions now exercise the native
+  // application in browser/task-live.mjs on desktop and mobile.
 }

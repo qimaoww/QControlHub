@@ -8,7 +8,7 @@ import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, summarizeDash
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
-import { taskRetryState, taskTiming } from "../modules/task-model.js";
+import { coreSourceLabel, taskRetryState, taskTiming } from "../modules/task-model.js";
 import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
@@ -290,6 +290,22 @@ export async function dashboardPage(ctx) {
   return stack(overviewCard, host, trafficCard, nodes);
 }
 
+function taskEngine(task) {
+  if (task.action === 'upgrade-agent') return 'QAgent';
+  if (task.action === 'ip-quality') return 'IPQuality';
+  if (['enable-bbr', 'disable-bbr', 'configure-tcp'].includes(task.action)) return 'BBR / TCP';
+  return task.engine;
+}
+
+function taskContext(ctx, task) {
+  const agent = ctx.can('agents.read') && ctx.state.data.taskAgents?.find(agent => agent.id === task.agent_id);
+  const source = coreSourceLabel(task.engine, task.core_version, task.core_source);
+  return stack(muted(`节点 ${agent?.name || task.agent_id} · ${date(task.created_at)}`),
+    muted(task.attempt ? `第 ${task.attempt} 次执行` : '尚未开始'),
+    !task.config_id && task.core_version && muted(`内核版本 ${task.core_version}${source ? ` · ${source}` : ''}`),
+    task.install_if_missing && muted('缺少时安装稳定版；已有内核保持版本'));
+}
+
 export async function taskDetail(ctx, taskID) {
   if (!ctx.can("tasks.read")) return;
   let task = await ctx.api(`/tasks/${pathID(taskID)}`);
@@ -309,8 +325,10 @@ export async function taskDetail(ctx, taskID) {
   }
   paintDiagnosis();
   const timing = muted(taskTiming(task));
-  const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
-    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), timing, failure, diagnosis, output);
+  const context = taskContext(ctx, task);
+  const heading = actions(state, badge(taskEngine(task)), badge(actionName(task.action)));
+  const content = stack(heading,
+    context, timing, failure, diagnosis, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
@@ -326,6 +344,7 @@ export async function taskDetail(ctx, taskID) {
       if (!active()) return;
       task = latest;
       timing.textContent = taskTiming(task);
+      patch(context, taskContext(ctx, task));
       paintDiagnosis();
       const next = status(task.status);
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
@@ -347,6 +366,8 @@ export async function taskDetail(ctx, taskID) {
       if (active() && error.status === 403) {
         output.textContent = ''; output.hidden = true; state.textContent = '无权读取';
         timing.textContent = '';
+        context.replaceChildren();
+        heading.replaceChildren(state);
         failure.textContent = '无权读取此任务。';
         task = { ...task, status: 'denied' }; stop();
         paintDiagnosis();
@@ -357,11 +378,11 @@ export async function taskDetail(ctx, taskID) {
   async function poll() {
     try { if (!document.hidden && active()) await read(); }
     catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
-    finally { if (active() && ["pending","running"].includes(task.status)) timer=setTimeout(poll,2000); }
+    finally { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); }
   }
   box.addEventListener("close", stop, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
-  if(["pending","running"].includes(task.status))timer=setTimeout(poll,2000);
+  timer=setTimeout(poll,2000);
 }
 
 export async function tasksPage(ctx) {
@@ -373,10 +394,25 @@ export async function tasksPage(ctx) {
     return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
   };
   let readSequence = 0, filtering = false;
+  let agents = ctx.can('agents.read') ? ctx.state.data.taskAgents || [] : [], agentsLoadedAt = -Infinity, lastTasks = [];
+  const agentField = field('节点', 'agent_id', filters.agent_id || '', { options: [['', '全部节点'], ...(filters.agent_id ? [[filters.agent_id, filters.agent_id]] : [])] });
+  const agentPicker = agentField.querySelector('select');
+  let agentSignature;
+  function syncAgents() {
+    const selected = agentPicker.value;
+    const choices = ctx.can('agents.read') ? agents : [...new Set(lastTasks.map(task => task.agent_id))].map(id => ({ id, name: id }));
+    const options = [['', '全部节点'], ...choices.map(agent => [agent.id, agent.name])];
+    if (selected && !choices.some(agent => agent.id === selected)) options.push([selected, selected]);
+    const signature = JSON.stringify(options);
+    if (signature === agentSignature || agentPicker.matches(':open') && ctx.can('agents.read') && agents.length) return;
+    agentPicker.replaceChildren(agentPicker.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
+    agentPicker.value = selected;
+    agentSignature = signature;
+  }
   const filter = autoFilter(ctx, [
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
-      field("节点 ID", "agent_id", filters.agent_id || ""),
+      agentField,
       field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp"].map(action => [action, actionName(action)])] }),
       field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
   ], async (values, _, request) => {
@@ -418,10 +454,11 @@ export async function tasksPage(ctx) {
     };
   }
   function draw(tasks) {
-    taskTable.updateRows(list(tasks).map(task => {
+    lastTasks = list(tasks); syncAgents();
+    taskTable.updateRows(lastTasks.map(task => {
       const retryState = taskRetryState(task);
       return [
-        actionName(task.action), task.agent_id, task.engine, stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
+        actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id, taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
         node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
           ctx.can("tasks.execute") && retryState.canRetry && button(task.config_id ? "重试配置" : "重试任务", async event => {
             const control = event.currentTarget;
@@ -450,6 +487,20 @@ export async function tasksPage(ctx) {
     if (filtering) return;
     const sequence = ++readSequence;
     try {
+      if (!ctx.can('agents.read')) {
+        agents = []; delete ctx.state.data.taskAgents;
+      } else if (Date.now() - agentsLoadedAt >= 30000) {
+        try {
+          const latest = await readOrderedNodes(ctx.api);
+          if (!ctx.current() || sequence !== readSequence) return;
+          agents = latest; ctx.state.data.taskAgents = agents;
+        } catch (error) {
+          if (error.name === 'AbortError') throw error;
+          if (!ctx.current() || sequence !== readSequence) return;
+          if (error.status === 403) { agents = []; delete ctx.state.data.taskAgents; }
+        }
+        agentsLoadedAt = Date.now();
+      }
       if (ctx.can('settings.read') && Date.now() - settingsLoadedAt >= 30000) {
         try { await ctx.api('/settings'); }
         catch (error) { if (error.name === 'AbortError') throw error; }
