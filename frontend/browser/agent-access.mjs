@@ -1,5 +1,5 @@
 import { assert, waitFor, delay } from './assertions.mjs';
-import { startNativeNodes } from './agent-detail-actions.mjs';
+import { startNativeNodes, openCoreSettings } from './agent-detail-actions.mjs';
 
 const button = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
 const modal = () => [...document.querySelectorAll('dialog[open]')].at(-1);
@@ -33,6 +33,7 @@ export async function testSharedNodeRuntime({ mode, testAPI, populatedAgents }) 
   fits(shared);
   const box = await settings('alpha'); fits(box);
   assert.equal(box.querySelectorAll('[data-core-installed]').length, 1, '共享详情显示未授权内核');
+  openCoreSettings(box);
   const core = box.querySelector('[data-refresh-key=mihomo]');
   assert.ok(core.querySelector('a[href*="live-config"]'), '共享内核缺少独立配置入口');
   assert.ok(!button('重启服务', core).disabled && !button('停止服务', core).disabled, '共享接收者不能操作本人实例');
@@ -41,11 +42,11 @@ export async function testSharedNodeRuntime({ mode, testAPI, populatedAgents }) 
   for (const label of ['国家／地区', '卸载内核', '升级 Agent', '删除节点', '查看安装命令', '保存名称']) assert.ok(!button(label, box), `共享详情暴露宿主管理：${label}`);
   assert.ok(box.textContent.includes('所有者') && box.textContent.includes('端口'), '共享详情缺少授权范围');
   await close(box);
-  const own = await settings('bravo'); fits(own);
+  const own = await settings('bravo'); fits(own); openCoreSettings(own);
   assert.ok(own.querySelector('input[name=name]') && button('卸载内核', own), '自有节点丢失管理入口');
   assert.ok(!own.textContent.includes('本人共享实例'), '自有节点显示共享身份');
   await close(own);
-  let reopened = await settings('alpha');
+  let reopened = await settings('alpha'); openCoreSettings(reopened);
   const beforeTasks = testAPI.submittedTasks.length;
   button('重启服务', reopened.querySelector('[data-refresh-key=mihomo]')).click();
   const confirmation = await waitFor(() => modal() !== reopened && modal()?.textContent.includes('重启服务') && modal(), '共享实例重启没有确认');
@@ -62,7 +63,7 @@ export async function testSharedNodeRuntime({ mode, testAPI, populatedAgents }) 
 export async function testReadonlyRuntime({ testAPI }) {
   await startNativeNodes();
   assert.ok(!button('添加节点') && !button('批量操作'), '只读用户可添加或批量操作节点');
-  const box = await settings('alpha');
+  const box = await settings('alpha'); openCoreSettings(box);
   assert.equal(box.querySelector('input[name=name]'), null, '只读用户可修改节点名称');
   assert.ok(button('卸载内核', box)?.disabled, '只读用户可卸载内核');
   assert.ok(!button('国家／地区', box), '只读用户可修改国家／地区');

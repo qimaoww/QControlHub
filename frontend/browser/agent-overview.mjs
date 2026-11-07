@@ -33,6 +33,7 @@ export async function testAgentOverview({ testAPI }) {
   button('列表').click();
   await waitFor(() => document.querySelector('.a-probe-list'), '列表视图未切换');
   assert.ok(document.querySelector('.a-probe-list').textContent.includes('累计接收'), '列表缺少累计流量');
+  await testNetworkLayout(testAPI);
   await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '视图保存未结束');
   testAPI.nodeView.revision++;
   button('卡片').click();
@@ -77,30 +78,27 @@ async function testNativeAddressRefresh(testAPI) {
     await waitFor(() => copied === '198.35.26.96', 'native copy used the hostname instead of IPv4');
     [...card().querySelectorAll('button')].find(button => button.textContent === '查看设置').click();
     settings = await waitFor(() => document.querySelector('dialog[open] input[name=name]')?.closest('dialog'), 'node address details missing');
-    assert.equal(address(settings, 'v4'), '198.35.26.96', 'node details omitted the public IPv4');
-    assert.ok(settings.textContent.includes(`手动连接地址：${hostname}`), 'node details omitted the manual connection hostname');
-    const detailRow = row(settings, 'v4');
-    await update({ ...original.labels, client_address: '93.184.216.34', public_ip: '2001:4860:4860::8888' }, { public_ipv4: '198.35.26.96', public_ipv6: '' }, () => address(settings, 'v4') === '93.184.216.34' && address(card(), 'v6') === '2001:4860:4860::8888');
-    assert.equal(row(settings, 'v4'), detailRow, 'detail address refresh replaced the existing family row');
-    assert.equal(row(settings, 'v4').title, '手动设置', 'manual source not identified');
-    assert.equal(row(settings, 'v6').title, '节点公网 IP');
-    assert.ok(!card().textContent.includes('手动连接地址：') && !settings.textContent.includes('手动连接地址：'), 'manual literal duplicated as a hostname note');
+    assert.ok(!settings.querySelector('[data-ip-family],.a-probe-network,.a-probe-meters'), '节点设置重复列表信息');
+    settings.querySelector('[aria-label=关闭]').click();
+    await waitFor(() => !settings.isConnected, 'node settings did not close'); settings = null;
+    await update({ ...original.labels, client_address: '93.184.216.34', public_ip: '2001:4860:4860::8888' }, { public_ipv4: '198.35.26.96', public_ipv6: '' }, () => address(card(), 'v4') === '93.184.216.34' && address(card(), 'v6') === '2001:4860:4860::8888');
+    assert.equal(row(card(), 'v4').title, '手动设置', 'manual source not identified');
+    assert.equal(row(card(), 'v6').title, '节点公网 IP');
+    assert.ok(!card().textContent.includes('手动连接地址：'), 'manual literal duplicated as a hostname note');
     row(card(), 'v4').querySelector('button').click();
     await waitFor(() => copied === '93.184.216.34', 'in-place copy retained the old IP');
     assert.ok(row(card(), 'v4').querySelector('button').getAttribute('aria-label').endsWith('93.184.216.34'), 'copy accessible label retained stale IP');
-    await update(original.labels, { public_ipv4: '::ffff:0101:0101', public_ipv6: '' }, () => address(settings, 'v4') === '1.1.1.1');
-    assert.equal(address(card(), 'v4'), '1.1.1.1', 'mapped IPv4 did not normalize');
-    await update(original.labels, { public_ipv4: '172.69.135.152', observed_public_ip: '93.184.216.34', public_ipv6: '' }, () => address(settings, 'v4') === '93.184.216.34');
-    assert.equal(row(settings, 'v4').title, '已验证连接来源', 'relay probe did not use the verified connection fallback');
-    await update(original.labels, { public_ipv4: '104.22.17.83', observed_public_ip: '', public_ipv6: '' }, () => !row(settings, 'v4') && !row(card(), 'v4'));
+    const stableAddress = row(card(), 'v4');
+    await update(original.labels, { public_ipv4: '::ffff:0101:0101', public_ipv6: '' }, () => address(card(), 'v4') === '1.1.1.1');
+    assert.equal(row(card(), 'v4'), stableAddress, 'address refresh replaced the existing family row');
+    await update(original.labels, { public_ipv4: '172.69.135.152', observed_public_ip: '93.184.216.34', public_ipv6: '' }, () => address(card(), 'v4') === '93.184.216.34');
+    assert.equal(row(card(), 'v4').title, '已验证连接来源', 'relay probe did not use the verified connection fallback');
+    await update(original.labels, { public_ipv4: '104.22.17.83', observed_public_ip: '', public_ipv6: '' }, () => !row(card(), 'v4') && !row(card(), 'v6'));
     assert.ok(card().textContent.includes('暂无公网 IP'), 'relay-only addresses masquerade as public IPs');
-    assert.ok(!settings.querySelector('.a-ip-copy'), 'unavailable address retains a stale copy target');
-    await update(original.labels, { public_ipv4: '198.35.26.96', public_ipv6: '2001:4860:4860::8888' }, () => address(settings, 'v4') === '198.35.26.96' && !!row(settings, 'v6'));
-    assert.equal(row(settings, 'v6').title, 'Agent 本地直连探测', 'IPv6 source missing');
-    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1 && settings.scrollWidth <= settings.clientWidth + 1, 'address content overflows');
-    settings.querySelector('[aria-label=关闭]').click();
-    await waitFor(() => !settings.isConnected, 'node address details did not close');
-    settings = null;
+    assert.ok(!card().querySelector('.a-ip-copy'), 'unavailable address retains a stale copy target');
+    await update(original.labels, { public_ipv4: '198.35.26.96', public_ipv6: '2001:4860:4860::8888' }, () => address(card(), 'v4') === '198.35.26.96' && !!row(card(), 'v6'));
+    assert.equal(row(card(), 'v6').title, 'Agent 本地直连探测', 'IPv6 source missing');
+    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1 && card().scrollWidth <= card().clientWidth + 1, 'address content overflows');
   } finally {
     settings?.close();
     testAPI.agents[0] = original;
@@ -109,4 +107,47 @@ async function testNativeAddressRefresh(testAPI) {
   const refresh = [...document.querySelectorAll('.a-top button')].find(button => button.textContent === '刷新');
   refresh.click();
   await waitFor(() => !refresh.disabled && address(card(), 'v4') === original.metrics.public_ipv4, 'address fixture did not restore');
+}
+
+async function testNetworkLayout(testAPI) {
+  const original = structuredClone(testAPI.agents[0]);
+  const rates = () => document.querySelector('.a-probe-rates');
+  const stable = rates(), row = stable.closest('tr');
+  const geometry = () => [row.getBoundingClientRect().height, ...[...row.cells].map(cell => cell.getBoundingClientRect().width)];
+  const initial = geometry();
+  const refresh = async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+    await delay(150);
+  };
+  for (const value of [0, 999, 1024, 1024 ** 3, 2 ** 64 - 1]) {
+    Object.assign(testAPI.agents[0].metrics, { network_rx_bps: value, network_tx_bps: value, network_rx_bytes: value, network_tx_bytes: value });
+    await refresh();
+    await waitFor(() => rates().textContent.includes(value === 0 ? '0\u00a0B' : value === 999 ? '999\u00a0B' : value === 1024 ? '1\u00a0KB' : value === 1024 ** 3 ? '1\u00a0GB' : 'TB'), '收发单位或数值未更新');
+    assert.equal(rates(), stable, '数值更新替换网络统计');
+    assert.equal(JSON.stringify(geometry()), JSON.stringify(initial), '数值增长导致表格布局跳动');
+    assert.equal(rates().children.length, 4, '缺少收发统计');
+    const edges = [...rates().children].map(pair => {
+      assert.equal(pair.children.length, 2, '统计标签与数值未分开');
+      const [label, value] = [...pair.children].map(item => item.getBoundingClientRect());
+      assert.ok(label.right <= value.left, '统计标签与数值重叠');
+      assert.ok(value.right <= rates().getBoundingClientRect().right + 1, '统计数值溢出');
+      return value.right;
+    });
+    assert.ok(edges.every(edge => Math.abs(edge - edges[0]) < 1), '速率与累计数值未对齐');
+  }
+  testAPI.agents[0].metrics.network_rx_bytes = undefined;
+  testAPI.agents[0].metrics.network_tx_bytes = 0;
+  await refresh();
+  await waitFor(() => rates().children[2].lastChild.textContent === '—', '缺失累计值被当作零');
+  assert.equal(rates().children[3].lastChild.textContent, '0\u00a0B', '真实零值被当作缺失');
+  testAPI.agents[0].status = 'offline';
+  await refresh();
+  await waitFor(() => rates().children[0].lastChild.textContent === '—', '离线节点仍显示实时速率');
+  assert.equal(rates().children[3].lastChild.textContent, '0\u00a0B', '离线清空已上报累计值');
+  testAPI.agents[0].metrics.network_available = false;
+  await refresh();
+  await waitFor(() => [...rates().children].every(pair => pair.lastChild.textContent === '—'), '不可用指标仍显示累计值');
+  testAPI.agents[0] = original;
+  await refresh();
+  await waitFor(() => rates().children[2].lastChild.textContent !== '—', '收发测试未恢复数据');
 }

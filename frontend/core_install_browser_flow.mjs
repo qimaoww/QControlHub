@@ -28,6 +28,26 @@ async function run() {
   assert.ok(session.permissions.includes("tasks.read"));
   location.hash = `#settings-node-${agentID}`;
   await waitFor(core, "native node settings did not render");
+  const settings = core().closest('dialog');
+  const nodePanel = settings.querySelector('[data-settings-panel=node]'), corePanel = settings.querySelector('[data-settings-panel=core]');
+  assert.ok(!nodePanel.hidden && corePanel.hidden, 'node deep link did not open node settings');
+  assert.ok(!nodePanel.querySelector('[data-core-installed],.a-probe-network,.a-probe-meters,[data-ip-family]'), 'node settings repeats the overview or exposes core controls');
+  assert.equal(Boolean(nodePanel.querySelector('[name=name]')), !shared, 'node editing escaped its owner scope');
+  button('内核设置', settings).click();
+  assert.ok(nodePanel.hidden && !corePanel.hidden, 'core settings did not open independently');
+  assert.ok(core().checkVisibility(), 'core operations remain hidden');
+  assert.equal(Boolean(core().querySelector('[data-engine-capability]')), !shared, 'recipient received host capability controls');
+  assert.equal(corePanel.querySelectorAll('[type=submit]').length, shared ? 0 : 1, 'capability save entry escaped its scope or was duplicated');
+  if (!shared) {
+    const input = corePanel.querySelector('[data-engine-capability=xray]'), form = input.form;
+    const initial = input.checked;
+    for (const enabled of [!initial, initial]) {
+      input.click(); form.requestSubmit();
+      await waitFor(() => !document.querySelector('#app[aria-busy=true]') && corePanel.querySelector('[data-refresh-key=xray]').dataset.capabilityEnabled === String(Number(enabled)), 'unified capability save did not refresh');
+      const agents = await (await fetch('/api/v1/agents')).json();
+      assert.equal(agents.find(agent => agent.id === agentID).capabilities.includes('xray'), enabled, 'capability save did not reach the real API');
+    }
+  }
   if (shared) {
     assert.equal(button("卸载内核", core()), undefined, "recipient received host uninstall control");
     for (const name of ["启动", "停止", "重启"]) assert.ok(!button(name, core()) || button(name, core()).disabled, "unprepared recipient received host lifecycle management");
@@ -54,6 +74,7 @@ async function run() {
   const success = await waitFor(() => dialog("任务详情")?.textContent.includes("成功") && dialog("任务详情"), "installation retry did not succeed");
   success.querySelector('[aria-label=关闭]').click();
   await waitFor(() => core()?.textContent.includes("1.19.30"), "runtime version did not refresh");
+  assert.ok(!corePanel.hidden && core().checkVisibility(), 'runtime refresh changed the settings section');
   installBox.querySelector('[aria-label=关闭]').click();
   document.querySelector('dialog[open] [data-refresh-key=mihomo]').closest('dialog').querySelector('[aria-label=关闭]').click();
   location.hash = `#live-config?agent=${agentID}&engine=xray`;
