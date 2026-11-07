@@ -123,6 +123,7 @@ COPY frontend/modules/account-request.js \
     frontend/modules/routes.js \
     frontend/modules/session-watch.js \
     frontend/modules/shared-instance-model.js \
+    frontend/modules/task-model.js \
     frontend/modules/substore-model.js \
     frontend/modules/system-bbr-model.js \
     frontend/modules/system-bbr-presets.js \

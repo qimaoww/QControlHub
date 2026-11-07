@@ -42,6 +42,13 @@ assert.ok(diagnosticError(realTLSPath).includes("A".repeat(43)), "a real TLS fil
 assert.equal(redactDiagnostic('invalid "privateKey": inline-secret'), 'invalid "privateKey": [redacted]');
 assert.ok(!diagnosticError("中文诊断 private-key: inline-secret").includes("inline-secret"));
 assert.equal(redactDiagnostic("-----BEGIN PRIVATE KEY-----\ninline-secret\n-----END PRIVATE KEY-----"), "[redacted private PEM]");
+for (const field of ['password', 'token', 'credential', 'api_key', 'pre-shared-key']) {
+  const text = `listeners[1] ${field}="fixture-secret"; connection refused`;
+  const redacted = redactDiagnostic(text);
+  assert.ok(!redacted.includes('fixture-secret'), `${field} leaked in historical diagnostics`);
+  assert.ok(redacted.includes('listeners[1]') && redacted.includes('connection refused'), 'redaction lost diagnostic context');
+  assert.equal(redactDiagnostic(redacted), redacted, 'repeated diagnostic rendering changes redacted values');
+}
 assert.match(diagnosticError("dial tcp: connection refused"), /目标服务拒绝连接/);
 assert.match(diagnosticError("permission denied"), /节点执行权限不足/);
 assert.match(diagnosticError("context deadline exceeded"), /节点操作超时/);

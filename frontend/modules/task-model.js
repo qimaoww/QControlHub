@@ -11,6 +11,24 @@ export function coreSourceLabel(engine, version, source) {
   return coreSourceName(source);
 }
 
+export function taskRetryState(task) {
+  const missingConfigVersion = Boolean(task.config_id) && !(Number.isInteger(task.config_version) && task.config_version > 0);
+  const finished = ["failed", "canceled"].includes(task.status);
+  let diagnostic = diagnoseTask(task);
+  if (missingConfigVersion && finished) {
+    const advice = "历史任务缺少配置历史关联，请核对配置后，选择编辑后重试或重新部署。";
+    diagnostic = diagnostic
+      ? { ...diagnostic, advice: `${diagnostic.advice} ${advice}` }
+      : { title: "配置历史关联缺失", advice };
+  }
+  return {
+    missingConfigVersion,
+    canRetry: finished && !missingConfigVersion,
+    canEditRetry: finished && Boolean(task.config_id) && ["validate", "deploy"].includes(task.action),
+    diagnostic,
+  };
+}
+
 export function taskRenderSignature(items, agents) {
     const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
     return JSON.stringify(

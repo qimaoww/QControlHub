@@ -4,16 +4,25 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 export async function testEditedRetryDialog(preview = false) {
   const nativeFetch = globalThis.fetch;
   const task = { id: "failed", agent_id: "node", engine: "sing-box", action: "deploy", config_id: "cfg", config_version: 2, status: "failed", error: "模拟部署失败\n" + "诊断内容，保留草稿后可重新校验。".repeat(80), created_at: "2026-11-04T10:00:00Z" };
+  const originalTask = structuredClone(task);
   const config = { id: "cfg", name: "重试测试配置", agent_id: "node", engine: "sing-box", version: 5, content: '{"inbounds":[]}', updated_at: "2026-11-04T11:00:00Z" };
   const gate = {};
   gate.promise = new Promise(resolve => { gate.resolve = resolve; });
   let attempts = 0, reads = 0, session, lastPayload;
+  const ordinaryRetries = [];
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith("/api/v1")) return nativeFetch(url, options);
     const path = String(url).slice(7), method = options.method || "GET";
     let value;
     if (path === "/auth/session") value = session;
     else if (path.startsWith("/tasks?")) { reads++; value = [task]; }
+    else if (path === "/tasks/failed") value = task;
+    else if (path === "/tasks/failed/retry" && method === 'POST') {
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), 'retry-fixture', 'ordinary retry missing CSRF');
+      ordinaryRetries.push(JSON.parse(options.body));
+      value = { ...task, id: 'ordinary-retry' };
+    }
+    else if (path === '/tasks/ordinary-retry') value = { ...task, id: 'ordinary-retry', status: 'succeeded', error: '' };
     else if (path === "/tasks/failed/retry-editor") value = { task, config };
     else if (path === "/tasks/failed/edit-retry" && method === "POST") {
       assert.equal(new Headers(options.headers).get("X-QControlHub-CSRF"), "retry-fixture", "retry missing CSRF");
@@ -46,6 +55,41 @@ export async function testEditedRetryDialog(preview = false) {
   await mount();
   if(preview){await open();return;}
   try{
+    for (const status of ['failed', 'canceled']) for (const config_version of [undefined, null, 0]) {
+      Object.assign(task, originalTask, { status, config_version });
+      await mount();
+      assert.equal(document.querySelector('[data-retry]'), null, 'historical task offers an unbound ordinary retry');
+      assert.ok(document.querySelector('[aria-label="任务"]').textContent.includes('缺少配置历史关联'), 'historical task lacks association status');
+      assert.ok(button('编辑后重试'), 'historical task lost its editable recovery path');
+      button('详情').click();
+      const detail = await waitFor(() => box('任务详情'), 'historical task detail missing');
+      assert.ok(detail.textContent.includes('缺少配置历史关联') && detail.textContent.includes('编辑后重试或重新部署'), 'historical detail lost recovery guidance');
+      assert.ok(!/vundefined|vnull|版本 0/.test(detail.textContent), 'historical task exposes fabricated revisions');
+      await settled(); detail.querySelector('[aria-label="关闭"]').click();
+    }
+    Object.assign(task, originalTask, { config_version: 3 }); await mount();
+    assert.ok(button('重试配置') && !document.querySelector('[aria-label="任务"]').textContent.includes('缺少配置历史关联'), 'versioned configuration retry is unavailable');
+    assert.equal(ordinaryRetries.length, 0, 'historical task submitted an ordinary retry');
+    button('重试配置').click();
+    let retryConfirmation = await waitFor(() => box('重试任务'), 'configuration retry confirmation missing');
+    button('重试任务', retryConfirmation).click();
+    await waitFor(() => box('任务详情'), 'configuration retry receipt missing'); await settled();
+    assert.equal(ordinaryRetries.length, 1); assert.equal(ordinaryRetries[0].expected_config_version, 3, 'ordinary retry lost its exact configuration association');
+    box('任务详情').querySelector('[aria-label="关闭"]').click();
+    Object.assign(task, originalTask, { action: 'status', config_id: '', config_version: undefined }); await mount();
+    assert.ok(button('重试任务') && !button('编辑后重试'), 'operational retry incorrectly requires configuration history');
+    button('重试任务').click(); retryConfirmation = await waitFor(() => box('重试任务'), 'operational retry confirmation missing');
+    button('重试任务', retryConfirmation).click();
+    await waitFor(() => box('任务详情'), 'operational retry receipt missing'); await settled();
+    assert.equal(ordinaryRetries.length, 2); assert.equal(JSON.stringify(ordinaryRetries[1]), '{}', 'operational retry fabricated configuration history');
+    box('任务详情').querySelector('[aria-label="关闭"]').click();
+    Object.assign(task, originalTask, { config_version: undefined, error: 'Caddy rollback failed token=fixture-secret' }); await mount();
+    button('详情').click();
+    const rollback = await waitFor(() => box('任务详情'), 'rollback task detail missing');
+    assert.ok(rollback.textContent.includes('回滚失败：需检查节点最终服务与路由状态') && rollback.textContent.includes('缺少配置历史关联'), 'rollback guidance or missing-history recovery was discarded');
+    assert.ok(!rollback.textContent.includes('fixture-secret'), 'task diagnostic exposes credentials');
+    await settled(); rollback.querySelector('[aria-label="关闭"]').click();
+    Object.assign(task, originalTask); await mount();
     let dialog=await open(),form=dialog.querySelector("form"),source=form.elements.content;
     assert.ok(dialog.textContent.includes("当前配置")&&dialog.textContent.includes(config.name)&&dialog.textContent.includes("sing-box"),"retry lacks configuration and engine identity");
     assert.ok(!/当前 v5|原任务 v2|版本 5/.test(dialog.textContent),"retry exposes internal revisions");
@@ -76,7 +120,13 @@ export async function testEditedRetryDialog(preview = false) {
     gate.resolve();await waitFor(()=>!dialog.open&&box("任务详情"),"successful retry has no task receipt");await settled();
     assert.ok(box("任务详情").textContent.includes("成功")&&box("任务详情").textContent.includes("部署完成"),"retry result does not follow actual task");box("任务详情").close();
     dialog=await open();location.hash="#themes";await waitFor(()=>!dialog.open,"navigation leaked retry editor");
-    for(const permissions of [["tasks.read","configs.write"],["tasks.read","tasks.execute"]]){await mount(permissions);assert.equal(button("编辑后重试"),undefined,"retry bypasses execute or configuration-write permission");}
+    for(const permissions of [["tasks.read"],["tasks.read","configs.write"],["tasks.read","tasks.execute"]]){
+      await mount(permissions);assert.equal(button("编辑后重试"),undefined,"retry bypasses execute or configuration-write permission");
+      assert.equal(Boolean(button('重试配置')), permissions.includes('tasks.execute'), 'ordinary retry bypasses task execution permission');
+      task.config_version = undefined; await mount(permissions);
+      assert.equal(button('重试配置'), undefined, 'permission combination allows an unbound historical retry');
+      Object.assign(task, originalTask);
+    }
     assert.ok(document.documentElement.scrollWidth<=innerWidth+1,"task layout exceeds viewport");
   }finally{gate.resolve();window.dispatchEvent(new Event("pagehide"));document.querySelectorAll("dialog").forEach(dialog=>dialog.close());globalThis.fetch=nativeFetch;styles.remove();}
 }

@@ -63,6 +63,7 @@ const sharedLogic = new Set([
   "errors.js", "ip-quality-model.js", "ip-quality-controller.js", "live-config-state.js", "node-order.js",
   "permissions.js", "poller.js", "preset-route.js", "routes.js", "route-loader.js", "route-warmup.js",
   "session-watch.js", "substore-model.js", "system-bbr-model.js", "system-bbr-presets.js",
+  "task-model.js",
   "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "shared-instance-model.js", "traffic-order.js", "user-model.js",
 ]);
 for (const name of ["agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "config-mutations.js", "shared-instance-model.js", "traffic-order.js"]) {

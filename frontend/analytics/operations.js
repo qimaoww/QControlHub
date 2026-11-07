@@ -8,6 +8,7 @@ import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, summarizeDash
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
+import { taskRetryState } from "../modules/task-model.js";
 import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
@@ -296,8 +297,19 @@ export async function taskDetail(ctx, taskID) {
   const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
   const output = code(redactDiagnostic(task.output).trim());
   output.hidden = !output.textContent;
+  const diagnosis = stack();
+  let diagnosisSignature;
+  function paintDiagnosis() {
+    const value = taskRetryState(task).diagnostic;
+    const signature = JSON.stringify(value);
+    if (signature === diagnosisSignature) return;
+    diagnosisSignature = signature;
+    patch(diagnosis, stack(value && ["title", "advice", "rollback"].map(key => value[key] && muted(redactDiagnostic(value[key])))));
+    diagnosis.hidden = !value;
+  }
+  paintDiagnosis();
   const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
-    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, output);
+    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, diagnosis, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
@@ -312,6 +324,7 @@ export async function taskDetail(ctx, taskID) {
       const latest = await ctx.api(`/tasks/${pathID(taskID)}`);
       if (!active()) return;
       task = latest;
+      paintDiagnosis();
       const next = status(task.status);
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
       const error = diagnosticError(task.error || "");
@@ -331,7 +344,9 @@ export async function taskDetail(ctx, taskID) {
     } catch (error) {
       if (active() && error.status === 403) {
         output.textContent = ''; output.hidden = true; state.textContent = '无权读取';
+        failure.textContent = '无权读取此任务。';
         task = { ...task, status: 'denied' }; stop();
+        paintDiagnosis();
       }
       throw error;
     } finally { reading = false; }
@@ -394,30 +409,33 @@ export async function tasksPage(ctx) {
     };
   }
   function draw(tasks) {
-    taskTable.updateRows(list(tasks).map(task => [
-      actionName(task.action), task.agent_id, task.engine, status(task.status), date(task.created_at),
-      node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
-        ctx.can("tasks.execute") && ["failed", "canceled"].includes(task.status) && button(task.config_id ? "重试配置" : "重试任务", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm(task.config_id ? `确定重试原任务关联配置？${task.install_if_missing ? "仅缺少内核时安装稳定版，已安装的内核不会切换版本。" : ""}配置已有更新时会拒绝本次重试，请选择编辑后重试或重新部署。` : "重新执行此任务？请先核对原任务结果。", "重试任务") || !ctx.current()) return;
-          await ctx.mutate(control, async () => {
-            const retry = await ctx.api(`/tasks/${pathID(task.id)}/retry`, { method: "POST", body: task.config_id ? { expected_config_version: task.config_version } : {} });
-            ctx.announce("已提交重试任务");
-            await taskDetail(ctx, retry.id);
-          });
-        }, { "data-retry": task.id }),
-        ctx.can("tasks.execute") && task.config_id && ["validate", "deploy"].includes(task.action) && ["failed", "canceled"].includes(task.status) &&
-          (ctx.can("agent-config.write") || ctx.can("configs.write")) && button("编辑后重试", event => void ctx.mutate(event.currentTarget, () => editRetry(task))),
-        ctx.can("tasks.execute") && ["pending", "running"].includes(task.status) && button("取消", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm("取消此任务？已在节点执行的操作可能仍需核实结果。", "取消任务") || !ctx.current()) return;
-          await ctx.mutate(control, async () => {
-            await ctx.api(`/tasks/${pathID(task.id)}`, { method: "DELETE" });
-            ctx.announce("已提交取消请求");
-            draw(await ctx.api(query("/tasks", ctx.state.data.taskFilters || filters)));
-          });
-        }, { tone: "danger" })),
-    ]));
+    taskTable.updateRows(list(tasks).map(task => {
+      const retryState = taskRetryState(task);
+      return [
+        actionName(task.action), task.agent_id, task.engine, stack(status(task.status), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
+        node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
+          ctx.can("tasks.execute") && retryState.canRetry && button(task.config_id ? "重试配置" : "重试任务", async event => {
+            const control = event.currentTarget;
+            if (!await ctx.confirm(task.config_id ? `确定重试原任务关联配置？${task.install_if_missing ? "仅缺少内核时安装稳定版，已安装的内核不会切换版本。" : ""}配置已有更新时会拒绝本次重试，请选择编辑后重试或重新部署。` : "重新执行此任务？请先核对原任务结果。", "重试任务") || !ctx.current()) return;
+            await ctx.mutate(control, async () => {
+              const retry = await ctx.api(`/tasks/${pathID(task.id)}/retry`, { method: "POST", body: task.config_id ? { expected_config_version: task.config_version } : {} });
+              ctx.announce("已提交重试任务");
+              await taskDetail(ctx, retry.id);
+            });
+          }, { "data-retry": task.id }),
+          ctx.can("tasks.execute") && retryState.canEditRetry &&
+            (ctx.can("agent-config.write") || ctx.can("configs.write")) && button("编辑后重试", event => void ctx.mutate(event.currentTarget, () => editRetry(task))),
+          ctx.can("tasks.execute") && ["pending", "running"].includes(task.status) && button("取消", async event => {
+            const control = event.currentTarget;
+            if (!await ctx.confirm("取消此任务？已在节点执行的操作可能仍需核实结果。", "取消任务") || !ctx.current()) return;
+            await ctx.mutate(control, async () => {
+              await ctx.api(`/tasks/${pathID(task.id)}`, { method: "DELETE" });
+              ctx.announce("已提交取消请求");
+              draw(await ctx.api(query("/tasks", ctx.state.data.taskFilters || filters)));
+            });
+          }, { tone: "danger" })),
+      ];
+    }));
   }
   async function refresh() {
     if (filtering) return;
