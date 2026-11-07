@@ -22,9 +22,10 @@ export async function checkNodeAddress({ page, fixture, evaluate, wait, screensh
   }
   await call('Emulation.setDeviceMetricsOverride', { width: mode === 'mobile' ? 390 : 1920, height: mode === 'mobile' ? 844 : 1080, deviceScaleFactor: 1, mobile: mode === 'mobile' }, page);
   const capture = async label => {
-    await evaluate(page, `(() => {document.querySelectorAll('.a-toast [aria-label=关闭通知]').forEach(button=>button.click());const heading=document.querySelector('[data-node-address="${id}"]').previousElementSibling;const box=heading.closest('dialog');box.scrollTop+=heading.getBoundingClientRect().top-box.getBoundingClientRect().top-100;})()`);
+    await evaluate(page, `(() => {document.querySelectorAll('.a-toast [aria-label=关闭通知]').forEach(button=>button.click());const heading=document.querySelector('[data-node-address="${id}"] h3');const box=heading.closest('dialog');box.scrollTop+=heading.getBoundingClientRect().top-box.getBoundingClientRect().top-100;})()`);
     await wait(page, "!document.querySelector('.a-toast,.a-motion-tail')");
     await screenshot(page, label);
+    if (mode === 'mobile') { await evaluate(page, `document.querySelector('[data-node-address="${id}"] [type=submit]').scrollIntoView({block:'end'})`); await screenshot(page, label+'-apply'); }
   };
   await capture('node-address-manual');
   await evaluate(page, "document.querySelector('dialog[open]').close();location.hash='#traffic'");
