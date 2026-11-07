@@ -12,26 +12,6 @@ import (
 func frontendFeatureSources(t *testing.T, route string) string {
 	t.Helper()
 	owners := map[string][]string{
-		"modules/settings.js": {
-			"modules/settings.js", "modules/settings-view.js", "modules/settings-bindings.js",
-		},
-		"modules/dashboard.js": {
-			"modules/dashboard.js", "modules/dashboard-model.js", "modules/dashboard-view.js", "modules/dashboard-bindings.js",
-		},
-		"modules/client-access.js": {
-			"modules/client-access.js", "modules/client-access-model.js", "modules/client-access-view.js",
-			"modules/client-access-results.js", "modules/client-access-bindings.js", "modules/client-access-profiles.js",
-			"modules/client-clipboard.js", "modules/card-masonry.js",
-		},
-		"modules/substore-sync.js": {
-			"modules/substore-sync.js", "modules/substore-model.js", "modules/substore-view.js",
-			"modules/substore-bindings.js", "modules/substore-selections.js", "modules/substore-targets.js", "modules/card-masonry.js",
-		},
-		"modules/traffic.js": {
-			"modules/traffic.js", "modules/traffic-model.js", "modules/traffic-view.js", "modules/traffic-accounting-view.js",
-			"modules/traffic-bindings.js", "modules/traffic-forms.js", "modules/traffic-form-view.js", "modules/traffic-form-model.js",
-			"modules/traffic-order.js", "modules/traffic-card-interactions.js", "modules/traffic-sync-dialog.js",
-		},
 		"modules/tasks.js": {
 			"modules/tasks.js", "modules/task-model.js", "modules/task-view.js", "modules/task-bindings.js", "modules/task-timeline.js",
 		},

@@ -1,5 +1,5 @@
 import { userPermissions } from "../modules/user-model.js";
-import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice } from "./ui.js";
+import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
 
 const numericFields = [
@@ -139,7 +139,10 @@ export async function settingsPage(ctx) {
     updateResult.textContent = "正在检查更新…";
     try {
       const result = await ctx.api("/settings/check-update", { method: "POST" });
-      if (ctx.current()) updateResult.textContent = result.update_available ? `发现更新：${result.latest_version}` : result.comparable ? `已是最新发行版：${result.latest_version}` : `当前可用发行版：${result.latest_version}`;
+      if (ctx.current()) {
+        const message = result.update_available ? `发现更新：${result.latest_version}` : result.comparable ? `已是最新发行版：${result.latest_version}` : `当前可用发行版：${result.latest_version}`;
+        updateResult.replaceChildren(message, ...(result.release_url ? [link("查看发行版", result.release_url)] : []));
+      }
     } catch (error) {
       if (ctx.current()) updateResult.textContent = `检查失败：${error.message}`;
     }
@@ -159,10 +162,26 @@ export async function settingsPage(ctx) {
 }
 
 async function apiKeys(ctx) {
-  let resource = await ctx.api("/settings/api-keys");
-  const results = node("div");
+  let resource = { items: [], read_permissions: [] }, sequence = 0;
+  const results = node("div", { hidden: true });
+  const feedback = notice("");
+  const create = button("创建 Key", () => edit(), { tone: "primary", disabled: true });
+  const retry = button("重新读取", event => void ctx.mutate(event.currentTarget, load));
+  const recovery = node("div", { className: "a-card-body a-stack" }, feedback, actions(retry)); recovery.hidden = true;
   const labels = Object.fromEntries(userPermissions);
-  async function load() { resource = await ctx.api("/settings/api-keys"); if (ctx.current()) draw(); }
+  async function load() {
+    const request = ++sequence;
+    try {
+      const latest = await ctx.api("/settings/api-keys");
+      if (!ctx.current() || request !== sequence) return;
+      resource = latest; draw();
+      feedback.textContent = ""; recovery.hidden = true; create.disabled = false;
+    } catch (error) {
+      if (!ctx.current() || request !== sequence || error.name === "AbortError") return;
+      feedback.textContent = `无法读取 API Key：${error.message}`; recovery.hidden = false;
+      if (error.status === 403) { results.replaceChildren(); results.hidden = true; resource = { items: [], read_permissions: [] }; create.disabled = true; }
+    }
+  }
   const body = key => ({ name: key.name, permissions: key.permissions, ip_allowlist: key.ip_allowlist,
     expires_at: key.expires_at, revision: key.revision, disabled: key.disabled });
   function edit(key = null) {
@@ -182,15 +201,26 @@ async function apiKeys(ctx) {
       };
       const saved = await ctx.api(key ? `/settings/api-keys/${pathID(key.id)}` : "/settings/api-keys", { method: key ? "PUT" : "POST", body: payload });
       box.close();
-      if (!key && saved.secret) ctx.dialog("API Key 已创建", stack(muted("密钥仅显示一次，请妥善保存。"), code(saved.secret)));
+      if (!key && saved.secret) {
+        const secret = code(saved.secret); saved.secret = "";
+        secret.setAttribute("data-sensitive", "");
+        const revealed = ctx.dialog("API Key 已创建", stack(muted("密钥仅显示一次，请妥善保存。"), secret,
+          actions(button("复制 Key", event => void ctx.mutate(event.currentTarget, async () => {
+            await copyText(secret.textContent);
+            if (ctx.current() && revealed.isConnected) ctx.announce("已复制");
+          })))));
+        revealed.addEventListener("close", () => { secret.textContent = ""; }, { once: true });
+      }
       await load();
       ctx.announce(key ? "授权已保存" : "API Key 已创建");
     });
     const box = ctx.dialog(key ? "编辑 API Key" : "创建 API Key", form, { wide: true });
   }
   function draw() {
-    results.replaceChildren(table(["名称", "前缀", "状态", "到期时间", "最近使用", "操作"], list(resource.items).map(key => [
-      key.name, `${key.prefix}…`, badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status),
+    results.hidden = false;
+    results.replaceChildren(table(["名称 / 创建时间", "前缀", "状态", "读取范围", "到期时间", "最近使用", "操作"], list(resource.items).map(key => [
+      stack(key.name, muted(date(key.created_at))), `${key.prefix}…`, badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status),
+      stack(list(key.ip_allowlist).length ? list(key.ip_allowlist).map(address => muted(address)) : "来源 IP 不限制", muted(`${list(key.permissions).length} 项读取权限`)),
       key.expires_at ? date(key.expires_at) : "永不过期", date(key.last_used_at),
       !key.revoked_at && actions(button("编辑授权", () => edit(key)),
         button(key.disabled ? "启用" : "停用", event => void ctx.mutate(event.currentTarget, async () => {
@@ -207,6 +237,6 @@ async function apiKeys(ctx) {
         }, { tone: "danger" })),
     ]), { label: "API Key" }));
   }
-  draw();
-  return section("API Key", results, button("创建 Key", () => edit(), { tone: "primary" }));
+  await load();
+  return section("API Key", stack(recovery, results), create);
 }

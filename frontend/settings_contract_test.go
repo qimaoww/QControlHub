@@ -6,59 +6,56 @@ import (
 )
 
 func TestSettingsDoesNotRepeatTheContextNavigation(t *testing.T) {
-	settings := []byte(frontendFeatureSources(t, "modules/settings.js"))
-	content := string(settings)
-	for _, duplicate := range []string{`class="settings-hero"`, `class="settings-category-nav"`, `aria-label="设置分类"`} {
+	content := string(mustReadFrontendFile(t, "analytics/settings.js"))
+	for _, duplicate := range []string{`settings-hero`, `settings-category-nav`, `设置分类`, `data-save-settings`} {
 		if strings.Contains(content, duplicate) {
-			t.Errorf("settings workspace repeats context navigation with %q", duplicate)
+			t.Errorf("native settings repeats retired navigation/control %q", duplicate)
 		}
 	}
-	if !strings.Contains(content, `class="settings-savebar"`) || !strings.Contains(content, `data-settings-state`) {
-		t.Fatal("settings save bar must retain the saved revision state")
+	for _, required := range []string{
+		`ctx.form(content, "保存设置"`, `form.id = "panel-settings-form"`,
+		`submit.setAttribute("form", form.id)`, `ctx.pageActions(submit)`,
+		`saveState.setAttribute("role", "status")`, `baseline = submitted`,
+		`保存失败 · 有未保存更改`, `snapshot() !== baseline`, `sequence !== refreshSequence`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("native settings save contract missing %q", required)
+		}
+	}
+	if strings.Count(content, `ctx.form(content, "保存设置"`) != 1 {
+		t.Error("settings must create one complete form and one save action")
 	}
 }
 
 func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
-	// The directory markup lives in its focused owner; the shell only mounts it.
-	appContent := frontendSources(t, "modules/settings-nav.js", "modules/shell-context.js", "modules/routes.js", "modules/shell-appearance.js")
+	appContent := frontendSources(t, "analytics/app.js", "modules/routes.js", "analytics/appearance.js")
 	for _, required := range []string{
-		`href="#settings-engines"><span>01</span>默认内核能力`,
-		`href="#settings-basic"><span>02</span>基础设置`,
-		`href="#settings-runtime"><span>03</span>任务与同步`,
-		`href="#settings-data"><span>04</span>数据与日志`,
-		`href="#settings-notify"><span>05</span>事件通知`,
-		`href="#settings-certificates"><span>08</span>证书申请`,
-		`href="#settings-deployment"><span>09</span>部署状态`,
-		`href="#settings-api-keys"><span>10</span>API Key`,
-		`"settings-engines": "settings"`,
-		`"settings-data": "settings"`,
-		`"settings-certificates": "settings"`,
-		`"settings-api-keys": "settings"`,
+		`["settings", "面板设置", "settings", "settings.read"]`,
+		`"settings-engines": "settings"`, `"settings-data": "settings"`,
+		`"settings-certificates": "settings"`, `"settings-api-keys": "settings"`,
+		`applyAppearance(result)`, `document.documentElement.style.fontSize`,
 	} {
 		if !strings.Contains(appContent, required) {
-			t.Errorf("core-log storage settings navigation is missing %q", required)
+			t.Errorf("native settings navigation/appearance missing %q", required)
 		}
 	}
-	settingsModule := []byte(frontendFeatureSources(t, "modules/settings.js"))
-	settingsContent := string(settingsModule)
-	if strings.Contains(settingsContent, `api("/users")`) || strings.Contains(settingsContent, "用户管理") {
-		t.Error("settings page must not load or render user permission management")
+	settingsContent := string(mustReadFrontendFile(t, "analytics/settings.js"))
+	for _, group := range []string{"基础设置", "默认内核能力", "节点上报", "任务", "日志", "数据清理", "证书与地址库", "通知", "部署状态", "API Key"} {
+		if !strings.Contains(settingsContent, `section("`+group+`"`) {
+			t.Errorf("native settings omits group %q", group)
+		}
 	}
-	if strings.Count(settingsContent, `data-save-settings`) != 2 {
-		t.Error("settings page must render and bind exactly one save button")
+	if strings.Contains(settingsContent, `api("/users")`) || strings.Contains(settingsContent, "用户管理") {
+		t.Error("settings must not load/render user management")
 	}
 	for _, required := range []string{
-		`select(item, "ui_font_scale", "界面字号"`,
-		`[90, "小"]`, `[100, "正常"]`, `[110, "大"]`,
-		`ui_font_scale: number("ui_font_scale")`,
-		`applyUIFontScale?.(saved.ui_font_scale)`,
+		`input("ui_font_scale", "文字大小"`, `[90, "较小"]`, `[100, "标准"]`, `[110, "较大"]`,
+		`"ui_font_scale", "client_connection_retention_days"`, `body[name] = Number(body[name])`,
+		`ctx.session.role === "admin" && writable`, `ctx.can("settings.manage")`,
 	} {
 		if !strings.Contains(settingsContent, required) {
-			t.Errorf("settings page is missing configurable typography marker %q", required)
+			t.Errorf("native settings typography/permission contract missing %q", required)
 		}
-	}
-	if !strings.Contains(appContent, `--ui-font-scale`) || !strings.Contains(appContent, `uiFontScaleOptions`) {
-		t.Error("app shell must apply the persisted typography scale")
 	}
 
 	module := []byte(frontendSources(t, "analytics/observability.js", "modules/core-log-model.js"))

@@ -1,3 +1,4 @@
+import { testSettingsAPIKeysRuntime } from './settings-api-keys.mjs';
 import { assert, delay, waitFor } from './assertions.mjs';
 
 export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
@@ -54,7 +55,11 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   assert.equal(testAPI.settings.client_connection_retention_days, 45, '连接保留期未保存'); assert.equal(testAPI.settings.acme_email, 'certs@example.test', '邮箱未保存'); assert.equal(testAPI.settings.default_agent_engines.length, 0, '不允许关闭所有默认内核');
   assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value); assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value); assert.equal(testAPI.settings.cnip_source.format, 'auto');
   assert.ok(save.disabled, '保存后仍要求保存'); assert.equal(status(), '已保存');
+  changed('ui_font_scale', '110');
   changed('acme_email', ''); form.requestSubmit(); await waitFor(() => testAPI.settings.revision === 3, '邮箱清空未保存'); await settled(); assert.equal(testAPI.settings.acme_email, '');
+  assert.equal(testAPI.settings.ui_font_scale, 110, '文字大小未按数字保存');
+  assert.equal(document.documentElement.style.fontSize, '110%', '已保存文字大小没有应用到原生界面');
+  assert.equal([...form.elements.ui_font_scale.options].map(option => Number(option.value)).join(','), '90,100,110', '文字大小选项缺失');
   const beforePending = writes(); let release;
   testAPI.settingsGate = new Promise(resolve => { release = resolve; });
   changed('panel_description', '正在提交'); form.requestSubmit(); form.requestSubmit();
@@ -85,5 +90,6 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   form.requestSubmit(); await settled(); assert.ok(status().includes('保存失败'), '草稿刷新偷偷采用新修订编号');
   changed('panel_description', '后续输入'); await refresh();
   assert.equal(description.value, '其他会话的设置', '无草稿刷新未同步当前设置'); assert.ok(save.disabled);
+  await testSettingsAPIKeysRuntime();
   if (new URLSearchParams(location.search).has('preview')) await new Promise(() => {});
 }

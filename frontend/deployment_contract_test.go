@@ -3,7 +3,6 @@ package frontend
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -172,19 +171,15 @@ func rewriteModuleCacheImports(t *testing.T, source string) string {
 
 func TestSPAModulesArePublished(t *testing.T) {
 	for _, name := range []string{
-		"dashboard.js",
-		"agents.js",
-		"client-access.js",
-		"substore-sync.js",
-		"configs.js",
-		"tasks.js",
-		"traffic.js",
-		"settings.js",
-		"route-loader.js",
-		"core-log-preferences.js",
-		"../module_smoke.mjs",
+		"bootstrap.js", "analytics/app.js", "analytics/operations.js",
+		"analytics/nodes.js", "analytics/client-access.js", "analytics/substore.js",
+		"analytics/configs.js", "analytics/live-config.js", "analytics/config-studio.js",
+		"analytics/traffic.js", "analytics/settings.js", "analytics/observability.js",
+		"analytics/users.js", "analytics/certificates.js", "analytics/ip-quality.js",
+		"analytics/tcp.js", "analytics/themes.js",
+		"modules/route-loader.js", "modules/core-log-preferences.js", "module_smoke.mjs",
 	} {
-		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
+		if _, err := os.Stat(name); err != nil {
 			t.Errorf("missing SPA module %s: %v", name, err)
 		}
 	}

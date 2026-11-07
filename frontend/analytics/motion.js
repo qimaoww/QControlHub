@@ -58,6 +58,7 @@ export function createAnalyticsMotion(scope) {
   function clearTails() { tails.forEach(tail => { stopTail(tail); tail.remove(); }); tails.clear(); }
   function floatingCopy(element, modal = false) {
     if (!element.isConnected) return;
+    if (element.matches('[data-sensitive]') || element.querySelector('[data-sensitive]')) return;
     const rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height || rect.bottom < 0 || rect.top > innerHeight) return;
     let clone = element.cloneNode(true);
