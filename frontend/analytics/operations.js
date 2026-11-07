@@ -425,7 +425,7 @@ export async function tasksPage(ctx) {
     } finally { if (sequence === readSequence) filtering = false; }
   }, { status: "", agent_id: "", action: "", limit: "100" });
   const results = node("div");
-  const taskTable = table(["操作", "节点", "内核", "状态", "创建时间", "操作"], [], { label: "任务", rowKey: row => row[5].dataset.taskId });
+  const taskTable = table(["操作", "节点", "执行对象", "状态", "创建时间", "操作"], [], { label: "任务", rowKey: row => row[5].dataset.taskId });
   results.append(taskTable);
   const refreshState = muted('正在实时更新'); refreshState.setAttribute('role', 'status');
   async function editRetry(task) {

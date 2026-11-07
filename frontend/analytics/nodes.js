@@ -1,6 +1,7 @@
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { accountStorage } from "../modules/account-storage.js";
 import { nodeTimeZone } from "./node-time-zone.js";
+import { nodeAddress } from './node-address.js';
 import { openNodeBatch } from "./node-batch.js";
 import { bindNodeOrdering } from "./node-ordering.js";
 import { patch, poll } from "./live-dom.js";
@@ -8,7 +9,7 @@ import { nodeRegion, nodeRegionFlag } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
 import { metricTrack } from './metric-track.js';
 import { nodeDeleteControl } from './node-delete.js';
-import { publicAddressRows, manualConnectionAddressNote } from '../modules/agent-address-model.js';
+import { publicAddressRows, manualConnectionAddressNote, nodeAddressSetting } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
@@ -159,6 +160,7 @@ export async function nodesPage(ctx) {
               if (ctx.current()) ctx.announce('复制失败，请重试。', 'error');
             } finally { if (control.isConnected) control.disabled = false; }
           }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'),
+      muted(`地址 · ${nodeAddressSetting(agent.labels).mode === 'manual' ? '手动设置' : '自动获取'}`),
       manualConnectionAddressNote(agent.labels) && node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, muted(manualConnectionAddressNote(agent.labels)))));
   }
 
@@ -345,24 +347,64 @@ export async function nodesPage(ctx) {
     )));
     const allocation = renderAllocation();
     const sections = [], settingsUpdates = [], capabilities = new Map();
-    let savingCapabilities = false;
-    if (manage) {
-      sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
-        ctx.form([field('节点名称', 'name', agent.name, { required: true, maxlength: 100 })], '保存名称', async values => {
-          const name = values.name.trim();
-          if (!name || [...name].length > 100 || /[\u0000-\u001f\u007f-\u009f]/u.test(name)) throw new Error('节点名称须为 1–100 个字符，且不能包含控制字符');
-          if (!box.open || settingsScope() !== openedScope || !canManage(agent)) return;
+    let savingCapabilities = false, savingNode = false, address, zone;
+    let savedName = agent.name, savedVisibility = Boolean(agent.admin_hidden);
+    const available = () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent) && canManage(agent);
+    const nodeForm = agent.can_manage !== false ? ctx.form([], '保存并应用', async () => {
+      if (!available() || savingNode) return;
+      const name = nodeForm.elements.name?.value.trim();
+      if (name != null && (!name || [...name].length > 100 || /[\u0000-\u001f\u007f-\u009f]/u.test(name))) throw new Error('节点名称须为 1–100 个字符，且不能包含控制字符');
+      const addressChanged = address?.dirty();
+      const nameChanged = name != null && name !== savedName;
+      const visibility = nodeForm.elements.admin_hidden?.checked;
+      const visibilityChanged = visibility != null && visibility !== savedVisibility;
+      const zoneChanged = zone?.dirty();
+      if (addressChanged && !await ctx.confirm('更改节点默认地址将影响继承它的客户端配置，独立端口覆盖保持不变。', nodeForm.elements.node_address_mode.value === 'auto' ? '恢复自动获取' : '保存并应用') || !available()) return;
+      savingNode = true;
+      let savedCount = 0;
+      try {
+        await load();
+        if (!available()) return;
+        if (addressChanged) { await address.save(); savedCount++; }
+        if (!available()) return;
+        if (nameChanged) {
           const saved = await ctx.api(`${base}/name`, { method: 'PUT', body: { name } });
-          if (!ctx.current() || !box.open || settingsScope() !== openedScope || !canManage(agent)) return;
-          agent.name = saved.name; updateTitle(); await load(); ctx.announce('名称已保存');
-        }),
-        button('国家／地区', () => chooseRegion(agent)),
-        agent.can_hide && ctx.form([field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' })], '保存可见性', async (_, form) => {
-          const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: form.elements.admin_hidden.checked } });
-          agent.admin_hidden = saved.admin_hidden; ctx.announce('可见性已保存'); await load();
-        }),
-
+          if (!available()) return;
+          savedName = agent.name = saved.name;
+          if (nodeForm.elements.name.value.trim() === name) nodeForm.elements.name.value = saved.name;
+          updateTitle(); savedCount++;
+        }
+        if (visibilityChanged) {
+          const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: visibility } });
+          if (!available()) return;
+          savedVisibility = agent.admin_hidden = Boolean(saved.admin_hidden); savedCount++;
+        }
+        if (!available()) return;
+        if (zone && (zoneChanged || !addressChanged && !nameChanged && !visibilityChanged)) { await zone.save(); savedCount++; }
+        if (!available()) return;
+        ctx.announce('节点设置已保存');
+        try { await load(); }
+        catch (error) { if (available() && error.name !== 'AbortError') ctx.announce('节点设置已保存，刷新失败，请刷新重试。', 'error'); }
+      } catch (error) {
+        if (savedCount && available()) throw new Error(`部分设置已保存，其余更改尚未保存：${error.message}`);
+        throw error;
+      } finally { savingNode = false; if (available()) settingsUpdates.forEach(update => update()); }
+    }) : null;
+    if (nodeForm) nodeForm.dataset.nodeSettingsForm = agent.id;
+    if (manage) {
+      address = nodeAddress(ctx, agent, { available, form: nodeForm });
+      settingsUpdates.push(address.update);
+      const nameField = field('节点名称', 'name', agent.name, { required: true, maxlength: 100 });
+      const visibilityField = agent.can_hide && field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' });
+      sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
+        nameField, button('国家／地区', () => chooseRegion(agent)), address.view, visibilityField,
       ))));
+      settingsUpdates.push(() => {
+        const name = nameField.querySelector('input');
+        if (!savingNode && name.value === savedName) { name.value = agent.name; savedName = agent.name; }
+        const visibility = visibilityField?.querySelector('input');
+        if (visibility && !savingNode && visibility.checked === savedVisibility) { visibility.checked = Boolean(agent.admin_hidden); savedVisibility = Boolean(agent.admin_hidden); }
+      });
       for (const engine of agent.supported_capabilities || engineIDs) {
         const inputField = field('启用内核能力', `capability:${engine}`, agent.capabilities.includes(engine), { type: 'checkbox' });
         const input = inputField.querySelector('input');
@@ -387,7 +429,7 @@ export async function nodesPage(ctx) {
       }
     }
     if (agent.can_manage !== false) {
-      const zone = nodeTimeZone(ctx, agent, () => canManage(agent));
+      zone = nodeTimeZone(ctx, agent, () => canManage(agent), nodeForm);
       sections.push(zone.view); settingsUpdates.push(zone.update);
     }
     const runtimes = node('div', { className: 'a-grid' });
@@ -506,7 +548,12 @@ export async function nodesPage(ctx) {
     );
     const nodeOperations = renderNodeOperations();
     const operations = nodeOperations.childElementCount > 0 && section('节点操作', node('div', { className: 'a-card-body' }, nodeOperations));
-    const nodePanel = stack(sections.length > 1 ? grid(sections) : sections, allocation, operations);
+    const details = sections.length > 1 ? grid(sections) : stack(sections);
+    if (nodeForm) {
+      nodeForm.querySelector('fieldset').append(details);
+      nodeForm.querySelector('[type=submit]').disabled = !manage;
+    }
+    const nodePanel = stack(nodeForm || details, allocation, operations);
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
     let activePanel = 'node';
     const scrollPositions = { node: 0, core: 0 };
@@ -522,6 +569,11 @@ export async function nodesPage(ctx) {
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
+    const nodeDirty = () => address?.dirty() || zone?.dirty() || nodeForm?.elements.name && nodeForm.elements.name.value !== savedName || nodeForm?.elements.admin_hidden && nodeForm.elements.admin_hidden.checked !== savedVisibility;
+    box.onRequestClose = async () => {
+      if (nodeDirty() && !await ctx.confirm('存在未保存的设置更改，确定关闭？', '放弃更改')) return;
+      if (ctx.current()) box.close();
+    };
     const update = () => {
       if (!box.open || !ctx.current()) { dialogUpdates.delete(update); return; }
       if (!agents.some(value => value.id === agent.id) || settingsScope() !== openedScope || manage && !canManage(agent)) { box.close(); dialogUpdates.delete(update); return; }
@@ -530,6 +582,10 @@ export async function nodesPage(ctx) {
       settingsUpdates.forEach(refresh => refresh());
       renderRuntimes();
     };
+    settingsUpdates.forEach(refresh => refresh());
+    if (nodeForm) for (const event of ['input', 'change']) nodeForm.addEventListener(event, () => ctx.setDirty(Boolean(nodeDirty())));
+    nodeForm?.querySelector('[type=submit]').addEventListener('mutationend', () => { if (ctx.current() && box.open) ctx.setDirty(Boolean(nodeDirty())); });
+    box.addEventListener('close', () => { if (ctx.current()) ctx.setDirty(false); }, { once: true });
     dialogUpdates.add(update);
     box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
     ctx.signal.addEventListener('abort', () => { dialogUpdates.delete(update); box.close(); }, { once: true });

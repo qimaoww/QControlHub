@@ -2,11 +2,13 @@ import { testConnectionReadLifecycle } from './connection-read-lifecycle.mjs';
 import { assert, waitFor } from "./assertions.mjs";
 
 export async function testClientConnectionsRuntime(preview = false) {
-  const fallback = window.fetch.bind(window), requests = [], locationRequests = [];
+  const fallback = window.fetch.bind(window), requests = [], locationRequests = [], orderRequests = [], regionRequests = [];
   const now = new Date().toISOString();
-  let releaseLocations, releaseShell, holdHistory;
+  let releaseLocations, releaseShell, releaseFirstHistory, releaseRegions, holdHistory;
+  const regionsReady = new Promise(resolve => { releaseRegions = resolve; });
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
+  holdHistory = new Promise(resolve => { releaseFirstHistory = resolve; });
   const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
   const rows = [
     { ...row, id: 10, engine: "mihomo", endpoints: [{ agent_id: "alpha", engine: "mihomo", local_port: 443 }] },
@@ -16,6 +18,12 @@ export async function testClientConnectionsRuntime(preview = false) {
   ];
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
+    if (url.pathname === "/api/v1/preferences/node-order") orderRequests.push(options?.signal);
+    if (/^\/api\/v1\/agents\/(alpha|bravo)\/region$/.test(url.pathname)) {
+      regionRequests.push(url.pathname);
+      await regionsReady;
+      return new Response(JSON.stringify({ country_code: url.pathname.includes("/alpha/") ? "JP" : "SG" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
       if (url.searchParams.get("locations") === "only") {
@@ -41,9 +49,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   document.head.append(styles); await styled;
   // Appearance is loaded before the new theme mounts its page. Location
   // enrichment remains independent of the usable history and filter controls.
-  releaseShell();
   const session = await (await fallback("/api/v1/auth/session")).json();
   (await import("../analytics/app.js")).startAnalytics({ app: document.querySelector("#app"), session });
+  await waitFor(() => orderRequests.length === 1, "connection ordering must start before appearance settings finish");
+  assert.equal(requests.length, 0, "history must wait for the authenticated order and page setup");
+  releaseShell();
   const region = () => document.querySelector('[aria-label="客户端来源 IP 明细"]');
   const displayed = () => [...region().querySelectorAll("tbody tr")];
   const body = () => region()?.querySelector("tbody");
@@ -57,7 +67,22 @@ export async function testClientConnectionsRuntime(preview = false) {
   const settled = () => document.querySelector(".a-main").textContent.includes("已读取");
   const requested = async (count, message) => waitFor(() => requests.length > count && settled(), message);
   const pageText = () => document.querySelector(".a-main").textContent;
+  await waitFor(() => form() && requests.length, "first history read must not block mounting filters");
+  assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "first history read disabled filters");
+  assert.ok(pageText().includes("正在读取") && !pageText().includes("已读取") && !pageText().includes("暂无记录"), "pending history was reported as a completed empty result");
+  assert.ok(pageText().includes("独立 IP —") && !pageText().includes("观测连接 0"), "pending history invented statistics");
+  assert.ok(button("上一页").disabled && button("下一页").disabled, "unknown pagination must remain disabled");
+  form().elements.client_ip.focus();
+  const firstInput = document.activeElement;
+  releaseFirstHistory(); holdHistory = null;
   await waitFor(() => body()?.textContent.includes("2001:db8::8"), "connection page did not load");
+  assert.equal(orderRequests.length, 1, "first history must reuse the route's order request");
+  assert.equal(document.activeElement, firstInput, "first history arrival replaced the active filter");
+  assert.equal(regionRequests.length, 2, "node flags must share one region request per authorized node");
+  assert.ok(!body().querySelector('[data-region-code]'), "pending node region invented a flag");
+  releaseRegions();
+  await waitFor(() => body().querySelectorAll('[data-region-code="JP"]').length === 3 && body().querySelector('[data-region-code="SG"]'), "node flags did not resolve independently of client IP geography");
+  assert.equal(form().elements.agent_id.querySelector('option[value="alpha"] [data-region-code="JP"] img').getAttribute('src'), '/api/v1/region-flags/jp', "node selector must reuse the panel flag artwork");
   assert.equal(form().elements.agent_id.options.length, 3, "authorized node choices must remain available while geography loads");
   assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "location lookup must not disable filters");
   assert.ok(!body().textContent.includes("广东"));
@@ -72,7 +97,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(displayed().length, 4, "same source must remain separate by engine and node");
   assert.equal(region().querySelectorAll('td[data-column="客户端来源 IP"] code').length, 4);
   assert.equal(displayed().map(row => row.querySelector('td[data-column="内核"]').textContent).join(","), "Mihomo,sing-box,Xray,Xray");
-  assert.equal(displayed()[2].querySelector('td[data-column="节点"]').textContent, "Alpha · 东京", "multiple ports must not duplicate the node name");
+  assert.equal(displayed()[2].querySelector('td[data-column="节点"]').textContent.trim(), "Alpha · 东京", "multiple ports must not duplicate the node name");
   assert.equal(displayed()[2].querySelector('td[data-column="入站端口"]').textContent, "443 · 8443");
   assert.equal(displayed()[3].querySelector('td[data-column="入站端口"]').textContent, "9443");
   assert.equal(requests.at(-1).get("group_by"), "ip");

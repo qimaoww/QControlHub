@@ -1,5 +1,6 @@
 import { checkAnalyticsTraffic } from './analytics_traffic_browser.mjs';
 import assert from 'node:assert/strict';
+import { checkNodeAddress } from './analytics_node_address_browser.mjs';
 export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call }) {
   await checkAnalyticsTraffic({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record });
   const agentID=fixture.analyticsAgent;
@@ -69,6 +70,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
     await evaluate(page, "(() => {const input=document.querySelector('.a-probe-toolbar [name=search]');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
   };
   await checkAddresses();
+  await checkNodeAddress({ page, fixture, evaluate, wait, screenshot, api, identity, record, mode, call });
   const regionTrigger = `.a-probe[data-agent-id="${agentID}"] .a-region-trigger`;
   await evaluate(page, `document.querySelector(${JSON.stringify(regionTrigger)}).click()`);
   await wait(page, "!!document.querySelector('dialog[open] [data-region-choice=JP]') && !document.querySelector('dialog[open] button[type=submit]').disabled");

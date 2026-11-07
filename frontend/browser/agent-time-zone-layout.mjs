@@ -7,7 +7,7 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   const session = await (await fetch('/api/v1/auth/session')).json();
   (await import('../analytics/app.js')).startAnalytics({ app: document.querySelector('#app'), session });
   const form = await waitFor(() => document.querySelector('[data-agent-timezone-form="alpha"]'), 'Agent 时区设置未加载');
-  const section = form.closest('[data-agent-timezone]'), dialog = form.closest('dialog');
+  const section = form.querySelector('[data-agent-timezone]'), dialog = form.closest('dialog');
   const input = form.elements.time_zone, modeInput = form.elements.mode, submit = form.querySelector('[data-timezone-submit]');
   const status = () => section.querySelector('[data-timezone-status]').textContent;
   const error = () => form.querySelector(':scope > .a-notice').textContent;
@@ -70,7 +70,7 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   testAPI.timeZoneSaveFailure = false; change(modeInput, 'auto'); form.requestSubmit(); await waitFor(() => testAPI.timeZoneSaves.length === 3, '自动时区未提交'); await settle();
   assert.equal(testAPI.timeZoneSaves[2].mode, 'auto'); assert.equal(testAPI.timeZoneSaves[2].time_zone, ''); assert.equal(testAPI.timeZoneSaves[2].retry, true);
   const previous = { ...agent.time_zone }; agent.time_zone = { ...previous, time_zone: 'Asia/Tokyo', applied_time_zone: 'Asia/Tokyo', status: 'applied', revision: previous.revision + 1 }; await refresh();
-  assert.equal(input.value, 'Asia/Tokyo'); assert.ok(input.disabled); assert.equal(submit.textContent, '重新检测');
+  assert.equal(input.value, 'Asia/Tokyo'); assert.ok(input.disabled); assert.equal(submit.textContent, '保存并应用');
   const latest = { ...agent.time_zone }; agent.time_zone = previous; await refresh(); assert.equal(input.value, 'Asia/Tokyo', '旧轮询回退时区'); assert.equal(status(), '已生效'); agent.time_zone = latest;
   change(modeInput, 'custom'); change(input, 'Australia/Sydney'); input.focus(); input.setSelectionRange(2, 8);
   agent.time_zone = { ...latest, time_zone: 'Europe/London', applied_time_zone: 'Europe/London', revision: latest.revision + 1 };
@@ -86,7 +86,7 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   agent.metrics.clock_sync = { status: 'unavailable' }; await refresh(); assert.equal(clock().join('|'), '不可用|');
   const rect = section.getBoundingClientRect(), modeRect = modeInput.getBoundingClientRect(), inputRect = input.getBoundingClientRect(), buttonRect = submit.getBoundingClientRect();
   assert.ok(rect.width > 0 && inputRect.width >= 100, '时区输入被挤压');
-  assert.ok(inputRect.right <= rect.right + 1 && modeRect.right <= rect.right + 1 && buttonRect.right <= rect.right + 1, '时区控件溢出');
+  assert.ok(inputRect.right <= rect.right + 1 && modeRect.right <= rect.right + 1 && buttonRect.right <= dialog.getBoundingClientRect().right + 1, '时区控件溢出');
   assert.ok(Math.abs(inputRect.height - modeRect.height) <= 1, '模式与输入高度不一致');
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1 && dialog.scrollWidth <= dialog.clientWidth + 1, '节点时区布局溢出');
   if (matchMedia('(pointer: coarse)').matches) for (const control of [input, modeInput, submit]) assert.ok(control.getBoundingClientRect().height >= 44, '触摸控件不足44像素');

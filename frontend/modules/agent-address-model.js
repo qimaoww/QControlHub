@@ -224,6 +224,11 @@ function manualAddressEntries(labels) {
   });
 }
 
+export function nodeAddressSetting(labels = {}) {
+  const entry = manualAddressEntries(labels)[0];
+  return { mode: entry ? 'manual' : 'auto', address: entry?.value || '', source: entry?.source || '自动获取' };
+}
+
 function manualPublicAddress(labels, wantIPv4) {
   for (const entry of manualAddressEntries(labels)) {
     const literal = normalizedPublicLiteral(entry.value);
