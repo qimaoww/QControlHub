@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -151,6 +152,10 @@ func (c Configuration) Validate() error {
 			return errors.New("ntfy 主题无效")
 		}
 		if ch.Type == "smtp" && ch.Enabled {
+			port, err := strconv.Atoi(ch.Get("port"))
+			if err != nil || port < 1 || port > 65535 {
+				return errors.New("SMTP 端口须为 1–65535")
+			}
 			for _, k := range []string{"from", "to"} {
 				a, e := mail.ParseAddress(ch.Get(k))
 				if e != nil || a.Address != ch.Get(k) {

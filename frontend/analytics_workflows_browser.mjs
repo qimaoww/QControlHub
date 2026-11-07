@@ -302,4 +302,34 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
   record(`${mode}: automatic query filters, removed confirmation controls, delayed response isolation and navigation with pending debounce passed`);
 
+  await evaluate(page,"location.hash='#settings'");
+  await wait(page,"!!document.querySelector('#panel-settings-form') && [...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道') && !document.querySelector('[aria-busy=true]')");
+  await click('添加渠道','.a-main');
+  await wait(page,"!!document.querySelector('dialog[open] select[name=type]')");
+  for (const [type, field] of [['telegram','chat_id'],['smtp','host'],['bark','device_key'],['ntfy','topic'],['gotify','token'],['webhook','url']]) {
+    await evaluate(page,`(()=>{const d=document.querySelector('dialog[open]'),t=d.querySelector('select[name=type]');t.value=${JSON.stringify(type)};t.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    assert.ok(await evaluate(page,`!!document.querySelector('dialog[open] [name=${field}]')`),`${type} fields are available`);
+    assert.ok(!await evaluate(page,"document.querySelector('dialog[open]').textContent.includes('null')"),'hidden fields do not render null');
+  }
+  const notificationName=`Notification fixture ${mode}`;
+  await evaluate(page,`(()=>{const f=document.querySelector('dialog[open] form');f.elements.name.value=${JSON.stringify(notificationName)};f.elements.enabled.checked=false;f.elements.url.value='https://example.invalid/isolated-notification';f.requestSubmit();})()`);
+  await wait(page,`!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-main td')].some(c=>c.textContent===${JSON.stringify(notificationName)})`);
+  const notificationConfig=(await api(page,identity,'GET','/settings/notifications')).configuration;
+  const notificationChannel=notificationConfig.channels.find(c=>c.name===notificationName);
+  assert.equal(notificationChannel.enabled,false);
+  assert.ok(notificationChannel.configured.includes('url')&&!notificationChannel.secrets,'API retains target without exposing it');
+  await evaluate(page,"[...document.querySelectorAll('summary')].find(s=>s.textContent==='编辑事件模板').click()");
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='节点：{{agent}}\n中文 <>& Unicode';b.dispatchEvent(new Event('input',{bubbles:true}));b.focus();b.setSelectionRange(2,5);})()");
+  await click('刷新记录','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').selectionStart"),2);
+  assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"));
+  await click('渲染预览','.a-main');
+  await wait(page,"[...document.querySelectorAll('pre[role=status]')].some(p=>p.textContent.includes('示例节点'))");
+  await click('保存模板','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]')");
+  assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');
+  await screenshot(page,'analytics-notification-templates');
+  record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save and refresh draft preservation passed`);
+
 }

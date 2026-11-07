@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -76,7 +77,7 @@ func TestNotificationPlatformFailures(t *testing.T) {
 		status int
 		body   string
 		retry  bool
-	}{{"telegram", 200, `{"ok":false,"error_code":429,"parameters":{"retry_after":45}}`, true}, {"gotify", 401, `secret`, false}, {"webhook", 429, `secret`, true}, {"webhook", 503, `secret`, true}, {"bark", 200, `{"code":400}`, false}, {"ntfy", 200, `{}`, false}, {"telegram", 200, `not json`, false}, {"webhook", 200, strings.Repeat("a", 65537), false}}
+	}{{"telegram", 429, `{"ok":false,"parameters":{"retry_after":45}}`, true}, {"telegram", 200, `{"ok":false,"error_code":429,"parameters":{"retry_after":45}}`, true}, {"gotify", 401, `secret`, false}, {"webhook", 429, `secret`, true}, {"webhook", 503, `secret`, true}, {"bark", 200, `{"code":400}`, false}, {"ntfy", 200, `{}`, false}, {"telegram", 200, `not json`, false}, {"webhook", 200, strings.Repeat("a", 65537), false}}
 	for _, v := range cases {
 		t.Run(v.kind+v.body[:min(8, len(v.body))], func(t *testing.T) {
 			s := &Sender{HTTP: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
@@ -84,6 +85,9 @@ func TestNotificationPlatformFailures(t *testing.T) {
 			})}}
 			err := s.Send(context.Background(), Channel{Type: v.kind, Secrets: map[string]string{"url": "https://example.com"}}, Sample(TypeTaskFailed))
 			var de *DeliveryError
+			if v.kind == "telegram" && v.status == 429 && (!errors.As(err, &de) || de.After != 45*time.Second) {
+				t.Fatalf("lost Telegram backoff: %v", err)
+			}
 			if !errors.As(err, &de) || de.Retry != v.retry || strings.Contains(err.Error(), "secret") {
 				t.Fatalf("result %v", err)
 			}

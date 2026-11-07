@@ -150,6 +150,16 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 	if after > 24*time.Hour {
 		after = 24 * time.Hour
 	}
+	if c.Type == "telegram" {
+		var limited struct {
+			Parameters struct {
+				RetryAfter int `json:"retry_after"`
+			} `json:"parameters"`
+		}
+		if json.Unmarshal(data, &limited) == nil && limited.Parameters.RetryAfter > 0 {
+			after = time.Duration(min(limited.Parameters.RetryAfter, 86400)) * time.Second
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &DeliveryError{Reason: fmt.Sprintf("平台 HTTP %d", resp.StatusCode), Retry: resp.StatusCode == 429 || resp.StatusCode >= 500, After: after}
 	}
