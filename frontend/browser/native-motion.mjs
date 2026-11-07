@@ -21,11 +21,11 @@ export async function testNativeMotion(fixture,preview){
   assert.equal(matchMedia('(prefers-reduced-motion:reduce)').matches,reduced);
   if(reduced)assert.equal(animations().length,0,'减少动态效果偏好未生效');
   const shell=document.querySelector('.a-layout'),rail=shell.querySelector('.a-rail'),main=document.querySelector('.a-main');
-  const originalFetch=window.fetch;let release,started=false;
-  window.fetch=async(input,options)=>{if(new URL(String(input),location.href).pathname==='/api/v1/traffic-policies'){started=true;await new Promise(resolve=>{release=resolve;});}return originalFetch(input,options);};
+  const originalFetch=window.fetch;let release,started=false,oldRouteSignal;
+  window.fetch=async(input,options)=>{if(new URL(String(input),location.href).pathname==='/api/v1/traffic-policies'){started=true;oldRouteSignal=options.signal;await new Promise(resolve=>{release=resolve;});}return originalFetch(input,options);};
   try{
     location.hash='#traffic';await waitFor(()=>started,'缓慢路由未开始读取');
-    await route('#node-settings','.a-probe-grid');release();await delay(30);
+    await route('#node-settings','.a-probe-grid');assert.ok(oldRouteSignal.aborted,'离开页面未取消旧读取');release();await delay(30);
     assert.ok(document.querySelector('.a-probe-grid')&&!document.querySelector('.a-traffic-page'),'过期路由响应覆盖新页面');
     assert.equal(document.querySelector('.a-main'),main,'路由切换替换主体容器');
     assert.equal(document.querySelector('.a-rail'),rail,'路由切换替换导航');
@@ -40,6 +40,8 @@ export async function testNativeMotion(fixture,preview){
   testAPI.settingsGate=new Promise(resolve=>{release=resolve;});form.requestSubmit();
   await waitFor(()=>form.getAttribute('aria-busy')==='true','设置未进入提交状态');
   const writes=testAPI.calls.filter(c=>c.path==='/settings'&&c.method==='PUT').length;form.requestSubmit();
+  location.hash='#node-settings';await waitFor(()=>location.hash==='#settings','提交中仍允许离开当前页面');
+  assert.equal(document.querySelector('#panel-settings-form'),form,'提交中导航替换当前表单');
   input.value='提交后的新输入';emit(input);btn('刷新',document.querySelector('.a-top')).click();
   assert.equal(testAPI.calls.filter(c=>c.path==='/settings'&&c.method==='PUT').length,writes,'重复设置写入');
   release();testAPI.settingsGate=null;await waitFor(()=>!form.hasAttribute('aria-busy'),'设置提交未解锁');
@@ -60,7 +62,55 @@ export async function testNativeMotion(fixture,preview){
     assert.equal(document.querySelector('form[aria-label=登录控制台]'),login);assert.equal(login.elements.username.value,'motion-test');assert.equal(login.elements.token.value,'fixture-password-123');
     await waitFor(()=>!login.querySelector('button[type=submit]').disabled,'登录失败未解锁');
   }finally{window.fetch=originalFetch;}
+  await testNativeAccountReplacement(testAPI,originalFetch);
   await settle();if(reduced)assert.equal(document.getAnimations().length,0);
+}
+
+async function testNativeAccountReplacement(testAPI,originalFetch){
+  let sequence=0;
+  const signIn=async()=>{
+    const login=document.querySelector('form[aria-label=登录控制台]');
+    login.elements.username.value=`replacement-${++sequence}`;login.elements.token.value='fixture-password-123';
+    login.requestSubmit();
+    await waitFor(()=>document.querySelector('#panel-settings-form')&&!document.querySelector('#app[aria-busy=true]'),'新账号没有进入原生设置页');
+  };
+  let armed=false,started=false,decoded=false,complete,oldSignal;
+  window.fetch=async(input,options)=>{
+    const path=new URL(String(input),location.href).pathname;
+    if(path==='/api/v1/auth/login')return Response.json({role:'admin',user_id:`replacement-${sequence}`,username:`replacement-${sequence}`,csrf_token:'browser-test-csrf'});
+    if(path==='/api/v1/preferences/theme')return Response.json({theme_id:'analytics'});
+    if(armed&&path==='/api/v1/settings'&&(!options?.method||options.method==='GET')){
+      armed=false;started=true;oldSignal=options.signal;return new Promise(resolve=>{complete=resolve;});
+    }
+    return originalFetch(input,options);
+  };
+  try{
+    await signIn();
+    for(const phase of ['success','unauthorized','body']){
+      started=decoded=false;armed=true;btn('刷新',document.querySelector('.a-top')).click();
+      await waitFor(()=>started,'旧账号刷新没有开始');
+      if(phase==='body'){
+        const resolve=complete;
+        resolve({ok:true,status:200,json:()=>{decoded=true;return new Promise(done=>{complete=done;});}});
+        await waitFor(()=>decoded,'未进入旧账号慢速正文解析');
+      }
+      document.querySelector('[title=退出登录]').click();
+      await waitFor(()=>document.querySelector('form[aria-label=登录控制台]')&&!document.querySelector('#app[aria-busy=true]'),'旧账号退出失败');
+      assert.ok(oldSignal.aborted,'退出后旧页面的读取没有取消');
+      await signIn();
+      const form=document.querySelector('#panel-settings-form'),input=form.elements.panel_name;
+      input.value=`新账号草稿-${phase}`;emit(input);input.focus();input.setSelectionRange(1,4);
+      const result={...testAPI.settings,panel_name:'旧账号私有设置',ui_font_scale:135};
+      complete(phase==='body'?result:Response.json(result,{status:phase==='unauthorized'?401:200}));
+      await delay(30);
+      assert.equal(document.querySelector('#panel-settings-form'),form,'旧账号结果替换新账号页面或触发退出');
+      assert.equal(input.value,`新账号草稿-${phase}`,'旧账号结果覆盖新账号草稿');
+      assert.equal(document.activeElement,input);assert.equal(input.selectionStart,1);assert.equal(input.selectionEnd,4);
+      assert.equal(document.documentElement.style.fontSize,'100%','旧账号设置污染新账号外观');
+      assert.ok(document.querySelector('.a-user').textContent.includes(`replacement-${sequence}`),'新账号被旧响应替换');
+      input.value=testAPI.settings.panel_name;emit(input);
+    }
+  }finally{armed=false;complete?.(Response.json({}));window.fetch=originalFetch;}
 }
 
 export async function testNativePopups(fixture,preview){

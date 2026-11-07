@@ -6,6 +6,21 @@ const memory = initial => {
 };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
 const flush = () => new Promise(setImmediate);
+// Concurrent account-order consumers share a pending read and server order
+// takes precedence over old browser IDs.
+{
+  let reads = 0;
+  const response = deferred();
+  const storage = memory(["foreign", "b", "a"]);
+  const order = createNodeOrderSync(async () => { reads++; return response.promise; }, storage);
+  const background = order.load();await flush();
+  const navigation = order.load();
+  assert.equal(background, navigation);
+  response.resolve({ ids: ["a", "b"], revision: 4 });
+  await Promise.all([background, navigation]);
+  assert.equal(reads, 1);
+  assert.deepEqual(order.ids(), ["a", "b"], "server order overrides unattributed browser IDs");
+}
 let server = { ids: ["a", "b", "c", "d"], revision: 0 }, puts = 0;
 let delay = null, fail = false, ambiguous = false;
 async function api(_path, options) {

@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { getEventListeners } from "node:events";
-import { createSessionAPI } from "./modules/session-api.js";
-import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
-import { nodeCardOrderKey, savedNodeOrder, refreshNodeOrder } from "./modules/node-order.js";
+import { accountRequest } from "./modules/account-request.js";
 
 const deferred = () => {
   let resolve, reject;
@@ -10,199 +7,101 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const flush = () => new Promise(setImmediate);
-const originals = new Map(["fetch", "localStorage"].map(key => [
-  key, Object.getOwnPropertyDescriptor(globalThis, key),
-]));
-const storage = new Map();
-const session = id => ({ user_id: id, role: "admin", csrf_token: `csrf-${id}` });
-const state = { session: session("first"), data: {}, routeSignal: new AbortController().signal };
-const logins = [], calls = [];
+const originalFetch = globalThis.fetch;
+const session = id => ({ user_id: id, csrf_token: `csrf-${id}` });
+const calls = [], logins = [];
 let respond = () => Response.json({});
-let orderRespond = () => Response.json({ ids: ["node-a", "node-b"], revision: 1 });
 
 try {
-  Object.defineProperty(globalThis, "localStorage", {
-    configurable: true,
-    value: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
-  });
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: (url, options) => {
-      if (url.endsWith("/preferences/node-order")) return orderRespond(url, options);
-      calls.push({ url, options });
-      return respond(url, options);
-    },
-  });
-  const transport = createSessionAPI({ state, renderLogin: message => logins.push(message) });
-  const { api, optionalAPI, ensureSession, scopedAPI, readPanelData, invalidatePanelReads } = transport;
-  assert.equal(calls.length, 0, "constructing transport must not read the session or render login");
-
+  globalThis.fetch = (url, options) => {
+    calls.push({ url, options });
+    return respond(url, options);
+  };
+  assert.equal(calls.length, 0, "importing the shipped transport must remain inert");
+  const first = session("first");
   for (const method of ["GET", "HEAD", "OPTIONS"]) {
-    await api("/settings", { method });
+    const controller = new AbortController();
+    await accountRequest("/settings", { session: first, method, signal: controller.signal });
     const { url, options } = calls.at(-1);
     assert.equal(url, "/api/v1/settings");
+    assert.equal(options.method, method);
     assert.equal(options.credentials, "same-origin");
+    assert.equal(options.cache, "no-store");
     assert.equal(options.headers.Accept, "application/json");
-    assert.equal(options.headers["X-QControlHub-CSRF"], state.session.csrf_token, "reads must be bound to the page's account, even after another tab replaces its cookie");
+    assert.equal(options.headers["X-QControlHub-CSRF"], first.csrf_token, "reads bind to their initiating account even if another tab replaces the cookie");
     assert.equal(options.headers["Content-Type"], undefined);
-    assert.equal(options.signal, state.routeSignal);
+    assert.equal(options.signal, controller.signal, "the native route owns request cancellation");
   }
-  await api("/tasks", {
-    method: "post", body: "{}",
-    headers: { "X-Test": "preserved", "X-QControlHub-CSRF": "not-the-session" },
-  });
-  assert.equal(calls.at(-1).options.headers["X-QControlHub-CSRF"], state.session.csrf_token);
-  assert.equal(calls.at(-1).options.headers["Content-Type"], "application/json");
-  assert.equal(calls.at(-1).options.headers["X-Test"], "preserved");
-  assert.equal(calls.at(-1).options.signal, undefined, "navigation must not cancel a committed write");
-
-  for (const cancelSource of ["route", "caller", "none"]) {
-    const route = new AbortController(), caller = new AbortController(), response = deferred();
-    state.routeSignal = route.signal;
+  for (const taskID of ["tsk_0123456789abcdef", "tsk_invalid", "tsk_0123456789abcdef\r\nX-Injected: yes", undefined]) {
+    await accountRequest("/tasks", {
+      session: first, method: "POST", body: { action: "deploy" },
+      headers: { "X-Config-Task-ID": taskID, "X-QControlHub-CSRF": "another-account", Authorization: "untrusted" },
+    });
+    const { options } = calls.at(-1);
+    assert.equal(options.headers["X-QControlHub-CSRF"], first.csrf_token);
+    assert.equal(options.headers["Content-Type"], "application/json");
+    assert.equal(options.headers.Authorization, undefined, "only the existing config-task header is forwarded");
+    assert.equal(options.headers["X-Config-Task-ID"], taskID === "tsk_0123456789abcdef" ? taskID : undefined);
+    assert.deepEqual(JSON.parse(options.body), { action: "deploy" });
+    assert.equal(options.signal, undefined, "the transport must not invent a route signal for a committed write");
+  }
+  for (const method of ["GET", "POST"]) {
+    const controller = new AbortController(), response = deferred();
     respond = (_url, options) => {
       options.signal.addEventListener("abort", () => response.reject(options.signal.reason), { once: true });
       return response.promise;
     };
-    const read = api("/agents", { signal: caller.signal });
-    await flush();
-    const combined = calls.at(-1).options.signal;
-    assert.notEqual(combined, route.signal);
-    assert.notEqual(combined, caller.signal);
-    assert.equal(getEventListeners(route.signal, "abort").length, 1);
-    assert.equal(getEventListeners(caller.signal, "abort").length, 1);
-    if (cancelSource === "none") {
-      response.resolve(Response.json([]));
-      await read;
-    } else {
-      const rejected = assert.rejects(read, { name: "AbortError" });
-      (cancelSource === "route" ? route : caller).abort();
-      await rejected;
-      assert.equal(combined.aborted, true);
-    }
-    assert.equal(getEventListeners(route.signal, "abort").length, 0);
-    assert.equal(getEventListeners(caller.signal, "abort").length, 0, "settled requests must release combined signal listeners");
+    const read = accountRequest("/tasks", { session: first, method, signal: controller.signal });
+    const rejected = assert.rejects(read, { name: "AbortError" });
+    controller.abort();
+    await rejected;
+    assert.equal(calls.at(-1).options.signal, controller.signal, "caller cancellation remains available for reads and writes");
   }
-
-  {
-    const route = new AbortController(), caller = new AbortController(), response = deferred();
-    state.routeSignal = route.signal;
-    respond = () => response.promise;
-    const write = api("/tasks", { method: "POST", body: "{}", signal: caller.signal });
-    assert.equal(calls.at(-1).options.signal, caller.signal, "caller cancellation remains available for writes");
-    route.abort();
-    assert.equal(calls.at(-1).options.signal.aborted, false);
-    response.resolve(Response.json({ id: "submitted" }));
-    assert.deepEqual(await write, { id: "submitted" });
-  }
-  state.routeSignal = new AbortController().signal;
-
-  respond = () => Response.json({ error: "missing" }, { status: 404 });
-  assert.equal(await optionalAPI("/optional"), null);
-  respond = () => Response.json({ error: "unavailable" }, { status: 503 });
-  await assert.rejects(optionalAPI("/optional"), { status: 503 });
-
-  respond = () => Response.json(session("signed-in"));
-  state.session = null;
-  assert.equal(await ensureSession(), true);
-  assert.deepEqual(state.session, session("signed-in"));
-  accountStorage.setItem("probe", "signed-in");
-  assert.equal(storage.get("probe:account:signed-in"), "signed-in");
-  storage.set(nodeCardOrderKey, JSON.stringify(["hidden", "node-b", "node-a"]));
-  respond = () => Response.json([{ id: "node-a" }, { id: "node-b" }]);
-  await api("/agents");
-  await refreshNodeOrder();
-  assert.deepEqual(savedNodeOrder(), ["node-a", "node-b"], "server order takes precedence over unattributed browser cache");
-
-  // An idle-page poll may already be loading account order when navigation
-  // starts. The new page must be able to reuse that read across route aborts.
-  {
-    const route = new AbortController(), response = deferred();
-    state.routeSignal = route.signal;
-    orderRespond = (_url, options) => {
-      options.signal?.addEventListener("abort", () => response.reject(options.signal.reason), { once: true });
-      return response.promise;
-    };
-    const background = refreshNodeOrder();
-    await flush();
-    route.abort();
-    state.routeSignal = new AbortController().signal;
-    const navigation = refreshNodeOrder();
-    response.resolve(Response.json({ ids: ["node-b", "node-a"], revision: 2 }));
-    await Promise.all([background, navigation]);
-    assert.deepEqual(savedNodeOrder(), ["node-b", "node-a"], "navigation restores server order while an earlier page poll is pending");
-    orderRespond = () => Response.json({ ids: ["node-a", "node-b"], revision: 1 });
-  }
-
-  // A superseded response must neither log out the new account nor migrate
-  // node IDs into its storage, including a switch while JSON is being decoded.
-  for (const phase of ["success", "unauthorized", "body"]) {
+  for (const phase of ["success", "unauthorized", "body", "error-body", "network"]) {
     const response = deferred(), parsed = deferred();
-    state.session = session("previous");
-    setStorageAccount(state.session);
-    respond = () => phase === "body"
-      ? { ok: true, status: 200, json: () => parsed.promise }
+    let current = first;
+    respond = () => phase.endsWith("body")
+      ? { ok: phase === "body", status: phase === "body" ? 200 : 409, json: () => parsed.promise }
       : response.promise;
-    const read = api("/agents");
+    const read = accountRequest("/agents", {
+      session: first, isCurrent: () => current === first, onUnauthorized: message => logins.push(message),
+    });
     const rejected = assert.rejects(read, { name: "AbortError" });
     await flush();
-    const nextData = { draft: "keep" };
-    state.session = session(`next-${phase}`);
-    state.data = nextData;
-    setStorageAccount(state.session);
-    if (phase === "body") parsed.resolve([{ id: "node-a" }]);
-    else response.resolve(Response.json([{ id: "node-a" }], { status: phase === "unauthorized" ? 401 : 200 }));
+    current = session(`next-${phase}`);
+    if (phase.endsWith("body")) parsed.resolve({ private: "previous account" });
+    else if (phase === "network") response.reject(new Error("old private network diagnostic"));
+    else response.resolve(Response.json({ private: "previous account" }, { status: phase === "unauthorized" ? 401 : 200 }));
     await rejected;
-    assert.equal(state.data, nextData);
-    assert.equal(state.session.user_id, `next-${phase}`);
-    assert.equal(accountStorage.getItem(nodeCardOrderKey), null);
-    assert.deepEqual(logins, [], "stale unauthorized responses must not render login");
+    assert.equal(calls.at(-1).options.headers["X-QControlHub-CSRF"], first.csrf_token);
+    assert.deepEqual(logins, [], "late responses must not expire the replacement account");
   }
-
   respond = () => Response.json({ error: "invalid admin token" }, { status: 401 });
-  const beforeLogin = state.session;
-  await assert.rejects(api("/auth/login", { method: "POST", body: "{}" }), { status: 401 });
-  assert.equal(state.session, beforeLogin, "failed credentials must stay on the login flow");
-  assert.deepEqual(logins, []);
-  await assert.rejects(api("/settings"), { status: 401 });
-  assert.equal(state.session, null);
-  assert.deepEqual(state.data, {});
+  await assert.rejects(accountRequest("/auth/login", {
+    method: "POST", body: { username: "fixture" }, onUnauthorized: message => logins.push(message),
+  }), { status: 401 });
+  assert.deepEqual(logins, [], "failed credentials remain in the existing login flow");
+  await assert.rejects(accountRequest("/settings", { session: first, onUnauthorized: message => logins.push(message) }), { status: 401 });
   assert.equal(logins.length, 1);
-  accountStorage.setItem("probe", "signed-out");
-  assert.equal(storage.get("probe:account:signed-out"), "signed-out");
-
-  state.session = session("failed-session");
-  state.data = { stale: true };
-  respond = () => Response.json({ error: "forbidden" }, { status: 403 });
-  assert.equal(await ensureSession(), false);
-  assert.equal(state.session, null);
-  assert.deepEqual(state.data, {});
-
-  state.session = session("cache-a");
-  respond = () => Response.json({ account: state.session.user_id, sequence: calls.length });
-  scopedAPI.begin();
-  const startReads = calls.length;
-  const [first, second] = await Promise.all([api("/shared"), api("/shared")]);
-  assert.equal(calls.length, startReads + 1);
-  assert.notEqual(first, second);
-  scopedAPI.end();
-  await api("/shared");
-  assert.equal(calls.length, startReads + 2);
-  const overview = await readPanelData("overview");
-  assert.equal(await readPanelData("overview"), overview);
-  assert.notEqual(await readPanelData("overview", { live: true }), overview);
-  const settings = await readPanelData("settings");
-  assert.equal(await readPanelData("settings"), settings);
-  invalidatePanelReads("settings");
-  assert.notEqual(await readPanelData("settings"), settings);
-  state.session = session("cache-b");
-  assert.equal((await readPanelData("overview")).account, "cache-b");
-  assert.equal((await readPanelData("settings")).account, "cache-b", "panel caches must follow the current session scope");
-} finally {
-  setStorageAccount(null);
-  for (const [key, descriptor] of originals) {
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-    else delete globalThis[key];
+  assert.match(logins[0], /登录已失效/);
+  for (const status of [403, 404, 503]) {
+    respond = () => Response.json({ error: "fixture failure" }, { status });
+    await assert.rejects(accountRequest("/settings", { session: first }), { status });
   }
+  respond = () => Response.json({ account: "fresh", items: [] });
+  for (const path of ["/auth/session", "/settings", "/agents"]) {
+    const count = calls.length;
+    const [a, b] = await Promise.all([accountRequest(path, { session: first }), accountRequest(path, { session: first })]);
+    assert.equal(calls.length, count + 2, "native requests have no render-prefetch cache");
+    a.items.push("changed");
+    assert.deepEqual(b.items, [], "independent callers cannot mutate another response");
+  }
+  // Retired shell caching is still checked by requests_smoke and
+  // panel_reads_smoke. Account storage/migration/queued node ordering retain
+  // their own suites. Native navigation, pending writes and logout/login are
+  // exercised through startAnalytics by the existing motion browser modes.
+} finally {
+  globalThis.fetch = originalFetch;
 }
 
-console.log("Session API transport, cancellation, CSRF and account-isolation smoke passed");
+console.log("Native account transport, cancellation, CSRF and stale-response smoke passed");
