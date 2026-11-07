@@ -5,7 +5,7 @@ export function coreInstallBlockReason(agent, engine, can, { automatic = false, 
   const shared = agent.can_manage === false;
   if (!automatic && !shared && !can("host.manage", agent)) return "需要此节点的管理授权。";
   if (!(agent.supported_capabilities || agent.capabilities || []).includes(engine)) return "节点不支持此内核。";
-  if (!(agent.capabilities || []).includes(engine)) return "内核能力未启用，请由所有者在节点设置的 Agent 页开启。";
+  if (!(agent.capabilities || []).includes(engine)) return "内核能力未启用，请由所有者在内核设置中开启。";
   if (agent.runtime?.[engine]?.existing_config_unsupported_reason) return agent.runtime[engine].existing_config_unsupported_reason;
   if (agent.status !== "online") return "节点离线，上线后可提交安装任务。";
   if (pending) return "安装任务正在执行，请等待结果刷新。";

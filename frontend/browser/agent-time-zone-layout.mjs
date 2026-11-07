@@ -57,7 +57,7 @@ export async function testAgentTimeZoneLayout({ testAPI, mode }) {
   form.requestSubmit(); assert.equal(applies(), 1, '重复写入时区');
   agent.time_zone = { ...agent.time_zone, time_zone: 'Europe/Oslo', applied_time_zone: 'Europe/Oslo', status: 'applied', revision: agent.time_zone.revision + 1 };
   agent.capabilities = agent.capabilities.filter(engine => engine !== 'ss-rust'); agent.metrics.clock_sync = { status: 'synchronized', offset_milliseconds: -1.375 }; await refresh();
-  assert.ok(!dialog.querySelector('[data-engine-capability="ss-rust"]').checked); assert.equal(dialog.querySelector('[data-refresh-key="ss-rust"]'), null, '已移除内核仍显示运行状态'); finishSave(); testAPI.timeZoneSaveGate = null; await settle();
+  assert.ok(!dialog.querySelector('[data-engine-capability="ss-rust"]').checked); assert.equal(dialog.querySelector('[data-refresh-key="ss-rust"]').dataset.capabilityEnabled, '0', '关闭能力后未更新对应内核卡片'); finishSave(); testAPI.timeZoneSaveGate = null; await settle();
   assert.equal(JSON.stringify(testAPI.timeZoneSaves[0]), JSON.stringify({ agentID: 'alpha', mode: 'custom', time_zone: 'Pacific/Apia', revision: 4, retry: false }));
   assert.equal(input.value, 'Europe/Oslo', '迟到响应覆盖较新设置'); assert.equal(status(), '已生效'); assert.equal(Number(form.dataset.timezoneRevision), agent.time_zone.revision); assert.equal(clock().join('|'), '已同步|-1.375 ms');
 

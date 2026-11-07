@@ -291,7 +291,7 @@ strong, b { font-weight: 600; }
 .a-probe-toolbar > .a-field { width: min(100%,360px); flex: 0 1 360px; min-width: 0; }
 .a-probe-toolbar > .a-actions { flex-wrap: wrap; }
 .a-card-tools { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; padding: 10px var(--card-gutter); }
-.a-probe-toolbar .a-button[aria-pressed=true] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.a-probe-toolbar .a-button[aria-pressed=true], .a-dialog [data-settings-navigation] .a-button[aria-pressed=true] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 [data-node-drag] { flex: none; width: 44px; min-height: 44px; padding: 10px; border: 0; border-radius: 6px; background: transparent; color: var(--soft-ink); cursor: grab; touch-action: none; }
 .a-probe-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,340px),1fr)); gap: 20px; }
 .a-probe { min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -335,7 +335,7 @@ strong, b { font-weight: 600; }
 .a-probe-batch[hidden] { display: none; }
 .a-probe-choice { padding: 0; flex: none; display: grid; gap: 8px; justify-items: end; }
 /* List mode owns a compact row layout instead of reusing card contents. */
-.a-probe-list table { min-width: 1290px; table-layout: fixed; }
+.a-probe-list table { min-width: 1340px; table-layout: fixed; }
 .a-probe-list th { border-top: 0; }
 .a-probe-list td { padding-block: 18px; }
 .a-probe-list .a-table-scroll :is(th,td)[data-column="选择"] { width: 64px; min-width: 64px; padding-inline: 10px; text-align: center; }
@@ -348,7 +348,7 @@ strong, b { font-weight: 600; }
 .a-probe-cell > strong { font-size: 13px; font-weight: 500; }
 .a-probe-cell > .a-muted { font-size: 12px; white-space: nowrap; }
 .a-probe-list .a-probe-track { height: 4px; }
-.a-probe-rates { display: grid; gap: 7px; min-width: 110px; font-variant-numeric: tabular-nums; }
+.a-probe-rates { display: grid; gap: 7px; min-width: 180px; font-variant-numeric: tabular-nums; }
 .a-probe-rates > div { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; font-size: 12px; }
 .a-probe-rates .a-muted { font-size: 12px; }
 .a-probe-row-actions > .a-actions { flex-wrap: nowrap; gap: 4px; }
