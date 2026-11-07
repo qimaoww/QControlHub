@@ -58,8 +58,13 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(settingsContent, `await notificationSettings(ctx, refreshSettings, changed => { notificationDirty = changed; ctx.setDirty(panelDirty || notificationDirty); })`) {
-		t.Error("settings omits notification integration or combined draft protection")
+	if strings.Contains(settingsContent, "notificationSettings") || strings.Contains(settingsContent, "/settings/notifications") {
+		t.Error("panel settings must not load notification management")
+	}
+	for _, required := range []string{`["notifications", "通知", "activity", "settings.read"]`, `notifications: ['notifications', 'notificationsPage']`, `"settings-notify": "notifications"`} {
+		if !strings.Contains(appContent, required) {
+			t.Errorf("independent notification route missing %q", required)
+		}
 	}
 	notificationContent := string(mustReadFrontendFile(t, "analytics/notification-settings.js"))
 	for _, title := range []string{"通知渠道", "通知规则", "通知模板", "投递记录"} {

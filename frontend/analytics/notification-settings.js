@@ -13,7 +13,7 @@ const fields = {
 const statusNames = { pending: "等待投递", sending: "投递中", accepted: "平台已接受", failed: "投递失败", canceled: "已取消" };
 const id = () => crypto.randomUUID().replaceAll("-", "");
 
-export async function notificationSettings(ctx, refreshSettings, setDirty) {
+export async function notificationsPage(ctx) {
   const [resource, agents, policies] = await Promise.all([
     ctx.api("/settings/notifications"), ctx.can("agents.read") ? ctx.api("/agents") : [], ctx.can("traffic.read") ? ctx.api("/traffic-policies") : [],
   ]);
@@ -23,7 +23,7 @@ export async function notificationSettings(ctx, refreshSettings, setDirty) {
   const channelList = node("div"), ruleList = node("div");
   const records = table(["时间", "事件", "渠道", "状态", "尝试", "反馈"], [], { label: "通知投递", emptyText: "暂无投递记录" });
   let recordSequence = 0, templateDirty = false, modalDirty = false;
-  const syncDirty = () => { if (ctx.current()) setDirty(templateDirty || modalDirty); };
+  const syncDirty = () => { if (ctx.current()) ctx.setDirty(templateDirty || modalDirty); };
   function protectDraft(box, form) {
     const changed = () => { modalDirty = true; syncDirty(); };
     form.addEventListener("input", changed); form.addEventListener("change", changed);
@@ -149,7 +149,7 @@ export async function notificationSettings(ctx, refreshSettings, setDirty) {
         config.channels.find(c => c.id === d.channel_id)?.name || "已删除", badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn"), String(d.attempts), d.error || "—"]));
     } catch (error) { if (!ctx.current() || sequence !== recordSequence) return; if (error.status === 403) records.updateRows([]); feedback.textContent = `读取投递记录失败：${error.message}`; }
   }
-  ctx.onRefresh(() => Promise.all([refreshSettings(), loadRecords()]));
+  ctx.onRefresh(loadRecords);
   draw(); await loadRecords();
   return stack(
     section("通知渠道", node("div", { className: "a-card-body a-stack" }, feedback, channelList), writable && button("添加渠道", () => editChannel())),

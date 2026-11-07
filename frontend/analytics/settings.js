@@ -1,4 +1,3 @@
-import { notificationSettings } from "./notification-settings.js";
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
@@ -31,7 +30,7 @@ export async function settingsPage(ctx) {
   const numeric = numericFields.map(([name, label, options]) => input(name, label, { options }));
   const saveState = muted("已保存");
   saveState.setAttribute("role", "status");
-  let baseline, phase = "idle", panelDirty = false, notificationDirty = false;
+  let baseline, phase = "idle";
   const content = [
     section("基础设置", node("div", { className: "a-card-body a-form-grid" },
       input("panel_name", "面板名称", { required: true, maxlength: 40 }),
@@ -88,7 +87,7 @@ export async function settingsPage(ctx) {
   function sync() {
     if (!ctx.current()) return;
     const changed = writable && snapshot() !== baseline;
-    panelDirty = changed; ctx.setDirty(panelDirty || notificationDirty);
+    ctx.setDirty(changed);
     submit.disabled = !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
     saveState.textContent = phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
     const heartbeat = form.elements.agent_heartbeat_interval_seconds, offline = form.elements.agent_offline_threshold_seconds;
@@ -156,7 +155,8 @@ export async function settingsPage(ctx) {
       ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
     updateResult, actions(check)))));
   if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
-  return stack(form, refreshState, await notificationSettings(ctx, refreshSettings, changed => { notificationDirty = changed; ctx.setDirty(panelDirty || notificationDirty); }), extra);
+  ctx.onRefresh(refreshSettings);
+  return stack(form, refreshState, extra);
 }
 
 async function apiKeys(ctx) {

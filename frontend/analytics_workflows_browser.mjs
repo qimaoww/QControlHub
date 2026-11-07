@@ -303,7 +303,10 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   record(`${mode}: automatic query filters, removed confirmation controls, delayed response isolation and navigation with pending debounce passed`);
 
   await evaluate(page,"location.hash='#settings'");
-  await wait(page,"!!document.querySelector('#panel-settings-form') && [...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道') && !document.querySelector('[aria-busy=true]')");
+  await wait(page,"!!document.querySelector('#panel-settings-form') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(!await evaluate(page,"[...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道')"),'panel settings do not contain notifications');
+  await evaluate(page,"location.hash='#notifications'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='通知' && [...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道') && !document.querySelector('[aria-busy=true]')");
   await click('添加渠道','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] select[name=type]')");
   for (const [type, field] of [['telegram','chat_id'],['smtp','host'],['bark','device_key'],['ntfy','topic'],['gotify','token'],['webhook','url']]) {

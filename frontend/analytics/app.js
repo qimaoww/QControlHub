@@ -26,6 +26,7 @@ const destinations = [
     ["tasks", "任务", "list", "tasks.read"], ["core-logs", "日志", "list", "core-logs.read"],
     ["client-connections", "客户端连接", "activity", "core-logs.read"],
     ["traffic", "流量", "activity", "traffic.read"],
+    ["notifications", "通知", "activity", "settings.read"],
     ["system-bbr", "TCP 调优", "settings", "system-bbr.read"], ["ip-quality", "IP 质量", "activity", "agents.read"],
   ]],
   ["面板", [
@@ -37,6 +38,7 @@ const pageModules = {
   dashboard: ['dashboard', 'dashboardPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
   'my-quota': ['quota', 'quotaPage'], 'archive-config': ['archives', 'archivePage'], themes: ['themes', 'themePage'],
   certificates: ['certificates', 'certificatesPage'], 'ip-quality': ['ip-quality', 'ipQualityPage'], users: ['users', 'usersPage'],
+  notifications: ['notifications', 'notificationsPage'],
   traffic: ['traffic', 'trafficPage'], settings: ['settings', 'settingsPage'], 'substore-sync': ['substore-sync', 'substorePage'],
   'live-config': ['configs', 'liveConfigPage'], 'system-bbr': ['system-bbr', 'tcpPage'],
   'core-logs': ['core-logs', 'logsPage'], 'client-connections': ['client-connections', 'connectionsPage'], 'client-access': ['client-access', 'clientAccessPage'],
@@ -46,6 +48,7 @@ const routeModules = createRouteModuleLoader({
   dashboard: () => import('./operations.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
   agents: () => import('./nodes.js'), archives: () => import('./configs.js'), themes: () => import('./themes.js'),
   certificates: () => import('./certificates.js'), 'ip-quality': () => import('./ip-quality.js'), users: () => import('./users.js'),
+  notifications: () => import('./notification-settings.js'),
   traffic: () => import('./traffic.js'), settings: () => import('./settings.js'), 'substore-sync': () => import('./substore.js'),
   configs: () => import('./live-config.js'), 'system-bbr': () => import('./tcp.js'),
   'core-logs': () => import('./observability.js'), 'client-connections': () => import('./observability.js'), 'client-access': () => import('./client-access.js'),
