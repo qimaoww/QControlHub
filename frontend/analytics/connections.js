@@ -26,7 +26,7 @@ export async function connectionsPage(ctx) {
   const next = button("下一页", () => { if (nextCursor) void load({ target: nextCursor, history: [...cursors, cursor] }); });
   const page = muted("");
   const controls = node("form", { className: "a-stack a-filter-form" }, node("div", { className: "a-form-grid" },
-    field("节点", "agent_id", filters.agent_id, { options: [["", "全部节点"]] }),
+    field("节点", "agent_id", filters.agent_id, { options: [["", "全部节点"], ...(filters.agent_id ? [[filters.agent_id, "正在读取…"]] : [])] }),
     field("日期", "date", filters.date, { type: "date", required: true }),
     field("查询范围", "period", filters.period, { options: [["day", "当天"], ["month", "所在月份"]] }),
     field("客户端来源 IP", "client_ip", filters.client_ip, { type: "search" }),
@@ -44,9 +44,11 @@ export async function connectionsPage(ctx) {
   function updateSources() {
     const select = controls.elements.agent_id, value = filters.agent_id || "";
     const ordered = orderNodesBySavedOrder(sources.map(source => ({ ...source, id: source.agent_id })), nodeOrder);
-    const signature = JSON.stringify(ordered.map(source => [source.agent_id, source.agent_name]));
+    const options = ordered.map(source => [source.agent_id, source.agent_name || source.agent_id]);
+    if (value && !ordered.some(source => source.agent_id === value)) options.push([value, "所选节点不可用"]);
+    const signature = JSON.stringify(options);
     if (select.dataset.options !== signature) {
-      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部节点"), ...ordered.map(source => node("option", { value: source.agent_id }, source.agent_name || source.agent_id)));
+      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部节点"), ...options.map(([id, name]) => node("option", { value: id }, name)));
       select.dataset.options = signature;
     }
     select.value = value;
@@ -104,7 +106,7 @@ export async function connectionsPage(ctx) {
       cursor = target; cursors = history; nextCursor = result.next_cursor || "";
       if (!filters.agent_id) sources = result.sources || [];
       else sources = sources.length ? sources.map(source => result.sources?.find(value => value.agent_id === source.agent_id) || source) : result.sources || [];
-      updateSources(); status.textContent = "已读取";
+      status.textContent = "已读取";
       if ((!cached?.locationsAttempted || force) && result.records?.some(record => !record.location?.non_public && (!record.location?.country_code || record.location.country_code === "CN" && !record.location.province))) {
         const locationQuery = new URLSearchParams(params);
         if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);
@@ -117,11 +119,11 @@ export async function connectionsPage(ctx) {
       }
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;
-      if ([401, 403, 404].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; updateSources(); }
+      if ([401, 403, 404].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; }
       error.textContent = redactDiagnostic(failure.message);
       status.textContent = result && !result.preview ? "更新失败，保留上次结果" : "读取失败，请重试";
     } finally {
-      if (current()) { loading = false; paint(); }
+      if (current()) { loading = false; updateSources(); paint(); }
     }
   }
   function changed() {

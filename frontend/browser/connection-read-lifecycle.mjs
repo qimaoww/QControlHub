@@ -95,6 +95,23 @@ export async function testConnectionReadLifecycle() {
     session = { role: 'admin', user_id: 'another-connection-account' }; records = []; historyGate = null; await boot();
     oldGate.resolve(); await delay(30);
     assert.ok(oldRequest.signal.aborted && rows().length === 0, 'late previous-account history populated current account');
+    session = { role: 'admin', user_id: 'restored-connection-target' };
+    records = [{ ...base, id: 1 }, { ...base, id: 2, agent_id: 'bravo', agent_name: 'Bravo' }];
+    geography = 'complete'; await boot();
+    await changedRead('agent_id', 'alpha');
+    location.hash = '#themes';
+    await waitFor(() => document.title.startsWith('主题') && !form(), 'connection route did not leave');
+    clockOffset = 31000; historyGate = deferred();
+    const restoredGate = historyGate, beforeRestore = historyReads();
+    location.hash = '#client-connections';
+    await waitFor(() => form() && historyReads() > beforeRestore, 'restored connection query did not start');
+    assert.equal(form().elements.agent_id.value, 'alpha', 'pending node choices lost the restored target');
+    change('period', 'month');
+    await waitFor(() => historyReads() > beforeRestore + 1, 'pending restored query could not change date range');
+    assert.equal(calls.filter(call => !call.locationOnly).at(-1).params.get('agent_id'), 'alpha', 'editing another filter widened the restored target');
+    restoredGate.resolve(); historyGate = null; await waitFor(ready, 'restored target did not settle');
+    clockOffset = 0; change('period', 'day'); await waitFor(ready, 'restored day cache did not settle');
+    change('agent_id', ''); await waitFor(() => ready() && rows().length === 2, 'restored all-node cache did not settle');
   } finally { window.dispatchEvent(new Event('pagehide')); globalThis.fetch = nativeFetch; Date.now = nativeNow; }
 }
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
