@@ -333,7 +333,7 @@ strong, b { font-weight: 600; }
 .a-probe-footer .a-button { min-height: 34px; padding: 6px 10px; }
 .a-probe-batch { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); flex-wrap: wrap; }
 .a-probe-batch[hidden] { display: none; }
-.a-probe-choice { padding: 0 20px 16px; }
+.a-probe-choice { padding: 0; flex: none; display: grid; gap: 8px; justify-items: end; }
 /* List mode owns a compact row layout instead of reusing card contents. */
 .a-probe-list table { min-width: 1290px; table-layout: fixed; }
 .a-probe-list th { border-top: 0; }
@@ -577,7 +577,7 @@ strong, b { font-weight: 600; }
 .a-region-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; max-height: min(360px, 46dvh); overflow: auto; padding: 3px; scrollbar-width: thin; }
 .a-region-option.a-button { justify-content: flex-start; gap: 10px; min-height: 48px; padding: 8px 10px; white-space: normal; text-align: start; font-weight: 400; }
 .a-region-option > span:not(.a-probe-flag,.a-muted) { flex: 1; }
-.a-region-option[aria-pressed=true] { background: var(--tint); border-color: var(--ink); }
+.a-region-option[aria-pressed=true], .a-probe[data-selected=true] { background: var(--tint); border-color: var(--ink); }
 .a-region-option .a-muted { font-size: var(--text-caption); }
 .a-region-options > .a-muted { grid-column: 1 / -1; padding: 8px; }
 @media (max-width: 40rem) { .a-region-options { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 40dvh; } }

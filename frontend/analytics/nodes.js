@@ -84,6 +84,8 @@ export async function nodesPage(ctx) {
       const input = card.querySelector('input[type=checkbox]');
       if (input) {
         input.checked = selected.has(card.dataset.agentId);
+        card.dataset.selected = String(input.checked);
+        input.nextElementSibling.textContent = input.checked ? '已选择' : '选择';
         card.setAttribute('aria-label', `${agents.find(agent => agent.id === card.dataset.agentId)?.name || ''}，${input.checked ? '已选择' : '未选择'}`);
       }
     });
@@ -204,12 +206,12 @@ export async function nodesPage(ctx) {
     if (!live) drawBatch();
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
-      node('article',{className:'a-card a-probe','data-agent-id':agent.id, tabindex: selecting && selectable(agent) ? 0 : null, role: selecting ? 'group' : null, 'aria-label': selecting ? `${agent.name}，${selected.has(agent.id) ? '已选择' : '未选择'}` : null},
-        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
-        selecting&&node('div',{className:'a-probe-choice'},choice(agent)),
+      node('article',{className:'a-card a-probe','data-agent-id':agent.id, 'data-selected': selecting ? String(selected.has(agent.id)) : null, tabindex: selecting && selectable(agent) ? 0 : null, role: selecting ? 'group' : null, 'aria-label': selecting ? `${agent.name}，${selected.has(agent.id) ? '已选择' : '未选择'}` : null},
+        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),
+          selecting ? node('div',{className:'a-probe-choice'},status(agent.status),choice(agent)) : status(agent.status)),
         node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
         node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
-        node('footer',{className:'a-probe-footer'},controls(agent)))));
+        !selecting&&node('footer',{className:'a-probe-footer'},controls(agent)))));
       if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
     }
     else{
@@ -243,7 +245,10 @@ export async function nodesPage(ctx) {
       }
     }
     results.querySelectorAll('input[type=checkbox]').forEach(input => {
-      if (input.name.startsWith('select:')) input.checked = selected.has(input.name.slice(7));
+      if (input.name.startsWith('select:')) {
+        input.checked = selected.has(input.name.slice(7));
+        input.nextElementSibling.textContent = input.checked ? '已选择' : '选择';
+      }
     });
   }
 

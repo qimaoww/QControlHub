@@ -14,9 +14,11 @@ export async function openNativeBatch(fixture) {
     card.querySelector('label').click(); assert.ok(choice.checked, '选择框标签重复切换');
     card.focus(); card.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     assert.ok(!choice.checked, '空格键未取消卡片选择');
+    assert.ok(choice.closest('.a-probe-head'), '选择框未整合进卡片标题栏');
+    assert.equal(card.querySelector('.a-probe-footer'), null, '多选模式仍保留普通操作栏');
     const dialogs = document.querySelectorAll('dialog[open]').length;
-    card.querySelector('.a-probe-footer button').click();
-    assert.ok(choice.checked, '多选模式下卡片操作区不能选择');
+    card.querySelector('.a-probe-meta').click();
+    assert.ok(choice.checked && card.dataset.selected === 'true', '多选模式下卡片底部不能选择');
     assert.equal(document.querySelectorAll('dialog[open]').length, dialogs, '多选点击误打开设置');
     choice.click(); assert.ok(!choice.checked, '直接点击选择框重复切换');
   }

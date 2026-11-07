@@ -138,7 +138,12 @@ export async function testNativePopups(fixture,preview){
   const multiple=node('select',{multiple:true},node('option',{value:'a'},'a'),node('option',{value:'b'},'b'),node('option',{value:'c'},'c'));
   const draft=field('文本','draft','',{multiline:4}),close=button('关闭',()=>box.close());
   const box=node('dialog',{className:'a-dialog'},node('div',{className:'a-dialog-head'},node('h2',{},'正在编辑')),node('div',{className:'a-dialog-body'},stack(select,multiple,draft,close)));
-  document.body.append(box);openDialog(box);select.querySelector('select').value='two';multiple.options[1].selected=multiple.options[2].selected=true;
+  document.body.append(box);openDialog(box);
+  if (!reduced) {
+    assert.ok(box.getAnimations().some(animation => animation.id === 'analytics-dialog'), '弹窗首次显示前未准备入场状态');
+    assert.ok(Number(getComputedStyle(box).opacity) < .05, '首次打开弹窗先完整显示再淡入');
+  }
+  select.querySelector('select').value='two';multiple.options[1].selected=multiple.options[2].selected=true;
   const editor=draft.querySelector('textarea');editor.value=Array.from({length:40},(_,i)=>`草稿 ${i}`).join('\n');editor.scrollTop=35;
   const scroll=editor.scrollTop;await frame();box.close();await frame();
   if(!reduced){const tail=await waitFor(()=>document.querySelector('.a-modal-tail'),'弹窗退出图层缺失');

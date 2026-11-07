@@ -249,13 +249,12 @@ export function createAnalyticsMotion(scope) {
     if (event.newState === "open") {
       clearTails();
       seenMessages.delete(element);
-      scope.frame(() => {
-        if (!element.open) return;
-        const drawer = element.classList.contains("a-drawer");
-        play(element, drawer ? [{ translate: "-100% 0" }, { translate: "0 0" }] :
-          [{ opacity: 0, translate: "0 12px", scale: ".975" }, { opacity: 1, translate: "0 0", scale: "1" }],
-        { name: drawer ? "menu" : "dialog", duration: drawer ? 360 : 300 });
-      });
+      // Prepare the first frame before showModal can paint the open surface.
+      // Deferring this makes the complete form flash before its fade-in starts.
+      const drawer = element.classList.contains("a-drawer");
+      play(element, drawer ? [{ translate: "-100% 0" }, { translate: "0 0" }] :
+        [{ opacity: 0, translate: "0 12px", scale: ".975" }, { opacity: 1, translate: "0 0", scale: "1" }],
+      { name: drawer ? "menu" : "dialog", duration: drawer ? 360 : 300 });
     } else { retire(element, { modal: true }); stop(element); }
   }, { capture: true });
   scope.listen(document, "pointerover", event => {
