@@ -120,7 +120,12 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		// Summary is independent of pagination and counts distinct observed tuples,
 		// not the number of minute rows or inferred authenticated sessions.
 		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
-		if err := tx.QueryRow(ctx, `SELECT count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where, args...).Scan(&result.Flows, &result.IPs); err != nil {
+		// Deduplicate scalar columns before counting. A DISTINCT composite row
+		// forces expensive record comparisons and a sort over every minute row;
+		// this form also lets PostgreSQL use partial hash aggregation. IPs remain
+		// distinct across the complete scope, independently of the page groups.
+		columns := `c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port`
+		if err := tx.QueryRow(ctx, `SELECT count(*),count(DISTINCT client_ip) FROM (SELECT DISTINCT `+columns+from+where+`) AS flows`, args...).Scan(&result.Flows, &result.IPs); err != nil {
 			return result, err
 		}
 		if !q.SkipTimeline {

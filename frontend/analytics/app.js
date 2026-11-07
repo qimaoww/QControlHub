@@ -364,6 +364,12 @@ export function startAnalytics({ app, session }) {
         stage.replaceChildren(notice("页面不存在。"));
         return;
       }
+      // Ordering is independent of the page module and appearance settings,
+      // but must be known before the first connection query creates a cursor.
+      if (route === "client-connections") {
+        context.connectionNodeOrder = context.api("/preferences/node-order");
+        void context.connectionNodeOrder.catch(() => {});
+      }
       const [module] = await Promise.all([
         routeModules.load(descriptor[0]),
         can('settings.read') && !state.data.settings ? context.api('/settings') : null,
