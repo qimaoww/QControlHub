@@ -160,6 +160,7 @@ export async function createConfigFixture(engine, options = {}) {
       return {config:saved, task};
     }
     if (path.endsWith("/plans")) {
+      (test.planRequests ||= []).push({ path, input: structuredClone(body) });
       if (test.planGate) await test.planGate;
       if (test.planError) throw Object.assign(new Error("协议方案读取失败"), {status:503});
       const entry = entries.find(item => item.protocol.key === body.protocol);

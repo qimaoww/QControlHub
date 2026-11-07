@@ -16,6 +16,7 @@ async function field(key){
 }
 const protectedStructure=test=>{const root=JSON.parse(test.saved().content);return JSON.stringify(Object.fromEntries(['inbounds','outbounds','listeners','servers'].filter(key=>key in root).map(key=>[key,root[key]])));};
 export async function testCommonConfigRuntime(){
+  await testCommonReadRecovery();
   await testSSRustOverrides();
   for(const engine of ['xray','sing-box','mihomo','ss-rust']){
     const test=await fixture(engine),structure=protectedStructure(test);
@@ -68,6 +69,45 @@ export async function testCommonConfigRuntime(){
   const isolated=await fixture('xray');await operation(isolated,'modify');const key=form().elements.key.value;form().elements.fragment.value='{"level":"draft-only"}';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));form().elements.mutation.value='delete';form().elements.mutation.dispatchEvent(new Event('change',{bubbles:true}));await field(key);assert(form().elements.fragment.readOnly&&!form().elements.fragment.value.includes('draft-only'),'modify draft leaked into delete preview');isolated.dispose();
   const conflict=await fixture('xray');await operation(conflict,'modify');form().elements.fragment.value='{"level":"keep-this-draft"}';conflict.fail=true;conflict.confirm=true;conflict.submit('deploy');await waitFor(()=>form()?.textContent.includes('草稿已保留'),'common conflict lost draft feedback');assert(form().elements.fragment.value.includes('keep-this-draft')&&form().querySelector('button[type=submit]').disabled,'common conflict permits stale resubmit');conflict.dispose();
   const late=await fixture('xray');let release;late.fieldGate=new Promise(resolve=>{release=resolve;});late.common();await waitFor(form,'deferred common form missing');late.dispose();release();await pause();assert(!dialog()&&!late.writes.length,'late common field escaped disposed session');
+}
+
+async function testCommonReadRecovery(){
+  for(const shared of [false,true]){
+    const test=await fixture('xray',{shared});
+    let release;
+    try{
+      await operation(test,'modify');
+      await field(test.primaryField);
+      const draft=JSON.stringify({message:"private draft $&$`$'"});
+      const editor=form().elements.fragment;
+      editor.value=draft;editor.dispatchEvent(new Event('input',{bubbles:true}));
+      test.fieldGate=new Promise(resolve=>{release=resolve;});
+      const before=test.calls.length;
+      form().elements.key.value=test.secondaryField;form().elements.key.dispatchEvent(new Event('change',{bubbles:true}));
+      await waitFor(()=>test.calls.slice(before).some(call=>call.path.includes(`/fields/${test.secondaryField}`)),'deferred field read did not start');
+      test.fieldGate=null;
+      await field(test.primaryField);
+      assert(form().elements.fragment===editor&&editor.value===draft,'rapid field switching replaced the editor or lost the draft');
+      editor.focus();editor.setSelectionRange(2,7);
+      release();await pause();
+      assert(form().elements.key.value===test.primaryField&&editor.value===draft,'late field read overwrote the selected field');
+      assert(document.activeElement===editor&&editor.selectionStart===2&&editor.selectionEnd===7,'late read reset draft focus or selection');
+      test.fieldFailure=true;
+      await field(test.secondaryField);
+      assert(form().textContent.includes('配置项读取失败')&&form().querySelector('[type=submit]').disabled,'failed read hid the error or permitted a write');
+      test.fieldFailure=false;
+      await field(test.primaryField);
+      assert(editor.value===draft&&!form().querySelector('[type=submit]').disabled,'retry discarded the cached draft or kept the editor locked');
+      await field(test.secondaryField);
+      assert(!form().textContent.includes('配置项读取失败')&&!form().querySelector('[type=submit]').disabled,'failed field read was pinned instead of retried');
+      assert(!test.writes.length,'reading or switching fields submitted configuration');
+    }finally{release?.();test.fieldGate=null;test.dispose();}
+    const replacement=await fixture('xray',{shared});
+    try{
+      await operation(replacement,'modify');await field(replacement.primaryField);
+      assert(!form().elements.fragment.value.includes('private draft'),'retired workspace draft leaked into a new workspace');
+    }finally{replacement.dispose();}
+  }
 }
 
 async function testSSRustOverrides(){

@@ -274,9 +274,14 @@ async function driveEnrollmentKeys(send) {
     }
     const request = result.result?.value;
     if (!request) return;
-    const key = { key: request.key, code: request.key, windowsVirtualKeyCode: request.key === 'Tab' ? 9 : 27, modifiers: request.shift ? 8 : 0 };
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    if (request.key === 'click') {
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: request.x, y: request.y, button: 'left', buttons: 1, clickCount: 1 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: request.x, y: request.y, button: 'left', buttons: 0, clickCount: 1 });
+    } else {
+      const key = { key: request.key, code: request.key, windowsVirtualKeyCode: request.key === 'Tab' ? 9 : 27, modifiers: request.shift ? 8 : 0 };
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    }
     await send('Runtime.evaluate', { expression: 'window.__enrollmentKey = null' });
   }
 }

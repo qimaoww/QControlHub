@@ -4,6 +4,7 @@ import { readServerPlanInput } from "../modules/inbound-options-model.js";
 
 const certificate = {id:"crt_fixture",name:"原生 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"};
 export async function testManagedTLSRuntime() {
+  await testNativeFieldRegeneration();
   for (const shared of [false,true]) {
     const test = await createPresetEditor("sing-box", {protocol:"vless-ws-tls", shared, certificates:[certificate]});
     const {form,control,edit,open,save}=test;
@@ -82,4 +83,50 @@ export async function testManagedTLSRuntime() {
     const saved=await test.save();
     assert(saved.tls_mode === "nginx" && !saved.panel_certificate_id,"delayed certificate binding leaked into proxy payload");
   } finally { release();test.dispose(); }
+}
+
+async function testNativeFieldRegeneration() {
+  for (const shared of [false, true]) {
+    const test = await createPresetEditor('sing-box', { protocol: 'vless-ws-tls', shared, certificates: [certificate] });
+    const { control, form, edit } = test;
+    const plans = () => test.calls.filter(call => call.path.endsWith('/plans'));
+    const fieldButton = name => control(name).closest('.a-field').querySelector('[aria-label^="生成"]');
+    try {
+      await test.open('add');
+      edit('tls_server_name', 'unsaved.example.test'); edit('tls_mode', 'native'); edit('listen', '127.0.0.1');
+      edit('certificate_path', '/unsaved/certificate.pem'); edit('private_key_path', '/unsaved/private-key.pem');
+      edit('tag', 'unsaved-tag'); edit('port', '24443');
+      const credential = control('credential').value;
+      const target = control('port'), before = plans().length;
+      fieldButton('port').click();
+      await waitFor(() => plans().length === before + 1 && !test.root.hasAttribute('aria-busy'), 'native field generation did not finish');
+      const request = test.planRequests.at(-1), payload = request.input;
+      assert(request.path === '/agents/node/configs/sing-box/plans' && payload.protocol === 'vless-ws-tls', 'generation changed selected node or core');
+      assert(payload.input.listen === '127.0.0.1' && payload.input.certificate_path === '/unsaved/certificate.pem' && payload.input.tls_server_name === 'unsaved.example.test', 'generation lost current unsaved inputs');
+      assert(control('port') === target && target.value !== '24443' && control('credential').value === credential && control('tag').value === 'unsaved-tag', 'field generation replaced the form or unrelated credentials');
+      assert(control('tls_server_name').value === 'unsaved.example.test' && control('listen').value === '127.0.0.1', 'field generation discarded routing choices');
+      const port = target.value;
+      test.planError = true; const failed = plans().length;
+      fieldButton('credential').click();
+      await waitFor(() => plans().length === failed + 1 && !test.root.hasAttribute('aria-busy'), 'failed generation did not unlock');
+      assert(control('credential').value === credential && target.value === port && document.body.textContent.includes('协议方案读取失败'), 'failed generation lost source or hid error');
+      test.planError = false;
+      let release; test.planGate = new Promise(resolve => { release = resolve; });
+      const count = plans().length;
+      fieldButton('credential').click();
+      await waitFor(() => plans().length === count + 1 && test.root.hasAttribute('aria-busy'), 'generation did not enter pending state');
+      fieldButton('port').click(); form().requestSubmit();
+      assert(plans().length === count + 1 && !test.writes.length, 'pending generation allowed another generate or save');
+      release(); test.planGate = null;
+      await waitFor(() => !test.root.hasAttribute('aria-busy'), 'generation did not release global lock');
+      assert(target.value === port && control('tag').value === 'unsaved-tag', 'credential generation changed tag or port');
+      let releaseLate; test.planGate = new Promise(resolve => { releaseLate = resolve; });
+      const lateCount = plans().length, savedCredential = control('credential').value;
+      fieldButton('credential').click();
+      await waitFor(() => plans().length === lateCount + 1, 'late generation did not start');
+      window.dispatchEvent(new Event('pagehide')); releaseLate(); test.planGate = null;
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert(control('credential').value === savedCredential && !test.writes.length, 'retired account/page applied generation or wrote configuration');
+    } finally { test.dispose(); }
+  }
 }

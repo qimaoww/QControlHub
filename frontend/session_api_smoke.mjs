@@ -96,10 +96,31 @@ try {
     a.items.push("changed");
     assert.deepEqual(b.items, [], "independent callers cannot mutate another response");
   }
-  // Retired shell caching is still checked by requests_smoke and
-  // panel_reads_smoke. Account storage/migration/queued node ordering retain
-  // their own suites. Native navigation, pending writes and logout/login are
-  // exercised through startAnalytics by the existing motion browser modes.
+  // Native requests always read fresh state. A read made during a write
+  // cannot become a reusable pre-commit baseline, even if its reply is lost.
+  for (const fails of [false, true]) {
+    let version = 1;
+    const committed = deferred();
+    respond = (_url, options) => options.method === 'PUT' ? committed.promise : Response.json({ version });
+    const write = accountRequest('/settings', { session: first, method: 'PUT', body: { name: 'new' } });
+    assert.equal((await accountRequest('/settings', { session: first })).version, 1);
+    version = 2;
+    if (fails) { const rejected = assert.rejects(write, error => /无法连接服务器/.test(error.message) && /response lost/.test(error.cause?.message)); committed.reject(new Error('response lost after save')); await rejected; }
+    else { committed.resolve(Response.json({ version })); await write; }
+    assert.equal((await accountRequest('/settings', { session: first })).version, 2, 'write completion reused an in-flight pre-commit snapshot');
+  }
+  let failures = true;
+  respond = () => failures ? Response.json({ error: 'temporary read failure' }, { status: 503 }) : Response.json({ recovered: true });
+  await assert.rejects(accountRequest('/settings', { session: first }), { status: 503 });
+  failures = false;
+  assert.equal((await accountRequest('/settings', { session: first })).recovered, true, 'failed settings read pinned a cached error');
+  for (const identity of [first, session('replacement')]) {
+    respond = (_url, options) => Response.json({ account: options.headers['X-QControlHub-CSRF'] });
+    assert.equal((await accountRequest('/settings', { session: identity })).account, identity.csrf_token, 'replacement account inherited shell settings');
+  }
+  // Account order/storage and actual navigation/pending-write guards retain
+  // their existing model and motion-browser suites.
+
 } finally {
   globalThis.fetch = originalFetch;
 }

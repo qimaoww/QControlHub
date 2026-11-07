@@ -1,5 +1,6 @@
 import { assert, waitFor, delay } from './assertions.mjs';
 import { startNativeNodes } from './agent-detail-actions.mjs';
+import { nodeRegionFlag } from '../analytics/node-region.js';
 
 export async function testRegionRuntime({ testAPI }) {
   await startNativeNodes();
@@ -87,4 +88,45 @@ export async function testRegionRuntime({ testAPI }) {
     await new Promise(() => {});
   }
   await close(false);
+  await testNativeRegionResolution();
+}
+
+async function testNativeRegionResolution() {
+  const requests = [], state = { data: {} };
+  let current = true, allowed = true, fail = false;
+  const ctx = { state, current: () => current, can: () => allowed, api: async path => {
+    requests.push(path);
+    if (fail) throw new Error('temporary region failure');
+    return { country_code: 'US' };
+  } };
+  const code = flag => flag.dataset.regionCode || '';
+  const agents = Array.from({ length: 40 }, (_, index) => ({ id: `inline-${index}`, region_code: '', metrics: { public_ipv4: `8.8.8.${index + 1}` } }));
+  for (const agent of agents) assert.equal(code(nodeRegionFlag(ctx, agent)), '', '未解析的内联地区误报旗帜');
+  assert.equal(requests.length, 0, '内联空地区触发逐节点查询');
+  nodeRegionFlag(ctx, agents[0]); nodeRegionFlag(ctx, { ...agents[0] });
+  assert.equal(requests.length, 0, '重建节点重复查询内联结果');
+  assert.equal(code(nodeRegionFlag(ctx, { ...agents[0], region_code: 'US' })), 'US', '新内联结果未替换未知地区');
+  assert.equal(code(nodeRegionFlag(ctx, { ...agents[0], region_code: 'US', labels: { region_code: 'JP' } })), 'JP', '自动地区覆盖手动旗帜');
+  const legacy = { id: 'legacy', metrics: { public_ipv4: '9.9.9.9' } };
+  const cached = nodeRegionFlag(ctx, legacy); document.body.append(cached);
+  await waitFor(() => code(cached) === 'US', '缺失地区字段未使用兼容查询');
+  assert.equal(requests.join(','), '/agents/legacy/region', '兼容查询目标不正确');
+  assert.equal(code(nodeRegionFlag(ctx, legacy)), 'US', '重建丢失已解析兼容结果');
+  assert.equal(requests.length, 1, '重建重复查询兼容结果');
+  assert.equal(code(nodeRegionFlag(ctx, { ...legacy, region_code: '' })), '', '当前空结果继承旧兼容地区');
+  assert.equal(code(nodeRegionFlag(ctx, legacy)), 'US', '空字段污染独立兼容缓存');
+  allowed = false;
+  assert.equal(code(nodeRegionFlag(ctx, { id: 'denied' })), '', '无节点读取权限显示兼容结果');
+  assert.equal(requests.length, 1, '无节点读取权限发起兼容查询'); allowed = true;
+  state.data = {};
+  nodeRegionFlag(ctx, legacy); await delay(0);
+  assert.equal(requests.length, 2, '新账号继承旧地区缓存');
+  fail = true; const failed = { id: 'retry-region' };
+  nodeRegionFlag(ctx, failed); await delay(0); fail = false;
+  const retry = nodeRegionFlag(ctx, failed); document.body.append(retry);
+  await waitFor(() => code(retry) === 'US', '地区查询失败被永久缓存');
+  assert.equal(requests.filter(path => path === '/agents/retry-region/region').length, 2, '地区重试次数错误');
+  current = false; const late = nodeRegionFlag(ctx, { id: 'late-region' }); document.body.append(late);
+  await delay(0); assert.equal(code(late), '', '旧页面响应仍写入旗帜');
+  cached.remove(); retry.remove(); late.remove();
 }

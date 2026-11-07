@@ -112,6 +112,60 @@ export async function testEnrollmentLayoutRuntime({ mode, testAPI }) {
   assert.equal(testAPI.calls.filter(call => call.path === '/enrollment-tokens/enr-alpha/command').length, reads + 3, '重复查看未使用读取接口');
   assert.equal(testAPI.calls.filter(call => call.method === 'POST' && call.path === '/enrollment-tokens').length, created, '查看已有命令创建新凭据');
   assert.equal(document.activeElement, launcher, '关闭命令未恢复添加入口焦点');
+  const savedRecords = structuredClone(testAPI.enrollmentRecords);
+  const agentsBefore = JSON.stringify(testAPI.agents);
+  const deletionCount = () => testAPI.calls.filter(call => call.method === 'DELETE' && call.path === '/enrollment-tokens/enr-alpha').length;
+  const nodeDeletesBefore = testAPI.calls.filter(call => call.method === 'DELETE' && call.path.startsWith('/agents/')).length;
+  const tasksBefore = testAPI.calls.filter(call => call.method === 'POST' && call.path === '/tasks').length;
+  box = await open();
+  const remove = button('删除记录', box);
+  const deletesBefore = deletionCount();
+  const deletionConfirmation = async () => {
+    remove.scrollIntoView({ block: 'nearest' });
+    if (!preview) {
+      const rect = remove.getBoundingClientRect();
+      window.__enrollmentKey = { key: 'click', x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      await waitFor(() => !window.__enrollmentKey, '真实删除按钮点击未完成');
+    } else { remove.focus(); remove.click(); }
+    return await waitFor(() => modal() !== box && modal()?.querySelector('h2')?.textContent === '删除记录' && modal(), '删除添加记录未确认');
+  };
+  let confirmation = await deletionConfirmation();
+  assert.ok(confirmation.textContent.includes('已接入的节点不会被卸载'), '删除确认未区分凭据与节点');
+  button('取消', confirmation).click(); await delay(20);
+  assert.equal(deletionCount(), deletesBefore, '取消确认仍删除凭据');
+  assert.equal(modal(), box, '取消确认关闭添加弹窗');
+  assert.equal(box.querySelectorAll('tbody tr').length, 1, '取消删除丢失记录');
+  assert.equal(document.activeElement, remove, '取消确认未恢复记录操作焦点');
+  if (!preview) {
+    await deletionConfirmation(); await key('Escape');
+    await waitFor(() => modal() === box, 'Escape 未取消凭据删除');
+    assert.equal(deletionCount(), deletesBefore, 'Escape 仍删除凭据');
+  }
+  testAPI.enrollmentDeleteFailure = true;
+  confirmation = await deletionConfirmation(); button('删除记录', confirmation).click();
+  await waitFor(() => deletionCount() === deletesBefore + 1, '失败删除未开始'); await idle();
+  assert.equal(deletionCount(), deletesBefore + 1, '失败删除未请求正确记录');
+  assert.ok(!remove.disabled && remove.isConnected && box.querySelectorAll('tbody tr').length === 1, '删除失败丢失记录或不能重试');
+  assert.ok(document.body.textContent.includes('服务暂不可用'), '删除失败没有反馈');
+  testAPI.enrollmentDeleteFailure = false;
+  let releaseDelete; testAPI.enrollmentDeleteGate = new Promise(resolve => { releaseDelete = resolve; });
+  confirmation = await deletionConfirmation(); button('删除记录', confirmation).click();
+  await waitFor(() => deletionCount() === deletesBefore + 2 && remove.disabled, '凭据删除未锁定');
+  remove.click(); await delay(20);
+  assert.equal(deletionCount(), deletesBefore + 2, '删除期间重复提交凭据');
+  assert.equal(document.querySelectorAll('dialog[open]').length, 1, '删除期间打开额外确认');
+  box.querySelector('[aria-label=关闭]').click();
+  assert.equal(modal(), box, '提交期间关闭添加弹窗');
+  releaseDelete(); testAPI.enrollmentDeleteGate = null;
+  await idle(); await waitFor(() => box.querySelector('summary').textContent.includes('· 0'), '删除后未重读凭据记录');
+  assert.ok(box.textContent.includes('暂无记录') && !box.querySelector('tbody tr'), '删除成功未显示空状态');
+  await close(); box = await open();
+  assert.ok(box.querySelector('summary').textContent.includes('· 0') && !box.querySelector('details').open, '重开恢复已删除凭据');
+  await close();
+  assert.equal(JSON.stringify(testAPI.agents), agentsBefore, '删除凭据修改已接入节点');
+  assert.equal(testAPI.calls.filter(call => call.method === 'DELETE' && call.path.startsWith('/agents/')).length, nodeDeletesBefore, '删除凭据调用节点删除');
+  assert.equal(testAPI.calls.filter(call => call.method === 'POST' && call.path === '/tasks').length, tasksBefore, '删除凭据执行远程任务');
+  testAPI.enrollmentRecords = savedRecords;
   window.__enrollmentKeysDone = true;
   if (new URLSearchParams(location.search).has('preview')) { await open(); document.documentElement.dataset.enrollmentPreview = 'ready'; await new Promise(() => {}); }
 }

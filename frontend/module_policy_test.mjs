@@ -64,9 +64,9 @@ const sharedLogic = new Set([
   "permissions.js", "poller.js", "preset-route.js", "routes.js", "route-loader.js", "route-warmup.js",
   "session-watch.js", "substore-model.js", "system-bbr-model.js", "system-bbr-presets.js",
   "task-model.js",
-  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "shared-instance-model.js", "traffic-order.js", "user-model.js",
+  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "shared-instance-model.js", "user-model.js",
 ]);
-for (const name of ["agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "config-mutations.js", "shared-instance-model.js", "traffic-order.js"]) {
+for (const name of ["agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "config-mutations.js", "shared-instance-model.js"]) {
   assert.doesNotMatch(readFileSync(resolve(modulesDir, name), "utf8"), /innerHTML|document\.(?:createElement|querySelector|getElementById)|\.classList\b|\.animate\(/, `${name}: shared logic must not render either theme`);
 }
 const analyticsRoot = resolve(root, "analytics");
@@ -105,30 +105,9 @@ assert.equal(new Set(shipped).size, shipped.length, "duplicate shared runtime as
 assert.deepEqual(shipped.sort(), [...independent].filter(path => dirname(path) === modulesDir).sort(),
   "the image must include every active dependency and exclude retired UI modules");
 
-// Retained classic code is test-only while its business contracts migrate.
-// Require an actual test consumer instead of pretending a dead entrypoint is
-// production reachability. The native graph and image boundary stay separate.
-const tested = new Set();
-function visitTest(path) {
-  if (tested.has(path)) return;
-  tested.add(path);
-  const source = readFileSync(path, "utf8");
-  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
-    visitTest(resolve(dirname(path), match[1]));
-  }
-}
-function visitTestDirectory(directory) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) visitTestDirectory(path);
-    else if (entry.name.endsWith(".mjs")) visitTest(path);
-    else if (entry.name.endsWith("_test.go")) {
-      for (const match of readFileSync(path, "utf8").matchAll(/"(modules\/[a-z0-9-]+\.js)"/g)) visitTest(resolve(root, match[1]));
-    }
-  }
-}
-visitTestDirectory(root);
+// Every remaining shared module belongs to the shipped runtime graph. Test-only
+// classic controllers, renderers and motion owners must not be reintroduced.
 for (const path of dependencies.keys()) {
-  assert.ok(independent.has(path) || tested.has(path), `${path} has neither an active runtime nor a retained test consumer`);
+  assert.ok(independent.has(path), `${path} is outside the active runtime graph`);
 }
-console.log(`legacy: ${files.filter(name => !independent.has(resolve(modulesDir, name))).length} modules retained only for migration tests`);
+console.log("legacy: no retired theme modules remain");

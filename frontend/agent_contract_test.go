@@ -77,7 +77,7 @@ func TestSystemBBRCardsUseDraggedNodeSettingsOrder(t *testing.T) {
 }
 
 func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
-	content := string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
+	content := string(mustReadFrontendFile(t, "analytics/nodes.js"))
 	for file, markers := range map[string][]string{
 		"analytics/node-batch.js": {
 			`const options = readOptions(values)`,
@@ -92,28 +92,26 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 		"analytics/nodes.js": {
 			`all.querySelector('input').indeterminate`,
 			`disabled: !selectable(agent)`,
+			`if (!ctx.current() || !box.isConnected) return`,
+			`if (!ctx.current() || !box.open) return`,
+			`删除此添加记录？已接入的节点不会被卸载。`,
+			`box.close(); command(created)`,
 		},
 		"analytics/app.js": {
 			`if (pending || submit.disabled) return`,
 			`controls.disabled = true`,
+			`if (pending) { announce(`,
+			`document.querySelectorAll("dialog.a-dialog").forEach(box => box.close())`,
+			`routeAbort?.abort()`,
+			`active?.isConnected`,
 		},
 		"modules/agent-batch.js": {
 			`agent-self-upgrade-v1`,
 			`旧版 Agent 缺少远程升级能力`,
 		},
-		"modules/agent-enrollment.js": {
-			`showCommand(command, async () =>`,
-			`id="deploy-command-description">命令仅供复制，不会自动执行。`,
-			`命令仅供复制，不会自动执行。`,
-			`document.body.style.overflow = "hidden"`,
-			`root.inert = true`,
-			`new MutationObserver(`,
-			`!wrap.isConnected`,
-			`else lockBackground()`,
-			`window.removeEventListener("hashchange", navigate)`,
-			`timers.forEach(timer => window.clearTimeout(timer))`,
-			`event.key !== "Tab"`,
-			`button.dataset.confirmDelete !== "1"`,
+		"analytics/ui.js": {
+			`box.showModal()`,
+			`event.key !== 'Tab'`,
 		},
 	} {
 		source := string(mustReadFrontendFile(t, file))
@@ -123,16 +121,16 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 			}
 		}
 	}
-	created := strings.Index(content, `const created = await api("/enrollment-tokens"`)
+	created := strings.Index(content, `const created = await ctx.api('/enrollment-tokens',`)
 	if created < 0 {
 		t.Fatal("enrollment flow must create an enrollment token")
 	}
-	shown := strings.Index(content[created:], `showCommand(command`)
+	shown := strings.Index(content[created:], `box.close(); command(created)`)
 	if shown < 0 {
 		t.Fatal("enrollment flow must show the generated command")
 	}
 	shown += created
-	refreshed := strings.Index(content[created:], `await refreshAgentPage()`)
+	refreshed := strings.Index(content[created:], `await load()`)
 	if refreshed >= 0 && created+refreshed < shown {
 		t.Error("enrollment flow must display the command before refresh can lose it")
 	}

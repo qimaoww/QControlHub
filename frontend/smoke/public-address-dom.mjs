@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { formatHostPort } from "../modules/agent-addresses.js";
+import { clientAccessExport } from "../modules/client-access-model.js";
 export async function run() {
 // The native node surface must keep address families upright and readable,
 // wrap long IPv6 values, and reserve the adjacent copy control's hit target.
@@ -18,18 +18,13 @@ export async function run() {
   assert.match(css, /@media \(pointer: coarse\) \{ \.a-ip-copy.a-button \{ width: 44px; min-height: 44px/);
 }
 
-assert.equal(
-  formatHostPort("2606:4700:4700::1111", "443"),
-  "[2606:4700:4700::1111]:443",
-);
-assert.equal(
-  formatHostPort("[2606:4700:4700::1111]", "443"),
-  "[2606:4700:4700::1111]:443",
-);
-assert.equal(formatHostPort("[::1]", "443"), "[::1]:443");
-assert.equal(formatHostPort("93.184.216.34", "443"), "93.184.216.34:443");
-assert.equal(formatHostPort("node.example.com", "8443"), "node.example.com:8443");
-assert.equal(formatHostPort("", "443"), "");
+// Native exports consume server-produced URIs. IPv6 brackets, hostname/IPv4
+// ports and secrets must survive the actual shared export model unchanged.
+for (const address of ["[2606:4700:4700::1111]:443", "[::1]:443", "93.184.216.34:443", "node.example.com:8443"]) {
+  const uri = `trojan://secret@${address}`;
+  assert.equal(clientAccessExport({profile:{format:"URI",uri}}, "url").value, uri);
+}
+assert.equal(clientAccessExport({profile:{uri:""}}, "url").value, "");
 
 // Live address updates, source labels, copy targets and relay filtering run
 // on the native page and details in browser/agent-overview.mjs.

@@ -6,7 +6,6 @@ import "./shared_instance_smoke.mjs";
 import "./core_install_state_smoke.mjs";
 import "./refresh_smoke.mjs";
 import "./route_loader_smoke.mjs";
-import "./requests_smoke.mjs";
 import "./errors_smoke.mjs";
 import "./core_logs_smoke.mjs";
 import "./core_log_conditional_smoke.mjs";
@@ -17,14 +16,11 @@ import "./system_bbr_smoke.mjs";
 import "./config_files_smoke.mjs";
 import "./config_outbounds_smoke.mjs";
 import "./preset_drafts_smoke.mjs";
-import "./preset_runtime_smoke.mjs";
 import "./traffic_smoke.mjs";
-import "./engine_capabilities_smoke.mjs";
 import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
 import "./node_order_smoke.mjs";
 import "./panel_metrics_smoke.mjs";
-import "./panel_reads_smoke.mjs";
 
 // Await each domain suite: many install temporary DOM globals, and their
 // setup/restore order is part of the regression contract.
@@ -32,7 +28,6 @@ const fixtures = {};
 await (await import("./smoke/inbound-options.mjs")).run();
 await (await import("./smoke/config-mutations.mjs")).run();
 await (await import("./smoke/motion.mjs")).run();
-await (await import("./smoke/region-display.mjs")).run();
 await (await import("./smoke/client-connections.mjs")).run();
 await (await import("./smoke/client-connection-cache.mjs")).run();
 Object.assign(fixtures, await (await import("./smoke/helper-contracts.mjs")).run(fixtures));
@@ -42,9 +37,7 @@ Object.assign(fixtures, await (await import("./smoke/live-config-state.mjs")).ru
 Object.assign(fixtures, await (await import("./smoke/installer-apis.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/agent-structure.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/code-format.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/latest-render.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/server-plan.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/card-drag.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/route-data.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/client-access.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/substore.mjs")).run(fixtures));

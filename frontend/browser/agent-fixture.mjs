@@ -83,6 +83,8 @@ const testAPI = {
   taskStates: new Map(),
   pendingTasks: [],
   enrollmentFailure: false,
+  enrollmentDeleteFailure: false,
+  enrollmentDeleteGate: null,
   renameFailure: false,
   renameGate: null,
   timeZoneSaves: [],
@@ -668,7 +670,13 @@ window.fetch = async (input, options = {}) => {
     return json({ token: "browser-test-enrollment", name: "ALPHA" });
   if (method === "POST" && path === "/enrollment-tokens/enr-alpha/command")
     return json({ token: "browser-test-enrollment", name: "ALPHA" });
-  if (method === "DELETE" && path.startsWith("/enrollment-tokens/")) return json(null, 204);
+  if (method === "DELETE" && path.startsWith("/enrollment-tokens/")) {
+    if (testAPI.enrollmentDeleteGate) await testAPI.enrollmentDeleteGate;
+    if (testAPI.enrollmentDeleteFailure) return json({ error: "temporary enrollment deletion failure" }, 503);
+    const id = decodeURIComponent(path.slice("/enrollment-tokens/".length));
+    testAPI.enrollmentRecords = testAPI.enrollmentRecords.filter(record => record.id !== id);
+    return json(null, 204);
+  }
   if (method === "POST" && path === "/tasks") {
     const payload = JSON.parse(String(options.body || "{}"));
     testAPI.submittedTasks.push(payload);

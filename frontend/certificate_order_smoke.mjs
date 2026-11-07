@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { certificateOrderPresentation, certificateOrderDiagnostic } from "./modules/certificate-order.js";
 import { recordDate } from "./modules/record-display.js";
-import { createDisplayHelpers } from "./modules/formatting.js";
+import { formatDate } from "./analytics/appearance.js";
 
 const scheduled = "2026-11-02T04:05:06Z";
 const show = patch => certificateOrderPresentation({status:"queued",stage:"queued",attempt:0,...patch}, String);
@@ -40,8 +40,7 @@ assert.match(show({stage:"retry",failure_stage:"http_preflight",error:"timeout"}
 assert.equal(show({error:"读取 ACME 申请账号失败: not found"}).error,"读取 ACME 申请账号失败，暂无法确认原因，请联系管理员检查。");
 assert.doesNotMatch(certificateOrderDiagnostic('token=fixture-secret https://user:secret@example.test/secret -----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----'),/fixture-secret|user:secret|example.test|\nfixture/);
 for(const missing of [undefined,null,"", "0001-01-01T00:00:00Z","invalid"]) assert.equal(recordDate(missing,String),"时间未知");
-const helpers=createDisplayHelpers({data:{settings:{time_zone:"Asia/Hong_Kong"}}});
-assert.equal(recordDate(scheduled,helpers.date),helpers.date(scheduled));
+assert.equal(recordDate(scheduled,formatDate),formatDate(scheduled));
 // Native certificate detail rendering is checked in browser/certificate-order-presentation.mjs.
 console.log("Certificate order states, real schedules, record dates and diagnostic redaction passed");
 

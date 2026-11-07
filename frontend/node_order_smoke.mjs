@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createNodeOrderSync, nodeCardOrderKey, orderNodesBySavedOrder } from "./modules/node-order.js";
+import { createNodeOrderSync, nodeCardOrderKey, orderNodesBySavedOrder, saveNodeOrder } from "./modules/node-order.js";
 const memory = initial => {
   const data = new Map(initial ? [[nodeCardOrderKey, JSON.stringify(initial)]] : []);
   return { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
@@ -105,4 +105,17 @@ console.log("Account node order queue, migration race, conflict, failure and sta
  await ports.save(['node:8443', 'node:443']);
  assert.deepEqual(JSON.parse(portStorage.getItem('ports')), server.ids);
  assert.equal(portStorage.getItem(nodeCardOrderKey), null, 'port sorting overwrote fleet order');
+}
+
+// Preserve the low-storage and unconfirmed-write cases on the active shared
+// helper. Both native node and port queues add server-confirmed persistence.
+{
+ let value = null;
+ const storage = {getItem:()=>value,setItem:(_key,next)=>{value=next;}};
+ for(const ids of [["a","b"],["b","a"],["a","b"]]) assert.equal(saveNodeOrder(ids,storage),true);
+ assert.equal(value,'["a","b"]');
+ const before=value;
+ assert.equal(saveNodeOrder(["b","a"],{...storage,setItem:()=>{throw new Error("quota exceeded");}}),false);
+ assert.equal(value,before);
+ assert.equal(saveNodeOrder(["b","a"],{...storage,setItem:()=>{}}),false,"unconfirmed storage must not announce success");
 }
