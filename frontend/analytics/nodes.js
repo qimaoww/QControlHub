@@ -16,7 +16,7 @@ import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { enrollmentInstallCommand } from '../modules/enrollment-command.js';
 import { formatSharedPorts } from '../modules/user-model.js';
 import { sharedInstancePresentation } from '../modules/shared-instance-model.js';
-import { copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
+import { bindSelectionSurface, copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
 import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
@@ -34,14 +34,13 @@ export async function nodesPage(ctx) {
   refreshState.setAttribute('role', 'status');
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
   await ordering.load();
-  const sort = field('排序', 'node_sort', ctx.state.data.nodeSort || 'saved', { options: [['saved', '保存顺序'], ['name', '节点名称']] });
-  sort.querySelector('select').addEventListener('change', () => { ctx.state.data.nodeSort = sort.querySelector('select').value; draw(); });
   const canManage = agent => ctx.can('agents.manage', agent) && agent.can_manage !== false;
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
+  bindSelectionSurface(results, { selector: 'article[data-agent-id]', active: () => selecting, signal: ctx.signal });
   const dragging = bindNodeOrdering(ctx, results, {
-    enabled: () => sort.querySelector('select').value === 'saved' && !selecting,
+    enabled: () => !selecting,
     order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
   });
   const selected = new Set();
@@ -70,7 +69,7 @@ export async function nodesPage(ctx) {
   }
   const shownAgents = () => {
     const query = search.querySelector('input').value.trim().toLowerCase();
-    const ordered = sort.querySelector('select').value === 'name' ? [...agents].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN')) : orderNodesBySavedOrder(agents, ordering.ids());
+    const ordered = orderNodesBySavedOrder(agents, ordering.ids());
     return ordered.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
   };
   const selectable = agent => ctx.can('tasks.execute') &&
@@ -81,6 +80,13 @@ export async function nodesPage(ctx) {
     },
   }); }
   function drawBatch() {
+    results.querySelectorAll('article[data-agent-id]').forEach(card => {
+      const input = card.querySelector('input[type=checkbox]');
+      if (input) {
+        input.checked = selected.has(card.dataset.agentId);
+        card.setAttribute('aria-label', `${agents.find(agent => agent.id === card.dataset.agentId)?.name || ''}，${input.checked ? '已选择' : '未选择'}`);
+      }
+    });
     batchBar.hidden = !selecting;
     if (batchToggle) batchToggle.hidden = selecting;
     if (!selecting) { batchBar.replaceChildren(); return; }
@@ -106,7 +112,7 @@ export async function nodesPage(ctx) {
     meter('CPU',m.cpu_percent,online&&m.cpu_available),
     meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
-  function dragControl(agent) { return dragHandle(agent.id, agent.name, selecting || sort.querySelector('select').value !== 'saved'); }
+  function dragControl(agent) { return dragHandle(agent.id, agent.name, selecting); }
   function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
     button(compact?'设置':'查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent)),{title:'查看设置'}),
     dragControl(agent));}
@@ -198,7 +204,7 @@ export async function nodesPage(ctx) {
     if (!live) drawBatch();
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
-      node('article',{className:'a-card a-probe','data-agent-id':agent.id},
+      node('article',{className:'a-card a-probe','data-agent-id':agent.id, tabindex: selecting && selectable(agent) ? 0 : null, role: selecting ? 'group' : null, 'aria-label': selecting ? `${agent.name}，${selected.has(agent.id) ? '已选择' : '未选择'}` : null},
         node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),status(agent.status)),
         selecting&&node('div',{className:'a-probe-choice'},choice(agent)),
         node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
@@ -512,7 +518,7 @@ export async function nodesPage(ctx) {
     if (agent) void settings(agent);
     else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
   });
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, sort, actions(
+  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
     cardToggle, listToggle,
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),

@@ -139,9 +139,8 @@ export async function testNativeOrdering({ mode, testAPI }, preview=false, coord
       equal(ids(),original,'保存失败提交了本地虚假顺序');
       testAPI.failNodeOrder=false;key(grip,'ArrowDown');await waitFor(()=>ids()[1]===original[0],'失败后无法重试');
       await delay(25);key(grip,'ArrowUp');await waitFor(()=>ids()[0]===original[0],'重试后无法恢复');await delay(25);
-      const sort=document.querySelector('[name=node_sort]');sort.value='name';sort.dispatchEvent(new Event('change',{bubbles:true}));
-      assert.ok(grips().every(g=>g.disabled),'按名称排序仍允许覆盖保存顺序');
-      sort.value='saved';sort.dispatchEvent(new Event('change',{bubbles:true}));
+      assert.equal(document.querySelector('[name=node_sort]'), null, '节点页仍显示排序下拉框');
+      assert.ok(grips().every(g=>!g.disabled),'保存顺序下拖拽手柄不可用');
     } else {
       document.querySelectorAll('.a-toast-close').forEach(button => button.click());
       await settled();

@@ -199,6 +199,16 @@ export async function testSubStoreScopeRuntime(preview = false) {
   assert([...new Set([...document.querySelectorAll('[aria-label=同步节点] [data-refresh-key]')].map(row=>JSON.parse(row.dataset.refreshKey)[0]))].join(",")==="shared,charlie,alpha","saved node order was lost");
   if(preview){await openSettings();return;}
   testSubStoreCardLayout();
+  const surface = row("cfg_current"), pick = surface.querySelector('[name="selected"]'), initial = pick.checked;
+  surface.cells[1].click(); assert(pick.checked !== initial, "clicking the subscription node did not toggle selection");
+  surface.focus(); surface.dispatchEvent(new KeyboardEvent('keydown', {key:' ',bubbles:true}));
+  assert(pick.checked === initial, "keyboard selection did not restore the subscription choice");
+  if (!pick.checked) surface.click();
+  const editing = surface.querySelector('[name="name"]'); editing.click();
+  assert(pick.checked && document.contains(editing), "editing a subscription name toggled its selection");
+  if (!initial) surface.click();
+  const unavailablePick = row("cfg_previous").querySelector('[name="selected"]'), unavailableBefore = unavailablePick.checked;
+  row("cfg_previous").click(); assert(unavailablePick.checked === unavailableBefore, "unavailable subscription source was toggled");
   assert(!document.querySelector('.a-main h1'),"subscription page adds a duplicate title hero");
   assert(document.querySelector('.a-main').textContent.includes("https://substore.example/••••••"),"connection hint missing");
   button("连接设置").click();await waitFor(()=>document.querySelector('dialog [name="endpoint_url"]'),"connection settings did not open");
@@ -233,6 +243,7 @@ export async function testSubStoreScopeRuntime(preview = false) {
   const before=fixture.calls.filter(call=>call.path==="/substore-sync/selections").length;
   button("保存所选节点").click();await waitFor(()=>fixture.calls.filter(call=>call.path==="/substore-sync/selections").length===before+1,"selection retry not submitted");
   assert(row("cfg_current").querySelector('[name="selected"]').matches(":disabled"),"pending selection can still be edited");
+  row("cfg_current").cells[1].click(); assert(row("cfg_current").querySelector('[name="selected"]').checked, "pending row click changed selection");
   button("保存所选节点").click();assert(fixture.calls.filter(call=>call.path==="/substore-sync/selections").length===before+1,"duplicate selection write");
   finish();fixture.test.selectionGate=null;await settled();
   const saved=fixture.calls.filter(call=>call.path==="/substore-sync/selections").at(-1).input.selections;

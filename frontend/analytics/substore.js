@@ -2,7 +2,7 @@ import { subStoreSelectionPayload, subStoreAddressChoices, groupSubStoreProfiles
 import { savedNodeOrder } from "../modules/node-order.js";
 import { geoRegionDetails } from "../modules/region-model.js";
 import { regionFlag } from "./node-region.js";
-import { node, button, actions, stack, section, table, badge, field, muted, list, pathID, query, notice } from "./ui.js";
+import { bindSelectionSurface, node, button, actions, stack, section, table, badge, field, muted, list, pathID, query, notice } from "./ui.js";
 import { date } from "./operations.js";
 
 export async function substorePage(ctx) {
@@ -87,6 +87,7 @@ export async function substorePage(ctx) {
     const search = field("搜索节点", "search", "", { type: "search" });
     const agentFilter = field("节点", "agent", "", { options: [["", "全部节点"], ...[...new Map(profiles.map(profile => [profile.agent_id, profile.agent_name || profile.agent_id]))]] });
     const rows = node("div"), selectionFields = node("fieldset", { className: "a-form-fields" }, rows);
+    bindSelectionSurface(rows, { selector: 'tbody tr', preserveControls: true, signal: ctx.signal });
     let save, sync;
     syncDraft = () => {
       dirty = JSON.stringify(subStoreSelectionPayload(profiles)) !== baseline; ctx.setDirty(dirty);
@@ -128,6 +129,10 @@ export async function substorePage(ctx) {
         const profile = visible[index]; return JSON.stringify([profile.agent_id,profile.engine,profile.profile_tag,profile.config_id || ""]);
       } });
       content.classList.add("a-probe-list");
+      content.querySelectorAll('tbody tr').forEach(row => {
+        const input = row.querySelector('input[type=checkbox]');
+        if (input && !input.disabled) row.tabIndex = 0;
+      });
       rows.replaceChildren(content);
     }
     drawRows();

@@ -6,6 +6,20 @@ export const nativeBatchButton = (text, root = document) => [...root.querySelect
 export async function openNativeBatch(fixture) {
   await startNativeNodes();
   nativeBatchButton('批量操作').click();
+  const card = document.querySelector('article[data-agent-id]');
+  if (card) {
+    const choice = card.querySelector('input[type=checkbox]');
+    card.querySelector('h2').click(); assert.ok(choice.checked, '点击卡片标题未选择节点');
+    card.querySelector('.a-probe-body').click(); assert.ok(!choice.checked, '点击卡片内容未取消选择');
+    card.querySelector('label').click(); assert.ok(choice.checked, '选择框标签重复切换');
+    card.focus(); card.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    assert.ok(!choice.checked, '空格键未取消卡片选择');
+    const dialogs = document.querySelectorAll('dialog[open]').length;
+    card.querySelector('.a-probe-footer button').click();
+    assert.ok(choice.checked, '多选模式下卡片操作区不能选择');
+    assert.equal(document.querySelectorAll('dialog[open]').length, dialogs, '多选点击误打开设置');
+    choice.click(); assert.ok(!choice.checked, '直接点击选择框重复切换');
+  }
   const all = () => document.querySelector('input[name=select-all]');
   all().click();
   assert.ok(all().checked && !all().indeterminate, '全选状态错误');

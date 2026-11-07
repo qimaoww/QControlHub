@@ -1,6 +1,25 @@
 import { listen, patch } from "./live-dom.js";
 import { currentTheme } from "../modules/theme-lifecycle.js";
 let fieldID = 0;
+export function bindSelectionSurface(root, { selector, active = () => true, preserveControls = false, signal }) {
+  const toggle = event => {
+    if (!active()) return;
+    const surface = event.target.closest(selector);
+    if (!surface || !root.contains(surface)) return;
+    const input = surface.querySelector('input[type=checkbox]');
+    if (!input || input.matches(':disabled')) return;
+    if (event.type === 'keydown') {
+      if (event.target !== surface || ![' ', 'Enter'].includes(event.key) || event.repeat) return;
+    } else {
+      if (event.target === input || event.target.closest('label')?.contains(input)) return;
+      if (preserveControls && event.target.closest('input,select,textarea,button,a,label,summary')) return;
+    }
+    event.preventDefault(); event.stopPropagation();
+    input.click();
+  };
+  root.addEventListener('click', toggle, { capture: true, signal });
+  root.addEventListener('keydown', toggle, { capture: true, signal });
+}
 const icons = {
   brand: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
