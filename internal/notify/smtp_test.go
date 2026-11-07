@@ -6,11 +6,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNotificationSMTPImplicitTLSAndSTARTTLS(t *testing.T) {
@@ -126,5 +128,19 @@ func TestNotificationSMTPImplicitTLSAndSTARTTLS(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestNotificationSMTPCanceledTLSRemainsRetryable(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	sender := &Sender{Dial: func(context.Context, string, string) (net.Conn, error) { return client, nil }}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := sender.Send(ctx, Channel{Type: "smtp", Values: map[string]string{"host": "localhost", "port": "465", "tls": "tls"}}, Sample(TypeTaskFailed))
+	var result *DeliveryError
+	if !errors.As(err, &result) || !result.Retry {
+		t.Fatalf("temporary TLS failure cannot retry: %v", err)
 	}
 }

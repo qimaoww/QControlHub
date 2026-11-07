@@ -224,7 +224,7 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 	if c.Get("tls") == "tls" {
 		secure := tls.Client(conn, cfg)
 		if err := secure.HandshakeContext(ctx); err != nil {
-			return &DeliveryError{Reason: "SMTP TLS 失败"}
+			return &DeliveryError{Reason: "SMTP TLS 失败", Retry: transientSMTP(err)}
 		}
 		conn = secure
 	}
@@ -235,12 +235,12 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 	defer client.Close()
 	if c.Get("tls") == "starttls" {
 		if err := client.StartTLS(cfg); err != nil {
-			return &DeliveryError{Reason: "SMTP STARTTLS 失败"}
+			return &DeliveryError{Reason: "SMTP STARTTLS 失败", Retry: transientSMTP(err)}
 		}
 	}
 	if user := c.Get("username"); user != "" {
 		if err := client.Auth(smtp.PlainAuth("", user, c.Get("password"), host)); err != nil {
-			return &DeliveryError{Reason: "SMTP 认证失败"}
+			return &DeliveryError{Reason: "SMTP 认证失败", Retry: transientSMTP(err)}
 		}
 	}
 	if err := client.Mail(c.Get("from")); err != nil {
@@ -272,4 +272,9 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 func smtpFailure(err error) error {
 	retry := !strings.HasPrefix(err.Error(), "5")
 	return &DeliveryError{Reason: "SMTP 未接受消息", Retry: retry}
+}
+
+func transientSMTP(err error) bool {
+	var network net.Error
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) || strings.HasPrefix(err.Error(), "4")
 }
