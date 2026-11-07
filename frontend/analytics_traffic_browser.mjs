@@ -56,18 +56,23 @@ export async function checkAnalyticsTraffic({ page, mode, fixture, evaluate, wai
   const saved = (await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id);
   assert.equal(saved.limit_bytes, 2 * 1024 ** 3);
   assert.ok(saved.is_current_user && saved.deployment_confirmed);
-  await click('清零', row); await wait(page, "[...document.querySelectorAll('dialog[open] h2')].some(item=>item.textContent==='清零并解封')");
+  await click('统计详情', row); await wait(page, "!!document.querySelector('dialog[open][data-traffic-details]') && !document.querySelector('[aria-busy=true]')");
+  await click('清零', 'dialog[open][data-traffic-details]'); await wait(page, "[...document.querySelectorAll('dialog[open] h2')].some(item=>item.textContent==='清零并解封')");
   await click('清零并解封');
+  await wait(page, "!document.querySelector('[aria-busy=true],dialog[open]:not([data-traffic-details])')"); await close();
   await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && !!document.querySelector(${JSON.stringify(row)})`);
   assert.equal((await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).used_bytes, 0);
-  await click('取消配额', row); await wait(page, "!!document.querySelector('dialog[open]')"); await click('取消配额');
-  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && document.querySelector(${JSON.stringify(row)})?.textContent.includes('持续统计')`).catch(async error => {
+  await click('统计详情', row); await wait(page, "!!document.querySelector('dialog[open][data-traffic-details]') && !document.querySelector('[aria-busy=true]')");
+  await click('取消配额', 'dialog[open][data-traffic-details]'); await wait(page, "!!document.querySelector('dialog[open]:not([data-traffic-details])')"); await click('取消配额', 'dialog[open]:not([data-traffic-details])');
+  await wait(page, "!document.querySelector('[aria-busy=true],dialog[open]:not([data-traffic-details])')"); await close();
+  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && document.querySelector(${JSON.stringify(row)})?.textContent.includes('设置配额')`).catch(async error => {
     await screenshot(page, 'analytics-traffic-quota-failure');
     const presentation = await evaluate(page, `({dialogs:[...document.querySelectorAll('dialog[open]')].map(box=>box.textContent),row:document.querySelector(${JSON.stringify(row)})?.textContent,busy:[...document.querySelectorAll('[aria-busy=true]')].map(control=>control.textContent),alerts:[...document.querySelectorAll('[role=alert],.a-toast')].map(item=>item.textContent)})`);
     const stored = (await api(page, identity, 'GET', '/traffic-policies')).find(value=>value.id===policy.id);
     throw new Error(`${error.message}; quota diagnostics: ${JSON.stringify({presentation,stored})}`);
   });
   assert.equal((await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).quota_enabled, false);
+  await click('统计详情', row); await wait(page, "document.querySelector('dialog[open][data-traffic-details]')?.textContent.includes('持续统计') && !document.querySelector('[aria-busy=true]')"); await close();
   await click('设置配额', row);
   await wait(page, "!!document.querySelector('dialog[open] [name=limit_gb]')");
   await act( "const input=document.querySelector('dialog[open] [name=limit_gb]');input.value='1';input.form.requestSubmit()");
@@ -85,10 +90,12 @@ export async function checkAnalyticsTraffic({ page, mode, fixture, evaluate, wai
   await act('window.fetch=window.__trafficFetch;delete window.__createdTraffic');
 
 
-  await click('删除', row); await wait(page, "!!document.querySelector('dialog[open]')");
-  assert.ok(await evaluate(page, "document.querySelector('dialog[open]').textContent.includes('每日历史')"));
+  await click('统计详情', row); await wait(page, "!!document.querySelector('dialog[open][data-traffic-details]') && !document.querySelector('[aria-busy=true]')");
+  await click('删除', 'dialog[open][data-traffic-details]'); await wait(page, "!!document.querySelector('dialog[open]')");
+  assert.ok(await evaluate(page, "document.querySelector('dialog[open]:not([data-traffic-details])').textContent.includes('每日历史')"));
   await click('删除流量记录');
-  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && !document.querySelector(${JSON.stringify(row)})`);
+  await wait(page, "!document.querySelector('[aria-busy=true],dialog[open]:not([data-traffic-details])')"); await close();
+  await wait(page, `!document.querySelector('dialog[open],[aria-busy=true]') && !document.querySelector(${JSON.stringify(row)})`).catch(async error => { throw new Error(`${error.message}; delete diagnostics: ${JSON.stringify(await evaluate(page, `({dialogs:[...document.querySelectorAll('dialog[open]')].map(box=>box.textContent),row:document.querySelector(${JSON.stringify(row)})?.textContent,busy:!!document.querySelector('[aria-busy=true]')})`))}; stored: ${JSON.stringify((await api(page, identity, 'GET', '/traffic-policies')).find(value=>value.id===policy.id))}`); });
   assert.ok(!(await api(page, identity, 'GET', '/traffic-policies')).some(value => value.id === policy.id && value.monitoring_enabled));
   await click('同步配置端口', '.a-main');
   await wait(page, "document.querySelector('dialog[open] [name=select-all]')?.disabled===false");

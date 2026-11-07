@@ -11,10 +11,11 @@ import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
 import { coreSourceLabel, taskRetryState, taskTiming } from "../modules/task-model.js";
 import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
+const byteFormatters = [0, 1].map(maximumFractionDigits => new Intl.NumberFormat("zh-CN", { maximumFractionDigits }));
 export const bytes = value => {
   const amount = Math.max(0, Number(value) || 0);
   const exponent = amount ? Math.max(0, Math.min(4, Math.floor(Math.log(amount) / Math.log(1024)))) : 0;
-  return `${(amount / 1024 ** exponent).toLocaleString("zh-CN", { maximumFractionDigits: exponent ? 1 : 0 })}\u00a0${["B", "KB", "MB", "GB", "TB"][exponent]}`;
+  return `${byteFormatters[exponent ? 1 : 0].format(amount / 1024 ** exponent)}\u00a0${["B", "KB", "MB", "GB", "TB"][exponent]}`;
 };
 export const date = formatDate;
 export const status = value => badge(({ online: "在线", offline: "离线", active: "运行中", inactive: "已停止", unknown: "未知", activating: "启动中", deactivating: "停止中", pending: "准备中", running: "执行中", succeeded: "成功", failed: "失败", canceled: "已取消", accepted: "已接受", rejected: "已拒绝" })[value] || value || "未知",

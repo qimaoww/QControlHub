@@ -20,9 +20,11 @@ var ansiControlPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 func sanitizeCoreLogMessage(raw string) string {
 	message := strings.TrimSpace(strings.ToValidUTF8(raw, "�"))
 	message = strings.ReplaceAll(message, "\x00", "�")
-	message = ansiControlPattern.ReplaceAllString(message, "")
-	// Remove any surviving ESC introducer so a lone control byte cannot render.
-	message = strings.ReplaceAll(message, "\x1b", "")
+	if strings.ContainsRune(message, '\x1b') {
+		message = ansiControlPattern.ReplaceAllString(message, "")
+		// Remove any surviving ESC introducer so a lone control byte cannot render.
+		message = strings.ReplaceAll(message, "\x1b", "")
+	}
 	message = core.RedactDiagnostic(message)
 	if message == "" {
 		return ""
