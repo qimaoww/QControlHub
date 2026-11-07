@@ -9,7 +9,7 @@ cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 cd "$root"
 CGO_ENABLED=0 go build -buildvcs=false -o "$work/qagent" ./cmd/agent
-for image in ${QCH_IPQUALITY_TEST_IMAGES:-debian:bookworm-slim ubuntu:24.04 alpine:3.23}; do
+for image in ${QCH_IPQUALITY_TEST_IMAGES:-debian:bookworm-slim ubuntu:24.04 alpine:3.24}; do
   printf '%s\n' "Live IPQuality: $image"
   docker run -d --name "$container" --mount "type=bind,src=$work/qagent,dst=/qagent,readonly" "$image" sh -c 'sleep 36000' >/dev/null
   for phase in first repeat; do

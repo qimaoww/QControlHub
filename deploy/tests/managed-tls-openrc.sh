@@ -12,7 +12,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
  -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
  -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
 docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_start=1024 --cap-add NET_ADMIN --cap-add SYS_PTRACE \
- -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.23 sh -ec '
+ -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.24 sh -ec '
  apk add --no-cache openrc libcap >/dev/null
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
  mkdir -p /usr/local/lib/qagent /run/openrc /etc/qcontrolhub/tls
