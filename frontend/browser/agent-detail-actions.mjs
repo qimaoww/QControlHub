@@ -54,8 +54,9 @@ async function testSettingsPanels(box, testAPI) {
   for (const engine of ['mihomo', 'xray', 'sing-box', 'ss-rust']) {
     const card = corePanel.querySelector(`[data-refresh-key="${engine}"]`);
     assert.ok(card.querySelector(`[data-engine-capability="${engine}"]`), '能力设置与对应内核未归组');
-    assert.equal([...card.querySelectorAll('button')].filter(control => control.textContent === '保存能力').length, 1, '相同内核重复能力保存入口');
+    assert.equal(card.querySelectorAll('[type=submit]').length, 0, '内核卡片保留重复保存按钮');
   }
+  assert.equal(corePanel.querySelectorAll('[type=submit]').length, 1, '内核能力未使用统一保存入口');
   [...box.querySelectorAll('button')].find(control => control.textContent === '节点设置').click();
   assert.equal(name.value, '未提交的节点名称', '分区切换丢失名称草稿');
   openCoreSettings(box); assert.equal(capability.checked, !before, '分区切换丢失能力草稿'); capability.click();
@@ -207,6 +208,24 @@ export async function testNativeNodeTaskLifecycle(fixture) {
   // The failed attempt retains the chosen disabled draft for retry.
   capability('xray').closest('form').requestSubmit();
   await waitFor(() => !document.querySelector('#app[aria-busy=true]') && settings.querySelector('[data-refresh-key=xray]')?.dataset.capabilityEnabled === '0', '关闭未安装内核未更新能力状态');
+  const capabilityWrites = () => testAPI.calls.filter(call => call.method === 'PUT' && call.path.includes('/capabilities/'));
+  const combined = capability('xray').closest('form'), save = combined.querySelector('[type=submit]');
+  capability('xray').click(); capability('ss-rust').click();
+  testAPI.capabilityFailures = new Set(['ss-rust']);
+  const beforeCombined = capabilityWrites().length;
+  combined.requestSubmit(); combined.requestSubmit();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '统一能力保存未结束');
+  assert.equal(capabilityWrites().length, beforeCombined + 2, '统一保存漏发或重复提交');
+  assert.ok(testAPI.agents[0].capabilities.includes('xray') && !testAPI.agents[0].capabilities.includes('ss-rust'), '部分失败误报保存成功');
+  assert.ok(capability('ss-rust').checked && !save.disabled, '失败内核草稿未保留或不能重试');
+  assert.ok(capability('ss-rust').closest('[data-refresh-key]').textContent.includes('冲突'), '失败未定位到对应内核');
+  testAPI.capabilityFailures.clear();
+  combined.requestSubmit();
+  await waitFor(() => testAPI.agents[0].capabilities.includes('ss-rust') && !document.querySelector('#app[aria-busy=true]'), '统一保存重试未成功');
+  assert.equal(capabilityWrites().length, beforeCombined + 3, '重试重复保存已成功的内核');
+  assert.ok(save.disabled, '保存成功后仍有待保存状态');
+  capability('xray').click(); capability('ss-rust').click(); combined.requestSubmit();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && !testAPI.agents[0].capabilities.includes('xray') && !testAPI.agents[0].capabilities.includes('ss-rust'), '多内核关闭未保存');
   for (const success of [false, true, false, true]) {
     const wasEnabled = testAPI.agents[0].capabilities.includes('mihomo');
     await toggle('mihomo');

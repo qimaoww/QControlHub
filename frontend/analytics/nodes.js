@@ -335,6 +335,7 @@ export async function nodesPage(ctx) {
     )));
     const allocation = renderAllocation();
     const sections = [], settingsUpdates = [], capabilities = new Map();
+    let savingCapabilities = false;
     if (manage) {
       sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
         ctx.form([field('节点名称', 'name', agent.name, { required: true, maxlength: 100 })], '保存名称', async values => {
@@ -353,39 +354,33 @@ export async function nodesPage(ctx) {
 
       ))));
       for (const engine of agent.supported_capabilities || engineIDs) {
+        const inputField = field('启用内核能力', `capability:${engine}`, agent.capabilities.includes(engine), { type: 'checkbox' });
+        const input = inputField.querySelector('input');
+        input.dataset.engineCapability = engine;
         const transitionState = notice('');
-        const form = ctx.form([field('启用内核能力', 'enabled', agent.capabilities.includes(engine), { type: 'checkbox' }), transitionState], '保存能力', async (_, element) => {
-          if (!canManage(agent) || ['pending', 'running'].includes(agent.capability_transitions?.[engine]?.status)) return;
-          const received = await ctx.api(`${base}/capabilities/${engine}`, { method: 'PUT', body: { enabled: element.elements.enabled.checked } });
-          ctx.announce(received.task_id ? '启停任务已提交，成功后更新能力' : '内核能力已更新'); await load();
-          if (received.task_id && ctx.can('tasks.read')) await taskDetail(ctx, received.task_id);
-        });
-        form.className = 'a-actions';
-        let savedEnabled = agent.capabilities.includes(engine);
+        const task = button('查看启停任务', event => void ctx.mutate(event.currentTarget, () => taskDetail(ctx, capability.taskID)));
+        const capability = { input, view: stack(inputField, transitionState, actions(task)), saved: input.checked, failure: '', taskID: '' };
         const update = () => {
-          const input = form.elements.enabled, latest = agent.capabilities.includes(engine);
-          const transition = agent.capability_transitions?.[engine];
+          const latest = agent.capabilities.includes(engine), transition = agent.capability_transitions?.[engine];
           const waiting = ['pending', 'running'].includes(transition?.status);
-          if (waiting || form.getAttribute('aria-busy') !== 'true' && (input.checked === savedEnabled || input.checked === latest)) {
-            input.checked = latest; savedEnabled = latest;
+          if (!savingCapabilities && !capability.failure && (waiting || input.checked === capability.saved || input.checked === latest)) {
+            input.checked = latest; capability.saved = latest;
           }
-          input.disabled = !canManage(agent) || waiting;
-          form.querySelector('[type=submit]').disabled = !canManage(agent) || waiting || form.getAttribute('aria-busy') === 'true';
-          transitionState.textContent = waiting ? `${transition.enabled ? '启动' : '停止'}${transition.status === 'pending' ? '排队中' : '执行中'}`
-            : ['failed', 'canceled'].includes(transition?.status) ? `上次启停失败或取消${transition.error ? `：${transition.error}` : ''}` : '';
+          input.disabled = !canManage(agent) || waiting || savingCapabilities;
+          capability.taskID = transition?.task_id || capability.taskID;
+          task.hidden = !ctx.can('tasks.read') || !capability.taskID;
+          transitionState.textContent = capability.failure || (waiting ? `${transition.enabled ? '启动' : '停止'}${transition.status === 'pending' ? '排队中' : '执行中'}`
+            : ['failed', 'canceled'].includes(transition?.status) ? `上次启停失败或取消${transition.error ? `：${transition.error}` : ''}` : '');
         };
-        settingsUpdates.push(update);
-        form.querySelector('[type=submit]').addEventListener('mutationend', update);
-        form.elements.enabled.dataset.engineCapability = engine;
-        update();
-        capabilities.set(engine, form);
+        input.addEventListener('change', () => { capability.failure = ''; update(); updateCapabilitySave(); });
+        settingsUpdates.push(update); capabilities.set(engine, capability); update();
       }
     }
     if (agent.can_manage !== false) {
       const zone = nodeTimeZone(ctx, agent, () => canManage(agent));
       sections.push(zone.view); settingsUpdates.push(zone.update);
     }
-    const runtimes = node('div', { className: 'a-grid', 'data-settings-panel': 'core', role: 'region', 'aria-label': '内核设置', hidden: true });
+    const runtimes = node('div', { className: 'a-grid' });
     const coreViews = new Map();
     const renderRuntimes = () => {
       const engines = [...new Set([...capabilities.keys(), ...(agent.capabilities || []), ...(agent.can_manage !== false ? Object.keys(agent.runtime || {}).filter(engine => agent.runtime[engine]?.installed) : [])])];
@@ -439,7 +434,7 @@ export async function nodesPage(ctx) {
         let view = coreViews.get(engine);
         if (!view) {
           const service = renderService();
-          const card = section(engine, node('div', { className: 'a-card-body a-stack' }, capabilities.get(engine), service));
+          const card = section(engine, node('div', { className: 'a-card-body a-stack' }, capabilities.get(engine)?.view, service));
           card.dataset.refreshKey = engine;
           view = { card, service }; coreViews.set(engine, view); runtimes.append(card);
         } else patch(view.service, renderService());
@@ -450,6 +445,42 @@ export async function nodesPage(ctx) {
       else if (engines.length && runtimes.firstChild?.nodeName === 'SPAN') runtimes.firstChild.remove();
       runtimes.className = engines.length > 1 ? 'a-grid' : 'a-stack';
     };
+    const changedCapabilities = () => [...capabilities].filter(([, capability]) => !capability.input.disabled && capability.input.checked !== agent.capabilities.includes(capability.input.dataset.engineCapability));
+    const capabilityForm = manage && ctx.form([runtimes], '保存内核能力', async () => {
+      if (!box.open || settingsScope() !== openedScope || !canManage(agent)) return;
+      const changes = changedCapabilities().map(([engine, capability]) => ({ engine, capability, enabled: capability.input.checked }));
+      if (!changes.length) return;
+      savingCapabilities = true; settingsUpdates.forEach(update => update());
+      let failures = 0;
+      try {
+        for (const { engine, capability, enabled } of changes) {
+          if (!ctx.current() || !box.open || settingsScope() !== openedScope || !canManage(agent)) return;
+          try {
+            const received = await ctx.api(`${base}/capabilities/${engine}`, { method: 'PUT', body: { enabled } });
+            if (!ctx.current() || !box.open || settingsScope() !== openedScope || !canManage(agent)) return;
+            capability.failure = ''; capability.taskID = received.task_id || '';
+            capability.saved = received.enabled; capability.input.checked = received.enabled;
+          } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            capability.failure = error.message; failures++;
+          }
+        }
+        await load();
+        if (ctx.current() && box.open) ctx.announce(failures ? '部分内核能力保存失败' : '内核能力已提交', failures ? 'error' : undefined);
+      } finally {
+        savingCapabilities = false;
+        if (ctx.current() && box.open) { settingsUpdates.forEach(update => update()); updateCapabilitySave(); }
+      }
+    });
+    function updateCapabilitySave() {
+      if (capabilityForm) capabilityForm.querySelector('[type=submit]').disabled = savingCapabilities || !canManage(agent) || !changedCapabilities().length || capabilityForm.getAttribute('aria-busy') === 'true';
+    }
+    if (capabilityForm) {
+      capabilityForm.querySelector('[type=submit]').addEventListener('mutationend', updateCapabilitySave);
+      settingsUpdates.push(updateCapabilitySave); updateCapabilitySave();
+    }
+    const corePanel = stack(capabilityForm || runtimes);
+    corePanel.dataset.settingsPanel = 'core'; corePanel.setAttribute('role', 'region'); corePanel.setAttribute('aria-label', '内核设置'); corePanel.hidden = true;
     renderRuntimes();
     const renderNodeOperations = () => actions(
       ctx.can('metrics.read') && button('查看指标历史',event=>void ctx.mutate(event.currentTarget,()=>nodeMetrics(ctx,agent))),
@@ -472,7 +503,7 @@ export async function nodesPage(ctx) {
     const updateTitle = () => { box.querySelector('.a-dialog-head h2').textContent = `${agent.name} · ${activePanel === 'node' ? '节点设置' : '内核设置'}`; };
     const selectPanel = value => {
       scrollPositions[activePanel] = box.scrollTop; activePanel = value;
-      nodePanel.hidden = value !== 'node'; runtimes.hidden = value !== 'core';
+      nodePanel.hidden = value !== 'node'; corePanel.hidden = value !== 'core';
       nodeTab.setAttribute('aria-pressed', String(value === 'node')); coreTab.setAttribute('aria-pressed', String(value === 'core'));
       updateTitle(); box.scrollTop = scrollPositions[value];
     };
@@ -480,7 +511,7 @@ export async function nodesPage(ctx) {
     const coreTab = button('内核设置', () => selectPanel('core'), { 'aria-pressed': 'false' });
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
-    const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, runtimes), { wide: true });
+    const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
     const update = () => {
       if (!box.open || !ctx.current()) { dialogUpdates.delete(update); return; }
       if (!agents.some(value => value.id === agent.id) || settingsScope() !== openedScope || manage && !canManage(agent)) { box.close(); dialogUpdates.delete(update); return; }

@@ -37,6 +37,17 @@ async function run() {
   assert.ok(nodePanel.hidden && !corePanel.hidden, 'core settings did not open independently');
   assert.ok(core().checkVisibility(), 'core operations remain hidden');
   assert.equal(Boolean(core().querySelector('[data-engine-capability]')), !shared, 'recipient received host capability controls');
+  assert.equal(corePanel.querySelectorAll('[type=submit]').length, shared ? 0 : 1, 'capability save entry escaped its scope or was duplicated');
+  if (!shared) {
+    const input = corePanel.querySelector('[data-engine-capability=xray]'), form = input.form;
+    const initial = input.checked;
+    for (const enabled of [!initial, initial]) {
+      input.click(); form.requestSubmit();
+      await waitFor(() => !document.querySelector('#app[aria-busy=true]') && corePanel.querySelector('[data-refresh-key=xray]').dataset.capabilityEnabled === String(Number(enabled)), 'unified capability save did not refresh');
+      const agents = await (await fetch('/api/v1/agents')).json();
+      assert.equal(agents.find(agent => agent.id === agentID).capabilities.includes('xray'), enabled, 'capability save did not reach the real API');
+    }
+  }
   if (shared) {
     assert.equal(button("卸载内核", core()), undefined, "recipient received host uninstall control");
     for (const name of ["启动", "停止", "重启"]) assert.ok(!button(name, core()) || button(name, core()).disabled, "unprepared recipient received host lifecycle management");
