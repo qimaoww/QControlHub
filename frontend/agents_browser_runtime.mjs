@@ -25,7 +25,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith("task-retry")) {
+  if (mode.startsWith('node-address')) {
+    const { testNodeAddressRuntime } = await import('./browser/node-address.mjs');
+    await testNodeAddressRuntime(scenario);
+  } else if (mode.startsWith("task-retry")) {
     if (new URLSearchParams(location.search).get('preview') === 'tasks-live') {
       const { testLiveTaskRuntime } = await import('./browser/task-live.mjs');
       await testLiveTaskRuntime(true);

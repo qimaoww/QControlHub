@@ -61,6 +61,14 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, ad
 		addressKey = "client_address"
 	}
 	if address != nil {
+		// These legacy labels are node-wide connection defaults too. Replacing
+		// or clearing the node address must not leave an older manual fallback.
+		// Profile updates use a separate scope and never touch these defaults.
+		if addressLabel == "" {
+			if _, err := tx.Exec(ctx, `UPDATE agents SET labels = COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'public_host' - 'public_ip' WHERE id=$1 AND revoked_at IS NULL`, id); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $3::text ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$3::text], to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *address, addressKey); err != nil {
 			return err
 		}

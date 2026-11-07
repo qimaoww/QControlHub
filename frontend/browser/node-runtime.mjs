@@ -87,7 +87,10 @@ export async function testPortNamesAndRuntimeRefresh({ testAPI }) {
   assert.ok(card().textContent.includes('已停止'),'service stop missing');
   testAPI.agentsFailure=true;await delay(2200);assert.ok(card().textContent.includes('1.13.2'),'failed refresh lost valid state');
   testAPI.agentsFailure=false;runtime(false,'');await waitFor(()=>card()?.dataset.coreInstalled==='0','polling did not recover');
-  await close();await close();location.hash='#client-access';await waitFor(()=>row(20001),'could not leave node settings');
+  await close();
+  settings.querySelector('[aria-label=关闭]').click();
+  const discard=await waitFor(()=>button('放弃更改',dialog()),'missing node draft confirmation');discard.click();
+  await waitFor(()=>!settings.isConnected,'node draft did not close');location.hash='#client-access';await waitFor(()=>row(20001),'could not leave node settings');
   await delay(2200);const before=testAPI.calls.filter(call=>call.path==='/agents').length;await delay(2200);
   assert.equal(testAPI.calls.filter(call=>call.path==='/agents').length,before,'node polling continued after navigation');
 }
