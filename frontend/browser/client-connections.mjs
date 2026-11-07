@@ -97,7 +97,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(displayed().length, 4, "same source must remain separate by engine and node");
   assert.equal(region().querySelectorAll('td[data-column="客户端来源 IP"] code').length, 4);
   assert.equal(displayed().map(row => row.querySelector('td[data-column="内核"]').textContent).join(","), "Mihomo,sing-box,Xray,Xray");
-  assert.equal(displayed()[2].querySelector('td[data-column="节点"]').textContent, "Alpha · 东京", "multiple ports must not duplicate the node name");
+  assert.equal(displayed()[2].querySelector('td[data-column="节点"]').textContent.trim(), "Alpha · 东京", "multiple ports must not duplicate the node name");
   assert.equal(displayed()[2].querySelector('td[data-column="入站端口"]').textContent, "443 · 8443");
   assert.equal(displayed()[3].querySelector('td[data-column="入站端口"]').textContent, "9443");
   assert.equal(requests.at(-1).get("group_by"), "ip");

@@ -6,7 +6,7 @@ import { node, button, actions, stack, section, filterbar, field, badge, muted, 
 import { observationTable } from "./observability-table.js";
 import { date } from "./operations.js";
 import { sourceStatus } from "./source-status.js";
-import { nodeName } from "./node-region.js";
+import { nodeName, nodeRegionFlag } from "./node-region.js";
 
 const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" })[value] || value;
 
@@ -65,7 +65,8 @@ export async function connectionsPage(ctx) {
     collection.trigger.disabled = !result;
     view.update(records, record => {
       const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), connectionLocationLabel(record.location), nodeName(ctx, { id: record.agent_id, name: record.agent_name || record.agent_id }),
+      const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
+      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), connectionLocationLabel(record.location), node("span", {}, nodeRegionFlag(ctx, agent), " ", agent.name),
         badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
     }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试");
     collection.update(reportSources.map(source => ({
