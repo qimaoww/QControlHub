@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 	"net/http"
@@ -30,6 +32,14 @@ func TestCoreLogConditionalReadRechecksOwnership(t *testing.T) {
 		client.handler.ServeHTTP(response, request)
 		if response.Code != status {
 			t.Fatalf("%s: status=%d, body=%s", query, response.Code, response.Body.String())
+		}
+		if response.Code == http.StatusOK {
+			// Existing clients must keep matching the exact pre-optimization
+			// validator, including query, credential scope and trailing newline.
+			old := sha256.Sum256(append([]byte(request.URL.RawQuery+"\x00"+request.Header.Get("Authorization")+request.Header.Get("Cookie")+"\x00"), response.Body.Bytes()...))
+			if response.Header().Get("ETag") != `W/"`+hex.EncodeToString(old[:])+`"` {
+				t.Fatal("response validator changed")
+			}
 		}
 		return response
 	}

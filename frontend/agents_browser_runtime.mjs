@@ -72,6 +72,9 @@ try {
   } else if (mode === "presets" || mode === "presets-mobile") {
     const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
     await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-deployment" || mode === "config-deployment-mobile") {
+    const { testInboundDeploymentRuntime } = await import("./browser/config-deployment.mjs");
+    await testInboundDeploymentRuntime();
   } else if (mode === "config-inbounds" || mode === "config-inbounds-mobile") {
     const { testConfigInboundsRuntime } = await import("./config_inbounds_browser_runtime.mjs");
     await testConfigInboundsRuntime(new URLSearchParams(location.search).has("preview"));

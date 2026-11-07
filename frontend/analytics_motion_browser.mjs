@@ -106,7 +106,7 @@ export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, w
   await wait(page, "!document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page, "window.__analyticsMotion.filter(a=>a.id==='analytics-page').length"), count, "refresh does not replay page entrance");
   await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }, page);
-  await wait(page, "document.documentElement.dataset.themeMotion==='off'");
+  await wait(page, "document.documentElement.dataset.themeMotion==='off'").catch(async error => { throw new Error(`${error.message}; reduced motion state: ${JSON.stringify(await evaluate(page,"({matches:matchMedia('(prefers-reduced-motion: reduce)').matches,theme:document.documentElement.dataset.uiTheme,motion:document.documentElement.dataset.themeMotion,hidden:document.hidden})"))}`); });
   await navigate("archive-config");
   await evaluate(page, "[...document.querySelectorAll('button')].find(item=>item.textContent==='新建配置').click()");
   assert.ok(await evaluate(page, "!!document.activeElement.closest('dialog[open]')"));

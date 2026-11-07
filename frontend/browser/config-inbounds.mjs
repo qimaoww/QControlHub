@@ -3,7 +3,6 @@ import { testConfigOutboundsRuntime } from './config-outbounds.mjs';
 import { testCommonConfigRuntime } from './config-common.mjs';
 import { testWireGuardConfigRuntime } from './config-wireguard.mjs';
 import { testPresetFieldLayoutRuntime } from './preset-layout.mjs';
-import { testInboundDeploymentRuntime } from './config-deployment.mjs';
 
 const editor = () => [...document.querySelectorAll('dialog[open] form')].at(-1);
 const ready = () => waitFor(() => editor()?.elements.tag && !document.querySelector('[aria-busy=true]'), 'actual analytics inbound editor did not load');
@@ -17,7 +16,6 @@ export async function testConfigInboundsRuntime(preview = false) {
     if (params.has('modify')) { window.inboundFixture.select('second'); window.inboundFixture.click('modify'); }
     return;
   }
-  await testInboundDeploymentRuntime();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
   await testInboundProtocolChanges();
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {

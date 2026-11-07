@@ -71,8 +71,12 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	payload = append(payload, '\n')
-	digest := sha256.Sum256(append([]byte(request.URL.RawQuery+"\x00"+request.Header.Get("Authorization")+request.Header.Get("Cookie")+"\x00"), payload...))
-	etag := `W/"` + hex.EncodeToString(digest[:]) + `"`
+	// Hash the same bytes incrementally. Concatenating the scope and payload
+	// copied the complete response once more for every conditional poll.
+	digest := sha256.New()
+	_, _ = digest.Write([]byte(request.URL.RawQuery + "\x00" + request.Header.Get("Authorization") + request.Header.Get("Cookie") + "\x00"))
+	_, _ = digest.Write(payload)
+	etag := `W/"` + hex.EncodeToString(digest.Sum(nil)) + `"`
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, no-cache")
 	w.Header().Set("Vary", "Cookie, Authorization")
