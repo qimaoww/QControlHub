@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -497,5 +498,18 @@ func TestNotificationPublicationOrdersCommittedSourceIDs(t *testing.T) {
 	rows, err := s.NotificationDeliveries(ctx)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("source cursor lost a committed event: %+v %v", rows, err)
+	}
+}
+
+func TestNotificationTestSendHonorsQueueCapacity(t *testing.T) {
+	ctx, s, _, c := notificationFixture(t)
+	if _, err := s.pool.Exec(ctx, `INSERT INTO notification_deliveries(owner_id,rule_id,channel_id,dedupe,event) SELECT '','offline','hook',n::text,'{}'::jsonb FROM generate_series(1,1000) n`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueNotificationTest(ctx, "hook", c.Revision); !errors.Is(err, ErrConflict) {
+		t.Fatalf("unbounded test queue: %v", err)
+	}
+	if err := s.CleanNotificationRecords(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

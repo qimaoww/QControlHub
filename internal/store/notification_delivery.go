@@ -179,6 +179,13 @@ func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision i
 	if recent >= 5 {
 		return 0, fmt.Errorf("%w: 每分钟最多 5 次测试", ErrConflict)
 	}
+	var pending int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM(SELECT 1 FROM notification_deliveries WHERE owner_id=$1 AND status IN ('pending','sending') LIMIT 1000) q`, owner).Scan(&pending); err != nil {
+		return 0, err
+	}
+	if pending >= 1000 {
+		return 0, fmt.Errorf("%w: 通知队列已满", ErrConflict)
+	}
 	e := notify.Event{Type: "test", Time: time.Now().UTC(), Test: true, Message: "测试通知"}
 	b, _ := json.Marshal(e)
 	authorization, err := s.notificationAuthorization(ctx, tx, owner)
@@ -197,6 +204,7 @@ func (s *Store) CleanNotificationRecords(ctx context.Context) error {
  DELETE FROM notification_deliveries WHERE id IN(SELECT id FROM notification_deliveries WHERE status IN ('accepted','failed','canceled') AND (updated_at<now()-interval '14 days' OR id<(SELECT COALESCE(max(id),0)-100000 FROM notification_deliveries)) ORDER BY id LIMIT 1000);
  DELETE FROM notification_deliveries WHERE id IN(SELECT id FROM (SELECT id,status,row_number() OVER(PARTITION BY owner_id ORDER BY id DESC) n FROM notification_deliveries) ranked WHERE n>5000 AND status IN ('accepted','failed','canceled') LIMIT 1000);
  DELETE FROM notification_events WHERE id IN(SELECT id FROM notification_events WHERE created_at<now()-interval '30 days' OR id<(SELECT COALESCE(max(id),0)-100000 FROM notification_events) ORDER BY id LIMIT 1000);
+ DELETE FROM notification_rule_states WHERE (owner_id,rule_id,resource) IN (SELECT owner_id,rule_id,resource FROM notification_rule_states st WHERE st.rule_id<>'_update-comparison' AND st.resource NOT IN ('events','update') AND NOT EXISTS(SELECT 1 FROM agents WHERE id=st.resource) AND NOT EXISTS(SELECT 1 FROM port_traffic_policies WHERE id=st.resource) AND NOT EXISTS(SELECT 1 FROM agent_shares WHERE id=st.resource) LIMIT 1000);
  DELETE FROM notification_configs WHERE owner_id<>'' AND NOT starts_with(owner_id,'token_') AND NOT EXISTS(SELECT 1 FROM panel_users WHERE id=owner_id);`)
 	return err
 }
