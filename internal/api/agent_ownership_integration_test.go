@@ -48,7 +48,29 @@ func TestTaskFailureWebhookUsesTaskOwnerNotSharedHostOwner(t *testing.T) {
 	var task core.Task
 	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, ConfigID: saved.ID, Engine: saved.Engine, Action: core.ActionValidate}, http.StatusCreated, &task)
 	server := New(db, Config{})
-	server.notifyTaskFailure(agent.ID, task.ID, core.TaskResultRequest{Error: "Bob private validation diagnostic"})
+	if err := db.ScanNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim %v %v", claimed, err)
+	}
+	if err = db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Error: "Bob private validation diagnostic"}); err != nil {
+		t.Fatal(err)
+	}
+	// A restart can resume the durable scanner without replaying Agent results.
+	if err = db.ScanNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Poll once the bounded per-user scan interval elapses.
+	time.Sleep(11 * time.Second)
+	if err = db.ScanNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
+	if _, err = db.DeliverNotification(ctx, notify.NewSender(), server.notifier.Secret); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case got := <-deliveries:
 		if got.path != "/bob" || got.event.TaskID != task.ID || got.event.Error != "Bob private validation diagnostic" {

@@ -40,7 +40,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 	settingsContent := string(mustReadFrontendFile(t, "analytics/settings.js"))
-	for _, group := range []string{"基础设置", "默认内核能力", "节点上报", "任务", "日志", "数据清理", "证书与地址库", "通知", "部署状态", "API Key"} {
+	for _, group := range []string{"基础设置", "默认内核能力", "节点上报", "任务", "日志", "数据清理", "证书与地址库", "部署状态", "API Key"} {
 		if !strings.Contains(settingsContent, `section("`+group+`"`) {
 			t.Errorf("native settings omits group %q", group)
 		}
@@ -58,6 +58,15 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 
+	if !strings.Contains(settingsContent, `await notificationSettings(ctx, refreshSettings)`) {
+		t.Error("settings omits notification integration")
+	}
+	notificationContent := string(mustReadFrontendFile(t, "analytics/notification-settings.js"))
+	for _, title := range []string{"通知渠道", "通知规则", "通知模板", "投递记录"} {
+		if !strings.Contains(notificationContent, `section("`+title+`"`) {
+			t.Errorf("notification group missing %s", title)
+		}
+	}
 	module := []byte(frontendSources(t, "analytics/observability.js", "modules/core-log-model.js"))
 	moduleContent := string(module)
 	if !strings.Contains(moduleContent, `})[value] || "保存策略不可见"`) {

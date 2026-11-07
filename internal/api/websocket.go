@@ -400,7 +400,6 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if message.Result.Result.Success && (inFlightAction == core.ActionDeploy || inFlightAction == core.ActionImportExisting) {
 					s.refreshAgentTrafficPolicies(id)
 				}
-				s.notifyTaskFailure(id, message.Result.TaskID, message.Result.Result)
 				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireResultAck, TaskID: message.Result.TaskID}); err != nil {
 					return
 				}

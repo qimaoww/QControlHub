@@ -71,6 +71,16 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 		}
 		metrics.BBR = &status
 	}
+	metrics.NetworkSampledAt = time.Time{}
+	if metrics.NetworkRateAvailable != nil && *metrics.NetworkRateAvailable && metrics.NetworkAvailable {
+		sampled := input.CollectedAt
+		if !sampled.IsZero() && !sampled.After(receivedAt.Add(30*time.Second)) && receivedAt.Sub(sampled) <= 2*time.Minute {
+			metrics.NetworkSampledAt = sampled.UTC()
+		} else {
+			valid := false
+			metrics.NetworkRateAvailable = &valid
+		}
+	}
 	metrics.CollectedAt = receivedAt.UTC()
 	if metrics.CPUAvailable {
 		if math.IsNaN(metrics.CPUPercent) || math.IsInf(metrics.CPUPercent, 0) || metrics.CPUPercent < 0 || metrics.CPUPercent > 100 {
