@@ -25,7 +25,7 @@ export async function createConfigFixture(engine, options = {}) {
       ...(options.legacy ? [] : ["preset-auto-install-v1"])],
     runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, service_status:options.serviceStatus || "active", version:"test-development", existing_config_available:Boolean(options.import)}}};
   const test = {writes:[], calls:[], readRequests:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending",deploymentState:options.deploymentState};
-  let inbounds = options.missing || options.emptyInbounds ? [] : ["first", "second"].map((tag, index) => ({...basePlan, tag, port:21001+index}));
+  let inbounds = options.missing || options.emptyInbounds ? [] : (options.tags || ["first", "second"]).map((tag, index) => ({...basePlan, tag, port:21001+index}));
   const primaryField = engine === "ss-rust" ? "timeout" : engine === "mihomo" ? "log-level" : "log";
   const secondaryField = engine === "xray" ? "stats" : engine === "sing-box" ? "experimental" : "mode";
   const extraField = engine === "xray" ? "policy" : engine === "ss-rust" ? "ipv6_first" : "ntp";
@@ -40,6 +40,7 @@ export async function createConfigFixture(engine, options = {}) {
     [primaryField, engine === "ss-rust" ? "300" : engine === "mihomo" ? '"info"' : '{"level":"info"}'],
     [secondaryField, engine === "ss-rust" ? '"tcp_and_udp"' : engine === "mihomo" ? '"rule"' : "{}"],
   ]);
+  for (const [key,value] of Object.entries(options.globalFields || {})) values.set(key,JSON.stringify(value));
   if (options.allCommon) for (const field of fields.filter(field=>field.scope !== "inbound"))
     if (!values.has(field.key)) values.set(field.key, "{}");
   const root = () => ({
@@ -138,6 +139,7 @@ export async function createConfigFixture(engine, options = {}) {
       return {version:saved.version,fragment:JSON.stringify(entry,null,2)};
     }
     if (path.endsWith("/workspace")) {
+      if (test.workspaceResponses?.length) return test.workspaceResponses.shift();
       if (test.workspaceGate) await test.workspaceGate;
       if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
       if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
@@ -268,6 +270,7 @@ export async function createConfigFixture(engine, options = {}) {
     }
     if (path.includes("/fields/")) {
       if (test.fieldGate) await test.fieldGate;
+      if (test.fieldError) throw Object.assign(new Error(test.fieldError),{status:503});
       if (test.fieldFailure) throw Object.assign(new Error("测试配置项读取失败"), {status:503});
       const key = decodeURIComponent(path.split("/fields/")[1].split("?")[0]);
       return {version:saved.version+(test.staleField?1:0), present:values.has(key), fragment:values.get(key) || ""};
@@ -342,6 +345,6 @@ export async function createConfigFixture(engine, options = {}) {
   const reenter = async () => {const before=test.calls.filter(call=>call.path.endsWith('/workspace')).length;clickButton('刷新',appRoot);await waitFor(()=>test.calls.filter(call=>call.path.endsWith('/workspace')).length>before&&!appRoot.querySelector('[aria-busy=true]'),'workspace refresh failed');};
   const dispose = () => {window.dispatchEvent(new Event('pagehide'));controller.abort();observer.disconnect();document.querySelectorAll('dialog.a-dialog').forEach(box=>box.close());styles.remove();globalThis.fetch=nativeFetch;state.data={};};
   Object.assign(test,{state,agent,root:appRoot,row,topDialog,clickButton,click,select:tag=>{selected=tag;},selectCommon:()=>{},common:()=>click('advanced'),reenter,dispose,settle,submit,
-    setAgentContent:value=>{agentContent=value;},primaryField,secondaryField,extraField,saved:()=>saved,revisions,restores:[]});
+    setAgentContent:value=>{agentContent=value;},workspace,primaryField,secondaryField,extraField,saved:()=>saved,revisions,restores:[]});
   return test;
 }

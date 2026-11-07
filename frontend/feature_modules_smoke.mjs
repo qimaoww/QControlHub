@@ -5,9 +5,6 @@ import * as batch from "./modules/agent-batch.js";
 import * as drag from "./modules/agent-card-drag.js";
 import * as coreActions from "./modules/agent-core-actions.js";
 import * as agentRefresh from "./modules/agent-refresh.js";
-import * as configs from "./modules/configs.js";
-import * as plan from "./modules/server-plan-form.js";
-import * as live from "./modules/live-config-state.js";
 import { bindCodeEditors } from "./modules/code-editor.js";
 import { createAgentEnrollment } from "./modules/agent-enrollment.js";
 
@@ -19,8 +16,6 @@ for (const [facade, owner, names] of [
   [agents, drag, ["animateNodeCardDrop", "clearNodeCardDragState", "nodeCardDropIndex"]],
   [agents, coreActions, ["developmentSourceVisible", "coreSourceForInstall"]],
   [agents, agentRefresh, ["agentStructureSignature"]],
-  [configs, plan, ["bindServerPlanRegeneration", "readServerPlanInput"]],
-  [configs, live, ["liveConfigEditorState", "liveConfigEngineEligible", "liveConfigReadAction", "liveConfigSnapshotReusable", "submitLiveConfigChange"]],
 ]) {
   for (const name of names) assert.equal(facade[name], owner[name], `${name} must retain its public export`);
 }

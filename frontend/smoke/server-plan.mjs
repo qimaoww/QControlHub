@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { bindServerPlanRegeneration } from "../modules/configs.js";
+import { bindServerPlanRegeneration } from "../modules/server-plan-form.js";
 import { readServerPlanInput } from "../modules/inbound-options-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.

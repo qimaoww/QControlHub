@@ -16,6 +16,7 @@ async function field(key){
 }
 const protectedStructure=test=>{const root=JSON.parse(test.saved().content);return JSON.stringify(Object.fromEntries(['inbounds','outbounds','listeners','servers'].filter(key=>key in root).map(key=>[key,root[key]])));};
 export async function testCommonConfigRuntime(){
+  await testSSRustOverrides();
   for(const engine of ['xray','sing-box','mihomo','ss-rust']){
     const test=await fixture(engine),structure=protectedStructure(test);
     assert([...document.querySelectorAll('.a-main button')].filter(button=>button.textContent==='添加入站').length===1,'standalone add-inbound entry duplicated/missing');
@@ -60,7 +61,47 @@ export async function testCommonConfigRuntime(){
   for(const kind of ['workspace','field']){
     const test=await fixture('xray');if(kind==='workspace')test.stale=true;else test.staleField=true;test.common();await waitFor(()=>alerts().includes('配置已变化'),'stale common read conflict hidden');assert(!test.writes.length&&(!form()||form().querySelector('button[type=submit]').disabled),'stale common read permits write');test.dispose();
   }
+  const malicious='测试读取失败：</textarea><img src=x onerror="bad()"><script>bad()</script>';
+  const escaped=await fixture('xray');escaped.fieldError=malicious;escaped.common();
+  await waitFor(()=>form()&&form().textContent.includes(malicious),'field failure text missing');
+  assert(!dialog().querySelector('img,script')&&form().querySelector('[type=submit]').disabled&&!escaped.writes.length,'failed field injected markup or permits mutation');escaped.dispose();
   const isolated=await fixture('xray');await operation(isolated,'modify');const key=form().elements.key.value;form().elements.fragment.value='{"level":"draft-only"}';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));form().elements.mutation.value='delete';form().elements.mutation.dispatchEvent(new Event('change',{bubbles:true}));await field(key);assert(form().elements.fragment.readOnly&&!form().elements.fragment.value.includes('draft-only'),'modify draft leaked into delete preview');isolated.dispose();
   const conflict=await fixture('xray');await operation(conflict,'modify');form().elements.fragment.value='{"level":"keep-this-draft"}';conflict.fail=true;conflict.confirm=true;conflict.submit('deploy');await waitFor(()=>form()?.textContent.includes('草稿已保留'),'common conflict lost draft feedback');assert(form().elements.fragment.value.includes('keep-this-draft')&&form().querySelector('button[type=submit]').disabled,'common conflict permits stale resubmit');conflict.dispose();
   const late=await fixture('xray');let release;late.fieldGate=new Promise(resolve=>{release=resolve;});late.common();await waitFor(form,'deferred common form missing');late.dispose();release();await pause();assert(!dialog()&&!late.writes.length,'late common field escaped disposed session');
+}
+
+async function testSSRustOverrides(){
+  const tag='HK & JP </textarea><img src=x onerror="bad()">';
+  for(const shared of [false,true]){
+    const test=await fixture('ss-rust',{native:true,shared,tags:[tag,'second'],globalFields:{outbound_bind_addr:'192.0.2.1'}});test.confirm=true;
+    const edit=async()=>{
+      test.select(tag);test.click('modify');
+      await waitFor(()=>dialog()?.querySelector('[name=fragment]'),'native SS Rust source editor missing');
+      return dialog().querySelector('form');
+    };
+    const submit=async(current,fragment,count)=>{
+      current.elements.fragment.value=JSON.stringify(fragment,null,2);current.elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));
+      current.requestSubmit();await test.settle(count);
+    };
+    try{
+      const original=JSON.parse(test.saved().content),current=await edit(),entry=JSON.parse(current.elements.fragment.value);
+      assert(!dialog().querySelector('img,script')&&dialog().textContent.includes(tag),'inbound identity escaped text or injected markup');
+      assert(test.calls.some(call=>call.path.split('?')[0]===`/agents/node/configs/ss-rust/server-inbounds/${encodeURIComponent(tag)}`),'native source read did not encode selected inbound identity');
+      assert(!Object.hasOwn(entry,'mode')&&!Object.hasOwn(entry,'outbound_bind_addr'),'inherited globals were copied into native port overrides');
+      await submit(current,{...entry,mode:'udp_only',outbound_udp_allow_fragmentation:false},1);
+      let saved=JSON.parse(test.saved().content);
+      assert(saved.outbound_bind_addr===original.outbound_bind_addr&&saved.mode===original.mode&&saved.servers.find(item=>item.remarks===tag).mode==='udp_only'&&saved.servers.find(item=>item.remarks===tag).outbound_udp_allow_fragmentation===false&&!Object.hasOwn(saved.servers.find(item=>item.remarks==='second'),'mode'),'port override changed global defaults or sibling');
+      const port=JSON.stringify(saved.servers);
+      await operation(test,'modify');await field('mode');
+      assert(![...form().elements.key.options].some(option=>['server','server_port','servers'].includes(option.value)),'global editor includes inbound structural fields');
+      form().elements.fragment.value='"tcp_only"';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));test.submit('deploy');await test.settle(2);
+      saved=JSON.parse(test.saved().content);
+      assert(saved.mode==='tcp_only'&&JSON.stringify(saved.servers)===port,'global default mutation erased port overrides');
+      const reopened=await edit(),inherited=JSON.parse(reopened.elements.fragment.value);delete inherited.mode;
+      await submit(reopened,inherited,3);saved=JSON.parse(test.saved().content);
+      assert(saved.mode==='tcp_only'&&!Object.hasOwn(saved.servers.find(item=>item.remarks===tag),'mode')&&saved.servers.find(item=>item.remarks===tag).outbound_udp_allow_fragmentation===false,'removing port override lost inheritance or unrelated options');
+      assert(test.writes[0].original_tag===tag&&test.writes[0].expected_version===1&&test.writes[1].path.endsWith('/fields/mode')&&test.writes[1].expected_version===2&&test.writes[2].expected_version===3,'scoped mutations lost original identity or CAS');
+      assert(test.confirmations.some(item=>item.message.includes('重启')),'SS Rust deployment omitted restart confirmation');
+    }finally{test.dispose();}
+  }
 }

@@ -3,6 +3,7 @@ import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mj
 const failureButton = test => test.row("second")?.querySelector('button[aria-label*="部署失败"]');
 
 export async function testInboundDeploymentRuntime() {
+  await testSupersededDeploymentReceipts();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) for (const shared of [false, true]) {
     const test = await createConfigFixture(engine, {shared});
     test.confirm = true; test.taskStatus = "failed";
@@ -50,5 +51,37 @@ export async function testInboundDeploymentRuntime() {
         await waitFor(()=>row.cells[3].innerText === "部署结果待确认", "unknown result falsely claims enabled");
       }
     } finally { test.dispose(); }
+  }
+}
+
+async function testSupersededDeploymentReceipts() {
+  for (const shared of [false,true]) {
+    const test=await createConfigFixture('xray',{shared});
+    const source=()=>test.root.querySelector('form:has([name=content])');
+    let release;
+    test.confirm=true;
+    try {
+      source().elements.content.value+='\n ';source().elements.content.dispatchEvent(new Event('input',{bubbles:true}));
+      source().requestSubmit();await test.settle(1);
+      const firstSource=source().elements.content.value;
+      location.hash='#tasks';await waitFor(()=>!source()&&test.calls.some(call=>call.path.startsWith('/tasks?'))&&!test.root.querySelector('[aria-busy=true]'),'pending deployment did not leave for tasks');
+      location.hash='#live-config?agent=node&engine=xray';
+      await waitFor(()=>source()&&!test.root.querySelector('[aria-busy=true]'),'pending deployment did not recover on return');
+      assert(source().elements.content.value===firstSource&&test.row('first').cells[3].innerText==='等待执行','route return lost pending deployment or saved baseline');
+      const oldReceipt=test.workspace();oldReceipt.deployment={...oldReceipt.deployment,state:'applied',task_status:'succeeded'};
+      test.workspaceResponses=[new Promise(resolve=>{release=()=>resolve(oldReceipt);})];
+      await waitFor(()=>test.workspaceResponses.length===0,'old deployment poll did not begin');
+      const form=source();form.elements.content.value+='\n  ';form.elements.content.dispatchEvent(new Event('input',{bubbles:true}));
+      const latest=form.elements.content.value;form.requestSubmit();await test.settle(2);
+      assert(test.saved().version===3&&form.elements.content.value===latest,'new source submission lost current revision');
+      release();release=null;await pause();
+      assert(source()===form&&form.elements.content.value===latest&&test.row('first').cells[3].innerText==='等待执行','old successful receipt overwrote newer pending configuration');
+      test.taskStatus='failed';
+      await waitFor(()=>test.row('first').cells[3].innerText==='部署失败','latest failure did not supersede older success');
+      assert(form.elements.content.value===latest&&test.saved().version===3&&test.writes.length===2,'failed deployment cleared baseline or repeated write');
+      test.taskStatus='succeeded';
+      await waitFor(()=>test.row('first').cells[3].innerText==='启用','latest deployment did not converge after recovery');
+      assert(source()===form&&form.elements.content.value===latest&&!test.readRequests.length&&test.writes.length===2,'status convergence replaced source or created redundant read/write tasks');
+    } finally {release?.();test.dispose();}
   }
 }

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { installAgents } from "./modules/agents.js";
-import { installConfigPages } from "./modules/configs.js";
 import { createConfigDeployment } from "./modules/config-deployment.js";
 import { createLiveConfigReader } from "./modules/live-config-reader.js";
 
@@ -23,10 +22,6 @@ for (const [pages, names] of [
     "agents", "nodeSettings", "submitTask", "bindCodeEditors", "showCommand",
     "pollAgentMetrics", "updateAgentMetrics", "cancelAgentInteractions",
     "sharingHasUnsavedChanges", "compactPresetPage",
-  ]],
-  [installConfigPages(context), [
-    "agentConfig", "liveConfig", "archiveConfigs", "capturePresetDrafts",
-    "presetHasUnsavedChanges", "configHasUnsavedChanges",
   ]],
 ]) {
   assert.deepEqual(Object.keys(pages).sort(), names.sort());
