@@ -4,9 +4,10 @@ import { assert, waitFor } from "./assertions.mjs";
 export async function testClientConnectionsRuntime(preview = false) {
   const fallback = window.fetch.bind(window), requests = [], locationRequests = [];
   const now = new Date().toISOString();
-  let releaseLocations, releaseShell, holdHistory;
+  let releaseLocations, releaseShell, releaseFirstHistory, holdHistory;
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
+  holdHistory = new Promise(resolve => { releaseFirstHistory = resolve; });
   const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
   const rows = [
     { ...row, id: 10, engine: "mihomo", endpoints: [{ agent_id: "alpha", engine: "mihomo", local_port: 443 }] },
@@ -57,7 +58,16 @@ export async function testClientConnectionsRuntime(preview = false) {
   const settled = () => document.querySelector(".a-main").textContent.includes("已读取");
   const requested = async (count, message) => waitFor(() => requests.length > count && settled(), message);
   const pageText = () => document.querySelector(".a-main").textContent;
+  await waitFor(() => form() && requests.length, "first history read must not block mounting filters");
+  assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "first history read disabled filters");
+  assert.ok(pageText().includes("正在读取") && !pageText().includes("已读取") && !pageText().includes("暂无记录"), "pending history was reported as a completed empty result");
+  assert.ok(pageText().includes("独立 IP —") && !pageText().includes("观测连接 0"), "pending history invented statistics");
+  assert.ok(button("上一页").disabled && button("下一页").disabled, "unknown pagination must remain disabled");
+  form().elements.client_ip.focus();
+  const firstInput = document.activeElement;
+  releaseFirstHistory(); holdHistory = null;
   await waitFor(() => body()?.textContent.includes("2001:db8::8"), "connection page did not load");
+  assert.equal(document.activeElement, firstInput, "first history arrival replaced the active filter");
   assert.equal(form().elements.agent_id.options.length, 3, "authorized node choices must remain available while geography loads");
   assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "location lookup must not disable filters");
   assert.ok(!body().textContent.includes("广东"));
