@@ -100,7 +100,16 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.certificateGate) await test.certificateGate;
       return {items:test.certificates || options.certificates || []};
     }
-    if (path === "/agents") return [options.cachedMissing ? {...structuredClone(agent), runtime:{[engine]:{installed:false}}} : structuredClone(agent)];
+    if (path === "/agents") {
+      const result = [options.cachedMissing ? {...structuredClone(agent), runtime:{[engine]:{installed:false}}} : structuredClone(agent)];
+      const gate = test.agentReadGate;
+      test.agentReadGate = null;
+      if (gate) {
+        await gate;
+        if (!test.ignoreAgentAbort) request.signal?.throwIfAborted();
+      }
+      return result;
+    }
     if (path === "/client-access") return options.clientEntries || [];
     if (path.startsWith("/client-access?")) {
       if (test.peerGate) await test.peerGate;
@@ -197,6 +206,7 @@ export async function createConfigFixture(engine, options = {}) {
       revisions.set(saved.version,structuredClone(saved));test.writes.push({path,...body});return saved;
     }
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
+    if (path.startsWith('/tasks?') && (!request.method || request.method === 'GET')) return [...tasks.values()];
     if (request.method === "POST" && path === "/tasks") {
       if (body.action === 'import-existing') {
         test.imports ||= [];test.imports.push(body);

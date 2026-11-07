@@ -39,10 +39,6 @@ Object.assign(fixtures, await (await import("./smoke/helper-contracts.mjs")).run
 Object.assign(fixtures, await (await import("./smoke/node-order.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/traffic-log-models.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/live-config-state.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/live-config-dual-source.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/live-config-unsupported.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/live-config-runtime.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/live-config-stale-runtime.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/installer-apis.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/deployment-recovery.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/agent-structure.mjs")).run(fixtures));

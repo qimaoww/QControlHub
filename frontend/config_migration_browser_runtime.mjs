@@ -56,6 +56,73 @@ export async function testConfigMigrationRuntime(preview=false){
   await testPendingAndRejectedSource();
   await testSourceReceipts();
   await testNativeConfigReadCacheRuntime();
+  await testRuntimeAndSourceSelection();
+}
+async function testRuntimeAndSourceSelection(){
+  const test=await createConfigFixture('sing-box',{import:true});
+  const target=()=>test.root.querySelector('.a-target-form');
+  const idle=()=>sourceForm()&&!test.root.querySelector('[aria-busy=true]');
+  const selectSource=async value=>{
+    const select=target().elements.source;
+    select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));
+    await waitFor(()=>idle()&&target().elements.source.value===value,`native source selection failed: ${value}`);
+  };
+  let release;
+  try{
+    for(const reason of ['complex wrapper is unsupported','standard executable did not pass protected native binary validation']){
+      Object.assign(test.agent.runtime['sing-box'],{installed:false,existing_config_available:false,existing_config_unsupported_reason:reason});
+      const reads=test.calls.filter(call=>call.path==='/agents').length;
+      await test.reenter();
+      assert(test.calls.filter(call=>call.path==='/agents').length===reads+1,'explicit refresh duplicated runtime reads');
+      assert(target().elements.engine.value==='sing-box'&&target().elements.engine.options.length===1,'unsupported runtime removed selected engine');
+      assert(test.root.textContent.includes(reason),'fresh unsupported runtime reason missing');
+      assert(sourceForm().querySelector('[type=submit]').disabled,'unsupported runtime permits deployment');
+      assert(![...target().elements.source.options].some(option=>option.value==='import'),'unsupported runtime permits system migration');
+      if(reason.startsWith('standard'))assert(!test.root.textContent.includes('complex wrapper is unsupported'),'runtime refresh retained stale unsupported reason');
+    }
+    Object.assign(test.agent.runtime['sing-box'],{installed:true,existing_config_available:true,existing_config_unsupported_reason:''});
+    const beforeWorkspaces=test.calls.filter(call=>call.path.endsWith('/workspace')).length;
+    location.hash='#tasks';
+    await waitFor(()=>!sourceForm()&&test.calls.some(call=>call.path.startsWith('/tasks?'))&&!test.root.querySelector('[aria-busy=true]'),'tasks route did not load before returning to configuration');
+    const afterTasksAgents=test.calls.filter(call=>call.path==='/agents').length;
+    location.hash='#live-config?agent=node&engine=sing-box&source=personal';
+    await waitFor(()=>idle()&&target().elements.source.value==='personal','configuration did not reload after tasks route');
+    assert(test.calls.filter(call=>call.path==='/agents').length===afterTasksAgents+1,'return from tasks reused obsolete runtime');
+    assert(test.calls.filter(call=>call.path.endsWith('/workspace')).length===beforeWorkspaces+1,'runtime refresh duplicated workspace reads');
+    assert(!test.root.textContent.includes('standard executable did not pass'),'upgrade retained unsupported warning');
+    assert(!sourceForm().querySelector('[type=submit]').disabled,'upgraded runtime did not restore deployment');
+    assert(['personal','managed','import'].every(value=>[...target().elements.source.options].some(option=>option.value===value)),'upgraded runtime lost available source choices');
+    await selectSource('personal');
+    assert(!sourceForm().elements.content.readOnly&&sourceForm().elements.content.value===test.saved().content,'saved source is not editable or shows system snapshot');
+    await selectSource('managed');
+    assert(!sourceForm().elements.content.readOnly&&sourceForm().querySelector('[type=submit]').textContent==='保存并部署','managed source lost atomic deployment');
+    await selectSource('import');
+    const snapshot='{"inbounds":[{"tag":"complete-existing-snapshot"}],"large":9007199254740993}';
+    test.setAgentContent(snapshot);test.clickButton('读取系统配置');
+    await waitFor(()=>idle()&&sourceForm().elements.content.value===snapshot,'newly available system source did not read exact snapshot');
+    assert(sourceForm().elements.content.readOnly,'system migration snapshot became editable');
+    assert(sourceForm().querySelectorAll('[type=submit]').length===1&&sourceForm().querySelector('[type=submit]').textContent==='导入并迁移','system migration has duplicate or incorrect submit action');
+    await selectSource('personal');
+    assert(sourceForm().elements.content.value===test.saved().content,'system snapshot polluted saved source');
+    for(const ignoreAbort of [false,true]){
+      test.ignoreAgentAbort=ignoreAbort;
+      const nextSource=ignoreAbort?'personal':'managed';
+      Object.assign(test.agent.runtime['sing-box'],{installed:false,existing_config_available:false,existing_config_unsupported_reason:'stale unsupported reason'});
+      test.agentReadGate=new Promise(resolve=>{release=resolve;});
+      const agentReads=test.calls.filter(call=>call.path==='/agents').length;
+      test.clickButton('刷新');
+      await waitFor(()=>test.calls.filter(call=>call.path==='/agents').length===agentReads+1,'stale runtime read did not begin');
+      Object.assign(test.agent.runtime['sing-box'],{installed:true,existing_config_available:true,existing_config_unsupported_reason:''});
+      location.hash=`#live-config?agent=node&engine=sing-box&source=${nextSource}`;
+      await waitFor(()=>idle()&&target().elements.source.value===nextSource,'current runtime did not supersede held old read');
+      const currentForm=sourceForm(),workspaceReads=test.calls.filter(call=>call.path.endsWith('/workspace')).length;
+      release();release=null;await pause();
+      assert(sourceForm()===currentForm&&!test.root.textContent.includes('stale unsupported reason'),'late old runtime replaced current workspace');
+      assert(!sourceForm().querySelector('[type=submit]').disabled&&target().elements.source.value===nextSource,'late runtime changed current source or deployment permission');
+      if(!ignoreAbort)assert(test.calls.filter(call=>call.path.endsWith('/workspace')).length===workspaceReads,'obsolete runtime triggered another workspace read');
+    }
+    assert(!test.writes.length&&!test.imports?.length,'runtime and source navigation unexpectedly wrote configuration');
+  }finally{release?.();test.dispose();}
 }
 async function testPendingAndRejectedSource(){
   for(const engine of ['xray','sing-box']){
