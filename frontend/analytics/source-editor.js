@@ -4,6 +4,9 @@ import { actions, badge, button, muted } from "./ui.js";
 export function bindSourceEditorTools(ctx, form, engine, original, changed, writable) {
   const input = form.elements.content;
   const feedback = muted("");
+  feedback.id = `${input.id}-feedback`;
+  feedback.setAttribute("role", "status");
+  input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), feedback.id].filter(Boolean).join(" "));
   const language = badge("");
   const busy = () => form.getAttribute("aria-busy") === "true";
   const reset = writable && button("重置源码", () => {

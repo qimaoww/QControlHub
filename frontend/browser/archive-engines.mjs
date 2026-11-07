@@ -80,6 +80,32 @@ export async function testArchiveEnginesRuntime(preview = false) {
     for (const engine of [...engines, ...engines.toReversed(), "xray", "ss-rust", "sing-box", "xray"]) {
       change(form.elements.engine, engine); check(form, engine); assert.equal(form.elements.name.value, "My archive"); assert.equal(form.elements.description.value, "Keep these notes");
     }
+    const editor = form.elements.content, editorHost = editor.closest('.a-editor');
+    const feedback = document.getElementById(editor.getAttribute('aria-describedby'));
+    assert.equal(feedback?.getAttribute('role'), 'status', "source feedback is not associated with the input or announced");
+    const format = () => button("格式化源码", form).click();
+    const unformatted = '{"tag":"demo","port":443,"tls":{"enabled":true}}';
+    fill(form, "content", unformatted); format();
+    const formatted = '{\n  "tag": "demo",\n  "port": 443,\n  "tls": {\n    "enabled": true\n  }\n}\n';
+    assert.equal(editor.value, formatted, "JSON formatting must use two spaces and a final newline");
+    format(); assert.equal(editor.value, formatted, "formatting is not idempotent");
+    assert.equal(form.elements.content, editor, "formatting replaced the source control");
+    assert.equal(editor.closest('.a-editor'), editorHost, "formatting rebuilt the editor");
+    for (const [content, message] of [
+      ['{"tag":"demo",}', /JSON 语法错误/],
+      ['['.repeat(600000), /当前内容无法安全格式化/],
+      [JSON.stringify(Array(840001).fill(0)), /超过 2 MiB 上限/],
+    ]) {
+      fill(form, "content", content);
+      const validBefore = editor.validity.valid, resetBefore = button("重置源码", form).disabled;
+      format();
+      assert.equal(editor.value, content, "failed formatting changed the source");
+      assert.equal(editor.validity.valid, validBefore, "failed formatting changed source validation");
+      assert.equal(button("重置源码", form).disabled, resetBefore, "failed formatting changed the draft baseline");
+      assert.match(editorHost.textContent, message, "formatter failure lacks safe local feedback");
+      assert.equal(form.elements.content, editor, "formatter failure replaced the input");
+    }
+    button("重置源码", form).click(); check(form, "xray");
     for (const engine of engines) {
       change(form.elements.engine, engine);
       const content = engine === "mihomo" ? `${configDefaults[engine]}# my YAML draft\n` : `{"custom":"draft-${engine}"}`;
@@ -133,7 +159,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
     for (const engine of engines) {
       box = reopen(`Archive ${engine}`); form = formOf(box); check(form, engine);
       assert.ok(form.elements.content.readOnly && form.elements.name.readOnly && form.elements.engine.disabled, "read-only archive permits edits");
-      assert.equal(form.querySelector('[type="submit"]'), null); assert.equal(button("格式化源码", form), undefined); assert.equal(button("新建模板"), undefined); retainedClose(box);
+      assert.equal(form.querySelector('[type="submit"]'), null); assert.equal(button("格式化源码", form), undefined); assert.equal(button("重置源码", form), undefined); assert.equal(button("新建模板"), undefined); retainedClose(box);
     }
     writable = true;
     // A pending old account response cannot write into the new account mount.

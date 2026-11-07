@@ -57,9 +57,7 @@ Object.assign(fixtures, await (await import("./smoke/substore.mjs")).run(fixture
 Object.assign(fixtures, await (await import("./smoke/polling.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/preset-compaction.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/preset-forms.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/code-editor.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/archive-language.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/archive-readonly.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/public-addresses.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/public-address-runtime.mjs")).run(fixtures));
 await import("./route_modules_smoke.mjs");

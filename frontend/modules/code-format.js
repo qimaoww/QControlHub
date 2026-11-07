@@ -229,7 +229,17 @@ function formatYaml() {
 export function formatConfigContent(text, language) {
   const normalized = (language || "").toUpperCase();
   if (!text.trim()) throw new ConfigFormatError("内容为空，无法格式化。");
-  if (normalized === "JSON") return formatJson(text);
+  if (normalized === "JSON") {
+    try {
+      const formatted = formatJson(text);
+      if (new Blob([formatted]).size > 2 * 1024 * 1024)
+        throw new ConfigFormatError("格式化结果超过 2 MiB 上限，已保留原文。");
+      return formatted;
+    } catch (error) {
+      if (error instanceof ConfigFormatError) throw error;
+      throw new ConfigFormatError("当前内容无法安全格式化。");
+    }
+  }
   if (normalized === "YAML") return formatYaml();
   throw new ConfigFormatError(`暂不支持格式化 ${language || "未知"} 格式。`);
 }
