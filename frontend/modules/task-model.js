@@ -4,6 +4,19 @@ export function coreSourceName(source) {
   return "";
 }
 
+export function taskTiming(task, now = Date.now()) {
+  if (task.status === "pending") return "准备执行";
+  const started = Date.parse(task.started_at), finished = Date.parse(task.finished_at);
+  const valid = value => Number.isFinite(value) && value > 0;
+  const duration = end => {
+    const seconds = Math.max(0, Math.round((end - started) / 1000));
+    return seconds < 60 ? `${seconds}\u00a0秒` : `${Math.floor(seconds / 60)}\u00a0分 ${seconds % 60}\u00a0秒`;
+  };
+  if (task.status === "running") return valid(started) ? `已运行 ${duration(now)}` : "正在启动执行";
+  if (valid(started) && valid(finished)) return `执行 ${duration(finished)}`;
+  return valid(finished) && !task.started_at ? "未开始执行" : "耗时未知";
+}
+
 export function coreSourceLabel(engine, version, source) {
   if (engine === "mihomo" && version === "development") {
     return coreSourceName(source || "official");

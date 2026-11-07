@@ -2,16 +2,20 @@ import { startAnalytics } from '../analytics/app.js';
 import { assert, waitFor, delay } from './assertions.mjs';
 
 export async function testLiveTaskRuntime(preview = false) {
-  const nativeFetch = globalThis.fetch;
+  const nativeFetch = globalThis.fetch, nativeNow = Date.now, nativeTimeout = window.setTimeout;
+  let clockOffset = 0;
+  Date.now = () => nativeNow() + clockOffset;
   const session = { role: 'user', user_id: 'task-reader', permissions: ['tasks.read'], csrf_token: 'tasks-live-fixture' };
-  const task = index => ({ id: `live-${index}`, agent_id: 'alpha', engine: 'mihomo', action: 'validate', status: 'running', created_at: '2026-11-06T10:00:00Z', output: Array.from({length:160}, (_,line)=>`任务输出 ${line} · ${'诊断文本'.repeat(8)}`).join('\n') });
+  const task = index => ({ id: `live-${index}`, agent_id: 'alpha', engine: 'mihomo', action: 'validate', status: 'running', created_at: '2026-11-06T10:00:00Z', started_at: new Date(nativeNow()-65000).toISOString(), output: Array.from({length:160}, (_,line)=>`任务输出 ${line} · ${'诊断文本'.repeat(8)}`).join('\n') });
   let tasks = Array.from({length:26}, (_, index)=>task(index));
   let failed = false, denied = false, detailDenied = false, hold = false, release, reads = 0;
+  let settings = { task_page_size: 50, task_poll_interval_ms: 5000 }, settingsReads = 0, settingsFailed = false;
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   globalThis.fetch = async (url, options={}) => {
     if (!String(url).startsWith('/api/v1')) return nativeFetch(url, options);
     const parsed = new URL(url, location.href), path = parsed.pathname.slice(7);
     if (path === '/auth/session') return reply(session);
+    if (path === '/settings') { settingsReads++; return settingsFailed ? reply({ error: '设置暂不可用' }, 503) : reply(settings); }
     if (path === '/tasks') {
       reads++;
       const result = tasks.filter(task => !parsed.searchParams.get('agent_id') || task.agent_id === parsed.searchParams.get('agent_id'));
@@ -38,6 +42,8 @@ export async function testLiveTaskRuntime(preview = false) {
     history.replaceState(null,'','#tasks');
     startAnalytics({app:document.querySelector('#live-task-test'),session});
     await waitFor(()=>row('live-0'),'任务列表未加载');
+    assert.ok(row('live-0').textContent.replace(/\s/g,'').includes('已运行1分'), '运行任务缺少真实耗时');
+    assert.equal(settingsReads, 0, '任务只读账号读取了面板设置');
     const filter=document.querySelector('.a-main input[name=agent_id]');
     button('下一页').click(); await waitFor(()=>row('live-12'),'任务第二页未打开');
     await waitFor(()=>!document.getAnimations().some(animation=>animation.id.startsWith('analytics-')), '任务列表入场未结束');
@@ -63,9 +69,10 @@ export async function testLiveTaskRuntime(preview = false) {
     output.scrollTop=80;const outputScroll=output.scrollTop;
     output.focus();const text=output.firstChild;
     getSelection().setBaseAndExtent(text,5,text,15);const outputSelected=getSelection().toString();
-    const chosen=tasks.find(task=>task.id==='live-13');chosen.output+='\n新的输出';
+    const chosen=tasks.find(task=>task.id==='live-13');chosen.output+='\n新的输出';chosen.status='succeeded';chosen.finished_at=new Date(Date.parse(chosen.started_at)+5000).toISOString();
     button('刷新结果',box).click();
     await waitFor(()=>output.textContent.endsWith('新的输出'),'任务输出未刷新');
+    assert.ok(box.textContent.replace(/\s/g,'').includes('执行5秒'),'详情未更新已结束任务的实际耗时');
     assert.equal(box.querySelector('pre'),output,'任务输出重建');assert.equal(document.activeElement,output,'任务输出刷新丢失焦点');
     assert.equal(getSelection().toString(),outputSelected,'任务输出更新丢失文本选择');assert.equal(output.scrollTop,outputScroll,'任务输出强制跟随');
     if (preview) { document.documentElement.dataset.taskLivePreview = 'ready'; await new Promise(()=>{}); }
@@ -88,5 +95,25 @@ export async function testLiveTaskRuntime(preview = false) {
     denied=true;await refresh(()=>!document.querySelector('[data-task-id]'));
     assert.ok(document.querySelector('.a-main [role=status]').textContent.includes('访问权限已变化'),'权限撤销没有说明');
     assert.ok(document.documentElement.scrollWidth<=innerWidth+1,'任务页面横向溢出');
-  } finally { window.dispatchEvent(new Event('pagehide'));document.querySelectorAll('dialog').forEach(box=>box.close());globalThis.fetch=nativeFetch;styles.remove(); }
+    // The bootstrap settings supply the initial size and one dynamic poller.
+    window.dispatchEvent(new Event('pagehide')); denied=false;tasks=Array.from({length:6},(_,index)=>task(index));
+    session.permissions.push('settings.read');
+    const delays=[];
+    window.setTimeout=(callback, timeout, ...args)=>{if(callback.name==='tick')delays.push(timeout);return nativeTimeout(callback,timeout,...args);};
+    document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'task-preferences-test'}));
+    startAnalytics({app:document.querySelector('#task-preferences-test'),session});
+    await waitFor(()=>row('live-0'),'带设置的任务页面未加载');
+    assert.equal(document.querySelector('.a-main input[name=limit]').value,'50','任务条数未读取账号设置');
+    assert.equal(settingsReads,1,'首次加载重复读取设置');
+    assert.equal(delays.at(-1),5000,'首次轮询未使用设置间隔');
+    settings={task_page_size:500,task_poll_interval_ms:600};clockOffset=31000;
+    const beforeSettings=reads;document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(()=>reads>beforeSettings&&delays.at(-1)===600,'过期设置未更新轮询间隔');
+    assert.equal(settingsReads,2,'设置缓存过期未重新读取');
+    assert.equal(document.querySelector('.a-main input[name=limit]').value,'50','设置更新覆盖当前查询');
+    await refresh();assert.equal(settingsReads,2,'普通任务刷新重复读取未过期设置');
+    clockOffset=62000;settingsFailed=true;
+    await refresh(()=>document.querySelector('.a-main [role=status]')?.textContent==='正在实时更新');
+    assert.ok(row('live-0'),'设置失败清空仍获授权的任务');
+  } finally { window.dispatchEvent(new Event('pagehide'));document.querySelectorAll('dialog').forEach(box=>box.close());globalThis.fetch=nativeFetch;Date.now=nativeNow;window.setTimeout=nativeTimeout;styles.remove(); }
 }

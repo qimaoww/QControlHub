@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { taskRetryState, coreSourceName, coreSourceLabel } from "./modules/task-model.js";
+import { taskRetryState, taskTiming, coreSourceName, coreSourceLabel } from "./modules/task-model.js";
 
 // Native pages perform work when called. Importing their modules must remain
 // inert so route loading cannot start requests, read the DOM or mount a page.
@@ -55,3 +55,14 @@ const failedLegacy = taskRetryState({ ...taskFixture, status: "failed", error: "
 assert.match(failedLegacy.diagnostic.advice, /缺少配置历史关联/);
 assert.match(failedLegacy.diagnostic.rollback, /回滚失败：需检查节点最终服务与路由状态/);
 console.log("Native task retry state preserves omitted historical revisions and rollback diagnostics");
+
+const started = '2026-11-07T01:00:00Z', finished = '2026-11-07T01:01:05Z';
+assert.equal(taskTiming({status:'pending'}), '准备执行');
+assert.equal(taskTiming({status:'running'}), '正在启动执行');
+assert.equal(taskTiming({status:'running',started_at:'invalid'}), '正在启动执行');
+assert.equal(taskTiming({status:'running',started_at:started},Date.parse(finished)), '已运行 1\u00a0分 5\u00a0秒');
+assert.equal(taskTiming({status:'running',started_at:finished},Date.parse(started)), '已运行 0\u00a0秒');
+assert.equal(taskTiming({status:'succeeded',started_at:started,finished_at:finished}), '执行 1\u00a0分 5\u00a0秒');
+assert.equal(taskTiming({status:'failed',started_at:started,finished_at:'2026-11-07T01:00:05Z'}), '执行 5\u00a0秒');
+assert.equal(taskTiming({status:'canceled',finished_at:finished}), '未开始执行');
+for (const task of [{status:'failed'},{status:'succeeded',started_at:started},{status:'failed',started_at:'invalid',finished_at:finished}]) assert.equal(taskTiming(task),'耗时未知');

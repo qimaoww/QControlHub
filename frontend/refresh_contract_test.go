@@ -52,7 +52,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"export function poll(ctx, run, delay = 2000)",
 			"if (!ctx.current() || running) return;",
 			"if (!document.hidden) await run();",
-			"if (ctx.current()) timer = setTimeout(tick, delay)",
+			"if (ctx.current()) schedule()",
 			"ctx.signal.addEventListener('abort', stop",
 		},
 		"analytics/nodes.js": {
@@ -90,7 +90,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"刷新失败 · 保留上次采样", "更新失败，保留上次数据",
 			"query(\"/traffic-usage\", { month })",
 			"can(\"panel-metrics.read\")", "\"/panel-metrics\"",
-			"orderNodesBySavedOrder(", "poll(ctx, refresh)",
+			"orderNodesBySavedOrder(", "poll(ctx, refresh, pollDelay)",
 		},
 		"analytics/traffic.js": {
 			"createPoller({", "bindNodeOrdering(ctx, results",

@@ -49,6 +49,7 @@ export function patch(current, fresh) {
 
 export function poll(ctx, run, delay = 2000) {
   let timer, running = false;
+  const schedule = () => { timer = setTimeout(tick, typeof delay === 'function' ? delay() : delay); };
   const stop = () => clearTimeout(timer);
   async function tick() {
     stop();
@@ -56,10 +57,10 @@ export function poll(ctx, run, delay = 2000) {
     running = true;
     try { if (!document.hidden) await run(); }
     catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.onRefreshError?.(error); }
-    finally { running = false; if (ctx.current()) timer = setTimeout(tick, delay); }
+    finally { running = false; if (ctx.current()) schedule(); }
   }
   document.addEventListener('visibilitychange', tick, { signal: ctx.signal });
   ctx.signal.addEventListener('abort', stop, { once: true });
-  timer = setTimeout(tick, delay);
+  schedule();
   return tick;
 }

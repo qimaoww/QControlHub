@@ -8,7 +8,7 @@ import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, summarizeDash
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
-import { taskRetryState } from "../modules/task-model.js";
+import { taskRetryState, taskTiming } from "../modules/task-model.js";
 import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
 
 export const bytes = value => {
@@ -308,8 +308,9 @@ export async function taskDetail(ctx, taskID) {
     diagnosis.hidden = !value;
   }
   paintDiagnosis();
+  const timing = muted(taskTiming(task));
   const content = stack(actions(state, badge(task.engine), badge(actionName(task.action))),
-    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), failure, diagnosis, output);
+    muted(`节点 ${task.agent_id} · ${date(task.created_at)}`), timing, failure, diagnosis, output);
   const box = ctx.dialog("任务详情", content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
@@ -324,6 +325,7 @@ export async function taskDetail(ctx, taskID) {
       const latest = await ctx.api(`/tasks/${pathID(taskID)}`);
       if (!active()) return;
       task = latest;
+      timing.textContent = taskTiming(task);
       paintDiagnosis();
       const next = status(task.status);
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
@@ -344,6 +346,7 @@ export async function taskDetail(ctx, taskID) {
     } catch (error) {
       if (active() && error.status === 403) {
         output.textContent = ''; output.hidden = true; state.textContent = '无权读取';
+        timing.textContent = '';
         failure.textContent = '无权读取此任务。';
         task = { ...task, status: 'denied' }; stop();
         paintDiagnosis();
@@ -362,7 +365,13 @@ export async function taskDetail(ctx, taskID) {
 }
 
 export async function tasksPage(ctx) {
-  const filters = ctx.state.data.taskFilters || { limit: "100" };
+  const pageSize = ctx.state.data.settings?.task_page_size;
+  const filters = ctx.state.data.taskFilters || { limit: String([50, 100, 500].includes(pageSize) ? pageSize : 100) };
+  let settingsLoadedAt = Date.now();
+  const pollDelay = () => {
+    const value = ctx.state.data.settings?.task_poll_interval_ms;
+    return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
+  };
   let readSequence = 0, filtering = false;
   const filter = autoFilter(ctx, [
     node("div", { className: "a-form-grid" },
@@ -412,7 +421,7 @@ export async function tasksPage(ctx) {
     taskTable.updateRows(list(tasks).map(task => {
       const retryState = taskRetryState(task);
       return [
-        actionName(task.action), task.agent_id, task.engine, stack(status(task.status), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
+        actionName(task.action), task.agent_id, task.engine, stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
         node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
           ctx.can("tasks.execute") && retryState.canRetry && button(task.config_id ? "重试配置" : "重试任务", async event => {
             const control = event.currentTarget;
@@ -441,6 +450,12 @@ export async function tasksPage(ctx) {
     if (filtering) return;
     const sequence = ++readSequence;
     try {
+      if (ctx.can('settings.read') && Date.now() - settingsLoadedAt >= 30000) {
+        try { await ctx.api('/settings'); }
+        catch (error) { if (error.name === 'AbortError') throw error; }
+        if (!ctx.current() || sequence !== readSequence) return;
+        settingsLoadedAt = Date.now();
+      }
       const tasks = await ctx.api(query('/tasks', ctx.state.data.taskFilters || filters));
       if (!ctx.current() || sequence !== readSequence) return;
       draw(tasks); refreshState.textContent = '正在实时更新';
@@ -454,7 +469,7 @@ export async function tasksPage(ctx) {
   }
   await refresh();
   ctx.onRefresh(refresh);
-  poll(ctx, refresh);
+  poll(ctx, refresh, pollDelay);
   return stack(filterbar(filter), refreshState, section(null, results));
 }
 
