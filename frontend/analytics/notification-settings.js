@@ -146,7 +146,7 @@ export async function notificationSettings(ctx, refreshSettings, setDirty) {
       const result = await ctx.api("/settings/notifications/deliveries");
       if (!ctx.current() || sequence !== recordSequence) return;
       records.updateRows(result.map(d => [date(d.created_at), d.event.test ? "测试" : resource.events[d.event.type] || d.event.type,
-        config.channels.find(c => c.id === d.channel_id)?.name || "已删除", badge(statusNames[d.status] || d.status, d.status === "failed" ? "error" : d.status === "accepted" ? "ok" : "warn"), String(d.attempts), d.error || "—"]));
+        config.channels.find(c => c.id === d.channel_id)?.name || "已删除", badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn"), String(d.attempts), d.error || "—"]));
     } catch (error) { if (!ctx.current() || sequence !== recordSequence) return; if (error.status === 403) records.updateRows([]); feedback.textContent = `读取投递记录失败：${error.message}`; }
   }
   ctx.onRefresh(() => Promise.all([refreshSettings(), loadRecords()]));

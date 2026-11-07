@@ -319,7 +319,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   assert.equal(notificationChannel.enabled,false);
   assert.ok(notificationChannel.configured.includes('url')&&!notificationChannel.secrets,'API retains target without exposing it');
   await evaluate(page,"[...document.querySelectorAll('summary')].find(s=>s.textContent==='编辑事件模板').click()");
-  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='节点：{{agent}}\n中文 <>& Unicode';b.dispatchEvent(new Event('input',{bubbles:true}));b.focus();b.setSelectionRange(2,5);})()");
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='节点：{{agent}}\\n中文 <>& Unicode';b.dispatchEvent(new Event('input',{bubbles:true}));b.focus();b.setSelectionRange(2,5);})()");
   await click('刷新记录','.a-main');
   await wait(page,"!document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').selectionStart"),2);
@@ -331,5 +331,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');
   await screenshot(page,'analytics-notification-templates');
   record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save and refresh draft preservation passed`);
+  await evaluate(page,"location.hash='#archive-config'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
 
 }

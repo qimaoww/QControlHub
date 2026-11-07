@@ -1096,6 +1096,7 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
  error text NOT NULL DEFAULT '', UNIQUE(owner_id,rule_id,channel_id,dedupe)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS notification_source_delivery ON notification_deliveries(owner_id,channel_id,dedupe) WHERE dedupe LIKE 'source:%';
 CREATE INDEX IF NOT EXISTS notification_deliveries_due ON notification_deliveries(next_at,id) WHERE status IN ('pending','sending');
 CREATE INDEX IF NOT EXISTS notification_deliveries_owner ON notification_deliveries(owner_id,id DESC);
 CREATE TABLE IF NOT EXISTS notification_update_cache (

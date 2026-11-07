@@ -43,6 +43,14 @@ func (s *Store) importNotificationTasks(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Sequence IDs are consumed only while holding the publication lock until
+	// commit. Otherwise a later committed ID could move subscriber cursors past
+	// an earlier, still uncommitted event on another server instance.
+	if len(items) > 0 {
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(91823411)`); err != nil {
+			return err
+		}
+	}
 	for _, v := range items {
 		raw, er := json.Marshal(v.event)
 		if er != nil {

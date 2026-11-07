@@ -51,6 +51,9 @@ func TestNotificationPresenceOutboxRetryRestartAndCancellation(t *testing.T) {
 	defer endpoint.Close()
 	t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
 	c.Channels[0].Secrets["url"] = endpoint.URL
+	overlapping := c.Rules[0]
+	overlapping.ID = "overlapping-offline"
+	c.Rules = append(c.Rules, overlapping)
 	c, err := s.SaveNotificationConfiguration(ctx, c)
 	if err != nil {
 		t.Fatal(err)
@@ -446,5 +449,53 @@ func TestNotificationTokenRevocationCancelsQueuedTest(t *testing.T) {
 	var status string
 	if err = s.pool.QueryRow(ctx, `SELECT status FROM notification_deliveries WHERE id=$1`, id).Scan(&status); err != nil || status != "canceled" {
 		t.Fatal("revoked token delivery", status, err)
+	}
+}
+
+func TestNotificationPublicationOrdersCommittedSourceIDs(t *testing.T) {
+	ctx, s, a, _ := notificationFixture(t)
+	if _, err := s.AgentPresenceTransitions(ctx, time.Now(), 45*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE agents SET last_seen=now()-interval '2 minutes' WHERE id=$1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback(ctx)
+	if _, err = first.Exec(ctx, `SELECT pg_advisory_xact_lock(91823411)`); err != nil {
+		t.Fatal(err)
+	}
+	e := notify.Event{Type: notify.TypeAgentOffline, Time: time.Now().UTC(), AgentID: a.ID, Agent: a.Name}
+	raw, _ := json.Marshal(e)
+	if _, err = first.Exec(ctx, `INSERT INTO notification_events(source_key,owner_id,event) VALUES('delayed-first','',$1)`, raw); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := s.AgentPresenceTransitions(ctx, time.Now(), 45*time.Second); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("later publisher committed before first: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	// A subscriber scanning while the first publication is open must not skip it.
+	forceNotificationScan(t, ctx, s)
+	if err = first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("publisher did not resume")
+	}
+	forceNotificationScan(t, ctx, s)
+	rows, err := s.NotificationDeliveries(ctx)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("source cursor lost a committed event: %+v %v", rows, err)
 	}
 }

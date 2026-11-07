@@ -46,7 +46,7 @@ func (s *Store) AgentPresenceTransitions(ctx context.Context, now time.Time, off
  SELECT 'presence:'||id||':'||current||':'||last_seen::text,owner_id,
  jsonb_build_object('type','agent.'||CASE WHEN current='online' THEN 'online' ELSE 'offline' END,
  'time',now(),'agent_id',id,'agent',name,'message','节点 '||name||CASE WHEN current='online' THEN ' 已恢复在线' ELSE ' 已离线' END)
- FROM updated WHERE previous<>'unknown' ON CONFLICT DO NOTHING)
+ FROM updated CROSS JOIN (SELECT pg_advisory_xact_lock(91823411)) notification_journal_gate WHERE previous<>'unknown' ON CONFLICT DO NOTHING)
  SELECT id,name,last_seen,previous,current FROM updated`, now.UTC(), int(offlineAfter/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("record agent presence transitions: %w", err)
@@ -89,7 +89,7 @@ func (s *Store) ClaimTrafficQuotaTransitions(ctx context.Context) ([]TrafficQuot
  'engine',u.engine,'port',u.port,'resource_id',u.id,'config_id',p.config_id,'config_version',p.config_version,'share_id',COALESCE(p.share_id,''),
  'period',COALESCE(p.period_start::text,'')||' / '||COALESCE(p.period_end::text,''),'direction','上传 + 下载（计费口径）','used_bytes',u.used_bytes,'limit_bytes',u.limit_bytes,
  'message','流量配额触发：端口 '||u.port::text||' 已阻断')
- FROM updated u JOIN agents a ON a.id=u.agent_id JOIN port_traffic_policies p ON p.id=u.id ON CONFLICT DO NOTHING)
+ FROM updated u JOIN agents a ON a.id=u.agent_id JOIN port_traffic_policies p ON p.id=u.id CROSS JOIN (SELECT pg_advisory_xact_lock(91823411)) notification_journal_gate ON CONFLICT DO NOTHING)
  SELECT id,agent_id,agent_name,name,engine,port,protocol,used_bytes,limit_bytes,reset_generation FROM updated`)
 	if err != nil {
 		return nil, err
