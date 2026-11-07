@@ -97,6 +97,8 @@ const testAPI = {
   deployments: [],
   savedConfigs: [],
   agentsFailure: false,
+  metricSamples: [],
+  metricFailure: false,
   enrollmentRecords: [
     {
       id: "enr-alpha",
@@ -655,7 +657,7 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/enrollment-tokens") return json(testAPI.enrollmentRecords);
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json(testAPI.savedConfigs.filter((item) => path.includes(item.agent_id)));
-  if (method === "GET" && path.startsWith("/metrics/")) return json([]);
+  if (method === "GET" && path.startsWith("/metrics/")) return testAPI.metricFailure ? json({error:"temporary metric history failure"},503) : json(testAPI.metricSamples);
   if (method === "POST" && path === "/enrollment-tokens") {
     testAPI.lastEnrollmentRequest = JSON.parse(options.body);
     if (testAPI.enrollmentGate) await testAPI.enrollmentGate;

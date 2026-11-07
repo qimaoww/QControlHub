@@ -298,6 +298,30 @@ async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
   assert.equal(document.querySelector('[data-agent-id=runtime-parity]'), stableCard, 'API response ordering rebuilt an existing node');
   assert.equal(core('mihomo'), stable, 'API response ordering rebuilt an existing engine');
   assert.ok(box.open && draft.value === '未保存的名称' && document.activeElement === draft, 'API response ordering lost settings, draft or focus');
+  button('查看指标历史', box).click();
+  const history = await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(dialog => dialog.querySelector('h2')?.textContent.includes('指标历史')), 'native metric history did not open');
+  await waitFor(() => history.textContent.includes('暂无指标记录'), 'empty metric history missing');
+  assert.equal(testAPI.calls.filter(call => call.path.startsWith('/metrics/')).at(-1)?.path, '/metrics/runtime-parity', 'metric history read targets another node');
+  testAPI.metricSamples = Array.from({ length: 36 }, (_, index) => ({ sampled_at: new Date(Date.UTC(2026, 10, 7, 0, index)).toISOString(), cpu_percent: index, memory_percent: 50, rx_rate_bps: 1024 * (index + 1), tx_rate_bps: 512 * (index + 1) }));
+  const refreshHistory = button('刷新指标', history);
+  refreshHistory.click();
+  await waitFor(() => history.querySelector('svg.a-chart') && !refreshHistory.disabled, 'metric history did not recover from empty data');
+  assert.ok(history.querySelector('svg.a-chart').getAttribute('aria-label').includes('最近 24 小时网络速率'), 'history chart lacks scoped accessible description');
+  assert.equal(history.querySelectorAll('tbody tr').length, 24, 'metric history lost bounded pagination');
+  button('下一页', history).click();
+  assert.equal(history.querySelectorAll('tbody tr').length, 12, 'metric history cannot read older samples');
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const chart = history.querySelector('svg.a-chart');
+  testAPI.metricFailure = true; refreshHistory.click();
+  await waitFor(() => !refreshHistory.disabled, 'failed metric history read left retry locked');
+  assert.equal(history.querySelector('svg.a-chart'), chart, 'failed metric history read discarded valid chart');
+  assert.equal(history.querySelectorAll('tbody tr').length, 12, 'failed metric history read changed historical page');
+  testAPI.metricFailure = false; testAPI.metricSamples = [];
+  refreshHistory.click();
+  await waitFor(() => !history.querySelector('svg.a-chart') && history.textContent.includes('暂无指标记录') && !refreshHistory.disabled, 'metric history retry retained obsolete samples');
+  history.querySelector('[aria-label=关闭]').click();
+  assert.ok(box.open && draft.value === '未保存的名称', 'closing metric history lost parent settings or draft');
+
 
   box.querySelector('[aria-label=关闭]').click();
   const originalFetch = window.fetch;
@@ -309,5 +333,10 @@ async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
     testAPI.agents.push(onlineAgent('without-metrics-permission'));
     await waitFor(() => document.querySelector('[data-agent-id=without-metrics-permission]'), 'node discovery incorrectly requires metrics.read');
     assert.ok(!button('添加节点') && !button('批量操作'), 'roster read grant exposes mutation controls');
+    button('查看设置').click();
+    const details = await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(dialog => dialog.querySelector('h2')?.textContent.includes('节点设置')), 'readonly node details missing');
+    assert.ok(!button('查看指标历史', details), 'metric history exposed without metrics.read');
+    details.querySelector('[aria-label=关闭]').click();
+
   } finally { window.fetch = originalFetch; }
 }

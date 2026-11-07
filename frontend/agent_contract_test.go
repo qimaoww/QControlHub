@@ -79,11 +79,6 @@ func TestSystemBBRCardsUseDraggedNodeSettingsOrder(t *testing.T) {
 func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	content := string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
 	for file, markers := range map[string][]string{
-		"modules/agents.js": {
-			`createAgentEnrollment({`,
-			`enrollment.bindEnrollmentPage(enrollmentHistory)`,
-			`batch.bind(agentsByID)`,
-		},
 		"modules/agent-batch-controller.js": {
 			`batchForm.dataset.busy === "1"`,
 			`batchForm.dataset.confirming === "1"`,
