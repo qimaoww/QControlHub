@@ -155,8 +155,10 @@ try {
       await wait(page,"document.querySelector('.a-layout>.a-rail nav').scrollTop>0");
       await check(page,'tasks','real navigation scroll');
       await tap(page,'button[aria-label="切换导航"]',scenario.touch);
+      await wait(page,"document.querySelector('.a-layout').classList.contains('a-collapsed')");
       assert.equal(await evaluate(page,"document.querySelector('.a-layout').classList.contains('a-collapsed')"),true);
       await tap(page,'button[aria-label="切换导航"]',scenario.touch);
+      await wait(page,"!document.querySelector('.a-layout').classList.contains('a-collapsed')");
       assert.equal(await evaluate(page,"document.querySelector('.a-layout').classList.contains('a-collapsed')"),false);
       await check(page,'tasks','collapse and restore');
     } else {
@@ -174,7 +176,10 @@ try {
       if(scenario.width<=896) await wait(page,"!document.querySelector('dialog.a-drawer')");
       assert.equal(await evaluate(page,"window.originalRail===document.querySelector('.a-layout>.a-rail')&&window.originalNav===originalRail.querySelector('nav')"),true,'route switch replaced stable shell');
       await drawer();await check(page,route,'tap after scrolling');
-      if(scenario.width<=896) await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+      if(scenario.width<=896) {
+        await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+        await wait(page,"!document.querySelector('dialog.a-drawer')");
+      }
     }
     const before=await evaluate(page,"window.__agentsBrowserTestAPI.calls.filter(c=>c.path==='/tasks').length");
     for(let i=0;i<3;i++) {
@@ -189,11 +194,17 @@ try {
     await evaluate(page,"location.hash='#core-logs';setTimeout(()=>location.hash='#tasks',25);setTimeout(()=>location.hash='#dashboard',50);setTimeout(()=>location.hash='#tasks',75)");
     await wait(page,"location.hash==='#tasks'&&document.querySelector('.a-top-title')?.textContent==='任务'&&document.querySelector('[data-task-id]')");
     await drawer();await check(page,'tasks','rapid route changes');
-    if(scenario.width<=896) await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+    if(scenario.width<=896) {
+      await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+      await wait(page,"!document.querySelector('dialog.a-drawer')");
+    }
     for(const [width,height] of [[844,390],[1100,600],[390,844]]) {
       await metrics(page,width,height,scenario.touch);await delay(150);await drawer();
       await check(page,'tasks','orientation and width change');
-      if(width<=896) await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+      if(width<=896) {
+        await tap(page,'dialog.a-drawer[open] button[title="关闭导航"]',scenario.touch);
+        await wait(page,"!document.querySelector('dialog.a-drawer')");
+      }
     }
     report.push({...scenario,result:'passed',measurements});console.log(`PASS ${scenario.name}`);
     await call('Target.disposeBrowserContext',{browserContextId});
