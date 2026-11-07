@@ -242,12 +242,13 @@ if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
       ["charlie", 8443, "xray", "edge-singapore-secondary", "tcp", 1.9],
       ["charlie", 39999, "mihomo", "socks-in", "both", 0.00012],
     ].map(([agent_id, port, engine, name, protocol, usedGB], index) => {
-      const used = usedGB * 1024 ** 3;
+      const used = (index === 5 ? 0 : usedGB) * 1024 ** 3;
       const received = used * (index % 3 === 0 ? 0.5 : 0.48);
       return {
         id: `trf_dense_${index}`, agent_id, port, engine, name, protocol,
         cycle: "monthly", cycle_anchor: "2026-09-01", period_start: "2026-09-01", period_end: "2026-10-01",
-        quota_enabled: false, monitoring_enabled: true,
+        quota_enabled: [0, 1, 2, 3, 5].includes(index), limit_bytes: ([0, 2, 5].includes(index) ? 100 : 50) * 1024 ** 3, monitoring_enabled: true,
+        ...(index === 6 ? { shared_quota: { id: 'share-traffic-layout', limit_bytes: 300 * 1024 ** 3, used_bytes: 225 * 1024 ** 3 } } : {}),
         received_bytes: received, sent_bytes: used - received, used_bytes: used,
         receive_bps: index % 4 === 0 ? 0 : 7000 + index * 1500,
         send_bps: index % 4 === 0 ? 0 : 6900 + index * 1500,

@@ -2,6 +2,7 @@ import { trafficBatch } from './traffic-batch.js';
 import { trafficSync } from './traffic-sync.js';
 import { trafficDetails } from './traffic-details.js';
 import { trafficTable } from './traffic-table.js';
+import { metricTrack } from './metric-track.js';
 import { bindNodeOrdering } from './node-ordering.js';
 import { nodeName } from './node-region.js';
 import { mergeTrafficPorts, orderTrafficItems, trafficCardIdentity, trafficPolicyEditable, trafficCardOrderKey, eligibleAgents, policyStatus, policyStatusKey, trafficRateForDisplay, protocolName, dateInputValue, reusableTrafficSnapshot } from '../modules/traffic-model.js';
@@ -194,7 +195,27 @@ export async function trafficPage(ctx) {
         dragHandle(item.key, `端口 ${value.port}`));
       const state = () => item.policy ? badge(...policyStatus(value, agent)) : badge('等待同步', 'warn');
       const identity = () => stack(node('span', {}, agent?.name || value.agent_id), !value.is_current_user && muted(value.owner_name || '其他用户'), (value.shared_quota || value.share_id) && muted('共享实例'));
-      const cumulative = () => item.policy ? bytes(value.used_bytes) : '—';
+      const cumulative = () => item.policy && value.used_bytes != null && Number.isFinite(Number(value.used_bytes)) ? bytes(value.used_bytes) : '—';
+      const quota = () => {
+        const shared = value.shared_quota, source = shared || value;
+        const limit = Number(source.limit_bytes), used = Number(source.used_bytes);
+        const limited = item.policy && (shared || value.quota_enabled !== false) && Number.isFinite(limit) && limit > 0;
+        const available = limited && source.used_bytes != null && Number.isFinite(used) && used >= 0;
+        const percent = available ? used / limit * 100 : 0;
+        const formatted = percent > 0 && percent < 0.1 ? '不足0.1%' : `${percent.toLocaleString('zh-CN', { maximumFractionDigits: 1, notation: percent >= 10000 ? 'compact' : 'standard' })}%`;
+        const label = shared ? '共享配额' : '配额', usage = shared ? '共享已用' : '已用';
+        const track = metricTrack(percent, available);
+        if (available) {
+          track.removeAttribute('aria-hidden');
+          track.setAttribute('role', 'meter'); track.setAttribute('aria-label', `${label}用量`);
+          track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100');
+          track.setAttribute('aria-valuenow', String(Math.min(100, percent)));
+          track.setAttribute('aria-valuetext', `${usage}${formatted}，${bytes(used)} / ${bytes(limit)}`);
+        }
+        return stack(node('div', { className: 'a-stat-heading' },
+          muted(limited ? `${label} ${bytes(limit)}` : shared ? '共享配额不限量' : item.policy ? '未设置配额' : '等待同步'),
+          muted(available ? `${usage}${formatted}` : limited ? '用量待同步' : '')), track);
+      };
       const transfer = (label, counter, speed) => stack(muted(label), node('b', {}, item.policy ? bytes(value[counter]) : '—'), muted(item.policy ? `当前 ${bytes(rate(value[speed]))}/s` : '等待采样'));
       const [amount, unit = ''] = cumulative().split('\u00a0');
       return { key: item.key, card: () => node('article', { className: 'a-card a-probe', 'data-traffic-key': item.key },
@@ -205,13 +226,13 @@ export async function trafficPage(ctx) {
           (value.shared_quota || value.share_id) && muted('共享实例')), node('div', {}, state())),
         node('div', { className: 'a-stat' },
           muted('累计流量'), actions(node('strong', {}, amount), muted(unit)),
-          item.policy && value.quota_enabled !== false && muted(`配额 ${bytes(value.limit_bytes)}`),
+          quota(),
           node('div', { className: 'a-probe-network' }, transfer('累计接收', 'received_bytes', 'receive_bps'), transfer('累计发送', 'sent_bytes', 'send_bps'))),
         node('div', { className: 'a-probe-footer' }, controls())), cells: [
         identity(),
         stack(node('strong', {}, `${value.port}`), muted(`${value.engine} · ${protocolName(value.protocol)}`)),
         item.policy ? actions(badge(...policyStatus(value, agent))) : badge('等待同步', 'warn'),
-        stack(node('strong', {}, cumulative()), item.policy && value.quota_enabled !== false && muted(`配额 ${bytes(value.limit_bytes)}`)),
+        stack(node('strong', {}, cumulative()), quota()),
         item.policy ? stack(bytes(value.received_bytes), muted(`${bytes(rate(value.receive_bps))}/s`)) : '—',
         item.policy ? stack(bytes(value.sent_bytes), muted(`${bytes(rate(value.send_bps))}/s`)) : '—',
         controls(),

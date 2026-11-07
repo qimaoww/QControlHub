@@ -56,7 +56,7 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	styles := mustReadFrontendFile(t, "analytics/theme.css")
 	// Preserve the reviewed native surface, including the requested compact
 	// card-selection header, node network column and settings section selection.
-	const expected = "ada30a6c730c6fa2832654c963a7425b578481bee061846591db1b11c2de967a"
+	const expected = "57e5673c07947a43e35c09d651ad217f7c8c962be567237c6d18a376169c33e4"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

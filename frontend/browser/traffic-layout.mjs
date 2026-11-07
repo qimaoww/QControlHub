@@ -292,9 +292,27 @@ async function fitDialog(dialog) {
     assert.ok(box.left>=bounds.left-1&&box.right<=bounds.right+1&&box.top>=0&&box.bottom<=innerHeight+1,'quota control unreachable');
   }
 }
-export async function testDenseTrafficLayoutRuntime() {
+export async function testDenseTrafficLayoutRuntime({ testAPI }) {
   await startTrafficTheme();
+  const key = index => `policy:${testAPI.trafficPolicies[index].id}`;
+  const item = index => document.querySelector(`[data-traffic-key="${key(index)}"]`);
+  const quota = (index, expected) => {
+    const meter = item(index).querySelector('[role=meter]');
+    assert.ok(meter, 'quota usage meter missing');
+    assert.equal(meter.getAttribute('aria-valuenow'), String(Math.min(100, expected)), 'quota fill does not match the API value');
+    assert.ok(meter.getAttribute('aria-valuetext').includes(expected < 0.1 && expected > 0 ? '不足0.1%' : `${expected}%`), 'quota percentage missing or capped in text');
+    const bounds = meter.getBoundingClientRect();
+    assert.ok(bounds.width > 0 && bounds.right <= item(index).getBoundingClientRect().right, 'quota meter escaped its record');
+  };
+  const inspectQuotas = () => {
+    for (const [index, expected] of [[0, 88.8], [1, 20.8], [2, 157.7], [5, 0], [6, 75]]) quota(index, expected);
+    assert.ok(item(2).querySelector('[role=meter] .bad'), 'over-quota state lost warning color');
+    assert.ok(!item(4).querySelector('[role=meter]') && item(4).textContent.includes('未设置配额'), 'monitor-only port fabricates a quota');
+    assert.ok(item(6).textContent.includes('共享配额') && item(6).textContent.includes('共享已用75%'), 'shared pool usage confused with port usage');
+  };
+  inspectQuotas();
   [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '列表').click();
+  inspectQuotas();
   const rows=()=>document.querySelectorAll('.a-traffic-list tbody tr');
   assert.equal(rows().length,12,'dense traffic must page rather than create every row');
   assert.ok(document.querySelector('.a-main').textContent.includes('第 1 / 2 页'),'dense count missing');
@@ -333,5 +351,23 @@ export async function testDenseTrafficLayoutRuntime() {
   assert.ok(document.querySelector('.a-main').textContent.includes('第 2 / 2 页'),'view switch lost page position');
 
   assert.ok(document.documentElement.scrollWidth<=innerWidth,'dense page overflows horizontally');
+  [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '上一页').click();
+  const first = item(0), meter = first.querySelector('[role=meter]'), control = first.querySelector('button');
+  control.focus();
+  const original = structuredClone(testAPI.trafficPolicies[0]);
+  testAPI.trafficPolicies[0].used_bytes = 50 * 1024 ** 3;
+  await waitFor(() => first.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '50', 'quota bar did not refresh');
+  assert.equal(first, item(0), 'quota refresh replaced the record');
+  assert.equal(meter, first.querySelector('[role=meter]'), 'quota refresh replaced the meter');
+  assert.equal(document.activeElement, control, 'quota refresh stole keyboard focus');
+  testAPI.trafficPolicies[0].used_bytes = 2 ** 64 - 1;
+  await waitFor(() => first.querySelector('[role=meter]')?.getAttribute('aria-valuetext').includes('亿%'), 'large quota usage did not refresh');
+  assert.equal(first.querySelector('[role=meter]').getAttribute('aria-valuenow'), '100', 'over-quota fill exceeded its track');
+  assert.ok(first.scrollWidth <= first.clientWidth && document.documentElement.scrollWidth <= innerWidth, 'large usage overflowed the record');
+  testAPI.trafficPolicies[0].used_bytes = undefined;
+  await waitFor(() => !first.querySelector('[role=meter]') && first.textContent.includes('用量待同步'), 'unknown usage fabricated a percentage');
+  assert.equal(first.querySelector('[data-column="累计流量"] strong').textContent, '—', 'unknown usage became zero');
+  Object.assign(testAPI.trafficPolicies[0], original);
+  await waitFor(() => first.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '88.8', 'quota fixture did not restore');
   if(new URLSearchParams(location.search).has('preview')) { document.documentElement.dataset.trafficPreview = 'ready'; await new Promise(()=>{}); }
 }

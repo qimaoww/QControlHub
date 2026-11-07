@@ -557,7 +557,7 @@ strong, b { font-weight: 600; }
 .a-traffic-page .a-table-scroll td:last-child > .a-actions { flex-wrap: wrap; }
 @media (max-width: 40rem) { .a-traffic-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-@media (max-width: 40rem) {
+@media (max-width: 96rem) {
   .a-traffic-list table, .a-traffic-list tbody { display: block; min-width: 0; }
   .a-traffic-list thead { display: none; }
   .a-traffic-list tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px; border-bottom: 1px solid var(--border); }
