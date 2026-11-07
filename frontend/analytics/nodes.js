@@ -419,7 +419,7 @@ export async function nodesPage(ctx) {
             } finally { actionBusy.delete(key); if (ctx.current()) dialogUpdates.forEach(update => update()); }
           }, { tone: 'danger', disabled: busy || uninstallReason() });
           return section(engine, node('div', { className: 'a-card-body' }, stack(
-            actions(instance ? badge(instance.label, instance.tone) : status(runtime.service_status === 'running' ? 'active' : runtime.service_status), !enabled && badge('能力已关闭', 'warn'), muted(runtime.version || (runtime.installed ? '版本未上报' : '尚未安装'))),
+            actions(instance ? badge(instance.label, instance.tone) : status(runtime.service_status === 'running' ? 'active' : runtime.service_status), !enabled && badge('能力已关闭', 'warn'), muted(runtime.version || (runtime.installed === true ? '版本未上报' : runtime.installed === false ? '尚未安装' : '安装状态未知'))),
             instance && stack(muted(instance.version), instance.reason && notice(instance.reason)),
             runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
             controls, actions(install, agent.can_manage !== false && uninstall, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
@@ -427,7 +427,7 @@ export async function nodesPage(ctx) {
           )));
         };
         const view = renderService();
-        view.dataset.refreshKey = engine; view.dataset.coreInstalled = agent.runtime?.[engine]?.installed ? '1' : '0'; view.dataset.capabilityEnabled = agent.capabilities?.includes(engine) ? '1' : '0'; fresh.append(view);
+        view.dataset.refreshKey = engine; view.dataset.coreInstalled = typeof agent.runtime?.[engine]?.installed === 'boolean' ? agent.runtime[engine].installed ? '1' : '0' : 'unknown'; view.dataset.capabilityEnabled = agent.capabilities?.includes(engine) ? '1' : '0'; fresh.append(view);
       }
       patch(runtimes, fresh);
     };

@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -164,73 +163,5 @@ func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
 	}
 	if strings.Contains(nodes, "enrollment-sheet") {
 		t.Fatal("enrollment must not retain a persistent panel")
-	}
-}
-
-func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
-	agents, err := os.ReadFile("modules/agent-refresh.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(agents)
-	start := strings.Index(content, "function updateAgentMetrics")
-	end := strings.Index(content, "async function pollAgentMetrics")
-	if start < 0 || end <= start {
-		t.Fatal("agent-refresh.js is missing the updateAgentMetrics body boundary")
-	}
-	body := content[start:end]
-	for _, required := range []string{
-		`requestAgentStructureRefresh();`,
-		`card?.dataset.runtimeStructure === "full"`,
-		`const installedKnown = typeof runtime.installed === "boolean";`,
-		`const installedMarker = installedKnown ? installed ? "1" : "0" : "unknown";`,
-		`card.dataset.coreInstalled !== installedMarker`,
-		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
-		`card.dataset.existingUnsupported !== existingUnsupportedReason`,
-		`card.dataset.runtimeStructure !== "full"`,
-		`card.dataset.coreInstalled = installedMarker`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Errorf("updateAgentMetrics structural comparison is missing %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		`card.dataset.existingPending =`,
-		`card.dataset.existingUnsupported =`,
-		`refreshAgentPage();`,
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("updateAgentMetrics must not precommit structure markers or bypass the coalesced refresh path (%q)", forbidden)
-		}
-	}
-}
-
-func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
-	agents := frontendSources(t, "modules/agents.js", "modules/agent-refresh.js")
-	for _, required := range []string{
-		`export function agentStructureSignature(agents = [])`,
-		`renderedAgentStructure = agentStructureSignature(visibleAgents)`,
-		`visibleAgentStructure(items) !== renderedAgentStructure`,
-		`if (structureChanged) {`,
-		`requestAgentStructureRefresh();`,
-		`if (!presetMode)`,
-		`state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);`,
-	} {
-		if !strings.Contains(agents, required) {
-			t.Errorf("newly enrolled Agent polling contract is missing %q", required)
-		}
-	}
-	pollStart := strings.Index(agents, "async function pollAgentMetrics()")
-	if pollStart < 0 {
-		t.Fatal("Agent roster polling function boundary is missing")
-	}
-	pollBody := agents[pollStart:]
-	pollEnd := strings.Index(pollBody, "\n  return {\n    pollAgentMetrics,")
-	if pollEnd < 0 {
-		t.Fatal("Agent roster polling function end is missing")
-	}
-	pollBody = pollBody[:pollEnd]
-	if strings.Contains(pollBody, `!can("metrics.read")`) {
-		t.Error("new Agent discovery must not require metrics.read")
 	}
 }

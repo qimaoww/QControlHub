@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { installAgents } from "../modules/agents.js";
+import { poll } from "../analytics/live-dom.js";
 
 import { mergeVisibleTrafficCardOrder, mergeTrafficPorts, orderTrafficItems } from "../modules/traffic-model.js";
 
@@ -57,72 +57,46 @@ try {
     "filtered traffic reordering preserves hidden card positions",
   );
 
-  let metricRequests = 0;
-  const metricState = {
-    route: "node-settings",
-    navigationEpoch: 1,
-    data: {},
-  };
-  const { pollAgentMetrics } = installAgents(
-    new Proxy(
-      {
-        state: metricState,
-        api: async (path) => {
-          assert.equal(path, "/agents");
-          metricRequests += 1;
-          return ["alpha", "beta", "gamma"].map((id) => ({
-            id,
-            status: "online",
-            metrics: {},
-            runtime: {},
-          }));
-        },
-        can: (capability) => capability === "metrics.read",
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-  globalThis.document.hidden = true;
-  await pollAgentMetrics();
-  clearTimeout(metricState.agentPollTimer);
-  assert.equal(metricRequests, 0, "hidden node page defers metrics requests");
-  globalThis.document.hidden = false;
-  await pollAgentMetrics();
-  clearTimeout(metricState.agentPollTimer);
-  assert.equal(metricRequests, 1, "three-node metrics patch uses one fleet request");
-  assert.deepEqual(
-    metricState.data.agents.map((agent) => agent.id),
-    ["alpha", "beta", "gamma"],
-    "metrics polling synchronizes the shared Agent runtime snapshot",
-  );
-
-  let rosterOnlyRequests = 0;
-  const rosterOnlyState = {
-    route: "node-settings",
-    navigationEpoch: 1,
-    data: {},
-  };
-  const { pollAgentMetrics: pollAgentRoster } = installAgents(
-    new Proxy(
-      {
-        state: rosterOnlyState,
-        api: async (path) => {
-          assert.equal(path, "/agents");
-          rosterOnlyRequests += 1;
-          return [];
-        },
-        can: (capability) => capability === "agents.read",
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-  await pollAgentRoster();
-  clearTimeout(rosterOnlyState.agentPollTimer);
-  assert.equal(
-    rosterOnlyRequests,
-    1,
-    "Agent roster polling does not require metrics permission",
-  );
+  // Exercise the shipped poller rather than a retired route's timer loop.
+  const previousSetTimeout = globalThis.setTimeout, previousClearTimeout = globalThis.clearTimeout;
+  const timers = new Map(); let timerID = 0;
+  globalThis.setTimeout = callback => { timers.set(++timerID, callback); return timerID; };
+  globalThis.clearTimeout = id => timers.delete(id);
+  globalThis.document = Object.assign(new EventTarget(), { hidden: false });
+  const controller = new AbortController();
+  let calls = 0, release, fail = false, current = true;
+  const errors = [];
+  try {
+    const tick = poll({ signal: controller.signal, current: () => current, onRefreshError: error => errors.push(error.message) }, async () => {
+      calls++;
+      if (fail) throw new Error('temporary native poll failure');
+      await new Promise(resolve => { release = resolve; });
+    });
+    assert.equal(timers.size, 1, 'native polling starts with one timer');
+    const active = tick(); await tick();
+    assert.equal(calls, 1, 'concurrent native ticks duplicate a fleet request');
+    release(); await active;
+    assert.equal(timers.size, 1, 'native completion schedules more than one timer');
+    fail = true; await tick();
+    assert.deepEqual(errors, ['temporary native poll failure'], 'native polling does not report a transient failure');
+    assert.equal(timers.size, 1, 'failed native polling cannot retry');
+    fail = false; const retry = tick();
+    assert.equal(calls, 3, 'native polling does not retry after failure');
+    release(); await retry;
+    globalThis.document.hidden = true; await tick();
+    assert.equal(calls, 3, 'hidden native page still requests the fleet');
+    assert.equal(timers.size, 1, 'hidden native polling loses its resume timer');
+    globalThis.document.hidden = false;
+    current = false; await tick();
+    assert.equal(calls, 3, 'departed native route requests old fleet');
+    assert.equal(timers.size, 0, 'departed native route retains a timer');
+    current = true;
+    const pending = tick(); current = false; controller.abort(); release(); await pending;
+    assert.equal(timers.size, 0, 'disposing an in-flight native poll retains a timer');
+  } finally {
+    current = false; controller.abort();
+    globalThis.setTimeout = previousSetTimeout; globalThis.clearTimeout = previousClearTimeout;
+  }
 } finally {
   if (pollingDocument === undefined) delete globalThis.document;
   else globalThis.document = pollingDocument;

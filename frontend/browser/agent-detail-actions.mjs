@@ -76,7 +76,10 @@ export async function testNativeNodeTaskLifecycle(fixture) {
     assert.ok(matchMedia('(pointer:coarse)').matches, '节点任务移动回归未启用触摸模拟');
   }
   await testAgentOverview(fixture);
-  await testNativeInstallSource(fixture);
+  if (fixture.mode.startsWith('node-task-lifecycle')) {
+    await testNativeInstallSource(fixture);
+    await testNativeRuntimeRefresh(fixture);
+  }
   const { testAPI, onlineAgent } = fixture;
   testAPI.agents = [onlineAgent('native-guard')];
   testAPI.taskMode = 'deferred';
@@ -241,4 +244,49 @@ async function testNativeInstallSource({ testAPI, onlineAgent }) {
   button('提交安装', modal()).click(); await idle();
   assert.equal(testAPI.pendingTasks.length, count, 'changed owner installed after confirmation');
   box.querySelector('[aria-label=关闭]').click(); settings.querySelector('[aria-label=关闭]').click();
+}
+
+async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
+  testAPI.agents = [onlineAgent('runtime-parity')];
+  testAPI.agents[0].capabilities = ['mihomo', 'xray'];
+  testAPI.agents[0].features.push('core-uninstall-v1');
+  await startNativeNodes();
+  const button = (text, root = document) => [...root.querySelectorAll('button')].find(control => control.textContent === text);
+  button('查看设置').click();
+  const box = await waitFor(() => document.querySelector('dialog[open] input[name=name]')?.closest('dialog'), 'runtime details missing');
+  const core = engine => box.querySelector(`[data-refresh-key="${engine}"]`);
+  const stable = core('mihomo'), draft = box.querySelector('input[name=name]');
+  draft.value = '未保存的名称'; draft.focus(); draft.setSelectionRange(1, 3);
+  assert.equal(core('xray').dataset.coreInstalled, 'unknown', 'unreported runtime is reported as uninstalled');
+  assert.ok(core('xray').textContent.includes('安装状态未知'), 'initial unknown installation is not identified');
+  for (const installed of [false, true, undefined]) {
+    testAPI.agents[0].runtime = installed === undefined ? {} : { mihomo: { installed, service_status: installed ? 'running' : 'unknown' }, xray: { installed: false } };
+    const marker = installed === undefined ? 'unknown' : installed ? '1' : '0';
+    await waitFor(() => core('mihomo')?.dataset.coreInstalled === marker, 'live runtime transition did not converge');
+    assert.equal(core('mihomo'), stable, 'runtime transition rebuilt the existing engine section');
+    assert.ok(core('mihomo').textContent.includes(installed === undefined ? '安装状态未知' : installed ? '版本未上报' : '尚未安装'), 'installation state text is inaccurate');
+    if (installed !== true) {
+      assert.ok(!button('卸载内核', core('mihomo')), 'unknown/uninstalled core retains uninstall action');
+      for (const name of ['查询状态', '启动服务', '停止服务', '重启服务']) assert.ok(button(name, core('mihomo')).disabled, 'unknown/uninstalled core permits a service task');
+    }
+    assert.equal(draft.value, '未保存的名称', 'runtime poll replaced the name draft');
+    assert.equal(document.activeElement, draft, 'runtime poll stole input focus');
+    assert.equal(draft.selectionStart, 1, 'runtime poll reset text selection');
+  }
+  const stableCard = document.querySelector('[data-agent-id=runtime-parity]');
+  testAPI.agents.push(onlineAgent('newly-enrolled'));
+  await waitFor(() => document.querySelector('[data-agent-id=newly-enrolled]'), 'new Agent did not appear through polling');
+  assert.equal(document.querySelector('[data-agent-id=runtime-parity]'), stableCard, 'new Agent discovery rebuilt an existing card');
+  assert.ok(box.open && draft.value === '未保存的名称', 'new Agent discovery lost open settings or draft');
+  box.querySelector('[aria-label=关闭]').click();
+  const originalFetch = window.fetch;
+  window.fetch = (input, options) => String(input).endsWith('/auth/session')
+    ? Promise.resolve(Response.json({ role: 'user', user_id: 'roster-only', permissions: ['agents.read'], csrf_token: 'browser-test-csrf' }))
+    : originalFetch(input, options);
+  try {
+    await startNativeNodes();
+    testAPI.agents.push(onlineAgent('without-metrics-permission'));
+    await waitFor(() => document.querySelector('[data-agent-id=without-metrics-permission]'), 'node discovery incorrectly requires metrics.read');
+    assert.ok(!button('添加节点') && !button('批量操作'), 'roster read grant exposes mutation controls');
+  } finally { window.fetch = originalFetch; }
 }
