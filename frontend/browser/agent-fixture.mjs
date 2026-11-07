@@ -3,6 +3,7 @@ import { assert } from "./assertions.mjs";
 import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
+if (mode === "navigation-preview") mode = "tasks-preview";
 const initialAnchor = location.hash;
 const readPermissions = ["overview.read", "agents.read", "deployments.read", "client-access.read", "catalogs.read", "agent-config.read", "configs.read", "tasks.read", "settings.read", "audit.read", "metrics.read", "traffic.read", "templates.read", "core-logs.read"];
 const tcpRules = [

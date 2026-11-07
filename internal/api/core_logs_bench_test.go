@@ -1,8 +1,11 @@
 package api
 
 import (
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,9 +58,9 @@ func BenchmarkCoreLogRefresh(b *testing.B) {
 					b.Fatal(err)
 				}
 				if _, err := connection.Exec(ctx, `INSERT INTO core_logs
-					(batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at)
+					(batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at,instance_id,owner_id,node_owner_id)
 					SELECT $1,n-1,$2,(ARRAY['mihomo','xray','sing-box','ss-rust'])[(n-1)/2000+1],
-					'warning',left(md5(n::text)||repeat(' long diagnostic line',200),$3),now(),now()
+					'warning',left(md5(n::text)||repeat(' long diagnostic line',200),$3),now(),now(),'main','',''
 					FROM generate_series(1,8000) n`, batchID, agentID, messageBytes); err != nil {
 					b.Fatal(err)
 				}
@@ -85,7 +88,32 @@ func BenchmarkCoreLogRefresh(b *testing.B) {
 				handler.ServeHTTP(response, request)
 				return response
 			}
-			etag := fetch(current, "").Header().Get("ETag")
+			initial := fetch(current, "")
+			if initial.Code != http.StatusOK {
+				b.Fatalf("fixture response: %d", initial.Code)
+			}
+			var reader io.Reader = initial.Body
+			if initial.Header().Get("Content-Encoding") == "gzip" {
+				compressed, err := gzip.NewReader(initial.Body)
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer compressed.Close()
+				reader = compressed
+			}
+			var records []core.CoreLogEntry
+			if err := json.NewDecoder(reader).Decode(&records); err != nil {
+				b.Fatal(err)
+			}
+			if len(records) != 8000 {
+				b.Fatalf("fixture returned %d records, want 8000", len(records))
+			}
+			for _, record := range records {
+				if len(record.Message) != messageBytes {
+					b.Fatalf("message bytes=%d want=%d", len(record.Message), messageBytes)
+				}
+			}
+			etag := initial.Header().Get("ETag")
 			for _, scenario := range []struct {
 				name    string
 				handler http.Handler

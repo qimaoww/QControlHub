@@ -127,6 +127,11 @@ try {
     await testPopupRuntime(scenario, new URLSearchParams(location.search).has('preview'));
   } else if (mode.startsWith('motion')) {
     await testMotionRuntime(scenario, new URLSearchParams(location.search).has('preview'));
+  } else if (mode === 'navigation-preview') {
+    const session = await (await fetch('/api/v1/auth/session')).json();
+    const { startAnalytics } = await import('./analytics/app.js');
+    startAnalytics({ app: document.querySelector('#app'), session });
+    await new Promise(resolve => requestAnimationFrame(resolve));
   } else if (mode === 'tasks-preview') {
     const { testEditedRetryDialog } = await import('./browser/task-retry.mjs');
     await testEditedRetryDialog(true);

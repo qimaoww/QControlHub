@@ -68,12 +68,12 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 		queries, batches int64
 		run              func() error
 	}{
-		{"logs32", 6, 0, func() error {
+		{"logs32", 4, 1, func() error {
 			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000001", Entries: entries})
 		}},
 		// Shared rows replace the main client-connection status write with one
-		// source ownership lookup; eight sources still take six round trips.
-		{"shared logs32 across eight sources", 6, 0, func() error {
+		// source ownership lookup; eight sources still take five round trips.
+		{"shared logs32 across eight sources", 4, 1, func() error {
 			shared := make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)
 			for i := range shared {
 				engine := core.AllEngines()[i%4]
@@ -84,7 +84,7 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 		}},
 		// Connection indexing adds a single set-based write for the whole batch,
 		// regardless of the number of source tuples.
-		{"connection logs32", 7, 0, func() error {
+		{"connection logs32", 5, 1, func() error {
 			connections := make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)
 			for index := range connections {
 				connections[index] = core.CoreLogEntry{Engine: core.EngineMihomo, Level: "warning", Message: fmt.Sprintf("[TCP] 8.8.8.8:%d --> example.invalid:443 using DIRECT", 10000+index)}
@@ -101,11 +101,21 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			trace.queries.Store(0)
 			trace.batches.Store(0)
+			trace.statements.Store(0)
 			if err := test.run(); err != nil {
 				t.Fatal(err)
 			}
 			if trace.queries.Load() != test.queries || trace.batches.Load() != test.batches {
 				t.Fatalf("queries/batches = %d/%d, want %d/%d", trace.queries.Load(), trace.batches.Load(), test.queries, test.batches)
+			}
+			// Pipelining reduces protocol round trips, never statement or
+			// validation coverage: every current batch has exactly two reads/writes.
+			wantStatements := int64(0)
+			if test.batches > 0 {
+				wantStatements = 2
+			}
+			if got := trace.statements.Load(); got != wantStatements {
+				t.Fatalf("batched statements = %d, want %d", got, wantStatements)
 			}
 		})
 	}

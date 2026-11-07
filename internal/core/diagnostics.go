@@ -12,13 +12,23 @@ var diagnosticLegacyRealityPath = regexp.MustCompile(`(read certificate/key /var
 // RedactDiagnostic handles labelled keys and inline private PEM even when the
 // configuration is unavailable (journal output or diagnostics from old Agents).
 func RedactDiagnostic(value string) string {
-	value = diagnosticPrivatePEM.ReplaceAllString(value, "[redacted private PEM]")
-	value = diagnosticAssignments.ReplaceAllString(value, "${1}[redacted]")
-	value = diagnosticBearer.ReplaceAllString(value, "Bearer [redacted]")
-	value = diagnosticAPIKey.ReplaceAllString(value, "[redacted]")
-	value = diagnosticUUID.ReplaceAllString(value, "[redacted UUID]")
-	value = diagnosticURLCredentials.ReplaceAllString(value, "${1}[redacted]@")
-	value = diagnosticURLSecret.ReplaceAllString(value, "${1}[redacted]")
-	value = diagnosticKeyAssignment.ReplaceAllString(value, "${1}[redacted]")
-	return diagnosticLegacyRealityPath.ReplaceAllString(value, "${1}[redacted]${2}")
+	value = replaceDiagnostic(value, diagnosticPrivatePEM, "[redacted private PEM]")
+	value = replaceDiagnostic(value, diagnosticAssignments, "${1}[redacted]")
+	value = replaceDiagnostic(value, diagnosticBearer, "Bearer [redacted]")
+	value = replaceDiagnostic(value, diagnosticAPIKey, "[redacted]")
+	value = replaceDiagnostic(value, diagnosticUUID, "[redacted UUID]")
+	value = replaceDiagnostic(value, diagnosticURLCredentials, "${1}[redacted]@")
+	value = replaceDiagnostic(value, diagnosticURLSecret, "${1}[redacted]")
+	value = replaceDiagnostic(value, diagnosticKeyAssignment, "${1}[redacted]")
+	return replaceDiagnostic(value, diagnosticLegacyRealityPath, "${1}[redacted]${2}")
+}
+
+// ReplaceAllString allocates two message-sized buffers even without a match.
+// Most log lines contain no credentials. Still run every original expression,
+// including its Unicode case folding, and allocate only for actual redaction.
+func replaceDiagnostic(value string, pattern *regexp.Regexp, replacement string) string {
+	if !pattern.MatchString(value) {
+		return value
+	}
+	return pattern.ReplaceAllString(value, replacement)
 }

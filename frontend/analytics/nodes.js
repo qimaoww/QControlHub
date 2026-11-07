@@ -25,7 +25,7 @@ const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels
 export async function nodesPage(ctx) {
   const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view')]);
   let agents = list(receivedAgents), preference = savedView;
-  let liveTable, loadSequence = 0;
+  let liveTable, loadSequence = 0, renderSignature;
   const dialogUpdates = new Set();
   const actionBusy = new Set();
   const uninstallTasks = ctx.state.data.coreUninstallTasks ||= {};
@@ -204,7 +204,16 @@ export async function nodesPage(ctx) {
     for (const id of selected) if (!shown.some(agent => agent.id === id && selectable(agent))) selected.delete(id);
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
     if (!live) drawBatch();
-    if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));return;}
+    // Only retain the current projection, within this page/account lifetime.
+    // Include permissions, selection and formatted time (including relative
+    // age), so unchanged payloads never suppress a visible state transition.
+    const signature = JSON.stringify([view, selecting, Boolean(agents.length), [...selected], shown,
+      ctx.can('agents.read'), ctx.can('agent-config.read'), shown.map(agent => [canManage(agent), selectable(agent), date(agent.last_seen)])]);
+    // Legacy responses without a resolved region still need their lookup's
+    // normal retry/update path. Current API lists always include region_code.
+    const regionsResolved = shown.every(agent => Object.hasOwn(agent, 'region_code') || geoRegionDetails(agent.labels?.region_code) || !ctx.can('agents.read'));
+    if (regionsResolved && renderSignature === signature) return;
+    if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));renderSignature = signature;return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id, 'data-selected': selecting ? String(selected.has(agent.id)) : null, tabindex: selecting && selectable(agent) ? 0 : null, role: selecting ? 'group' : null, 'aria-label': selecting ? `${agent.name}，${selected.has(agent.id) ? '已选择' : '未选择'}` : null},
         node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),
@@ -250,6 +259,7 @@ export async function nodesPage(ctx) {
         input.nextElementSibling.textContent = input.checked ? '已选择' : '选择';
       }
     });
+    renderSignature = signature;
   }
 
   function command(created) {
