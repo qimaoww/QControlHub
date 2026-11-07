@@ -108,6 +108,9 @@ try {
       width:innerWidth,pageWidth:document.documentElement.scrollWidth};
   })()`;
   const check = async (page, route, label) => {
+    // Route DOM commits before the selection color transition paints. Wait for
+    // that visible state instead of sampling its initial transparent frame.
+    await wait(page, `(() => { const rail=document.querySelector('dialog.a-drawer[open] .a-rail') || document.querySelector('.a-layout>.a-rail'); const active=rail?.querySelector('nav [aria-current="page"]'); return active && getComputedStyle(active).backgroundColor!=='rgba(0, 0, 0, 0)'; })()`);
     const result=await evaluate(page,selection);
     assert.equal(result.hash,`#${route}`,`${label}: scroll changed route`);
     assert.equal(result.active,`#${route}`,`${label}: selected route diverged`);

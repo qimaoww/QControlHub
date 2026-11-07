@@ -14,7 +14,7 @@ async page => {
     for (let repeat = 0; repeat < 3; repeat++) {
       const began = Date.now();
       await page.goto(`${origin}/?nodes=${nodes}&role=${role}`);
-      await page.waitForSelector(nodes ? 'article[data-agent-id]' : '.a-empty');
+      await page.locator(nodes ? 'article[data-agent-id]' : '.a-empty').first().waitFor();
       await page.waitForFunction(() => window.__nodePerformanceFixture && document.querySelector('.a-probe-toolbar'));
       const firstVisibleMs = Date.now() - began;
       const views = [];
@@ -68,5 +68,45 @@ async page => {
     }
     results.push({ nodes, role, runs });
   }
+  const session = await page.context().newCDPSession(page);
+  await session.send('Performance.enable');
+  const metrics = async () => {
+    // Exclude the fixture's retained timing/call history from application heap.
+    await page.evaluate(() => { window.__phaseMetrics = []; window.__longTasks = []; window.testAPI.calls.length = 0; performance.clearResourceTimings(); });
+    await session.send('HeapProfiler.collectGarbage');
+    const { metrics } = await session.send('Performance.getMetrics');
+    return Object.fromEntries(metrics.filter(({ name }) => ['JSHeapUsedSize', 'Nodes', 'JSEventListeners', 'Documents'].includes(name)).map(({ name, value }) => [name, value]));
+  };
+  const leave = async () => {
+    await page.evaluate(() => { location.hash = '#themes'; });
+    await page.waitForFunction(() => document.querySelector('.a-top-title')?.textContent === '主题');
+  };
+  const enter = async () => {
+    await page.evaluate(() => { location.hash = '#node-settings'; });
+    await page.locator('article[data-agent-id]').first().waitFor();
+  };
+  try {
+    await page.goto(`${origin}/?nodes=32`);
+    await page.locator('article[data-agent-id]').first().waitFor();
+    for (let i = 0; i < 2; i++) { await leave(); await enter(); }
+    await leave();
+    await page.waitForTimeout(1500);
+    const before = await metrics();
+    const checkpoints = [];
+    for (let i = 0; i < 12; i++) {
+      await enter();
+      await page.locator('input[name=search]').fill(i % 2 ? '测试节点' : '');
+      await page.getByRole('button', { name: '列表', exact: true }).click();
+      await page.getByRole('button', { name: '卡片', exact: true }).click();
+      await leave();
+      if ((i + 1) % 4 === 0) { await page.waitForTimeout(1500); checkpoints.push(await metrics()); }
+    }
+    await page.waitForTimeout(300);
+    const calls = await page.evaluate(() => window.testAPI.calls.filter(call => call.path === '/agents').length);
+    await page.waitForTimeout(2500);
+    const callsAfter = await page.evaluate(() => window.testAPI.calls.filter(call => call.path === '/agents').length);
+    if (calls !== callsAfter) throw new Error('Node polling continued after leaving');
+    results.push({ nodeLifetime: { cycles: 12, before, checkpoints, agentsCallsWhileAway: callsAfter - calls } });
+  } finally { await session.detach(); }
   return results;
 }

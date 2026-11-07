@@ -85,6 +85,14 @@ func TestCoreLogProcessMeasurements(t *testing.T) {
 		}
 		return
 	}
+	seconds := 3
+	if setting := os.Getenv("QCH_LOG_PROCESS_SECONDS"); setting != "" {
+		parsed, err := strconv.Atoi(setting)
+		if err != nil || parsed < 1 || parsed > 120 {
+			t.Fatal("QCH_LOG_PROCESS_SECONDS must be 1..120")
+		}
+		seconds = parsed
+	}
 	parts := strings.Split(mode, "/")
 	size, rate, sources := 160, 0, 1
 	if parts[1] == "typical" {
@@ -135,7 +143,7 @@ func TestCoreLogProcessMeasurements(t *testing.T) {
 	}
 	start := time.Now()
 	sent, maxQueue, wireBytes := 0, 0, 0
-	for tick := range 30 {
+	for tick := range seconds * 10 {
 		for offset := 0; offset < rate/10; offset++ {
 			index := tick*(rate/10) + offset
 			child := children[index%sources]
@@ -175,8 +183,8 @@ func TestCoreLogProcessMeasurements(t *testing.T) {
 	runtime.GC()
 	var recovered runtime.MemStats
 	runtime.ReadMemStats(&recovered)
-	if sent != rate*3 || len(collector.queued) != 0 || collector.pending != nil || endGoroutines != goroutines || endDescriptors != descriptors {
-		t.Fatalf("resource or record mismatch: sent=%d expected=%d", sent, rate*3)
+	if sent != rate*seconds || len(collector.queued) != 0 || collector.pending != nil || endGoroutines != goroutines || endDescriptors != descriptors {
+		t.Fatalf("resource or record mismatch: sent=%d expected=%d", sent, rate*seconds)
 	}
 	cpu := time.Duration(endCPU.Utime.Nano() + endCPU.Stime.Nano() - startCPU.Utime.Nano() - startCPU.Stime.Nano())
 	t.Logf("mode=%s records=%d seconds=%.3f process_cpu_ms=%.3f process_cpu_percent=%.3f allocated_bytes=%d allocs=%d gc=%d heap_after_gc=%d rss_kib=%d->%d goroutines=%d->%d fds=%d->%d queue_max=%d queue_end=%d json_bytes=%d", mode, sent, elapsed.Seconds(), float64(cpu)/float64(time.Millisecond), 100*cpu.Seconds()/elapsed.Seconds(), after.TotalAlloc-before.TotalAlloc, after.Mallocs-before.Mallocs, after.NumGC-before.NumGC, recovered.HeapAlloc, rss, endRSS, goroutines, endGoroutines, descriptors, endDescriptors, maxQueue, len(collector.queued), wireBytes)
