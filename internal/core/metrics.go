@@ -5,23 +5,25 @@ import (
 )
 
 type HostMetrics struct {
-	BBR               *SystemBBRStatus       `json:"bbr,omitempty"`
-	ClockSync         *ClockSyncStatus       `json:"clock_sync,omitempty"`
-	CollectedAt       time.Time              `json:"collected_at"`
-	CPUAvailable      bool                   `json:"cpu_available"`
-	CPUPercent        float64                `json:"cpu_percent"`
-	MemoryAvailable   bool                   `json:"memory_available"`
-	MemoryUsedBytes   uint64                 `json:"memory_used_bytes"`
-	MemoryTotalBytes  uint64                 `json:"memory_total_bytes"`
-	DiskAvailable     bool                   `json:"disk_available"`
-	DiskUsedBytes     uint64                 `json:"disk_used_bytes"`
-	DiskTotalBytes    uint64                 `json:"disk_total_bytes"`
-	NetworkAvailable  bool                   `json:"network_available"`
-	NetworkRXBytes    uint64                 `json:"network_rx_bytes"`
-	NetworkTXBytes    uint64                 `json:"network_tx_bytes"`
-	NetworkRXBPS      uint64                 `json:"network_rx_bps"`
-	NetworkTXBPS      uint64                 `json:"network_tx_bps"`
-	NetworkInterfaces []HostNetworkInterface `json:"network_interfaces,omitempty"`
+	BBR                  *SystemBBRStatus       `json:"bbr,omitempty"`
+	ClockSync            *ClockSyncStatus       `json:"clock_sync,omitempty"`
+	CollectedAt          time.Time              `json:"collected_at"`
+	CPUAvailable         bool                   `json:"cpu_available"`
+	CPUPercent           float64                `json:"cpu_percent"`
+	MemoryAvailable      bool                   `json:"memory_available"`
+	MemoryUsedBytes      uint64                 `json:"memory_used_bytes"`
+	MemoryTotalBytes     uint64                 `json:"memory_total_bytes"`
+	DiskAvailable        bool                   `json:"disk_available"`
+	DiskUsedBytes        uint64                 `json:"disk_used_bytes"`
+	DiskTotalBytes       uint64                 `json:"disk_total_bytes"`
+	NetworkSampledAt     time.Time              `json:"network_sampled_at,omitempty"`
+	NetworkRateAvailable *bool                  `json:"network_rate_available,omitempty"`
+	NetworkAvailable     bool                   `json:"network_available"`
+	NetworkRXBytes       uint64                 `json:"network_rx_bytes"`
+	NetworkTXBytes       uint64                 `json:"network_tx_bytes"`
+	NetworkRXBPS         uint64                 `json:"network_rx_bps"`
+	NetworkTXBPS         uint64                 `json:"network_tx_bps"`
+	NetworkInterfaces    []HostNetworkInterface `json:"network_interfaces,omitempty"`
 	// ObservedPublicIP is assigned by the control plane from the authenticated
 	// WSS source. Agent-provided values are never trusted. It only ever
 	// reflects the address family the WSS connection itself used.

@@ -223,14 +223,22 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		agent_core_log_rotate_count=$19,metric_retention_days=$20,audit_retention_days=$21,task_retention_days=$22,
 		config_revision_retention=$23,webhook_url=$24,notify_task_failed=$25,notify_agent_offline=$26,
 		notify_agent_online=$27,notify_traffic_quota=$28,updated_at=$29,default_agent_engines=$30,cnip_source=$31,client_connection_retention_days=$32,acme_email=$33 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
-	saved, err := scanPanelSettings(s.pool.QueryRow(ctx, query, args...))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	defer tx.Rollback(ctx)
+	saved, err := scanPanelSettings(tx.QueryRow(ctx, query, args...))
 	if errors.Is(err, pgx.ErrNoRows) && expectedRevision > 0 {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
 	}
 	if err != nil {
 		return core.PanelSettings{}, fmt.Errorf("save panel settings: %w", err)
 	}
-	return saved, nil
+	if err = s.notificationLegacyChanged(ctx, tx, current, saved); err != nil {
+		return core.PanelSettings{}, err
+	}
+	return saved, tx.Commit(ctx)
 }
 
 func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, settings core.PanelSettings, revision int64) (core.PanelSettings, error) {
@@ -259,6 +267,10 @@ func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, setti
 	if err := lockAgentUser(ctx, tx); err != nil {
 		return core.PanelSettings{}, err
 	}
+	previous, err := s.panelSettingsForOwner(ctx, tx, ownerID)
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
 	err = tx.QueryRow(ctx, `INSERT INTO user_panel_settings(owner_id,content,runtime,revision,updated_at)
 		SELECT $1,$2,$3,2,$5 WHERE $4=1 OR EXISTS(SELECT 1 FROM user_panel_settings WHERE owner_id=$1)
 		ON CONFLICT(owner_id) DO UPDATE SET content=EXCLUDED.content,runtime=EXCLUDED.runtime,
@@ -269,6 +281,9 @@ func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, setti
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
 	}
 	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	if err = s.notificationLegacyChanged(ctx, tx, previous, settings); err != nil {
 		return core.PanelSettings{}, err
 	}
 	return settings, tx.Commit(ctx)

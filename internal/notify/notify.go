@@ -31,18 +31,31 @@ const (
 
 // Event is the structured payload sent to the configured webhook.
 type Event struct {
-	Type       string    `json:"type"`
-	Time       time.Time `json:"time"`
-	AgentID    string    `json:"agent_id,omitempty"`
-	Agent      string    `json:"agent,omitempty"`
-	Engine     string    `json:"engine,omitempty"`
-	TaskID     string    `json:"task_id,omitempty"`
-	Action     string    `json:"action,omitempty"`
-	Port       int       `json:"port,omitempty"`
-	UsedBytes  uint64    `json:"used_bytes,omitempty"`
-	LimitBytes uint64    `json:"limit_bytes,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	Message    string    `json:"message"`
+	Title         string    `json:"title,omitempty"`
+	Version       string    `json:"version,omitempty"`
+	ConfigID      string    `json:"config_id,omitempty"`
+	ConfigVersion int       `json:"config_version,omitempty"`
+	ResourceID    string    `json:"resource_id,omitempty"`
+	ResourceOwner string    `json:"-"`
+	ShareID       string    `json:"share_id,omitempty"`
+	Period        string    `json:"period,omitempty"`
+	Direction     string    `json:"direction,omitempty"`
+	Current       string    `json:"current,omitempty"`
+	Threshold     string    `json:"threshold,omitempty"`
+	Status        string    `json:"status,omitempty"`
+	Test          bool      `json:"test,omitempty"`
+	Type          string    `json:"type"`
+	Time          time.Time `json:"time"`
+	AgentID       string    `json:"agent_id,omitempty"`
+	Agent         string    `json:"agent,omitempty"`
+	Engine        string    `json:"engine,omitempty"`
+	TaskID        string    `json:"task_id,omitempty"`
+	Action        string    `json:"action,omitempty"`
+	Port          int       `json:"port,omitempty"`
+	UsedBytes     uint64    `json:"used_bytes,omitempty"`
+	LimitBytes    uint64    `json:"limit_bytes,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	Message       string    `json:"message"`
 }
 
 // Client sends signed events over HTTP. It is safe for concurrent use.
@@ -106,7 +119,7 @@ func TaskFailedEvent(task core.Task, agentName, errorText string) Event {
 		Engine:  string(task.Engine),
 		TaskID:  task.ID,
 		Action:  string(task.Action),
-		Error:   truncate(errorText, 2000),
+		Error:   Redact(errorText),
 		Message: fmt.Sprintf("任务失败：%s 在节点 %s 上执行 %s 失败", task.Engine, agentName, task.Action),
 	}
 }
@@ -141,9 +154,4 @@ func TrafficQuotaEvent(policy core.PortTrafficPolicy, agentName string) Event {
 	}
 }
 
-func truncate(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit] + "..."
-}
+func truncate(value string, limit int) string { return Clip(value, limit) }

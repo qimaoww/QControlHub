@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 90
+const currentSchemaVersion = 91
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS account_traffic_orders (
@@ -1070,4 +1070,41 @@ ALTER TABLE account_themes ADD CONSTRAINT account_themes_theme_id_check CHECK (t
 ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_url;
 ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_api_key;
 UPDATE agents SET labels=labels - 'komari_uuid' WHERE labels ? 'komari_uuid';
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notification_failure_attempt integer NOT NULL DEFAULT -1;
+CREATE INDEX IF NOT EXISTS notification_failed_tasks ON tasks(finished_at,id) WHERE status='failed' AND notification_failure_attempt<attempt;
+-- Notification source journal, per-user rule state and a durable bounded outbox.
+CREATE TABLE IF NOT EXISTS notification_configs (
+ owner_id text PRIMARY KEY, content text NOT NULL DEFAULT '', revision bigint NOT NULL DEFAULT 1,
+ cursor bigint NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now(), scanned_at timestamptz NOT NULL DEFAULT 'epoch'
+);
+CREATE TABLE IF NOT EXISTS notification_events (
+ id bigserial PRIMARY KEY, source_key text UNIQUE NOT NULL, owner_id text NOT NULL,
+ event jsonb NOT NULL, resource_owner text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notification_events_created ON notification_events(created_at);
+CREATE TABLE IF NOT EXISTS notification_rule_states (
+ owner_id text NOT NULL REFERENCES notification_configs(owner_id) ON DELETE CASCADE,
+ rule_id text NOT NULL, resource text NOT NULL, state jsonb NOT NULL,
+ PRIMARY KEY(owner_id,rule_id,resource)
+);
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+ id bigserial PRIMARY KEY, owner_id text NOT NULL, rule_id text NOT NULL, channel_id text NOT NULL,
+ principal_stamp text NOT NULL DEFAULT '', dedupe text NOT NULL, event jsonb NOT NULL, resource_owner text NOT NULL DEFAULT '',
+ status text NOT NULL DEFAULT 'pending', attempts integer NOT NULL DEFAULT 0,
+ next_at timestamptz NOT NULL DEFAULT now(), lease_until timestamptz, lease_id text NOT NULL DEFAULT '',
+ created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+ error text NOT NULL DEFAULT '', UNIQUE(owner_id,rule_id,channel_id,dedupe)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS notification_source_delivery ON notification_deliveries(owner_id,channel_id,dedupe) WHERE dedupe LIKE 'source:%';
+CREATE INDEX IF NOT EXISTS notification_deliveries_due ON notification_deliveries(next_at,id) WHERE status IN ('pending','sending');
+CREATE INDEX IF NOT EXISTS notification_deliveries_owner ON notification_deliveries(owner_id,id DESC);
+CREATE TABLE IF NOT EXISTS notification_update_cache (
+ id integer PRIMARY KEY CHECK(id=1), version text NOT NULL DEFAULT '', error text NOT NULL DEFAULT '',
+ published_at timestamptz, checked_at timestamptz NOT NULL DEFAULT 'epoch', next_at timestamptz NOT NULL DEFAULT 'epoch', lease_until timestamptz
+);
+INSERT INTO notification_update_cache(id) VALUES(1) ON CONFLICT DO NOTHING;
+INSERT INTO notification_configs(owner_id) SELECT id FROM panel_users ON CONFLICT DO NOTHING;
+INSERT INTO notification_configs(owner_id) SELECT owner_id FROM user_panel_settings ON CONFLICT DO NOTHING;
+INSERT INTO notification_configs(owner_id) VALUES('') ON CONFLICT DO NOTHING;
 `

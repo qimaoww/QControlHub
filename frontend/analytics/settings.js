@@ -1,3 +1,4 @@
+import { notificationSettings } from "./notification-settings.js";
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
@@ -30,7 +31,7 @@ export async function settingsPage(ctx) {
   const numeric = numericFields.map(([name, label, options]) => input(name, label, { options }));
   const saveState = muted("已保存");
   saveState.setAttribute("role", "status");
-  let baseline, phase = "idle";
+  let baseline, phase = "idle", panelDirty = false, notificationDirty = false;
   const content = [
     section("基础设置", node("div", { className: "a-card-body a-form-grid" },
       input("panel_name", "面板名称", { required: true, maxlength: 40 }),
@@ -53,22 +54,19 @@ export async function settingsPage(ctx) {
       input("acme_email", "ACME 邮箱", { type: "email" }),
       field("大陆 IPv4 数据源", "cnip_ipv4_url", settings.cnip_source?.ipv4_url || "", { type: "url", disabled: !writable }),
       field("大陆 IPv6 数据源", "cnip_ipv6_url", settings.cnip_source?.ipv6_url || "", { type: "url", disabled: !writable }))),
-    section("通知", node("div", { className: "a-card-body a-stack" },
-      input("webhook_url", "Webhook 地址", { type: "url", maxlength: 500 }),
-      actions(toggles.map(([name, label]) => input(name, label, { type: "checkbox" }))))),
     saveState,
   ];
   const form = ctx.form(content, "保存设置", async (values, element) => {
     if (!writable) return;
     const submitted = snapshot();
-    const body = { ...values, revision: settings.revision,
+    const body = { ...settings, ...values, revision: settings.revision,
       default_agent_engines: engineIDs.filter(engine => element.elements.namedItem(`engine:${engine}`).checked),
       cnip_source: { ipv4_url: values.cnip_ipv4_url, ipv6_url: values.cnip_ipv6_url, format: "auto" },
     };
     delete body.cnip_ipv4_url;
     delete body.cnip_ipv6_url;
     for (const engine of engineIDs) delete body[`engine:${engine}`];
-    for (const [name] of toggles) body[name] = element.elements.namedItem(name).checked;
+    for (const [name] of toggles) body[name] = element.elements.namedItem(name)?.checked ?? settings[name];
     for (const name of [...numericFields.map(([key]) => key), "ui_font_scale", "client_connection_retention_days"]) body[name] = Number(body[name]);
     phase = "saving"; sync();
     try {
@@ -90,7 +88,7 @@ export async function settingsPage(ctx) {
   function sync() {
     if (!ctx.current()) return;
     const changed = writable && snapshot() !== baseline;
-    ctx.setDirty(changed);
+    panelDirty = changed; ctx.setDirty(panelDirty || notificationDirty);
     submit.disabled = !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
     saveState.textContent = phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
     const heartbeat = form.elements.agent_heartbeat_interval_seconds, offline = form.elements.agent_offline_threshold_seconds;
@@ -107,7 +105,7 @@ export async function settingsPage(ctx) {
   submit.addEventListener("mutationend", sync);
   const refreshState = notice('');
   let refreshSequence = 0;
-  ctx.onRefresh(async () => {
+  const refreshSettings = async () => {
     const sequence = ++refreshSequence;
     const latest = await ctx.api('/settings');
     if (!ctx.current() || sequence !== refreshSequence) return;
@@ -125,7 +123,7 @@ export async function settingsPage(ctx) {
       else if (control.value !== String(value ?? '')) control.value = value ?? '';
     }
     baseline = snapshot(); phase = 'idle'; refreshState.textContent = ''; sync();
-  });
+  };
   sync();
   if (!writable) submit.remove();
   else {
@@ -158,7 +156,7 @@ export async function settingsPage(ctx) {
       ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
     updateResult, actions(check)))));
   if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
-  return stack(form, refreshState, extra);
+  return stack(form, refreshState, await notificationSettings(ctx, refreshSettings, changed => { notificationDirty = changed; ctx.setDirty(panelDirty || notificationDirty); }), extra);
 }
 
 async function apiKeys(ctx) {
