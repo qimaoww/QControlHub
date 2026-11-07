@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { bindEvent, createInteractionGate, createRefreshChannel, reconcileView } from "./modules/refresh.js";
 import { createPoller } from "./modules/poller.js";
-import { animateNodeCardDrop, nodeCardDropIndex } from "./modules/agents.js";
+import { animateNodeCardDrop, nodeCardDropIndex } from "./modules/agent-card-drag.js";
 
 class FakeText {
   constructor(data, ownerDocument) {

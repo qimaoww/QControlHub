@@ -248,7 +248,11 @@ async function testNativeInstallSource({ testAPI, onlineAgent }) {
 
 async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
   testAPI.agents = [onlineAgent('runtime-parity')];
-  testAPI.agents[0].capabilities = ['mihomo', 'xray'];
+  testAPI.agents[0].capabilities = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
+  Object.assign(testAPI.agents[0].runtime, {
+    'sing-box': { installed: false, existing_config_available: false, existing_config_unsupported_reason: 'unsupported wrapper' },
+    'ss-rust': { installed: true, existing_config_available: true },
+  });
   testAPI.agents[0].features.push('core-uninstall-v1');
   await startNativeNodes();
   const button = (text, root = document) => [...root.querySelectorAll('button')].find(control => control.textContent === text);
@@ -256,6 +260,16 @@ async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
   const box = await waitFor(() => document.querySelector('dialog[open] input[name=name]')?.closest('dialog'), 'runtime details missing');
   const core = engine => box.querySelector(`[data-refresh-key="${engine}"]`);
   const stable = core('mihomo'), draft = box.querySelector('input[name=name]');
+  for (const engine of ['mihomo', 'xray', 'sing-box', 'ss-rust']) {
+    const entry = [...core(engine).querySelectorAll('a')].find(link => link.textContent === '编辑配置');
+    assert.equal(entry?.getAttribute('href'), `#live-config?agent=runtime-parity&engine=${engine}`, 'engine configuration entry missing or targets another core');
+  }
+  assert.ok(core('sing-box').textContent.includes('unsupported wrapper'), 'optional import refusal reason missing');
+  assert.ok(![...core('sing-box').querySelectorAll('a')].some(link => link.textContent === '导入系统配置'), 'unsupported system configuration can be imported');
+  const importEntry = [...core('ss-rust').querySelectorAll('a')].find(link => link.textContent === '导入系统配置');
+  assert.equal(importEntry?.getAttribute('href'), '#live-config?agent=runtime-parity&engine=ss-rust&source=import', 'optional import replaced the managed entry or targets another core');
+  assert.ok(!box.textContent.includes('请先手动导入'), 'optional import became a configuration prerequisite');
+
   draft.value = '未保存的名称'; draft.focus(); draft.setSelectionRange(1, 3);
   assert.equal(core('xray').dataset.coreInstalled, 'unknown', 'unreported runtime is reported as uninstalled');
   assert.ok(core('xray').textContent.includes('安装状态未知'), 'initial unknown installation is not identified');
@@ -278,6 +292,13 @@ async function testNativeRuntimeRefresh({ testAPI, onlineAgent }) {
   await waitFor(() => document.querySelector('[data-agent-id=newly-enrolled]'), 'new Agent did not appear through polling');
   assert.equal(document.querySelector('[data-agent-id=runtime-parity]'), stableCard, 'new Agent discovery rebuilt an existing card');
   assert.ok(box.open && draft.value === '未保存的名称', 'new Agent discovery lost open settings or draft');
+  const reads = testAPI.calls.filter(call => call.path === '/agents').length;
+  testAPI.agents.reverse();
+  await waitFor(() => testAPI.calls.filter(call => call.path === '/agents').length > reads, 'reordered roster was not polled');
+  assert.equal(document.querySelector('[data-agent-id=runtime-parity]'), stableCard, 'API response ordering rebuilt an existing node');
+  assert.equal(core('mihomo'), stable, 'API response ordering rebuilt an existing engine');
+  assert.ok(box.open && draft.value === '未保存的名称' && document.activeElement === draft, 'API response ordering lost settings, draft or focus');
+
   box.querySelector('[aria-label=关闭]').click();
   const originalFetch = window.fetch;
   window.fetch = (input, options) => String(input).endsWith('/auth/session')

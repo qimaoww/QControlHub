@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { saveNodeOrder } from "../modules/node-order.js";
 import { createTrafficOrder } from "../modules/traffic-order.js";
 import { cardMoveTarget } from "../modules/card-move-layout.js";
-import { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "../modules/agents.js";
+import { animateNodeCardDrop, clearNodeCardDragState, nodeCardDropIndex } from "../modules/agent-card-drag.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run() {

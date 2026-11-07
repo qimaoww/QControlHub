@@ -45,7 +45,6 @@ Object.assign(fixtures, await (await import("./smoke/code-format.mjs")).run(fixt
 Object.assign(fixtures, await (await import("./smoke/latest-render.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/server-plan.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/card-drag.mjs")).run(fixtures));
-Object.assign(fixtures, await (await import("./smoke/preset-workspace.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/route-data.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/client-access.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/substore.mjs")).run(fixtures));

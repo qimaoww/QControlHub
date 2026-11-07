@@ -11,6 +11,7 @@ try {
     ["operations", ["dashboardPage", "tasksPage", "quotaPage"]], ["settings", ["settingsPage"]],
     ["client-access", ["clientAccessPage"]], ["substore", ["substorePage"]],
     ["traffic", ["trafficPage"]], ["users", ["usersPage"]],
+    ["nodes", ["nodesPage"]], ["live-config", ["liveConfigPage"]],
   ]) {
     const module = await import(`./analytics/${path}.js`);
     for (const name of exports) assert.equal(typeof module[name], "function", `${path}.${name} is the shipped page entry`);

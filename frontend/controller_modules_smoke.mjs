@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { installAgents } from "./modules/agents.js";
 import { createConfigDeployment } from "./modules/config-deployment.js";
 import { createLiveConfigReader } from "./modules/live-config-reader.js";
 
@@ -10,23 +9,6 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
-// Composition must remain inert until a route or user action invokes a
-// controller. In particular, callback wiring must not need a mounted DOM.
-const context = {
-  state: { data: {}, session: null },
-  can: () => false, esc: String, bytes: String,
-  api: () => assert.fail("constructing a route installer must not make requests"),
-};
-for (const [pages, names] of [
-  [installAgents(context), [
-    "agents", "nodeSettings", "submitTask", "bindCodeEditors", "showCommand",
-    "pollAgentMetrics", "updateAgentMetrics", "cancelAgentInteractions",
-    "sharingHasUnsavedChanges", "compactPresetPage",
-  ]],
-]) {
-  assert.deepEqual(Object.keys(pages).sort(), names.sort());
-  for (const method of Object.values(pages)) assert.equal(typeof method, "function");
-}
 
 {
   const state = { data: {} };

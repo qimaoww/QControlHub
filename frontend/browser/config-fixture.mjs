@@ -102,7 +102,7 @@ export async function createConfigFixture(engine, options = {}) {
       return {items:test.certificates || options.certificates || []};
     }
     if (path === "/agents") {
-      const result = [options.cachedMissing ? {...structuredClone(agent), runtime:{[engine]:{installed:false}}} : structuredClone(agent)];
+      const result = [options.cachedMissing ? {...structuredClone(agent), runtime:{[engine]:{installed:false}}} : structuredClone(agent), ...structuredClone(options.additionalAgents || [])];
       const gate = test.agentReadGate;
       test.agentReadGate = null;
       if (gate) {

@@ -53,10 +53,27 @@ export async function testConfigMigrationRuntime(preview=false){
       assert(test.writes[0].intent==='deploy'&&!test.readRequests.length,'legacy Agent lost regular atomic deployment');
     }finally{test.dispose()}
   }
+  await testSelectedNodeWorkspace();
   await testPendingAndRejectedSource();
   await testSourceReceipts();
   await testNativeConfigReadCacheRuntime();
   await testRuntimeAndSourceSelection();
+}
+async function testSelectedNodeWorkspace(){
+  for(const engine of ['mihomo','xray','sing-box','ss-rust']){
+    const other={id:'unselected',name:'OTHER-NODE-CONTENT',status:'online',capabilities:['mihomo','xray','sing-box','ss-rust'],runtime:{}};
+    const test=await createConfigFixture(engine,{additionalAgents:[other]});
+    try{
+      const selector=test.root.querySelector('.a-target-form [name=agent]');
+      assert([...selector.options].some(option=>option.value===other.id),'other authorized node missing from selection');
+      assert(selector.value==='node','explicit configuration target was not retained');
+      const reads=test.calls.filter(call=>call.path.includes('/configs'));
+      assert(reads.length===1&&reads[0].path===`/agents/node/configs/${engine}/workspace`,'opening configuration fetched an unselected node or redundant fleet configs');
+      assert(!sourceForm().elements.content.value.includes(other.name),'unselected node content entered active editor');
+      assert(sourceForm().querySelector('[type=submit]')?.textContent==='保存并部署','managed configuration requires an optional system import');
+      assert(!test.writes.length&&!test.readRequests.length,'opening selected configuration unexpectedly submitted a task');
+    }finally{test.dispose()}
+  }
 }
 async function testRuntimeAndSourceSelection(){
   const test=await createConfigFixture('sing-box',{import:true});
