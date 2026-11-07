@@ -58,8 +58,8 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(settingsContent, `await notificationSettings(ctx, refreshSettings)`) {
-		t.Error("settings omits notification integration")
+	if !strings.Contains(settingsContent, `await notificationSettings(ctx, refreshSettings, changed => { notificationDirty = changed; ctx.setDirty(panelDirty || notificationDirty); })`) {
+		t.Error("settings omits notification integration or combined draft protection")
 	}
 	notificationContent := string(mustReadFrontendFile(t, "analytics/notification-settings.js"))
 	for _, title := range []string{"通知渠道", "通知规则", "通知模板", "投递记录"} {
