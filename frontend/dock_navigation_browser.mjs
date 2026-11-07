@@ -225,5 +225,5 @@ try {
     await Promise.race([stopped, delay(2000)]);
     if (child.exitCode == null && child.signalCode == null) { child.kill("SIGKILL"); await stopped; }
   }
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
