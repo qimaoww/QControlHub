@@ -99,7 +99,9 @@ try {
     await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
-    await wait(page, "!!document.querySelector('.a-user')");
+    // The shell mounts before the login mutation finishes its initial read.
+    // Wait for that read before navigation can pass the submission guard.
+    await wait(page, "!!document.querySelector('.a-user') && !document.querySelector('[aria-busy=true]')");
     return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
