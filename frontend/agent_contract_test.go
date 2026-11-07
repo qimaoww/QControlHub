@@ -79,14 +79,23 @@ func TestSystemBBRCardsUseDraggedNodeSettingsOrder(t *testing.T) {
 func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	content := string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
 	for file, markers := range map[string][]string{
-		"modules/agent-batch-controller.js": {
-			`batchForm.dataset.busy === "1"`,
-			`batchForm.dataset.confirming === "1"`,
-			`for (const input of selected)`,
-			`data-batch-retry`,
-			`data-batch-select-all`,
-			`selectAll.indeterminate = selection.indeterminate`,
-			`selection.indeterminate ? "mixed"`,
+		"analytics/node-batch.js": {
+			`const options = readOptions(values)`,
+			`if (!await ctx.confirm(`,
+			`agents = list(await ctx.api('/agents'))`,
+			`for (const id of targets)`,
+			`const reason = eligibility(agents.find(agent => agent.id === id), options)`,
+			`row.retry.disabled = busy`,
+			`if (busy || !row.result) return`,
+			`已提交 ${submitted}，提交失败 ${failed}`,
+		},
+		"analytics/nodes.js": {
+			`all.querySelector('input').indeterminate`,
+			`disabled: !selectable(agent)`,
+		},
+		"analytics/app.js": {
+			`if (pending || submit.disabled) return`,
+			`controls.disabled = true`,
 		},
 		"modules/agent-batch.js": {
 			`agent-self-upgrade-v1`,

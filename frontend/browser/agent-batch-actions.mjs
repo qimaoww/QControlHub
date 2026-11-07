@@ -45,6 +45,12 @@ export async function testAgentBatchActions(fixture) {
   assert.ok(choose('delta').disabled && !choose('delta').checked && row('delta').textContent.includes('旧版 Agent'), '旧 Agent 仍可更新');
   assert.ok(choose('alpha').checked && choose('bravo').checked, '合格节点选择丢失');
   testAPI.taskMode = 'deferred';
+  const beforeCancel = writes();
+  const canceled = await confirm();
+  nativeBatchButton('取消', canceled).click(); await idle();
+  assert.equal(writes(), beforeCancel, '取消批量确认仍提交任务');
+  assert.ok(box.open && !submit.disabled && choose('alpha').checked && choose('bravo').checked, '取消确认丢失选择或未解锁');
+  assert.equal(document.querySelectorAll('dialog[open]').length, 1, '取消确认残留额外弹窗');
   // A new authoritative read after confirmation must reject every newly ineligible target.
   for (const [action, mutate] of [
     ['upgrade-agent', agent => { agent.status = 'offline'; }],
