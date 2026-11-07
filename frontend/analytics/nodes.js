@@ -8,7 +8,7 @@ import { nodeRegion, nodeRegionFlag } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
 import { metricTrack } from './metric-track.js';
 import { nodeDeleteControl } from './node-delete.js';
-import { publicAddressRows } from '../modules/agent-address-model.js';
+import { publicAddressRows, manualConnectionAddressNote } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
@@ -145,7 +145,8 @@ export async function nodesPage(ctx) {
             } catch {
               if (ctx.current()) ctx.announce('复制失败，请重试。', 'error');
             } finally { if (control.isConnected) control.disabled = false; }
-          }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'));
+          }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'),
+      manualConnectionAddressNote(agent.labels) && node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, muted(manualConnectionAddressNote(agent.labels)))));
   }
 
   async function load() {
@@ -312,6 +313,7 @@ export async function nodesPage(ctx) {
     const renderFacts = () => section('节点信息', node('div', { className: 'a-card-body' }, stack(
       actions(status(agent.status), badge(agent.can_manage === false ? '本人共享实例' : '主实例')),
       muted(agent.id), muted(`${agent.os} / ${agent.arch} · QAgent ${agent.version || '—'}`),
+      addresses(agent),
       muted(`最近在线 · ${date(agent.last_seen)}`),
       manage && button('国家／地区', () => chooseRegion(agent)),
       agent.metrics && grid(
