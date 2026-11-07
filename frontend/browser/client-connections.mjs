@@ -2,7 +2,7 @@ import { testConnectionReadLifecycle } from './connection-read-lifecycle.mjs';
 import { assert, waitFor } from "./assertions.mjs";
 
 export async function testClientConnectionsRuntime(preview = false) {
-  const fallback = window.fetch.bind(window), requests = [], locationRequests = [];
+  const fallback = window.fetch.bind(window), requests = [], locationRequests = [], orderRequests = [];
   const now = new Date().toISOString();
   let releaseLocations, releaseShell, releaseFirstHistory, holdHistory;
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
@@ -17,6 +17,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   ];
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
+    if (url.pathname === "/api/v1/preferences/node-order") orderRequests.push(options?.signal);
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
       if (url.searchParams.get("locations") === "only") {
@@ -42,9 +43,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   document.head.append(styles); await styled;
   // Appearance is loaded before the new theme mounts its page. Location
   // enrichment remains independent of the usable history and filter controls.
-  releaseShell();
   const session = await (await fallback("/api/v1/auth/session")).json();
   (await import("../analytics/app.js")).startAnalytics({ app: document.querySelector("#app"), session });
+  await waitFor(() => orderRequests.length === 1, "connection ordering must start before appearance settings finish");
+  assert.equal(requests.length, 0, "history must wait for the authenticated order and page setup");
+  releaseShell();
   const region = () => document.querySelector('[aria-label="客户端来源 IP 明细"]');
   const displayed = () => [...region().querySelectorAll("tbody tr")];
   const body = () => region()?.querySelector("tbody");
@@ -67,6 +70,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   const firstInput = document.activeElement;
   releaseFirstHistory(); holdHistory = null;
   await waitFor(() => body()?.textContent.includes("2001:db8::8"), "connection page did not load");
+  assert.equal(orderRequests.length, 1, "first history must reuse the route's order request");
   assert.equal(document.activeElement, firstInput, "first history arrival replaced the active filter");
   assert.equal(form().elements.agent_id.options.length, 3, "authorized node choices must remain available while geography loads");
   assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "location lookup must not disable filters");

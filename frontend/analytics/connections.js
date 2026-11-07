@@ -13,6 +13,10 @@ export async function connectionsPage(ctx) {
   const data = ctx.state.data;
   let filters = data.analyticsConnectionFilters ||= defaultConnectionFilters();
   const cache = data.analyticsConnectionCache ||= createConnectionCache();
+  let initialOrder = ctx.connectionNodeOrder;
+  // Filter changes can share the route's pending order read. Once settled,
+  // later refreshes continue to read the current authenticated preference.
+  initialOrder?.finally(() => { initialOrder = null; }).catch(() => {});
   let sources = [], result = null, loading = true, controller, serial = 0, cursor = "", cursors = [], nextCursor = "", nodeOrder = savedNodeOrder();
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
@@ -82,7 +86,7 @@ export async function connectionsPage(ctx) {
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
       if (force || !sources.length) {
-        const order = await ctx.api("/preferences/node-order", { signal });
+        const order = await (!force && initialOrder || ctx.api("/preferences/node-order", { signal }));
         if (!current()) return;
         if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; }
         nodeOrder = order.ids;
