@@ -4,6 +4,7 @@ import { accountStorage } from "../modules/account-storage.js";
 
 export async function testTrafficLayoutRuntime({ testAPI }) {
     await startTrafficTheme();
+    await testTrafficScopeAndFormContracts(testAPI);
     const trafficReads = () => testAPI.calls.filter(call => call.path.startsWith('/traffic-policies') || call.path === '/traffic-endpoints').length;
     const revisit = async () => {
       location.hash = '#themes';
@@ -42,6 +43,20 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(diagnostic.open && diagnostic.textContent.includes('single-protocol'), 'original diagnostic inaccessible');
     assert.ok(detailDialog.textContent.includes('仅监听端口') && !detailDialog.textContent.includes('统计异常'), 'scope limitation rendered as error');
     const policy = testAPI.trafficPolicies[0];
+    const original = structuredClone(policy);
+    const diagnose = async (error, expected) => {
+      policy.enforcement_error = error;
+      await waitFor(() => detailDialog.textContent.includes(expected), `native diagnostic missing: ${expected}`);
+    };
+    await diagnose(`${policy.enforcement_error}; read failed`, '统计异常');
+    await diagnose('dual accounting unavailable: outbound tags must be present and unique', '重复标签须修改配置，不能合并计数');
+    await diagnose('dual accounting unavailable: outbounds[1].tag duplicates an earlier outbound; assign distinct tags and update the intended route targets', '使用不同标签并同步修改路由');
+    await diagnose('<script>window.trafficInjected=true</script><img src=x onerror="window.trafficInjected=true">', '<script>');
+    assert.equal(detailDialog.querySelectorAll('script,img').length, 0, 'Agent diagnostic became executable markup');
+    assert.ok(!window.trafficInjected, 'Agent diagnostic executed');
+    policy.enforcement_error = ''; policy.enforcement_available = false;
+    await waitFor(() => detailDialog.textContent.includes('暂未提供详细诊断'), 'unavailable accounting lacks fallback diagnostic');
+    Object.assign(policy, original);
     policy.enforcement_error = 'API connection refused';
     await waitFor(() => detailDialog.textContent.includes('API connection refused'), 'open status dialog did not refresh failure');
     assert.ok(detailDialog.open && diagnostic.open, 'refresh closed dialog or diagnostics');
@@ -52,6 +67,12 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     policy.accounting.target_sent = 16384;
     await waitFor(() => detailDialog.textContent !== previous, 'open counters did not refresh');
     assert.ok(detailDialog.open, 'counter refresh closed dialog');
+    assert.ok(detailDialog.textContent.includes('不等同于本月总量'), 'metering generation counters confused with monthly totals');
+    for (const label of ['客户端至代理', '代理至客户端', '目标至代理', '代理至目标']) assert.ok(detailDialog.textContent.includes(label), `dual counter lost: ${label}`);
+    policy.engine = 'mihomo'; policy.accounting.source = 'nft-dual';
+    await waitFor(() => detailDialog.textContent.includes('双链路 · 范围受限'), 'Mihomo partial egress not identified');
+    assert.ok(detailDialog.textContent.includes('非全局单播目标仅计入口，出口不补算或翻倍'), 'Mihomo scope limitation missing');
+    delete policy.accounting; Object.assign(policy, original);
     await close(detailDialog);
     button('统计详情', document.querySelectorAll('.a-traffic-list tbody tr')[2]).click();
     detailDialog = await waitFor(() => active(), 'failure detail missing');
@@ -187,7 +208,66 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(!document.querySelector('dialog[data-traffic-sync]'), "expired session left an orphan modal blocking login");
 }
 
-async function startTrafficTheme(route = '#traffic') {
+async function testTrafficScopeAndFormContracts(testAPI) {
+  const originalPolicies = testAPI.trafficPolicies, originalEndpoints = testAPI.trafficEndpoints, originalAgents = testAPI.agents;
+  testAPI.agents = originalAgents.map(agent => agent.id === 'bravo' ? { ...agent, capabilities: ['xray'] } : agent);
+  const button = text => [...document.querySelectorAll('.a-main button')].find(control => control.textContent === text);
+  const keys = () => [...document.querySelectorAll('.a-main [data-traffic-key]')].map(item => item.dataset.trafficKey);
+  const foreign = { ...originalPolicies[0], id: 'foreign-policy', agent_id: 'bravo', port: 24443, is_current_user: false, owner_id: 'another-user', owner_name: '其他用户测试' };
+  testAPI.trafficPolicies = [...originalPolicies, foreign];
+  await startTrafficTheme();
+  assert.ok(!keys().includes('policy:foreign-policy'), 'default traffic scope exposes another user');
+  const scope = document.querySelector('[name=scope]');
+  scope.value = 'all'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.ok(keys().includes('policy:foreign-policy'), 'authorized all scope loses a visible foreign port');
+  assert.ok(document.querySelector('[data-traffic-key="policy:foreign-policy"]').textContent.includes('其他用户测试'), 'foreign port ownership missing');
+  scope.value = 'current'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+  const endpoint = { agent_id: 'alpha', engine: 'mihomo', port: 25443, protocol: 'udp', name: '新发现监听', is_current_user: true };
+  testAPI.trafficEndpoints = [endpoint];
+  await waitFor(() => keys().some(key => key.includes(':25443:')), 'polling did not discover a newly deployed endpoint');
+  testAPI.trafficEndpoints = [];
+  await waitFor(() => !keys().some(key => key.includes(':25443:')), 'polling retained a removed configured endpoint');
+  button('添加配额').click();
+  let box = document.querySelector('dialog[open]'), form = box.querySelector('form');
+  const agent = form.elements.agent_id;
+  const first = agent.value;
+  const other = [...agent.options].find(option => option.value !== first).value;
+  agent.value = other; agent.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal([...form.elements.engine.options].map(option => option.value).join(','), testAPI.agents.find(value => value.id === other).capabilities.join(','), 'changing quota node kept stale engines');
+  box.close();
+  await waitFor(() => !box.isConnected, 'quota dialog did not dispose');
+  button('添加配额').click();
+  box = document.querySelector('dialog[open]'); form = box.querySelector('form');
+  assert.equal(form.elements.agent_id.value, first, 'new quota inherited the previous dialog node');
+  assert.equal([...form.elements.engine.options].map(option => option.value).join(','), testAPI.agents.find(value => value.id === first).capabilities.join(','), 'new quota inherited the previous node engines');
+  box.close(); await waitFor(() => !box.isConnected, 'new quota dialog did not dispose');
+  assert.ok(!testAPI.calls.some(call => call.method !== 'GET'), 'rendering or cancelling quota wrote data');
+  button('管理').click();
+  button('批量操作').click();
+  box = document.querySelector('dialog[open]');
+  assert.ok(box.matches(':modal'), 'batch selection must block background filters and dragging');
+  assert.ok(!box.querySelector('[name="foreign-policy"]'), 'current-user batch includes another owner');
+  box.querySelector(`input[name="${originalPolicies[0].id}"]`).click();
+  box.close(); await waitFor(() => !box.isConnected, 'batch selection did not dispose');
+  scope.value = 'all'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+  button('批量操作').click();
+  box = document.querySelector('dialog[open]');
+  assert.ok(box.querySelector('[name="foreign-policy"]'), 'authorized all-scope batch omitted a visible target');
+  assert.equal(box.querySelectorAll('input[type=checkbox]:checked').length, 0, 'batch selection survived a scope change');
+  assert.ok([...box.querySelectorAll('button')].find(control => control.textContent === '重试未完成项').hidden, 'new scope retained a previous retry');
+  box.close(); await waitFor(() => !box.isConnected, 'all-scope batch did not dispose');
+  await startTrafficTheme('#traffic', { role: 'user', user_id: 'traffic-reader', permissions: ['traffic.read', 'agents.read'], csrf_token: 'browser-test-csrf' });
+  assert.ok(!button('添加配额') && !button('批量操作') && !button('同步配置端口'), 'readonly traffic exposes management actions');
+  assert.ok(!button('设置配额') && !button('编辑配额'), 'readonly port exposes a quota editor');
+  button('统计详情').click();
+  box = document.querySelector('dialog[open]');
+  assert.ok(box && ![...box.querySelectorAll('button')].some(control => ['清零', '取消配额', '删除'].includes(control.textContent)), 'readonly statistics exposes mutation actions');
+  box.close(); await waitFor(() => !box.isConnected, 'readonly statistics did not dispose');
+  testAPI.trafficPolicies = originalPolicies; testAPI.trafficEndpoints = originalEndpoints; testAPI.agents = originalAgents;
+  await startTrafficTheme();
+}
+
+async function startTrafficTheme(route = '#traffic', sessionOverride) {
   window.dispatchEvent(new Event('pagehide'));
   document.querySelectorAll('link[rel=stylesheet]').forEach(link=>link.remove());
   const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/assets/analytics/theme.css'});
@@ -196,7 +276,7 @@ async function startTrafficTheme(route = '#traffic') {
   document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'app'}));
   history.replaceState(null,'',route);
   const session=await(await fetch('/api/v1/auth/session')).json();
-  startAnalytics({app:document.querySelector('#app'),session});
+  startAnalytics({app:document.querySelector('#app'),session:sessionOverride || session});
   await waitFor(()=>document.querySelector(route === '#traffic' ? '.a-traffic-page [data-traffic-key]' : '.a-probe'),'native theme did not load');
 }
 async function fitDialog(dialog) {
