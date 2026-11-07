@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -55,20 +56,31 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	defer tx.Rollback(ctx)
 	// Serialize uploads with revocation so an already authenticated request
 	// cannot recreate logs after the deletion worker has drained them.
+	// Pipeline the lock/read and deduplication insert on this transaction's
+	// connection. PostgreSQL executes them in order; any failed read or write
+	// still rolls the complete transaction back before an ACK can be sent.
+	prelude := &pgx.Batch{}
+	prelude.Queue(`SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
+		,agents.owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID)
+	prelude.Queue(`INSERT INTO core_log_batches (id,agent_id,received_at) VALUES ($1,$2,$3)
+		ON CONFLICT (id) DO NOTHING`, batch.ID, agentID, receivedAt)
+	results := tx.SendBatch(ctx, prelude)
 	var minimumLevel, nodeOwner string
-	if err := tx.QueryRow(ctx, `SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
-		,agents.owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID).Scan(&minimumLevel, &nodeOwner); err != nil {
+	if err := results.QueryRow().Scan(&minimumLevel, &nodeOwner); err != nil {
+		_ = results.Close()
 		return fmt.Errorf("read core log minimum level: %w", mapError(err))
+	}
+	command, err := results.Exec()
+	closeErr := results.Close()
+	if err != nil {
+		return mapError(err)
+	}
+	if closeErr != nil {
+		return mapError(closeErr)
 	}
 	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)
 	if minimumLevel == "" {
 		return errors.New("invalid stored core log minimum level")
-	}
-	command, err := tx.Exec(ctx, `
-		INSERT INTO core_log_batches (id,agent_id,received_at) VALUES ($1,$2,$3)
-		ON CONFLICT (id) DO NOTHING`, batch.ID, agentID, receivedAt)
-	if err != nil {
-		return mapError(err)
 	}
 	if command.RowsAffected() == 0 {
 		var existingAgentID string

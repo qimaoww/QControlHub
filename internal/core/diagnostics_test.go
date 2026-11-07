@@ -29,3 +29,36 @@ func TestDiagnosticRedactionMasksKeyAssignmentsPEMAndHistoricalPaths(t *testing.
 		t.Fatalf("a real file was mistaken for a historical inline key: %s", got)
 	}
 }
+
+// Keep the previous replacement sequence as an independent output oracle.
+// This covers replacement expansion, cascading matches, malformed encodings
+// and Unicode case folding, which a literal credential prefilter could miss.
+func FuzzDiagnosticRedactionEquivalent(f *testing.F) {
+	for _, seed := range []string{
+		"ordinary diagnostic line", "", "\xff\x00",
+		`private_key="secret" token=abc api_key='xyz'`,
+		"BeArEr abc123\nqch_key_" + strings.Repeat("A", 43),
+		"https://user:pass@example.invalid/?token=abc&password=def",
+		"-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+		"-----BEGIN EC PRIVATE KEY-----\nunclosed secret",
+		"a1234567-1234-1234-1234-123456789abc",
+		"read certificate/key /var/lib/qcontrolhub-mihomo/" + strings.Repeat("A", 43),
+		"PRIVATE_KEY=secret\nmldſa65_ſeed: secret",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		want := diagnosticPrivatePEM.ReplaceAllString(raw, "[redacted private PEM]")
+		want = diagnosticAssignments.ReplaceAllString(want, "${1}[redacted]")
+		want = diagnosticBearer.ReplaceAllString(want, "Bearer [redacted]")
+		want = diagnosticAPIKey.ReplaceAllString(want, "[redacted]")
+		want = diagnosticUUID.ReplaceAllString(want, "[redacted UUID]")
+		want = diagnosticURLCredentials.ReplaceAllString(want, "${1}[redacted]@")
+		want = diagnosticURLSecret.ReplaceAllString(want, "${1}[redacted]")
+		want = diagnosticKeyAssignment.ReplaceAllString(want, "${1}[redacted]")
+		want = diagnosticLegacyRealityPath.ReplaceAllString(want, "${1}[redacted]${2}")
+		if got := RedactDiagnostic(raw); got != want {
+			t.Fatalf("redaction differs for %q: got %q, want %q", raw, got, want)
+		}
+	})
+}

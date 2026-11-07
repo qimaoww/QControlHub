@@ -80,6 +80,7 @@ export async function checkAnalyticsTraffic({ page, mode, fixture, evaluate, wai
   assert.equal((await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).quota_enabled, false);
   assert.ok(!(await api(page, identity, 'GET', '/traffic-policies')).find(value => value.id === policy.id).last_reported_at, 'reset must await a new Agent sample');
   assert.equal(await evaluate(page, `document.querySelector(${JSON.stringify(row + ' [role=meter]')})`), null, 'removed quota retains a numeric usage meter');
+  await click('统计详情', row); await wait(page, "document.querySelector('dialog[open][data-traffic-details]')?.textContent.includes('持续统计') && !document.querySelector('[aria-busy=true]')"); await close();
   await click('设置配额', row);
   await wait(page, "!!document.querySelector('dialog[open] [name=limit_gb]')");
   await act( "const input=document.querySelector('dialog[open] [name=limit_gb]');input.value='1';input.form.requestSubmit()");

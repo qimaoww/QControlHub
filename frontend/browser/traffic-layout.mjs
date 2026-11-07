@@ -205,6 +205,8 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     testAPI.trafficPreviewUnauthorized = true;
     button('同步配置端口').click();
     await waitFor(() => document.querySelector("#analytics-login-form") || document.querySelector(".a-login form"), "expired session did not reach login");
+    assert.ok(!document.querySelector('dialog[data-traffic-sync][open]'), "expired session left a modal blocking login");
+    await waitFor(() => !document.querySelector('dialog[data-traffic-sync]'), "expired session did not remove the closed modal");
     assert.ok(!document.querySelector('dialog[data-traffic-sync]'), "expired session left an orphan modal blocking login");
 }
 

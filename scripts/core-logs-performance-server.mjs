@@ -26,6 +26,17 @@ function instrument(path, source) {
     source = source.replace("return (entries, filters) => {", "return (entries, filters) => { const began = performance.now();")
       .replace("return { entries: filtered, counts };", "window.__phaseMetrics.push({phase:'projection',ms:performance.now()-began}); return { entries: filtered, counts };");
   }
+  if (path.endsWith("/analytics/nodes.js")) {
+    source = source.replace("function draw(live = false) {", `function draw(...args) { ${record("draw", "measuredDraw(...args)")} } function measuredDraw(live = false) {`);
+  }
+  if (path.endsWith("/analytics/operations.js")) {
+    source = source.replace("export const bytes = value => {", "const measuredBytes = value => {");
+    source += `\nexport const bytes = value => { ${record("bytes", "measuredBytes(value)")} };`;
+  }
+  if (path.endsWith("/analytics/appearance.js")) {
+    source = source.replace("export function formatDate(", "function measuredFormatDate(");
+    source += `\nexport function formatDate(...args) { ${record("date", "measuredFormatDate(...args)")} }`;
+  }
   return source;
 }
 const fixture = { revision: 0, failure: 0, requests: [] };
@@ -108,6 +119,23 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/assets/agents_browser_runtime.mjs") {
     response.setHeader("Content-Type", "text/javascript");
+    if (process.env.QCH_PERF_PAGE === "nodes") {
+      response.end(`import { installAgentFixture } from './browser/agent-fixture.mjs';
+const params = new URLSearchParams(location.search);
+const count = Math.max(0, Math.min(1024, Number(params.get('nodes') ?? 32) || 0));
+const { testAPI } = installAgentFixture(params.get('role') === 'shared' ? 'shared-node' : 'admin');
+window.testAPI = testAPI;
+const first = structuredClone(testAPI.agents[0]);
+testAPI.agents = Array.from({length:count}, (_, i) => ({...structuredClone(first),id:'perf-'+i,name:'测试节点 '+i,region_code:''}));
+window.__nodePerformanceFixture = true;
+window.__phaseMetrics = []; window.__longTasks = [];
+new PerformanceObserver(list => window.__longTasks.push(...list.getEntries().map(entry => ({at:entry.startTime,ms:entry.duration})))).observe({type:'longtask',buffered:true});
+history.replaceState(null, '', location.search + '#node-settings');
+const session = await (await fetch('/api/v1/auth/session')).json();
+const { startAnalytics } = await import('./analytics/app.js');
+startAnalytics({app:document.querySelector('#app'),session});`);
+      return;
+    }
     response.end(`import { installAgentFixture } from './browser/agent-fixture.mjs';
 const nativeFetch = window.fetch;
 const { testAPI } = installAgentFixture('logs');
