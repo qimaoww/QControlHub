@@ -10,6 +10,7 @@ export async function testAgentDetailActions(fixture) {
   const box = await waitFor(() => document.querySelector('dialog[open] input[name=name]')?.closest('dialog'), '单节点设置未打开');
   const button = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
   assert.equal(box.querySelector('.a-probe-batch,form[name=enrollment]'), null, '单节点设置包含聚合操作');
+  await testSettingsPanels(box, testAPI);
   const reads = testAPI.calls.filter(call => call.path === '/agents/alpha/enrollment-command').length;
   const credentials = testAPI.calls.filter(call => /enrollment-token/.test(call.path) && call.method === 'POST').length;
   let previous;
@@ -30,6 +31,38 @@ export async function testAgentDetailActions(fixture) {
   await testNativeNodeTaskLifecycle(fixture);
 }
 
+async function testSettingsPanels(box, testAPI) {
+  const nodePanel = box.querySelector('[data-settings-panel=node]'), corePanel = box.querySelector('[data-settings-panel=core]');
+  const name = box.querySelector('input[name=name]'), original = name.value;
+  assert.ok(!nodePanel.hidden && corePanel.hidden, '旧节点深链接未进入节点设置');
+  assert.ok(!nodePanel.querySelector('[data-core-installed],[data-engine-capability]'), '节点设置混入内核操作');
+  assert.ok(!corePanel.querySelector('[name=name],[data-agent-timezone]'), '内核设置混入节点表单');
+  name.value = '未提交的节点名称'; name.focus(); name.setSelectionRange(1, 3);
+  const top = box.scrollTop;
+  testAPI.agents[0].metrics.network_rx_bps = 1024;
+  await waitFor(() => document.querySelector('.a-probe-network').textContent.includes('1\u00a0KB/s'), '节点未实时更新');
+  assert.ok(!nodePanel.querySelector('.a-probe-network,.a-probe-meters,[data-ip-family]'), '节点设置重复列表概览');
+  assert.equal(document.activeElement, name, '设置刷新丢失焦点'); assert.equal(name.selectionStart, 1, '设置刷新丢失选择'); assert.equal(box.scrollTop, top, '设置刷新重置滚动');
+  openCoreSettings(box);
+  const capability = corePanel.querySelector('[data-engine-capability=xray]');
+  const before = capability.checked; capability.click();
+  const stable = capability.closest('form');
+  testAPI.agents[0].runtime.mihomo.version = 'v1.2.3';
+  await waitFor(() => corePanel.textContent.includes('v1.2.3'), '内核设置未实时更新');
+  assert.equal(capability.closest('form'), stable, '刷新重建能力表单'); assert.equal(capability.checked, !before, '刷新覆盖能力草稿');
+  assert.equal(corePanel.hidden, false, '刷新重置当前设置分区');
+  for (const engine of ['mihomo', 'xray', 'sing-box', 'ss-rust']) {
+    const card = corePanel.querySelector(`[data-refresh-key="${engine}"]`);
+    assert.ok(card.querySelector(`[data-engine-capability="${engine}"]`), '能力设置与对应内核未归组');
+    assert.equal(card.querySelectorAll('[type=submit]').length, 0, '内核卡片保留重复保存按钮');
+  }
+  assert.equal(corePanel.querySelectorAll('[type=submit]').length, 1, '内核能力未使用统一保存入口');
+  [...box.querySelectorAll('button')].find(control => control.textContent === '节点设置').click();
+  assert.equal(name.value, '未提交的节点名称', '分区切换丢失名称草稿');
+  openCoreSettings(box); assert.equal(capability.checked, !before, '分区切换丢失能力草稿'); capability.click();
+  [...box.querySelectorAll('button')].find(control => control.textContent === '节点设置').click(); name.value = original;
+}
+
 export async function startNativeNodes() {
   window.dispatchEvent(new Event('pagehide'));
   document.querySelectorAll('link[rel=stylesheet]').forEach(link => link.remove());
@@ -44,11 +77,17 @@ export async function startNativeNodes() {
   await waitFor(() => document.querySelector('.a-probe-toolbar'), '新主题节点未加载');
 }
 
+export function openCoreSettings(box) {
+  [...box.querySelectorAll('button')].find(control => control.textContent === '内核设置').click();
+  assert.ok(!box.querySelector('[data-settings-panel=core]').hidden && box.querySelector('[data-settings-panel=node]').hidden, '节点与内核设置未独立切换');
+}
+
 export async function testWriteOnlyCoreUninstall({ testAPI }) {
   await startNativeNodes();
   const button = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
   button('查看设置', document.querySelector('[data-agent-id="alpha"]')).click();
   const settings = await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(box => box.textContent.includes('节点设置')), '节点设置未打开');
+  openCoreSettings(settings);
   const service = settings.querySelector('[data-refresh-key=mihomo]');
   const uninstall = await waitFor(() => button('卸载内核', service), '只有执行权的节点所有者不能卸载内核');
   assert.ok(!uninstall.disabled, '只有执行权的所有者卸载入口不可用');
@@ -88,6 +127,7 @@ export async function testNativeNodeTaskLifecycle(fixture) {
   const modal = () => [...document.querySelectorAll('dialog[open]')].at(-1);
   button('查看设置').click();
   const settings = await waitFor(() => modal()?.textContent.includes('节点设置') && modal(), '节点设置未打开');
+  openCoreSettings(settings);
   const core = () => settings.querySelector('[data-refresh-key=mihomo]');
   const uninstall = () => button('卸载内核', core());
   const writes = () => testAPI.submittedTasks.filter(task => task.action === 'uninstall');
@@ -167,7 +207,25 @@ export async function testNativeNodeTaskLifecycle(fixture) {
   testAPI.capabilityFailure = false;
   // The failed attempt retains the chosen disabled draft for retry.
   capability('xray').closest('form').requestSubmit();
-  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && !settings.querySelector('[data-refresh-key=xray]'), '关闭未安装内核未移除管理入口');
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && settings.querySelector('[data-refresh-key=xray]')?.dataset.capabilityEnabled === '0', '关闭未安装内核未更新能力状态');
+  const capabilityWrites = () => testAPI.calls.filter(call => call.method === 'PUT' && call.path.includes('/capabilities/'));
+  const combined = capability('xray').closest('form'), save = combined.querySelector('[type=submit]');
+  capability('xray').click(); capability('ss-rust').click();
+  testAPI.capabilityFailures = new Set(['ss-rust']);
+  const beforeCombined = capabilityWrites().length;
+  combined.requestSubmit(); combined.requestSubmit();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '统一能力保存未结束');
+  assert.equal(capabilityWrites().length, beforeCombined + 2, '统一保存漏发或重复提交');
+  assert.ok(testAPI.agents[0].capabilities.includes('xray') && !testAPI.agents[0].capabilities.includes('ss-rust'), '部分失败误报保存成功');
+  assert.ok(capability('ss-rust').checked && !save.disabled, '失败内核草稿未保留或不能重试');
+  assert.ok(capability('ss-rust').closest('[data-refresh-key]').textContent.includes('冲突'), '失败未定位到对应内核');
+  testAPI.capabilityFailures.clear();
+  combined.requestSubmit();
+  await waitFor(() => testAPI.agents[0].capabilities.includes('ss-rust') && !document.querySelector('#app[aria-busy=true]'), '统一保存重试未成功');
+  assert.equal(capabilityWrites().length, beforeCombined + 3, '重试重复保存已成功的内核');
+  assert.ok(save.disabled, '保存成功后仍有待保存状态');
+  capability('xray').click(); capability('ss-rust').click(); combined.requestSubmit();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && !testAPI.agents[0].capabilities.includes('xray') && !testAPI.agents[0].capabilities.includes('ss-rust'), '多内核关闭未保存');
   for (const success of [false, true, false, true]) {
     const wasEnabled = testAPI.agents[0].capabilities.includes('mihomo');
     await toggle('mihomo');
@@ -194,6 +252,7 @@ async function testNativeInstallSource({ testAPI, onlineAgent }) {
   const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), 'installation did not unlock');
   button('查看设置').click();
   const settings = await waitFor(() => modal()?.querySelector('input[name=name]') && modal(), 'settings missing');
+  openCoreSettings(settings);
   button('切换版本', settings.querySelector('[data-refresh-key=mihomo]')).click();
   const box = modal(), form = box.querySelector('form');
   const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };

@@ -629,7 +629,7 @@ window.fetch = async (input, options = {}) => {
     return json(null, 204);
   }
   if (method === "PUT" && /^\/agents\/[^/]+\/capabilities\/[^/]+$/.test(path)) {
-    if (testAPI.capabilityFailure) return json({ error: "capability save failure" }, 409);
+    if (testAPI.capabilityFailure || testAPI.capabilityFailures?.has(path.split("/").at(-1))) return json({ error: "capability save failure" }, 409);
     const [, , id, , engine] = path.split("/");
     const { enabled } = JSON.parse(options.body);
     const agent = testAPI.agents.find((item) => item.id === id);
