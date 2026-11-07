@@ -116,6 +116,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   if(preview)return;
   if(fixture.failed){assert(cpu().textContent==="—","failed first sample became zero");assert(nodes()&&traffic(),"optional host failure blocked dashboard");fixture.failed=false;await refresh();}
   assert(cpu().textContent==="23.6%","CPU usage differs from panel API");
+  assert(metric("内存使用率").textContent==="43.5%"&&metric("根目录磁盘").textContent==="33.0%","capacity percentages differ from the panel API");
   const summary = card('运行概况');
   assert(summary?.querySelector('[data-refresh-key="运行内核"] strong')?.textContent === '3', 'offline runtime counted as live or scoped installed cores lost');
   assert(summary?.querySelector('[data-refresh-key="节点速率合计"] strong')?.textContent !== '—', 'valid fleet rates missing');
@@ -181,6 +182,16 @@ export async function testDashboardRuntime(mode, preview = false) {
     assert(metric('内存使用率').textContent==='—','invalid memory capacity was displayed as a valid percentage');
   }
   fixture.metrics.memory_total_bytes=memoryTotal;fixture.metrics.memory_available=false;
+  fixture.metrics.network_available=true;fixture.metrics.network_rx_bps=null;await refresh();
+  assert(metric("网络接收速率").textContent==="—","invalid network sample became a real rate");
+  fixture.metrics.network_rx_bps='<img src=x onerror=alert(1)>';await refresh();
+  assert(metric("网络接收速率").textContent==="—"&&!panel().querySelector('img'),"untrusted metric became HTML or a real sample");
+  fixture.metrics.network_rx_bps=2048;fixture.metrics.network_tx_bps=512;await refresh();
+  assert(metric("网络接收速率").textContent.replace(/\s/g,'')==='2KB/s'&&panel().textContent.includes('容器可见'),"network recovery or container scope lost");
+  fixture.metrics.collected_at="invalid";await refresh();
+  assert(panel().textContent.includes("尚无有效采样"),"invalid timestamp presented a fresh sample");
+  assert(!/NaN|undefined|Infinity/.test(panel().textContent),"invalid metric text leaked");
+
   fixture.metrics.collected_at=new Date(Date.now()-60000).toISOString();await refresh();assert(panel().textContent.includes("采样已过期"),"stale sample presented live");delete fixture.metrics.collected_at;
   fixture.denied=true;await refresh();assert(cpu().textContent==="—"&&panel().textContent.includes("权限"),"denied host read retained protected data");fixture.denied=false;await refresh();
   const chooseMonth=value=>{month().value=value;month().dispatchEvent(new Event("change",{bubbles:true}));};

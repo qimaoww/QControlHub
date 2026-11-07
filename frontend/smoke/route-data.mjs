@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 
 import { aggregateDashboardTrafficDays, dashboardTrafficMonthDays } from "../modules/dashboard-model.js";
-import { installDashboard } from "../modules/dashboard.js";
 
 import { installTasks } from "../modules/tasks.js";
 import { summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic } from "../modules/dashboard-model.js";
@@ -14,51 +13,9 @@ globalThis.document = {
   querySelectorAll: () => [],
 };
 try {
-  const dashboardCalls = [];
-  let dashboardMarkup = "";
-  const dashboardState = {
-    route: "dashboard",
-    data: { dashboardTrafficMonth: "2026-08" },
-  };
-  const renderDashboard = installDashboard(
-    new Proxy(
-      {
-        state: dashboardState,
-        api: async (path) => {
-          dashboardCalls.push(path);
-          if (path === "/agents" || path.startsWith("/tasks?")) return [];
-          if (path === "/traffic-usage?month=2026-08")
-            return { days: [{ day: "2026-08-27", received_bytes: 6, sent_bytes: 4, used_bytes: 10, peak_receive_bps: 2, peak_send_bps: 1 }] };
-          assert.fail(`unexpected dashboard preload API path ${path}`);
-        },
-        can: (capability) => ["traffic.read", "agents.read", "tasks.read"].includes(capability),
-        esc: (value) => String(value ?? ""),
-        bytes: (value) => `${value || 0} B`,
-        rate: (value) => `${value || 0} B/s`,
-        shell: (markup) => { dashboardMarkup = markup; },
-      },
-      { get: (target, key) => target[key] ?? noop },
-    ),
-  );
-  await renderDashboard({
-    overview: { agents: 3, agents_online: 3, tasks_pending: 0 },
-  });
-  assert.deepEqual(
-    dashboardCalls,
-    ["/agents", "/tasks?limit=7", "/traffic-usage?month=2026-08"],
-    "dashboard reuses the route bootstrap overview",
-  );
-  assert.equal(dashboardMarkup.includes('id="traffic-usage"'), true, "dashboard owns the monthly traffic chart");
-  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-month'), true, "dashboard traffic history can change month");
-  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-details'), true, "dashboard daily traffic opens from a dedicated action");
-  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-dialog'), true, "dashboard daily traffic is rendered in a modal dialog");
-  assert.equal(dashboardMarkup.includes('class="dashboard-traffic-axis"'), true, "dashboard chart keeps dates on a stable external axis");
-  assert.doesNotMatch(dashboardMarkup, /\sstyle=/, "dashboard markup must respect the production CSP");
-  assert.equal(dashboardMarkup.includes("31日"), true, "dashboard chart labels natural days explicitly");
-  assert.equal(dashboardMarkup.includes('class="dashboard-month-picker"'), true, "dashboard uses a theme-native month picker");
-  assert.equal(dashboardMarkup.includes('type="month"'), false, "dashboard does not open the browser-native month panel");
-  assert.equal(dashboardMarkup.includes("<details class=\"traffic-daily\""), false, "dashboard no longer expands daily history inline");
-  assert.equal(dashboardMarkup.includes("2026-08-27"), true, "dashboard renders persisted daily traffic details");
+  // Native dashboard API selection, monthly history, details, day tooltips,
+  // permission boundaries and CSP are exercised by dashboard browser modes.
+  // Keep all shared numerical/date/ordering edge cases here.
   assert.equal(dashboardTrafficMonthDays("2024-02").length, 29, "dashboard traffic month helper observes leap years");
   assert.deepEqual(
     aggregateDashboardTrafficDays([
@@ -109,7 +66,6 @@ try {
     { agent_id: 'two', day: '2026-11-07', received_bytes: 9000 },
   ], '2026-11', '2026-11-06'), [{ agentID: 'one', used: 20 }, { agentID: 'two', used: 7 }], 'ranking sums all authorized port rows in the selected month and excludes future days');
   assert.deepEqual(rankDashboardTraffic([{agent_id:'one',day:'2026-11-01',received_bytes:10}], '2026-11', '2026-11-06', ['one','two','three']), [{agentID:'one',used:10},{agentID:'three',used:0},{agentID:'two',used:0}], 'authorized zero-usage nodes remain available without fabricating traffic');
-  assert.match(dashboardMarkup, /aria-label="流量趋势摘要"/, "dashboard exposes the trend summary");
 
   const taskCalls = [];
   const taskTimers = new Map();
