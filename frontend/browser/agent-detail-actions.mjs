@@ -76,6 +76,7 @@ export async function testNativeNodeTaskLifecycle(fixture) {
     assert.ok(matchMedia('(pointer:coarse)').matches, '节点任务移动回归未启用触摸模拟');
   }
   await testAgentOverview(fixture);
+  await testNativeInstallSource(fixture);
   const { testAPI, onlineAgent } = fixture;
   testAPI.agents = [onlineAgent('native-guard')];
   testAPI.taskMode = 'deferred';
@@ -178,4 +179,66 @@ export async function testNativeNodeTaskLifecycle(fixture) {
   }
   await testAgentRenameActions(fixture);
   await testAgentDeleteActions(fixture);
+}
+
+async function testNativeInstallSource({ testAPI, onlineAgent }) {
+  testAPI.agents = [onlineAgent('source-guard')];
+  testAPI.agents[0].features = [];
+  testAPI.taskMode = 'deferred';
+  await startNativeNodes();
+  const button = (text, root = document) => [...root.querySelectorAll('button')].find(control => control.textContent === text);
+  const modal = () => [...document.querySelectorAll('dialog[open]')].at(-1);
+  const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), 'installation did not unlock');
+  button('查看设置').click();
+  const settings = await waitFor(() => modal()?.querySelector('input[name=name]') && modal(), 'settings missing');
+  button('切换版本', settings.querySelector('[data-refresh-key=mihomo]')).click();
+  const box = modal(), form = box.querySelector('form');
+  const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };
+  const source = form.elements.core_source.closest('.a-field'), custom = form.elements.custom_version.closest('.a-field');
+  const mirror = form.elements.core_source.querySelector('[value=mirror]');
+  assert.ok(source.hidden && custom.hidden, 'stable channel exposes development/custom fields');
+  change('release_channel', 'development');
+  assert.ok(!source.hidden && mirror.disabled && !source.querySelector('.a-field-hint').hidden, 'legacy Agent mirror is not disabled/explained');
+  change('release_channel', 'stable'); assert.ok(source.hidden, 'stable channel retains development source');
+  change('release_channel', 'custom');
+  assert.ok(!custom.hidden && form.elements.custom_version.required && !form.checkValidity(), 'custom version is not required');
+  change('custom_version', 'v9.8.7-draft');
+  testAPI.agents[0].features.push('mihomo-development-source-v1');
+  await waitFor(() => !mirror.disabled, 'live Agent feature upgrade did not enable mirror');
+  assert.equal(form.elements.custom_version.value, 'v9.8.7-draft', 'feature refresh overwrote draft');
+  change('release_channel', 'development');
+  assert.ok(source.querySelector('.a-field-hint').hidden, 'supported Agent retains upgrade warning');
+  for (const selected of ['official', 'mirror']) {
+    change('core_source', selected);
+    const count = testAPI.pendingTasks.length;
+    form.requestSubmit();
+    const confirm = await waitFor(() => modal() !== box && modal()?.querySelector('h2').textContent === '提交安装' && modal(), 'install confirmation missing');
+    button('提交安装', confirm).click();
+    const request = await waitFor(() => testAPI.pendingTasks[count], 'development source install not submitted');
+    assert.equal(JSON.stringify(request.payload), JSON.stringify({ agent_id: 'source-guard', engine: 'mihomo', action: 'install', core_version: 'development', core_source: selected }), 'development source payload changed');
+    assert.ok(form.elements.release_channel.matches(':disabled'), 'pending install leaves fields editable');
+    request.ok({ id: `source-${selected}`, status: 'pending' });
+    await waitFor(() => modal()?.querySelector('h2').textContent === '任务详情', 'task result did not open automatically');
+    modal().querySelector('[aria-label=关闭]').click(); await idle();
+  }
+  const count = testAPI.pendingTasks.length;
+  form.requestSubmit();
+  await waitFor(() => modal()?.querySelector('h2').textContent === '提交安装', 'feature downgrade confirmation missing');
+  testAPI.agents[0].features = [];
+  button('提交安装', modal()).click(); await idle();
+  assert.equal(testAPI.pendingTasks.length, count, 'feature downgrade during confirmation still submitted mirror');
+  assert.ok(box.textContent.includes('使用第三方镜像需先升级 Agent'), 'mirror rejection lost recovery guidance');
+  assert.equal(form.elements.core_source.value, 'mirror', 'rejection overwrote selected source');
+  change('core_source', 'official'); form.requestSubmit();
+  await waitFor(() => modal()?.querySelector('h2').textContent === '提交安装', 'offline confirmation missing');
+  testAPI.agents[0].status = 'offline';
+  button('提交安装', modal()).click(); await idle();
+  assert.equal(testAPI.pendingTasks.length, count, 'offline node installed after confirmation');
+  assert.ok(box.textContent.includes('节点离线'), 'offline reason missing');
+  testAPI.agents[0].status = 'online'; form.requestSubmit();
+  await waitFor(() => modal()?.querySelector('h2').textContent === '提交安装', 'ownership confirmation missing');
+  testAPI.agents[0].owner_id = 'other-owner';
+  button('提交安装', modal()).click(); await idle();
+  assert.equal(testAPI.pendingTasks.length, count, 'changed owner installed after confirmation');
+  box.querySelector('[aria-label=关闭]').click(); settings.querySelector('[aria-label=关闭]').click();
 }

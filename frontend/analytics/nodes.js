@@ -456,26 +456,47 @@ export async function nodesPage(ctx) {
   }
   function installCore(agent, engine) {
     const shared = agent.can_manage === false;
+    const scope = target => JSON.stringify([target.can_manage !== false, target.owner_id || '', target.shared_allocation?.owner_id || '', target.runtime?.[engine]?.instance?.id || '']);
+    const openedScope = scope(agent);
     const custom = field('指定版本', 'custom_version', '', { placeholder: '软件发行版本' });
-    const source = field('开发版来源', 'core_source', 'official', { options: [['official', 'MetaCubeX 官方'], ['mirror', 'vernesong 镜像']] });
+    const source = field('开发版来源', 'core_source', 'official', { options: [['official', 'MetaCubeX 官方'], ['mirror', 'vernesong 镜像（第三方）']], hint: '使用第三方镜像需先升级 Agent。' });
     const feedback = notice('');
+    const targetForSubmit = async values => {
+      const received = list(await ctx.api('/agents'));
+      if (!ctx.current() || !box.open) return;
+      const latest = received.find(item => item.id === agent.id);
+      const reason = !latest || scope(latest) !== openedScope ? '节点授权或实例已变化，请重新打开安装窗口。' : coreInstallBlockReason(latest, engine, ctx.can);
+      if (reason) throw new Error(reason);
+      if (shared && values.release_channel !== 'stable') throw new Error('共享实例仅可准备稳定版内核。');
+      if (coreSourceForInstall(engine, values.release_channel, values.core_source) === 'mirror' && !latest.features?.includes('mihomo-development-source-v1')) throw new Error('使用第三方镜像需先升级 Agent。');
+      return latest;
+    };
     const form = ctx.form([
       field('发行通道', 'release_channel', 'stable', { options: shared ? [['stable', '稳定版']] : [['stable', '稳定版'], ...(engine === 'mihomo' ? [['development', '开发版']] : []), ['custom', '指定版本']] }), custom, source, feedback,
     ], shared ? '准备内核' : '提交安装', async values => {
-      const received = list(await ctx.api('/agents'));
-      if (!ctx.current()) return;
-      const latest = received.find(item => item.id === agent.id);
-      const reason = !latest ? '节点已不可用' : coreInstallBlockReason(latest, engine, ctx.can);
-      if (reason) throw new Error(reason);
+      if (!await targetForSubmit(values)) return;
       if (values.release_channel === 'custom' && !values.custom_version.trim()) throw new Error('请输入软件发行版本');
       if (!await ctx.confirm(shared ? '准备缺少的稳定版内核？已有版本会复用。' : '安装完成后将重启对应内核服务，确定继续？', '提交安装') || !ctx.current()) return;
+      if (!await targetForSubmit(values)) return;
       const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action: 'install', core_version: values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel, core_source: coreSourceForInstall(engine, values.release_channel, values.core_source) } });
       feedback.textContent = ''; ctx.announce('安装任务已提交');
       if (ctx.can('tasks.read')) { await taskDetail(ctx, task.id); if (taskTerminal(task)) await load(); }
     });
-    const sync = () => { ctx.visible(custom, form.elements.release_channel.value === 'custom'); form.elements.custom_version.required = form.elements.release_channel.value === 'custom'; ctx.visible(source, engine === 'mihomo' && form.elements.release_channel.value === 'development'); };
+    const sync = () => {
+      ctx.visible(custom, form.elements.release_channel.value === 'custom'); form.elements.custom_version.required = form.elements.release_channel.value === 'custom';
+      ctx.visible(source, engine === 'mihomo' && form.elements.release_channel.value === 'development');
+      const canMirror = agent.features?.includes('mihomo-development-source-v1');
+      form.elements.core_source.querySelector('[value=mirror]').disabled = !canMirror;
+      ctx.visible(source.querySelector('.a-field-hint'), !canMirror);
+    };
     form.elements.release_channel.addEventListener('change', sync); sync();
-    ctx.dialog(`${agent.name} · ${engine}`, form);
+    const box = ctx.dialog(`${agent.name} · ${engine}`, form);
+    const update = () => {
+      if (!ctx.current() || !agents.includes(agent) || scope(agent) !== openedScope) box.close();
+      else sync();
+    };
+    dialogUpdates.add(update);
+    box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
   }
   function batch() { openNodeBatch(ctx, () => agents, selected); }
 
