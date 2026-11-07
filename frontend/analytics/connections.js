@@ -51,7 +51,7 @@ export async function connectionsPage(ctx) {
     const records = result?.records || [], reportSources = result?.sources || [];
     const warnings = reportSources.filter(source => source.status !== "ok" || source.truncated || !source.updated_at);
     const totals = result?.preview ? "结果待更新" : `独立 IP ${result?.ips ?? "—"} · 观测连接 ${result?.flows ?? "—"} · 采集节点 ${result ? reportSources.length : "—"} · 需关注 ${result ? warnings.length : "—"}`;
-    if (summary.textContent !== totals) summary.textContent = totals;
+    if (summary.textContent !== totals) summary.replaceChildren(...totals.split(" · ").map((total, index) => node("span", {}, `${index ? " · " : ""}${total}`)));
     status.hidden = !result;
     view.root.setAttribute("aria-busy", String(loading));
     collection.trigger.disabled = !result;
