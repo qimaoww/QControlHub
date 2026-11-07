@@ -1,4 +1,4 @@
-import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessEntryForAddress, clientAccessExport, filterClientAccessEntries, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
+import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessEntryForAddress, clientAccessExport, filterClientAccessEntries, normalizeClientAccessFilters, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
 import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { accountStorage } from '../modules/account-storage.js';
 import { nodeRegionFlag } from './node-region.js';
@@ -17,6 +17,12 @@ export async function clientAccessPage(ctx) {
   const result = node('div', { className: 'a-stack' });
   const addressModes = new Map();
   let readSequence = 0;
+  function updateOptions(control, options) {
+    const picker = control.querySelector('select'), selected = picker.value;
+    if (JSON.stringify([...picker.options].map(option => [option.value, option.textContent])) !== JSON.stringify(options))
+      picker.replaceChildren(picker.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
+    picker.value = options.some(([value]) => value === selected) ? selected : '';
+  }
   const urls = new Set(), timers = new Set();
   ctx.signal.addEventListener('abort', () => { urls.forEach(url => URL.revokeObjectURL(url)); timers.forEach(clearTimeout); urls.clear(); timers.clear(); }, { once: true });
   function download(value, name, type = 'text/plain;charset=utf-8') {
@@ -99,19 +105,21 @@ export async function clientAccessPage(ctx) {
     const [received, nodes] = await Promise.all([ctx.api('/client-access'), ctx.can('agents.read') ? ctx.api('/agents') : [], ordering.load()]);
     if (!ctx.current() || sequence !== readSequence) return;
     entries = list(received); agents = orderNodesBySavedOrder(list(nodes), ordering.ids());
-    const picker = agentFilter.querySelector('select'), selected = picker.value;
-    const options = agentOptions(), fingerprint = JSON.stringify(options);
-    if (picker.dataset.options !== fingerprint) {
-      picker.replaceChildren(picker.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
-      picker.dataset.options = fingerprint;
-    }
-    picker.value = agentOptions().some(([value]) => value === selected) ? selected : '';
+    updateOptions(agentFilter, agentOptions());
+    updateOptions(engineFilter, [['', '全部内核'], ...new Set(entries.map(entry => entry.engine))].map(option => Array.isArray(option) ? option : [option, option]));
     draw();
   }
   function draw() {
+    // Export-only accounts may have no permission to read the node directory.
+    const available = groupClientAccessEntries(entries, agents).map(group => ({ id: group.agent_id }));
+    const filters = normalizeClientAccessFilters(entries, available, {
+      query: search.querySelector('input').value, agent: agentFilter.querySelector('select').value, engine: engineFilter.querySelector('select').value,
+    });
+    agentFilter.querySelector('select').value = filters.agent;
+    engineFilter.querySelector('select').value = filters.engine;
     const shown = filterClientAccessEntries(groupClientAccessEntries(entries, agents).flatMap(group => group.entries).map(entry =>
       clientAccessEntryForAddress(entry, addressModes.get(JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || ''])) || 'auto')),
-    { query: search.querySelector('input').value, agent: agentFilter.querySelector('select').value, engine: engineFilter.querySelector('select').value });
+    filters);
     const cards = shown.map(entry => {
       // Bind the selection to the real instance identity, never to list order.
       const key = JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || '']);

@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
 import { filterClientAccessEntries, groupClientAccessEntries } from "./modules/client-access-model.js";
-import { installClientAccess } from "./modules/client-access.js";
 import { nodeCardOrderKey } from "./modules/node-order.js";
 
-const previousDocument = globalThis.document;
 const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const values = new Map();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
@@ -50,61 +48,8 @@ try {
   assert.equal(accountStorage.getItem(nodeCardOrderKey), saved,
     "filtering must not persist a partial node order");
 
-  let markup = "";
-  let canReadAgents = true;
-  const calls = [];
-  const state = { route: "client-access", navigationEpoch: 1, data: {} };
-  const sidebarLinks = ["", "alpha"].map(accessAgent => ({ dataset: { accessAgent } }));
-  globalThis.document = {
-    querySelector: () => null,
-    querySelectorAll: selector => selector === "[data-access-agent]" ? sidebarLinks : [],
-  };
-  const render = installClientAccess({
-    state, engines: ["mihomo", "xray"], esc: value => String(value ?? ""), engineName: String,
-    can: capability => capability === "agents.read" && canReadAgents,
-    notify: message => assert.fail(message),
-    shell: html => { markup = html; },
-    api: async path => {
-      calls.push(path);
-      if (path === "/agents") return agents;
-      if (path === "/client-access") return entries;
-      assert.fail(`unexpected client ordering API: ${path}`);
-    },
-  });
-  const cardIDs = () => [...markup.matchAll(/data-refresh-key="client-access-node-([^"]+)"/g)]
-    .map(match => match[1]);
-  await render();
-  assert.deepEqual(cardIDs(), ["gamma", "beta", "alpha", "missing"],
-    "opening the client page must apply the saved node order");
-  sidebarLinks[1].onclick({ preventDefault() {} });
-  assert.deepEqual(cardIDs(), ["alpha"], "node filtering must keep the selected card");
-  sidebarLinks[0].onclick({ preventDefault() {} });
-  assert.deepEqual(cardIDs(), ["gamma", "beta", "alpha", "missing"],
-    "clearing a node filter must restore the complete node order");
-  assert.equal(calls.length, 2, "local filtering must not refetch data");
-
-  accountStorage.setItem(nodeCardOrderKey, JSON.stringify(["beta", "alpha"]));
-  await render();
-  assert.deepEqual(cardIDs(), ["beta", "alpha", "gamma", "missing"],
-    "refresh must apply later changes to the node order");
-  state.data.accessEngine = "xray";
-  await render();
-  assert.deepEqual(cardIDs(), ["alpha", "gamma", "missing"],
-    "rendering an engine filter must retain the updated node order");
-  state.data.accessEngine = "";
-  state.data.accessQuery = "20001";
-  await render();
-  assert.deepEqual(cardIDs(), ["beta", "alpha", "gamma", "missing"],
-    "rendering profile search results must retain the updated node order");
-  assert.equal((markup.match(/class="client-profile-row"/g) || []).length, entries.length,
-    "profile search must still narrow each entry to matching profiles");
-  state.data.accessQuery = "";
-  canReadAgents = false;
-  const beforeReadonly = calls.length;
-  await render();
-  assert.deepEqual(cardIDs(), ["beta", "alpha", "gamma", "missing"]);
-  assert.deepEqual(calls.slice(beforeReadonly), ["/client-access"],
-    "sorting must not require additional agent permissions or requests");
+  // Native client-order desktop/mobile modes exercise the real node picker,
+  // local engine/profile filters, refresh order and export-only permissions.
 
   setStorageAccount({ user_id: "client-order-bob" });
   assert.deepEqual(groupIDs(), ["alpha", "beta", "gamma", "missing"],
@@ -132,8 +77,6 @@ try {
     "sorting must not mutate the API response");
 } finally {
   setStorageAccount(null);
-  if (previousDocument === undefined) delete globalThis.document;
-  else globalThis.document = previousDocument;
   if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
   else delete globalThis.localStorage;
 }

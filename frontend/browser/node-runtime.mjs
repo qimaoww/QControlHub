@@ -124,4 +124,34 @@ export async function testClientNodeOrderRuntime({ testAPI }) {
   [...document.querySelectorAll('button')].find(control=>control.textContent==='刷新').click();
   await waitFor(()=>cardNodes()==='bravo,alpha,charlie','refresh ignored updated order');
   assert.equal(cardNodes(),pickerNodes(),'refresh client/picker order disagree');
+  const reads=testAPI.calls.length;
+  select('engine','xray');select('agent','bravo');
+  assert.equal(document.querySelector('select[name=engine]').value,'','切换节点未清除不兼容内核');
+  assert.equal(cardNodes(),'bravo','不兼容内核让已有客户端看起来为空');
+  select('agent','');assert.equal(cardNodes(),'bravo,alpha,charlie');
+  assert.equal(testAPI.calls.length,reads,'本地筛选重新读取 API');
+  select('agent','bravo');testAPI.clientAccessEntries=testAPI.clientAccessEntries.filter(entry=>entry.agent_id!=='bravo');
+  [...document.querySelectorAll('button')].find(control=>control.textContent==='刷新').click();
+  await waitFor(()=>!document.querySelector('.a-top button[title=刷新]')?.disabled&&cardNodes()==='alpha,charlie','删除所选节点后未恢复可用配置');
+  assert.equal(document.querySelector('select[name=agent]').value,'','失效节点筛选未清除');
+
+  const originalFetch=window.fetch,beforeReadonly=testAPI.calls.filter(call=>call.path==='/agents').length;
+  window.fetch=(input,options)=>String(input).endsWith('/auth/session')?Promise.resolve(Response.json({role:'user',user_id:'export-only',permissions:['client-access.read'],csrf_token:'browser-test-csrf'})):originalFetch(input,options);
+  try{
+    await startNativeClients();
+    assert.equal(testAPI.calls.filter(call=>call.path==='/agents').length,beforeReadonly,'只读导出请求了未授权节点目录');
+    assert.equal(cardNodes(),'alpha,charlie','无节点目录权限时丢失账号顺序');
+    select('agent','alpha');assert.equal(cardNodes(),'alpha','无目录权限不能按已授权导出筛选');
+    select('agent','');assert.equal(cardNodes(),'alpha,charlie');
+    assert.equal([...document.querySelectorAll('button')].some(control=>control.textContent==='修改显示参数'),false,'导出权限扩大为节点管理权限');
+    const added={...structuredClone(testAPI.clientAccessEntries.find(entry=>entry.agent_id==='alpha')),engine:'ss-rust'};
+    testAPI.clientAccessEntries.push(added);
+    const refresh=()=>[...document.querySelectorAll('button')].find(control=>control.textContent==='刷新');
+    refresh().click();await waitFor(()=>[...document.querySelector('select[name=engine]').options].some(option=>option.value==='ss-rust'),'刷新没有提供新增内核筛选');
+    select('engine','ss-rust');assert.equal(cardNodes(),'alpha','新增内核无法筛选');
+    testAPI.clientAccessEntries=testAPI.clientAccessEntries.filter(entry=>entry!==added);
+    await waitFor(()=>!refresh().disabled,'新增内核刷新没有结束');refresh().click();
+    await waitFor(()=>!refresh().disabled&&document.querySelector('select[name=engine]').value==='','内核移除后未清理失效筛选');
+    assert.equal(cardNodes(),'alpha,charlie');
+  }finally{window.fetch=originalFetch;}
 }

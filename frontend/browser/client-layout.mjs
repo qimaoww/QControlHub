@@ -111,6 +111,7 @@ export async function testClientLayoutRuntime({ testAPI }) {
   assert.equal(yaml.type,'text','YAML must be revealable');
   assert.ok(yaml.value.startsWith('{')&&!/[\r\n]/.test(yaml.value),'YAML must retain single-line Sub-Store map');
   button('隐藏',yamlField.parentElement).click();assert.equal(yaml.type,'password','YAML must be maskable again');
+  await testNativeClientClipboard(dialog(),yaml,button('复制',yamlField.parentElement));
   await close();select('format','url');
   button('参数详情',rows()[0]).click();
   assert.ok([...dialog().querySelectorAll('input[name=export]')].some(input=>input.value.startsWith('vless://')),'switching format did not restore URL');
@@ -160,4 +161,41 @@ export async function testClientLayoutRuntime({ testAPI }) {
   try{await refresh();assert.ok(card.isConnected&&card.textContent.includes('第 3 / 3 页'),'读取失败清空有效客户端列表');}
   finally{window.fetch=previousFetch;}
   await refresh();assert.ok(card.isConnected&&card.textContent.includes('第 3 / 3 页'),'恢复读取重置页码');
+}
+
+async function testNativeClientClipboard(box,input,copy){
+  const clipboard=Object.getOwnPropertyDescriptor(navigator,'clipboard');
+  const exec=Object.getOwnPropertyDescriptor(document,'execCommand');
+  let copied='',calls=0,complete;
+  const idle=()=>!document.querySelector('#app[aria-busy=true]');
+  try{
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:value=>{calls++;copied=value;return new Promise(resolve=>{complete=resolve;});}}});
+    copy.click();copy.click();await waitFor(()=>calls===1,'现代剪贴板复制未提交或重复提交');
+    assert.ok(copy.disabled,'复制提交中没有锁定');assert.equal(copied,input.value);assert.equal(input.type,'password');
+    complete();await waitFor(idle,'复制未结束');
+    for(const mode of ['missing','rejected','text-selection','denied']){
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:mode==='missing'?undefined:{writeText:async()=>{throw new Error('fixture clipboard denied');}}});
+      const value=input.value;
+      input.type=mode==='text-selection'?'text':'password';input.focus();
+      if(input.type==='text')input.setSelectionRange(1,4,'forward');
+      let invoked=false;
+      Object.defineProperty(document,'execCommand',{configurable:true,value:command=>{
+        const selected=document.activeElement;
+        invoked=true;assert.equal(command,'copy');assert.equal(selected.tagName,'TEXTAREA');
+        assert.ok(box.contains(selected),'复制助手位于模态之外的不可交互区域');
+        assert.equal(selected.value,value);assert.equal(selected.selectionStart,0);assert.equal(selected.selectionEnd,value.length);
+        return mode!=='denied';
+      }});
+      copy.click();await waitFor(()=>invoked&&idle(),'回退复制未结束');
+      assert.equal(box.querySelector('.a-clipboard'),null,'复制助手没有移除');
+      assert.equal(document.activeElement,input,'复制后没有恢复焦点');assert.equal(input.value,value,'复制改写原值');
+      assert.equal(input.type,mode==='text-selection'?'text':'password','复制暴露隐藏内容');
+      if(mode==='text-selection'){assert.equal(input.selectionStart,1);assert.equal(input.selectionEnd,4);assert.equal(input.selectionDirection,'forward');}
+      if(mode==='denied')assert.ok([...document.querySelectorAll('.a-toast.error')].some(toast=>toast.textContent.includes('浏览器拒绝了剪贴板操作')),'复制被拒绝没有显示真实错误');
+    }
+    input.type='password';
+  }finally{
+    if(clipboard)Object.defineProperty(navigator,'clipboard',clipboard);else delete navigator.clipboard;
+    if(exec)Object.defineProperty(document,'execCommand',exec);else delete document.execCommand;
+  }
 }

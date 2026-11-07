@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { clientAccessExport } from "../modules/client-access-model.js";
 
-import { copyClientValue, installClientAccess } from "../modules/client-access.js";
 import { clientAccessAddressChoices, clientAccessEntryForAddress, filterClientAccessEntries, groupClientAccessEntries, normalizeClientAccessFilters } from "../modules/client-access-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
-export async function run({ noop, previousDocument }) {
+export async function run() {
 const exportSample = { profile: { format: "VLESS URI", uri: "vless://example" }, mihomo_yaml: '{name: "Example", type: vless, server: "example.test", port: 443}' };
 assert.equal(clientAccessExport(exportSample, "url").value, exportSample.profile.uri);
 assert.equal(clientAccessExport(exportSample, "mihomo").value, exportSample.mihomo_yaml);
@@ -106,175 +105,9 @@ assert.deepEqual(
   ],
   "multiple engine exports for one node share one node card",
 );
-let copiedClientValue = "";
-assert.equal(
-  await copyClientValue(
-    { value: "ss://demo" },
-    {
-      navigatorObject: {
-        clipboard: { writeText: async (value) => (copiedClientValue = value) },
-      },
-    },
-  ),
-  "clipboard",
-);
-assert.equal(copiedClientValue, "ss://demo");
-let legacyCopySelected = false;
-let legacyCopyRestored = false;
-const legacyCopyInput = {
-  value: "ss://legacy",
-  selectionStart: 1,
-  selectionEnd: 3,
-  selectionDirection: "forward",
-  focus: noop,
-  select: () => (legacyCopySelected = true),
-  setSelectionRange: (start, end, direction) => {
-    legacyCopyRestored = start === 1 && end === 3 && direction === "forward";
-  },
-};
-assert.equal(
-  await copyClientValue(legacyCopyInput, {
-    navigatorObject: {},
-    documentObject: {
-      activeElement: null,
-      execCommand: (command) => command === "copy" && legacyCopySelected,
-    },
-  }),
-  "legacy",
-);
-assert.equal(legacyCopyRestored, true);
-// A rejected modern clipboard still uses the unmasked legacy selection.
-let temporaryRemoved = false;
-let temporarySelected = false;
-const masked = { value: "trojan://p%2B%25%23@[2001:db8::1]:24443#%E9%A6%99%E6%B8%AF", type: "password" };
-const temporary = { focus: noop, select: () => { temporarySelected = true; }, remove: () => { temporaryRemoved = true; } };
-assert.equal(await copyClientValue(masked, {
-  navigatorObject: { clipboard: { writeText: async () => { throw new Error("denied"); } } },
-  documentObject: { activeElement: null, createElement: () => temporary, body: { append: noop }, execCommand: () => temporarySelected && temporary.value === masked.value },
-}), "legacy");
-assert.equal(temporaryRemoved, true);
-assert.equal(masked.type, "password");
-// A modal makes controls outside its subtree inert, including copy helpers.
-let modalCopyParent = false;
-masked.closest = () => ({ append: () => { modalCopyParent = true; } });
-assert.equal(await copyClientValue(masked, {
-  navigatorObject: {},
-  documentObject: { activeElement: null, createElement: () => temporary, body: { append: () => { throw new Error("inert outside modal"); } }, execCommand: () => modalCopyParent },
-}), "legacy");
-assert.equal(modalCopyParent, true);
-const accessState = {
-  route: "client-access",
-  data: { accessAgent: "beta", accessEngine: "", accessQuery: "" },
-};
-const accessSidebarLinks = [
-  { dataset: { accessAgent: "" }, onclick: null },
-  { dataset: { accessAgent: "alpha" }, onclick: null },
-  { dataset: { accessAgent: "beta" }, onclick: null },
-];
-let accessMarkup = "";
-let accessAPICalls = 0;
-globalThis.document = {
-  querySelector: () => null,
-  querySelectorAll(selector) {
-    if (selector === "[data-access-agent]") return accessSidebarLinks;
-    return [];
-  },
-};
-
-try {
-  const accessCtx = new Proxy(
-    {
-      state: accessState,
-      engines: ["mihomo", "xray"],
-      api: async (path) => {
-        accessAPICalls += 1;
-        if (path === "/client-access") return accessEntries;
-        if (path === "/agents") return accessAgents;
-        assert.fail(`unexpected client access smoke API path ${path}`);
-      },
-      can: (capability) => capability === "agents.read" || capability === "agents.manage",
-      esc: (value) => String(value ?? ""),
-      engineName: (value) => value,
-      short: (value) => value,
-      shell: (markup) => {
-        accessMarkup = markup;
-      },
-    },
-    { get: (target, key) => target[key] ?? noop },
-  );
-  const renderClientAccess = installClientAccess(accessCtx);
-  await renderClientAccess();
-  assert.equal(accessAPICalls, 2);
-
-  assert.equal(accessMarkup.includes("Alpha node"), false);
-  assert.equal(accessMarkup.includes("Beta node"), true);
-  assert.equal(accessMarkup.includes("data-filter-agent"), false);
-  assert.equal(accessMarkup.includes("按节点筛选"), false);
-  assert.equal(accessMarkup.includes('data-filter-engine=""'), true);
-  assert.equal(accessMarkup.includes("按内核筛选"), true);
-  assert.equal(accessMarkup.includes("client-access-toolbar"), true);
-  assert.equal(accessMarkup.includes("client-access-node-card"), true);
-  assert.equal(accessMarkup.includes("修改显示参数"), true);
-  assert.equal(accessMarkup.includes("client-display-dialog"), true);
-  assert.equal(accessMarkup.includes("客户端地址协议栈"), false);
-  assert.equal(accessMarkup.includes("client-address-editor"), false);
-  assert.equal(accessMarkup.includes("data-client-parameter-open"), true);
-  assert.equal(accessMarkup.includes("client-parameter-dialog"), true);
-  assert.equal(accessMarkup.includes("traffic-edit-dialog"), true);
-  assert.equal(accessMarkup.includes("client-parameter-menu"), false);
-  assert.equal(accessMarkup.includes("client-access-hero"), false);
-  assert.equal(accessMarkup.includes("client-access-filter-panel"), false);
-  assert.equal(
-    accessSidebarLinks.every((link) => typeof link.onclick === "function"),
-    true,
-    "context sidebar remains the executable node filter",
-  );
-
-  await accessSidebarLinks[0].onclick({ preventDefault: noop });
-  assert.equal(accessState.data.accessAgent, "");
-  assert.equal(accessMarkup.includes("Alpha node"), true);
-  assert.equal(accessMarkup.includes("Beta node"), true);
-  assert.equal(accessMarkup.includes("客户端地址协议栈"), true);
-  assert.equal(
-    accessMarkup.includes('data-saved-mode="ipv6"'),
-    true,
-    "client profile address family is not scoped to its own port",
-  );
-  assert.equal(
-    accessMarkup.includes("使用手动地址中；恢复自动识别后可切换协议栈"),
-    true,
-    "a manual address does not lock the client profile family selector",
-  );
-  assert.equal(
-    accessMarkup.includes('placeholder="留空使用自动识别地址"'),
-    true,
-    "client profile address field no longer defaults to the automatic address",
-  );
-  assert.equal(
-    accessAPICalls,
-    2,
-    "switching the local node filter does not refetch client access data",
-  );
-
-  accessState.data.accessEngine = "xray";
-  await renderClientAccess();
-  assert.equal(accessMarkup.includes("Alpha node"), false);
-  assert.equal(accessMarkup.includes("Beta node"), true);
-  assert.equal(accessAPICalls, 4, "an explicit page refresh still reloads both APIs");
-
-  await accessSidebarLinks[1].onclick({ preventDefault: noop });
-  assert.equal(accessState.data.accessAgent, "alpha");
-  assert.equal(accessState.data.accessEngine, "");
-  assert.equal(accessMarkup.includes("Alpha node"), true);
-  assert.equal(accessMarkup.includes("Beta node"), false);
-  assert.equal(
-    accessAPICalls,
-    4,
-    "node changes normalize incompatible engine filters locally",
-  );
-} finally {
-  if (previousDocument === undefined) delete globalThis.document;
-  else globalThis.document = previousDocument;
-}
-
+// Actual native client-layout desktop/mobile modes now cover modern clipboard,
+// rejected/missing clipboard fallback, masked values, modal containment,
+// original focus/selection, denial and duplicate locks. Native client-order
+// modes retain sorting/filter/reset/refresh/readonly behavior; ports modes
+// retain per-port address families, manual overrides and display writes.
 }
