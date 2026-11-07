@@ -1,6 +1,7 @@
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { accountStorage } from "../modules/account-storage.js";
 import { nodeTimeZone } from "./node-time-zone.js";
+import { nodeAddress } from './node-address.js';
 import { openNodeBatch } from "./node-batch.js";
 import { bindNodeOrdering } from "./node-ordering.js";
 import { patch, poll } from "./live-dom.js";
@@ -8,7 +9,7 @@ import { nodeRegion, nodeRegionFlag } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
 import { metricTrack } from './metric-track.js';
 import { nodeDeleteControl } from './node-delete.js';
-import { publicAddressRows, manualConnectionAddressNote } from '../modules/agent-address-model.js';
+import { publicAddressRows, manualConnectionAddressNote, nodeAddressSetting } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
@@ -159,6 +160,7 @@ export async function nodesPage(ctx) {
               if (ctx.current()) ctx.announce('复制失败，请重试。', 'error');
             } finally { if (control.isConnected) control.disabled = false; }
           }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'),
+      muted(`地址 · ${nodeAddressSetting(agent.labels).mode === 'manual' ? '手动设置' : '自动获取'}`),
       manualConnectionAddressNote(agent.labels) && node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, muted(manualConnectionAddressNote(agent.labels)))));
   }
 
@@ -345,8 +347,10 @@ export async function nodesPage(ctx) {
     )));
     const allocation = renderAllocation();
     const sections = [], settingsUpdates = [], capabilities = new Map();
-    let savingCapabilities = false;
+    let savingCapabilities = false, address;
     if (manage) {
+      address = nodeAddress(ctx, agent, { available: () => box.open && settingsScope() === openedScope && agents.includes(agent) && canManage(agent), refresh: load });
+      settingsUpdates.push(address.update);
       sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
         ctx.form([field('节点名称', 'name', agent.name, { required: true, maxlength: 100 })], '保存名称', async values => {
           const name = values.name.trim();
@@ -357,6 +361,7 @@ export async function nodesPage(ctx) {
           agent.name = saved.name; updateTitle(); await load(); ctx.announce('名称已保存');
         }),
         button('国家／地区', () => chooseRegion(agent)),
+        address.view,
         agent.can_hide && ctx.form([field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' })], '保存可见性', async (_, form) => {
           const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: form.elements.admin_hidden.checked } });
           agent.admin_hidden = saved.admin_hidden; ctx.announce('可见性已保存'); await load();
@@ -522,6 +527,10 @@ export async function nodesPage(ctx) {
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
+    box.onRequestClose = async () => {
+      if (address?.dirty() && !await ctx.confirm('存在未保存的地址更改，确定关闭？', '放弃更改')) return;
+      if (ctx.current()) box.close();
+    };
     const update = () => {
       if (!box.open || !ctx.current()) { dialogUpdates.delete(update); return; }
       if (!agents.some(value => value.id === agent.id) || settingsScope() !== openedScope || manage && !canManage(agent)) { box.close(); dialogUpdates.delete(update); return; }
