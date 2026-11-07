@@ -54,9 +54,9 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 
 func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	styles := mustReadFrontendFile(t, "analytics/theme.css")
-	// Retiring classic CSS must preserve every byte of the approved native
-	// surface, including modal/copy controls, responsive rules and typography.
-	const expected = "baeac5214a6ae3df9cfb7459049d99765cdba9299a4728a7d2c0cfde59c06be7"
+	// Preserve the reviewed native surface, including the requested compact
+	// card-selection header and existing selected-state colors and border.
+	const expected = "9a64c73201ce55dc550ca939d4e118b7a41dfa2308dc442085ba2cd09073ad61"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
