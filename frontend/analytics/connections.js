@@ -52,6 +52,7 @@ export async function connectionsPage(ctx) {
     const warnings = reportSources.filter(source => source.status !== "ok" || source.truncated || !source.updated_at);
     const totals = result?.preview ? "结果待更新" : `独立 IP ${result?.ips ?? "—"} · 观测连接 ${result?.flows ?? "—"} · 采集节点 ${result ? reportSources.length : "—"} · 需关注 ${result ? warnings.length : "—"}`;
     if (summary.textContent !== totals) summary.textContent = totals;
+    status.hidden = !result;
     view.root.setAttribute("aria-busy", String(loading));
     collection.trigger.disabled = !result;
     view.update(records, record => {
@@ -136,6 +137,6 @@ export async function connectionsPage(ctx) {
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
   void load({ changedScope: true });
-  return stack(filterbar(controls), error, section("客户端连接", stack(summary, node("div", { className: "a-card-body" }, muted("根据内核日志观测，不代表当前在线会话数"), status), view.root,
+  return stack(filterbar(controls), error, section("客户端连接", stack(summary, node("div", { className: "a-card-body a-stack" }, muted("根据内核日志观测，不代表当前在线会话数"), status), view.root,
     node("div", { className: "a-card-body" }, actions(page, previous, next))), collection.trigger));
 }
