@@ -2,9 +2,10 @@ import { testConnectionReadLifecycle } from './connection-read-lifecycle.mjs';
 import { assert, waitFor } from "./assertions.mjs";
 
 export async function testClientConnectionsRuntime(preview = false) {
-  const fallback = window.fetch.bind(window), requests = [], locationRequests = [], orderRequests = [];
+  const fallback = window.fetch.bind(window), requests = [], locationRequests = [], orderRequests = [], regionRequests = [];
   const now = new Date().toISOString();
-  let releaseLocations, releaseShell, releaseFirstHistory, holdHistory;
+  let releaseLocations, releaseShell, releaseFirstHistory, releaseRegions, holdHistory;
+  const regionsReady = new Promise(resolve => { releaseRegions = resolve; });
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
   holdHistory = new Promise(resolve => { releaseFirstHistory = resolve; });
@@ -18,6 +19,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (url.pathname === "/api/v1/preferences/node-order") orderRequests.push(options?.signal);
+    if (/^\/api\/v1\/agents\/(alpha|bravo)\/region$/.test(url.pathname)) {
+      regionRequests.push(url.pathname);
+      await regionsReady;
+      return new Response(JSON.stringify({ country_code: url.pathname.includes("/alpha/") ? "JP" : "SG" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
       if (url.searchParams.get("locations") === "only") {
@@ -72,6 +78,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => body()?.textContent.includes("2001:db8::8"), "connection page did not load");
   assert.equal(orderRequests.length, 1, "first history must reuse the route's order request");
   assert.equal(document.activeElement, firstInput, "first history arrival replaced the active filter");
+  assert.equal(regionRequests.length, 2, "node flags must share one region request per authorized node");
+  assert.ok(!body().querySelector('[data-region-code]'), "pending node region invented a flag");
+  releaseRegions();
+  await waitFor(() => body().querySelectorAll('[data-region-code="JP"]').length === 3 && body().querySelector('[data-region-code="SG"]'), "node flags did not resolve independently of client IP geography");
+  assert.equal(form().elements.agent_id.querySelector('option[value="alpha"] [data-region-code="JP"] img').getAttribute('src'), '/api/v1/region-flags/jp', "node selector must reuse the panel flag artwork");
   assert.equal(form().elements.agent_id.options.length, 3, "authorized node choices must remain available while geography loads");
   assert.ok([...form().elements].filter(control => control.name).every(control => !control.disabled), "location lookup must not disable filters");
   assert.ok(!body().textContent.includes("广东"));

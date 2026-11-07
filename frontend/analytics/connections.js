@@ -6,6 +6,7 @@ import { node, button, actions, stack, section, filterbar, field, badge, muted, 
 import { observationTable } from "./observability-table.js";
 import { date } from "./operations.js";
 import { sourceStatus } from "./source-status.js";
+import { nodeName } from "./node-region.js";
 
 const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" })[value] || value;
 
@@ -44,11 +45,12 @@ export async function connectionsPage(ctx) {
   function updateSources() {
     const select = controls.elements.agent_id, value = filters.agent_id || "";
     const ordered = orderNodesBySavedOrder(sources.map(source => ({ ...source, id: source.agent_id })), nodeOrder);
+    const available = new Set(ordered.map(source => source.agent_id));
     const options = ordered.map(source => [source.agent_id, source.agent_name || source.agent_id]);
     if (value && !ordered.some(source => source.agent_id === value)) options.push([value, "所选节点不可用"]);
     const signature = JSON.stringify(options);
     if (select.dataset.options !== signature) {
-      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部节点"), ...options.map(([id, name]) => node("option", { value: id }, name)));
+      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部节点"), ...options.map(([id, name]) => node("option", { value: id }, available.has(id) ? nodeName(ctx, { id, name }) : name)));
       select.dataset.options = signature;
     }
     select.value = value;
@@ -63,7 +65,7 @@ export async function connectionsPage(ctx) {
     collection.trigger.disabled = !result;
     view.update(records, record => {
       const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), connectionLocationLabel(record.location), record.agent_name || record.agent_id,
+      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), connectionLocationLabel(record.location), nodeName(ctx, { id: record.agent_id, name: record.agent_name || record.agent_id }),
         badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
     }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试");
     collection.update(reportSources.map(source => ({
