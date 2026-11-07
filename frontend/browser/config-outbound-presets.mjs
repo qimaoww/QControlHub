@@ -1,26 +1,27 @@
 import { assert, pause, waitFor, createConfigFixture as fixture } from "./config-fixture.mjs";
+import { openOutbound, outboundDialog, outboundForm } from "./config-outbounds.mjs";
 
 export async function testOutboundPresetsRuntime() {
   const change = (element, value) => {
     element.value = value;
     element.dispatchEvent(new Event(element.tagName === "SELECT" ? "change" : "input", {bubbles:true}));
   };
-  const open = async () => {
-    document.querySelector('[data-outbound-action="add"]').click();
+  const open = async test => {
+    await openOutbound(test,"add");
     await waitFor(()=>document.querySelector("[data-outbound-mode]"), "outbound preset selector missing");
   };
   for (const engine of ["xray", "sing-box"]) {
     const test = await fixture(engine);
     test.select("first");
-    await open();
+    await open(test);
     const field = key => document.querySelector(`[data-outbound-value="${key}"]`);
     let input = document.querySelector('textarea[aria-label="出站配置 JSON"]');
     let mode = document.querySelector("[data-outbound-mode]");
     assert(mode.value === "preset" && input.readOnly, "new outbound should start with a preset, not raw JSON");
     change(document.querySelector("[data-outbound-protocol]"), "vless");
     assert(document.querySelector("[data-outbound-credential-label]").textContent.includes("UUID"), "VLESS preset mislabels its credential as a password");
-    document.querySelector('[data-intent="validate"]').click();
-    await waitFor(()=>document.querySelector("[data-outbound-error]").textContent.includes("服务器地址"), "incomplete preset submitted");
+    outboundForm().requestSubmit();
+    await waitFor(()=>[...outboundForm().querySelectorAll(".a-notice")].some(item=>item.textContent.includes("服务器地址")), "incomplete preset submitted");
     assert(!test.writes.length, "incomplete preset wrote source");
     change(field("server"), "edge.example");
     change(field("credential"), "123e4567-e89b-42d3-a456-426614174000");
@@ -38,15 +39,17 @@ export async function testOutboundPresetsRuntime() {
     change(field("transport"), "ws");
     assert(JSON.stringify(JSON.parse(input.value)) === JSON.stringify(ws), "transport switch lost WS draft");
     change(field("host"), "https://invalid.example");
-    document.querySelector('[data-intent="validate"]').click();
-    await waitFor(()=>document.querySelector("[data-outbound-error]").textContent.includes("WS Host"), "invalid WS Host accepted");
+    outboundForm().requestSubmit();
+    await waitFor(()=>[...outboundForm().querySelectorAll(".a-notice")].some(item=>item.textContent.includes("WS Host")), "invalid WS Host accepted");
     assert(!test.writes.length, "invalid WS Host wrote source");
     change(field("host"), "host.example");
-    document.querySelector('[data-intent="validate"]').click();
-    await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "WS preset did not save");
+    assert(field("server").value === "203.0.113.10" && field("port").value === "443", `preset dial fields changed before save (${field("server").value}; ${field("port").value})`);
+    test.confirm = true;
+    outboundForm().requestSubmit();
+    await test.settle(1);
     assert(test.saved().content.includes("host.example") && test.saved().content.includes("sni.example"), "saved source lost independent routing");
     test.writes.length = 0;
-    await open();
+    await open(test);
     input = document.querySelector('textarea[aria-label="出站配置 JSON"]');
     mode = document.querySelector("[data-outbound-mode]");
     change(document.querySelector("[data-outbound-protocol]"), "vless");
@@ -66,9 +69,9 @@ export async function testOutboundPresetsRuntime() {
     change(mode, "json");
     assert(input.value.includes("9007199254740993"), "mode switch lost advanced JSON draft");
     test.confirm = true;
-    document.querySelector('[data-outbound-close]').click();
+    outboundDialog().querySelector('[aria-label=关闭]').click();
     await waitFor(()=>!document.querySelector("dialog"), "preset draft did not close");
-    await open();
+    await open(test);
     let release;
     test.peerGate = new Promise(resolve=>{release=resolve;});
     change(document.querySelector("[data-outbound-mode]"), "node");
@@ -79,7 +82,7 @@ export async function testOutboundPresetsRuntime() {
     assert(![...node.options].some(option=>option.value === test.agent.id), "peer picker permits selecting this same node");
     change(node, "incompatible");
     assert(document.querySelector("[data-outbound-peer-status]").textContent.includes("Snell"), "unsupported peer has no explanation");
-    document.querySelector('[data-intent="validate"]').click(); await pause();
+    outboundForm().requestSubmit(); await pause();
     assert(!test.writes.length, "incompatible node silently reused another node's outbound");
     change(node, "peer-node");
     change(field("tag"), "node-exit");
@@ -99,15 +102,15 @@ export async function testOutboundPresetsRuntime() {
     await waitFor(()=>!document.querySelector("[data-outbound-peer-reload]").disabled, "peer removal refresh did not finish");
     assert(peerSelect.value === "" && preview.value === "" &&
       document.querySelector("[data-outbound-peer-status]").textContent.includes("不会自动"), "removed peer silently fell back to another target");
-    document.querySelector('[data-intent="validate"]').click(); await pause();
+    outboundForm().requestSubmit(); await pause();
     assert(!test.writes.length, "removed peer could still submit its stale credentials");
     test.peerEntries = undefined;
     document.querySelector("[data-outbound-peer-reload]").click();
     await waitFor(()=>!document.querySelector("[data-outbound-peer-reload]").disabled, "restored peer refresh did not finish");
     assert(peerSelect.value === "", "refresh selected an inbound without the user's choice");
     change(peerSelect, "0");
-    document.querySelector('[data-intent="validate"]').click();
-    await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "peer outbound did not save");
+    outboundForm().requestSubmit();
+    await test.settle(1);
     const saved = JSON.parse(test.saved().content), route = engine === "xray" ? saved.routing : saved.route;
     assert(saved.outbounds.some(entry=>entry.tag === "node-exit") &&
       route.rules.some(rule=>(rule.outboundTag || rule.outbound) === "node-exit"), "peer outbound lost local inbound binding");
@@ -116,7 +119,7 @@ export async function testOutboundPresetsRuntime() {
   }
   const restricted = await fixture("xray", {noPeerRead:true});
   restricted.select("first");
-  await open();
+  await open(restricted);
   assert(document.querySelector('[data-outbound-mode] option[value="node"]').disabled &&
     !restricted.calls.some(call=>call.path.startsWith("/client-access")), "peer selector bypassed client-access permission");
   restricted.dispose();

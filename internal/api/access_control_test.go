@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -38,6 +39,36 @@ func TestSSRustSourceEditsKeepRestrictions(t *testing.T) {
 		policies := reconcileShadowsocksRustPolicies([]serverconfig.MainlandAccessPolicy{entry}, existing, "node", 2, false, "", 0, false, false)
 		if len(policies) != 1 || !policies[0].BlockMainlandSource || policies[0].Tag != entry.Tag || policies[0].Port != entry.Port {
 			t.Fatalf("edit lost restriction: %+v", policies)
+		}
+	}
+}
+
+// The same endpoint is used from the inbound editor. A rejected task must not
+// save a new source revision or a host policy in a shared user's workspace.
+func TestInboundAccessMutationKeepsSharedBoundaryAtomic(t *testing.T) {
+	db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "access-atomic", core.EngineShadowsocksRust)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 21001)
+	base := "/agents/" + agent.ID + "/configs/ss-rust"
+	var config core.Config
+	recipient.call("PUT", base, map[string]any{
+		"name": "shared ACL", "version": 0,
+		"content": `{"server":"0.0.0.0","server_port":21001,"method":"aes-256-gcm","password":"access-test-password"}`,
+	}, http.StatusOK, &config)
+	recipient.call("PUT", "/access-controls", map[string]any{
+		"agent_id": agent.ID, "engine": "ss-rust", "tag": "ss-rust-21001", "port": 21001,
+		"expected_version": config.Version, "intent": "deploy", "block_mainland_source": true,
+	}, http.StatusConflict, nil)
+	var after core.Config
+	recipient.call("GET", base, nil, http.StatusOK, &after)
+	if after.Version != config.Version || after.Content != config.Content {
+		t.Fatal("rejected shared host policy saved a new revision")
+	}
+	var entries []mainlandAccessResource
+	recipient.call("GET", "/access-controls", nil, http.StatusOK, &entries)
+	for _, entry := range entries {
+		if entry.AgentID == agent.ID && (entry.BlockMainlandSource || entry.BlockMainlandDestination) {
+			t.Fatal("rejected shared host policy was retained")
 		}
 	}
 }

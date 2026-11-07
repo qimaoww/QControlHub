@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 
-import {
-  bindEvent,
-  createInteractionGate,
-  createPoller,
-  createRefreshChannel,
-  reconcileView,
-} from "./modules/refresh.js";
-import { animateNodeCardDrop, nodeCardDropIndex } from "./modules/agents.js";
+import { listen as bindEvent, patch as reconcileView } from "./analytics/live-dom.js";
+import { createPoller } from "./modules/poller.js";
 
 class FakeText {
   constructor(data, ownerDocument) {
@@ -16,6 +10,7 @@ class FakeText {
     this.ownerDocument = ownerDocument;
     this.parentNode = null;
   }
+  get nodeName() { return "#text"; }
   cloneNode() {
     return new FakeText(this.data, this.ownerDocument);
   }
@@ -54,6 +49,8 @@ class FakeElement {
       this.setAttribute(name, value),
     );
   }
+  get nodeName() { return this.tagName; }
+  hasAttribute(name) { return this.attributeMap.has(name); }
   get attributes() {
     return [...this.attributeMap].map(([name, value]) => ({ name, value }));
   }
@@ -130,6 +127,7 @@ class FakeElement {
     return selector.split(",").some((part) => {
       const value = part.trim();
       if (value === "*") return true;
+      if (value.toUpperCase() === this.tagName) return true;
       if (value === "[data-refresh-scroll]")
         return this.getAttribute("data-refresh-scroll") != null;
       if (value === ".workspace-main")
@@ -236,11 +234,7 @@ const currentList = element("section", { "data-refresh-scroll": "" }, currentA, 
 currentList.scrollTop = 155;
 const currentMain = element("main", { class: "workspace-main" }, currentList);
 currentMain.scrollTop = 420;
-const currentDialog = element("dialog", { open: "" }, text("confirm"));
-currentDialog.open = true;
-const currentLiveDialog = element("dialog", { open: "", "data-refresh-live": "" }, text("old TCP status"));
-currentLiveDialog.open = true;
-const currentRoot = element("div", {}, currentMain, currentDialog, currentLiveDialog);
+const currentRoot = element("div", {}, currentMain);
 currentRoot.connected = true;
 currentInput.focus();
 
@@ -297,16 +291,9 @@ const freshRoot = element(
     { class: "workspace-main" },
     element("section", { "data-refresh-scroll": "" }, freshC, freshA),
   ),
-  element("dialog", {}, text("confirm updated")),
-  element("dialog", { "data-refresh-live": "" }, text("new TCP status")),
 );
 
-const reconciliationMetrics = { inserted: 0, removed: 0, replaced: 0, updated: 0 };
-const reconciled = reconcileView(currentRoot, freshRoot, {
-  document: fakeDocument,
-  window: fakeWindow,
-  metrics: reconciliationMetrics,
-});
+const reconciled = reconcileView(currentRoot, freshRoot);
 assert.equal(reconciled, currentRoot, "same-route view root keeps identity");
 assert.equal(currentMain, currentRoot.children[0], "workspace keeps identity");
 assert.equal(currentA, currentList.children[1], "stable keyed row keeps identity");
@@ -326,23 +313,9 @@ assert.deepEqual(
   "keyboard selection survives",
 );
 assert.equal(currentDetails.open, true, "details state survives");
-assert.equal(currentDialog.open, true, "modal state survives");
-assert.equal(currentDialog.childNodes[0].data, "confirm", "open modal content stays stable");
-assert.equal(currentLiveDialog.open, true, "live modal stays open");
-assert.equal(currentLiveDialog.childNodes[0].data, "new TCP status", "only opted-in modal content refreshes");
 assert.equal(currentMain.scrollTop, 420, "workspace scroll survives");
 assert.equal(currentList.scrollTop, 155, "inner scroll survives");
 assert.deepEqual([fakeWindow.scrollX, fakeWindow.scrollY], [14, 640]);
-assert.deepEqual(
-  {
-    inserted: reconciliationMetrics.inserted,
-    removed: reconciliationMetrics.removed,
-    replaced: reconciliationMetrics.replaced,
-  },
-  { inserted: 1, removed: 1, replaced: 0 },
-  "keyed data changes insert/delete only and replace no stable nodes",
-);
-
 const switchedInput = element("input", { name: "content", value: "draft" });
 switchedInput.defaultValue = "draft";
 switchedInput.value = "unsaved draft";
@@ -395,30 +368,6 @@ const deferred = () => {
   });
   return { promise, resolve, reject };
 };
-let routeScope = 1;
-const channel = createRefreshChannel({ getScope: () => routeScope });
-const older = deferred();
-const newer = deferred();
-const appliedValues = [];
-let olderSignal;
-const olderRun = channel.run((signal) => {
-  olderSignal = signal;
-  return older.promise;
-}, (value) => appliedValues.push(value));
-const newerRun = channel.run(() => newer.promise, (value) => appliedValues.push(value));
-assert.equal(olderSignal.aborted, true, "newer refresh aborts the older request");
-newer.resolve("newer");
-assert.equal(await newerRun, true);
-older.resolve("older");
-assert.equal(await olderRun, false);
-assert.deepEqual(appliedValues, ["newer"], "out-of-order data cannot overwrite latest");
-const departed = deferred();
-const departedRun = channel.run(() => departed.promise, (value) => appliedValues.push(value));
-routeScope += 1;
-departed.resolve("departed");
-assert.equal(await departedRun, false);
-assert.deepEqual(appliedValues, ["newer"], "a departed route rejects its old response");
-
 const timers = new Map();
 let nextTimer = 1;
 const pendingRuns = [];
@@ -462,55 +411,6 @@ await poller.trigger();
 assert.equal(timers.size, 0, "a departed route owns no timer");
 assert.equal(pollRuns, 2, "a departed route starts no new request");
 
-const interactionGate = createInteractionGate();
-const releasePointer = interactionGate.begin();
-let structuralRefreshes = 0;
-let metricPatches = 0;
-interactionGate.defer(() => {
-  structuralRefreshes += 1;
-}, "structure");
-interactionGate.defer(() => {
-  metricPatches += 1;
-}, "metrics");
-assert.equal(structuralRefreshes, 0, "pointerdown defers structural refresh");
-assert.equal(metricPatches, 0, "pointerdown defers metric DOM patches");
-assert.equal(interactionGate.pendingCount(), 2, "refresh types coalesce independently");
-assert.equal(
-  nodeCardDropIndex(
-    [
-      { left: 0, right: 100, top: 0, bottom: 100 },
-      { left: 120, right: 220, top: 0, bottom: 100 },
-      { left: 0, right: 100, top: 120, bottom: 220 },
-    ],
-    { x: 40, y: 170 },
-  ),
-  2,
-  "pointer move keeps cross-row hit testing available while refresh waits",
-);
-const animatedCard = {
-  style: { transition: "", transform: "" },
-  getBoundingClientRect: () => ({ left: 120, top: 0 }),
-};
-let settleDrop;
-animateNodeCardDrop(
-  [animatedCard], new Map([[animatedCard, { left: 20, top: 0 }]]), {
-    animate: (_card, _frames, { onSettled }) => { settleDrop = onSettled; return onSettled; },
-    onSettled: releasePointer,
-  },
-);
-assert.equal(structuralRefreshes, 0, "drop keeps refresh deferred during FLIP");
-settleDrop();
-assert.equal(structuralRefreshes, 1, "FLIP settlement applies one merged refresh");
-assert.equal(metricPatches, 1, "FLIP settlement applies the latest metric patch");
-assert.equal(animatedCard.style.transform, "", "FLIP does not write temporary transforms");
-
-const canceledGate = createInteractionGate();
-const releaseCanceledInteraction = canceledGate.begin();
-let canceledRefreshes = 0;
-canceledGate.defer(() => {
-  canceledRefreshes += 1;
-});
-canceledGate.cancel();
-releaseCanceledInteraction();
-assert.equal(canceledRefreshes, 0, "route departure discards stale interaction work");
-assert.equal(canceledGate.activeCount(), 0, "route departure releases interaction state");
+// Native route cancellation, pointer refresh deferral, modal ownership and
+// drag cleanup run on actual pages in browser/native-motion.mjs and
+// browser/native-ordering.mjs. The poller above remains an active shared model.

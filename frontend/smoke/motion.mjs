@@ -1,95 +1,79 @@
-import assert from "node:assert/strict";
-import { createMotionController } from "../modules/motion.js";
+import assert from 'node:assert/strict';
+import { createAnalyticsMotion } from '../analytics/motion.js';
 
+// Exercise the shipped motion owner. Native modal paint, disclosure, focus,
+// reduced-motion preference changes and pointer geometry also run in Chrome.
 export async function run() {
-  const timers = new Map(), listeners = new Set();
-  let removed, observers = 0, next = 0;
-  const preference = {
-    matches: false,
-    addEventListener: (_type, fn) => listeners.add(fn),
-    removeEventListener: (_type, fn) => listeners.delete(fn),
-  };
-  const controller = createMotionController({
-    media: () => preference,
-    style: () => ({ opacity: ".42", getPropertyValue: name => name === "--motion-base" ? ".2s" : "ease-out" }),
-    setTimer: (fn, delay) => { assert.equal(delay, 280); timers.set(++next, fn); return next; },
-    clearTimer: id => timers.delete(id),
-    observe: fn => { removed = fn; observers++; return () => observers--; },
-  });
-  const element = () => ({
-    isConnected: true, calls: [], frames: [],
-    animate(frames, options) {
-      assert.equal(options.duration, 200, "CSS tokens are shared with native animations");
-      assert.equal(options.fill, "none", "finished animation never masks hover/drag");
-      const animation = { cancel() { this.oncancel?.(); } };
-      this.calls.push(animation);
-      this.frames.push(frames);
-      return animation;
+  const names = ['document', 'window', 'MutationObserver', 'getComputedStyle'];
+  const originals = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+  const timers = new Map(), disposers = [], suspensions = [];
+  let observer, observers = 0, next = 0, enabled = true;
+  Object.assign(globalThis, {
+    document: { body: {} }, window: {},
+    getComputedStyle: () => ({ opacity: '.42', translate: '0 0' }),
+    MutationObserver: class {
+      constructor(callback) { observer = callback; }
+      observe() { observers++; }
+      disconnect() { observers--; }
     },
   });
-  const a = element(), b = element();
-  let settled = 0;
-  const animate = node => controller.animate(node, [{ opacity: 0 }, { opacity: 1 }], { onSettled: () => settled++ });
-  const cancelFirst = animate(a);
-  animate(a);
-  assert.equal(a.frames.at(-1)[0].opacity, ".42", "interrupted motion resumes from current paint");
-  assert.equal(settled, 1, "superseded motion settles the previous owner");
-  cancelFirst();
-  assert.equal(controller.activeCount(), 1, "stale cancellation cannot stop the newer animation");
-  animate(b);
-  assert.equal(observers, 1, "all animations share one removal observer");
-  assert.equal(listeners.size, 1, "preference listener is shared and bounded");
-  a.isConnected = false;
-  removed();
-  assert.equal(controller.activeCount(), 1, "removed element is released");
-  preference.matches = true;
-  for (const fn of [...listeners]) fn();
-  assert.equal(controller.activeCount(), 0, "live preference change snaps to the final DOM state");
-  assert.equal(timers.size, 0);
-  assert.equal(listeners.size, 0);
-  assert.equal(observers, 0);
-  animate(b);
-  assert.equal(b.calls.length, 1, "reduced motion does not call Element.animate");
-  preference.matches = false;
-  animate(b);
-  const fallback = [...timers.values()][0];
-  fallback(); fallback();
-  assert.equal(controller.activeCount(), 0, "lost finish event has a bounded cleanup");
-  assert.equal(timers.size, 0);
-  animate(b);
-  b.calls.at(-1).onfinish();
-  assert.equal(timers.size, 0, "native finish cleans the fallback");
-  animate(b);
-  b.calls.at(-1).oncancel();
-  assert.equal(controller.activeCount(), 0, "external cancellation releases ownership");
-  assert.equal(observers, 0);
-  const shadowHost = {};
-  b.getRootNode = () => ({ host: shadowHost });
-  animate(b);
-  controller.cancel({ contains: node => node === shadowHost });
-  assert.equal(controller.activeCount(), 0, "container cancellation crosses an isolated exit shadow boundary");
-  assert.equal(timers.size, 0);
-
-  let releaseReady;
-  const pending = element();
-  const native = pending.animate;
-  pending.animate = function (...args) {
-    const animation = native.apply(this, args);
-    animation.ready = new Promise(resolve => { releaseReady = resolve; });
-    return animation;
+  const scope = {
+    enabled: () => enabled, current: () => true, listen() {},
+    timer(callback, delay) { const id = ++next; timers.set(id, { callback, delay }); return id; },
+    clearTimer: id => timers.delete(id),
+    onSuspend: callback => suspensions.push(callback), own: callback => disposers.push(callback),
   };
-  animate(pending);
-  assert.equal(timers.size, 0, "render work before playback readiness cannot spend the fallback budget");
-  releaseReady(); await Promise.resolve();
-  assert.equal(timers.size, 1, "playback readiness starts the bounded deadline");
-  controller.cancel(pending);
-  assert.equal(timers.size, 0);
-
-  const parent = element(), child = element();
-  parent.contains = node => node === child;
-  animate(parent); animate(child);
-  controller.cancelOwn(parent);
-  assert.equal(controller.activeCount(), 1, "releasing a parent's reflow must preserve its child's entrance owner");
-  controller.cancel(parent);
-  assert.equal(controller.activeCount(), 0, "lifecycle cancellation still releases the whole subtree");
+  const element = () => ({
+    isConnected: true, parentElement: null, calls: [], frames: [],
+    animate(frames, options) {
+      assert.equal(options.duration, 240);
+      const animation = { ready: Promise.resolve(), cancel() { this.oncancel?.(); } };
+      this.calls.push(animation); this.frames.push(frames); return animation;
+    },
+  });
+  try {
+    const motion = createAnalyticsMotion(scope), a = element(), b = element();
+    motion.list(a); const cancelFirst = a.calls[0].oncancel;
+    motion.list(a);
+    assert.equal(a.frames[1][0].opacity, '.42', 'interruption continues from current paint');
+    cancelFirst();
+    assert.equal(timers.size, 1, 'stale completion must not cancel the newer owner');
+    motion.list(b); await Promise.resolve();
+    assert.equal(observers, 1, 'animations share the native lifecycle observer');
+    a.isConnected = false; observer([]);
+    assert.equal(timers.size, 1, 'removed elements release their deadline');
+    suspensions.forEach(callback => callback());
+    assert.equal(timers.size, 0, 'suspending the theme releases every active animation');
+    enabled = false; motion.list(b);
+    assert.equal(b.calls.length, 1, 'disabled/reduced motion leaves the committed DOM immediate');
+    enabled = true; motion.list(b); await Promise.resolve();
+    const fallback = [...timers.values()][0];
+    assert.equal(fallback.delay, 360);
+    fallback.callback(); fallback.callback();
+    assert.equal(timers.size, 0, 'lost native finish events have idempotent bounded cleanup');
+    motion.list(b); b.calls.at(-1).onfinish();
+    assert.equal(timers.size, 0, 'native completion cleans the deadline');
+    motion.list(b); b.calls.at(-1).oncancel();
+    assert.equal(timers.size, 0, 'external cancellation releases the owner');
+    let ready;
+    const pending = element(), animate = pending.animate;
+    pending.animate = function (...args) {
+      const animation = animate.apply(this, args);
+      animation.ready = new Promise(resolve => { ready = resolve; }); return animation;
+    };
+    motion.list(pending);
+    assert.equal([...timers.values()][0].delay, 1240, 'unready playback still has a bounded safety deadline');
+    ready(); await Promise.resolve();
+    assert.equal([...timers.values()][0].delay, 360, 'normal deadline begins at playback readiness');
+    motion.cancel(); assert.equal(timers.size, 0);
+    const failed = element(); failed.animate = () => { throw new Error('presentation unavailable'); };
+    assert.doesNotThrow(() => motion.list(failed));
+    assert.equal(timers.size, 0, 'presentation failure must not block business state');
+    motion.list(b); disposers.forEach(callback => callback());
+    assert.equal(timers.size, 0); assert.equal(observers, 0);
+  } finally {
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
+    }
+  }
 }

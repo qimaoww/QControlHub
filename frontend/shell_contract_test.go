@@ -2,132 +2,90 @@ package frontend
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
 
 func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
-	content := frontendSources(t, "modules/shell-view.js", "modules/shell-icons.js")
-	start := strings.Index(content, "  const links = [")
-	if start < 0 {
-		t.Fatal("shell-view.js is missing the sidebar navigation list")
+	content := string(mustReadFrontendFile(t, "analytics/app.js"))
+	start, end := strings.Index(content, "const destinations = ["), strings.Index(content, "const pageModules =")
+	if start < 0 || end <= start {
+		t.Fatal("native navigation groups are missing")
 	}
-	end := strings.Index(content[start:], "  ];\n  const linkPermissions")
-	if end < 0 {
-		t.Fatal("shell-view.js sidebar navigation list has no closing boundary")
-	}
-	navigation := content[start : start+end]
+	navigation := content[start:end]
 	previous := -1
-	for _, route := range []string{
-		"dashboard", "node-settings", "live-config", "system-bbr", "ip-quality",
-		"client-access", "substore-sync", "traffic", "client-connections", "core-logs", "tasks",
-	} {
-		position := strings.Index(navigation, `"`+route+`"`)
-		if position < 0 {
-			t.Errorf("sidebar navigation is missing route %q", route)
-			continue
-		}
+	for _, group := range []string{`["概览"`, `["节点与配置"`, `["运维"`, `["面板"`} {
+		position := strings.Index(navigation, group)
 		if position <= previous {
-			t.Errorf("sidebar route %q is outside the expected workflow order", route)
+			t.Errorf("native navigation group out of order: %q", group)
 		}
 		previous = position
 	}
-	if strings.Contains(navigation, `"settings"`) {
-		t.Error("settings must remain separated from the primary desktop navigation")
-	}
-	if strings.Contains(navigation, `"agents"`) || strings.Contains(content, `["agents", "内核预设"]`) {
-		t.Error("preset actions belong in the configuration page, not standalone desktop or mobile navigation")
-	}
-	for _, required := range []string{
-		`const dockIcons = Object.freeze({`,
-		`["node-settings", "节点", dockIcons.server]`,
-		`["live-config", "配置", dockIcons.fileCode]`,
-		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
-		`["substore-sync", "同步", dockIcons.refreshCw, true]`,
-		`["traffic", "流量", dockIcons.chart, true]`,
-		`["core-logs", "日志", dockIcons.logs, true]`,
-		`["tasks", "任务", dockIcons.listChecks, true]`,
-		`class="dock-settings`,
-		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
-		`summary class="${mobileMoreActive ? "active" : ""}"`,
-		`["ip-quality", "IP 质量", dockIcons.gauge, true]`,
-		`const navGroups = {`,
-		`groupStart ? " dock-group-start" : ""`,
-	} {
-		if !strings.Contains(content, required) {
-			t.Errorf("sidebar navigation is missing responsive icon contract %q", required)
+	for _, route := range []string{"dashboard", "node-settings", "live-config", "archive-config", "client-access", "substore-sync", "certificates", "tasks", "core-logs", "client-connections", "traffic", "system-bbr", "ip-quality", "settings", "users", "my-quota", "themes"} {
+		if strings.Count(navigation, `["`+route+`",`) != 1 {
+			t.Errorf("native navigation must expose exactly one %s destination", route)
 		}
 	}
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
+	for _, forbidden := range []string{`"agents"`, `"access-control"`, `"agent-config"`} {
+		if strings.Contains(navigation, forbidden) {
+			t.Errorf("duplicate configuration navigation: %s", forbidden)
+		}
 	}
-	for _, required := range []string{
-		`.dock-nav .dock-mobile-secondary{display:none}`,
-		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr))`,
-		`.dock-nav{display:contents!important}`,
-		`.dock-nav a,.mobile-account-menu>summary{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px`,
-		`,.page-agents .release-channel-options label{min-height:44px}`,
-		`.mobile-account-menu>summary.active`,
-		`.mobile-account-menu a,.mobile-account-menu button`,
-		`.page-access-control .access-control-card form.is-dirty>footer{position:fixed;z-index:85;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));left:8px`,
-		`.app-dock:is(:hover,:has(:focus-visible)){width:var(--dock-rail-expanded)`,
-		`.app-dock .dock-nav a.dock-group-start::after{`,
-	} {
-		if !strings.Contains(string(styles), required) {
-			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)
+	for _, required := range []string{`const allowed = entries.filter`, `can(permission)`, `rail(true)`, `"aria-label": "主导航"`, `"aria-current": route === id ? "page" : null`, `matchMedia("(max-width: 56rem)")`, `openDialog(opened)`, `navigationToggle?.setAttribute("aria-expanded", "false")`} {
+		if !strings.Contains(content, required) {
+			t.Errorf("native navigation permission/responsive contract missing %q", required)
+		}
+	}
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	for _, required := range []string{`.a-rail nav {`, `overflow: auto`, `.a-drawer { width: min(288px, 88vw)`, `.a-layout > .a-rail { display: none; }`, `.a-drawer .a-rail`, `min-height: 44px`} {
+		if !strings.Contains(styles, required) {
+			t.Errorf("native navigation styles missing %q", required)
 		}
 	}
 }
 
 func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
-	app, err := os.ReadFile("modules/login-page.js")
-	if err != nil {
-		t.Fatal(err)
+	content := frontendSources(t, "analytics/app.js", "analytics/ui.js")
+	for _, required := range []string{`field("用户名", "username", "", { autocomplete: "username", required: true`, `field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true`, `node("label"`, `node("span", {}, label)`} {
+		if !strings.Contains(content, required) {
+			t.Errorf("native login label/autocomplete contract missing %q", required)
+		}
 	}
-	content := string(app)
-	if strings.Contains(content, `name="username" type="text" value="admin"`) {
+	if strings.Contains(content, `field("用户名", "username", "admin"`) {
 		t.Fatal("login username must not be prefilled with admin")
-	}
-	if !strings.Contains(content, `name="username" type="text" autocomplete="username"`) {
-		t.Fatal("login username must retain browser autocomplete support")
-	}
-	if !strings.Contains(content, `<label>用户名<input name="username"`) {
-		t.Fatal("login username must have a persistent label, not only a placeholder")
 	}
 }
 
 func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "app.js"))
+	app := string(mustReadFrontendFile(t, "analytics/app.js"))
 	for _, module := range []string{
-		"dashboard", "agents", "client-access", "substore-sync", "configs",
-		"tasks", "core-logs", "traffic", "access-control", "system-bbr",
-		"settings", "users",
+		"operations", "nodes", "client-access", "substore", "configs", "live-config",
+		"observability", "traffic", "tcp", "settings", "users", "themes", "ip-quality", "certificates",
 	} {
-		lazyImport := fmt.Sprintf(`import("./modules/%s.js")`, module)
+		lazyImport := fmt.Sprintf(`import('./%s.js')`, module)
 		if !strings.Contains(app, lazyImport) {
 			t.Errorf("route module %q is not loaded lazily", module)
 		}
-		staticImport := fmt.Sprintf(`from "./modules/%s.js"`, module)
-		if strings.Contains(app, staticImport) {
+		if strings.Contains(app, fmt.Sprintf(`from "./%s.js"`, module)) || strings.Contains(app, fmt.Sprintf(`from './%s.js'`, module)) {
 			t.Errorf("route module %q is still part of the eager application graph", module)
 		}
 	}
 	warmup := string(mustReadFrontendFile(t, "modules/route-warmup.js"))
 	for _, required := range []string{
 		`createRouteModuleLoader({`,
-		`createRouteWarmup(routeModules)`,
+		`createRouteWarmup(routeModules, { moduleName: pageModuleName, signal: lifetime.signal })`,
 		`bindNavigationPreload();`,
-		`routeModules.preload(routeModuleNames[route] || "dashboard")`,
+		`routeModules.preload(moduleName(route))`,
 		`document.addEventListener("pointerover", preloadNavigationRoute`,
 		`document.addEventListener("pointerdown", preloadNavigationRoute`,
 		`document.addEventListener("focusin", preloadNavigationRoute`,
 		`window.requestIdleCallback(warm, { timeout: 1500 })`,
 		`connection?.saveData`,
 		`connection?.effectiveType?.includes("2g")`,
-		`const routeModulePromise = routeModules.load(`,
-		`const sharedDataPromise = Promise.all([`,
+		`const [module] = await Promise.all([`,
+		`routeModules.load(descriptor[0])`,
+		`if (!context.current()) return;`,
+		`signal?.addEventListener('abort', stopRouteWarmup`,
 	} {
 		if !strings.Contains(app+warmup, required) {
 			t.Errorf("route loading performance contract is missing %q", required)
@@ -136,44 +94,19 @@ func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
 }
 
 func TestWorkspaceRouteCrumbsLinkToModuleEntries(t *testing.T) {
-	content := frontendSources(t, "modules/shell-view.js")
+	content := frontendSources(t, "analytics/app.js", "modules/routes.js")
+	// The native rail and header replace the old breadcrumb layout. Preserve
+	// the actual destinations, permission fallback and selected-route context.
 	for _, required := range []string{
-		`const homeRoute = can("overview.read") ? "dashboard" : "my-quota";`,
-		`const entryRoutes = { "agent-config": "live-config" };`,
-		`const entryRoute = entryRoutes[state.route] || state.route;`,
+		`className: "a-brand", href: "#dashboard"`,
+		`if (route === "dashboard" && !can("overview.read")) route = "my-quota"`,
+		`["agents", "agent-config", "access-control"].includes(route)`, `route = "live-config"`,
+		`shellTitle.textContent = title`, `aria-current`, `link.hash ===`,
+		`if (hash.startsWith("preset-node-")) return "live-config"`,
+		`["live-config", "实时配置"`, `["archive-config", "配置档案"`,
 	} {
 		if !strings.Contains(content, required) {
-			t.Errorf("workspace route breadcrumb is missing entry routing contract %q", required)
-		}
-	}
-	start := strings.Index(content, `<div class="workspace-route">`)
-	if start < 0 {
-		t.Fatal("shell-view.js is missing the workspace route breadcrumb")
-	}
-	end := strings.Index(content[start:], `<div class="workspace-actions">`)
-	if end < 0 {
-		t.Fatal("workspace route breadcrumb has no closing boundary")
-	}
-	// The crumbs stay nested inside the existing span/b elements: the shell
-	// styles mute and hide them by element, so anchors inherit that
-	// presentation instead of needing link styles of their own.
-	crumbs := content[start : start+end]
-	for _, required := range []string{
-		`<span><a href="#${homeRoute}">${esc(panelName)}</a></span>`,
-		`<i>/</i>`,
-		`<b><a href="#${entryRoute}">${esc(title)}</a></b>`,
-		`<i class="role-badge role-${esc(state.session.role)}">`,
-	} {
-		if !strings.Contains(crumbs, required) {
-			t.Errorf("workspace route breadcrumb is missing navigable crumb %q", required)
-		}
-	}
-	for _, plain := range []string{
-		`<span>${esc(panelName)}</span>`,
-		`<b>${esc(title)}</b>`,
-	} {
-		if strings.Contains(crumbs, plain) {
-			t.Errorf("workspace route crumb %q must stay a link instead of plain text", plain)
+			t.Errorf("native workspace entry routing is missing %q", required)
 		}
 	}
 }

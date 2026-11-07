@@ -18,7 +18,7 @@ writeFileSync(config, JSON.stringify({ browser: { browserName: "chromium", launc
 }, contextOptions: { viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 960 }, isMobile: mobile, hasTouch: mobile } }, outputDir: output }));
 function cli(...args) {
   const tool = process.env.PLAYWRIGHT_CLI || "npx";
-  const prefix = process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.22", "playwright-cli"];
+  const prefix = process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.23", "playwright-cli"];
   const result = spawnSync(tool, [...prefix, `-s=qch-card-record-${label}`, ...args], { encoding: "utf8" });
   if (result.status !== 0 || result.stdout.includes("### Error")) throw new Error(result.stdout + result.stderr);
   return result.stdout;

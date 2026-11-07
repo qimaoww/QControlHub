@@ -42,8 +42,6 @@ type PanelSettings struct {
 	NotifyAgentOffline             bool        `json:"notify_agent_offline"`
 	NotifyAgentOnline              bool        `json:"notify_agent_online"`
 	NotifyTrafficQuota             bool        `json:"notify_traffic_quota"`
-	KomariURL                      string      `json:"komari_url"`
-	KomariAPIKey                   string      `json:"komari_api_key"`
 	UpdatedAt                      time.Time   `json:"updated_at"`
 }
 
@@ -77,8 +75,6 @@ func DefaultPanelSettings() PanelSettings {
 		NotifyAgentOffline:             true,
 		NotifyAgentOnline:              true,
 		NotifyTrafficQuota:             true,
-		KomariURL:                      "",
-		KomariAPIKey:                   "",
 	}
 }
 
@@ -96,18 +92,6 @@ func (settings PanelSettings) Validate() error {
 	}
 	if settings.PanelName == "" {
 		return errors.New("panel name is required")
-	}
-	if utf8.RuneCountInString(settings.KomariURL) > 500 || utf8.RuneCountInString(settings.KomariAPIKey) > 500 {
-		return errors.New("Komari settings must not exceed 500 characters")
-	}
-	if strings.ContainsAny(settings.KomariAPIKey, "\r\n") {
-		return errors.New("Komari API Key contains invalid characters")
-	}
-	if strings.TrimSpace(settings.KomariURL) != "" {
-		parsed, err := url.Parse(strings.TrimSpace(settings.KomariURL))
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return errors.New("Komari URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
-		}
 	}
 	if utf8.RuneCountInString(settings.PanelName) > 40 {
 		return errors.New("panel name must not exceed 40 characters")

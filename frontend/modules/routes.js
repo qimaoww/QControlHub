@@ -1,4 +1,5 @@
 export const routeModuleNames = Object.freeze({
+  themes: "themes",
   dashboard: "dashboard",
   certificates: "certificates",
   "ip-quality": "ip-quality",
@@ -33,7 +34,6 @@ const routeAliases = Object.freeze({
   "settings-runtime": "settings",
   "settings-data": "settings",
   "settings-notify": "settings",
-  "settings-komari": "settings",
   "settings-cnip": "settings",
   "settings-certificates": "settings",
   "settings-deployment": "settings",

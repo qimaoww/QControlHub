@@ -10,16 +10,17 @@ const root = resolve(process.env.QCH_PERF_ROOT || resolve(dirname(fileURLToPath(
 const record = (name, call) => `const began = performance.now(); try { return ${call}; } finally { window.__phaseMetrics.push({ phase: '${name}', ms: performance.now() - began }); }`;
 function instrument(path, source) {
   if (process.env.QCH_PERF_TIMING !== "1") return source;
-  const wrappers = path.endsWith("/core-log-model.js") ? ["filterCoreLogEntries", "coreLogFilterCounts"]
-    : path.endsWith("/refresh.js") ? ["captureViewState", "reconcileView"] : [];
+  const wrappers = path.endsWith("/core-log-model.js") ? ["filterCoreLogEntries", "coreLogFilterCounts"] : [];
   for (const name of wrappers) {
     source = source.replace(`export function ${name}(`, `function measured_${name}(`);
     source += `\nexport function ${name}(...args) { ${record(name, `measured_${name}(...args)`)} }\n`;
   }
-  if (path.endsWith("/core-log-view.js")) {
-    source = source.replace("const rows =", "const rowsBegan = performance.now(); const rows =")
-      .replace("const pagination =", "window.__phaseMetrics.push({phase:'rowHTML',ms:performance.now()-rowsBegan}); const pagination =")
-      .replace("return renderCoreLogs;", `return (...args) => { ${record("view", "renderCoreLogs(...args)")} };`);
+  if (path.endsWith("/analytics/observability-table.js")) {
+    source = source.replace("export function observationStream(", "function measured_observationStream(");
+    source += `\nexport function observationStream(...args) {
+      const stream = measured_observationStream(...args);
+      return { ...stream, update(...values) { ${record("stream", "stream.update(...values)")} } };
+    }\n`;
   }
   if (path.endsWith("/core-log-projection.js")) {
     source = source.replace("return (entries, filters) => {", "return (entries, filters) => { const began = performance.now();")
@@ -102,7 +103,7 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/") {
     response.setHeader("Content-Type", "text/html; charset=utf-8");
-    response.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/app.css"></head><body><div id="app"></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>');
+    response.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/analytics/theme.css"></head><body><div id="app"></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>');
     return;
   }
   if (url.pathname === "/assets/agents_browser_runtime.mjs") {
@@ -111,6 +112,8 @@ const server = createServer(async (request, response) => {
 const nativeFetch = window.fetch;
 const { testAPI } = installAgentFixture('logs');
 window.testAPI = testAPI;
+window.__coreLogPerformanceFixture = true;
+history.replaceState(null, '', '#core-logs');
 const fixtureFetch = window.fetch;
 window.__bodyReads = [];
 window.__httpResponses = [];
@@ -130,14 +133,19 @@ window.fetch = async (input, options) => { const url = new URL(input, location.o
 window.__longTasks = [];
 window.__phaseMetrics = [];
 new PerformanceObserver(list => window.__longTasks.push(...list.getEntries().map(entry => ({ at: entry.startTime, ms: entry.duration })))).observe({ type: 'longtask', buffered: true });
-await import('./app.js');`);
+const session = await (await fetch('/api/v1/auth/session')).json();
+const { startAnalytics } = await import('./analytics/app.js');
+startAnalytics({ app: document.querySelector('#app'), session });`);
     return;
   }
   const path = resolve(root, url.pathname.replace(/^\/assets\//, ""));
   if (!url.pathname.startsWith("/assets/") || !path.startsWith(root + "/")) { response.writeHead(404).end(); return; }
   try {
-    response.setHeader("Content-Type", path.endsWith(".css") ? "text/css" : "text/javascript");
-    response.end(instrument(path, await readFile(path, "utf8")));
+    const type = { ".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
+    const extension = path.slice(path.lastIndexOf("."));
+    response.setHeader("Content-Type", type[extension] || "application/octet-stream");
+    const body = await readFile(path);
+    response.end([".js", ".mjs"].includes(extension) ? instrument(path, body.toString("utf8")) : body);
   } catch { response.writeHead(404).end(); }
 });
 server.listen(Number(process.env.QCH_PERF_PORT || 0), "127.0.0.1", () =>

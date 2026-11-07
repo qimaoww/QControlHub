@@ -14,7 +14,7 @@ const settings = mobile => ({ browser: { browserName: "chromium", launchOptions:
 writeFileSync(config, JSON.stringify(settings(false))); writeFileSync(mobileConfig, JSON.stringify(settings(true)));
 const sessions = [];
 function cli(session, ...args) {
- const result = spawnSync(process.env.PLAYWRIGHT_CLI || "npx", [...(process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.22", "playwright-cli"]), `-s=${session}`, ...args], { encoding: "utf8", timeout: 90000 });
+ const result = spawnSync(process.env.PLAYWRIGHT_CLI || "npx", [...(process.env.PLAYWRIGHT_CLI ? [] : ["--yes", "--package", "@playwright/cli@0.1.23", "playwright-cli"]), `-s=${session}`, ...args], { encoding: "utf8", timeout: 90000 });
  if (result.status || result.stdout.includes("### Error")) throw new Error(result.stdout + result.stderr);
  return result.stdout;
 }

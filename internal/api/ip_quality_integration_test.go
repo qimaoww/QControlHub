@@ -205,7 +205,7 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 		t.Fatalf("latest API did not return the stored report: %+v %v", history, err)
 	}
 	archivePath := "/ip-quality/" + task.ID + "/archives/4"
-	for _, suffix := range []string{"", "?download=1"} {
+	for _, suffix := range []string{"", "?download=1", "?layout=aligned"} {
 		response := call("GET", archivePath+suffix, "quality-admin", nil, 200)
 		if !strings.HasPrefix(response.Body.String(), "<svg") ||
 			strings.Join(ipQualityRenderedLines(response.Body.String()), "\n") != strings.TrimSuffix(report.ReportsText[0], "\n") ||
@@ -213,12 +213,13 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 			!strings.Contains(response.Header().Get("Content-Security-Policy"), "sandbox") {
 			t.Fatal("archive is not a panel-rendered SVG or lost browser isolation")
 		}
-		if (suffix == "") != strings.HasPrefix(response.Header().Get("Content-Disposition"), "inline;") {
+		if (suffix != "?download=1") != strings.HasPrefix(response.Header().Get("Content-Disposition"), "inline;") {
 			t.Fatal("incorrect preview/download disposition")
 		}
 	}
 	call("GET", archivePath, "", nil, 401)
 	call("GET", archivePath, "quality-reader", nil, 404)
+	call("GET", archivePath+"?layout=aligned", "quality-reader", nil, 404)
 	call("GET", "/ip-quality/"+task.ID+"/archives/6", "quality-admin", nil, 404)
 	call("GET", "/ip-quality/"+task.ID+"/archives/7", "quality-admin", nil, 400)
 	reader := call("GET", "/ip-quality?date="+day, "quality-reader", nil, 200)

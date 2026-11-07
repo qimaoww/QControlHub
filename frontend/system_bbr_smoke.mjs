@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { systemBBRState, validateTCPSelection } from "./modules/system-bbr.js";
+import { systemBBRState, validateTCPSelection } from "./modules/system-bbr-model.js";
 import { hasTCPParameter, validateTCPAvailability } from "./modules/system-bbr-model.js";
 import { systemTCPPresets, prepareTCPPreset } from "./modules/system-bbr-presets.js";
 

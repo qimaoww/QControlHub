@@ -1,6 +1,7 @@
 // Real Chromium contexts against isolated PostgreSQL and password/CSRF sessions.
 // Follow the repository's dependency-free native CDP browser convention.
 import assert from "node:assert/strict";
+import { runAnalyticsBrowser } from "./analytics_browser_session.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -64,7 +65,7 @@ try {
     }
     throw new Error(`Browser condition timed out: ${expression}`);
   };
-  const reload = async page => {
+  const reload = async (page, trigger = () => call("Page.reload", {}, page)) => {
     let timeout;
     let onMessage;
     const loaded = new Promise((resolve, reject) => {
@@ -77,13 +78,13 @@ try {
     });
     try {
       // Register before reloading: command acknowledgement precedes navigation.
-      await Promise.all([call("Page.reload", {}, page), loaded]);
+      await Promise.all([trigger(), loaded]);
     } finally {
       clearTimeout(timeout);
       socket.removeEventListener("message", onMessage);
     }
   };
-  const createPage = async (url = base) => {
+  const createPage = async (url = base, checkStartup = false) => {
     const { browserContextId } = await call("Target.createBrowserContext");
     const { targetId } = await call("Target.createTarget", { url: "about:blank", browserContextId });
     const { sessionId } = await call("Target.attachToTarget", { targetId, flatten: true });
@@ -91,14 +92,45 @@ try {
     await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, sessionId);
     if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
+    let startupScript;
+    if (checkStartup) {
+      // Hold the real session request to inspect the entry before either theme
+      // mounts. Releasing it continues the normal authenticated bootstrap.
+      startupScript = await call("Page.addScriptToEvaluateOnNewDocument", {source: `
+        const originalFetch = window.fetch;
+        const startupGate = new Promise(resolve => window.__releaseStartup = resolve);
+        window.fetch = (...args) => String(args[0]).endsWith('/auth/session')
+          ? startupGate.then(() => originalFetch(...args)) : originalFetch(...args);
+      `}, sessionId);
+    }
     await call("Page.navigate", { url }, sessionId);
-    await wait(sessionId, "!!document.querySelector('#login-form')");
+    if (checkStartup) {
+      await wait(sessionId, "!!window.__releaseStartup && !!document.querySelector('#qch-startup-style')?.sheet");
+      assert.ok(await evaluate(sessionId, `(() => {
+        const screen = document.querySelector('.qch-startup'), box = screen.getBoundingClientRect();
+        return getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight
+          && !document.getAnimations().length && !!document.querySelector('[role=status]');
+      })()`), "entry fills the viewport and remains clear with reduced motion");
+      await screenshot(sessionId, "startup-loading");
+      await call("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:"no-preference"}]}, sessionId);
+      await wait(sessionId, "document.getAnimations().length===2 && document.getAnimations().every(a=>a.playState==='running')");
+      await call("Page.removeScriptToEvaluateOnNewDocument", {identifier:startupScript.identifier}, sessionId);
+      await evaluate(sessionId, "window.__releaseStartup()");
+    }
+    await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
+    if (checkStartup) {
+      await wait(sessionId, "!document.querySelector('.qch-startup,#qch-startup-style')");
+      assert.ok(await evaluate(sessionId, "!document.getAnimations().some(a=>a.animationName?.startsWith('qch-startup'))"), "startup animations and stylesheet are released after theme mount");
+      await call("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:"reduce"},{name:"prefers-color-scheme",value:"light"}]}, sessionId);
+    }
     return sessionId;
   };
   const login = async (page, username) => {
-    await evaluate(page, `(() => { const form = document.querySelector('#login-form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
-    await wait(page, "!!document.querySelector('#logout')");
-    return evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='config scope password fixture'; form.requestSubmit(); })()`);
+    await wait(page, "!!document.querySelector('#logout,.a-user')");
+    const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    await wait(page, "!!document.querySelector('.a-user')");
+    return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
     const result = await evaluate(page, `(async () => { const r = await fetch('/api/v1' + ${JSON.stringify(path)}, {method:${JSON.stringify(method)}, credentials:'same-origin', headers:{'Content-Type':'application/json','X-QControlHub-CSRF':${JSON.stringify(session.csrf_token)}}, ${body === undefined ? "" : `body:JSON.stringify(${JSON.stringify(body)})`} }); return {status:r.status, body:await r.text()}; })()`);
@@ -112,50 +144,126 @@ try {
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
   };
 
+  // No preference row: use the production entry without a preview hint.
+  const defaultPage = await createPage(`${base}/?theme=classic#themes`, true);
+  assert.ok(await evaluate(defaultPage, "!!document.querySelector('.a-login form') && !new URL(location.href).searchParams.has('theme')"));
+  await evaluate(defaultPage, "window.__defaultDocument=true");
+  const defaultLogin = async () => {
+    await evaluate(defaultPage, `(() => {const form=document.querySelector('.a-login form');form.elements.username.value='default-theme-user';form.elements.token.value='config scope password fixture';form.requestSubmit()})()`);
+    await wait(defaultPage, "document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')");
+  };
+  await defaultLogin();
+  let defaultIdentity = await evaluate(defaultPage, "fetch('/api/v1/auth/session').then(r=>r.json())");
+  assert.deepEqual(await api(defaultPage, defaultIdentity, "GET", "/preferences/theme"), {theme_id:"analytics",revision:0});
+  assert.equal(await evaluate(defaultPage, "window.__defaultDocument"), true, "matching default login keeps the document and avoids a reload prompt");
+  await screenshot(defaultPage, "default-theme-account");
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(defaultPage, "document.querySelector('.a-user [title=退出登录]').click()");
+  await wait(defaultPage, "!!document.querySelector('.a-login form')");
+  await defaultLogin();
+  defaultIdentity = await evaluate(defaultPage, "fetch('/api/v1/auth/session').then(r=>r.json())");
+  assert.deepEqual(await api(defaultPage, defaultIdentity, "GET", "/preferences/theme"), {theme_id:"analytics",revision:0});
+  // A failed stylesheet must recover without changing the stored preference.
+  await call("Network.enable", {}, defaultPage);
+  await call("Network.setBlockedURLs", {urls:["*analytics/theme.css*"]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.qch-startup[data-failed] button')");
+  assert.ok(await evaluate(defaultPage, "document.querySelector('.qch-startup [role=alert]').textContent.includes('加载失败')"));
+  assert.equal((await api(defaultPage, defaultIdentity, "GET", "/preferences/theme")).theme_id, "analytics");
+  assert.equal(await evaluate(defaultPage, "document.querySelectorAll('link[href*=\"analytics/theme.css\"]').length"), 0, "failed theme styles are removed");
+  await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  // If neither runtime loads, keep an accessible entry and a working retry.
+  await call("Network.setBlockedURLs", {urls:["*/analytics/app.js*", "*/assets/app.js*"]}, defaultPage);
+  await reload(defaultPage);
+  await wait(defaultPage, "!!document.querySelector('.qch-startup[data-failed] button')");
+  assert.ok(await evaluate(defaultPage, "!!document.querySelector('.qch-startup [role=alert]') && !document.querySelector('.qch-startup[aria-busy]') && !document.getAnimations().length"));
+  await screenshot(defaultPage, "startup-failure");
+  await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Tab",code:"Tab",windowsVirtualKeyCode:9}, defaultPage);
+  await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Tab",code:"Tab",windowsVirtualKeyCode:9}, defaultPage);
+  assert.ok(await evaluate(defaultPage, "document.activeElement.matches('.qch-startup-retry')"));
+  await call("Network.setBlockedURLs", {urls:[]}, defaultPage);
+  await reload(defaultPage, async () => {
+    await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Enter",code:"Enter",windowsVirtualKeyCode:13,text:"\r"}, defaultPage);
+    await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13}, defaultPage);
+  });
+  await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true],#qch-startup-style')");
+  record(`${mode}: styled startup, reduced motion, animation cleanup, resource failure and keyboard retry`);
+  record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
+
+  await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });
+
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
   const [alice, bob, admin] = await Promise.all([login(a, "alice"), login(b, "bob"), login(manager, "browser-admin")]);
   assert.equal(alice.role, "user"); assert.equal(bob.role, "user"); assert.equal(admin.role, "admin");
   assert.notEqual(alice.user_id, bob.user_id);
   record(`${mode}: three independent browser contexts, real password/cookie/CSRF identities`);
-  for (const [user, route, selector] of [["task-reader", "tasks", "[data-task-page]"], ["traffic-reader", "traffic", ".traffic-workspace"]]) {
+  // Every account has the sole runtime; saved choices remain account scoped.
+  for (const [page, identity] of [[a, alice], [manager, admin]]) {
+    await evaluate(page, "location.hash='#themes'");
+    await wait(page, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+    const preference = await api(page, identity, "GET", "/preferences/theme");
+    assert.equal(preference.theme_id, "analytics");
+    await api(page, identity, "PUT", "/preferences/theme", {theme_id:"analytics",revision:preference.revision});
+    await api(page, identity, "PUT", "/preferences/theme", {theme_id:"analytics",revision:preference.revision}, 409);
+    assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"));
+  }
+  assert.equal((await api(b, bob, "GET", "/preferences/theme")).revision, 0, "another account preference is unchanged");
+  record(`${mode}: sole theme, optimistic conflict and account isolation`);
+  for (const [user, route, selector] of [["task-reader", "tasks", ".a-main table"], ["traffic-reader", "traffic", ".a-traffic-page"]]) {
     const page = await createPage();
     await login(page, user);
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
-    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
-    assert.ok(await evaluate(page, "!document.querySelector('.workspace-main .alert.error')"));
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(route === "tasks" ? "任务" : "流量")} && !document.querySelector('[aria-busy=true]')`);
+    assert.ok(await evaluate(page, "![...document.querySelectorAll('.a-main [role=alert]')].some(el=>el.textContent.trim())"));
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth <= innerWidth + 1"));
-    assert.equal(await evaluate(page, "document.querySelector('[data-sync-label]').textContent"), user === "traffic-reader" ? "1 个节点在线" : "节点状态未知");
+    if (user === "traffic-reader") {
+      const scoped = await api(page, await evaluate(page, "fetch('/api/v1/auth/session').then(r=>r.json())"), "GET", "/traffic-policies?view=page");
+      assert.equal(scoped.agents.length, 1, "traffic permission includes authorized node metadata");
+    }
     await screenshot(page, user);
     await evaluate(page, "location.hash='#certificates'");
-    await wait(page, "!!document.querySelector('[data-cert-accounts]')");
-    await evaluate(page, "document.querySelector('[data-cert-accounts]').click()");
-    await wait(page, "!!document.querySelector('dialog[open] [data-cert-http-grant]')");
+    await wait(page, "[...document.querySelectorAll('.a-main button')].some(el=>el.textContent==='账号与认证授权') && !document.querySelector('[aria-busy=true]')");
+    await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(el=>el.textContent==='账号与认证授权').click()");
+    await wait(page, "!!document.querySelector('dialog[open] select[name=agent_id]')");
     const nodes = await evaluate(page, "[...document.querySelectorAll('dialog[open] select[name=agent_id] option')].map(option=>option.value).filter(Boolean)");
     assert.deepEqual(nodes, [fixture.owned[user]], "certificate HTTP authorization must use the owned-node scope without agents.read");
-    await evaluate(page, "document.querySelector('[data-cert-close]').click()");
+    await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
     // Delay the real response rather than replacing its authorization/data.
-    await evaluate(page, `(() => { const original=window.fetch; window.__certificateRelease=null; window.__certificateWaiting=false; window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certificateWaiting=true;await new Promise(done=>window.__certificateRelease=done);}return response;};document.querySelector('[data-cert-accounts]').click();})()`);
+    await evaluate(page, `(() => { const original=window.fetch; window.__certificateRelease=null; window.__certificateWaiting=false; window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/certificate-http-nodes')){window.__certificateWaiting=true;await new Promise(done=>window.__certificateRelease=done);}return response;};[...document.querySelectorAll('.a-main button')].find(el=>el.textContent==='账号与认证授权').click();})()`);
     await wait(page, "window.__certificateWaiting");
     await evaluate(page, `location.hash=${JSON.stringify("#" + route)}`);
-    await wait(page, `!!document.querySelector(${JSON.stringify(selector)})`);
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(route === "tasks" ? "任务" : "流量")} && !document.querySelector('[aria-busy=true]')`);
     await evaluate(page, "window.__certificateRelease()");
     await delay(100);
     assert.equal(await evaluate(page, "document.querySelectorAll('dialog[open]').length"), 0, "late certificate responses cannot reopen a dialog on another route");
+    if (user === "traffic-reader") {
+      await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#traffic` }, page);
+      await wait(page, "!!document.querySelector('.a-traffic-page [data-traffic-key]') && !document.querySelector('[aria-busy=true]')");
+      assert.deepEqual(await evaluate(page, "[...document.querySelectorAll('.a-traffic-filters [name=agent] option')].map(option=>option.value).filter(Boolean)"), [fixture.owned[user]], "traffic-only account receives authorized node metadata without agents.read");
+      assert.equal(await evaluate(page, "[...document.querySelectorAll('.a-main button')].filter(button=>['添加配额','编辑配额','设置配额','清零','删除','同步配置端口','批量操作'].includes(button.textContent)).length"), 0, "read-only traffic identity has no mutation controls");
+      await screenshot(page, "analytics-traffic-reader");
+    }
   }
   record(`${mode}: task-only and traffic-only pages and owned certificate HTTP nodes work without agents.read/settings.read; delayed certificate dialogs stay closed after navigation`);
   const noPermissions = await createPage();
   await login(noPermissions, "no-permissions");
-  assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.dock-nav a[href=\"#live-config\"]').length"), 0);
+  await evaluate(noPermissions, "location.hash='#themes'");
+  await wait(noPermissions, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(await evaluate(noPermissions, "![...document.querySelectorAll('.a-main [role=alert]')].some(el=>el.textContent.trim())"));
+  assert.equal(await evaluate(noPermissions, "document.querySelectorAll('.a-rail a[href=\"#live-config\"]').length"), 0);
   await evaluate(noPermissions, "location.hash='#live-config'");
-  await wait(noPermissions, "document.querySelector('.workspace-main .alert.error')?.textContent.includes('无权查看配置')");
-  assert.ok(await evaluate(noPermissions, "!document.querySelector('.live-config-empty')"), "permission denial must not look like a resource-free account");
+  await wait(noPermissions, "document.querySelector('.a-main [role=alert]')?.textContent.includes('没有访问此页面的权限')");
+  assert.ok(await evaluate(noPermissions, "!document.querySelector('.a-main form')"), "permission denial must not look like a resource-free account");
   const stalePage = await createPage();
   const staleSession = await login(stalePage, "alice");
   // The cookie belongs to B after another tab logs in, while this page still
   // holds A's session and preferences. Its next navigation must clear the UI.
   await api(stalePage, staleSession, "POST", "/auth/login", { username: "bob", token: "config scope password fixture" });
   await evaluate(stalePage, "location.hash='#client-access'");
-  await wait(stalePage, "!!document.querySelector('#login-form')");
+  await wait(stalePage, "!!document.querySelector('#login-form,.a-login form')");
   assert.equal((await evaluate(stalePage, "fetch('/api/v1/auth/session').then(r=>r.json())")).user_id, bob.user_id);
   record(`${mode}: replacement cookie cannot populate the old account's page; B's session remains valid`);
   for (const [page, session, user, other] of [[a, alice, "alice", "bob"], [b, bob, "bob", "alice"]]) {
@@ -169,9 +277,9 @@ try {
     agents = await api(page, session, "GET", "/agents");
     assert.ok(agents.some(agent => agent.id === fixture.shared && !agent.can_manage));
     await evaluate(page, "location.hash='#node-settings'");
-    await wait(page, "document.querySelectorAll('[data-agent-node]').length===2");
-    assert.equal(await evaluate(page, "document.querySelectorAll('[data-node-batch-toggle]').length"), 0,
-      "one owned node plus a shared instance must not expose a host batch entry");
+    await wait(page, "document.querySelectorAll('[data-agent-id]').length===2");
+    assert.equal(await evaluate(page, "[...document.querySelectorAll('[data-agent-id]')].find(el=>el.textContent.includes('本人共享实例'))?.querySelectorAll('[title=共享]').length || 0"), 0,
+      "a shared instance never exposes host sharing management");
   }
   record(`${mode}: owned nodes isolated; pending shares denied, accepted shares visible without host management`);
   const archiveInput = { name: "private archive", engine: "mihomo", content: "mixed-port: 22001\n" };
@@ -203,19 +311,19 @@ try {
     await evaluate(before, "location.hash='#tasks'");
     await wait(before, `!!document.querySelector('[data-retry="${taskA.id}"]')`);
     await evaluate(before, `document.querySelector('[data-retry="${taskA.id}"]').click()`);
-    await wait(before, "!!document.querySelector('[data-confirm-dialog][open]')");
-    assert.ok(await evaluate(before, "document.querySelector('[data-confirm-message]').textContent.includes('当前配置')"));
+    await wait(before, "!!document.querySelector('dialog[open]')");
+    assert.ok(await evaluate(before, "document.querySelector('dialog[open] .a-dialog-body').textContent.includes('当前配置')"));
     await screenshot(before, "before");
   }
   await evaluate(a, "location.hash='#tasks'");
   await wait(a, `!!document.querySelector('[data-retry="${taskA.id}"]')`);
   assert.equal(await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').textContent`), "重试配置");
   await evaluate(a, `document.querySelector('[data-retry="${taskA.id}"]').click()`);
-  await wait(a, "!!document.querySelector('[data-confirm-dialog][open]')");
-  assert.ok(await evaluate(a, "document.querySelector('[data-confirm-message]').textContent.includes('配置已有更新')"));
-  assert.ok(await evaluate(a, "!document.querySelector('[data-confirm-message]').textContent.includes('安装稳定版')"));
+  await wait(a, "!!document.querySelector('dialog[open]')");
+  assert.ok(await evaluate(a, "document.querySelector('dialog[open] .a-dialog-body').textContent.includes('配置已有更新')"));
+  assert.ok(await evaluate(a, "!document.querySelector('dialog[open] .a-dialog-body').textContent.includes('安装稳定版')"));
   await screenshot(a, "after");
-  await evaluate(a, "document.querySelector('[data-confirm-accept]').click()");
+  await evaluate(a, "[...document.querySelectorAll('dialog[open] button')].find(el=>el.textContent==='重试任务').click()");
   await wait(a, "document.body.textContent.includes('保存后配置已发生变化')");
   assert.ok(await evaluate(a, "document.documentElement.scrollWidth <= innerWidth + 1"));
   await api(a, alice, "POST", `/tasks/${taskA.id}/retry`, {}, 409);
@@ -232,7 +340,7 @@ try {
   await api(a, alice, "GET", "/auth/session", undefined, 401);
   await api(b, bob, "GET", "/auth/session");
   await reload(a);
-  await wait(a, "!!document.querySelector('#login-form')");
+  await wait(a, "!!document.querySelector('#login-form,.a-login form')");
   const switched = await login(a, "bob");
   assert.equal(switched.user_id, bob.user_id);
   assert.deepEqual((await api(a, switched, "GET", "/configs")).map(config => config.id), [cb.id]);

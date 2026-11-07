@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  installTraffic, mergeTrafficPorts, orderTrafficItems, trafficCardIdentity,
-} from "./modules/traffic.js";
-import { nodeCardOrderKey } from "./modules/node-order.js";
+import { mergeTrafficPorts, orderTrafficItems, trafficCardIdentity } from "./modules/traffic-model.js";
 
 const mixedItems = Object.freeze([
   { policy: { agent_id: "alpha", port: 443 } },
@@ -25,133 +22,12 @@ assert.deepEqual(
 );
 assert.equal(orderTrafficItems(mixedItems), mixedItems, "no ordering information preserves the source order");
 
-// Selection, cancellation, retry and navigation use the real DOM in the
-// traffic-layout browser suite. Keep rendering/optional quota coverage here.
-const previousDocument = globalThis.document;
-try {
-  let button = {};
-  let markup = "";
-  globalThis.document = {
-    querySelector: selector => selector === "[data-traffic-sync]" ? button : null,
-    querySelectorAll: () => [],
-  };
-  const policy = { id: "policy-a", agent_id: "alpha", name: "Monitor", engine: "mihomo", port: 443, protocol: "tcp", quota_enabled: false, deployment_confirmed: true, is_current_user: true };
-  const agents = ["alpha", "beta", "gamma", "empty"].map(id => ({
-    id, name: id, status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"],
-  }));
-  let policies = [policy];
-  let endpoints = [];
-  const state = { route: "traffic", navigationEpoch: 1, data: {} };
-  const orders = new Map([[nodeCardOrderKey, "[]"]]);
-  const cardOrderKey = "qcontrolhub:traffic-card-order";
-  const cardKeys = () => [...markup.matchAll(/data-traffic-card-key="([^"]+)"/g)].map(match => match[1]);
-  const render = installTraffic({
-    state,
-    can: () => true, esc: value => String(value ?? ""), engineName: String,
-    bytes: String, rate: String, percent: () => 0, ago: () => "now",
-    storage: {
-      getItem: key => orders.get(key) ?? null,
-      setItem: (key, value) => orders.set(key, value),
-    },
-    setTimer: () => 1, clearTimer() {}, notify() {}, confirmAction() { assert.fail("sync must use the selection dialog"); },
-    shell: html => { markup = html; button = {}; },
-    api: async path => {
-      if (path === "/agents") return agents;
-      if (path === "/traffic-policies") return policies;
-      if (path === "/traffic-endpoints") return [...endpoints.map(endpoint => ({ ...endpoint, is_current_user: true })), ...policies.filter(policy => policy.deployment_confirmed).map(policy => ({ ...policy }))];
-      assert.fail(`render must be read-only: ${path}`);
-    },
-  });
-  await render();
-  const input = markup.match(/<input name="limit_gb"[^>]*>/)[0];
-  assert.equal(input.includes("required"), false);
-  assert.match(input, /min="0"/);
-  assert.match(input, /value=""/);
-  assert.equal(typeof button.onclick, "function");
-  assert.equal(button.disabled, false);
-  assert.deepEqual(mergeTrafficPorts([{...policy, monitoring_enabled: false}], [policy]), [], "deleted ports remain hidden until explicitly restored");
-
-  assert.deepEqual(mergeTrafficPorts([{ ...policy, deployment_confirmed: false }], []), [], "a policy alone never proves deployment");
-  assert.deepEqual(mergeTrafficPorts([policy], []), [], "a stale policy cannot outlive its confirmed endpoint");
-  assert.deepEqual(mergeTrafficPorts([{ ...policy, config_id: "old", config_version: 1 }], [{ ...policy, config_id: "new", config_version: 1 }]).map(item => item.kind), ["endpoint"], "a different instance never inherits an old policy");
-  policies = [policy, { ...policy, id: "foreign", agent_id: "beta", is_current_user: false, used_bytes: 700, limit_bytes: 900, quota_enabled: true }];
-  await render();
-  assert.deepEqual(cardKeys(), ["alpha:443"], "default scope hides another user's port even on a visible node");
-  assert.ok(!markup.includes('policy:foreign'), "foreign ports do not enter selector options");
-  state.data.trafficFilters = { user_scope: "all" };
-  await render();
-  assert.deepEqual(cardKeys(), ["alpha:443", "beta:443"], "all scope retains the authorized inventory");
-  assert.ok(markup.includes("所属用户"), "all scope identifies port ownership");
-  state.data.trafficBatch = { mode: true, selected: [policy.id, "foreign"], results: [], action: "reset" };
-  await render();
-  assert.ok(!markup.includes('data-card-move-grip'), "batch selection suppresses drag grips");
-  policies = [policy];
-  await render({ background: true });
-  assert.deepEqual(state.data.trafficBatch.selected, [policy.id], "refresh prunes removed targets and preserves valid selection");
-  state.data.trafficBatch.results = [{ id: policy.id, status: "failed" }];
-  state.data.trafficBatch.last = { request_id: "old-request", ids: [policy.id] };
-  state.data.trafficBatch.uncertainRequest = state.data.trafficBatch.last;
-  state.data.trafficFilters = {};
-  await render();
-  assert.deepEqual(state.data.trafficBatch.selected, [], "scope changes clear selection");
-  assert.deepEqual(state.data.trafficBatch.results, [], "scope changes clear previous operation results");
-  assert.equal(state.data.trafficBatch.last, null);
-  assert.equal(state.data.trafficBatch.uncertainRequest, null, "scope changes cannot replay hidden targets after a lost response");
-  assert.ok(!markup.includes("data-traffic-batch-retry"));
-  state.data.trafficBatch.mode = false;
-  policies = [
-    { ...policy, id: "policy-b", agent_id: "beta" },
-    policy,
-    { ...policy, id: "policy-c", agent_id: "gamma" },
-  ];
-  endpoints = [
-    { agent_id: "alpha", engine: "mihomo", port: 8443, protocol: "tcp" },
-    { agent_id: "beta", engine: "mihomo", port: 8443, protocol: "tcp" },
-    { agent_id: "missing", engine: "mihomo", port: 9443, protocol: "tcp" },
-  ];
-  await render();
-  assert.deepEqual(cardKeys(), ["alpha:443", "alpha:8443", "beta:443", "beta:8443", "gamma:443", "missing:9443"],
-    "without a saved node order, cards follow the API node list rather than the policy list");
-
-  orders.set(nodeCardOrderKey, JSON.stringify(["gamma", "beta"]));
-  await render();
-  assert.deepEqual(cardKeys(), ["gamma:443", "beta:443", "beta:8443", "alpha:443", "alpha:8443", "missing:9443"],
-    "traffic rendering uses the account's saved node order and appends new nodes");
-  assert.equal(orders.has(cardOrderKey), false, "default rendering must not persist a custom card order");
-
-  orders.set(nodeCardOrderKey, JSON.stringify(nodeOrder));
-  await render({ background: true });
-  assert.deepEqual(cardKeys(), ["beta:443", "beta:8443", "alpha:443", "alpha:8443", "gamma:443", "missing:9443"],
-    "background refresh follows later changes to the node order");
-
-  orders.set(cardOrderKey, JSON.stringify(["alpha:8443", "beta:443"]));
-  await render();
-  assert.deepEqual(cardKeys(), ["alpha:8443", "beta:443", "beta:8443", "alpha:443", "gamma:443", "missing:9443"],
-    "saved card positions override the node order without changing the fallback for new cards");
-  state.data.trafficFilters = { agent_id: "beta" };
-  await render();
-  assert.deepEqual(cardKeys(), ["beta:443", "beta:8443"], "filtering preserves card order within the selected node");
-  assert.deepEqual(JSON.parse(orders.get(cardOrderKey)), ["alpha:8443", "beta:443"],
-    "filtering must not overwrite the complete saved card order");
-
-  state.data.trafficFilters = {};
-  assert.deepEqual(mergeTrafficPorts([{ ...policy, monitoring_enabled:false }], []), [], "retired quota/history is never rendered as a live card");
-  state.data.trafficFilters = { endpoint_key: "policy:policy-b" };
-  policies = [];
-  endpoints = [];
-  await render({ background: true });
-  assert.deepEqual(cardKeys(), [], "automatic refresh drops the cached configured port set, including the final port");
-  assert.deepEqual(state.data.trafficEndpoints, []);
-  assert.equal(state.data.trafficFilters.endpoint_key, "", "removed filter no longer hides other listeners");
-  policies = [ { ...policy, id: "policy-b", agent_id: "beta" }, policy, { ...policy, id: "policy-c", agent_id: "gamma" } ];
-  endpoints = [ { agent_id: "alpha", engine: "mihomo", port: 8443, protocol: "tcp" }, { agent_id: "beta", engine: "mihomo", port: 8443, protocol: "tcp" }, { agent_id: "missing", engine: "mihomo", port: 9443, protocol: "tcp" } ];
-  orders.set(cardOrderKey, "invalid JSON");
-  await render();
-  assert.deepEqual(cardKeys(), ["beta:443", "beta:8443", "alpha:443", "alpha:8443", "gamma:443", "missing:9443"],
-    "invalid saved card data falls back to node order");
-  assert.deepEqual(policies.map(item => item.agent_id), ["beta", "alpha", "gamma"], "sorting must not mutate API data");
-} finally {
-  if (previousDocument === undefined) delete globalThis.document;
-  else globalThis.document = previousDocument;
-}
-console.log("traffic selection and ordering module smoke passed");
+// Rendering, quota fields and account scope run against the native page in
+// browser/traffic-layout.mjs. Keep the shared model's deployment contracts.
+const policy = { id: "policy-a", agent_id: "alpha", engine: "mihomo", port: 443, deployment_confirmed: true };
+assert.deepEqual(mergeTrafficPorts([{ ...policy, monitoring_enabled: false }], [policy]), [], "deleted monitoring stays hidden until explicitly restored");
+assert.deepEqual(mergeTrafficPorts([{ ...policy, deployment_confirmed: false }], []), [], "a policy alone never proves deployment");
+assert.deepEqual(mergeTrafficPorts([policy], []), [], "a stale policy cannot outlive its confirmed endpoint");
+assert.deepEqual(mergeTrafficPorts([{ ...policy, config_id: "old", config_version: 1 }], [{ ...policy, config_id: "new", config_version: 1 }]).map(item => item.kind), ["endpoint"], "a different instance never inherits an old policy");
+assert.deepEqual(mixedItems.map(item => (item.policy || item.endpoint).agent_id), ["alpha", "beta", "alpha", "gamma", "missing", "beta"], "sorting must not mutate API data");
+console.log("traffic deployment and ordering model smoke passed");

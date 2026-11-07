@@ -1,84 +1,112 @@
-import { assert, waitFor } from "./assertions.mjs";
+import { assert, waitFor, delay } from './assertions.mjs';
+import { startNativeNodes } from './agent-detail-actions.mjs';
+
 export async function testAgentOverview({ testAPI }) {
+  await startNativeNodes();
+  await testNativeAddressRefresh(testAPI);
+  const button = text => [...document.querySelectorAll('button')].find(item => item.textContent === text);
+  const card = id => document.querySelector(`.a-probe[data-agent-id="${id}"]`);
+  const flag = await waitFor(() => card('alpha').querySelector('img[src="/api/v1/region-flags/cn"]'), '节点地区没有统一 SVG 旗帜');
+  await waitFor(() => flag.complete && flag.naturalWidth > 0, '节点旗帜没有载入');
+  assert.equal(flag.parentNode.getAttribute('aria-label'), '中国台湾', '节点地区无可读名称');
+  assert.equal(flag.parentNode.title, '中国台湾 (TW)', '节点地区缺少名称及代号');
+  await waitFor(() => card('bravo').querySelector('img[src="/api/v1/region-flags/sg"]'), '内联地区未渲染');
+  assert.ok(!testAPI.calls.some(call => call.path === '/agents/bravo/region'), '已有内联地区仍逐节点查询');
+  const network = card('alpha').querySelector('.a-probe-network');
+  assert.ok(network.textContent.includes('/s') && network.textContent.includes('累计'), '节点丢失速率或累计流量');
+  const stableCard = card('alpha'), search = document.querySelector('input[name=search]');
+  search.focus(); search.value = 'ALPHA'; search.dispatchEvent(new Event('input', { bubbles: true }));
+  search.setSelectionRange(1, 3);
+  assert.equal(document.activeElement, search, `筛选前未取得焦点：${document.activeElement?.outerHTML}`);
+  const filteredCard = card('alpha');
+  testAPI.agents[0].metrics.network_rx_bps = 2048;
+  testAPI.agents[0].metrics.network_rx_bytes = 2 ** 30;
+  button('刷新').click();
+  await waitFor(() => card('alpha').querySelector('.a-probe-network').textContent.includes('2\u00a0KB/s'), '网络速率未刷新');
+  assert.equal(card('alpha'), filteredCard, '刷新重建节点卡片');
+  assert.equal(document.activeElement, search, `刷新丢失搜索焦点：${document.activeElement?.outerHTML}`);
+  assert.equal(search.selectionStart, 1, '刷新丢失文本选择');
+  assert.equal(search.value, 'ALPHA', '刷新重置筛选');
+  assert.ok(card('alpha').textContent.includes('累计 1\u00a0GB'), '累计收发量未刷新');
+  assert.ok(stableCard.isConnected, '搜索重建已存在卡片');
+  search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true }));
+  button('列表').click();
+  await waitFor(() => document.querySelector('.a-probe-list'), '列表视图未切换');
+  assert.ok(document.querySelector('.a-probe-list').textContent.includes('累计接收'), '列表缺少累计流量');
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '视图保存未结束');
+  testAPI.nodeView.revision++;
+  button('卡片').click();
+  await waitFor(() => !document.querySelector('#app[aria-busy=true]') && document.querySelector('.a-toast.error')?.textContent.includes('冲突'), '视图并发冲突未反馈');
+  assert.ok(document.querySelector('.a-probe-list'), '冲突未采用服务端当前视图');
+  button('卡片').click(); await waitFor(() => card('alpha'), '卡片视图未恢复');
+  assert.equal(testAPI.nodeView.view, 'cards', '视图未保存到 API');
+  const stable = card('alpha');
+  testAPI.agentsFailure = true; button('刷新').click();
+  await waitFor(() => document.querySelector('[role=status]')?.textContent.includes('更新失败'), '读取失败未保留状态');
+  assert.equal(card('alpha'), stable, '失败清空有效节点');
+  await waitFor(() => !button('刷新').disabled, '失败后刷新未解锁');
+  testAPI.agentsFailure = false; button('刷新').click();
+  await waitFor(() => document.querySelector('[role=status]')?.textContent === '正在实时更新', '节点读取未恢复');
+  await delay(20);
+  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, '节点列表横向溢出');
+}
 
-await waitFor(() => document.querySelector(".node-card-grid"), "聚合页没有渲染节点卡片");
-  const komariInline = await waitFor(
-    () => {
-      const inline = document.querySelector('[data-komari-link="alpha"]');
-      return inline?.querySelector("[data-komari-traffic]")?.textContent ===
-        "4.0 GB / 10.0 GB"
-        ? inline
-        : null;
-    },
-    "Komari 流量没有载入网络资源格",
-  );
-  assert.equal(komariInline.closest(".node-card-network") !== null, true);
-  assert.equal(
-    komariInline.querySelector("[data-komari-traffic]").textContent,
-    "4.0 GB / 10.0 GB",
-  );
-  assert.match(
-    komariInline.querySelector("[data-komari-cycle]").textContent,
-    /\d{1,2}\.\d{1,2}–\d{1,2}\.\d{1,2}/,
-  );
-  assert.equal(Number(komariInline.querySelector("[data-komari-progress]").value), 40);
-  const alphaAvatar = document.querySelector('[data-agent-node="alpha"] [data-region-avatar]');
-  const alphaFlag = await waitFor(
-    () => alphaAvatar.querySelector('img[src="/api/v1/region-flags/cn"]'),
-    "节点地区没有渲染统一 SVG 旗帜",
-  );
-  await waitFor(() => alphaFlag.complete && alphaFlag.naturalWidth > 0, "节点地区 SVG 旗帜没有载入");
-  assert.equal(alphaAvatar.textContent, "");
-  assert.equal(alphaAvatar.classList.contains("has-region"), true);
-  assert.equal(alphaAvatar.title, "中国台湾 (TW) · 点击选择国家/地区旗帜");
-  assert.equal(alphaAvatar.getAttribute("aria-label"), "选择国家/地区旗帜：中国台湾 (TW)");
-  // A node whose region the list already resolved renders its flag without a
-  // per-node lookup; that is what keeps a node grid from costing one request
-  // per card on a link where a single read takes about a second.
-  await waitFor(() => {
-    const flag = document.querySelector(
-      '[data-agent-node="bravo"] [data-region-avatar] img[src="/api/v1/region-flags/sg"]',
-    );
-    return flag?.complete && flag.naturalWidth > 0 ? flag : null;
-  }, "节点列表内联地区没有渲染旗帜");
-  assert.equal(
-    testAPI.calls.some(
-      (call) => call.method === "GET" && call.path === "/agents/bravo/region",
-    ),
-    false,
-    "列表已解析地区的节点不应再逐节点查询地区",
-  );
-  await waitFor(() => {
-    const inline = document.querySelector('[data-komari-link="delta"]');
-    return inline?.querySelector("[data-komari-traffic]")?.textContent ===
-      "5.0 GB / 20.0 GB"
-      ? inline
-      : null;
-  }, "节点列表内联 Komari 资源没有渲染月流量");
-  assert.equal(
-    testAPI.calls.some(
-      (call) => call.method === "GET" && call.path === "/agents/delta/komari",
-    ),
-    false,
-    "列表已内联 Komari 资源的节点不应再逐节点读取",
-  );
-  assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
-  assert.ok(
-    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),
-    "绑定 Komari UUID 后必须保留原实时网络内容",
-  );
-  assert.equal(
-    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-total]"),
-    null,
-    "绑定 Komari UUID 后应只替换原累计网络内容",
-  );
-  assert.ok(
-    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-rate"]'),
-    "未绑定 Komari UUID 的节点必须保留原实时网络内容",
-  );
-  assert.ok(
-    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-total"]'),
-    "未绑定 Komari UUID 的节点必须保留原累计网络内容",
-  );
-
+async function testNativeAddressRefresh(testAPI) {
+  const original = testAPI.agents[0];
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let copied;
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { copied = value; } } });
+  const card = () => document.querySelector('.a-probe[data-agent-id="alpha"]');
+  const row = (root, family) => root.querySelector(`[data-ip-family="${family}"]`);
+  const address = (root, family) => row(root, family)?.querySelector('[dir=ltr]').textContent;
+  const update = async (labels, metrics, ready) => {
+    testAPI.agents[0] = { ...original, labels, metrics: { ...original.metrics, ...metrics }, features: [...original.features, 'public-ip-probe-v1'] };
+    await waitFor(ready, 'native public address refresh did not converge');
+  };
+  let settings;
+  try {
+    const stable = card();
+    const hostname = 'node-' + 'edge'.repeat(18) + '.example.invalid';
+    await update({ ...original.labels, client_address: hostname }, { public_ipv4: '198.35.26.96', public_ipv6: '' }, () => card().textContent.includes(`手动连接地址：${hostname}`));
+    assert.equal(card(), stable, 'address refresh replaced the node card');
+    assert.ok(card().scrollWidth <= card().clientWidth + 1, 'long manual hostname overflows its node card');
+    assert.equal(address(card(), 'v4'), '198.35.26.96', 'manual hostname replaced the verified IP family');
+    assert.ok(!row(card(), 'v6'), 'unavailable IPv6 rendered as a detected address');
+    assert.equal(row(card(), 'v4').title, 'Agent 本地直连探测', 'probe origin missing');
+    card().querySelector('[aria-label="复制 ALPHA 的 IPv4：198.35.26.96"]').click();
+    await waitFor(() => copied === '198.35.26.96', 'native copy used the hostname instead of IPv4');
+    [...card().querySelectorAll('button')].find(button => button.textContent === '查看设置').click();
+    settings = await waitFor(() => document.querySelector('dialog[open] input[name=name]')?.closest('dialog'), 'node address details missing');
+    assert.equal(address(settings, 'v4'), '198.35.26.96', 'node details omitted the public IPv4');
+    assert.ok(settings.textContent.includes(`手动连接地址：${hostname}`), 'node details omitted the manual connection hostname');
+    const detailRow = row(settings, 'v4');
+    await update({ ...original.labels, client_address: '93.184.216.34', public_ip: '2001:4860:4860::8888' }, { public_ipv4: '198.35.26.96', public_ipv6: '' }, () => address(settings, 'v4') === '93.184.216.34' && address(card(), 'v6') === '2001:4860:4860::8888');
+    assert.equal(row(settings, 'v4'), detailRow, 'detail address refresh replaced the existing family row');
+    assert.equal(row(settings, 'v4').title, '手动设置', 'manual source not identified');
+    assert.equal(row(settings, 'v6').title, '节点公网 IP');
+    assert.ok(!card().textContent.includes('手动连接地址：') && !settings.textContent.includes('手动连接地址：'), 'manual literal duplicated as a hostname note');
+    row(card(), 'v4').querySelector('button').click();
+    await waitFor(() => copied === '93.184.216.34', 'in-place copy retained the old IP');
+    assert.ok(row(card(), 'v4').querySelector('button').getAttribute('aria-label').endsWith('93.184.216.34'), 'copy accessible label retained stale IP');
+    await update(original.labels, { public_ipv4: '::ffff:0101:0101', public_ipv6: '' }, () => address(settings, 'v4') === '1.1.1.1');
+    assert.equal(address(card(), 'v4'), '1.1.1.1', 'mapped IPv4 did not normalize');
+    await update(original.labels, { public_ipv4: '172.69.135.152', observed_public_ip: '93.184.216.34', public_ipv6: '' }, () => address(settings, 'v4') === '93.184.216.34');
+    assert.equal(row(settings, 'v4').title, '已验证连接来源', 'relay probe did not use the verified connection fallback');
+    await update(original.labels, { public_ipv4: '104.22.17.83', observed_public_ip: '', public_ipv6: '' }, () => !row(settings, 'v4') && !row(card(), 'v4'));
+    assert.ok(card().textContent.includes('暂无公网 IP'), 'relay-only addresses masquerade as public IPs');
+    assert.ok(!settings.querySelector('.a-ip-copy'), 'unavailable address retains a stale copy target');
+    await update(original.labels, { public_ipv4: '198.35.26.96', public_ipv6: '2001:4860:4860::8888' }, () => address(settings, 'v4') === '198.35.26.96' && !!row(settings, 'v6'));
+    assert.equal(row(settings, 'v6').title, 'Agent 本地直连探测', 'IPv6 source missing');
+    assert.ok(document.documentElement.scrollWidth <= innerWidth + 1 && settings.scrollWidth <= settings.clientWidth + 1, 'address content overflows');
+    settings.querySelector('[aria-label=关闭]').click();
+    await waitFor(() => !settings.isConnected, 'node address details did not close');
+    settings = null;
+  } finally {
+    settings?.close();
+    testAPI.agents[0] = original;
+    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard); else delete navigator.clipboard;
+  }
+  const refresh = [...document.querySelectorAll('.a-top button')].find(button => button.textContent === '刷新');
+  refresh.click();
+  await waitFor(() => !refresh.disabled && address(card(), 'v4') === original.metrics.public_ipv4, 'address fixture did not restore');
 }

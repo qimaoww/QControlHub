@@ -316,6 +316,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
+		task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+		if err != nil {
+			return core.Task{}, err
+		}
 		settings, settingsErr := s.panelSettingsForOwner(ctx, tx, scopeForConfig(ctx).OwnerID)
 		if settingsErr != nil {
 			return core.Task{}, settingsErr

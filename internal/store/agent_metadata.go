@@ -11,8 +11,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/geoip"
 )
 
-const komariUUIDLabel = "komari_uuid"
-
 // AgentRegionCode returns the optional operator-selected display region.
 func AgentRegionCode(agent core.Agent) string {
 	code := strings.ToUpper(strings.TrimSpace(agent.Labels["region_code"]))
@@ -62,39 +60,6 @@ func (s *Store) SetAgentName(ctx context.Context, id, name string) error {
 	}
 	defer tx.Rollback(ctx)
 	command, err := tx.Exec(ctx, `UPDATE agents SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, name)
-	if err != nil {
-		return err
-	}
-	if command.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return tx.Commit(ctx)
-}
-
-// AgentKomariUUID returns the optional Komari node UUID stored with the
-// QControlHub agent's display labels. Keeping this as an agent preference
-// avoids coupling the enrollment protocol to a third-party monitor.
-func AgentKomariUUID(agent core.Agent) string {
-	return strings.TrimSpace(agent.Labels[komariUUIDLabel])
-}
-
-// SetAgentKomariUUID updates or clears the optional Komari node UUID.
-func (s *Store) SetAgentKomariUUID(ctx context.Context, id, uuid string) error {
-	uuid = strings.TrimSpace(uuid)
-	if len(uuid) > 100 || strings.ContainsAny(uuid, "\r\n\t") {
-		return fmt.Errorf("%w: Komari server UUID is invalid", ErrInvalid)
-	}
-	tx, err := s.beginAgentAdministrationTx(ctx, id)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	command, err := tx.Exec(ctx, `
-		UPDATE agents SET labels = CASE
-			WHEN $2='' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $3::text
-			ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$3::text], to_jsonb($2::text), true)
-		END
-		WHERE id=$1 AND revoked_at IS NULL`, id, uuid, komariUUIDLabel)
 	if err != nil {
 		return err
 	}

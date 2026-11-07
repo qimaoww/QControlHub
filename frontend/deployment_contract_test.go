@@ -2,7 +2,7 @@ package frontend
 
 import (
 	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -98,9 +98,9 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	}
 	content := string(index)
 	for _, required := range []string{
-		`/assets/app.css?v=__QCH_CSS_VERSION__`,
-		`/assets/app.js?v=__QCH_JS_VERSION__`,
-		`rel="modulepreload" href="/assets/modules/dashboard.js?v=__QCH_JS_VERSION__"`,
+		`/assets/startup.css?v=__QCH_STARTUP_CSS_VERSION__`,
+		`/assets/bootstrap.js?v=__QCH_JS_VERSION__`,
+		`analytics=__QCH_ANALYTICS_CSS_VERSION__`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("index.html is missing cache key placeholder %q", required)
@@ -110,16 +110,22 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, placeholder := range []string{"__QCH_CSS_VERSION__", "__QCH_JS_VERSION__"} {
+	for _, placeholder := range []string{"__QCH_JS_VERSION__", "__QCH_ANALYTICS_CSS_VERSION__", "__QCH_STARTUP_CSS_VERSION__"} {
 		if !strings.Contains(string(dockerfile), placeholder) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
 		}
 	}
-	if !strings.Contains(string(dockerfile), `modules/[^\"]+\\.js`) || !strings.Contains(string(dockerfile), `?v=${js_version}`) {
-		t.Error("Dockerfile does not add the aggregate JavaScript cache key to module imports")
+	for _, retired := range []string{"COPY frontend/app.js ", "COPY frontend/app.css ", "__QCH_CSS_VERSION__", "/assets/app.js", "/assets/app.css"} {
+		if strings.Contains(string(dockerfile), retired) || strings.Contains(content, retired) {
+			t.Errorf("web entrypoint/build retains retired classic asset %q", retired)
+		}
 	}
-	if !strings.Contains(string(dockerfile), `import\\(\"\\./modules/`) {
-		t.Error("Dockerfile does not add the aggregate JavaScript cache key to lazy module imports")
+	// Run the build expressions against both quote conventions and lazy imports.
+	output := rewriteModuleCacheImports(t, "import { a } from './a.js';\nimport { b } from \"../b.js\";\nimport('./c.js');\nimport(\"../d.js\");\nimport('https://example.test/e.js');\n")
+	for _, path := range []string{"./a.js?v=cache-test", "../b.js?v=cache-test", "./c.js?v=cache-test", "../d.js?v=cache-test", "https://example.test/e.js'"} {
+		if !strings.Contains(output, path) {
+			t.Errorf("module cache transformation missing %q: %s", path, output)
+		}
 	}
 	if !strings.Contains(string(dockerfile), `js_content_version`) || !strings.Contains(string(dockerfile), `${VERSION}`) {
 		t.Error("Dockerfile JavaScript cache key must include both content and release version")
@@ -141,21 +147,39 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	}
 }
 
+func rewriteModuleCacheImports(t *testing.T, source string) string {
+	t.Helper()
+	dockerfile := mustReadFrontendFile(t, "../Dockerfile")
+	var expressions []string
+	for _, line := range strings.Split(string(dockerfile), "\n") {
+		if strings.Contains(line, "-e ") && strings.Contains(line, "?v=${js_version}") {
+			expressions = append(expressions, strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\")))
+		}
+	}
+	if len(expressions) != 2 {
+		t.Fatalf("expected static and lazy cache expressions, got %d", len(expressions))
+	}
+	expressions[len(expressions)-1] = strings.TrimSuffix(expressions[len(expressions)-1], "{} +")
+	command := exec.Command("sh", "-c", "js_version=cache-test; sed -E "+strings.Join(expressions, " "))
+	command.Stdin = strings.NewReader(source)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("module cache expressions failed: %s: %v", output, err)
+	}
+	return string(output)
+}
+
 func TestSPAModulesArePublished(t *testing.T) {
 	for _, name := range []string{
-		"dashboard.js",
-		"agents.js",
-		"client-access.js",
-		"substore-sync.js",
-		"configs.js",
-		"tasks.js",
-		"traffic.js",
-		"settings.js",
-		"route-loader.js",
-		"core-log-preferences.js",
-		"../module_smoke.mjs",
+		"bootstrap.js", "analytics/app.js", "analytics/operations.js",
+		"analytics/nodes.js", "analytics/client-access.js", "analytics/substore.js",
+		"analytics/configs.js", "analytics/live-config.js", "analytics/config-studio.js",
+		"analytics/traffic.js", "analytics/settings.js", "analytics/observability.js",
+		"analytics/users.js", "analytics/certificates.js", "analytics/ip-quality.js",
+		"analytics/tcp.js", "analytics/themes.js",
+		"modules/route-loader.js", "modules/core-log-preferences.js", "module_smoke.mjs",
 	} {
-		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
+		if _, err := os.Stat(name); err != nil {
 			t.Errorf("missing SPA module %s: %v", name, err)
 		}
 	}

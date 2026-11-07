@@ -1,84 +1,69 @@
 import assert from "node:assert/strict";
-import * as dashboard from "./modules/dashboard.js";
-import * as settings from "./modules/settings.js";
-import * as access from "./modules/access-control.js";
-import * as tcp from "./modules/system-bbr.js";
-import * as client from "./modules/client-access.js";
-import * as substore from "./modules/substore-sync.js";
-import * as tasks from "./modules/tasks.js";
-import * as logs from "./modules/core-logs.js";
-import * as traffic from "./modules/traffic.js";
-import * as users from "./modules/users.js";
-import * as quality from "./modules/ip-quality.js";
-import { createTaskView } from "./modules/task-view.js";
+import { taskRetryState, taskTiming, coreSourceName, coreSourceLabel } from "./modules/task-model.js";
 
-const boundaries = [
-  [quality, "installIPQuality"],
-  [dashboard, "installDashboard", "dashboard-model", ["dashboardTrafficMonthDays", "aggregateDashboardTrafficDays"]],
-  [settings, "installSettings"],
-  [access, "installAccessControl"],
-  [tcp, "installSystemBBR", "system-bbr-model", ["systemBBRFeature", "systemBBRActions", "validateTCPSelection", "systemBBRState"]],
-  [client, "installClientAccess", "client-access-model", ["normalizeClientAccessFilters", "filterClientAccessEntries", "groupClientAccessEntries", "clientAccessAddressChoices", "clientAccessEntryForAddress"]],
-  [substore, "installSubStoreSync", "substore-model", ["filterSubStoreProfiles", "groupSubStoreProfiles", "subStoreSelectionPayload", "subStoreAddressChoices", "subStoreProfileNodeCount", "subStoreAddressModeLabel"]],
-  [tasks, "installTasks", "task-model", ["coreSourceName", "coreSourceLabel"]],
-  [logs, "installCoreLogs", "core-log-model", ["filterCoreLogEntries", "coreLogFilterCounts"]],
-  [traffic, "installTraffic", "traffic-model", ["trafficCardIdentity", "orderTrafficItems", "mergeVisibleTrafficCardOrder", "trafficRateForDisplay", "mergeTrafficPorts"]],
-  [users, "installUsers", "user-model", ["userPermissions", "parseSharedPorts", "formatSharedPorts", "sharedPortsLabel", "selectedSharedEngines", "sharedLimitBytes", "sharedLimitGiB", "agentShareStatus", "mergeUserAllocation"]],
-];
-
-for (const [module, installer, owner, helpers] of boundaries) {
-  const state = { route: "", data: {}, session: { role: "admin" } };
-  const unexpected = () => assert.fail(`${installer} must not perform work before its collaborators are wired`);
-  const ctx = new Proxy({
-    state, engines: [], actions: [],
-    api: unexpected, shell: unexpected, notify: unexpected, can: unexpected,
-    setTimer: unexpected, clearTimer: unexpected,
-  }, { get: (target, key) => target[key] ?? unexpected });
-  const page = module[installer](ctx);
-  if (installer === "installUsers") {
-    assert.deepEqual(Object.keys(page).sort(), ["captureDraft", "closeInvitation", "hasUnsavedChanges", "myQuota", "users"]);
-    assert.equal(page.hasUnsavedChanges(), false);
-    page.captureDraft();
-    page.closeInvitation();
-  } else {
-    assert.equal(typeof page, "function", `${installer} preserves its callable API`);
-    if (installer === "installAccessControl") assert.equal(typeof page.open, "function");
+// Native pages perform work when called. Importing their modules must remain
+// inert so route loading cannot start requests, read the DOM or mount a page.
+const descriptors = new Map(["document", "window", "fetch", "localStorage"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+const unexpected = () => assert.fail("native route import performed browser work");
+try {
+  for (const key of descriptors.keys()) Object.defineProperty(globalThis, key, { configurable: true, value: key === "fetch" ? unexpected : new Proxy({}, { get: unexpected }) });
+  for (const [path, exports] of [
+    ["operations", ["dashboardPage", "tasksPage", "quotaPage"]], ["settings", ["settingsPage"]],
+    ["client-access", ["clientAccessPage"]], ["substore", ["substorePage"]],
+    ["traffic", ["trafficPage"]], ["users", ["usersPage"]],
+    ["nodes", ["nodesPage"]], ["live-config", ["liveConfigPage"]],
+  ]) {
+    const module = await import(`./analytics/${path}.js`);
+    for (const name of exports) assert.equal(typeof module[name], "function", `${path}.${name} is the shipped page entry`);
   }
-  if (owner) {
-    const focused = await import(`./modules/${owner}.js`);
-    for (const name of helpers) assert.equal(module[name], focused[name], `${installer}.${name} must re-export the focused owner`);
+} finally {
+  for (const [key, descriptor] of descriptors) {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else delete globalThis[key];
   }
 }
-assert.equal(client.copyClientValue, (await import("./modules/client-clipboard.js")).copyClientValue);
-assert.equal(traffic.resetTrafficCreateForm, (await import("./modules/traffic-form-model.js")).resetTrafficCreateForm);
-assert.equal(traffic.renderTrafficAccounting, (await import("./modules/traffic-accounting-view.js")).renderTrafficAccounting);
-console.log("Remaining route factories are inert and preserve their public APIs");
+for (const [owner, helpers] of [
+  ["dashboard-model", ["dashboardTrafficMonthDays", "aggregateDashboardTrafficDays"]],
+  ["client-access-model", ["normalizeClientAccessFilters", "filterClientAccessEntries", "groupClientAccessEntries", "clientAccessAddressChoices", "clientAccessEntryForAddress"]],
+  ["substore-model", ["filterSubStoreProfiles", "groupSubStoreProfiles", "subStoreSelectionPayload", "subStoreAddressChoices", "subStoreProfileNodeCount", "subStoreAddressModeLabel"]],
+  ["traffic-model", ["trafficCardIdentity", "orderTrafficItems", "mergeVisibleTrafficCardOrder", "trafficRateForDisplay", "mergeTrafficPorts"]],
+  ["user-model", ["userPermissions", "parseSharedPorts", "formatSharedPorts", "sharedPortsLabel", "selectedSharedEngines", "sharedLimitBytes", "sharedLimitGiB", "agentShareStatus", "mergeUserAllocation"]],
+]) {
+  const model = await import(`./modules/${owner}.js`);
+  for (const name of helpers) assert.notEqual(model[name], undefined, `${owner}.${name} remains available to native pages`);
+}
+assert.equal(typeof coreSourceName, "function"); assert.equal(typeof coreSourceLabel, "function");
+console.log("Native route imports remain inert and focused business APIs remain available");
 
-// Historical task JSON omits config_version when the database value is NULL.
-// It must not offer an ordinary retry which the server cannot authorize.
+// Keep the original historical-task cases while checking the shared state
+// consumed by the native UI. Browser task-retry covers the actual controls,
+// permission combinations, target/version payload and recovery guidance.
 const taskFixture = { id: "historical-task", agent_id: "node", engine: "mihomo", action: "deploy", status: "canceled", config_id: "archive" };
-const taskCards = (task, permissions = ["tasks.execute", "configs.write"]) => createTaskView({
-  state: { data: {} }, actions: [], can: permission => permissions.includes(permission),
-  esc: value => String(value ?? ""), statusName: String, engineName: String, short: String,
-  date: () => "fixture date", ago: () => "fixture age", actionName: String, statusTone: () => "neutral",
-}).renderTaskCards([task], [], new Set());
 for (const config_version of [undefined, null, 0]) {
-  const html = taskCards({ ...taskFixture, config_version });
-  assert.match(html, /历史关联缺失/);
-  assert.match(html, /缺少配置历史关联/);
-  assert.doesNotMatch(html, /data-retry=|vundefined|vnull|· v0/);
-  assert.match(html, /data-edit-retry="historical-task"/);
+  const state = taskRetryState({ ...taskFixture, config_version });
+  assert.equal(state.missingConfigVersion, true);
+  assert.equal(state.canRetry, false);
+  assert.equal(state.canEditRetry, true);
+  assert.match(state.diagnostic.advice, /缺少配置历史关联/);
 }
-const versioned = taskCards({ ...taskFixture, config_version: 3 });
-assert.match(versioned, /重试配置/);
-assert.match(versioned, /data-retry-version="3"/);
-assert.doesNotMatch(versioned, /缺少配置历史关联|历史关联缺失/);
-const statusTask = taskCards({ ...taskFixture, action: "status", config_id: "" });
-assert.match(statusTask, /data-retry="historical-task"/);
-assert.match(statusTask, /重试任务/);
-assert.doesNotMatch(statusTask, /缺少配置历史关联|历史关联缺失/);
-assert.doesNotMatch(taskCards(taskFixture, []), /data-retry=|data-edit-retry=/);
-const failedLegacy = taskCards({ ...taskFixture, status: "failed", error: "Caddy rollback failed" });
-assert.match(failedLegacy, /缺少配置历史关联/);
-assert.match(failedLegacy, /回滚失败：需检查节点最终服务与路由状态/);
-console.log("Task retry rendering handles omitted historical revisions and operation permissions");
+const versioned = taskRetryState({ ...taskFixture, config_version: 3 });
+assert.equal(versioned.canRetry, true); assert.equal(versioned.missingConfigVersion, false);
+assert.equal(versioned.diagnostic, null);
+const statusTask = taskRetryState({ ...taskFixture, action: "status", config_id: "" });
+assert.equal(statusTask.canRetry, true); assert.equal(statusTask.canEditRetry, false);
+assert.equal(statusTask.diagnostic, null);
+const failedLegacy = taskRetryState({ ...taskFixture, status: "failed", error: "Caddy rollback failed" });
+assert.match(failedLegacy.diagnostic.advice, /缺少配置历史关联/);
+assert.match(failedLegacy.diagnostic.rollback, /回滚失败：需检查节点最终服务与路由状态/);
+console.log("Native task retry state preserves omitted historical revisions and rollback diagnostics");
+
+const started = '2026-11-07T01:00:00Z', finished = '2026-11-07T01:01:05Z';
+assert.equal(taskTiming({status:'pending'}), '准备执行');
+assert.equal(taskTiming({status:'running'}), '正在启动执行');
+assert.equal(taskTiming({status:'running',started_at:'invalid'}), '正在启动执行');
+assert.equal(taskTiming({status:'running',started_at:started},Date.parse(finished)), '已运行 1\u00a0分 5\u00a0秒');
+assert.equal(taskTiming({status:'running',started_at:finished},Date.parse(started)), '已运行 0\u00a0秒');
+assert.equal(taskTiming({status:'succeeded',started_at:started,finished_at:finished}), '执行 1\u00a0分 5\u00a0秒');
+assert.equal(taskTiming({status:'failed',started_at:started,finished_at:'2026-11-07T01:00:05Z'}), '执行 5\u00a0秒');
+assert.equal(taskTiming({status:'canceled',finished_at:finished}), '未开始执行');
+for (const task of [{status:'failed'},{status:'succeeded',started_at:started},{status:'failed',started_at:'invalid',finished_at:finished}]) assert.equal(taskTiming(task),'耗时未知');

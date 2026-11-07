@@ -1,6 +1,5 @@
-import { createIPQualityBindings } from "./ip-quality-bindings.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityAvailableDates, ipQualityBlockReason, ipQualityFeature, ipQualityReportRecord } from "./ip-quality-model.js";
-import { createPoller } from "./refresh.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityAvailableDates, ipQualityBlockReason, ipQualityFeature, ipQualityReportRecord, validateIPQualityHistory } from "./ip-quality-model.js";
+import { createPoller } from "./poller.js";
 
 export function createIPQualityController(ctx, view) {
   const { state, api, can, notify, confirmAction,
@@ -17,7 +16,7 @@ export function createIPQualityController(ctx, view) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
   const editable = (agent) => agent?.can_manage !== false && can("agents.manage", agent) && can("tasks.execute");
-  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule, select, showMonth });
+  const bind = ctx.bind?.({ state, load, runCheck, setSchedule, select, showMonth }) || (() => {});
   const poller = createPoller({
     run: () => load(undefined, { background: true }),
     isActive: () => current(accountData, scopeEpoch) && !document.hidden && !requestController,
@@ -122,18 +121,8 @@ export function createIPQualityController(ctx, view) {
         agentsPromise,
       ]);
       if (!current(data, epoch) || request !== serial) return false;
-      if (!Array.isArray(history?.records) || !Array.isArray(history?.schedules) || !Array.isArray(history?.dates) || !Array.isArray(agents))
-        throw new Error("IPQuality 接口返回了无效数据");
-      if ((history.date || ipQualityLatest) !== date || history.timezone !== timezone ||
-          history.schedules.some(schedule => !schedule?.agent_id) ||
-          history.records.some(record => !record || !record.task_id || !record.agent_id ||
-            !["pending", "running", "succeeded", "failed", "canceled"].includes(record.status) ||
-            record.result && (!Array.isArray(record.result.reports) || record.result.reports.some(report => !report || typeof report !== "object")) ||
-            record.archives && (!Array.isArray(record.archives) || record.archives.some(archive => !archive || typeof archive !== "object")) ||
-            record.last_successful && (record.last_successful.agent_id !== record.agent_id || record.last_successful.status !== "succeeded" ||
-              !Array.isArray(record.last_successful.result?.reports) || record.last_successful.result.reports.some(report => !report || typeof report !== "object") ||
-              record.last_successful.archives && (!Array.isArray(record.last_successful.archives) || record.last_successful.archives.some(archive => !archive || typeof archive !== "object")))))
-        throw new Error("IPQuality 接口返回了无效数据或不匹配的检测日期");
+      if (!Array.isArray(agents)) throw new Error("检测节点返回了无效数据");
+      validateIPQualityHistory(history, date, timezone);
       availableDates = ipQualityAvailableDates(history.dates);
       readFailed = false;
       readError = "";

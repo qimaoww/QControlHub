@@ -1,245 +1,147 @@
-import { assert, pause, waitFor, createConfigFixture as fixture } from "./config-fixture.mjs";
+import { assert, pause, waitFor, createConfigFixture as fixture } from './config-fixture.mjs';
+const dialog=()=>[...document.querySelectorAll('dialog[open]')].at(-1);
+const form=()=>dialog()?.querySelector('form:has([name=mutation])');
+const alerts=()=>[...document.querySelectorAll('.a-toast[role=alert],.a-dialog .a-notice')].filter(item=>item.checkVisibility()).map(item=>item.textContent).join(' ');
+const source=()=>document.querySelector('.a-main [name=content]');
+async function operation(test,kind){
+  await waitFor(()=>!test.root.hasAttribute('aria-busy'),'previous common operation did not release its lock');
+  test.common();await waitFor(form,'common editor missing');
+  form().elements.mutation.value=kind;form().elements.mutation.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>!form()?.textContent.includes('正在读取配置项'),'common operation did not load');
+}
+async function field(key){
+  assert([...form().elements.key.options].some(option=>option.value===key),`common field ${key} unavailable`);
+  form().elements.key.value=key;form().elements.key.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>!form()?.textContent.includes('正在读取配置项'),`common field ${key} did not load`);
+}
+const protectedStructure=test=>{const root=JSON.parse(test.saved().content);return JSON.stringify(Object.fromEntries(['inbounds','outbounds','listeners','servers'].filter(key=>key in root).map(key=>[key,root[key]])));};
+export async function testCommonConfigRuntime(){
+  await testCommonReadRecovery();
+  await testSSRustOverrides();
+  for(const engine of ['xray','sing-box','mihomo','ss-rust']){
+    const test=await fixture(engine),structure=protectedStructure(test);
+    assert([...document.querySelectorAll('.a-main button')].filter(button=>button.textContent==='添加入站').length===1,'standalone add-inbound entry duplicated/missing');
+    await operation(test,'add');assert(!form().elements.protocol&&!test.calls.some(call=>call.path.endsWith('/plans')),'common editor generates unrelated inbound credentials');
+    assert([...form().elements.key.options].map(option=>option.value).join(',')===`dns,${test.extraField}`,'add includes present or inbound-scoped fields');
+    assert(dialog().scrollWidth<=dialog().clientWidth+1,'common dialog overflows');
+    form().elements.fragment.value='{"servers":["1.1.1.1"]}';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));
+    await field(test.extraField);form().elements.fragment.value='{"draft":true}';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));await field('dns');
+    assert(form().elements.fragment.value==='{"servers":["1.1.1.1"]}','field switch discarded draft');
+    dialog().querySelector('[aria-label=关闭]').click();await pause();assert(form()?.elements.fragment.value.includes('1.1.1.1'),'canceling close lost common draft');
+    test.confirm=true;let release;test.gate=new Promise(resolve=>{release=resolve;});const current=form();current.elements.intent.value='deploy';current.requestSubmit();current.requestSubmit();await pause();
+    assert(current.getAttribute('aria-busy')==='true'&&current.querySelector('fieldset').disabled,'pending common write does not lock fields');
+    dialog().querySelector('[aria-label=关闭]').click();await pause();assert(form()===current,'pending common write closed');release();await test.settle(1);test.gate=null;
+    assert(test.writes[0].path.endsWith('/fields/dns')&&test.writes[0].mutation==='add'&&test.writes[0].expected_version===1&&!Object.hasOwn(test.writes[0],'install_if_missing'),'common save lost target/CAS/install boundary');
+    assert(protectedStructure(test)===structure&&JSON.parse(test.saved().content).dns.servers[0]==='1.1.1.1','common add changed protected structure');
+    assert(test.confirmations.some(item=>item.title==='其他草稿尚未保存'),'saving one field discarded other drafts without confirmation');
+    const baseline=source().value;source().value+='\n ';source().dispatchEvent(new Event('input',{bubbles:true}));test.confirm=false;test.common();await pause();assert(!form()&&source().value===baseline+'\n ','opening common editor overwrote source draft');source().value=baseline;source().dispatchEvent(new Event('input',{bubbles:true}));
+    await operation(test,'modify');await field('dns');const choices=[...form().elements.key.options].map(option=>option.value);assert(choices.includes(test.primaryField)&&choices.includes(test.secondaryField)&&choices.includes('dns')&&!choices.includes(test.extraField),'modify choices ignore saved presence');
+    form().elements.fragment.value='{"servers":["9.9.9.9"]}';form().elements.mutation.value='delete';test.submit('deploy');await waitFor(()=>alerts().includes('操作已变化'),'tampered operation not rejected');assert(test.writes.length===1,'tampered operation reached API');form().elements.mutation.value='modify';test.confirm=true;test.submit('deploy');await test.settle(2);
+    assert(test.writes[1].expected_version===2&&protectedStructure(test)===structure,'common modify changed unrelated target');
+    const before=JSON.parse(test.saved().content);await operation(test,'delete');await field('dns');assert(form().elements.fragment.readOnly&&form().elements.fragment.value.includes('9.9.9.9'),'delete has no readonly preview');
+    test.confirm=false;test.submit('deploy');await pause();assert(test.writes.length===2&&form(),'canceled common delete wrote data');assert(test.confirmations.at(-1).message.includes('dns')&&test.confirmations.at(-1).message.includes('重启'),'delete confirmation lacks field/deploy impact');
+    await waitFor(()=>!form().hasAttribute('aria-busy'),'canceled common delete did not release its form');
+    test.confirm=true;test.submit('deploy');await test.settle(3);delete before.dns;
+    assert(test.writes[2].mutation==='delete'&&test.writes[2].expected_version===3&&test.writes[2].fragment===''&&JSON.stringify(JSON.parse(test.saved().content))===JSON.stringify(before),'delete changed more than selected field');
+    await operation(test,'add');assert([...form().elements.key.options].some(option=>option.value==='dns'),'deleted field cannot be re-added');test.dispose();
+  }
+  for(const options of [{missing:true},{emptyInbounds:true},{native:true}]){
+    const test=await fixture(options.native?'mihomo':'xray',options);assert([...document.querySelectorAll('.a-main button')].some(button=>button.textContent==='添加入站'),'empty/native workspace lacks standalone inbound entry');test.dispose();
+  }
+  for(const options of [{readonly:true},{noTasks:true},{import:true}]){
+    const test=await fixture('xray',options);assert(![...document.querySelectorAll('.a-main button')].some(button=>button.textContent==='通用配置项'),'denied/import source exposes common mutation');assert(!test.writes.length,'denied common operation wrote data');test.dispose();
+  }
+  for(const options of [{missing:true},{missing:true,savedMissing:true},{offline:true}]){
+    const test=await fixture('ss-rust',options);test.common();await pause();
+    if(options.missing&&!options.savedMissing)assert(!form(),'missing config permits common mutation');else{await waitFor(()=>form()&&!form().textContent.includes('正在读取配置项'),'unavailable core draft did not load');assert(form().querySelector('button[type=submit]').disabled,'unavailable core permits common write');}
+    assert(!test.writes.length,'common operation implicitly installed core');test.dispose();
+  }
+  for(const options of [{noCommon:true},{allCommon:true}]){
+    const test=await fixture('xray',options);await operation(test,options.noCommon?'delete':'add');assert(!form().elements.key.options.length&&form().querySelector('button[type=submit]').disabled,'empty choices expose accidental save target');test.dispose();
+  }
+  for(const kind of ['workspace','field']){
+    const test=await fixture('xray');if(kind==='workspace')test.stale=true;else test.staleField=true;test.common();await waitFor(()=>alerts().includes('配置已变化'),'stale common read conflict hidden');assert(!test.writes.length&&(!form()||form().querySelector('button[type=submit]').disabled),'stale common read permits write');test.dispose();
+  }
+  const malicious='测试读取失败：</textarea><img src=x onerror="bad()"><script>bad()</script>';
+  const escaped=await fixture('xray');escaped.fieldError=malicious;escaped.common();
+  await waitFor(()=>form()&&form().textContent.includes(malicious),'field failure text missing');
+  assert(!dialog().querySelector('img,script')&&form().querySelector('[type=submit]').disabled&&!escaped.writes.length,'failed field injected markup or permits mutation');escaped.dispose();
+  const isolated=await fixture('xray');await operation(isolated,'modify');const key=form().elements.key.value;form().elements.fragment.value='{"level":"draft-only"}';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));form().elements.mutation.value='delete';form().elements.mutation.dispatchEvent(new Event('change',{bubbles:true}));await field(key);assert(form().elements.fragment.readOnly&&!form().elements.fragment.value.includes('draft-only'),'modify draft leaked into delete preview');isolated.dispose();
+  const conflict=await fixture('xray');await operation(conflict,'modify');form().elements.fragment.value='{"level":"keep-this-draft"}';conflict.fail=true;conflict.confirm=true;conflict.submit('deploy');await waitFor(()=>form()?.textContent.includes('草稿已保留'),'common conflict lost draft feedback');assert(form().elements.fragment.value.includes('keep-this-draft')&&form().querySelector('button[type=submit]').disabled,'common conflict permits stale resubmit');conflict.dispose();
+  const late=await fixture('xray');let release;late.fieldGate=new Promise(resolve=>{release=resolve;});late.common();await waitFor(form,'deferred common form missing');late.dispose();release();await pause();assert(!dialog()&&!late.writes.length,'late common field escaped disposed session');
+}
 
-export async function testCommonConfigRuntime() {
-  const form = () => document.querySelector("#field-form");
-  const selectField = async key => {
-    const select = document.querySelector("[data-common-field]");
-    assert([...select.options].some(option=>option.value === key), `common field ${key} is unavailable`);
-    select.value = key;
-    select.dispatchEvent(new Event("change", {bubbles:true}));
-    await waitFor(()=>form() && document.querySelector("#common-options .field-editor-heading code")?.textContent === key,
-      `common field ${key} did not load`);
-  };
-  const protectedStructure = test => {
-    const saved = JSON.parse(test.saved().content);
-    return JSON.stringify(Object.fromEntries(["inbounds", "outbounds", "listeners", "servers"].filter(key=>key in saved).map(key=>[key, saved[key]])));
-  };
-  for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
-    const test = await fixture(engine);
-    const structure = protectedStructure(test);
-    test.selectCommon();
-    assert(!document.querySelector("dialog"), "selecting public config must not automatically open an editor");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作", "public selection did not change the operation menu");
-    assert(!document.querySelector("[data-common-actions]").hidden &&
-      document.querySelector('[data-inbound-action="modify"]').hidden, "public menu mixes common and inbound mutations");
-    const add = document.querySelector('[data-inbound-action="add"]');
-    assert(add && !add.hidden && !add.disabled && add.closest(".config-file-actions") &&
-      !add.closest(".config-inbound-menu") && document.querySelectorAll('[data-inbound-action="add"]').length === 1,
-      "add inbound must always be a single standalone source-toolbar action");
-    const preview = document.querySelector("[data-config-preview]");
-    if (preview) {
-      assert(add.nextElementSibling === preview, "add inbound must be immediately before merged preview");
-      const bounds = add.getBoundingClientRect(), previewBounds = preview.getBoundingClientRect();
-      assert(bounds.right <= previewBounds.left && Math.abs(bounds.top - previewBounds.top) <= 1,
-        "add inbound and merged preview must stay together on one row");
-    }
-    test.common("add");
-    await waitFor(()=>form(), "common add form did not load");
-    assert(document.querySelector("#config-inbound-title").textContent === "增加通用配置项", "common dialog title is incorrect");
-    assert(form().elements.mutation.type === "hidden" && form().elements.mutation.value === "add", "common add mutation is not locked");
-    let choices = [...document.querySelector("[data-common-field]").options].map(option=>option.value);
-    assert(choices.join(",") === `dns,${test.extraField}`, "add choices contain existing or inbound-scoped fields");
-    assert(!document.querySelector("dialog #server-plan-form, dialog #inbound-options, dialog .field-rail, dialog .config-source-studio"),
-      "common editor contains unrelated inbound forms or a second source editor");
-    assert(!test.calls.some(call=>call.path.endsWith("/plans")), "common editor generated unused inbound credentials");
-    if (innerWidth <= 600) {
-      const dialog = document.querySelector("dialog"), bounds = dialog.getBoundingClientRect();
-      const field = form().elements.fragment.getBoundingClientRect();
-      assert(dialog.scrollWidth <= dialog.clientWidth + 1 && field.left >= bounds.left && field.right <= bounds.right,
-        "mobile common editor overflows its dialog");
-      assert(form().querySelector("[data-field-intent=validate]").getBoundingClientRect().height >= 40,
-        "mobile common actions are too small");
-    }
-    form().elements.fragment.value = '{"servers":["1.1.1.1"]}';
-    await selectField(test.extraField);
-    form().elements.fragment.value = '{"draft":true}';
-    await selectField("dns");
-    assert(form().elements.fragment.value === '{"servers":["1.1.1.1"]}', "switching common fields discarded the local draft");
-    document.querySelector("[data-inbound-close]").click(); await pause();
-    assert(document.querySelector("dialog[open]") && form().elements.fragment.value.includes("1.1.1.1"),
-      "canceling common editor close discarded its draft");
-    test.confirm = true;
+async function testCommonReadRecovery(){
+  for(const shared of [false,true]){
+    const test=await fixture('xray',{shared});
     let release;
-    test.gate = new Promise(resolve=>{release=resolve;});
-    const submit = form().querySelector("[data-field-intent=validate]");
-    submit.click(); submit.click(); await pause();
-    assert(submit.disabled && document.querySelector("[data-common-field]").disabled &&
-      form().getAttribute("aria-busy") === "true", "common save did not lock form and field switching");
-    document.querySelector("[data-inbound-close]").click(); await pause();
-    assert(document.querySelector("dialog[open]"), "common dialog closed during a pending write");
-    release();
-    await waitFor(()=>!document.querySelector("dialog"), "common add did not return to the source editor");
-    test.gate = null;
-    assert(test.writes.length === 1 && test.writes[0].path.endsWith("/fields/dns") &&
-      test.writes[0].mutation === "add" && test.writes[0].expected_version === 1 &&
-      !Object.hasOwn(test.writes[0], "install_if_missing"), "common add used wrong field, revision, or installation flow");
-    assert(protectedStructure(test) === structure && JSON.parse(test.saved().content).dns.servers[0] === "1.1.1.1",
-      "adding a common field altered inbounds or their paired exits");
-    assert(document.querySelector("[data-config-operation-label]").textContent === "通用配置操作",
-      "common save changed the current file selection");
-    assert(test.confirmations.some(item=>item.title === "存在其他未保存修改"), "saving one common field silently discarded other field drafts");
+    try{
+      await operation(test,'modify');
+      await field(test.primaryField);
+      const draft=JSON.stringify({message:"private draft $&$`$'"});
+      const editor=form().elements.fragment;
+      editor.value=draft;editor.dispatchEvent(new Event('input',{bubbles:true}));
+      test.fieldGate=new Promise(resolve=>{release=resolve;});
+      const before=test.calls.length;
+      form().elements.key.value=test.secondaryField;form().elements.key.dispatchEvent(new Event('change',{bubbles:true}));
+      await waitFor(()=>test.calls.slice(before).some(call=>call.path.includes(`/fields/${test.secondaryField}`)),'deferred field read did not start');
+      test.fieldGate=null;
+      await field(test.primaryField);
+      assert(form().elements.fragment===editor&&editor.value===draft,'rapid field switching replaced the editor or lost the draft');
+      editor.focus();editor.setSelectionRange(2,7);
+      release();await pause();
+      assert(form().elements.key.value===test.primaryField&&editor.value===draft,'late field read overwrote the selected field');
+      assert(document.activeElement===editor&&editor.selectionStart===2&&editor.selectionEnd===7,'late read reset draft focus or selection');
+      test.fieldFailure=true;
+      await field(test.secondaryField);
+      assert(form().textContent.includes('配置项读取失败')&&form().querySelector('[type=submit]').disabled,'failed read hid the error or permitted a write');
+      test.fieldFailure=false;
+      await field(test.primaryField);
+      assert(editor.value===draft&&!form().querySelector('[type=submit]').disabled,'retry discarded the cached draft or kept the editor locked');
+      await field(test.secondaryField);
+      assert(!form().textContent.includes('配置项读取失败')&&!form().querySelector('[type=submit]').disabled,'failed field read was pinned instead of retried');
+      assert(!test.writes.length,'reading or switching fields submitted configuration');
+    }finally{release?.();test.fieldGate=null;test.dispose();}
+    const replacement=await fixture('xray',{shared});
+    try{
+      await operation(replacement,'modify');await field(replacement.primaryField);
+      assert(!form().elements.fragment.value.includes('private draft'),'retired workspace draft leaked into a new workspace');
+    }finally{replacement.dispose();}
+  }
+}
 
-    test.select("first");
-    assert(document.querySelector("[data-common-actions]").hidden && !document.querySelector('[data-inbound-action="modify"]').hidden,
-      "selecting an inbound did not restore inbound actions");
-    assert(!document.querySelector('[data-inbound-action="add"]').hidden && !document.querySelector('[data-inbound-action="add"]').disabled,
-      "selecting an existing inbound hid the standalone add action");
-    test.common("delete"); await pause();
-    assert(!document.querySelector("dialog"), "hidden common action can mutate the current inbound selection");
-    const menu = document.querySelector(".config-inbound-menu");
-    menu.querySelector("summary").focus();
-    menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
-    assert(document.activeElement.dataset.inboundAction === "modify", "keyboard menu navigation focused a hidden common action");
-    menu.querySelector("summary").focus();
-    menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowUp", bubbles:true}));
-    assert(document.activeElement.dataset.inboundAction === "delete", "menu ArrowUp did not enter at the last visible item");
-    menu.open = false;
-    if (["xray", "sing-box"].includes(engine)) {
-      document.querySelector("[data-config-preview]").click();
-      assert(document.querySelector("[data-common-actions]").hidden &&
-        document.querySelector('[data-common-action="modify"]').disabled, "merged preview is treated as common configuration");
-      assert(!document.querySelector('[data-inbound-action="add"]').hidden, "merged preview hid the standalone add action");
-      document.querySelector("[data-config-preview]").click();
-    }
-    test.selectCommon();
-    assert(!document.querySelector("dialog"), "returning to common source opened a modal");
-    const source = document.querySelector("[data-code-input]"), baseline = source.value;
-    source.value += "\n "; source.dispatchEvent(new Event("input"));
-    test.common("modify"); await pause();
-    assert(!document.querySelector("dialog") && test.notices.some(message=>message.includes("未保存修改")),
-      "common mutation ignored an unsaved source draft");
-    source.value = baseline; source.dispatchEvent(new Event("input"));
-    test.common("modify");
-    await waitFor(()=>form(), "common modify form did not load");
-    await selectField("dns");
-    choices = [...document.querySelector("[data-common-field]").options].map(option=>option.value);
-    assert(choices.includes(test.primaryField) && choices.includes(test.secondaryField) &&
-      choices.includes("dns") && !choices.includes(test.extraField), "modify choices do not reflect saved field presence");
-    assert(form().elements.fragment.value.includes("1.1.1.1") && form().elements.mutation.value === "modify",
-      "modify did not load the saved field value and locked operation");
-    form().elements.fragment.value = '{"servers":["9.9.9.9"]}';
-    form().elements.mutation.value = "delete";
-    form().querySelector("[data-field-intent=validate]").click(); await pause();
-    assert(test.writes.length === 1 && test.notices.some(message=>message.includes("操作已变化")),
-      "tampering with a hidden mutation escaped the common operation");
-    form().elements.mutation.value = "modify";
-    form().querySelector("[data-field-intent=validate]").click();
-    await waitFor(()=>!document.querySelector("dialog"), "common modify did not finish");
-    assert(test.writes.length === 2 && test.writes[1].mutation === "modify" &&
-      test.writes[1].expected_version === 2 && protectedStructure(test) === structure, "common modify changed another target");
-    const beforeDelete = JSON.parse(test.saved().content);
-    test.common("delete");
-    await waitFor(()=>form(), "common delete form did not load");
-    await selectField("dns");
-    assert(form().elements.fragment.readOnly && form().elements.fragment.value.includes("9.9.9.9") &&
-      form().elements.mutation.value === "delete", "common deletion must show the selected saved value read-only");
-    test.confirm = false;
-    form().querySelector("[data-field-intent=deploy]").click(); await pause();
-    assert(test.writes.length === 2 && document.querySelector("dialog[open]"), "canceling common deletion wrote data");
-    assert(test.confirmations.at(-1).message.includes("dns") &&
-      test.confirmations.at(-1).message.includes("重启内核"), "common delete confirmation omitted field identity or deploy impact");
-    test.confirm = true;
-    form().querySelector("[data-field-intent=validate]").click();
-    await waitFor(()=>!document.querySelector("dialog"), "common delete did not finish");
-    const afterDelete = JSON.parse(test.saved().content);
-    delete beforeDelete.dns;
-    assert(test.writes.length === 3 && test.writes[2].mutation === "delete" &&
-      test.writes[2].expected_version === 3 && test.writes[2].fragment === "" &&
-      JSON.stringify(afterDelete) === JSON.stringify(beforeDelete), "common deletion removed more than the selected field");
-    test.common("add");
-    await waitFor(()=>form(), "deleted common field cannot be added again");
-    assert([...document.querySelector("[data-common-field]").options].some(option=>option.value === "dns"),
-      "deleted common field remained in the wrong operation list");
-    test.dispose();
+async function testSSRustOverrides(){
+  const tag='HK & JP </textarea><img src=x onerror="bad()">';
+  for(const shared of [false,true]){
+    const test=await fixture('ss-rust',{native:true,shared,tags:[tag,'second'],globalFields:{outbound_bind_addr:'192.0.2.1'}});test.confirm=true;
+    const edit=async()=>{
+      test.select(tag);test.click('modify');
+      await waitFor(()=>dialog()?.querySelector('[name=fragment]'),'native SS Rust source editor missing');
+      return dialog().querySelector('form');
+    };
+    const submit=async(current,fragment,count)=>{
+      current.elements.fragment.value=JSON.stringify(fragment,null,2);current.elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));
+      current.requestSubmit();await test.settle(count);
+    };
+    try{
+      const original=JSON.parse(test.saved().content),current=await edit(),entry=JSON.parse(current.elements.fragment.value);
+      assert(!dialog().querySelector('img,script')&&dialog().textContent.includes(tag),'inbound identity escaped text or injected markup');
+      assert(test.calls.some(call=>call.path.split('?')[0]===`/agents/node/configs/ss-rust/server-inbounds/${encodeURIComponent(tag)}`),'native source read did not encode selected inbound identity');
+      assert(!Object.hasOwn(entry,'mode')&&!Object.hasOwn(entry,'outbound_bind_addr'),'inherited globals were copied into native port overrides');
+      await submit(current,{...entry,mode:'udp_only',outbound_udp_allow_fragmentation:false},1);
+      let saved=JSON.parse(test.saved().content);
+      assert(saved.outbound_bind_addr===original.outbound_bind_addr&&saved.mode===original.mode&&saved.servers.find(item=>item.remarks===tag).mode==='udp_only'&&saved.servers.find(item=>item.remarks===tag).outbound_udp_allow_fragmentation===false&&!Object.hasOwn(saved.servers.find(item=>item.remarks==='second'),'mode'),'port override changed global defaults or sibling');
+      const port=JSON.stringify(saved.servers);
+      await operation(test,'modify');await field('mode');
+      assert(![...form().elements.key.options].some(option=>['server','server_port','servers'].includes(option.value)),'global editor includes inbound structural fields');
+      form().elements.fragment.value='"tcp_only"';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));test.submit('deploy');await test.settle(2);
+      saved=JSON.parse(test.saved().content);
+      assert(saved.mode==='tcp_only'&&JSON.stringify(saved.servers)===port,'global default mutation erased port overrides');
+      const reopened=await edit(),inherited=JSON.parse(reopened.elements.fragment.value);delete inherited.mode;
+      await submit(reopened,inherited,3);saved=JSON.parse(test.saved().content);
+      assert(saved.mode==='tcp_only'&&!Object.hasOwn(saved.servers.find(item=>item.remarks===tag),'mode')&&saved.servers.find(item=>item.remarks===tag).outbound_udp_allow_fragmentation===false,'removing port override lost inheritance or unrelated options');
+      assert(test.writes[0].original_tag===tag&&test.writes[0].expected_version===1&&test.writes[1].path.endsWith('/fields/mode')&&test.writes[1].expected_version===2&&test.writes[2].expected_version===3,'scoped mutations lost original identity or CAS');
+      assert(test.confirmations.some(item=>item.message.includes('重启')),'SS Rust deployment omitted restart confirmation');
+    }finally{test.dispose();}
   }
-  for (const options of [{missing:true}, {emptyInbounds:true}]) {
-    const test = await fixture("xray", options);
-    const add = document.querySelector('[data-inbound-action="add"]');
-    assert(add && !add.hidden && !add.disabled && add.closest(".config-file-actions") &&
-      !add.closest(".config-inbound-menu"), "empty workspace lost the standalone add-inbound action");
-    test.click("add");
-    await waitFor(()=>document.querySelector("#server-plan-form"), "first inbound editor did not open");
-    document.querySelector("[data-plan-intent=validate]").click();
-    await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "first inbound did not save");
-    test.selectCommon();
-    assert(!document.querySelector('[data-inbound-action="add"]').hidden &&
-      !document.querySelector('.config-inbound-menu [data-inbound-action="add"]'),
-      "creating the first inbound hid the persistent action or moved it into the common menu");
-    test.dispose();
-  }
-  const nativeCommon = await fixture("mihomo", {native:true});
-  assert(!document.querySelector('[data-inbound-action="add"]').hidden &&
-    !document.querySelector('.config-inbound-menu [data-inbound-action="add"]'),
-    "native non-preset listeners changed the standalone add action");
-  nativeCommon.dispose();
-  for (const options of [{readonly:true}, {noTasks:true}, {import:true}]) {
-    const test = await fixture("xray", options);
-    assert(!document.querySelector('[data-inbound-action="add"]').hidden, "permission or source state should disable, not hide, the add action");
-    for (const operation of ["add", "modify", "delete"]) {
-      test.common(operation); await pause();
-      assert(!document.querySelector("dialog") && !test.writes.length,
-        "read-only, denied, imported or drifted source permits common mutation");
-    }
-    test.dispose();
-  }
-  for (const options of [{missing:true}, {missing:true, savedMissing:true}, {offline:true}]) {
-    const test = await fixture("ss-rust", options);
-    test.common("add");
-    if (options.missing && !options.savedMissing) {
-      assert(!document.querySelector("dialog") && document.querySelector('[data-common-action="add"]').disabled,
-        "common fields can be submitted before a configuration exists");
-    } else {
-      await waitFor(()=>form(), "unavailable core should still allow common field drafts");
-      assert(form().querySelector("[data-field-intent=validate]").disabled &&
-        form().querySelector("[data-field-intent=deploy]").disabled, "common field save bypassed runtime availability");
-    }
-    assert(!test.writes.length, "common configuration unexpectedly installed a missing core");
-    test.dispose();
-  }
-  for (const options of [{noCommon:true}, {allCommon:true}]) {
-    const test = await fixture("xray", options);
-    test.common(options.noCommon ? "delete" : "add");
-    await waitFor(()=>document.querySelector("#common-options"), "empty common choices did not finish loading");
-    assert(!form() && document.querySelector("#common-options").textContent.includes(options.noCommon ? "尚无可操作" : "没有可增加"),
-      "empty common choices exposed an accidental save target");
-    test.dispose();
-  }
-  for (const kind of ["workspace", "field"]) {
-    const test = await fixture("xray");
-    if (kind === "workspace") test.stale = true;
-    else test.staleField = true;
-    test.common("modify");
-    await waitFor(()=>document.querySelector("dialog")?.textContent.includes("配置已变化"), "common version conflict was not surfaced");
-    assert(!form() && !test.writes.length, "common editor allows writes from a stale workspace/field read");
-    test.dispose();
-  }
-  const isolated = await fixture("xray");
-  isolated.common("modify");
-  await waitFor(()=>form(), "common draft isolation form missing");
-  form().elements.fragment.value = '{"level":"draft-only"}';
-  await isolated.reenter();
-  isolated.common("delete");
-  await waitFor(()=>form(), "common deletion did not reopen after navigation");
-  assert(form().elements.mutation.value === "delete" && form().elements.fragment.value === '{"level":"info"}',
-    "a modify draft leaked into the delete operation");
-  isolated.dispose();
-  const conflict = await fixture("xray");
-  conflict.common("modify");
-  await waitFor(()=>form(), "common conflict form missing");
-  form().elements.fragment.value = '{"level":"keep-this-draft"}';
-  conflict.fail = true;
-  form().querySelector("[data-field-intent=validate]").click();
-  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("草稿已保留"),
-    "common save conflict did not preserve the draft");
-  assert(form().elements.fragment.value.includes("keep-this-draft") && form().querySelector("[data-field-intent=validate]").disabled,
-    "common conflict allowed stale resubmission or discarded inputs");
-  conflict.dispose();
-  const late = await fixture("xray");
-  let release;
-  late.fieldGate = new Promise(resolve=>{release=resolve;});
-  late.common("modify");
-  await waitFor(()=>document.querySelector("[data-common-field]"), "deferred common read did not mount its selector");
-  late.dispose();
-  release(); await pause();
-  assert(!document.querySelector("dialog") && !late.writes.length, "late common field response escaped its disposed session");
 }

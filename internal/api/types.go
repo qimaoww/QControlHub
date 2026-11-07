@@ -10,7 +10,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/geoip"
-	"github.com/qimaoww/qcontrolhub/internal/komari"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
@@ -32,9 +31,6 @@ type Config struct {
 	AgentInstaller             []byte
 	WebhookSecret              string
 	PublicIPProbe              core.PublicIPProbeConfig
-	KomariURL                  string
-	KomariAPIKey               string
-	KomariHTTPClient           *http.Client
 	GeoIPHTTPClient            *http.Client
 	SessionTTL                 time.Duration
 }
@@ -56,11 +52,6 @@ type Server struct {
 	agentInstaller             []byte
 	publicIPProbe              core.PublicIPProbeConfig
 	geoip                      *geoip.Client
-	komari                     *komari.Client
-	komariHTTPClient           *http.Client
-	komariConfigError          error
-	komariCacheMu              sync.Mutex
-	komariCache                map[string]cachedKomariNode
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client

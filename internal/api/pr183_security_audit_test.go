@@ -282,7 +282,6 @@ func TestPR183AuditSharedRecipientCannotAdministerHost(t *testing.T) {
 	}{
 		{"PUT", "/agents/" + agent.ID + "/capabilities/mihomo", map[string]any{"enabled": false}},
 		{"PUT", "/agents/" + agent.ID + "/region", map[string]any{"country_code": "US"}},
-		{"PUT", "/agents/" + agent.ID + "/komari", map[string]any{"uuid": "shared-node-uuid"}},
 		{"GET", "/agents/" + agent.ID + "/sharing", nil},
 		{"PUT", "/agents/" + agent.ID + "/sharing", core.AgentSharingRequest{Revision: sharing.Revision}},
 		{"DELETE", "/agents/" + agent.ID, nil},
@@ -406,7 +405,6 @@ func TestPR183AuditOwnerHiddenNodeVisibility(t *testing.T) {
 	for _, path := range []string{
 		"/agents/" + agent.ID + "/configs",
 		"/agents/" + agent.ID + "/sharing",
-		"/agents/" + agent.ID + "/komari",
 		"/agents/" + agent.ID + "/region",
 		"/metrics/" + agent.ID,
 		"/core-logs?agent_id=" + agent.ID,

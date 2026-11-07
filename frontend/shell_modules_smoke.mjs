@@ -1,22 +1,12 @@
 import assert from "node:assert/strict";
-import { createShellAppearance } from "./modules/shell-appearance.js";
-import { createShellFeedback } from "./modules/shell-feedback.js";
-import { createShellView } from "./modules/shell-view.js";
-import { createShellContext } from "./modules/shell-context.js";
-import { createLoginPage } from "./modules/login-page.js";
+import { applyAppearance, formatDate } from "./analytics/appearance.js";
+import { startAnalytics } from "./analytics/app.js";
 import { createRouteWarmup } from "./modules/route-warmup.js";
 import { routeForHash, routeModuleNames } from "./modules/routes.js";
 import { createServiceActionGuard, installedEngineCount } from "./modules/agent-service-state.js";
 
-// Factories must not read the DOM, attach listeners, render, or load routes
-// while the application is still wiring callbacks.
-const state = { data: {}, session: null };
-const context = { state };
-assert.equal(typeof createShellView(context), "function");
-assert.equal(typeof createShellContext(context), "function");
-assert.equal(typeof createLoginPage(context), "function");
-const appearance = createShellAppearance(state);
-const feedback = createShellFeedback(state);
+// Importing the shipped runtime remains inert before it is mounted.
+assert.equal(typeof startAnalytics, "function");
 const warmup = createRouteWarmup({
   peek: name => loaded.has(name),
   preload: name => preloaded.push(name),
@@ -70,76 +60,30 @@ const originals = new Map(["document", "window", "navigator", "localStorage", "m
 ]));
 const setGlobal = (key, value) => Object.defineProperty(globalThis, key, { configurable: true, value });
 try {
-  let theme = "dark", storageFails = false;
-  const styles = new Map(), attributes = new Map(), icon = {};
-  const root = { dataset: {}, style: { setProperty: (key, value) => styles.set(key, value) } };
-  setGlobal("localStorage", {
-    getItem: () => { if (storageFails) throw new Error("unavailable"); return theme; },
-    setItem: (key, value) => { assert.equal(key, "qcontrolhub-color-theme"); if (storageFails) throw new Error("unavailable"); theme = value; },
-  });
-  setGlobal("matchMedia", () => ({ matches: true }));
-  setGlobal("document", {
-    documentElement: root,
-    querySelectorAll: () => [{ setAttribute: (key, value) => attributes.set(key, value), querySelector: () => icon }],
-  });
-  state.data.settings = { ui_font_scale: 110 };
-  appearance.applyTheme();
-  assert.equal(root.dataset.theme, "dark");
-  assert.equal(root.style.colorScheme, "dark");
-  assert.equal(styles.get("--ui-font-scale"), "1.1");
-  assert.equal(attributes.get("aria-label"), "切换为浅色主题");
-  appearance.toggleTheme();
-  assert.equal(theme, "light");
-  assert.equal(icon.textContent, "☾");
-  state.data = { settings: { ui_font_scale: 90 } };
-  appearance.applyUIFontScale();
-  assert.equal(root.dataset.uiFontScale, "90", "appearance reads the new account's settings");
-  appearance.applyUIFontScale(200);
-  assert.equal(root.dataset.uiFontScale, "100");
-  storageFails = true;
-  appearance.applyTheme();
-  assert.equal(root.dataset.theme, "light", "inaccessible storage falls back to the system theme");
-  appearance.toggleTheme();
-  assert.equal(root.dataset.theme, "dark", "theme toggles remain usable without storage");
-
-  const nodes = new Map(["message", "accept", "cancel", "title"].map(key => [key, {}]));
-  const dialog = Object.assign(new EventTarget(), {
-    querySelector: selector => nodes.get(selector.match(/data-confirm-(\w+)/)[1]),
-    dataset: {},
-    showModal() { this.open = true; },
-    close() { this.open = false; },
-  });
-  setGlobal("document", { querySelector: () => dialog });
-  feedback.bindConfirmationDialog();
-  feedback.bindConfirmationDialog();
-  const confirmed = feedback.confirmAction("确认目标节点", "部署", {title: "部署配置", tone: "primary"});
-  assert.equal(dialog.open, true);
-  assert.equal(nodes.get("title").textContent, "部署配置");
-  assert.equal(dialog.dataset.tone, "primary");
-  assert.equal(state.confirmOpen, true);
-  assert.equal(nodes.get("message").textContent, "确认目标节点");
-  assert.equal(nodes.get("accept").textContent, "部署");
-  nodes.get("accept").onclick();
-  assert.equal(await confirmed, true);
-  assert.equal(state.confirmResolver, null);
-  assert.equal(state.confirmOpen, false);
-  const canceled = feedback.confirmAction("取消");
-  assert.equal(nodes.get("title").textContent, "确认继续？", "普通确认不能残留批量标题");
-  assert.equal(dialog.dataset.tone, "danger", "普通确认恢复原有危险操作语义");
-  const cancel = new Event("cancel", { cancelable: true });
-  dialog.dispatchEvent(cancel);
-  assert.equal(cancel.defaultPrevented, true);
-  assert.equal(await canceled, false);
-  assert.equal(dialog.open, false);
-  setGlobal("document", { querySelector: () => null });
-  setGlobal("window", { confirm: message => message === "fallback" });
-  assert.equal(await feedback.confirmAction("fallback"), true);
-  let nativeMessage;
-  setGlobal("window", { confirm: message => { nativeMessage = message; return true; } });
-  await feedback.confirmAction("1 个节点 · Mihomo", "确认", {title: "批量查询状态"});
-  assert.match(nativeMessage, /批量查询状态/);
-  assert.match(nativeMessage, /Mihomo/);
-  assert.match(nativeMessage, /1 个节点/);
+  const root = { style: {} };
+  setGlobal("document", { documentElement: root });
+  for (const [value, expected] of [[90, "90%"], [100, "100%"], ["110", "110%"], [200, "100%"], [null, "100%"]]) {
+    applyAppearance({ ui_font_scale: value });
+    assert.equal(root.style.fontSize, expected);
+  }
+  const timestamp = "2026-01-02T04:05:06Z";
+  const absolute = zone => new Date(timestamp).toLocaleString("zh-CN", { hour12: false, timeZone: zone });
+  applyAppearance({ ui_font_scale: 90, time_zone: "Asia/Shanghai" });
+  assert.equal(formatDate(timestamp), absolute("Asia/Shanghai"));
+  applyAppearance({ ui_font_scale: 110, time_zone: "UTC", time_display: "absolute-relative" });
+  assert.equal(root.style.fontSize, "110%", "appearance must use the current account settings");
+  assert.ok(formatDate(timestamp).startsWith(absolute("UTC") + " · "));
+  assert.ok(formatDate(new Date(Date.now() + 3600000).toISOString()).includes(" · "), "future relative date was lost");
+  applyAppearance({ time_zone: "invalid/timezone" });
+  assert.equal(formatDate(timestamp), new Date(timestamp).toLocaleString("zh-CN", { hour12: false }), "invalid zone must remain readable");
+  applyAppearance();
+  assert.equal(root.style.fontSize, "100%", "logout/account reset retained the previous font scale");
+  assert.equal(formatDate(timestamp), new Date(timestamp).toLocaleString("zh-CN", { hour12: false }), "account reset retained the previous time settings");
+  for (const value of [undefined, null, "", "invalid", "1960-01-01T00:00:00Z"]) assert.equal(formatDate(value), "—");
+  // Real native confirmation acceptance, cancellation, Escape, default focus,
+  // target labels and duplicate locks are exercised by batch-layout and users
+  // browser modes. The retired shell's native-window fallback and color toggle
+  // are not part of the shipped analytics runtime.
 
   const events = [], timers = new Map(), canceledTimers = [];
   let serial = 0;
@@ -194,4 +138,4 @@ try {
   }
 }
 
-console.log("Shell composition, appearance, confirmation and navigation warmup smoke passed");
+console.log("Native shell import, appearance, service scope and navigation warmup smoke passed");

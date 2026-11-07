@@ -1,335 +1,162 @@
-import { testBatchCoreUpdates } from "./agent-batch-core.mjs";
-import { assert, delay, waitFor } from "./assertions.mjs";
-export async function testAgentBatchActions({ testAPI, onlineAgent }) {
-  document.querySelector(".enrollment-dialog [data-close]")?.click();
-  const batchLauncher = document.querySelector("[data-node-batch-toggle]");
-  batchLauncher.click();
-  await waitFor(() => document.querySelector("#batch-form"), "顶栏批量操作没有打开选择模式");
-  assert.ok(document.querySelector(".node-batch-bar"), "选择模式没有渲染底部操作栏");
-  assert.equal(document.querySelectorAll("[data-node-batch-card] [data-batch-checkbox]").length, 4);
-  let form = document.querySelector("#batch-form");
-  let all = form.querySelector("[data-batch-select-all]");
-  let inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
-  let [alpha, bravo, charlie, delta] = inputs;
-  let count = form.querySelector("[data-batch-count]");
-  let submit = form.querySelector('button[type="submit"]');
-  const readCurrentBatchDOM = () => {
-    form = document.querySelector("#batch-form");
-    all = form.querySelector("[data-batch-select-all]");
-    inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
-    [alpha, bravo, charlie, delta] = inputs;
-    count = form.querySelector("[data-batch-count]");
-    submit = form.querySelector('button[type="submit"]');
+import { testBatchCoreUpdates } from './agent-batch-core.mjs';
+import { startNativeNodes } from './agent-detail-actions.mjs';
+import { assert, delay, waitFor } from './assertions.mjs';
+
+export const nativeBatchButton = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
+export async function openNativeBatch(fixture) {
+  await startNativeNodes();
+  nativeBatchButton('批量操作').click();
+  const card = document.querySelector('article[data-agent-id]');
+  if (card) {
+    const choice = card.querySelector('input[type=checkbox]');
+    card.querySelector('h2').click(); assert.ok(choice.checked, '点击卡片标题未选择节点');
+    card.querySelector('.a-probe-body').click(); assert.ok(!choice.checked, '点击卡片内容未取消选择');
+    card.querySelector('label').click(); assert.ok(choice.checked, '选择框标签重复切换');
+    card.focus(); card.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    assert.ok(!choice.checked, '空格键未取消卡片选择');
+    assert.ok(choice.closest('.a-probe-head'), '选择框未整合进卡片标题栏');
+    assert.equal(card.querySelector('.a-probe-footer'), null, '多选模式仍保留普通操作栏');
+    const dialogs = document.querySelectorAll('dialog[open]').length;
+    card.querySelector('.a-probe-meta').click();
+    assert.ok(choice.checked && card.dataset.selected === 'true', '多选模式下卡片底部不能选择');
+    assert.equal(document.querySelectorAll('dialog[open]').length, dialogs, '多选点击误打开设置');
+    choice.click(); assert.ok(!choice.checked, '直接点击选择框重复切换');
+  }
+  const all = () => document.querySelector('input[name=select-all]');
+  all().click();
+  assert.ok(all().checked && !all().indeterminate, '全选状态错误');
+  const multiple = document.querySelectorAll('input[name^="select:"]:enabled').length > 1;
+  const first = document.querySelector('input[name^="select:"]'); first.click();
+  assert.ok(!all().checked && all().indeterminate === multiple, '部分选择状态错误');
+  all().click(); assert.ok(all().checked && !all().indeterminate, '混合状态全选失败');
+  all().click(); assert.ok(!all().checked && !all().indeterminate, '取消全选状态错误');
+  assert.equal(document.querySelectorAll('input[name^="select:"]:checked').length, 0, '取消全选未清空选择');
+  all().click();
+  nativeBatchButton('执行批量操作', document.querySelector('.a-probe-batch')).click();
+  const form = await waitFor(() => document.querySelector('dialog[open] form'), '批量操作未打开');
+  if (fixture.mode?.endsWith('mobile')) {
+    assert.equal(innerWidth, 390, '批量操作移动视口不正确');
+    assert.ok(matchMedia('(pointer:coarse)').matches, '批量操作未使用触摸模拟');
+  }
+  return form;
+}
+export async function testAgentBatchActions(fixture) {
+  const { testAPI, onlineAgent, populatedAgents } = fixture;
+  testAPI.agents = populatedAgents.map(agent => structuredClone(agent));
+  const form = await openNativeBatch(fixture);
+  const box = form.closest('dialog'), choose = id => form.elements[`batch:${id}`];
+  const row = id => choose(id).closest('tr');
+  const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };
+  const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), '批量操作未结束');
+  const refresh = async () => { await delay(2100); };
+  const writes = () => testAPI.pendingTasks.length;
+  const submit = form.querySelector('[type=submit]');
+  const confirm = async () => {
+    form.requestSubmit();
+    return await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(item => item !== box), '批量确认未打开');
   };
-  const replaceAgent = (agentID, update) => {
-    testAPI.agents = testAPI.agents.map((agent) =>
-      agent.id === agentID ? update(agent) : agent,
-    );
-  };
-  const refreshAgents = async (predicate, message) => {
-    document.querySelector("[data-agent-refresh]")?.click();
-    await waitFor(predicate, message);
-    await delay(50);
-    if (document.querySelector("#batch-form") !== form) {
-      readCurrentBatchDOM();
-      await waitFor(predicate, message);
-    }
-  };
-  assert.equal(charlie.disabled, true);
-  assert.match(charlie.closest(".node-card-select").title, /离线/);
-  assert.equal(delta.disabled, true);
-  assert.match(delta.closest(".node-card-select").title, /旧版 Agent/);
-
-  all.click();
-  assert.equal(alpha.checked, true);
-  assert.equal(bravo.checked, true);
-  assert.equal(count.textContent, "已选 2");
-  assert.equal(all.checked, true);
-  assert.equal(all.indeterminate, false);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-  bravo.click();
-  assert.equal(all.checked, false);
-  assert.equal(all.indeterminate, true);
-  assert.equal(all.getAttribute("aria-checked"), "mixed");
-  all.click();
-  assert.equal(alpha.checked && bravo.checked, true);
-  all.click();
-  assert.equal(alpha.checked || bravo.checked, false, "取消全选未清空合格节点");
-  all.click();
-
-  testAPI.taskMode = "deferred";
-
-  replaceAgent("alpha", (agent) => ({ ...agent, status: "offline" }));
-  await refreshAgents(
-    () => alpha.disabled && !alpha.checked,
-    "刷新后没有撤销刚变离线的节点",
-  );
-  assert.equal(bravo.checked, true, "刷新不应清除仍合格节点的选择");
-  assert.equal(count.textContent, "已选 1");
-  assert.equal(all.checked, true);
-  assert.equal(all.indeterminate, false);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-  replaceAgent("alpha", () => onlineAgent("alpha"));
-  await refreshAgents(() => !alpha.disabled, "恢复在线快照后节点仍不可选");
-
-  bravo.click();
-  alpha.click();
-  form.requestSubmit(submit);
-  let confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "离线二次校验没有进入确认流程");
-  replaceAgent("alpha", (agent) => ({ ...agent, status: "offline" }));
-  await refreshAgents(
-    () => alpha.disabled && !alpha.checked && /离线/.test(alpha.closest(".node-card-select").title),
-    "刷新后没有立即撤销已离线节点的选择",
-  );
-  confirmDialog.querySelector("[data-confirm-accept]").click();
-  await delay(30);
-  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向已离线节点提交任务");
-  const notice = document.querySelector("[data-spa-notice]");
-  assert.equal(notice.getAttribute("role"), "alert");
-  notice.querySelector(".notice-close").click();
-  assert.equal(document.querySelector("[data-spa-notice]"), null);
-
-
-  replaceAgent("alpha", () => onlineAgent("alpha"));
-  await refreshAgents(() => !alpha.disabled, "恢复在线快照后节点仍不可选");
-  bravo.click();
-  form.requestSubmit(submit);
-  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "feature 二次校验没有进入确认流程");
-  replaceAgent("bravo", (agent) => ({ ...agent, features: [] }));
-  await refreshAgents(
-    () => bravo.disabled && !bravo.checked && /旧版 Agent/.test(bravo.closest(".node-card-select").title),
-    "刷新后没有立即撤销缺少升级 feature 的节点选择",
-  );
-  confirmDialog.querySelector("[data-confirm-accept]").click();
-  await delay(30);
-  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向缺少升级 feature 的节点提交任务");
-
-  replaceAgent("bravo", () => onlineAgent("bravo"));
-  await refreshAgents(() => !bravo.disabled, "恢复 feature 后节点仍不可选");
-  form.elements.action.value = "restart";
-  form.elements.action.dispatchEvent(new Event("change", { bubbles: true }));
-  alpha.click();
-  form.requestSubmit(submit);
-  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "runtime 二次校验没有进入确认流程");
-  replaceAgent("alpha", (agent) => ({
-    ...agent,
-    runtime: { ...agent.runtime, mihomo: { installed: false, service_status: "stopped" } },
-  }));
-  await refreshAgents(
-    () => alpha.disabled && !alpha.checked && /未安装/.test(alpha.closest(".node-card-select").title),
-    "刷新后没有立即撤销 runtime 不可用节点的选择",
-  );
-  confirmDialog.querySelector("[data-confirm-accept]").click();
-  await delay(30);
-  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向 runtime 不可用节点提交任务");
-
-  replaceAgent("alpha", () => onlineAgent("alpha"));
-  await refreshAgents(() => !alpha.disabled, "恢复 runtime 后节点仍不可选");
-  form.elements.action.value = "upgrade-agent";
-  form.elements.action.dispatchEvent(new Event("change", { bubbles: true }));
-  all.click();
-  form.requestSubmit(submit);
-  form.requestSubmit(submit);
-  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "批量提交没有进入确认流程");
-  assert.equal(testAPI.pendingTasks.length, 0, "确认前不应提交任务");
-  confirmDialog.querySelector("[data-confirm-accept]").click();
-  await waitFor(() => testAPI.pendingTasks.length === 1, "首个串行任务未提交");
-  assert.equal(testAPI.pendingTasks.length, 1, "确认防重入产生了重复任务");
-  assert.equal(form.querySelector(".batch-progress"), null, "进度只需一行文字");
-  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /提交中 0\/2/);
-  assert.equal(document.querySelector("[data-node-batch-toggle]").disabled, true);
-  assert.equal(alpha.checked && bravo.checked, true, "busy 不应清除选中状态");
-  assert.equal(alpha.disabled && bravo.disabled, true, "busy 应锁定节点选择控件");
-  assert.equal(all.disabled, true, "busy 应锁定全选控件");
-  assert.equal(submit.disabled, true, "busy 应锁定提交控件");
-  assert.equal(form.elements.action.disabled, true, "busy 应锁定动作控件");
-  assert.equal(form.elements.engine.disabled, true, "busy 应锁定内核控件");
-  assert.equal(count.textContent, "已选 2");
-  assert.equal(all.checked, true);
-  assert.equal(all.indeterminate, false);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-
-  testAPI.pendingTasks[0].ok({ id: "task-alpha" });
-  await waitFor(() => testAPI.pendingTasks.length === 2, "第二个任务没有在首个完成后串行提交");
-  assert.equal(testAPI.pendingTasks[1].payload.agent_id, "bravo");
-  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /提交中 1\/2/);
-  testAPI.pendingTasks[1].fail("bravo temporary failure");
-  await waitFor(() => form.dataset.busy !== "1", "部分失败后 busy 未恢复");
-  let rows = [...form.querySelectorAll(".batch-result-row")];
-  assert.equal(rows.length, 1, "仅显示失败节点");
-  assert.equal(rows[0].classList.contains("error"), true);
-  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "已提交 1，失败 1");
-  assert.equal(form.querySelector("[data-batch-result-filter]"), null);
-  assert.equal(form.querySelector("[data-batch-results-toggle]"), null);
-  let retry = form.querySelector("[data-batch-retry]");
-  assert.equal(retry.dataset.batchRetry, "bravo", "部分失败只应重试失败节点");
-  retry.click();
-  await waitFor(() => testAPI.pendingTasks.length === 3, "部分失败项重试未提交");
-  testAPI.pendingTasks[2].ok({ id: "task-bravo-retry" });
-  await waitFor(() => !form.querySelector("[data-batch-retry]"), "成功重试后仍残留重试入口");
-  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "已提交 2", "重试成功后汇总没有更新");
-  assert.equal(form.querySelectorAll(".batch-result-row").length, 0, "成功后移除失败明细");
-
-  form.requestSubmit(submit);
-  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "第二轮批量提交没有进入确认流程");
-  confirmDialog.querySelector("[data-confirm-accept]").click();
-  await waitFor(() => testAPI.pendingTasks.length === 4, "第二轮首个任务未提交");
-  testAPI.pendingTasks[3].fail("alpha temporary failure");
-  await waitFor(() => testAPI.pendingTasks.length === 5, "第二轮任务没有串行提交");
-  testAPI.pendingTasks[4].fail("bravo temporary failure");
-  await waitFor(() => form.dataset.busy !== "1", "全部失败后 busy 未恢复");
-  rows = [...form.querySelectorAll(".batch-result-row")];
-  assert.equal(rows.filter((row) => row.classList.contains("error")).length, 2);
-  let retries = [...form.querySelectorAll("[data-batch-retry]")];
-  assert.equal(retries.length, 2, "两个失败节点均应保留重试入口");
-  const batchBar = form.querySelector(".node-batch-bar");
-  const aggregateWorkspace = document.querySelector(".workspace-main");
-  const aggregateHash = location.hash;
-  aggregateWorkspace.scrollTop = 43;
-  const aggregateScrollTop = aggregateWorkspace.scrollTop;
-  const callsFor = (path) =>
-    testAPI.calls.filter((call) => call.method === "GET" && call.path === path)
-      .length;
-  const agentPollsBefore = callsFor("/agents");
-  const overviewCallsBefore = callsFor("/overview");
-  const enrollmentCallsBefore = callsFor("/enrollment-tokens");
-  const komariReadsBefore = callsFor("/agents/alpha/komari");
-  const alphaCard = document.querySelector('[data-agent-metrics="alpha"]');
-  const singBoxChip = alphaCard.querySelector(".service-sing-box");
-  const singBoxService = singBoxChip.querySelector('[data-core-service="sing-box"]');
-  const installedSummary = alphaCard.querySelector(
-    "[data-core-installed-summary]",
-  );
-  assert.equal(singBoxChip.dataset.coreInstalled, "0");
-  assert.equal(singBoxService.textContent, "未安装");
-  assert.equal(
-    singBoxService.closest(".engine-state").classList.contains("muted"),
-    true,
-  );
-  assert.match(installedSummary.textContent, /1\/2 内核已安装/);
-  replaceAgent("alpha", (agent) => ({
-    ...agent,
-    runtime: {
-      ...agent.runtime,
-      "sing-box": { installed: true, service_status: "active" },
-    },
-  }));
+  assert.equal(form.querySelectorAll('input[type=checkbox]').length, 4, '批量目标缺失');
+  change('action', 'upgrade-agent');
+  assert.ok(choose('charlie').disabled && !choose('charlie').checked && row('charlie').textContent.includes('离线'), '离线节点仍可更新');
+  assert.ok(choose('delta').disabled && !choose('delta').checked && row('delta').textContent.includes('旧版 Agent'), '旧 Agent 仍可更新');
+  assert.ok(choose('alpha').checked && choose('bravo').checked, '合格节点选择丢失');
+  testAPI.taskMode = 'deferred';
+  const beforeCancel = writes();
+  const canceled = await confirm();
+  nativeBatchButton('取消', canceled).click(); await idle();
+  assert.equal(writes(), beforeCancel, '取消批量确认仍提交任务');
+  assert.ok(box.open && !submit.disabled && choose('alpha').checked && choose('bravo').checked, '取消确认丢失选择或未解锁');
+  assert.equal(document.querySelectorAll('dialog[open]').length, 1, '取消确认残留额外弹窗');
+  // A new authoritative read after confirmation must reject every newly ineligible target.
+  for (const [action, mutate] of [
+    ['upgrade-agent', agent => { agent.status = 'offline'; }],
+    ['upgrade-agent', agent => { agent.features = []; }],
+    ['restart', agent => { agent.runtime.mihomo.installed = false; }],
+  ]) {
+    testAPI.agents = populatedAgents.map(agent => structuredClone(agent));
+    await refresh(); change('action', action);
+    for (const id of ['alpha', 'bravo', 'delta']) choose(id).checked = id === 'alpha';
+    const before = writes(), confirmation = await confirm();
+    mutate(testAPI.agents[0]);
+    nativeBatchButton('执行批量操作', confirmation).click(); await idle();
+    assert.equal(writes(), before, '确认后仍向失效节点提交');
+    assert.ok(row('alpha').textContent.includes('离线') || row('alpha').textContent.includes('旧版 Agent') || row('alpha').textContent.includes('未安装'), '失效原因未呈现');
+  }
+  testAPI.agents = populatedAgents.map(agent => structuredClone(agent)); await refresh(); change('action', 'upgrade-agent');
+  choose('alpha').checked = choose('bravo').checked = true;
+  let confirmation = await confirm(); form.requestSubmit();
+  assert.equal(document.querySelectorAll('dialog[open]').length, 2, '重复提交打开额外确认');
+  let next = writes(); nativeBatchButton('执行批量操作', confirmation).click();
+  await waitFor(() => writes() === next + 1, '首个串行任务未提交');
+  assert.equal(testAPI.pendingTasks[next].payload.agent_id, 'alpha');
+  assert.ok(submit.disabled && form.elements.action.matches(':disabled') && form.elements.engine.matches(':disabled') && choose('alpha').matches(':disabled'), '提交没有锁定表单');
+  assert.ok(choose('alpha').checked && choose('bravo').checked, '提交清除选择');
+  testAPI.pendingTasks[next++].ok({ id: 'task-alpha' });
+  await waitFor(() => writes() === next + 1, '第二个任务没有串行提交');
+  assert.equal(testAPI.pendingTasks[next].payload.agent_id, 'bravo');
+  testAPI.pendingTasks[next++].fail('bravo temporary failure'); await idle();
+  assert.ok(form.textContent.includes('已提交 1，提交失败 1'), '部分失败汇总错误');
+  assert.ok(nativeBatchButton('重试提交', row('bravo')) && !nativeBatchButton('重试提交', row('bravo')).hidden, '失败节点不能重试');
+  nativeBatchButton('重试提交', row('bravo')).click();
+  await waitFor(() => writes() === next + 1, '部分失败重试未提交');
+  testAPI.pendingTasks[next++].ok({ id: 'task-bravo-retry' }); await idle();
+  assert.ok(nativeBatchButton('重试提交', row('bravo')).hidden && form.textContent.includes('已提交 2，提交失败 0'), '重试结果未更新');
+  confirmation = await confirm(); nativeBatchButton('执行批量操作', confirmation).click();
+  for (const id of ['alpha', 'bravo']) {
+    await waitFor(() => writes() === next + 1, '全部失败未依次提交');
+    testAPI.pendingTasks[next++].fail(`${id} temporary failure`);
+  }
+  await idle();
+  assert.equal([...form.querySelectorAll('button')].filter(button => button.textContent === '重试提交' && !button.hidden).length, 2, '全部失败未保留两个重试入口');
+  if (new URLSearchParams(location.search).has('preview')) {
+    document.documentElement.dataset.batchPreview = 'ready';
+    await new Promise(() => {});
+  }
+  const route = location.hash, firstRow = row('alpha'), body = box.querySelector('.a-dialog-body');
+  body.scrollTop = 43; const scroll = body.scrollTop;
+  const calls = path => testAPI.calls.filter(call => call.method === 'GET' && call.path === path).length;
+  const beforePoll = calls('/agents'), beforeOverview = calls('/overview'), beforeEnrollment = calls('/enrollment-tokens');
+  const failedResults = ['alpha', 'bravo'].map(id => row(id).lastElementChild.textContent);
+  testAPI.agents[0].runtime['sing-box'] = { installed: true, service_status: 'active' };
   await delay(6500);
-  assert.ok(
-    callsFor("/agents") >= agentPollsBefore + 3,
-    "批量失败结果未经历三轮连续指标 poll",
-  );
-  assert.ok(
-    callsFor("/agents") <= agentPollsBefore + 4,
-    "连续指标 poll 请求失去边界",
-  );
-  assert.equal(
-    callsFor("/overview"),
-    overviewCallsBefore,
-    "指标 poll 不应重复加载 overview",
-  );
-  assert.equal(
-    callsFor("/enrollment-tokens"),
-    enrollmentCallsBefore,
-    "指标 poll 不应重复加载 enrollment history",
-  );
-  assert.equal(
-    callsFor("/agents/alpha/komari"),
-    komariReadsBefore,
-    "重建节点卡片不应重复读取 Komari 月流量",
-  );
-  assert.equal(
-    document.querySelector("#batch-form"),
-    form,
-    "聚合 core chip 的连续 poll 不应替换批量表单",
-  );
-  assert.equal(batchBar.isConnected, true, "连续 poll 不应关闭底部批量操作栏");
-  assert.equal(location.hash, aggregateHash, "连续 poll 不应改变 route");
-  assert.equal(
-    aggregateWorkspace.scrollTop,
-    aggregateScrollTop,
-    "连续 poll 不应改变聚合页滚动位置",
-  );
-  assert.equal(
-    form.querySelector("[data-batch-results]").hidden,
-    false,
-    "连续 poll 不应隐藏批量结果",
-  );
-  assert.equal(
-    form.querySelectorAll(".batch-result-row.error").length,
-    2,
-    "连续 poll 后两个失败结果必须保留",
-  );
-  retries = [...form.querySelectorAll("[data-batch-retry]")];
-  assert.equal(retries.length, 2, "连续 poll 后两个 retry 必须保留");
-  assert.equal(count.textContent, "已选 2");
-  assert.equal(all.checked, true);
-  assert.equal(all.indeterminate, false);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-  assert.equal(singBoxChip.dataset.coreInstalled, "1");
-  assert.equal(singBoxService.textContent, "运行中");
-  assert.equal(
-    singBoxService.closest(".engine-state").classList.contains("ok"),
-    true,
-  );
-  assert.match(installedSummary.textContent, /2\/2 内核已安装/);
-  replaceAgent("alpha", (agent) => ({
-    ...agent,
-    runtime: {
-      ...agent.runtime,
-      "sing-box": { installed: false, service_status: "unknown" },
-    },
-  }));
-  await waitFor(
-    () => singBoxChip.dataset.coreInstalled === "0",
-    "compact chip 没有原位同步卸载转换",
-  );
-  assert.equal(document.querySelector("#batch-form"), form);
-  assert.equal(form.querySelectorAll(".batch-result-row.error").length, 2);
-  assert.equal(form.querySelectorAll("[data-batch-retry]").length, 2);
-  assert.equal(singBoxService.textContent, "未安装");
-  assert.equal(
-    singBoxService.closest(".engine-state").classList.contains("muted"),
-    true,
-  );
-  assert.match(installedSummary.textContent, /1\/2 内核已安装/);
-  assert.equal(batchBar.isConnected, true);
-  assert.equal(location.hash, aggregateHash);
-  assert.equal(aggregateWorkspace.scrollTop, aggregateScrollTop);
-  assert.equal(count.textContent, "已选 2");
-  assert.equal(all.checked, true);
-  assert.equal(all.indeterminate, false);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-  retries[0].click();
-  retries[1].click();
-  form.requestSubmit(submit);
-  alpha.click();
-  await waitFor(() => testAPI.pendingTasks.length === 6, "失败项重试未提交");
-  await delay(30);
-  assert.equal(testAPI.pendingTasks.length, 6, "共享 busy 未阻止并行 retry 或主提交");
-  assert.equal(retries.every((button) => button.disabled), true, "retry busy 未锁定全部重试控件");
-  assert.equal(alpha.disabled && bravo.disabled && all.disabled, true, "retry busy 未锁定选择控件");
-  assert.equal(submit.disabled && form.elements.action.disabled && form.elements.engine.disabled, true, "retry busy 未锁定动作控件");
-  assert.equal(count.textContent, "已选 2");
-  assert.equal(all.checked, true);
-  assert.equal(all.getAttribute("aria-checked"), "true");
-  testAPI.pendingTasks[5].fail("alpha retry still failing");
-  await waitFor(() => form.dataset.busy !== "1", "retry 失败后共享 busy 未释放");
-  retries = [...form.querySelectorAll("[data-batch-retry]")];
-  assert.equal(retries.every((button) => !button.disabled), true, "retry 失败后控件未恢复");
-
-  retries[0].click();
-  await waitFor(() => testAPI.pendingTasks.length === 7, "失败 retry 未允许再次重试");
-  testAPI.pendingTasks[6].ok({ id: "task-alpha-retry" });
-  await waitFor(() => form.querySelectorAll("[data-batch-retry]").length === 1, "成功 retry 后失败项未原位更新");
-
-  const remainingRetry = form.querySelector("[data-batch-retry]");
-  replaceAgent("bravo", (agent) => ({ ...agent, status: "offline" }));
-  await refreshAgents(() => remainingRetry.disabled, "刷新后不合格 retry 未禁用");
-  const pendingBeforeRetry = testAPI.pendingTasks.length;
-  await remainingRetry.onclick();
-  assert.equal(testAPI.pendingTasks.length, pendingBeforeRetry, "retry 实际 POST 前未使用最新离线快照 fail closed");
-
-  await testBatchCoreUpdates({ testAPI });
-
+  assert.ok(calls('/agents') >= beforePoll + 3 && calls('/agents') <= beforePoll + 8, '持续刷新次数失去边界');
+  assert.equal(calls('/overview'), beforeOverview, '轮询重复读取仪表盘');
+  assert.equal(calls('/enrollment-tokens'), beforeEnrollment, '轮询重复读取接入记录');
+  assert.equal(row('alpha'), firstRow, '持续刷新重建批量结果');
+  assert.ok(form.isConnected && choose('alpha').checked && choose('bravo').checked, '刷新丢失结果或选择');
+  assert.equal(location.hash, route); assert.equal(body.scrollTop, scroll, '刷新改变滚动位置');
+  for (const [index, id] of ['alpha', 'bravo'].entries()) assert.equal(row(id).lastElementChild.textContent, failedResults[index], '刷新丢失失败详情');
+  nativeBatchButton('重试提交', row('alpha')).click(); nativeBatchButton('重试提交', row('bravo')).click(); form.requestSubmit();
+  await waitFor(() => writes() === next + 1, '失败重试未提交'); await delay(30);
+  assert.equal(writes(), next + 1, '重试未阻止并行提交');
+  assert.ok(form.elements.action.matches(':disabled') && choose('bravo').matches(':disabled') && submit.matches(':disabled'), '重试未锁定所有操作');
+  testAPI.pendingTasks[next++].fail('alpha retry still failing'); await idle();
+  nativeBatchButton('重试提交', row('alpha')).click();
+  await waitFor(() => writes() === next + 1, '重试失败后不能再次重试');
+  testAPI.pendingTasks[next++].ok({ id: 'task-alpha-retry' }); await idle();
+  testAPI.agents[1].status = 'offline'; await refresh();
+  const retry = nativeBatchButton('重试提交', row('bravo'));
+  assert.ok(retry.disabled, '离线节点重试未禁用');
+  retry.dispatchEvent(new MouseEvent('click')); await idle(); assert.equal(writes(), next, '失效重试仍实际提交');
+  testAPI.agents[0].runtime['sing-box'].installed = false;
+  await refresh();
+  await testBatchCoreUpdates({ testAPI, form });
+  const shared = { ...onlineAgent('shared-batch'), can_manage: false, features: ['shared-core-lifecycle-v1'],
+    shared_allocation: { enabled: true, status: 'accepted', owner_id: 'owner-one' } };
+  shared.runtime.mihomo.instance = { id: 'instance-one', created: true, deployed_version: 1 };
+  testAPI.agents = [shared];
+  const sharedForm = await openNativeBatch(fixture);
+  sharedForm.elements.action.value = 'restart'; sharedForm.elements.action.dispatchEvent(new Event('change', { bubbles: true }));
+  const sharedBefore = writes(); sharedForm.requestSubmit();
+  const sharedConfirm = await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(item => item !== sharedForm.closest('dialog')), '共享批量操作没有确认');
+  shared.runtime.mihomo.instance.id = 'instance-two';
+  nativeBatchButton('执行批量操作', sharedConfirm).click(); await idle();
+  assert.equal(writes(), sharedBefore, '确认后把操作转到另一个共享实例');
+  assert.ok(sharedForm.textContent.includes('目标实例已变化'), '实例变化没有提示');
+  const current = await openNativeBatch(fixture);
+  for (const action of ['upgrade-agent', 'install']) {
+    current.elements.action.value = action; current.elements.action.dispatchEvent(new Event('change', { bubbles: true }));
+    assert.ok(current.elements['batch:shared-batch'].disabled, '共享批量操作允许管理宿主');
+    current.requestSubmit(); await idle(); assert.equal(writes(), sharedBefore, '共享批量操作提交宿主任务');
+  }
 }

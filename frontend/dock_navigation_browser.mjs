@@ -168,6 +168,7 @@ try {
       // membership and verify the existing primary navigation with real taps.
       await evaluate(page, "document.querySelector('.mobile-account-menu').open=false");
       assert.equal(await evaluate(page, "!!document.querySelector('.mobile-account-menu [href=\"#certificates\"]')"), true);
+      assert.equal(await evaluate(page, "!!document.querySelector('.mobile-account-menu [href=\"#themes\"]')"), true);
       await tap(page, '.dock-nav [href="#node-settings"]', true);
       await wait(page, "document.body.classList.contains('page-node-settings')");
       assert.equal(await evaluate(page, "location.hash"), "#node-settings");
@@ -175,7 +176,8 @@ try {
     } else {
       let r = await check(page, "tasks", scenario.name);
       const count = await evaluate(page, "document.querySelectorAll('.dock-nav>a').length");
-      assert.equal(count, scenario.role === "admin" ? 13 : 10);
+      assert.equal(count, scenario.role === "admin" ? 14 : 11);
+      assert.equal(await evaluate(page, "document.querySelector('.dock-nav [href=\"#themes\"]').textContent.trim()"), "主题");
       await expandRail(page, true, scenario.touch, scenario.width);
       assert.ok(await evaluate(page, "document.querySelector('.app-dock').getBoundingClientRect().width>=211"), "scroll regression must cover the expanded rail shown in the report");
       // Frame sampler catches transient drift during real input and refresh.

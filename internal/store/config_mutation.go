@@ -6,11 +6,13 @@ import (
 	"regexp"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 var configMutationTaskID = regexp.MustCompile(`^tsk_[a-f0-9]{16}$`)
 
 type ConfigMutationOptions struct {
+	ManagementState  *serverconfig.ManagedState
 	TaskID           string
 	Action           core.Action
 	ClientMetadata   *ConfigClientMetadataMutation
@@ -37,7 +39,11 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 		return core.Config{}, core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, options.ClientMetadata)
+	var management []serverconfig.ManagedState
+	if options.ManagementState != nil {
+		management = []serverconfig.ManagedState{*options.ManagementState}
+	}
+	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, options.ClientMetadata, management...)
 	if err != nil {
 		return core.Config{}, core.Task{}, err
 	}

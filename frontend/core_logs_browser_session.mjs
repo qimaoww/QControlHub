@@ -62,7 +62,7 @@ try {
       }
       await delay(50);
     }
-    throw new Error(`Browser condition timed out: ${expression}\n${JSON.stringify(await evaluate(page, "({text:document.body.innerText.slice(0,2000),storage:{...localStorage},options:[...document.querySelectorAll(\"#core-log-filters select\")].map(el=>[el.name,el.value])})"))}`);
+    throw new Error(`Browser condition timed out: ${expression}\n${JSON.stringify(await evaluate(page, "({text:document.body.innerText.slice(0,2000),storage:{...localStorage},options:[...document.querySelectorAll(\"[data-log-filters] select\")].map(el=>[el.name,el.value])})"))}`);
   };
   const reload = async page => {
     let timeout;
@@ -92,13 +92,15 @@ try {
     if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
     await call("Page.navigate", { url }, sessionId);
-    await wait(sessionId, "!!document.querySelector('#login-form')");
+    await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
     return sessionId;
   };
   const login = async (page, username) => {
-    await evaluate(page, `(() => { const form = document.querySelector('#login-form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='core logs evidence password'; form.requestSubmit(); })()`);
-    await wait(page, "!!document.querySelector('#logout')");
-    return evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='core logs evidence password'; form.requestSubmit(); })()`);
+    await wait(page, "!!document.querySelector('#logout,.a-user')");
+    const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
+    await wait(page, "!!document.querySelector('.a-user')");
+    return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
     const result = await evaluate(page, `(async () => { const r = await fetch('/api/v1' + ${JSON.stringify(path)}, {method:${JSON.stringify(method)}, credentials:'same-origin', headers:{'Content-Type':'application/json','X-QControlHub-CSRF':${JSON.stringify(session.csrf_token)}}, ${body === undefined ? "" : `body:JSON.stringify(${JSON.stringify(body)})`} }); return {status:r.status, body:await r.text()}; })()`);
@@ -108,8 +110,13 @@ try {
   const screenshot = async (page, label) => {
     if (!artifacts) return;
     await mkdir(resolve(artifacts), { recursive: true });
+    const viewport = await evaluate(page,"({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio})");
+    const resize = viewport.width!==1920 || viewport.height!==1080 || viewport.deviceScaleFactor!==2;
+    if (resize) await call("Emulation.setDeviceMetricsOverride", {width:1920,height:1080,deviceScaleFactor:2,mobile:false},page);
+    await evaluate(page,"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
     const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
+    if (resize) await call("Emulation.setDeviceMetricsOverride", {...viewport,mobile:mode==="mobile"},page);
   };
 
 
@@ -138,24 +145,39 @@ try {
   record(`${mode}: symmetric forged node/user/instance, engine/level/search, history pagination and admin private-node requests verified`);
   for (const page of [a,b,manager]) {
     await evaluate(page,"location.hash='#core-logs'");
-    await wait(page,"!!document.querySelector('#core-log-filters select[name=instance_id]') && document.querySelector('[data-core-log-refresh-label]')?.textContent==='正在实时更新'");
+    await wait(page,"!!document.querySelector('[data-log-filters] select[name=instance_id]') && document.querySelector('[data-log-refresh-label]')?.textContent==='正在实时更新'");
     assert.ok(await evaluate(page,"document.documentElement.scrollWidth<=innerWidth+1"));
-    assert.ok(await evaluate(page,"[...document.querySelectorAll('.core-log-filters select,.core-log-filters input')].every(el=>el.getBoundingClientRect().right<=innerWidth+1)"));
+    assert.ok(await evaluate(page,"[...document.querySelectorAll('[data-log-filters] select,[data-log-filters] input')].every(el=>el.getBoundingClientRect().right<=innerWidth+1)"));
   }
-  const choose=async(page,field,value)=>evaluate(page,`(()=>{const select=document.querySelector('#core-log-filters select[name=${field}]');select.value=${JSON.stringify(value)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  const rows=page=>evaluate(page,"[...document.querySelectorAll('.core-log-row pre')].map(el=>el.textContent)");
-  await evaluate(a,`document.querySelector('[data-core-log-agent="${host}"]').click()`);
-  await wait(a,`document.querySelector('[data-core-log-agent="${host}"]').classList.contains('active') && [...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].length===2 && document.querySelector('.core-log-row')`);
-  assert.deepEqual(await evaluate(a,"[...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].map(option=>option.value)"),["",shareA]);
+  const choose=async(page,field,value)=>evaluate(page,`(()=>{const select=document.querySelector('[data-log-filters] select[name=${field}]');select.value=${JSON.stringify(value)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const rows=page=>evaluate(page,"[...document.querySelectorAll('.a-log-message')].map(el=>el.textContent)");
+  await choose(a,"agent_id",host);
+  await wait(a,`document.querySelector('[data-log-filters] [name=agent_id]').value===${JSON.stringify(host)} && [...document.querySelectorAll('[data-log-filters] select[name=instance_id] option')].length===2 && document.querySelector('[data-log-entry]')`);
+  assert.deepEqual(await evaluate(a,"[...document.querySelectorAll('[data-log-filters] select[name=instance_id] option')].map(option=>option.value)"),["",shareA]);
   assert.ok((await rows(a)).every(message=>message.startsWith("alice")));
   await screenshot(a,"ordinary-authorized");
-  await evaluate(a,"document.querySelector('[data-core-log-page-index=\"1\"]').click()");
-  await wait(a,"document.querySelector('.core-log-pagination').textContent.includes('第 2 /')");
+  await evaluate(a,"[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()");
+  await wait(a,"document.querySelector('.a-main').textContent.includes('第 2 / 2 页')");
   assert.ok((await rows(a)).every(message=>message.startsWith("alice")));
+  await evaluate(a, `(() => {
+    window.__historyRead=0;window.__historyFetch=window.fetch;window.fetch=async(...args)=>{const result=await window.__historyFetch(...args);if(String(args[0]).includes('/core-logs?'))window.__historyRead++;return result;};
+    window.__historyRow=document.querySelector('[data-log-entry]');window.__historyScroll=document.querySelector('[aria-label=内核日志]');
+
+    document.querySelector('[data-log-filters] [name=q]').focus();
+    const text=document.querySelector('.a-log-message').firstChild,range=document.createRange();range.setStart(text,0);range.setEnd(text,5);getSelection().removeAllRanges();getSelection().addRange(range);window.scrollTo(0,180);window.__historyY=window.scrollY;
+  })()`);
+  await wait(a,"window.__historyRead>0");
+  assert.ok(await evaluate(a,"document.querySelector('.a-main').textContent.includes('第 2 / 2 页') && window.__historyRow===document.querySelector('[data-log-entry]') && window.__historyScroll===document.querySelector('[aria-label=内核日志]') && Math.abs(window.scrollY-window.__historyY)<1 && getSelection().toString()==='alice' && document.activeElement===document.querySelector('[data-log-filters] [name=q]')"),`continuous log poll preserves history page, row identity, scroll, reading selection and focus: ${JSON.stringify(await evaluate(a,"({page:document.querySelector('.a-main').textContent.includes('第 2 / 2 页'),row:window.__historyRow===document.querySelector('[data-log-entry]'),scroll:window.__historyScroll.scrollLeft,oldScroll:window.__historyX,selection:getSelection().toString(),focus:document.activeElement?.name})"))}`);
+  await evaluate(a,"getSelection().removeAllRanges();window.__failedLogOnce=false;window.fetch=(...args)=>String(args[0]).includes('/core-logs?')&&!window.__failedLogOnce?(window.__failedLogOnce=true,Promise.resolve(new Response(JSON.stringify({error:'log read fixture failure'}),{status:503,headers:{'Content-Type':'application/json'}}))):window.__historyFetch(...args);[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()");
+  await wait(a,"document.querySelector('[data-log-refresh-label]').textContent.includes('刷新失败')");
+  assert.ok(await evaluate(a,"window.__historyRow===document.querySelector('[data-log-entry]') && document.querySelector('.a-main').textContent.includes('第 2 / 2 页')"),"failed update retains the history window");
+  await evaluate(a,"window.fetch=window.__historyFetch;[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()");
+  await wait(a,"document.querySelector('[data-log-refresh-label]').textContent==='正在实时更新'");
+  record(`${mode}: continuous refresh preserves history, selection, focus and scroll; failed read retains content and retry recovers`);
   await choose(a,"instance_id",shareA);
-  await wait(a,`document.querySelector('#core-log-filters select[name=instance_id]').value===${JSON.stringify(shareA)} && document.querySelector('.core-log-row')`);
+  await wait(a,`document.querySelector('[data-log-filters] select[name=instance_id]').value===${JSON.stringify(shareA)} && document.querySelector('[data-log-entry]')`);
   await reload(a);
-  await wait(a,`document.querySelector('#core-log-filters select[name=instance_id]')?.value===${JSON.stringify(shareA)} && !!document.querySelector('.core-log-row')`);
+  await wait(a,`document.querySelector('[data-log-filters] select[name=instance_id]')?.value===${JSON.stringify(shareA)} && !!document.querySelector('[data-log-entry]')`);
   assert.ok((await rows(a)).every(message=>message.startsWith("alice")));
   record(`${mode}: UI only offers A's shared instance; pagination and reload preserve the authorized selection; no horizontal overflow`);
   // Delay a real response to exercise out-of-order scope changes.
@@ -163,25 +185,67 @@ try {
   await choose(manager,"instance_id",shareA);
   await delay(70);
   await choose(manager,"instance_id",shareB);
-  await wait(manager,`document.querySelector('#core-log-filters select[name=instance_id]').value===${JSON.stringify(shareB)} && [...document.querySelectorAll('.core-log-row pre')].length>0 && [...document.querySelectorAll('.core-log-row pre')].every(el=>el.textContent.startsWith('bob'))`);
+  await wait(manager,`document.querySelector('[data-log-filters] select[name=instance_id]').value===${JSON.stringify(shareB)} && [...document.querySelectorAll('.a-log-message')].length>0 && [...document.querySelectorAll('.a-log-message')].every(el=>el.textContent.startsWith('bob'))`);
   await delay(800);
   assert.ok((await rows(manager)).every(message=>message.startsWith("bob")));
   await screenshot(manager,"admin-shared-instance");
   record(`${mode}: fast A→B selection ignores the delayed A response`);
+  // Exercise the actual production layout against the real long-log/source
+  // fixtures, plus a failed/delayed transport while retaining those records.
+  const layoutWidths = mode === "mobile" ? [[390,844],[844,390]] : [[1920,1080],[3840,2160],[1280,900],[960,800]];
+  for (const [width,height] of layoutWidths) {
+    await call("Emulation.setDeviceMetricsOverride", {width,height,deviceScaleFactor:1,mobile:mode==="mobile"}, manager);
+    await evaluate(manager,"window.scrollTo(0,0)");
+    assert.ok(await evaluate(manager,"document.documentElement.scrollWidth<=innerWidth+1"),`${width}: long logs and source names do not overflow the viewport`);
+    assert.ok(await evaluate(manager,"[...document.querySelectorAll('.a-log-message')].every(el=>el.getBoundingClientRect().right<=innerWidth+1)"),`${width}: the log message uses the visible reading width`);
+    await screenshot(manager,`stream-long-${width}x${height}`);
+  }
+  const [layoutWidth,layoutHeight] = mode === "mobile" ? [390,844] : [1920,1080];
+  await call("Emulation.setDeviceMetricsOverride", {width:layoutWidth,height:layoutHeight,deviceScaleFactor:1,mobile:mode==="mobile"}, manager);
+  await evaluate(manager,"[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='暂停更新').click();window.scrollTo(0,0)");
+  await screenshot(manager,"stream-paused");
+  await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='unmatched layout fixture';q.dispatchEvent(new Event('input',{bubbles:true}))})()");
+  await wait(manager,"!document.querySelector('[data-log-entry]')");
+  await screenshot(manager,"stream-empty");
+  await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='';q.dispatchEvent(new Event('input',{bubbles:true}));window.__layoutFetch=window.fetch;window.fetch=(...args)=>String(args[0]).includes('/core-logs?')?Promise.resolve(new Response(JSON.stringify({error:'日志读取失败，请重试'}),{status:503,headers:{'Content-Type':'application/json'}})):window.__layoutFetch(...args);[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新').click()})()");
+  await wait(manager,"document.querySelector('[data-log-refresh-label]').textContent.includes('刷新失败')");
+  assert.ok(await evaluate(manager,"document.querySelectorAll('[data-log-entry]').length>0"));
+  await screenshot(manager,"stream-error-retained");
+  await evaluate(manager,"window.fetch=async(...args)=>{const result=await window.__layoutFetch(...args);if(String(args[0]).includes('/core-logs?'))await new Promise(resolve=>setTimeout(resolve,1200));return result;};[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()");
+  await wait(manager,"document.querySelector('[data-log-refresh-label]').getAttribute('aria-busy')==='true'");
+  assert.ok(await evaluate(manager,"document.querySelectorAll('[data-log-entry]').length>0"),"refresh keeps readable logs while the response is pending");
+  await screenshot(manager,"stream-loading-retained");
+  await wait(manager,"!document.querySelector('[data-log-refresh-label]').hasAttribute('aria-busy') && document.querySelector('[data-log-refresh-label]').textContent==='正在实时更新'");
+  await evaluate(manager,"window.fetch=window.__layoutFetch;delete window.__layoutFetch");
+  await choose(manager,"instance_id","");
+  await wait(manager,"document.querySelector('[data-log-refresh-label]').textContent==='正在实时更新'");
+  await evaluate(manager,"document.querySelector('[data-log-source-status]').click();document.querySelectorAll('dialog[data-log-sources] [data-source-expand][aria-expanded=false]').forEach(item=>item.click());window.scrollTo(0,0)");
+  await screenshot(manager,"stream-source-states");
+  await evaluate(manager,"document.querySelector('dialog[data-log-sources] [aria-label=关闭]').click()");
+  assert.ok(await evaluate(manager,"document.documentElement.scrollWidth<=innerWidth+1"));
+  await call("Emulation.setDeviceMetricsOverride", {width:1920,height:1080,deviceScaleFactor:2,mobile:false},manager);
+  for (const name of ["agent_id","instance_id","engine","level","limit"]) {
+    await call("Runtime.evaluate", {expression:`document.querySelector('[data-log-filters] [name=${name}]').showPicker()`,userGesture:true},manager);
+    await screenshot(manager,`stream-options-${name}`);
+    await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27},manager);
+    await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27},manager);
+  }
+  record(`${mode}: long logs, long node labels, source failures, all filter pickers, empty, paused, failed/retry and delayed refresh layouts captured at required viewports`);
+
   let sharing=await api(manager,admin,"GET",`/agents/${host}/sharing`);
   await api(manager,admin,"PUT",`/agents/${host}/sharing`,{revision:sharing.revision,shares:sharing.shares.map(share=>({username:share.username,engines:share.engines,ports:share.ports,limit_bytes:share.limit_bytes,enabled:share.user_id!==alice.user_id}))});
-  await wait(a,`!document.querySelector('#core-log-filters select[name=instance_id] option[value="${shareA}"]') && [...document.querySelectorAll('.core-log-row pre')].every(el=>!el.textContent.includes('独立实例'))`);
+  await wait(a,`!document.querySelector('[data-log-filters] select[name=instance_id] option[value="${shareA}"]') && [...document.querySelectorAll('.a-log-message')].every(el=>!el.textContent.includes('独立实例'))`);
   assert.ok((await api(b,bob,"GET",`/core-logs?agent_id=${host}`)).every(log=>log.instance_id===shareB));
   await api(manager,admin,"DELETE",`/users/${alice.user_id}`,undefined,204);
   await api(a,alice,"GET","/core-log-sources",undefined,401);
   await reload(a);
-  await wait(a,"!!document.querySelector('#login-form')");
+  await wait(a,"!!document.querySelector('#login-form,.a-login form')");
   const switched=await login(a,"bob");
   await evaluate(a,"location.hash='#core-logs'");
-  await wait(a,"!!document.querySelector('.core-log-row')");
+  await wait(a,"!!document.querySelector('[data-log-entry]')");
   assert.equal(switched.user_id,bob.user_id);
   assert.ok((await rows(a)).every(message=>message.startsWith("bob")));
-  assert.ok(await evaluate(a,`![...document.querySelectorAll('#core-log-filters select[name=instance_id] option')].some(option=>option.value===${JSON.stringify(shareA)})`));
+  assert.ok(await evaluate(a,`![...document.querySelectorAll('[data-log-filters] select[name=instance_id] option')].some(option=>option.value===${JSON.stringify(shareA)})`));
   record(`${mode}: live poll removes revoked A data/options/cache; disabled session denied; same-context account switch contains only B data`);
   if(artifacts) await writeFile(join(resolve(artifacts),`${mode}-record.txt`),report.join("\n")+"\n");
 } finally {

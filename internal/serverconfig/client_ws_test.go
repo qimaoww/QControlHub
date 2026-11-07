@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestWebSocketClientHostDefaultsAndLifecycle(t *testing.T) {

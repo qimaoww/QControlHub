@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 	"path/filepath"
 	"strings"
 )

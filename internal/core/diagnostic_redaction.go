@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 var diagnosticCredentialKey = regexp.MustCompile(`(?i)(?:^auth$|^pass$|^psk$|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|secret|token|credential|authorization|cookie|api[-_]?key|webhook[-_]?url|sudoku[-_]?client[-_]?key|decryption|mldsa65[-_]?seed|short[-_]?ids?|uuid|^authentication$)`)

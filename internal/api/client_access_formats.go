@@ -3,7 +3,7 @@ package api
 import (
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Expose the same single-line proxy map consumed by Sub-Store, using only

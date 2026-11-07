@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -245,6 +246,39 @@ func TestIPQualityRenderKeepsTextUpright(t *testing.T) {
 	}
 	if got := ipQualityRenderedLines(svg); len(got) != 1 || got[0] != "Maxmind 数据库普通文字" {
 		t.Fatalf("lost report text: %v", got)
+	}
+}
+
+func TestIPQualityRenderCentersMediaRegions(t *testing.T) {
+	text := "服务商：  TikTok   Disney+  Netflix Youtube  AmazonPV  Reddit   ChatGPT \n" +
+		"状态：     解锁     解锁     解锁     解锁     解锁     解锁     解锁\n" +
+		"地区：    \x1b[32m[ALISG]   [HK]     []     [US]     [HK]     [HK]     [US]\x1b[0m\n"
+	svg := mustRenderIPQualitySVG(t, text)
+	pattern := regexp.MustCompile(`<text x="([^"]+)" y="66"[^>]*>(.*?)</text>`)
+	want := []int{120, 196, 268, 332, 408, 480, 556}
+	index, left, size := 0, 0, 0
+	for _, match := range pattern.FindAllStringSubmatch(svg, -1) {
+		value := html.UnescapeString(match[2])
+		if value == "[" {
+			left, _ = strconv.Atoi(match[1])
+			size = 0
+		}
+		if value == "[" || size > 0 {
+			size += len(value)
+		}
+		if value == "]" {
+			if index >= len(want) || left+size*4 != want[index] {
+				t.Fatalf("region %d is not centered: left=%d size=%d", index, left, size)
+			}
+			index++
+			size = 0
+		}
+	}
+	if index != len(want) {
+		t.Fatalf("only %d region labels rendered", index)
+	}
+	if got := ipQualityRenderedLines(svg); got[2] != "地区：    [ALISG]   [HK]     []     [US]     [HK]     [HK]     [US]" {
+		t.Fatal("region correction changed original text")
 	}
 }
 

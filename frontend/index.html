@@ -5,19 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>QControlHub</title>
-  <link rel="stylesheet" href="/assets/app.css?v=__QCH_CSS_VERSION__">
-  <link rel="modulepreload" href="/assets/modules/dashboard.js?v=__QCH_JS_VERSION__">
+  <link id="qch-startup-style" rel="stylesheet" href="/assets/startup.css?v=__QCH_STARTUP_CSS_VERSION__">
 </head>
 <body>
   <div id="app">
-    <div class="boot">
-      <div class="boot-content" role="status" aria-live="polite">
-        <div class="boot-mark" aria-hidden="true"></div>
-        <span>正在加载控制台...</span>
+    <div class="qch-startup" aria-busy="true">
+      <div class="qch-startup-content">
+        <div class="qch-startup-emblem" aria-hidden="true">
+          <div class="qch-startup-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path class="qch-startup-signal" d="M3 12h4l3-7 4 14 3-7h4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="qch-startup-copy">
+          <p class="qch-startup-name">QControlHub</p>
+          <p class="qch-startup-status" role="status">正在加载控制台</p>
+        </div>
+        <div class="qch-startup-track" aria-hidden="true"></div>
       </div>
     </div>
   </div>
   <noscript>需要启用 JavaScript 才能使用 QControlHub 控制台。</noscript>
-  <script type="module" src="/assets/app.js?v=__QCH_JS_VERSION__"></script>
+  <script type="module" src="/assets/bootstrap.js?v=__QCH_JS_VERSION__&amp;analytics=__QCH_ANALYTICS_CSS_VERSION__"></script>
 </body>
 </html>

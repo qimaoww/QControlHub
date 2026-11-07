@@ -6,14 +6,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const komariAPIKeyMask = "••••••••"
-
-func panelSettingsResponse(settings core.PanelSettings) core.PanelSettings {
-	if settings.KomariAPIKey != "" {
-		settings.KomariAPIKey = komariAPIKeyMask
-	}
-	return settings
-}
+func panelSettingsResponse(settings core.PanelSettings) core.PanelSettings { return settings }
 
 func (s *Server) getSettings(w http.ResponseWriter, request *http.Request) {
 	settings, err := s.store.PanelSettings(request.Context())
@@ -34,9 +27,6 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 		core.PanelSettings
 		ACMEEmail                     *string `json:"acme_email"`
 		ClientConnectionRetentionDays *int    `json:"client_connection_retention_days"`
-		KomariURL                     *string `json:"komari_url"`
-		KomariAPIKey                  *string `json:"komari_api_key"`
-		ClearKomariAPIKey             bool    `json:"clear_komari_api_key"`
 	}
 	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -51,24 +41,6 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	if input.ClientConnectionRetentionDays != nil {
 		settings.ClientConnectionRetentionDays = *input.ClientConnectionRetentionDays
 	}
-	// Pointer fields distinguish a legacy client that does not know about
-	// Komari from an explicit empty value used to clear the URL.
-	if input.KomariURL == nil {
-		settings.KomariURL = previous.KomariURL
-	} else {
-		settings.KomariURL = *input.KomariURL
-	}
-	preserveKomariAPIKey := input.KomariAPIKey == nil
-	if !preserveKomariAPIKey && !input.ClearKomariAPIKey {
-		preserveKomariAPIKey = *input.KomariAPIKey == "" || *input.KomariAPIKey == komariAPIKeyMask
-	}
-	if preserveKomariAPIKey {
-		settings.KomariAPIKey = previous.KomariAPIKey
-	} else {
-		settings.KomariAPIKey = *input.KomariAPIKey
-	}
-	// The browser never receives the actual key. An empty or masked value means
-	// keep the currently saved key; an explicit clear flag removes it.
 	ids, err := s.store.OwnedAgentIDs(request.Context())
 	if err != nil {
 		writeInternalError(w, err)

@@ -73,6 +73,13 @@ func (s *Server) getIPQualityArchive(w http.ResponseWriter, request *http.Reques
 		writeStoreError(w, err)
 		return
 	}
+	// The aligned preview can update presentation of historical reports while
+	// the original download and its stored digest remain immutable.
+	if request.URL.Query().Get("layout") == "aligned" && archive.SourceText != "" {
+		if content, err := renderIPQualitySVG(archive.SourceText); err == nil {
+			archive.Content = content
+		}
+	}
 	w.Header().Set("Content-Type", "image/svg+xml")
 	disposition := "inline"
 	if request.URL.Query().Get("download") == "1" {

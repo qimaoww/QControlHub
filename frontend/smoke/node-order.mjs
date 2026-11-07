@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 
-import { agentStructureSignature } from "../modules/agents.js";
-
 import {
   nodeCardOrderKey,
   orderNodesBySavedOrder,
@@ -52,30 +50,7 @@ assert.deepEqual(
   "node ordering does not mutate the API response",
 );
 
-assert.equal(
-  agentStructureSignature([
-    { id: "beta" },
-    { id: "alpha" },
-  ]),
-  agentStructureSignature([
-    { id: "alpha" },
-    { id: "beta" },
-  ]),
-  "Agent structure signatures ignore response ordering",
-);
-assert.notEqual(
-  agentStructureSignature([{ id: "alpha", capabilities: ["mihomo"] }]),
-  agentStructureSignature([
-    { id: "alpha", capabilities: ["mihomo"] },
-    { id: "new-node", capabilities: [] },
-  ]),
-  "Agent structure signatures detect newly enrolled nodes",
-);
-
-assert.notEqual(
-  agentStructureSignature([{ id: "alpha", capabilities: ["mihomo"] }]),
-  agentStructureSignature([{ id: "alpha", capabilities: [] }]),
-  "Capability changes from another session trigger a structural refresh",
-);
+// Native keyed DOM discovery/capability transitions are exercised by the
+// node-task-lifecycle browser modes, without the retired structure signature.
   return { state, noop };
 }

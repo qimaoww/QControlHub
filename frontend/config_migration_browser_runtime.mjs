@@ -1,347 +1,163 @@
-import { installConfigPages } from "./modules/configs.js";
-import { bindConfigFiles } from "./modules/config-files.js";
-import { reconcileView } from "./modules/refresh.js";
-
-// Paired source files are saved through regular deployment. The dedicated
-// bundle-generation button has been removed from the configuration page.
-const assert = (condition, message) => { if (!condition) throw new Error(message); };
-const pause = () => new Promise(resolve => setTimeout(resolve, 30));
-const waitFor = async (condition, message) => {
-  const deadline = Date.now() + 4000;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(message);
-    await new Promise(resolve => setTimeout(resolve, 10));
+import { assert, pause, waitFor, createConfigFixture } from './browser/config-fixture.mjs';
+import { testNativeConfigReadCacheRuntime } from './browser/config-snapshots.mjs';
+import { testSourceReceipts } from './browser/preset-recovery.mjs';
+import { patch } from './analytics/live-dom.js';
+const sourceForm=()=>document.querySelector('.a-main form:has([name=content])');
+const feedback=()=>[...document.querySelectorAll('.a-main .a-notice,.a-toast')].filter(node=>node.checkVisibility()).map(node=>node.textContent).join(' ');
+const source='{"inbounds":[{"tag":"first","port":21001},{"tag":"second","port":21002}],"outbounds":[{"tag":"direct"},{"tag":"qch-trf-21001-abcdef012345","custom_integer":9007199254740993}],"large":9007199254740993}';
+export async function testConfigMigrationRuntime(preview=false){
+  if(preview){const params=new URLSearchParams(location.search);await createConfigFixture(params.get('engine')||'xray',{readonly:params.has('readonly'),import:params.has('import'),legacy:params.has('legacy')});return}
+  for(const engine of ['xray','sing-box','mihomo','ss-rust'])for(const readonly of [false,true]){
+    const test=await createConfigFixture(engine,{readonly,...(['xray','sing-box'].includes(engine)?{content:source}:{})});
+    try{
+      const form=sourceForm(),input=form.elements.content;
+      assert(!document.querySelector('[data-live-intent="migrate-files"]')&&!document.body.textContent.includes('生成入站与出口成套文件'),'removed bundle-generation action remains');
+      const submit=form.querySelector('[type=submit]');assert(Boolean(submit)===!readonly,'source deployment permission changed');
+      assert(!form.querySelector('select[name=intent]')&&!document.body.textContent.includes('保存并校验'),'retired source action returned');
+      if(readonly){assert(input.readOnly,'readonly source remains editable');continue}
+      const baseline=input.value;form.requestSubmit();await pause();assert(!test.writes.length,'canceled source deployment wrote');
+      if(['xray','sing-box'].includes(engine)){
+        test.select('second');assert(input.value===baseline&&input.value.includes('qch-trf-21001'),'inbound selection replaced full source/dedicated exit');
+        assert(!document.querySelector('[data-config-preview]'),'single-file source retained merged preview');
+        input.value=baseline.replaceAll('21001','23001').replaceAll('9007199254740993','9007199254740995');
+      }else input.value=baseline+'\n ';
+      input.dispatchEvent(new Event('input',{bubbles:true}));const draft=input.value;
+      // Refreshing an unchanged source container must retain the complete draft.
+      patch(input.parentElement,input.parentElement.cloneNode(true));assert(input.value===draft,'source patch discarded draft');
+      test.confirm=true;form.requestSubmit();await test.settle(1);
+      const written=test.writes[0];assert(written.intent==='deploy'&&written.version===1&&written.content===draft&&test.saved().version===2,'source deployment lost complete draft/CAS');
+      assert(!test.readRequests.length&&!test.calls.some(call=>call.path==='/tasks'),'source submission required redundant Agent read or second task');
+      if(['xray','sing-box'].includes(engine))assert(written.content.includes('9007199254740995')&&written.content.includes('qch-trf-23001'),'source corrupted exact integer or dedicated exit');
+      assert(test.sawTaskDetails,'accepted source submission did not open task result');
+      assert(test.confirmations.filter(item=>item.title==='部署并重启').length===2,'source submission presented duplicate confirmations');
+      assert(form.textContent.includes('已保存')&&!form.textContent.includes('版本 2'),'save date missing or internal revision exposed');
+    }finally{test.dispose()}
   }
-};
-
-async function fixture(engine, readOnly = false, imported = false, preview = false, legacy = false, options = {}) {
-  const content = engine === "mihomo" ? "listeners: []\n" : '{"inbounds":[{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"direct"},{"tag":"qch-trf-1080-111111111111","custom_integer":9007199254740993}],"large":9007199254740993}';
-  const sourceKey = `node|${engine}${imported ? "|import" : ""}`;
-  const node = {id:"node",name:"Migration fixture",status:"online",os:"linux",arch:"amd64",features:legacy?["managed-config-read-v1","config-files-v1"]:["managed-config-read-v1","config-files-v1","config-files-paired-v1"],capabilities:[engine],runtime:{[engine]:{installed:true,existing_config_available:imported,version:"fixture"}}};
-  if (options.multi) {
-    const other = engine === "xray" ? "sing-box" : "xray";
-    node.capabilities.push(other);
-    node.runtime[other] = {installed:true};
-    node.runtime[engine].existing_config_available = true;
+  for(const engine of ['xray','sing-box','mihomo','ss-rust']){
+    const imported=await createConfigFixture(engine,{import:true});
+    try{
+      const form=sourceForm();assert(form.elements.content.readOnly&&form.querySelector('[type=submit]')?.textContent==='导入并迁移','external source lost explicit migration');
+      assert(![...form.querySelectorAll('button')].some(button=>button.textContent==='保存并部署'),'external source exposed regular source deployment');
+      imported.clickButton('读取系统配置');await waitFor(()=>imported.snapshotReads===1&&!imported.root.hasAttribute('aria-busy'),'system source read did not finish');
+      form.requestSubmit();await pause();assert(!imported.imports?.length,'canceled external migration submitted');
+      imported.confirm=true;form.requestSubmit();await waitFor(()=>imported.imports?.length===1&&!imported.root.hasAttribute('aria-busy'),'explicit source migration failed');
+      assert(imported.imports[0].action==='import-existing'&&imported.imports[0].expected_config_version===imported.saved().version&&imported.imports[0].engine===engine,'migration lost exact saved target');
+      assert(imported.sawTaskDetails,'migration did not show task result');
+    }finally{imported.dispose()}
   }
-  const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",
-    liveSources:options.readFromAgent ? {} : {[sourceKey]:{content,agentContent:content}}}};
-  const savedDate = version => `2026-11-02T04:05:${String(version).padStart(2,"0")}Z`;
-  let saved = {id:"config",version:1,name:"fixture",content,updated_at:savedDate(1)};
-  const test = {writes:[],tasks:[],reads:[],confirmations:[],notifications:[],accept:false,
-    snapshotReads:0, taskPolls:0, missingSnapshots:options.missingSnapshots || 0, snapshotGate:options.snapshotGate};
-  const api = async (path, options = {}) => {
-    if (path === "/agents") return [node];
-    if (path.endsWith("/workspace")) {
-      if (test.workspaceError) throw test.workspaceError;
-      if (test.refreshError && test.writes.length) throw test.refreshError;
-      return {config:saved};
-    }
-    if (options.method === "POST" && path.endsWith("/source")) {
-      const input = JSON.parse(options.body); test.writes.push(input);
-      if (test.saveGate) await test.saveGate;
-      if (test.saveError) throw test.saveError;
-      if (test.taskError) throw test.taskError;
-      saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)};
-      test.tasks.push({action:input.intent, expected_config_version:saved.version});
-      const task = {id:options.headers["X-Config-Task-ID"], agent_id:"node", engine, config_id:saved.id, config_version:saved.version, action:input.intent, status:"pending"};
-      test.receiptTask = task;
-      if (test.supersedeLostSave) {
-        saved = {...saved,version:saved.version+1,content:saved.content.replaceAll("9007199254740995", "9007199254740997"),updated_at:savedDate(saved.version+1)};
-        throw TypeError("测试保存响应中断");
-      }
-      test.beforeSaveResponse?.();
-      return {config:saved, task};
-    }
-    if (options.method === "PUT") {
-      const input = JSON.parse(options.body); test.writes.push(input);
-      if (test.saveGate) await test.saveGate;
-      if (test.saveError) throw test.saveError;
-      saved = {...input,id:"config",version:saved.version+1,updated_at:savedDate(saved.version+1)}; return saved;
-    }
-    if (options.method === "POST" && path === "/tasks") {
-      const input = JSON.parse(options.body);
-      test.reads.push(input);
-      return {id:`read-${test.reads.length}`,action:input.action,status:"succeeded",
-        reused:Boolean(input.prefer_cached),finished_at:new Date().toISOString()};
-    }
-    if (path.startsWith("/tasks/read-") && path.endsWith("/config-snapshot")) {
-      test.snapshotReads++;
-      if (test.snapshotGate) await test.snapshotGate;
-      if (test.missingSnapshots-- > 0) throw Object.assign(new Error("snapshot retired"), {status:404});
-      return {content};
-    }
-    if (path.startsWith("/tasks/")) {
-      test.taskPolls++;
-      return {...(path.split("?")[0] === `/tasks/${test.receiptTask?.id}` ? test.receiptTask : {}),status:"failed",error:"测试任务未执行"};
-    }
-    if (path === `/agents/node/configs/${engine}`) return saved;
-    throw new Error(`unexpected API ${path}`);
+  for(const engine of ['xray','sing-box'])for(const shared of [false,true]){
+    const test=await createConfigFixture(engine,{legacy:true,shared,content:source});
+    try{
+      const form=sourceForm();form.requestSubmit();await pause();assert(!test.writes.length,'canceled legacy source deployment wrote');
+      test.confirm=true;form.requestSubmit();await test.settle(1);
+      assert(test.writes[0].intent==='deploy'&&!test.readRequests.length,'legacy Agent lost regular atomic deployment');
+    }finally{test.dispose()}
+  }
+  await testSelectedNodeWorkspace();
+  await testPendingAndRejectedSource();
+  await testSourceReceipts();
+  await testNativeConfigReadCacheRuntime();
+  await testRuntimeAndSourceSelection();
+}
+async function testSelectedNodeWorkspace(){
+  for(const engine of ['mihomo','xray','sing-box','ss-rust']){
+    const other={id:'unselected',name:'OTHER-NODE-CONTENT',status:'online',capabilities:['mihomo','xray','sing-box','ss-rust'],runtime:{}};
+    const test=await createConfigFixture(engine,{additionalAgents:[other]});
+    try{
+      const selector=test.root.querySelector('.a-target-form [name=agent]');
+      assert([...selector.options].some(option=>option.value===other.id),'other authorized node missing from selection');
+      assert(selector.value==='node','explicit configuration target was not retained');
+      const reads=test.calls.filter(call=>call.path.includes('/configs'));
+      assert(reads.length===1&&reads[0].path===`/agents/node/configs/${engine}/workspace`,'opening configuration fetched an unselected node or redundant fleet configs');
+      assert(!sourceForm().elements.content.value.includes(other.name),'unselected node content entered active editor');
+      assert(sourceForm().querySelector('[type=submit]')?.textContent==='保存并部署','managed configuration requires an optional system import');
+      assert(!test.writes.length&&!test.readRequests.length,'opening selected configuration unexpectedly submitted a task');
+    }finally{test.dispose()}
+  }
+}
+async function testRuntimeAndSourceSelection(){
+  const test=await createConfigFixture('sing-box',{import:true});
+  const target=()=>test.root.querySelector('.a-target-form');
+  const idle=()=>sourceForm()&&!test.root.querySelector('[aria-busy=true]');
+  const selectSource=async value=>{
+    const select=target().elements.source;
+    select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));
+    await waitFor(()=>idle()&&target().elements.source.value===value,`native source selection failed: ${value}`);
   };
-  const pages = installConfigPages({state,api,optionalAPI:api,engines:[engine],can:()=>!readOnly,esc:String,engineName:v=>v,conciseVersion:()=>"fixture",date:String,ago:String,bytes:String,
-    confirmAction:async message=>{test.confirmations.push(message);return preview?window.confirm(message):test.accept;},
-    notify:message=>test.notifications.push(message),shell:html=>{document.body.innerHTML=html;},bindCodeEditors:()=>{},
-    submitTask:async value=>{
-      test.tasks.push(value);
-      if (test.taskError) throw test.taskError;
-      return {id:`task-${test.tasks.length}`};
-    },
-  });
-  await pages.liveConfig();
-  Object.assign(test, {pages, state, saved:()=>saved, dispose:()=>{state.data = {};}});
-  window.configMigrationFixture = test;
-  return test;
-}
-
-export async function testConfigMigrationRuntime(preview = false) {
-  if (preview) {
-    const params = new URLSearchParams(location.search);
-    await fixture(params.get("engine")||"xray",params.has("readonly"),params.has("import"),true,params.has("legacy"));
-    return;
-  }
-  testReconciledConfigFiles();
-  {
-    const test = await fixture("xray");
-    test.supersedeLostSave = true;
-    const input = document.querySelector("[data-code-input]");
-    input.value = input.value.replaceAll("9007199254740993", "9007199254740995");
-    input.dispatchEvent(new Event("input", {bubbles:true}));
-    const draft = input.value;
-    document.querySelector('[data-live-intent="validate"]').click();
-    await waitFor(()=>document.querySelector("[data-live-save-status]")?.textContent.includes("之后又有新的配置保存"), "lost response associated a later revision with the original task");
-    assert(input.isConnected && input.value === draft && document.querySelector('[data-live-intent="validate"]').disabled, "superseded receipt lost its draft or allowed duplicate writes");
-    const operation = test.state.data.presetOperations?.["node|xray"];
-    assert(!operation || operation.version === operation.task.config_version, "old task was labeled with another saved revision");
-    assert(test.writes.length === 1 && test.tasks.length === 1 && test.saved().version === 3, "receipt recovery repeated the mutation");
-    test.dispose();
-  }
-  for (const change of ["account", "newer-operation"]) {
-    const test = await fixture("xray");
-    test.accept = true;
-    test.beforeSaveResponse = () => {
-      if (change === "account") test.state.data = {...test.state.data, pendingDeployTasks:{}};
-      else {
-        test.state.data.presetOperations = {"node|xray":{version:3,task:{id:"newer-task"}}};
-        test.state.data.pendingDeployTasks = {"node|xray":{taskId:"newer-task"}};
-      }
-    };
-    document.querySelector('[data-live-intent="deploy"]').click();
-    await waitFor(()=>test.writes.length === 1 && !document.querySelector("#live-config-form")?.hasAttribute("aria-busy"), "late source response did not release its editor");
-    assert(test.state.data.pendingDeployTasks?.["node|xray"]?.taskId === (change === "account" ? undefined : "newer-task"), "late source response replaced another account or newer deployment");
-    test.dispose();
-  }
-  for (const engine of ["xray","sing-box","mihomo","ss-rust"]) {
-    for (const restricted of [false,true]) {
-      const test = await fixture(engine, restricted);
-      assert(!document.querySelector('[data-live-intent="migrate-files"]'), "removed bundle-generation action is still rendered");
-      assert(!document.body.textContent.includes("生成入站与出口成套文件"), "removed bundle-generation label is still visible");
-      const button = document.querySelector('[data-live-intent="deploy"]');
-      assert(Boolean(button) === !restricted, `regular deployment permission changed: ${engine}/${restricted}`);
-      const supported = ["xray","sing-box"].includes(engine) && !restricted;
-      if (!supported) continue;
-      button.click(); await pause();
-      assert(test.writes.length===0 && test.tasks.length===0,"canceling source deployment wrote data");
-      test.accept = true;
-      const buttons = document.querySelectorAll("[data-config-file]");
-      assert(buttons[1].querySelector("b").textContent === "a", "filename must follow the preset tag, not the server name");
-      buttons[1].click();
-      const input = document.querySelector("[data-code-input]");
-      assert(JSON.parse(input.value).outbounds?.[0]?.tag === "qch-trf-1080-111111111111", "inbound editor did not include its dedicated exit");
-      assert(!document.querySelector('optgroup[label="出站"]'), "legacy outbound file group remains visible");
-      input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
-      buttons[0].click();
-      assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
-      document.querySelector('[data-live-intent="deploy"]').click(); await pause();
-      assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
-      assert(test.reads.length===0,
-        "source deployment required a duplicate Agent read");
-      assert(test.tasks[0].action==="deploy","source save must use validated rollback-capable deployment");
-      assert(test.tasks[0].expected_config_version===2,"source deployment must use the exact newly saved version");
-      assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"source deployment corrupted integer or discarded fragment draft");
-      assert(test.confirmations.length===2,"source deployment presented duplicate confirmations");
+  let release;
+  try{
+    for(const reason of ['complex wrapper is unsupported','standard executable did not pass protected native binary validation']){
+      Object.assign(test.agent.runtime['sing-box'],{installed:false,existing_config_available:false,existing_config_unsupported_reason:reason});
+      const reads=test.calls.filter(call=>call.path==='/agents').length;
+      await test.reenter();
+      assert(test.calls.filter(call=>call.path==='/agents').length===reads+1,'explicit refresh duplicated runtime reads');
+      assert(target().elements.engine.value==='sing-box'&&target().elements.engine.options.length===1,'unsupported runtime removed selected engine');
+      assert(test.root.textContent.includes(reason),'fresh unsupported runtime reason missing');
+      assert(sourceForm().querySelector('[type=submit]').disabled,'unsupported runtime permits deployment');
+      assert(![...target().elements.source.options].some(option=>option.value==='import'),'unsupported runtime permits system migration');
+      if(reason.startsWith('standard'))assert(!test.root.textContent.includes('complex wrapper is unsupported'),'runtime refresh retained stale unsupported reason');
     }
-    await fixture(engine,false,true);
-    assert(!document.querySelector('[data-live-intent="migrate-files"]'),"external service must not expose managed-file migration");
-    assert(document.querySelector('[data-live-intent="import"]') && !document.querySelector('[data-live-intent="deploy"]'),
-      "removing bundle generation changed explicit external-service import");
-    if (["xray","sing-box"].includes(engine)) {
-      const legacy = await fixture(engine,false,false,false,true);
-      assert(!document.querySelector('[data-live-intent="migrate-files"]'), "legacy Agent still exposes the removed bundle action");
-      const button = document.querySelector('[data-live-intent="deploy"]');
-      assert(button && !button.disabled,"legacy Agent lost its regular deployment action");
-      button.click(); await pause();
-      assert(legacy.writes.length===0 && legacy.tasks.length===0,"canceling legacy source deployment wrote data");
-      legacy.accept = true;
-      button.click(); await pause();
-      assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
-        "removing bundle generation blocked normal deployment to a legacy Agent");
-      assert(legacy.reads.length===0,
-        "legacy source deployment required a duplicate Agent read");
+    Object.assign(test.agent.runtime['sing-box'],{installed:true,existing_config_available:true,existing_config_unsupported_reason:''});
+    const beforeWorkspaces=test.calls.filter(call=>call.path.endsWith('/workspace')).length;
+    location.hash='#tasks';
+    await waitFor(()=>!sourceForm()&&test.calls.some(call=>call.path.startsWith('/tasks?'))&&!test.root.querySelector('[aria-busy=true]'),'tasks route did not load before returning to configuration');
+    const afterTasksAgents=test.calls.filter(call=>call.path==='/agents').length;
+    location.hash='#live-config?agent=node&engine=sing-box&source=personal';
+    await waitFor(()=>idle()&&target().elements.source.value==='personal','configuration did not reload after tasks route');
+    assert(test.calls.filter(call=>call.path==='/agents').length===afterTasksAgents+1,'return from tasks reused obsolete runtime');
+    assert(test.calls.filter(call=>call.path.endsWith('/workspace')).length===beforeWorkspaces+1,'runtime refresh duplicated workspace reads');
+    assert(!test.root.textContent.includes('standard executable did not pass'),'upgrade retained unsupported warning');
+    assert(!sourceForm().querySelector('[type=submit]').disabled,'upgraded runtime did not restore deployment');
+    assert(['personal','managed','import'].every(value=>[...target().elements.source.options].some(option=>option.value===value)),'upgraded runtime lost available source choices');
+    await selectSource('personal');
+    assert(!sourceForm().elements.content.readOnly&&sourceForm().elements.content.value===test.saved().content,'saved source is not editable or shows system snapshot');
+    await selectSource('managed');
+    assert(!sourceForm().elements.content.readOnly&&sourceForm().querySelector('[type=submit]').textContent==='保存并部署','managed source lost atomic deployment');
+    await selectSource('import');
+    const snapshot='{"inbounds":[{"tag":"complete-existing-snapshot"}],"large":9007199254740993}';
+    test.setAgentContent(snapshot);test.clickButton('读取系统配置');
+    await waitFor(()=>idle()&&sourceForm().elements.content.value===snapshot,'newly available system source did not read exact snapshot');
+    assert(sourceForm().elements.content.readOnly,'system migration snapshot became editable');
+    assert(sourceForm().querySelectorAll('[type=submit]').length===1&&sourceForm().querySelector('[type=submit]').textContent==='导入并迁移','system migration has duplicate or incorrect submit action');
+    await selectSource('personal');
+    assert(sourceForm().elements.content.value===test.saved().content,'system snapshot polluted saved source');
+    for(const ignoreAbort of [false,true]){
+      test.ignoreAgentAbort=ignoreAbort;
+      const nextSource=ignoreAbort?'personal':'managed';
+      Object.assign(test.agent.runtime['sing-box'],{installed:false,existing_config_available:false,existing_config_unsupported_reason:'stale unsupported reason'});
+      test.agentReadGate=new Promise(resolve=>{release=resolve;});
+      const agentReads=test.calls.filter(call=>call.path==='/agents').length;
+      test.clickButton('刷新');
+      await waitFor(()=>test.calls.filter(call=>call.path==='/agents').length===agentReads+1,'stale runtime read did not begin');
+      Object.assign(test.agent.runtime['sing-box'],{installed:true,existing_config_available:true,existing_config_unsupported_reason:''});
+      location.hash=`#live-config?agent=node&engine=sing-box&source=${nextSource}`;
+      await waitFor(()=>idle()&&target().elements.source.value===nextSource,'current runtime did not supersede held old read');
+      const currentForm=sourceForm(),workspaceReads=test.calls.filter(call=>call.path.endsWith('/workspace')).length;
+      release();release=null;await pause();
+      assert(sourceForm()===currentForm&&!test.root.textContent.includes('stale unsupported reason'),'late old runtime replaced current workspace');
+      assert(!sourceForm().querySelector('[type=submit]').disabled&&target().elements.source.value===nextSource,'late runtime changed current source or deployment permission');
+      if(!ignoreAbort)assert(test.calls.filter(call=>call.path.endsWith('/workspace')).length===workspaceReads,'obsolete runtime triggered another workspace read');
     }
-  }
-  await testSourceSaveRuntime();
-  await testConfigReadCacheRuntime();
+    assert(!test.writes.length&&!test.imports?.length,'runtime and source navigation unexpectedly wrote configuration');
+  }finally{release?.();test.dispose();}
 }
-
-function testReconciledConfigFiles() {
-  for (const dirty of [false, true]) {
-    const baseline = JSON.stringify({inbounds:[{tag:"alice",port:24101},{tag:"second",port:24105}],outbounds:[{tag:"direct"}]});
-    const markup = () => {
-      const form = document.createElement("form");
-      form.innerHTML = '<section data-code-editor><header class="code-editor-toolbar"></header><textarea data-code-input></textarea></section>';
-      form.querySelector("textarea").textContent = baseline;
-      return form;
-    };
-    const form = markup(); document.body.replaceChildren(form);
-    let files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
-    files.selectInbound("second",24105);
-    if (dirty) form.querySelector("textarea").value = form.querySelector("textarea").value.replace("24105","24106");
-    reconcileView(form, markup());
-    files = bindConfigFiles(form, "xray", message => { throw new Error(message); });
-    assert(files.paths().length === 3 && form.querySelectorAll(".config-file-buttons").length === 1, "refresh lost inbound fragments or duplicated navigation");
-    assert(JSON.parse(files.content()).inbounds[1].port === (dirty ? 24106 : 24105), "refresh discarded an inbound draft");
-    assert(files.selectedInbound()?.tag === "second", "refresh changed the selected inbound");
+async function testPendingAndRejectedSource(){
+  for(const engine of ['xray','sing-box']){
+    const test=await createConfigFixture(engine,{multi:true,content:source});
+    try{
+      test.confirm=true;const form=sourceForm(),input=form.elements.content;
+      input.value=source.replaceAll('9007199254740993','9007199254740995');input.dispatchEvent(new Event('input',{bubbles:true}));const draft=input.value;
+      test.sourceFailure={status:422};form.requestSubmit();await waitFor(()=>feedback().includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'rejected source lost feedback');
+      assert(!test.writes.length&&input.value===draft&&!form.querySelector('[type=submit]').disabled,'correctable source rejection lost draft or retry');
+      test.sourceFailure=null;let release;test.gate=new Promise(resolve=>{release=resolve});form.requestSubmit();
+      await waitFor(()=>test.calls.filter(call=>call.path.endsWith('/source')).length===2,'pending source save did not start');
+      assert(form.getAttribute('aria-busy')==='true'&&form.querySelector('fieldset').disabled,'pending source save left editable controls');
+      form.requestSubmit();const engineSelect=test.root.querySelector('.a-target-form [name=engine]');engineSelect.value='mihomo';engineSelect.dispatchEvent(new Event('change',{bubbles:true}));await pause();
+      assert(sourceForm()===form&&input.value===draft&&new URLSearchParams(location.hash.split('?')[1]).get('engine')===engine,'pending source target switch discarded workspace');
+      assert(test.calls.filter(call=>call.path.endsWith('/source')).length===2,'pending source submitted twice');
+      release();await test.settle(1);assert(test.writes[0].content===draft&&test.saved().version===2&&!form.querySelector('[type=submit]').disabled,'retry did not save exact source once');
+      assert(form.textContent.includes('已保存'),'accepted source lost save date');
+    }finally{test.dispose()}
   }
-}
-
-async function testConfigReadCacheRuntime() {
-  const key = "node|xray";
-  for (const missingSnapshots of [0, 1, 2]) {
-    const test = await fixture("xray", false, false, false, false, {readFromAgent:true, missingSnapshots});
-    await waitFor(()=>test.state.data.liveSources[key] && !test.state.data.liveSources[key].reading,
-      "automatic cached read did not finish");
-    assert(test.reads.length === (missingSnapshots ? 2 : 1), "snapshot recovery must issue at most one forced read");
-    assert(test.reads[0].prefer_cached === true, "automatic read lost its cache preference");
-    assert(test.taskPolls === 0, "already terminal cached reads still poll task status");
-    if (missingSnapshots) assert(test.reads[1].prefer_cached === undefined, "snapshot recovery reused the failed cache");
-    if (missingSnapshots === 2) {
-      assert(test.state.data.liveSources[key].error, "exhausted snapshot recovery hid its error");
-    } else {
-      assert(Boolean(test.state.data.liveSources[key].cached) === !missingSnapshots, "cache provenance is incorrect");
-      assert(test.state.data.liveSources[key].agentContent === test.state.data.liveSources[key].content, "Agent baseline was lost");
-      const previousReads = test.reads.length;
-      await waitFor(()=>document.querySelector("[data-config-refresh]"), "configuration refresh control is missing");
-      document.querySelector("[data-config-refresh]").click();
-      await waitFor(()=>test.reads.length === previousReads + 1 && test.state.data.liveSources[key]?.taskId,
-        "explicit refresh did not finish");
-      assert(test.reads.at(-1).prefer_cached === undefined && !test.state.data.liveSources[key].cached,
-        "explicit refresh reused the display cache");
-    }
-    test.dispose();
-  }
-
-  // A fresh read can also be retired by another tab before its snapshot GET.
-  const deploy = await fixture("xray", false, false, false, false, {missingSnapshots:1});
-  deploy.accept = true;
-  document.querySelector('[data-live-intent="deploy"]').click();
-  await waitFor(()=>deploy.tasks.length === 1, "fresh preflight did not recover a concurrent snapshot retirement");
-  assert(deploy.reads.length === 0,
-    "fresh preflight recovery used a cached read");
-  assert(deploy.writes.length === 1, "preflight recovery duplicated configuration persistence");
-  await pause();
-  deploy.dispose();
-
-  for (const change of ["account", "route", "epoch", "source"]) {
-    let release;
-    const snapshotGate = new Promise(resolve=>{release=resolve;});
-    const test = await fixture("xray", false, false, false, false, {readFromAgent:true, missingSnapshots:1, snapshotGate});
-    await waitFor(()=>test.snapshotReads === 1, "late-snapshot fixture did not start");
-    if (change === "account") test.state.data = {...test.state.data, liveSources:{}};
-    if (change === "route") test.state.route = "tasks";
-    if (change === "epoch") test.state.navigationEpoch++;
-    if (change === "source") test.state.data.liveConfigSource = "import";
-    const newerRead = {reading:true, pendingTaskId:"newer-read"};
-    test.state.data.liveSources[key] = newerRead;
-    release();
-    await pause();
-    assert(test.reads.length === 1, `${change} change allowed an abandoned cache fallback to create a task`);
-    assert(test.state.data.liveSources[key] === newerRead, `${change} change let an old read clear the newer read state`);
-    test.dispose();
-  }
-}
-
-async function testSourceSaveRuntime() {
-  for (const engine of ["xray", "sing-box"]) {
-    const test = await fixture(engine, false, false, false, false, {multi:true});
-    let release;
-    test.saveGate = new Promise(resolve => { release = resolve; });
-    const form = document.querySelector("#live-config-form");
-    const button = document.querySelector('[data-live-intent="validate"]');
-    button.click();
-    await waitFor(()=>test.writes.length === 1, "source save did not start");
-    assert(form.dataset.saving === "1" && form.getAttribute("aria-busy") === "true" &&
-      document.querySelector("[data-live-save-status]").textContent.includes("正在保存"), "pending source save has no status");
-    assert([...document.querySelectorAll(".live-config-workspace button, .live-config-workspace input, .live-config-workspace select, .live-config-workspace textarea")]
-      .every(element=>element.disabled), "source save left mutable controls active");
-    assert(test.pages.configHasUnsavedChanges(), "pending source save lost navigation protection");
-    form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
-    const otherEngine = [...document.querySelectorAll("[data-live-engine]")].find(tab=>tab.dataset.liveEngine !== engine);
-    await otherEngine.onclick({preventDefault(){}});
-    await document.querySelector('[data-live-source="import"]').onclick();
-    assert(test.state.data.liveEngine === engine && test.state.data.liveConfigSource === "managed", "pending source save allowed target switching");
-    assert(test.writes.length === 1 && !test.tasks.length, "source save submitted twice or created a task before persistence");
-    release();
-    await waitFor(()=>test.saved().version === 2 &&
-      document.querySelector(".live-config-version")?.textContent === `已保存 · ${test.saved().updated_at}` &&
-      !document.querySelector("[data-live-intent]").disabled, "source save did not load its persisted save date");
-    assert(test.writes.length === 1 && test.tasks.length === 1 && test.tasks[0].expected_config_version === 2, "source save lost exact-once revision/task submission");
-    assert(!document.querySelector("[data-live-intent]").disabled, "source save did not unlock fresh controls");
-    test.dispose();
-  }
-
-  for (const failure of ["save", "task", "refresh"]) {
-    const test = await fixture("xray");
-    if (failure === "save") test.saveError = Object.assign(new Error("source rejected"), {status:422});
-    if (failure === "task") test.taskError = Object.assign(new Error("task unavailable"), {status:503});
-    if (failure === "refresh") test.refreshError = Object.assign(new Error("refresh unavailable"), {status:503});
-    const input = document.querySelector("[data-code-input]");
-    input.value = input.value.replace("9007199254740993", "9007199254740995");
-    input.dispatchEvent(new Event("input", {bubbles:true}));
-    const draft = input.value, form = document.querySelector("#live-config-form");
-    const button = document.querySelector('[data-live-intent="validate"]');
-    const baseline = [...document.querySelectorAll(".live-config-workspace button, .live-config-workspace textarea")].map(element=>[element, element.disabled]);
-    button.click();
-    await waitFor(()=>!form.dataset.saving && document.querySelector("[data-live-save-status]")?.getAttribute("role") === "alert", `${failure} failure lost source feedback`);
-    assert(input.value === draft && !input.disabled, `${failure} failure discarded or locked the source draft`);
-    if (failure === "save") {
-      assert(baseline.every(([element, disabled])=>element.disabled === disabled), "rejected source save changed preexisting disabled states");
-      test.saveError = null;
-      button.click();
-      await waitFor(()=>test.tasks.length === 1, "correctable source failure could not retry");
-      assert(test.writes.length === 2, "correctable source failure duplicated its retry");
-    } else if (failure === "task") {
-      assert(test.saved().version === 1 && !test.tasks.length, "task creation failure partially committed the save");
-      assert(button.disabled, "unknown transaction outcome allows blind resubmission");
-    } else {
-      assert(document.querySelector("[data-live-save-status]").textContent.includes("配置已保存"), "partial source success misreported durable configuration as unsaved");
-      assert(button.disabled, "partial source success allows uncertain resubmission");
-      form.dispatchEvent(new SubmitEvent("submit", {cancelable:true, submitter:button}));
-      assert(test.writes.length === 1 && test.tasks.length === 1, "partial source failure repeated a committed mutation");
-      test.refreshError = null;
-      const retry = document.querySelector("[data-live-save-status] button");
-      assert(retry?.textContent === "重新加载配置", "accepted source save has no same-page recovery");
-      retry.click();
-      await waitFor(()=>!document.querySelector('[data-live-intent="validate"]').disabled,
-        "read-only page recovery did not unlock deployment");
-      assert(test.writes.length === 1 && test.tasks.length === 1, "page recovery submitted another mutation");
-    }
-    test.dispose();
-  }
-
-  const test = await fixture("xray", false, false, false, false, {multi:true});
-  test.accept = true;
-  const workspace = document.querySelector(".live-config-workspace");
-  const input = document.querySelector("[data-code-input]");
-  input.value = input.value.replace("9007199254740993", "9007199254740995");
-  const draft = input.value;
-  test.workspaceError = Object.assign(Error("temporary workspace read failure"), {status:503});
-  const other = document.querySelector('[data-live-engine="sing-box"]');
-  await other.onclick({preventDefault(){}});
-  assert(test.state.data.liveEngine === "xray" && workspace.isConnected && !workspace.inert &&
-    input.value === draft, "failed engine switch lost its original workspace or draft");
-  test.workspaceError = null;
-  document.querySelector('[data-live-intent="deploy"]').click();
-  await waitFor(()=>test.tasks.length === 1, "failed engine switch poisoned the original deployment guard");
-  assert(test.writes.length === 1 && test.tasks[0].action === "deploy", "same-page deployment repeated its write");
-  test.dispose();
+  const late=await createConfigFixture('xray',{content:source});let release;late.gate=new Promise(resolve=>{release=resolve});late.confirm=true;sourceForm().requestSubmit();await waitFor(()=>late.calls.some(call=>call.path.endsWith('/source')),'late source submission not started');late.dispose();const next=await createConfigFixture('sing-box');release();await pause();assert(!document.querySelector('dialog[open]')&&next.saved().version===1,'late source response entered new account/workspace');next.dispose();
 }

@@ -79,4 +79,9 @@ func TestClientOutboundSecurityAndTransport(t *testing.T) {
 			t.Fatal("listener wildcard used as a remote destination")
 		}
 	}
+	input.Protocol = ProtocolVMess
+	out, err := BuildClientOutbound(core.EngineSingBox, input, "node.example", "tls.example")
+	if err != nil || !strings.Contains(string(out), `"security":"aes-128-gcm"`) {
+		t.Fatalf("TLS VMess export must not let auto select the incompatible zero mode: %s %v", out, err)
+	}
 }

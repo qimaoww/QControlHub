@@ -37,6 +37,25 @@ try {
   assert.deepEqual(nextData, {}, "a delayed access response cannot update another account");
   watcher.stop();
   assert.equal(timers.size, 0);
+  const authorized = { role: "admin", user_id: "owner", workspace_id: "workspace", csrf_token: "session-csrf", permissions: ["agents.read", "tasks.read"] };
+  const changing = { session: authorized, data: {} };
+  let nextSession = { ...authorized, permissions: ["tasks.read", "agents.read"] }, invalidations = 0;
+  const permissions = createSessionWatch({ state: changing,
+    api: async path => { assert.equal(path, "/auth/session"); return nextSession; },
+    onAccessChanged: () => { invalidations++; changing.data = {}; },
+    setTimer: callback => { const id = {}; timers.set(id, callback); return id; }, clearTimer: id => timers.delete(id),
+  });
+  await permissions.trigger();
+  assert.equal(invalidations, 0, "permission ordering must not discard drafts");
+  nextSession = { ...authorized, role: "user", permissions: ["agents.read"] };
+  await permissions.trigger();
+  assert.equal(invalidations, 1, "administrator demotion must invalidate an open page");
+  assert.equal(changing.session, nextSession, "permission checker retained the old session");
+  nextSession = { ...nextSession, user_id: "second-owner", workspace_id: "second-workspace" };
+  await permissions.trigger();
+  assert.equal(invalidations, 2, "cookie account changes must discard the old account scope");
+  permissions.stop();
+  assert.equal(timers.size, 0);
   state.session = null;
   await watcher.trigger();
   assert.equal(timers.size, 0);

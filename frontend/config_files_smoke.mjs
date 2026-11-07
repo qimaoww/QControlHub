@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {splitConfigFiles,mergeConfigFiles,configFileDisplayName} from "./modules/config-files.js";
+import { splitConfigFiles, mergeConfigFiles, configFileDisplayName } from "./modules/config-file-model.js";
 
 assert.equal(configFileDisplayName("common.json"), "公共配置.json");
 assert.equal(configFileDisplayName("inbounds/VLESS-REALITY-8443.json"), "VLESS-REALITY-8443.json");

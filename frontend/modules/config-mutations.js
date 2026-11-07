@@ -82,7 +82,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
     try {
       result = await api(path, {...options, headers:{...options.headers, "X-Config-Task-ID":id}});
     } catch (error) {
-      if (state.data !== owner) throw error;
+      if (state.data !== owner || error.name === "AbortError") throw error;
       if (error.status >= 400 && error.status < 500 && error.status !== 408) {
         delete records[id];
         persist(records);

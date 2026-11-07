@@ -34,12 +34,12 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	var action core.Action
 	var engine core.Engine
 	var transition, installIfMissing, shared bool
-	var shareID, configID string
+	var shareID, configID, runtimeSnapshot string
 	var configVersion int
 	if err := tx.QueryRow(ctx, `
-		SELECT action,engine,capability_transition,install_if_missing,shared_instance,shared_traffic_id,COALESCE(config_id,''),COALESCE(config_version,0) FROM tasks
+		SELECT action,engine,capability_transition,install_if_missing,shared_instance,shared_traffic_id,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(config_content,'') FROM tasks
 		WHERE id=$1 AND agent_id=$2 AND lease_id=$3 AND status='running'
-		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition, &installIfMissing, &shared, &shareID, &configID, &configVersion); err != nil {
+		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition, &installIfMissing, &shared, &shareID, &configID, &configVersion, &runtimeSnapshot); err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -194,7 +194,21 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if status == core.TaskSucceeded && !(shared && result.InstanceStatus != nil) {
-		if err := recordEngineOwnershipTx(ctx, tx, taskID, action, result.TrafficSettled); err != nil {
+		appliedRunning := true
+		if action == core.ActionDeploy && runtimeSnapshot != "" {
+			content, decryptErr := s.decryptContent(runtimeSnapshot)
+			if decryptErr != nil {
+				return decryptErr
+			}
+			content, _, decryptErr = core.DecodeExecutionSnapshot(content)
+			if decryptErr != nil {
+				return decryptErr
+			}
+			if plan, planErr := serverconfig.PrepareIndependentEgress(engine, content); planErr == nil && plan.Source == "disabled" {
+				appliedRunning = false
+			}
+		}
+		if err := recordEngineOwnershipTx(ctx, tx, taskID, action, result.TrafficSettled, appliedRunning); err != nil {
 			return err
 		}
 	}

@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -15,17 +14,13 @@ func TestConfigFieldStudioSmoke(t *testing.T) {
 }
 
 func TestConfigFieldModuleCacheInvalidation(t *testing.T) {
-	dockerfile, err := os.ReadFile("../Dockerfile")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The main app already has versioned imports; the shared field renderer is
-	// imported by modules themselves and must receive that same release key.
-	for _, line := range strings.Split(string(dockerfile), "\n") {
-		if strings.Contains(line, "find /usr/share/nginx/html/assets/modules -name '*.js'") &&
-			strings.Contains(line, "sed -i -E") && strings.Contains(line, "?v=${js_version}") {
-			return
+	// Transform the actual native editor: nested theme modules and shared field
+	// models must receive the same build key as the application entrypoint.
+	source := string(mustReadFrontendFile(t, "analytics/config-studio.js"))
+	transformed := rewriteModuleCacheImports(t, source)
+	for _, path := range []string{"./inbound-fields.js", "../modules/config-field-model.js", "./inbound-source.js"} {
+		if !strings.Contains(source, path) || !strings.Contains(transformed, path+"?v=cache-test") {
+			t.Errorf("native config editor dependency %s did not receive the release cache key", path)
 		}
 	}
-	t.Fatal("nested module imports must use the release cache key to avoid stale field renderers")
 }

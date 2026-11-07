@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { certificateOrderPresentation, certificateOrderDiagnostic } from "./modules/certificate-order.js";
 import { recordDate } from "./modules/record-display.js";
-import { createDisplayHelpers } from "./modules/formatting.js";
-import { createCertificateView } from "./modules/certificate-view.js";
+import { formatDate } from "./analytics/appearance.js";
 
 const scheduled = "2026-11-02T04:05:06Z";
 const show = patch => certificateOrderPresentation({status:"queued",stage:"queued",attempt:0,...patch}, String);
@@ -41,16 +40,8 @@ assert.match(show({stage:"retry",failure_stage:"http_preflight",error:"timeout"}
 assert.equal(show({error:"读取 ACME 申请账号失败: not found"}).error,"读取 ACME 申请账号失败，暂无法确认原因，请联系管理员检查。");
 assert.doesNotMatch(certificateOrderDiagnostic('token=fixture-secret https://user:secret@example.test/secret -----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----'),/fixture-secret|user:secret|example.test|\nfixture/);
 for(const missing of [undefined,null,"", "0001-01-01T00:00:00Z","invalid"]) assert.equal(recordDate(missing,String),"时间未知");
-const helpers=createDisplayHelpers({data:{settings:{time_zone:"Asia/Hong_Kong"}}});
-assert.equal(recordDate(scheduled,helpers.date),helpers.date(scheduled));
-const view=createCertificateView({...helpers,date:String});
-const certificate={id:"cert",name:"TLS",domains:["example.test"],key_type:"ecdsa256",source:"acme",method:"dns-api",version:1234,owned:true,status:"issued",saved_at:scheduled};
-const html=view.detail({certificate,orders:[{id:"order",status:"queued",stage:"retry",error:"not found",attempt:2,next_attempt:scheduled,created_at:scheduled,challenges:[]}],bindings:[{version:5678,saved_at:scheduled}],grants:[],versions:[{version:1234,saved_at:scheduled}]});
-const text=html.replace(/<[^>]+>/g,"");
-assert.doesNotMatch(text,/v1234|1234|5678|第 0 次|版本历史/);
-assert.match(text,/2026-11-02T04:05:06Z/);
-assert.match(text,/等待自动重试/);
-assert.match(text,/暂无法确认具体资源或原因/);
+assert.equal(recordDate(scheduled,formatDate),formatDate(scheduled));
+// Native certificate detail rendering is checked in browser/certificate-order-presentation.mjs.
 console.log("Certificate order states, real schedules, record dates and diagnostic redaction passed");
 
 assert.match(show({error:"读取 ACME 申请账号失败：申请账号解密失败，请联系管理员检查当前及旧加密密钥"}).error,/旧加密密钥/);

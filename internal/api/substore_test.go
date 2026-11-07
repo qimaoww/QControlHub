@@ -13,7 +13,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestNormalizeSubStoreEndpoint(t *testing.T) {

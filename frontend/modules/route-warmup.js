@@ -1,22 +1,22 @@
 import { routeForHash, routeModuleNames } from "./routes.js";
 
-export function createRouteWarmup(routeModules) {
+export function createRouteWarmup(routeModules, { moduleName = route => routeModuleNames[route] || 'dashboard', signal } = {}) {
 function preloadNavigationRoute(event) {
   const link = event.target.closest?.('a[href^="#"]');
   if (!link) return;
   if (event.type === "pointerover" && link.contains(event.relatedTarget)) return;
   const route = routeForHash(link.getAttribute("href"));
-  void routeModules.preload(routeModuleNames[route] || "dashboard");
+  void routeModules.preload(moduleName(route));
 }
 
 function bindNavigationPreload() {
 document.addEventListener("pointerover", preloadNavigationRoute, {
-  passive: true,
+  passive: true, signal,
 });
 document.addEventListener("pointerdown", preloadNavigationRoute, {
-  passive: true,
+  passive: true, signal,
 });
-document.addEventListener("focusin", preloadNavigationRoute);
+document.addEventListener("focusin", preloadNavigationRoute, { signal });
 }
 
 const nextRouteModules = Object.freeze({
@@ -39,11 +39,11 @@ function stopRouteWarmup() {
 
 function scheduleRouteWarmup(route) {
   stopRouteWarmup();
-  const current = routeModuleNames[route] || "dashboard";
+  const current = moduleName(route);
   const next = nextRouteModules[current];
   const connection = navigator.connection;
   if (
-    !next ||
+    signal?.aborted || !next ||
     routeModules.peek(next) ||
     document.hidden ||
     connection?.saveData ||
@@ -52,7 +52,7 @@ function scheduleRouteWarmup(route) {
     return;
   const warm = () => {
     cancelRouteWarmup = () => {};
-    void routeModules.preload(next);
+    if (!signal?.aborted && !document.hidden) void routeModules.preload(next);
   };
   if (typeof window.requestIdleCallback === "function") {
     const handle = window.requestIdleCallback(warm, { timeout: 1500 });
@@ -66,5 +66,6 @@ function scheduleRouteWarmup(route) {
   }
 }
 
+  signal?.addEventListener('abort', stopRouteWarmup, { once: true });
   return { bindNavigationPreload, scheduleRouteWarmup, stopRouteWarmup };
 }

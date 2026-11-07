@@ -71,7 +71,7 @@ func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
 		agent.CanHide = true
 	}
 	for key := range agent.Labels {
-		if strings.HasPrefix(key, "client_profile_") || (!agent.CanManage && key == komariUUIDLabel) {
+		if strings.HasPrefix(key, "client_profile_") {
 			delete(agent.Labels, key)
 		}
 	}

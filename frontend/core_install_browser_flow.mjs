@@ -1,69 +1,76 @@
-import { assert, waitFor } from "./browser/assertions.mjs";
+import { assert, delay } from "./browser/assertions.mjs";
 const query = new URLSearchParams(location.search);
-const username = query.get("user");
-const agentID = query.get("agent");
+const username = query.get("user"), agentID = query.get("agent");
 const shared = username === "bob";
-const formFor = engine => document.querySelector(`.service-${engine} .core-version-form`);
-const buttonFor = (engine, selector) => document.querySelector(`.service-${engine} ${selector}`);
+const button = (name, root = document) => [...root.querySelectorAll("button")].find(control => control.textContent === name);
+const dialog = title => [...document.querySelectorAll("dialog[open]")].find(box => box.querySelector("h2")?.textContent === title);
+const core = () => document.querySelector('dialog[open] [data-refresh-key=mihomo]');
+async function waitFor(predicate, message) {
+  for (let attempt = 0; attempt < 1200; attempt++) {
+    const value = predicate(); if (value) return value;
+    await delay(10);
+  }
+  assert.fail(message);
+}
+async function confirmation(title) {
+  const box = await waitFor(() => dialog(title), `${title}: confirmation missing`);
+  button(title, box).click();
+}
 async function run() {
-  const login = await waitFor(() => document.querySelector("#login-form"), "login did not render");
+  const login = await waitFor(() => document.querySelector('.a-login form'), "native login did not render");
   login.elements.username.value = username;
   login.elements.token.value = "config scope password fixture";
   login.requestSubmit();
-  await waitFor(() => document.querySelector('#logout'), "password login did not complete");
-  const response = await fetch("/api/v1/auth/session");
-  const session = await response.json();
+  await waitFor(() => document.querySelector('button[title="退出登录"]') && !document.querySelector('#app[aria-busy=true]'), "password login did not complete");
+  const response = await fetch("/api/v1/auth/session"), session = await response.json();
   assert.equal(session.role, "user");
   assert.ok(session.permissions.includes("tasks.execute"));
   assert.ok(session.permissions.includes("tasks.read"));
   location.hash = `#settings-node-${agentID}`;
-  await waitFor(() => document.querySelector(`.node-operations-workspace[data-agent-node="${agentID}"]`), "node did not render");
+  await waitFor(core, "native node settings did not render");
   if (shared) {
-    assert.equal(document.querySelector("[data-core-uninstall], [data-service-action]"), null, "recipient received host lifecycle management");
-    assert.equal(formFor("mihomo").querySelectorAll('input[name="release_channel"]').length, 1, "recipient received host version selection");
+    assert.equal(button("卸载内核", core()), undefined, "recipient received host uninstall control");
+    for (const name of ["启动", "停止", "重启"]) assert.ok(!button(name, core()) || button(name, core()).disabled, "unprepared recipient received host lifecycle management");
   }
-  {
-    const open = buttonFor("mihomo", "[data-open-version-form]");
-    assert.equal(open.disabled, false);
-    open.click();
-    const form = formFor("mihomo");
-    assert.equal(form.querySelector("button[type=submit]").disabled, false);
-    await waitFor(() => {
-      const bounds = form.getBoundingClientRect();
-      const controls = [...form.querySelectorAll("button, .release-channel-options label")].filter(element => element.checkVisibility());
-      return controls.length >= (shared ? 2 : 4) && controls.every(element => {
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.left >= bounds.left && rect.right <= bounds.right + 1;
-      });
-    }, "installation form clips a control");
-    form.requestSubmit();
-    const dialog = await waitFor(() => document.querySelector('[data-confirm-dialog][open]'), "install confirmation missing");
-    [...dialog.querySelectorAll("button")].find(button => button.textContent === "提交任务").click();
-    await waitFor(() => document.body.textContent.includes("fixture download failure"), "installation failure was not visible");
-    const failure = formFor("mihomo").querySelector("[data-core-install-status]");
-    assert.ok(failure.scrollWidth <= failure.clientWidth + 1, "long installation error overflows");
-    await waitFor(() => formFor("mihomo")?.querySelector("button[type=submit]")?.disabled === false, "failed install cannot retry");
-    formFor("mihomo").closest("details").open = true;
-    formFor("mihomo").requestSubmit();
-    const retry = await waitFor(() => document.querySelector('[data-confirm-dialog][open]'), "retry confirmation missing");
-    [...retry.querySelectorAll("button")].find(button => button.textContent === "提交任务").click();
-    await waitFor(() => buttonFor("mihomo", "[data-core-version]")?.textContent.includes("1.19.30"), "runtime version did not refresh");
-    location.hash = `#live-config?agent=${agentID}&engine=xray`;
+  const open = button(shared ? "准备内核" : "安装内核", core());
+  assert.ok(open && !open.disabled, "manual first installation is blocked"); open.click();
+  const installBox = await waitFor(() => dialog("Browser install · mihomo"), "native installation dialog missing");
+  const form = installBox.querySelector("form"), submit = form.querySelector('[type=submit]');
+  assert.ok(!submit.disabled, "manual installation is disabled");
+  assert.equal([...form.elements.release_channel.options].map(option => option.value).join(','), shared ? "stable" : "stable,development,custom", "host release selection escaped its scope");
+  const bounds = form.getBoundingClientRect();
+  for (const control of form.querySelectorAll("button,input,select")) {
+    if (!control.checkVisibility() || control.closest('[hidden]')) continue;
+    const rect = control.getBoundingClientRect();
+    assert.ok(rect.width > 0 && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1, "installation form clips a control");
   }
-  const add = await waitFor(() => document.querySelector('[data-inbound-action="add"]'), "add inbound action missing");
-  add.click();
-  const plan = await waitFor(() => document.querySelector("#server-plan-form"), "preset form missing");
-  assert.ok(document.body.textContent.includes(shared ? "受控准备" : "自动安装"));
-  const deploy = plan.querySelector('[data-plan-intent="deploy"]');
+  form.requestSubmit(); await confirmation("提交安装");
+  const failed = await waitFor(() => dialog("任务详情")?.querySelector('.a-notice')?.textContent.includes("fixture download failure") && dialog("任务详情"), "installation failure was not visible");
+  const failure = failed.querySelector('.a-notice');
+  assert.ok(failure.scrollWidth <= failure.clientWidth + 1, "long installation error overflows");
+  failed.querySelector('[aria-label=关闭]').click();
+  await waitFor(() => !submit.disabled, "failed install cannot retry");
+  form.requestSubmit(); await confirmation("提交安装");
+  const success = await waitFor(() => dialog("任务详情")?.textContent.includes("成功") && dialog("任务详情"), "installation retry did not succeed");
+  success.querySelector('[aria-label=关闭]').click();
+  await waitFor(() => core()?.textContent.includes("1.19.30"), "runtime version did not refresh");
+  installBox.querySelector('[aria-label=关闭]').click();
+  document.querySelector('dialog[open] [data-refresh-key=mihomo]').closest('dialog').querySelector('[aria-label=关闭]').click();
+  location.hash = `#live-config?agent=${agentID}&engine=xray`;
+  const add = await waitFor(() => button("添加入站"), "native add inbound action missing"); add.click();
+  const plan = await waitFor(() => document.querySelector('dialog[open] form:has([name=protocol]) [name=port]')?.form, "native preset form missing");
+  const deploy = plan.querySelector('[type=submit]');
+  assert.equal(deploy.textContent, "保存并部署");
   assert.equal(deploy.disabled, false, "first install blocked deployment");
-  plan.requestSubmit(deploy);
-  await waitFor(() => document.querySelector("[data-preset-status]")?.textContent.includes("部署成功"), "automatic preparation did not continue deployment");
+  plan.requestSubmit(); await confirmation("部署并重启");
+  const prepare = await waitFor(() => dialog("安装并部署"), "automatic preparation confirmation missing");
+  assert.ok(prepare.textContent.includes("此内核尚未安装") && prepare.textContent.includes("稳定版"), "automatic first-install intent is not visible");
+  button("安装并部署", prepare).click();
+  await waitFor(() => dialog("任务详情")?.textContent.includes("成功"), "automatic preparation did not continue exact-revision deployment");
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "page overflows viewport");
-  const status = document.createElement("pre");
-  status.id = "browser-smoke-result";
-  status.textContent = `${username}: real password session, manual failure/retry/refresh and ${shared ? "private" : "owner"} automatic preparation, exact revision deployment, viewport ${innerWidth}: passed`;
-  document.body.append(status);
-  document.documentElement.dataset.browserSmoke = "passed";
+  const status = document.createElement("pre"); status.id = "browser-smoke-result";
+  status.textContent = `${username}: native real password session, manual failure/retry/refresh and ${shared ? "private" : "owner"} automatic preparation, exact revision deployment, viewport ${innerWidth}: passed`;
+  document.body.append(status); document.documentElement.dataset.browserSmoke = "passed";
 }
 run().catch(error => {
   const status = document.createElement("pre"); status.id="browser-smoke-result"; status.textContent=String(error.stack || error); document.body.append(status); document.documentElement.dataset.browserSmoke="failed";

@@ -1,36 +1,16 @@
-import { installAgents } from "../modules/agents.js";
+import assert from "node:assert/strict";
 
-import { installClientAccess } from "../modules/client-access.js";
-
-import { installConfigPages } from "../modules/configs.js";
-import { installCoreLogs } from "../modules/core-logs.js";
-import { installDashboard } from "../modules/dashboard.js";
-import { installSettings } from "../modules/settings.js";
-
-import { installTasks } from "../modules/tasks.js";
-import { installTraffic } from "../modules/traffic.js";
-
-// Inert on import. The runner owns ordering and the few shared read-only fixtures.
-export async function run({ state, noop }) {
-const ctx = new Proxy(
-  { state, engines: [], actions: [] },
-  { get: (target, key) => target[key] ?? noop },
-);
-
-for (const install of [
-  installAgents,
-  installClientAccess,
-  installConfigPages,
-  installCoreLogs,
-  installDashboard,
-  installSettings,
-  installTasks,
-  installTraffic,
-]) {
-  const page = install(ctx);
-  if (typeof page !== "function" && (typeof page !== "object" || !page)) {
-    throw new TypeError(`${install.name} returned an invalid page module`);
+// Page factories from the retired shell have no runtime consumers. Verify the
+// shipped native route entries instead; the route import smoke additionally
+// rejects eager DOM, storage and request work before a page is called.
+export async function run() {
+  for (const [path, names] of [
+    ['nodes', ['nodesPage']], ['client-access', ['clientAccessPage']],
+    ['configs', ['archivePage']], ['live-config', ['liveConfigPage']],
+    ['operations', ['dashboardPage', 'tasksPage']], ['settings', ['settingsPage']],
+    ['traffic', ['trafficPage']],
+  ]) {
+    const module = await import(`../analytics/${path}.js`);
+    for (const name of names) assert.equal(typeof module[name], 'function', `${path}.${name} native page entry missing`);
   }
-}
-
 }

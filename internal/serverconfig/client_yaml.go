@@ -3,7 +3,7 @@ package serverconfig
 import (
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func marshalSingleLineYAML(value map[string]any) (string, error) {

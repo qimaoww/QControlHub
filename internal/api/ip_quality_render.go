@@ -202,6 +202,7 @@ func ipQualityCSISequence(raw string, index int) (string, int) {
 }
 
 func buildIPQualitySVG(lines []ipQualityLine) []byte {
+	regionOffsets := ipQualityMediaRegionOffsets(lines)
 	columns := 0
 	for _, line := range lines {
 		if width := ipQualityLineWidth(line); width > columns {
@@ -237,13 +238,78 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 				if runWidth > 0 {
 					length = fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, runWidth)
 				}
-				fmt.Fprintf(&builder, `<text x="%s" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, ipQualityRunPositions(run.text, x), y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
+				fmt.Fprintf(&builder, `<text x="%s" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, ipQualityRunPositions(run.text, x+regionOffsets[row][x]), y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
 				x += runWidth
 			}
 		}
 	}
 	builder.WriteString(`</g></svg>`)
 	return []byte(builder.String())
+}
+
+// Upstream pads region labels inconsistently (notably [] and [ALISG]).
+// Center each label under its provider without changing the archived text,
+// ANSI colours, neighbouring rows, or the report's terminal cell widths.
+func ipQualityMediaRegionOffsets(lines []ipQualityLine) map[int]map[int]int {
+	type word struct {
+		text         string
+		start, width int
+	}
+	words := func(line ipQualityLine) []word {
+		var text strings.Builder
+		for _, cell := range line {
+			text.WriteString(cell.text)
+		}
+		var result []word
+		column := 0
+		// Track byte slices separately from terminal columns: Chinese labels
+		// occupy two cells per rune, while region identifiers use ASCII.
+		rest := text.String()
+		for len(rest) > 0 {
+			trimmed := strings.TrimLeft(rest, " ")
+			column += len(rest) - len(trimmed)
+			rest = trimmed
+			if rest == "" {
+				break
+			}
+			end := strings.IndexByte(rest, ' ')
+			if end < 0 {
+				end = len(rest)
+			}
+			token := rest[:end]
+			width := ipQualityDisplayWidth(token)
+			result = append(result, word{token, column, width})
+			column += width
+			rest = rest[end:]
+		}
+		return result
+	}
+	offsets := map[int]map[int]int{}
+	for row := 0; row+2 < len(lines); row++ {
+		headers, regions := words(lines[row]), words(lines[row+2])
+		if len(headers) < 3 || len(headers) != len(regions) || headers[0].text != "服务商：" || regions[0].text != "地区：" {
+			continue
+		}
+		valid := true
+		for _, region := range regions[1:] {
+			if !strings.HasPrefix(region.text, "[") || !strings.HasSuffix(region.text, "]") {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		offsets[row+2] = map[int]int{}
+		for index, region := range regions[1:] {
+			header := headers[index+1]
+			shift := (header.start-region.start)*ipQualityRenderCellWidth + (header.width-region.width)*ipQualityRenderCellWidth/2
+			for column := region.start; column < region.start+region.width; column++ {
+				offsets[row+2][ipQualityRenderPadding+column*ipQualityRenderCellWidth] = shift
+			}
+		}
+	}
+	return offsets
 }
 
 // Pin repeated glyph origins as well, since fallback fonts may kern pairs.

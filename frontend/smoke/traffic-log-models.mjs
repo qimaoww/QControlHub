@@ -1,13 +1,26 @@
+import { trafficAccountingState } from "../modules/traffic-model.js";
 import assert from "node:assert/strict";
 
-import { batchAgentEligibility, batchSelectAllState } from "../modules/agents.js";
+import { batchAgentEligibility, batchSelectAllState } from "../modules/agent-batch.js";
 
-import { coreLogFilterCounts, filterCoreLogEntries } from "../modules/core-logs.js";
+import { coreLogFilterCounts, filterCoreLogEntries } from "../modules/core-log-model.js";
 
-import { trafficRateForDisplay } from "../modules/traffic.js";
+import { trafficRateForDisplay } from "../modules/traffic-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run() {
+const coreAccounting = trafficAccountingState({ engine: 'xray', accounting: { source: 'core-api' }, enforcement_available: true });
+assert.equal(coreAccounting.dual, true);
+assert.equal(coreAccounting.failed, false);
+assert.equal(coreAccounting.tone, 'ok');
+const mihomoAccounting = trafficAccountingState({ engine: 'mihomo', accounting: { source: 'nft-dual' }, enforcement_available: true });
+assert.equal(mihomoAccounting.partialEgress, true);
+assert.equal(mihomoAccounting.tone, 'limited');
+const listenerAccounting = trafficAccountingState({ enforcement_available: true, enforcement_error: 'dual accounting unavailable: single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified' });
+assert.equal(listenerAccounting.failed, false);
+assert.equal(listenerAccounting.dual, false);
+assert.equal(trafficAccountingState({ enforcement_available: false }).failed, true);
+assert.match(trafficAccountingState({ enforcement_error: 'outbound tags must be present and unique' }).hint, /标签缺失或重复/);
 const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
 for (const invalidRate of [-1, NaN, Infinity, "invalid"]) {
   assert.equal(trafficRateForDisplay(invalidRate, "2026-08-28T00:00:15Z", "online", trafficRateNow), 0);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import {outboundEntries, mutateOutbound, bindOutbound, inboundOutbound, changeInboundOutbound} from "./modules/config-outbounds.js";
-import {outboundPreset, outboundProtocols, outboundPeers} from "./modules/outbound-presets.js";
+import { outboundEntries, mutateOutbound, bindOutbound, inboundOutbound, changeInboundOutbound } from "./modules/config-outbound-model.js";
+import { outboundPreset, outboundProtocols, outboundPeers } from "./modules/outbound-preset-model.js";
 const source = '{"large":9007199254740993,"outbounds":[{"tag":"direct","type":"direct"},{"tag":"unused","type":"direct"},{"tag":"qch-trf-443-abcdef012345","type":"direct"}],"route":{"final":"direct"}}';
 assert.deepEqual(outboundEntries(source).map(o=>o.tag), ["direct","unused"]);
 assert.throws(()=>mutateOutbound(source,"delete",0,""), /引用/);

@@ -30,5 +30,6 @@ type IPQualityArchiveInfo struct {
 // Content stays out of JSON/WSS/history. Only the panel serves these bytes.
 type IPQualityArchive struct {
 	IPQualityArchiveInfo
-	Content []byte `json:"-"`
+	Content    []byte `json:"-"`
+	SourceText string `json:"-"`
 }

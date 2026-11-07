@@ -195,7 +195,7 @@ func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error
 	return nil
 }
 
-func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, action core.Action, settled bool) error {
+func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, action core.Action, settled, appliedRunning bool) error {
 	var sharedInstance bool
 	if err := tx.QueryRow(ctx, `SELECT shared_instance FROM tasks WHERE id=$1`, taskID).Scan(&sharedInstance); err != nil {
 		return err
@@ -213,19 +213,19 @@ func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, acti
 		if sharedInstance {
 			_, err := tx.Exec(ctx, `INSERT INTO agent_shared_instance_ownership
 				(agent_id,engine,share_id,owner_id,config_id,config_version,running,updated_at,service_status,observed_at,deployed_at,last_task_id,applied_task_id)
-				SELECT t.agent_id,t.engine,t.shared_traffic_id,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,true,now(),'active',now(),now(),t.id,t.id
+				SELECT t.agent_id,t.engine,t.shared_traffic_id,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,$2,now(),CASE WHEN $2 THEN 'active' ELSE 'inactive' END,now(),now(),t.id,t.id
 				FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
 				ON CONFLICT(agent_id,engine,share_id) DO UPDATE SET owner_id=EXCLUDED.owner_id,
-					config_id=EXCLUDED.config_id,config_version=EXCLUDED.config_version,running=true,
-					uncertain=false,config_uncertain=false,traffic_settled=false,service_status='active',status_reason='',
-					last_task_id=$1,applied_task_id=$1,deployed_at=now(),observed_at=now(),updated_at=now()`, taskID)
+					config_id=EXCLUDED.config_id,config_version=EXCLUDED.config_version,running=$2,
+					uncertain=false,config_uncertain=false,traffic_settled=false,service_status=CASE WHEN $2 THEN 'active' ELSE 'inactive' END,status_reason='',
+					last_task_id=$1,applied_task_id=$1,deployed_at=now(),observed_at=now(),updated_at=now()`, taskID, appliedRunning)
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,updated_at)
-			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,true,now()
+			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,$2,now()
 			FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
 			ON CONFLICT(agent_id,engine) DO UPDATE SET owner_id=EXCLUDED.owner_id,config_id=EXCLUDED.config_id,
-				config_version=EXCLUDED.config_version,running=true,uncertain=false,config_uncertain=false,traffic_settled=false,updated_at=now()`, taskID)
+				config_version=EXCLUDED.config_version,running=$2,uncertain=false,config_uncertain=false,traffic_settled=false,updated_at=now()`, taskID, appliedRunning)
 		return err
 	case core.ActionStop, core.ActionUninstall, core.ActionStart, core.ActionRestart:
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,updated_at)

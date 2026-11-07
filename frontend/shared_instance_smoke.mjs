@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { sharedInstancePresentation, sharedConfigPresentation } from "./modules/shared-instance-state.js";
+import { sharedInstancePresentation, sharedConfigPresentation } from "./modules/shared-instance-model.js";
 
 const node = (runtime = {}, instance = {}, status = "online") => ({can_manage:false, status,
   runtime:{xray:{installed:true, service_status:"unknown", ...runtime, instance:{...instance}}}});

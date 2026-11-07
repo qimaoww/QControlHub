@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 
-FROM golang:1.26.10-alpine AS build-base
+FROM golang:1.27.3-alpine AS build-base
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath \
     && mv /out/control-plane /out/qcontrol-plane \
     && mv /out/agent /out/qagent
 
-FROM alpine:3.22 AS runtime-base
+FROM alpine:3.24 AS runtime-base
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
@@ -70,9 +70,70 @@ LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
       org.opencontainers.image.licenses="GPL-3.0-only"
 
 COPY frontend/index.html /usr/share/nginx/html/index.html
-COPY frontend/app.js /usr/share/nginx/html/assets/app.js
-COPY frontend/modules /usr/share/nginx/html/assets/modules
-COPY frontend/app.css /usr/share/nginx/html/assets/app.css
+COPY frontend/bootstrap.js /usr/share/nginx/html/assets/bootstrap.js
+COPY frontend/analytics /usr/share/nginx/html/assets/analytics
+# Keep the shipped shared-module graph aligned with the active theme.
+# frontend/module_policy_test.mjs verifies this list transitively.
+COPY frontend/modules/account-request.js \
+    frontend/modules/account-storage.js \
+    frontend/modules/agent-address-model.js \
+    frontend/modules/agent-batch.js \
+    frontend/modules/agent-service-state.js \
+    frontend/modules/agent-time-zone-model.js \
+    frontend/modules/archive-draft-model.js \
+    frontend/modules/card-move-scroll.js \
+    frontend/modules/certificate-order.js \
+    frontend/modules/client-access-model.js \
+    frontend/modules/client-connection-cache.js \
+    frontend/modules/client-connection-model.js \
+    frontend/modules/code-format.js \
+    frontend/modules/config-defaults.js \
+    frontend/modules/config-field-model.js \
+    frontend/modules/config-file-model.js \
+    frontend/modules/config-mutations.js \
+    frontend/modules/config-outbound-model.js \
+    frontend/modules/config-snapshot.js \
+    frontend/modules/core-install-source.js \
+    frontend/modules/core-install-state.js \
+    frontend/modules/core-log-cache.js \
+    frontend/modules/core-log-model.js \
+    frontend/modules/core-log-preferences.js \
+    frontend/modules/core-log-projection.js \
+    frontend/modules/core-log-read.js \
+    frontend/modules/core-log-scope.js \
+    frontend/modules/core-log-selection.js \
+    frontend/modules/core-log-source-status.js \
+    frontend/modules/dashboard-model.js \
+    frontend/modules/enrollment-command.js \
+    frontend/modules/errors.js \
+    frontend/modules/inbound-options-model.js \
+    frontend/modules/ip-quality-controller.js \
+    frontend/modules/ip-quality-model.js \
+    frontend/modules/live-config-state.js \
+    frontend/modules/node-order.js \
+    frontend/modules/outbound-preset-controller.js \
+    frontend/modules/outbound-preset-model.js \
+    frontend/modules/permissions.js \
+    frontend/modules/poller.js \
+    frontend/modules/preset-route.js \
+    frontend/modules/record-display.js \
+    frontend/modules/region-model.js \
+    frontend/modules/route-loader.js \
+    frontend/modules/route-warmup.js \
+    frontend/modules/routes.js \
+    frontend/modules/session-watch.js \
+    frontend/modules/shared-instance-model.js \
+    frontend/modules/task-model.js \
+    frontend/modules/substore-model.js \
+    frontend/modules/system-bbr-model.js \
+    frontend/modules/system-bbr-presets.js \
+    frontend/modules/theme-lifecycle.js \
+    frontend/modules/theme-registry.js \
+    frontend/modules/traffic-model.js \
+    frontend/modules/user-model.js \
+    frontend/modules/xray-api.js \
+    /usr/share/nginx/html/assets/modules/
+COPY frontend/startup.css /usr/share/nginx/html/assets/startup.css
 COPY deploy/remote/install-agent.sh /usr/share/nginx/html/install-agent.sh
 COPY deploy/bootstrap-core-services.sh /usr/share/nginx/html/install-assets/deploy/bootstrap-core-services.sh
 COPY deploy/existing-core-mapping.sh /usr/share/nginx/html/install-assets/deploy/existing-core-mapping.sh
@@ -95,16 +156,16 @@ COPY frontend/nginx.conf /etc/nginx/nginx.conf
 RUN sed 's#http://control-plane:8080#http://127.0.0.1:8080#g' /etc/nginx/nginx.conf > /tmp/nginx.check.conf \
     && nginx -t -c /tmp/nginx.check.conf \
     && rm -f /tmp/nginx.check.conf
-RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
+RUN startup_css_version="$(sha256sum /usr/share/nginx/html/assets/startup.css | cut -c1-16)" \
+    && analytics_css_version="$(sha256sum /usr/share/nginx/html/assets/analytics/theme.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \
     && js_version="${js_content_version}-$(printf '%s' "${VERSION}" | sha256sum | cut -c1-10)" \
-    && sed -i -E \
-      -e "s#(from \"\\./modules/[^\"]+\\.js)\"#\\1?v=${js_version}\"#g" \
-      -e "s#(import\\(\"\\./modules/[^\"]+\\.js)\"\\)#\\1?v=${js_version}\"\\)#g" \
-      /usr/share/nginx/html/assets/app.js \
-    && find /usr/share/nginx/html/assets/modules -name '*.js' -exec sed -i -E "s#(from \"\\./[^\"]+\\.js)\"#\\1?v=${js_version}\"#g" {} + \
+    && find /usr/share/nginx/html/assets -name '*.js' -exec sed -i -E \
+      -e "s#(from[[:space:]]+)(['\"])(\\.\\.?/[^'\"?]+\\.js)['\"]#\\1\\2\\3?v=${js_version}\\2#g" \
+      -e "s#(import\\([[:space:]]*)(['\"])(\\.\\.?/[^'\"?]+\\.js)['\"]#\\1\\2\\3?v=${js_version}\\2#g" {} + \
     && sed -i \
-      -e "s/__QCH_CSS_VERSION__/${css_version}/g" \
+      -e "s/__QCH_STARTUP_CSS_VERSION__/${startup_css_version}/g" \
+      -e "s/__QCH_ANALYTICS_CSS_VERSION__/${analytics_css_version}/g" \
       -e "s/__QCH_JS_VERSION__/${js_version}/g" \
       /usr/share/nginx/html/index.html \
     && find /usr/share/nginx/html/assets -type f \( -name '*.js' -o -name '*.css' \) -exec gzip -9 -k {} +

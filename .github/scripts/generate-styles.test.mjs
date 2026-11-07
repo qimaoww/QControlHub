@@ -10,7 +10,7 @@ import {
 } from "../../scripts/generate-styles.mjs";
 
 test("the distributed stylesheet is the byte-exact ordered concatenation", () => {
-  assert.deepEqual(renderStyles(), readFileSync(resolve(repositoryRoot, "frontend/app.css")));
+  assert.deepEqual(renderStyles(), readFileSync(resolve(repositoryRoot, "frontend/analytics/theme.css")));
   assert.doesNotThrow(() => checkStyles());
   const result = spawnSync(process.execPath, ["scripts/generate-styles.mjs", "--check"], {
     cwd: repositoryRoot, encoding: "utf8",
@@ -21,9 +21,9 @@ test("the distributed stylesheet is the byte-exact ordered concatenation", () =>
 
 test("every style source is listed once, and no listed source can disappear", () => {
   assert.throws(() => validateStyleManifest([...styleManifest, styleManifest[0]]), /duplicate/);
-  assert.throws(() => validateStyleManifest(styleManifest, [...styleManifest, "frontend/styles/unlisted.css"]), /unlisted=.*unlisted\.css/);
-  assert.throws(() => validateStyleManifest(styleManifest, styleManifest.slice(1)), /missing=frontend\/styles\//);
-  for (const invalid of [[], null, ["frontend/styles/../outside.css"], ["/tmp/styles.css"]])
+  assert.throws(() => validateStyleManifest(styleManifest, [...styleManifest, "frontend/analytics/unlisted.css"]), /unlisted=.*unlisted\.css/);
+  assert.throws(() => validateStyleManifest(styleManifest, styleManifest.slice(1)), /missing=frontend\/analytics\//);
+  for (const invalid of [[], null, ["frontend/analytics/../outside.css"], ["/tmp/styles.css"], ["frontend/analytics/theme.css"]])
     assert.throws(() => validateStyleManifest(invalid));
 });
 
@@ -36,11 +36,11 @@ test("source slices cannot cut a rule, conditional group, string, or comment", (
 test("changing cascade order or a source byte makes the generated check fail", (t) => {
   const root = mkdtempSync(join(tmpdir(), "qch-style-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, "frontend/styles"), { recursive: true });
-  const manifest = ["frontend/styles/a.css", "frontend/styles/b.css"];
+  mkdirSync(join(root, "frontend/analytics"), { recursive: true });
+  const manifest = ["frontend/analytics/a.css", "frontend/analytics/b.css"];
   writeFileSync(join(root, manifest[0]), "a{color:red}\n");
   writeFileSync(join(root, manifest[1]), "a{color:blue}\n");
-  writeFileSync(join(root, "frontend/app.css"), "a{color:red}\na{color:blue}\n");
+  writeFileSync(join(root, "frontend/analytics/theme.css"), "a{color:red}\na{color:blue}\n");
   assert.doesNotThrow(() => checkStyles(root, manifest));
   assert.throws(() => checkStyles(root, [...manifest].reverse()), /differs/);
   writeFileSync(join(root, manifest[0]), "a{color:green}\n");

@@ -1,219 +1,146 @@
 package frontend
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
 
 func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
-	form := string(mustReadFrontendFile(t, "modules/server-plan-form.js"))
+	form := string(mustReadFrontendFile(t, "analytics/config-studio.js"))
 	content := form + "\n" + frontendSources(t,
-		"modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js")
-	start := strings.Index(form, "export function bindServerPlanRegeneration")
+		"modules/inbound-options-model.js", "analytics/inbound-fields.js", "analytics/inbound-options.js")
+	start := strings.Index(form, "for (const [name, fields, label] of generatedFieldActions)")
 	if start < 0 {
-		t.Fatal("server-plan-form.js is missing the isolated server-plan regeneration handler")
+		t.Fatal("native editor is missing isolated field generation")
 	}
-	handler := form[start:]
+	end := start + strings.Index(form[start:], "bindAnalyticsCertificateSelector(ctx")
+	if end <= start {
+		t.Fatal("native editor is missing isolated field generation")
+	}
+	handler := form[start:end]
 	for _, required := range []string{
-		"readServerPlanInput(form, protocol)",
-		"JSON.stringify({ protocol: protocol.key, input })",
-		"form.elements.namedItem(name)",
-		"request !== latestRequest",
-		"requestedRevision !== formRevision",
-		`buttons.forEach((item)`,
-		`item.disabled = true`,
-		`button.setAttribute("aria-busy", "true")`,
-		"生成参数失败",
+		`form.elements.namedItem(name)`, `ctx.mutate(event.currentTarget`,
+		`body: { protocol: selected.key, input: read() }`,
+		`!ctx.current() || !box.isConnected || selected !== protocol`,
+		`requestedRevision !== revision || draft !== JSON.stringify(read())`,
+		`for (const key of requested)`, `Object.hasOwn(generated, key)`,
+		`参数已修改，未应用过期生成结果`, `ctx.announce(`,
 	} {
 		if !strings.Contains(handler, required) {
-			t.Errorf("server-plan regeneration handler is missing %q", required)
+			t.Errorf("native field generation is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{
-		"agentConfig(", "location.", "state.data.inboundTag", "shell(", "notify(",
-	} {
+	for _, forbidden := range []string{"agentConfig(", "location.", "shell(", "replaceChildren(", "render(generated)", "await committed("} {
 		if strings.Contains(handler, forbidden) {
-			t.Errorf("server-plan regeneration handler must not use %q", forbidden)
+			t.Errorf("field generation must stay local and must not use %q", forbidden)
 		}
-	}
-	if strings.Contains(content, "delete state.data.serverPlans[") {
-		t.Error("server-plan regeneration must not discard the current local plan before the request succeeds")
-	}
-	if !strings.Contains(content, "data-regenerate-status") {
-		t.Error("server-plan regeneration needs a local status region that does not scroll the page")
 	}
 	for _, required := range []string{
-		"const esc = (value) =>",
+		`readServerPlanInput(form, protocol, values)`, `Object.entries(baseline || {})`,
 		`["port", "port", "生成监听端口"]`,
 		`["credential", "credential", "生成凭据"]`,
 		`["secondary_credential", "secondary_credential", "生成次凭据"]`,
 		`"reality_private_key,reality_public_key"`,
 		`["reality_short_id", "reality_short_id", "生成 Short ID"]`,
-		`"vless_decryption,vless_encryption"`,
-		`protocol?.uses_vless_encryption`,
-		`name="vless_decryption"`,
-		`name="vless_encryption"`,
-		`const portForward = Boolean(protocol?.port_forward);`,
-		`name="target_address"`,
-		`name="target_port"`,
-		`name="network"`,
-		`<strong>转发目标</strong>`,
-		`snellProtocolOptions(plan, false)`,
-		`snellProtocolOptions(plan, true)`,
-		`sudokuProtocolOptions(plan)`,
-		`name="snell_obfs_mode" value="shadow-tls"`,
-		`optionSecret("snell_shadow_tls_password"`,
-		`optionSecret("sudoku_client_key"`,
-		`name="sudoku_httpmask_mode"`,
-		`name="sudoku_multiplex"`,
-		`bindProtocolOptionVisibility(serverPlanForm)`,
+		`"vless_decryption,vless_encryption"`, `protocol.uses_vless_encryption`,
+		`control('vless_decryption')`, `control('vless_encryption')`,
+		`protocol.port_forward`, `'target_address','target_port','network'`,
+		`snell_shadow_tls_password`, `sudoku_client_key`, `sudoku_httpmask_mode`, `sudoku_multiplex`,
+		`'snell_'`, `'sudoku_'`, `protocolOptions(form, protocol, plan)`,
 	} {
 		if !strings.Contains(content, required) {
-			t.Errorf("server-plan field generation is missing %q", required)
+			t.Errorf("native server-plan field generation is missing %q", required)
 		}
 	}
-	if strings.Contains(content, "skip-cert-verify") {
-		t.Error("safe Snell presets must not expose a certificate verification bypass")
-	}
-	for _, forbidden := range []string{`name="sudoku_key_mode"`, `name="sudoku_smux_enabled"`, `name="sudoku_allow_insecure_aead"`} {
+	for _, forbidden := range []string{"skip-cert-verify", "sudoku_key_mode", "sudoku_smux_enabled", "sudoku_allow_insecure_aead"} {
 		if strings.Contains(content, forbidden) {
-			t.Errorf("safe Sudoku preset must not expose %q", forbidden)
+			t.Errorf("safe native protocol fields must not expose %q", forbidden)
 		}
 	}
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
+
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	native := frontendSources(t, "analytics/config-studio.js", "analytics/ui.js")
+	// The native select replaces the retired two-row protocol catalogue. Every
+	// eligible protocol must remain reachable without depending on old CSS.
+	for _, marker := range []string{
+		`field('协议','protocol'`, `options:protocols.map(protocol=>[protocol.key,protocol.name])`,
+		`input = node("select"`, `options.map(item =>`,
+	} {
+		if !strings.Contains(native, marker) {
+			t.Errorf("native protocol catalogue missing %q", marker)
+		}
 	}
-	if !strings.Contains(string(styles), ".protocol-catalog-wide.protocol-two-rows .protocol-browser>nav{display:grid") ||
-		!strings.Contains(content, `protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1`) ||
-		!strings.Contains(content, `String(Math.ceil(workspace.protocols.length / 2))`) ||
-		!strings.Contains(content, `"vless-enc-xhttp-reality-vision": "VLESS-ENC-XHTTP-Vision-uTLS-REALITY"`) {
-		t.Error("large protocol preset catalogs must render as exactly two rows")
+	if !strings.Contains(styles, ".a-field select") || !strings.Contains(styles, ".a-form-grid") {
+		t.Error("native protocol fields must use the responsive form controls")
 	}
 }
 
 func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
-	app := frontendSources(t, "app.js", "modules/routes.js", "modules/shell-context.js")
-	agents := frontendSources(t, "modules/agents.js", "modules/agent-view.js")
-	styles, err := os.ReadFile("app.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	const sidebarPresetLink = `href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
-	if !strings.Contains(string(app), sidebarPresetLink) {
-		t.Error("preset sidebar nodes must start from the per-node preset anchor")
-	}
-	if !strings.Contains(string(app), `state.data.selectedAgent === agent.id ? "active" : ""`) {
-		t.Error("preset sidebar must retain the selected node active state")
-	}
-	const settingsDetailLink = `href="#settings-node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
-	if strings.Contains(string(app), settingsDetailLink) {
-		t.Error("preset sidebar nodes must not enter the node settings workflow")
-	}
-	for _, required := range []string{
+	app := frontendSources(t, "analytics/app.js", "analytics/live-config.js", "modules/routes.js", "modules/preset-route.js")
+	for _, marker := range []string{
 		`if (hash.startsWith("preset-node-")) return "live-config";`,
-		`state.data.liveAgent = hash.slice(12);`,
-		`let hash = presetSelection ? "live-config"`,
+		`const selection = readPresetRoute(location.hash) || {};`,
+		`location.hash.match(/^#preset-node-(.+)$/)?.[1]`,
+		`'live-config': ['configs', 'liveConfigPage']`,
+		`selection.agentId`, `const selectedEngine = selection.engine || "";`,
+		`if (requested && !available.some(agent => agent.id === requested))`,
+		`此节点不可用，或当前账号无权访问。`, `available.find(agent => agent.id === requested)`,
+		`engines.includes(selectedEngine) ? selectedEngine`,
+		`/agents/${pathID(target.id)}/configs/${pathID(engine)}`,
+		`const targetField = field("节点", "agent", target.id`,
 	} {
-		if !strings.Contains(string(app), required) {
-			t.Errorf("preset sidebar routing is missing %q", required)
+		if !strings.Contains(app, marker) {
+			t.Errorf("native scoped preset routing missing %q", marker)
 		}
 	}
-	for _, required := range []string{
-		`? selectedAgent`,
-		`? [selectedAgent]`,
-		`class="preset-node-workspace workspace-panel machine-body"`,
-		`id="preset-node-${esc(agent.id)}"`,
-		`<h2>节点内核</h2>`,
-		`const prefix = presetMode ? "preset-node" : "settings-node";`,
-		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
-	} {
-		if !strings.Contains(agents, required) {
-			t.Errorf("focused preset workspace is missing %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		`<details class="machine-workspace"`,
-		`<summary class="machine-header"`,
-		`<header class="node-page-intro"><div><p class="eyebrow">节点配置</p>`,
-		`agent.id === state.data.selectedAgent ? "open" : ""`,
-	} {
-		if strings.Contains(agents, forbidden) {
-			t.Errorf("focused preset workspace still renders node accordion contract %q", forbidden)
-		}
-	}
-
-	const presetSingleColumnRule = `.preset-node-workspace>.service-canvas>.service-grid{grid-template-columns:minmax(0,1fr)}`
-	if strings.Count(string(styles), presetSingleColumnRule) != 1 {
-		t.Error("selected preset workspace must define one scoped, shrinkable service-grid column")
-	}
-	const globalSingleColumnRule = `.service-grid{grid-template-columns:minmax(0,1fr)}`
-	for _, line := range strings.Split(string(styles), "\n") {
-		if strings.TrimSpace(line) == globalSingleColumnRule {
-			t.Error("preset layout must not force every service grid into one column")
+	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
+	for _, marker := range []string{`.a-stack { display: grid; grid-template-columns: minmax(0, 1fr)`, `.a-form-grid`, `.a-field select`} {
+		if !strings.Contains(styles, marker) {
+			t.Errorf("native focused configuration layout missing %q", marker)
 		}
 	}
 }
 
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
-	content := frontendSources(t, "modules/live-config-page.js", "modules/live-config-state.js",
-		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js")
+	content := frontendSources(t, "analytics/live-config.js", "modules/live-config-state.js", "modules/config-snapshot.js")
 	for _, required := range []string{
-		`data-live-intent="import">手动导入并迁移`,
-		`迁移任一步失败都会自动恢复原服务`,
-		`action: "import-existing"`,
-		`existing_config_unsupported_reason`,
-		`检测到现有服务，但不可自动迁移`,
-		`系统服务只读快照`,
-		`data-live-source="managed"`,
-		`data-live-source="import"`,
-		`QAgent 托管配置`,
-		`系统服务 · 只读快照`,
-		`read-managed-config`,
-		`prefer_cached: true`,
-		`liveConfig({ preferCachedRead: false })`,
-		`手动刷新会重新读取`,
-		`最近 600 秒内已校验的节点快照`,
-		`liveConfigSnapshotReusable`,
-		`beforeDeploy`,
-		`submitLiveConfigChange`,
-		`!unsupportedReason`,
-		`esc(unsupportedReason)`,
+		`importSource ? "导入并迁移" : "保存并部署"`,
+		`action: "import-existing"`, `existing_config_unsupported_reason`,
+		`["managed", "QAgent 托管配置"]`, `["import", "可导入的系统服务配置"]`,
+		`readonly: importSource || !editable`, `系统配置快照`,
+		`read-managed-config`, `prefer_cached: true`, `snapshot = async (preferCached = false)`,
+		`const result = await snapshot()`, `requestConfigSnapshot`, `liveConfigSnapshotReusable`,
+		`beforeDeploy`, `submitLiveConfigChange`, `if (!source?.content)`,
+		`source, existingAvailable: importSource`, `beforeDeploy,`,
+		`const errorText = runtime.existing_config_unsupported_reason`, `errorText && notice(errorText)`,
+		`canDeploy = execute && !errorText`,
+		`field("内核", "engine", engine, { options: engines })`,
+		`const engines = target.capabilities`, `if (values.agent !== agent.id)`,
+		`delete values.engine; delete values.source`,
 	} {
 		if !strings.Contains(content, required) {
-			t.Errorf("manual configuration flow is missing %q", required)
+			t.Errorf("native manual configuration flow is missing %q", required)
 		}
 	}
-	agents, err := os.ReadFile("modules/agent-view.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// External source is explicitly read-only and requires a migration task;
+	// normal save/deploy must never silently adopt a system service.
 	for _, required := range []string{
-		`data-existing-pending`, `data-existing-unsupported`, `data-manual-import`,
-		`导入现有服务`, `检测到但不可迁移`, `查看现有服务不可导入原因`,
-		`existing_config_unsupported_reason`, `esc(existingUnsupportedReason)`,
-	} {
-		if !strings.Contains(string(agents), required) {
-			t.Errorf("node service controls do not represent pending migration state %q", required)
-		}
-	}
-	app, err := os.ReadFile("modules/shell-context.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, required := range []string{
-		`(item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item], can("agent-config.write"))`,
-		`class="live-engine-bar" aria-label="选择内核"`,
-		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
+		`if (values.intent === "import")`, `请先读取可导入的系统服务配置`,
+		`导入此配置并迁移现有系统服务`, `canReadHost`, `ctx.can("host.manage", agent)`,
+		`runtime.existing_config_available && canReadHost`,
 	} {
 		if !strings.Contains(content, required) {
-			t.Errorf("manual configuration engine top bar is missing %q", required)
+			t.Errorf("native import permission/confirmation missing %q", required)
 		}
 	}
-	sidebar := strings.Split(strings.Split(string(app), `if (state.route === "live-config") {`)[1], `if (state.route === "archive-config")`)[0]
-	if strings.Contains(sidebar, "data-live-engine") || !strings.Contains(sidebar, "data-live-agent") {
-		t.Fatal("manual configuration sidebar must select nodes only")
+	nodes := string(mustReadFrontendFile(t, "analytics/nodes.js"))
+	for _, required := range []string{
+		`runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason)`,
+		`runtime.existing_config_available && ctx.can('host.manage', agent)`,
+		`link('导入系统配置',`, `&source=import`,
+	} {
+		if !strings.Contains(nodes, required) {
+			t.Errorf("native node service controls omit migration state %q", required)
+		}
 	}
 }

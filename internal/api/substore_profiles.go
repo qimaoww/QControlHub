@@ -10,7 +10,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Sub-Store 2.42.6 decodes TUIC/AnyTLS passwords twice. Its native proxy-map

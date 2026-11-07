@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,20 +41,73 @@ function visit(path, chain = []) {
 }
 for (const path of dependencies.keys()) visit(path);
 
-const reachable = new Set();
-function visitFromApplication(path) {
-  if (reachable.has(path)) return;
-  reachable.add(path);
-  for (const dependency of dependencies.get(path) || []) visitFromApplication(dependency);
-}
-const appPath = resolve(root, "app.js");
-for (const match of readFileSync(appPath, "utf8").matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
-  const dependency = resolve(dirname(appPath), match[1]);
-  assert.equal(dependencies.has(dependency), true, "the application must import an existing production module");
-  visitFromApplication(dependency);
-}
-for (const path of dependencies.keys()) {
-  assert.equal(reachable.has(path), true, `${path} is not reachable from the application`);
-}
+assert.equal(existsSync(resolve(root, "app.js")), false, "the retired classic entrypoint must not return");
+for (const name of ["app.css", "styles"])
+  assert.equal(existsSync(resolve(root, name)), false, `retired classic styles must not return: ${name}`);
+assert.equal(existsSync(resolve(modulesDir, "classic-motion.js")), false, "the retired classic lifecycle must not return");
 
 console.log(`frontend/module_policy_test.mjs: ${files.length} modules satisfy the module boundary contract`);
+
+// Independent UI can share transport and business models, never classic DOM
+// renderers or the application shell, including through transitive imports.
+const sharedLogic = new Set([
+  "card-move-scroll.js",
+  "core-log-preferences.js", "core-log-scope.js", "core-log-read.js", "core-log-cache.js", "core-log-model.js", "core-log-projection.js", "core-log-source-status.js", "client-connection-model.js", "client-connection-cache.js",
+  "inbound-options-model.js", "archive-draft-model.js", "config-defaults.js", "config-mutations.js",
+  "account-request.js", "account-storage.js", "agent-service-state.js",
+  "agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js",
+  "core-install-state.js", "core-install-source.js", "xray-api.js", "enrollment-command.js",
+  "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "outbound-preset-controller.js",
+  "code-format.js", "core-log-selection.js",
+  "certificate-order.js", "record-display.js", "client-access-model.js", "config-snapshot.js", "dashboard-model.js",
+  "errors.js", "ip-quality-model.js", "ip-quality-controller.js", "live-config-state.js", "node-order.js",
+  "permissions.js", "poller.js", "preset-route.js", "routes.js", "route-loader.js", "route-warmup.js",
+  "session-watch.js", "substore-model.js", "system-bbr-model.js", "system-bbr-presets.js",
+  "task-model.js",
+  "theme-registry.js", "theme-lifecycle.js", "traffic-model.js", "shared-instance-model.js", "user-model.js",
+]);
+for (const name of ["agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js", "core-install-source.js", "enrollment-command.js", "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "config-mutations.js", "shared-instance-model.js"]) {
+  assert.doesNotMatch(readFileSync(resolve(modulesDir, name), "utf8"), /innerHTML|document\.(?:createElement|querySelector|getElementById)|\.classList\b|\.animate\(/, `${name}: shared logic must not render either theme`);
+}
+const analyticsRoot = resolve(root, "analytics");
+const independent = new Set();
+function visitIndependent(path) {
+  if (independent.has(path)) return;
+  independent.add(path);
+  if (dirname(path) !== analyticsRoot) {
+    assert.equal(dirname(path), modulesDir, `${path}: unexpected theme dependency`);
+    assert.ok(sharedLogic.has(path.slice(modulesDir.length + 1)), `${path}: classic UI cannot enter the independent runtime`);
+  }
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g)) {
+    visitIndependent(resolve(dirname(path), match[1]));
+  }
+}
+visitIndependent(resolve(analyticsRoot, "app.js"));
+for (const name of readdirSync(analyticsRoot).filter(name => name.endsWith(".js"))) {
+  assert.ok(independent.has(resolve(analyticsRoot, name)), `${name}: unreachable independent theme module`);
+}
+console.log(`analytics: ${independent.size} independent UI and shared logic modules satisfy the boundary contract`);
+
+// The production image must ship exactly the active runtime's shared graph.
+// Legacy modules retained while their tests migrate cannot enter the image.
+for (const match of readFileSync(resolve(root, "bootstrap.js"), "utf8").matchAll(/from\s*["'](\.\/modules\/[^"']+)["']/g)) {
+  visitIndependent(resolve(root, match[1]));
+}
+const dockerfile = readFileSync(resolve(root, "../Dockerfile"), "utf8").replace(/\\\r?\n/g, " ");
+const moduleCopies = [...dockerfile.matchAll(/^COPY ([^\n]+) \/usr\/share\/nginx\/html\/assets\/modules\/\s*$/gm)];
+assert.equal(moduleCopies.length, 1, "the web image must explicitly copy its shared runtime modules");
+const shipped = moduleCopies[0][1].trim().split(/\s+/).map(source => {
+  assert.match(source, /^frontend\/modules\/[a-z0-9-]+\.js$/, "do not package the entire legacy module directory");
+  return resolve(root, "..", source);
+});
+assert.equal(new Set(shipped).size, shipped.length, "duplicate shared runtime asset");
+assert.deepEqual(shipped.sort(), [...independent].filter(path => dirname(path) === modulesDir).sort(),
+  "the image must include every active dependency and exclude retired UI modules");
+
+// Every remaining shared module belongs to the shipped runtime graph. Test-only
+// classic controllers, renderers and motion owners must not be reintroduced.
+for (const path of dependencies.keys()) {
+  assert.ok(independent.has(path), `${path} is outside the active runtime graph`);
+}
+console.log("legacy: no retired theme modules remain");

@@ -26,8 +26,8 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"go.yaml.in/yaml/v4"
 	"golang.org/x/net/http2"
-	"gopkg.in/yaml.v3"
 )
 
 // No Internet endpoint is contacted. TLS and CDN-style endpoints terminate in
@@ -224,6 +224,47 @@ func xhttpAssertClient(t *testing.T, binary, content, certPath string) {
 
 func xhttpTestCore(t *testing.T, binary, content, certPath string) {
 	t.Helper()
+	// The fixture CA lives in SSL_CERT_FILE; recent Xray releases require
+	// explicitly selecting system roots instead of their bundled public CAs.
+	var root map[string]any
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		t.Fatal(err)
+	}
+	var trustFixtureCA func(any)
+	trustFixtureCA = func(value any) {
+		switch object := value.(type) {
+		case map[string]any:
+			if security, ok := object["tlsSettings"].(map[string]any); ok {
+				security["useSystemCA"] = true
+			}
+			for _, child := range object {
+				trustFixtureCA(child)
+			}
+		case []any:
+			for _, child := range object {
+				trustFixtureCA(child)
+			}
+		}
+	}
+	trustFixtureCA(root)
+	outbounds, _ := root["outbounds"].([]any)
+	for _, item := range outbounds {
+		outbound := item.(map[string]any)
+		if outbound["protocol"] == "freedom" {
+			// Only local echo targets are permitted by this fixture override.
+			settings, _ := outbound["settings"].(map[string]any)
+			if settings == nil {
+				settings = map[string]any{}
+				outbound["settings"] = settings
+			}
+			settings["finalRules"] = []any{map[string]any{"action": "allow", "ip": []string{"127.0.0.0/8", "::1/128"}}}
+		}
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = string(encoded)
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
@@ -331,7 +372,10 @@ func xhttpAssertMihomo(t *testing.T, binary, proxyJSON, certPath string) {
 	if err := yaml.Unmarshal([]byte(proxyJSON), &proxy); err != nil {
 		t.Fatal(err)
 	}
-	port, echo := singBoxFreePort(t), singBoxEcho(t, "tcp")
+	// Bind the echo target before selecting the proxy port, so the free-port
+	// probe cannot return the target's port and connect back to the fixture.
+	echo := singBoxEcho(t, "tcp")
+	port := singBoxFreePort(t)
 	content, _ := json.Marshal(map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "silent", "proxies": []any{proxy}, "rules": []string{"MATCH," + proxy["name"].(string)}})
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mihomo.json")

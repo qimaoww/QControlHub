@@ -1,4 +1,5 @@
-import { assert, waitFor } from "./assertions.mjs";
+import { startAnalytics } from "../analytics/app.js";
+import { assert, waitFor, delay } from "./assertions.mjs";
 
 // Client exports shaped like a real fleet: several engines per node, long names,
 // single-line YAML, an offline node and a node that still needs an address.
@@ -73,62 +74,128 @@ export function clientLayoutFixture() {
   return { agents, entries };
 }
 
+export async function startNativeClients() {
+  window.dispatchEvent(new Event('pagehide'));
+  document.querySelectorAll('link[rel=stylesheet]').forEach(link=>link.remove());
+  const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/assets/analytics/theme.css'});
+  document.head.append(style);
+  await new Promise((resolve,reject)=>{style.onload=resolve;style.onerror=reject;});
+  document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'app'}));
+  history.replaceState(null,'','#client-access');
+  const session=await(await fetch('/api/v1/auth/session')).json();
+  startAnalytics({app:document.querySelector('#app'),session});
+  await waitFor(()=>document.querySelector('[data-client-agent]'),'native clients did not load');
+}
 export async function testClientLayoutRuntime({ testAPI }) {
-  await waitFor(() => document.querySelectorAll(".client-access-node-card").length === 8, "client cards did not load");
-  if (new URLSearchParams(location.search).has("preview")) return;
-  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "client page overflows the viewport");
-  assert.ok(document.querySelector('#client-search [name="q"]').getBoundingClientRect().width >= 140, "search input must remain usable beside its button");
-  const query = (selector) => document.querySelector(selector);
-  const count = (selector) => document.querySelectorAll(selector).length;
-  const selectFormat = (format) => {
-    const select = query("[data-client-display-format]");
-    select.value = format;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  };
-  query('[data-filter-engine="mihomo"]').click();
-  assert.equal(count(".client-profile-row"), 2, "engine filter must show only Mihomo profiles");
-  assert.ok(query(".client-export-unavailable"), "native-only protocols must not be mislabeled as URL");
-  selectFormat("mihomo");
-  assert.equal(count(".client-export-control input"), 2, "format selector must keep every export on one line");
-  const yaml = query(".client-export-control input");
-  yaml.parentElement.querySelector("[data-secret-visibility]").click();
-  assert.equal(yaml.type, "text", "YAML must be revealable");
-  assert.ok(yaml.value.startsWith("{") && !/[\r\n]/.test(yaml.value), "YAML must be a single-line Sub-Store proxy map");
-  yaml.parentElement.querySelector("[data-secret-visibility]").click();
-  assert.equal(yaml.type, "password", "YAML must be maskable again");
-  selectFormat("url");
-  assert.equal(count(".client-profile-row > .client-export-control textarea.client-share-yaml"), 0, "switching back must restore URL values");
-  query('[data-filter-engine=""]').click();
-  query('#client-search [name="q"]').value = "LAX-02-v6";
-  query('#client-search button[type="submit"]').click();
-  assert.equal(count(".client-profile-row"), 1, "search must match a custom client name");
-  assert.ok(query('.client-profile-row>header').textContent.includes("端口 21026"), "port metadata must stay visible");
-  query("[data-client-parameter-open]").click();
-  assert.ok(query(".client-parameter-dialog[open]"), "parameter details must open");
-  query(".client-parameter-dialog[open] [data-client-parameter-close]").click();
-  query("[data-client-display-open]").click();
-  assert.ok(query(".client-display-dialog[open]"), "display settings must open");
-  query(".client-display-dialog[open] [data-client-display-close]").click();
-  query("[data-clear-search]").click();
-  assert.equal(count(".client-access-node-card"), 8, "clearing search must restore every node");
-  query('#client-search [name="q"]').value = "no-such-client";
-  query("#client-search").requestSubmit();
-  assert.equal(count(".client-profile-row"), 0, "unmatched search must show no profiles");
-  query("[data-clear-client-filters]").click();
-  assert.equal(count(".client-access-node-card"), 8, "empty-state reset must restore results");
-  query("[data-refresh-client-access]").click();
-  await waitFor(() => !query("[data-refresh-client-access]").disabled, "refresh must finish");
-  selectFormat("mihomo");
-  const missing = testAPI.clientAccessEntries[0].profiles[0];
-  const savedYAML = missing.mihomo_yaml;
-  missing.mihomo_yaml = "";
-  missing.mihomo_error = "此协议不支持 Mihomo YAML";
-  query("[data-refresh-client-access]").click();
-  await waitFor(() => query(".client-export-unavailable"), "unsupported format must explain the missing export");
-  assert.equal(query("[data-client-display-format]").value, "mihomo", "refresh must preserve display format");
-  assert.equal(query(".client-export-unavailable").closest(".client-profile-row").querySelector(".client-export-control"), null, "unsupported YAML must not copy the URL");
-  missing.mihomo_yaml = savedYAML;
-  delete missing.mihomo_error;
-  selectFormat("url");
-  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "filtered client page overflows the viewport");
+  await startNativeClients();
+  const button=(text,root=document)=>[...root.querySelectorAll('button')].find(control=>control.textContent===text);
+  const dialog=()=>[...document.querySelectorAll('dialog[open]')].at(-1);
+  const close=async()=>{button('',dialog())?.click(); await waitFor(()=>!dialog(),'client dialog did not close');};
+  const rows=()=>[...document.querySelectorAll('[data-client-agent] tbody tr')];
+  const nodeCount=()=>new Set([...document.querySelectorAll('[data-client-agent]')].map(card=>card.dataset.clientAgent)).size;
+  const select=(name,value)=>{const control=document.querySelector(`.a-main select[name="${name}"]`);control.value=value;control.dispatchEvent(new Event('change',{bubbles:true}));};
+  const search=value=>{const control=document.querySelector('.a-main input[name=search]');control.value=value;control.dispatchEvent(new Event('input',{bubbles:true}));};
+  assert.equal(nodeCount(),8,'client layout lost a node');
+  assert.ok(document.documentElement.scrollWidth<=innerWidth,'client page overflows viewport');
+  assert.ok(document.querySelector('input[name=search]').getBoundingClientRect().width>=140,'search input unusable');
+  select('engine','mihomo');
+  assert.equal(rows().length,2,'engine filter must show every Mihomo profile');
+  assert.ok(rows().some(row=>row.textContent.includes('原生配置')),'native-only protocol mislabeled as URL');
+  select('format','mihomo');
+  for(const row of rows())assert.ok(!button('复制',row).disabled,'supported YAML cannot be copied');
+  button('参数详情',rows()[1]).click();
+  const yamlField=[...dialog().querySelectorAll('.a-field')].find(field=>field.querySelector('label')?.textContent==='Mihomo YAML');
+  const yaml=yamlField.querySelector('input');
+  assert.equal(yaml.type,'password','YAML must start masked');
+  button('显示',yamlField.parentElement).click();
+  assert.equal(yaml.type,'text','YAML must be revealable');
+  assert.ok(yaml.value.startsWith('{')&&!/[\r\n]/.test(yaml.value),'YAML must retain single-line Sub-Store map');
+  button('隐藏',yamlField.parentElement).click();assert.equal(yaml.type,'password','YAML must be maskable again');
+  await testNativeClientClipboard(dialog(),yaml,button('复制',yamlField.parentElement));
+  await close();select('format','url');
+  button('参数详情',rows()[0]).click();
+  assert.ok([...dialog().querySelectorAll('input[name=export]')].some(input=>input.value.startsWith('vless://')),'switching format did not restore URL');
+  await close();select('engine','');search('LAX-02-v6');
+  assert.equal(rows().length,1,'search must match custom client name');
+  assert.ok(rows()[0].cells[0].textContent.includes('端口 21026'),'port metadata lost');
+  button('参数详情',rows()[0]).click();assert.ok(dialog().textContent.includes('服务器'),'parameter details inaccessible');await close();
+  button('修改显示参数',rows()[0]).click();assert.ok(dialog().querySelector('form'),'display settings inaccessible');await close();
+  button('重置').click();assert.equal(nodeCount(),8,'clearing search lost nodes');
+  search('no-such-client');assert.equal(rows().length,0,'unmatched search has results');
+  button('重置').click();assert.equal(nodeCount(),8,'empty reset lost nodes');
+  button('刷新').click();await waitFor(()=>!button('刷新').disabled,'client refresh did not finish');
+  select('format','mihomo');
+  const missing=testAPI.clientAccessEntries[0].profiles[0],savedYAML=missing.mihomo_yaml;
+  missing.mihomo_yaml='';missing.mihomo_error='此协议不支持 Mihomo YAML';
+  button('刷新').click();await waitFor(()=>rows().some(row=>row.textContent.includes(missing.mihomo_error)),'unsupported format needs visible explanation');
+  assert.equal(document.querySelector('select[name=format]').value,'mihomo','refresh lost export format');
+  const unsupported=rows().find(row=>row.textContent.includes(missing.mihomo_error));
+  assert.ok(button('复制',unsupported).disabled&&button('下载',unsupported).disabled,'unsupported YAML allows copying URL');
+  button('参数详情',unsupported).click();
+  assert.ok(![...dialog().querySelectorAll('input[name=export],textarea[name=export]')].some(input=>input.value.startsWith('ss://')),'unsupported YAML details substitute URL');
+  await close();missing.mihomo_yaml=savedYAML;delete missing.mihomo_error;select('format','url');
+  assert.ok(document.documentElement.scrollWidth<=innerWidth,'filtered page overflows');
+  for(const list of document.querySelectorAll('.a-traffic-list .a-table-scroll'))assert.ok(list.scrollWidth<=list.clientWidth+1,'client list needs sideways scroll');
+  if(new URLSearchParams(location.search).has('preview')){document.documentElement.dataset.clientPreview='ready';await new Promise(()=>{});}
+  const refresh=async()=>{button('刷新').click();await waitFor(()=>!button('刷新').disabled,'客户端局部刷新未结束');await delay(25);};
+  const lax=document.querySelector('[data-client-agent=lax-02]'),address=lax.querySelector('select[name=address]');
+  address.focus();address.value='ipv6';address.dispatchEvent(new Event('change',{bubbles:true}));
+  assert.equal(lax.querySelector('[name=address]'),address,'预览地址切换替换下拉控件');assert.equal(document.activeElement,address,'预览地址切换丢失焦点');
+  await refresh();assert.equal(document.querySelector('[data-client-agent=lax-02]'),lax,'刷新替换客户端节点');assert.equal(lax.querySelector('[name=address]'),address);assert.equal(address.value,'ipv6','刷新重置预览地址');assert.equal(document.activeElement,address);
+  const resource=testAPI.clientAccessEntries[0],profile=resource.profiles[0];
+  resource.profiles=Array.from({length:26},(_,index)=>({...structuredClone(profile),tag:`阅读中的入站-${index}`,port:22000+index}));
+  await refresh();
+  const card=document.querySelector(`[data-client-agent="${resource.agent_id}"]`),table=card.querySelector('table'),next=button('下一页',card);
+  assert.ok(next,'长客户端列表缺少分页');next.click();
+  await waitFor(()=>card.textContent.includes('第 2 / 3 页'),'客户端分页未切换');
+  const row=table.querySelector('tbody tr'),control=button('参数详情',row);control.focus();
+  const range=document.createRange();range.selectNodeContents(row.cells[0].querySelector('.a-stack').firstChild);getSelection().removeAllRanges();getSelection().addRange(range);const selection=getSelection().toString();
+  await waitFor(()=>!document.getAnimations().some(a=>a.id.startsWith('analytics-')),'分页动效未结束');
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const top=scrollY;
+  await refresh();
+  assert.equal(card.querySelector('table'),table,'刷新替换客户端列表');assert.equal(table.querySelector('tbody tr'),row,'刷新替换当前分页记录');
+  assert.ok(card.textContent.includes('第 2 / 3 页'),'刷新重置分页');assert.equal(document.activeElement,control,'刷新丢失行按钮焦点');assert.equal(getSelection().toString(),selection,'刷新丢失选中文本');assert.equal(scrollY,top,'刷新改变客户端阅读位置');
+  button('下一页',card).click();assert.ok(card.textContent.includes('第 3 / 3 页'),'刷新后分页处理器失效');
+  const previousFetch=window.fetch;
+  window.fetch=async(input,options)=>String(input).endsWith('/client-access')?new Response(JSON.stringify({error:'客户端读取失败'}),{status:503,headers:{'Content-Type':'application/json'}}):previousFetch(input,options);
+  try{await refresh();assert.ok(card.isConnected&&card.textContent.includes('第 3 / 3 页'),'读取失败清空有效客户端列表');}
+  finally{window.fetch=previousFetch;}
+  await refresh();assert.ok(card.isConnected&&card.textContent.includes('第 3 / 3 页'),'恢复读取重置页码');
+}
+
+async function testNativeClientClipboard(box,input,copy){
+  const clipboard=Object.getOwnPropertyDescriptor(navigator,'clipboard');
+  const exec=Object.getOwnPropertyDescriptor(document,'execCommand');
+  let copied='',calls=0,complete;
+  const idle=()=>!document.querySelector('#app[aria-busy=true]');
+  try{
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:value=>{calls++;copied=value;return new Promise(resolve=>{complete=resolve;});}}});
+    copy.click();copy.click();await waitFor(()=>calls===1,'现代剪贴板复制未提交或重复提交');
+    assert.ok(copy.disabled,'复制提交中没有锁定');assert.equal(copied,input.value);assert.equal(input.type,'password');
+    complete();await waitFor(idle,'复制未结束');
+    for(const mode of ['missing','rejected','text-selection','denied']){
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:mode==='missing'?undefined:{writeText:async()=>{throw new Error('fixture clipboard denied');}}});
+      const value=input.value;
+      input.type=mode==='text-selection'?'text':'password';input.focus();
+      if(input.type==='text')input.setSelectionRange(1,4,'forward');
+      let invoked=false;
+      Object.defineProperty(document,'execCommand',{configurable:true,value:command=>{
+        const selected=document.activeElement;
+        invoked=true;assert.equal(command,'copy');assert.equal(selected.tagName,'TEXTAREA');
+        assert.ok(box.contains(selected),'复制助手位于模态之外的不可交互区域');
+        assert.equal(selected.value,value);assert.equal(selected.selectionStart,0);assert.equal(selected.selectionEnd,value.length);
+        return mode!=='denied';
+      }});
+      copy.click();await waitFor(()=>invoked&&idle(),'回退复制未结束');
+      assert.equal(box.querySelector('.a-clipboard'),null,'复制助手没有移除');
+      assert.equal(document.activeElement,input,'复制后没有恢复焦点');assert.equal(input.value,value,'复制改写原值');
+      assert.equal(input.type,mode==='text-selection'?'text':'password','复制暴露隐藏内容');
+      if(mode==='text-selection'){assert.equal(input.selectionStart,1);assert.equal(input.selectionEnd,4);assert.equal(input.selectionDirection,'forward');}
+      if(mode==='denied')assert.ok([...document.querySelectorAll('.a-toast.error')].some(toast=>toast.textContent.includes('浏览器拒绝了剪贴板操作')),'复制被拒绝没有显示真实错误');
+    }
+    input.type='password';
+  }finally{
+    if(clipboard)Object.defineProperty(navigator,'clipboard',clipboard);else delete navigator.clipboard;
+    if(exec)Object.defineProperty(document,'execCommand',exec);else delete document.execCommand;
+  }
 }

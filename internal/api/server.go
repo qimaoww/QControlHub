@@ -4,14 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/geoip"
-	"github.com/qimaoww/qcontrolhub/internal/komari"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
@@ -60,18 +58,7 @@ func New(dataStore *store.Store, config Config) *Server {
 			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyReadonlyPermissions()}
 		}
 	}
-	komariClient, komariErr := komari.New(config.KomariURL, config.KomariAPIKey, config.KomariHTTPClient)
 	geoipClient := geoip.New(config.GeoIPHTTPClient)
-	if komariErr != nil {
-		// Keep the control plane available when an optional integration is
-		// misconfigured; the endpoint reports the configuration error to an
-		// operator instead of preventing unrelated node management.
-		komariClient = nil
-	}
-	komariHTTPClient := config.KomariHTTPClient
-	if komariHTTPClient == nil {
-		komariHTTPClient = &http.Client{Timeout: 10 * time.Second}
-	}
 	return &Server{
 		store:                      dataStore,
 		allowedOrigins:             origins,
@@ -89,9 +76,6 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentInstaller:             config.AgentInstaller,
 		publicIPProbe:              config.PublicIPProbe,
 		geoip:                      geoipClient,
-		komari:                     komariClient,
-		komariHTTPClient:           komariHTTPClient,
-		komariConfigError:          komariErr,
 		webhookSigningConfigured:   strings.TrimSpace(config.WebhookSecret) != "",
 		notifier:                   notify.New(config.WebhookSecret, slog.Default()),
 		subStoreHTTP:               newSubStoreHTTPClient(),

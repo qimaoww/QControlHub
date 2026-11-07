@@ -3,13 +3,13 @@ package cnip
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/oschwald/maxminddb-golang"
+	"github.com/oschwald/maxminddb-golang/v2"
 	"net/netip"
 	"strings"
 )
 
 func parseMMDB(data []byte) ([]netip.Prefix, error) {
-	db, err := maxminddb.FromBytes(data)
+	db, err := maxminddb.OpenBytes(data)
 	if err != nil {
 		return nil, errors.New("无效 MMDB 数据库")
 	}
@@ -19,10 +19,9 @@ func parseMMDB(data []byte) ([]netip.Prefix, error) {
 	if err := validateMMDBTree(data, db.Metadata.NodeCount, db.Metadata.RecordSize); err != nil {
 		return nil, err
 	}
-	networks := db.Networks(maxminddb.SkipAliasedNetworks)
 	result := []netip.Prefix{}
 	count := 0
-	for networks.Next() {
+	for network := range db.Networks() {
 		count++
 		if count > 2000000 {
 			return nil, errors.New("MMDB 网络条目过多")
@@ -33,8 +32,7 @@ func parseMMDB(data []byte) ([]netip.Prefix, error) {
 			} `maxminddb:"country"`
 			CountryCode string `maxminddb:"country_code"`
 		}
-		network, err := networks.Network(&record)
-		if err != nil {
+		if err := network.Decode(&record); err != nil {
 			return nil, err
 		}
 		code := record.Country.ISOCode
@@ -44,16 +42,12 @@ func parseMMDB(data []byte) ([]netip.Prefix, error) {
 		if !strings.EqualFold(code, "CN") {
 			continue
 		}
-		p, err := netip.ParsePrefix(network.String())
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, p)
+		result = append(result, network.Prefix())
 		if len(result) > MaxPrefixes {
 			return nil, errors.New("MMDB CN 网段过多")
 		}
 	}
-	return result, networks.Err()
+	return result, nil
 }
 
 // Validate search-node references before traversal. A malformed downloadable

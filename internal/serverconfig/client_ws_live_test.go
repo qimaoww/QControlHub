@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -173,6 +175,9 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 			port := singBoxFreePort(t)
 			client, _ := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"type": "direct", "listen": "127.0.0.1", "listen_port": port, "network": "tcp", "override_address": "127.0.0.1", "override_port": echo}}, "outbounds": []any{out}})
 			clientLog := singBoxRun(t, binary, "ws-edge-client", string(client))
+			if engine == core.EngineMihomo && !tc.edge {
+				waitNativeWebSocketForwarding(t, port, serverLog, clientLog)
+			}
 			err = singBoxEchoRoundTrip("tcp", port)
 			if tc.edge {
 				var r requestInfo
@@ -261,7 +266,7 @@ func testPlainWebSocketClientRoutingLive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), source, input.Port, "")
+			originLogs := nativeWSOriginRun(t, engine, nativeWSTestBinary(t, engine), source, input.Port, "")
 			metadata, _ := MarshalClientMetadata(input)
 			parsed, ok := Parse(engine, source)
 			if !ok {
@@ -291,6 +296,9 @@ func testPlainWebSocketClientRoutingLive(t *testing.T) {
 			echo, clientPort := singBoxEcho(t, "tcp"), singBoxFreePort(t)
 			client, _ := json.Marshal(map[string]any{"inbounds": []any{map[string]any{"type": "direct", "listen": "127.0.0.1", "listen_port": clientPort, "network": "tcp", "override_address": "127.0.0.1", "override_port": echo}}, "outbounds": []any{outbound}})
 			logs := singBoxRun(t, nativeWSTestBinary(t, core.EngineSingBox), "plain-ws-client", string(client))
+			if engine == core.EngineMihomo {
+				waitNativeWebSocketForwarding(t, clientPort, originLogs, logs)
+			}
 			if err := singBoxEchoRoundTrip("tcp", clientPort); err != nil {
 				t.Fatalf("plaintext WS payload: %v\n%s", err, logs())
 			}
@@ -298,5 +306,24 @@ func testPlainWebSocketClientRoutingLive(t *testing.T) {
 			t.Run("mihomo", func(t *testing.T) { testWebSocketMihomoImport(t, parsed, "127.0.0.1", "", false) })
 			t.Run("share-uri", func(t *testing.T) { testWebSocketMihomoImport(t, parsed, "127.0.0.1", "", true) })
 		})
+	}
+}
+
+// Mihomo binds its listener before tunnel.OnRunning. Warm up only a
+// controlled echo path, then take fresh connections for the strict payload,
+// hostname-routing and exported-client assertions. Only startup EOF retries;
+// mismatched payloads, TLS errors and persistent failures remain fatal.
+func waitNativeWebSocketForwarding(t *testing.T, port int, serverLog, clientLog func() string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := singBoxEchoRoundTrip("tcp", port)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, io.EOF) || time.Now().After(deadline) {
+			t.Fatalf("WS forwarding not ready: %v\n%s\n%s", err, serverLog(), clientLog())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

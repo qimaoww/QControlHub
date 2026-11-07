@@ -1,72 +1,69 @@
 package frontend
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
+	// Check the shipped owners directly: a retired renderer must never satisfy
+	// an otherwise missing native workflow through a repository-wide scan.
+	owners := map[string][]string{
+		"analytics/app.js": {
+			`["client-access",`, `["substore-sync",`, `["live-config",`, `["archive-config",`,
+			`["node-settings",`, `["settings",`, `field("用户名", "username", ""`,
+			`api("/auth/login"`, `api("/auth/logout"`, `mountTheme(`,
+		},
+		"analytics/nodes.js": {
+			`enrollmentInstallCommand(created)`, `ctx.dialog('QAgent 安装命令'`,
+			`await copyText(value)`, `ctx.api('/enrollment-tokens')`,
+			`/enrollment-tokens/${pathID(token.id)}/command`, `method: 'DELETE'`,
+			`token.command_available`, `已接入的节点不会被卸载`, `/enrollment-command`,
+			`ctx.can('enrollment.manage')`, `ctx.can('host.manage',agent)`,
+			`createServiceActionGuard(ctx.can)`, `m.cpu_percent`, `agent.last_seen`,
+		},
+		"analytics/config-studio.js": {
+			`field('协议','protocol'`, `保存并部署`, `await taskDetail(ctx,result.task.id)`,
+			`section('入站配置'`, `section('出站配置'`, `通用配置项`,
+		},
+		"analytics/live-config.js":      {`保存历史`, `/revisions?limit=100`, `恢复此档案`, `配置源码`},
+		"analytics/operations.js":       {`export async function tasksPage`, `export async function taskDetail`, `taskRetryState(task)`, `output.firstChild`},
+		"analytics/settings.js":         {`保存设置`, `ctx.pageActions(submit)`, `section("API Key"`},
+		"analytics/themes.js":           {`createThemePreference`, `ctx.switchTheme`, `theme.id === "analytics"`},
+		"modules/enrollment-command.js": {`X-QControlHub-Enrollment`, `/install-agent.sh`, `created?.token`, `created?.name`},
+	}
 	var scripts strings.Builder
-	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	for path, markers := range owners {
+		content := string(mustReadFrontendFile(t, path))
+		scripts.WriteString(content)
+		for _, required := range markers {
+			if !strings.Contains(content, required) {
+				t.Errorf("native console owner %s is missing %q", path, required)
+			}
 		}
-		if entry.IsDir() || filepath.Ext(path) != ".js" {
-			return nil
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		scripts.Write(data)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	content := scripts.String()
-	for _, required := range []string{
-		`"client-access"`, `"substore-sync"`, `"live-config"`, `"archive-config"`,
-		`machine-workspace`, `server-plan-form`, `field-form`,
-		`revision-timeline`, `task-timeline`, `settings-section`,
-		`node-settings`, `内核配置预设`, `node-settings-tabs`, `查看安装部署命令`, `复制 Agent 安装命令`,
+	for _, forbidden := range []string{
+		"/ui/", "注册码", "入网码", "命令有效期", "旧安装命令会立即失效", "重新生成后旧命令立即失效",
+		"生成新安装命令", "data-reinstall-agent", "login-theme-toggle", "qcontrolhub-color-theme",
 	} {
-		if !strings.Contains(content, required) {
-			t.Errorf("SPA is missing initial console surface %q", required)
-		}
-	}
-	for _, required := range []string{
-		`data-theme-toggle`, `qcontrolhub-color-theme`, `login-theme-toggle`,
-		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
-		`/install-agent.sh`, `执行记录`, `入站操作`, `高级字段`, `系统设置`,
-		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
-		`enrollment-token`, `/enrollment-command`,
-		`heartbeat, percent`, `serviceActionDisabled`, `trafficChart`, `renderConfigDiff`,
-	} {
-		if !strings.Contains(content, required) {
-			t.Errorf("SPA is missing initial visual/installation contract %q", required)
-		}
-	}
-	if strings.Contains(content, "/ui/") {
-		t.Error("SPA must use the JSON API instead of legacy HTML form routes")
-	}
-	for _, forbidden := range []string{"注册码", "入网码", "命令有效期"} {
 		if strings.Contains(content, forbidden) {
-			t.Errorf("SPA still exposes deprecated add-node wording %q", forbidden)
+			t.Errorf("native console exposes retired route/control/wording %q", forbidden)
 		}
 	}
-	if strings.Contains(content, "旧安装命令会立即失效") || strings.Contains(content, "重新生成后旧命令立即失效") {
-		t.Error("SPA must keep existing Agent install commands valid when another command is generated")
+	// Reading existing enrollment commands must keep the token and does not
+	// depend on regenerating credentials; real repeated reads are browser tested.
+	nodes := string(mustReadFrontendFile(t, "analytics/nodes.js"))
+	start := strings.Index(nodes, "token.command_available && button('安装命令'")
+	if start < 0 {
+		t.Fatal("existing command action is missing")
 	}
-	for _, forbidden := range []string{"生成新安装命令", "data-reinstall-agent"} {
-		if strings.Contains(content, forbidden) {
-			t.Errorf("SPA must not expose single-node credential generation control %q", forbidden)
-		}
+	end := strings.Index(nodes[start:], "button('删除记录'")
+	if end <= 0 {
+		t.Fatal("existing command action boundary is missing")
 	}
-	if !strings.Contains(content, "命令可重复查看") {
-		t.Error("SPA does not explain that existing Agent install commands remain readable")
+	read := nodes[start : start+end]
+	if strings.Contains(read, `ctx.api('/enrollment-tokens',`) || !strings.Contains(read, `box.close(); command(created)`) {
+		t.Fatal("reading an installation command must display the existing credential without regenerating it")
 	}
 }

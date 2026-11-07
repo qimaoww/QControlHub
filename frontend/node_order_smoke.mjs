@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
-import { createNodeOrderSync, nodeCardOrderKey, orderNodesBySavedOrder } from "./modules/node-order.js";
+import { createNodeOrderSync, nodeCardOrderKey, orderNodesBySavedOrder, saveNodeOrder } from "./modules/node-order.js";
 const memory = initial => {
   const data = new Map(initial ? [[nodeCardOrderKey, JSON.stringify(initial)]] : []);
   return { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
 };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
 const flush = () => new Promise(setImmediate);
+// Concurrent account-order consumers share a pending read and server order
+// takes precedence over old browser IDs.
+{
+  let reads = 0;
+  const response = deferred();
+  const storage = memory(["foreign", "b", "a"]);
+  const order = createNodeOrderSync(async () => { reads++; return response.promise; }, storage);
+  const background = order.load();await flush();
+  const navigation = order.load();
+  assert.equal(background, navigation);
+  response.resolve({ ids: ["a", "b"], revision: 4 });
+  await Promise.all([background, navigation]);
+  assert.equal(reads, 1);
+  assert.deepEqual(order.ids(), ["a", "b"], "server order overrides unattributed browser IDs");
+}
 let server = { ids: ["a", "b", "c", "d"], revision: 0 }, puts = 0;
 let delay = null, fail = false, ambiguous = false;
 async function api(_path, options) {
@@ -71,4 +86,36 @@ console.log("Account node order queue, migration race, conflict, failure and sta
  const blocked = { getItem() { throw new Error("storage disabled"); }, setItem() { throw new Error("storage disabled"); } };
  const restored = createNodeOrderSync(async () => ({ ids: ["b", "a"], revision: 4 }), blocked);
  await restored.load(); assert.deepEqual(restored.ids(), ["b", "a"], "database reads survive blocked local storage");
+}
+// Port sorting uses the same account queue and CAS behavior with its own key.
+{
+ const values = new Map([['ports', JSON.stringify(['node:443', 'revoked:443', 'node:8443'])]]);
+ const portStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+ let server = { ids: [], revision: 0 };
+ const calls = [];
+ const ports = createNodeOrderSync(async (path, options) => {
+  assert.equal(path, '/preferences/traffic-order');
+  calls.push(options);
+  if (options) { const body = JSON.parse(options.body); assert.equal(body.revision, server.revision); server = { ids: body.ids, revision: server.revision + 1 }; }
+  return server;
+ }, portStorage, () => true, true, { endpoint: '/preferences/traffic-order', key: 'ports', migrationIDs: ids => ids.filter(id => id.startsWith('node:')) });
+ await ports.load();
+ assert.deepEqual(ports.ids(), ['node:443', 'node:8443'], 'authorized legacy port order was not migrated');
+ assert.equal(JSON.parse(calls[1].body).initialize, true);
+ await ports.save(['node:8443', 'node:443']);
+ assert.deepEqual(JSON.parse(portStorage.getItem('ports')), server.ids);
+ assert.equal(portStorage.getItem(nodeCardOrderKey), null, 'port sorting overwrote fleet order');
+}
+
+// Preserve the low-storage and unconfirmed-write cases on the active shared
+// helper. Both native node and port queues add server-confirmed persistence.
+{
+ let value = null;
+ const storage = {getItem:()=>value,setItem:(_key,next)=>{value=next;}};
+ for(const ids of [["a","b"],["b","a"],["a","b"]]) assert.equal(saveNodeOrder(ids,storage),true);
+ assert.equal(value,'["a","b"]');
+ const before=value;
+ assert.equal(saveNodeOrder(["b","a"],{...storage,setItem:()=>{throw new Error("quota exceeded");}}),false);
+ assert.equal(value,before);
+ assert.equal(saveNodeOrder(["b","a"],{...storage,setItem:()=>{}}),false,"unconfirmed storage must not announce success");
 }

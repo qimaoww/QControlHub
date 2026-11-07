@@ -405,6 +405,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return validation, fmt.Errorf("inspect service before deployment: %w", err)
 		}
 		applyAction := core.ActionRestart
+		if plan, planErr := serverconfig.PrepareIndependentEgress(task.Engine, task.ConfigContent); planErr == nil && plan.Source == "disabled" {
+			applyAction = core.ActionStop
+		}
 		if task.SharedInstance {
 			endpoints, endpointErr := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
 			if endpointErr != nil {
@@ -486,7 +489,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			return output, fmt.Errorf("configuration deployment failed; previous configuration was restored with its service state: %w", err)
 		}
 		if applyAction == core.ActionStop {
-			return output + "\n[阶段:提交成功状态] 空协议配置已应用；本人实例已停止，所有入站已移除", nil
+			return output + "\n[阶段:提交成功状态] 空监听配置已应用，当前内核实例已停止", nil
 		}
 		return output + "\n[阶段:提交成功状态] 服务 active；TLS 与代理链路就绪（如配置托管 TLS）；部署已提交", nil
 	case core.ActionStart, core.ActionRestart:

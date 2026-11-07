@@ -3,9 +3,24 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 85
+const currentSchemaVersion = 90
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS account_traffic_orders (
+ account_id text PRIMARY KEY,
+ port_keys text[] NOT NULL DEFAULT '{}',
+ revision bigint NOT NULL CHECK (revision > 0)
+);
+CREATE TABLE IF NOT EXISTS account_node_views (
+ account_id text PRIMARY KEY,
+ view text NOT NULL CHECK (view IN ('cards', 'list')),
+ revision bigint NOT NULL CHECK (revision > 0)
+);
+CREATE TABLE IF NOT EXISTS account_themes (
+ account_id text PRIMARY KEY,
+ theme_id text NOT NULL CHECK (theme_id IN ('classic', 'analytics')),
+ revision bigint NOT NULL CHECK (revision > 0)
+);
 CREATE TABLE IF NOT EXISTS traffic_batch_requests (
  account_id text NOT NULL,
  request_id text NOT NULL,
@@ -175,6 +190,14 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	);
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_content_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_content_check CHECK (octet_length(content) <= 4194304);
+
+CREATE TABLE IF NOT EXISTS config_management_states (
+ config_id text NOT NULL,
+ config_version integer NOT NULL CHECK (config_version > 0),
+ content text NOT NULL CHECK (octet_length(content) <= 1048576),
+ PRIMARY KEY (config_id,config_version),
+ FOREIGN KEY (config_id,config_version) REFERENCES config_revisions(config_id,version) ON DELETE CASCADE
+);
 
 	CREATE TABLE IF NOT EXISTS config_client_metadata (
 	    config_id text NOT NULL,
@@ -1041,4 +1064,10 @@ $$;
 DROP TRIGGER IF EXISTS panel_users_revoke_api_keys ON panel_users;
 CREATE TRIGGER panel_users_revoke_api_keys BEFORE UPDATE OR DELETE ON panel_users
  FOR EACH ROW EXECUTE FUNCTION revoke_admin_api_keys_for_user();
+UPDATE account_themes SET theme_id='analytics' WHERE theme_id='classic';
+ALTER TABLE account_themes DROP CONSTRAINT IF EXISTS account_themes_theme_id_check;
+ALTER TABLE account_themes ADD CONSTRAINT account_themes_theme_id_check CHECK (theme_id='analytics');
+ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_url;
+ALTER TABLE panel_settings DROP COLUMN IF EXISTS komari_api_key;
+UPDATE agents SET labels=labels - 'komari_uuid' WHERE labels ? 'komari_uuid';
 `

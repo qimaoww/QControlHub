@@ -11,7 +11,7 @@ export function createCardMoveScroll(grid, update) {
     }
     chain.push(document.scrollingElement);
     const view = window.visualViewport;
-    const dock = document.querySelector(".app-dock"), bar = document.querySelector(".workspace-topbar");
+    const dock = document.querySelector(".app-dock"), bar = document.querySelector(".workspace-topbar,.a-top");
     const clip = { left: view?.offsetLeft || 0, top: view?.offsetTop || 0,
       right: (view?.offsetLeft || 0) + (view?.width || innerWidth), bottom: (view?.offsetTop || 0) + (view?.height || innerHeight) };
     if (dock && getComputedStyle(dock).position === "fixed" && dock.getBoundingClientRect().width > innerWidth / 2) clip.bottom = Math.min(clip.bottom, dock.getBoundingClientRect().top);

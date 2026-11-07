@@ -23,16 +23,19 @@ type configInboundTargetResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
-	AccountingPlan  *serverconfig.AccountingPlan  `json:"accounting_plan,omitempty"`
-	AccountingError string                        `json:"accounting_error,omitempty"`
-	Agent           core.Agent                    `json:"agent"`
-	Config          *core.Config                  `json:"config,omitempty"`
-	Catalog         configschema.Catalog          `json:"catalog"`
-	Protocols       []serverconfig.Protocol       `json:"protocols"`
-	Inbounds        []serverconfig.Input          `json:"inbounds"`
-	InboundTargets  []configInboundTargetResource `json:"inbound_targets"`
-	PresentFields   map[string]bool               `json:"present_fields"`
-	RealityPresets  []string                      `json:"reality_presets"`
+	Deployment      store.ConfigManagementDeployment `json:"deployment"`
+	Management      serverconfig.ManagedState        `json:"management"`
+	ManagedObjects  []serverconfig.ManagedObject     `json:"managed_objects"`
+	AccountingPlan  *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
+	AccountingError string                           `json:"accounting_error,omitempty"`
+	Agent           core.Agent                       `json:"agent"`
+	Config          *core.Config                     `json:"config,omitempty"`
+	Catalog         configschema.Catalog             `json:"catalog"`
+	Protocols       []serverconfig.Protocol          `json:"protocols"`
+	Inbounds        []serverconfig.Input             `json:"inbounds"`
+	InboundTargets  []configInboundTargetResource    `json:"inbound_targets"`
+	PresentFields   map[string]bool                  `json:"present_fields"`
+	RealityPresets  []string                         `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -123,8 +126,45 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		InboundTargets: []configInboundTargetResource{},
 		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
-	if config.ID != "" {
+	if config.ID != "" || request.PathValue("snapshot") != "" {
+		previewChanged := false
+		if snapshot := request.PathValue("snapshot"); snapshot != "" {
+			var content string
+			content, err = s.store.ReadTaskConfigSnapshot(request.Context(), snapshot, agent.ID, engine)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			previewChanged = content != config.Content
+			config.Content = content
+			config.AgentID, config.Engine = agent.ID, engine
+			if config.Name == "" {
+				config.Name = agent.Name + " · " + string(engine)
+			}
+		}
 		result.Config = &config
+		if config.ID != "" {
+			result.Management, err = s.store.ConfigManagementState(request.Context(), config.ID, config.Version)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			result.Deployment, err = s.store.ConfigManagementDeployment(request.Context(), config.ID, config.Version)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+		}
+		if previewChanged {
+			result.Deployment.State = "pending"
+			result.Deployment.TaskID = ""
+			result.Deployment.TaskStatus = ""
+		}
+		result.ManagedObjects, err = serverconfig.ManagedObjects(engine, config.Content, result.Management)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		// Reading a saved plan only needs one verification pass. Stripping and
 		// compiling it again tripled this work on every post-save page refresh.
 		plan, planErr := serverconfig.PrepareAccounting(engine, config.Content)
@@ -144,9 +184,11 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
 			})
 		}
-		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
-			writeInternalError(w, err)
-			return
+		if config.ID != "" {
+			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
+				writeInternalError(w, err)
+				return
+			}
 		}
 		if engine == core.EngineShadowsocksRust {
 			destination := false

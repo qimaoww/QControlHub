@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -24,6 +27,41 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+			var analyticsUser core.User
+			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
+			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
+			analyticsScope := store.WithConfigScope(ctx, analyticsUser.ID, false)
+			// Keep a saved account preference at the login boundary.
+			if _, err := db.SaveTheme(analyticsScope, "analytics", 0); err != nil {
+				t.Fatal(err)
+			}
+			admin.call("POST", "/users", core.UserRequest{Username: "default-theme-user", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
+			// This browser fixture declares the current Agent traffic capability.
+			// Runtime/feature state is separate from the metrics sample below.
+			analyticsAgent.Features = append(analyticsAgent.Features, "port-traffic-v1")
+			if err := db.Heartbeat(analyticsScope, analyticsAgent.ID, core.HeartbeatRequest{Features: analyticsAgent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpdateAgentMetrics(analyticsScope, analyticsAgent.ID, core.HostMetrics{
+				PublicIPv4: "93.184.216.34", PublicIPv6: "2606:2800:1234:5678:9abc:def0:25c8:1946",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SetAgentRegionCode(analyticsScope, analyticsAgent.ID, "JP"); err != nil {
+				t.Fatal(err)
+			}
+			analyticsConfig := configScopeAPIConfig(t, 23475)
+			analyticsConfig.AgentID = analyticsAgent.ID
+			analyticsConfig, err := db.SaveAgentConfig(analyticsScope, analyticsConfig, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			analyticsDeploy, err := db.CreateTask(analyticsScope, core.TaskRequest{AgentID: analyticsAgent.ID, Engine: analyticsConfig.Engine, Action: core.ActionDeploy, ConfigID: analyticsConfig.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			completeConfigScopeAPITask(t, analyticsScope, db, analyticsDeploy)
+			analyticsXray := enrollAnalyticsXray(t, analyticsScope, db)
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}
@@ -32,6 +70,20 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 				admin.call("POST", "/users", core.UserRequest{Username: name, Role: core.RoleUser, Password: "config scope password fixture", Permissions: []core.Permission{permission}}, http.StatusCreated, &user)
 				agent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, user.ID, false), db)
 				owned[name] = agent.ID
+				if name == "traffic-reader" {
+					scope := store.WithConfigScope(ctx, user.ID, false)
+					config := configScopeAPIConfig(t, 23476)
+					config.AgentID = agent.ID
+					config, err = db.SaveAgentConfig(scope, config, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					deploy, err := db.CreateTask(store.WithConfigScope(ctx, admin.userID, true), core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionDeploy, ConfigID: config.ID})
+					if err != nil {
+						t.Fatal(err)
+					}
+					completeConfigScopeAPITask(t, store.WithConfigScope(ctx, admin.userID, true), db, deploy)
+				}
 			}
 			for username, client := range map[string]configScopeAPIClient{"alice": alice, "bob": bob} {
 				token, err := db.CreateEnrollmentToken(store.WithConfigScope(ctx, client.userID, false), core.EnrollmentTokenRequest{Name: username + " node"})
@@ -51,7 +103,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fixture := map[string]any{"owned": owned, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
+			fixture := map[string]any{"owned": owned, "analyticsAgent": analyticsAgent.ID, "analyticsXray": analyticsXray.ID, "shared": shared.ID, "alice": alice.userID, "bob": bob.userID,
 				"contentA": configScopeAPIConfig(t, 21001).Content, "contentB": configScopeAPIConfig(t, 21002).Content}
 			frontendRoot := filepath.Join("..", "..", "frontend")
 			serve := func(root string) *httptest.Server {
@@ -97,4 +149,28 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A saved fixture exercises analytics editing without claiming a live kernel.
+func enrollAnalyticsXray(t *testing.T, ctx context.Context, db *store.Store) core.Agent {
+	t.Helper()
+	token, err := db.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "analytics-xray"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "analytics-xray", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineXray}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := serverconfig.Generate(core.EngineXray, serverconfig.Input{Protocol: serverconfig.ProtocolVLESS, Tag: "theme-xray", Listen: "0.0.0.0", Port: 23479, Username: "theme-user", Credential: "123e4567-e89b-42d3-a456-426614174000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "analytics-xray", Engine: core.EngineXray, Content: content}, 0); err != nil {
+		t.Fatal(err)
+	}
+	return agent
 }

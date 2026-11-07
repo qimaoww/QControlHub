@@ -32,7 +32,6 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	// Resolve derived display data before the metrics redaction below: region
 	// detection reads the public address out of those metrics.
 	s.resolveAgentRegions(request, agents)
-	s.attachAgentKomari(request, agents)
 	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
