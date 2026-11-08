@@ -344,7 +344,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('刷新','.a-top');
   await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
   await click('取消');
-  await wait(page,"!document.querySelector('dialog[open]')");
+  await wait(page,"!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-top button')].some(b=>b.textContent==='刷新' && !b.disabled)");
   assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').value"),'未保存的并发草稿','refresh cancellation preserves the draft');
   await click('刷新','.a-top');
   await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
