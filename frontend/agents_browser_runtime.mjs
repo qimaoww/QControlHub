@@ -53,6 +53,9 @@ try {
     await testConfigLayoutRuntime(scenario);
   } else if (mode.startsWith("bbr")) {
     await testSystemTCPRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "connections-reload") {
+    const { bootConnectionReloadFixture } = await import("./browser/connection-reload.mjs");
+    await bootConnectionReloadFixture();
   } else if (mode.startsWith("connections")) {
     const { testClientConnectionsRuntime } = await import("./browser/client-connections.mjs");
     await testClientConnectionsRuntime(new URLSearchParams(location.search).has("preview"));

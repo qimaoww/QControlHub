@@ -79,6 +79,7 @@ func MarshalClientMetadata(input Input) (string, error) {
 	}
 	if input.Transport == "xhttp" {
 		metadata.XHTTP = marshalXHTTPMetadata(input)
+		metadata.TLSClientCertificate = input.TLSClientCertificate
 		encoded, err := json.Marshal(metadata)
 		return string(encoded), err
 	}
@@ -122,8 +123,19 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	// A source edit can reuse a tag for another protocol or rotate a peer.
 	// Stale metadata must neither overwrite source nor break the workspace.
 	if metadata.XHTTP != nil && input.Transport == "xhttp" {
+		if metadata.XHTTP.Binding != xhttpBinding(*input) {
+			return nil
+		}
 		applyXHTTPMetadata(input, metadata)
-		return nil
+		if isXHTTPGroup(input.Protocol) {
+			if metadata.PanelCertificateID != "" && input.CertificatePath == core.PanelCertificatePrefix+metadata.PanelCertificateID+"/cert.pem" && input.PrivateKeyPath == core.PanelCertificatePrefix+metadata.PanelCertificateID+"/key.pem" {
+				input.PanelCertificateID = metadata.PanelCertificateID
+			}
+			return nil
+		}
+		if metadata.Protocol == ProtocolXHTTPTLS && (input.TLSEnabled || metadata.Frontend != nil) {
+			input.Protocol = ProtocolXHTTPTLS
+		}
 	}
 	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
@@ -134,7 +146,8 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	}
 	if f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
 		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
-		input.TLSACMEEmail = f.ACMEEmail
+		input.TLSACMEEmail, input.TLSStaticHTML = f.ACMEEmail, f.StaticHTML
+		input.CertificatePath, input.PrivateKeyPath = f.CertificatePath, f.PrivateKeyPath
 		input.TLSEnabled = true
 		input.TLSALPN = metadata.TLSALPN
 	}

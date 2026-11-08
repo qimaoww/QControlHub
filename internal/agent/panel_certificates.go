@@ -136,5 +136,18 @@ func preparePanelCertificates(spec EngineSpec, task *core.Task) error {
 		}
 		return path, nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	for i := range task.TLSFrontends {
+		f := &task.TLSFrontends[i]
+		for _, path := range []*string{&f.CertificatePath, &f.PrivateKeyPath} {
+			if mapped, ok := paths[*path]; ok {
+				*path = mapped
+			} else if strings.HasPrefix(*path, core.PanelCertificatePrefix) {
+				return errors.New("受管证书引用缺少经过授权的秘密")
+			}
+		}
+	}
+	return nil
 }

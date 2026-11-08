@@ -16,6 +16,8 @@ export async function testConfigInboundsRuntime(preview = false) {
     if (params.has('modify')) { window.inboundFixture.select('second'); window.inboundFixture.click('modify'); }
     return;
   }
+  await testCopyInboundConnections();
+  await testSourceCorrection();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
   await testInboundProtocolChanges();
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {
@@ -128,6 +130,27 @@ export async function testConfigInboundsRuntime(preview = false) {
   await testConfigOutboundsRuntime();await testCommonConfigRuntime();
 }
 
+async function testSourceCorrection() {
+  for (const shared of [false, true]) {
+    const test = await fixture('sing-box', {shared});
+    const form = test.root.querySelector('form:has([name=content])'), input = form.elements.content;
+    const edit = value => { input.value=value; input.dispatchEvent(new Event('input',{bubbles:true})); };
+    test.confirm=true;
+    test.sourceFailure={status:400}; edit('{}'); form.requestSubmit();
+    await waitFor(()=>form.textContent.includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'source rejection did not settle');
+    assert(input.value==='{}'&&!form.querySelector('[type=submit]').disabled&&!test.writes.length,'validation failure discarded or permanently blocked draft');
+    const valid=JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
+    test.sourceFailure=null; test.normalizedSource=JSON.stringify({...JSON.parse(valid),log:{level:'warn'}},null,2);
+    edit(valid); form.requestSubmit(); form.requestSubmit(); await test.settle(1);
+    assert(test.writes[0].content===valid&&test.writes[0].version===1,'retry submitted old source or baseline');
+    assert(input.value===test.normalizedSource&&input.defaultValue===test.normalizedSource,'saved editor does not match normalized server source');
+    assert(!form.textContent.includes('测试源码保存失败')&&form.textContent.includes('已保存'),'saved state retained old error');
+    test.clickButton('重置修改'); assert(input.value===test.normalizedSource,'reset restored stale source');
+    test.taskStatus='succeeded'; await pause();
+    test.dispose();
+  }
+}
+
 export async function testInboundProtocolChanges() {
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) for (const shared of [false,true]) {
     const test=await fixture(engine,{protocol:'ss2022',shared});test.select('second');test.click('modify');await ready();
@@ -177,4 +200,33 @@ async function testNodeConfigHistory(){
   }
   const readonly=await fixture('xray',{history:true,readonly:true});readonly.click('history');await waitFor(()=>readonly.topDialog()?.querySelector('tbody tr'),'readonly history missing');readonly.clickButton('预览',[...readonly.topDialog().querySelectorAll('tbody tr')].at(-1));await waitFor(()=>readonly.topDialog()?.querySelector('pre'),'readonly preview missing');assert(![...readonly.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'readonly restore exposed');readonly.dispose();
   const stale=await fixture('xray',{history:true});stale.click('history');await waitFor(()=>stale.topDialog()?.querySelector('tbody tr'),'stale history missing');let release;stale.revisionGate=new Promise(resolve=>{release=resolve;});stale.clickButton('预览',[...stale.topDialog().querySelectorAll('tbody tr')].at(-1));stale.dispose();const next=await fixture('sing-box');release();await pause();assert(!document.querySelector('dialog[open]'),'previous account preview entered new target');next.dispose();
+}
+
+async function testCopyInboundConnections() {
+  const original=Object.getOwnPropertyDescriptor(navigator,'clipboard');
+  let copied=[];
+  Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{copied.push(value);}}});
+  try {
+    for(const options of [{},{readonly:true,offline:true},{shared:true},{noTasks:true}]) {
+      const test=await fixture('xray',options);
+      const source=document.querySelector('.a-main [name=content]'), initial=source.value;
+      source.value+='\n ';source.dispatchEvent(new Event('input',{bubbles:true}));
+      source.focus();source.setSelectionRange(1,3);
+      const control=test.click('复制入站连接');assert(control,'export reader cannot copy');
+      control.click();await waitFor(()=>copied.length>0&&!document.querySelector('[aria-busy=true]'),'copy did not finish');
+      assert(test.calls.filter(call=>call.path.includes('/configs/')&&call.path.includes('/client-access?')).length===1,'duplicate copy request');
+      assert(copied.length===1&&copied[0].startsWith('ss://'),'wrong clipboard content');
+      assert(!test.writes.length&&!test.topDialog()&&source.value===initial+'\n ','copy mutated configuration or lost draft');
+      assert(source.selectionStart===1&&source.selectionEnd===3,'copy changed selection');
+      copied=[];test.dispose();
+    }
+    const denied=await fixture('xray',{noPeerRead:true});assert(!denied.click('复制入站连接'),'export without permission');denied.dispose();
+    const stale=await fixture('xray');let release;stale.exportGate=new Promise(resolve=>{release=resolve;});
+    stale.click('复制入站连接');await pause();
+    const source=document.querySelector('.a-main [name=content]');source.value+=' ';source.dispatchEvent(new Event('input',{bubbles:true}));
+    release();await pause();await pause();assert(!copied.length&&!stale.writes.length,'stale draft request copied');stale.dispose();
+    const failed=await fixture('xray');failed.exportFailure=true;failed.click('复制入站连接');
+    await waitFor(()=>document.body.textContent.includes('配置已变化，请重新读取'),'copy failure not shown');
+    assert(!copied.length&&!failed.writes.length,'failed export copied or wrote configuration');failed.dispose();
+  } finally {if(original)Object.defineProperty(navigator,'clipboard',original);else delete navigator.clipboard;}
 }

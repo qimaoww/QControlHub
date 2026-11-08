@@ -324,7 +324,7 @@ func verifyManagedTLSProviderSwitch(t *testing.T, m *tlsFrontendManager, ctx con
 		t.Fatal("Caddy rollback HTTPS", err)
 	}
 	for i := 0; i < 2; i++ {
-		if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy); err != nil {
+		if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy, true); err != nil {
 			t.Fatal("Caddy-to-Nginx deployment/repeat", err)
 		}
 	}
@@ -334,7 +334,7 @@ func verifyManagedTLSProviderSwitch(t *testing.T, m *tlsFrontendManager, ctx con
 		t.Fatal(err)
 	}
 	next.Certificate, next.PrivateKey = pair.Certificate, pair.PrivateKey
-	if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy); err != nil {
+	if err = m.apply(ctx, "qch-sing-box", []core.TLSFrontend{next}, core.ActionDeploy, true); err != nil {
 		t.Fatal("certificate rotation", err)
 	}
 	trust := x509.NewCertPool()

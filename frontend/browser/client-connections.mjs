@@ -26,6 +26,7 @@ export async function testClientConnectionsRuntime(preview = false) {
     }
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
+      if (url.searchParams.get("scope_only") === "true") return new Response(JSON.stringify({ scope: "" }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url.searchParams.get("locations") === "only") {
         locationRequests.push(url.searchParams);
         await locationsReady;
@@ -36,7 +37,7 @@ export async function testClientConnectionsRuntime(preview = false) {
       const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
         records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} })),
-        ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
+        country_codes: [], ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
       }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -164,9 +165,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(requests.at(-1).get("cursor"), "next-page", "refresh retains the current page");
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "refresh retains the node filter");
   assert.ok(pageText().includes("第 2 页"));
+  const beforePrevious = requests.length;
   button("上一页").click();
   await waitFor(() => pageText().includes("第 1 页") && settled(), "previous page missing");
-  assert.ok(!requests.at(-1).has("cursor"));
+  assert.equal(requests.length, beforePrevious, "refresh must retain the other page's fresh snapshot");
+  assert.ok(displayed().every(row => !row.textContent.includes("2026/9/20")), "previous page must not retain the refreshed cursor page");
   const beforeRecent = requests.length;
   button("今日").click();
   await requested(beforeRecent, "today query missing");

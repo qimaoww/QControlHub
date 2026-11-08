@@ -51,17 +51,21 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
     if (task.id !== id || task.agent_id !== record.agentId || task.engine !== record.engine ||
         task.action !== record.intent || task.config_version !== record.version || !task.config_id)
       throw new Error("保存任务与当前目标不一致，请查看执行记录。");
+    if (record.instanceId !== undefined && ((task.shared_traffic_id || "") !== record.instanceId ||
+        Boolean(task.shared_instance) !== Boolean(record.instanceId)))
+      throw new Error("保存任务与当前实例不一致，请查看执行记录。");
     const config = await api(`/agents/${encodeURIComponent(record.agentId)}/configs/${encodeURIComponent(record.engine)}`, {method:"GET"});
     if (config.id !== task.config_id || config.version < task.config_version)
       throw new Error("保存配置尚未确认，请查看执行记录。");
     return {config, task};
   }
-  async function recover(agentId, engine) {
+  async function recover(agentId, engine, instanceId) {
     const owner = state.data, records = entries();
     for (const [id, record] of Object.entries(records)) {
       if (!record || record.agentId !== agentId || record.engine !== engine) continue;
+      if (instanceId !== undefined && record.instanceId !== undefined && record.instanceId !== instanceId) continue;
       try {
-        const result = await readReceipt(id, record);
+        const result = await readReceipt(id, {...record, instanceId:instanceId ?? record.instanceId});
         if (state.data !== owner) return;
         track(result, record, owner, records, id);
       } catch { /* Unknown is not failure. Keep the address; never repeat a write. */ }
@@ -73,7 +77,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
     const owner = state.data, records = entries();
     const input = JSON.parse(options.body);
     const record = {agentId:decodeURIComponent(match[1]), engine:decodeURIComponent(match[2]),
-      intent:input.intent, version:Number(input.expected_version ?? input.version) + 1};
+      intent:input.intent, version:Number(input.expected_version ?? input.version) + 1, instanceId:input.expected_instance_id};
     const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
     const id = `tsk_${[...bytes].map(value => value.toString(16).padStart(2,"0")).join("")}`;
     records[id] = record;

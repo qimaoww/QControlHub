@@ -19,7 +19,8 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 	}
 	var input struct {
 		core.Config
-		Intent string `json:"intent"`
+		Intent             string  `json:"intent"`
+		ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -67,7 +68,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.Version,
-		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID})
 	if err != nil {
 		writeStoreError(w, err)
 		return

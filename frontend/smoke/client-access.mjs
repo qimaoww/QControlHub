@@ -1,22 +1,39 @@
 import assert from "node:assert/strict";
 import { clientAccessExport } from "../modules/client-access-model.js";
 
-import { clientAccessAddressChoices, clientAccessEntryForAddress, filterClientAccessEntries, groupClientAccessEntries, normalizeClientAccessFilters } from "../modules/client-access-model.js";
+import { clientAccessAddressChoices, clientAccessBatchExport, clientAccessRecordKey, filterClientAccessEntries, groupClientAccessEntries, normalizeClientAccessFilters } from "../modules/client-access-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run() {
 const exportSample = { profile: { format: "VLESS URI", uri: "vless://example" }, mihomo_yaml: '{name: "Example", type: vless, server: "example.test", port: 443}' };
 assert.equal(clientAccessExport(exportSample, "url").value, exportSample.profile.uri);
 assert.equal(clientAccessExport(exportSample, "mihomo").value, exportSample.mihomo_yaml);
-assert.equal(clientAccessExport({ ...exportSample, mihomo_error: "unsupported" }, "mihomo").value, "");
-assert.ok(clientAccessExport({ profile: exportSample.profile }, "mihomo").error);
-assert.ok(clientAccessExport({ profile: { format: "Mihomo Mieru YAML", uri: "{type: mieru}" } }, "url").error);
-// Content determines URL availability; labels such as "JSON URI" do not.
-for (const value of ['{"outbounds":[]}', 'socks5 = socks5, host, 1080', 'name: example\ntype: ss']) {
-  assert.equal(clientAccessExport({ profile: { format: "URL", uri: value } }, "url").value, "");
-}
+assert.equal(clientAccessExport({ ...exportSample, mihomo_error: "unsupported" }, "mihomo").value, exportSample.profile.uri);
+assert.equal(clientAccessExport({ profile: exportSample.profile }, "mihomo").format, "URL");
+const yaml = { profile: { format: "Mihomo Mieru YAML", uri: "{type: mieru, server: edge.test, port: 1234}" } };
+assert.equal(clientAccessExport(yaml, "url").value, yaml.profile.uri);
+assert.equal(clientAccessExport(yaml, "url").outputs[0].extension, "yaml");
+assert.equal(clientAccessExport({ profile: { format: "URL", uri: 'name: broken' } }, "url").value, "");
 assert.equal(clientAccessExport({ profile: { format: "VMess v2 JSON URI", uri: "vmess://eyJ2IjoiMiJ9" } }, "url").error, "");
-assert.equal(clientAccessExport({ profile: { uri: "vless://uuid@host:443#name", uri_error: "使用 JSON" } }, "url").value, "");
+const native = { profile: { format: 'sing-box client JSON', uri_error: 'no lossless URL', uri: '{"outbounds":[{"type":"vless","server":"edge.test","tls":{"enabled":true}}]}' } };
+assert.deepEqual(JSON.parse(clientAccessExport(native, 'url').value), JSON.parse(native.profile.uri));
+assert.equal(clientAccessExport(native, 'url').outputs[0].mime, 'application/json');
+for (const [format, uri] of [['Surge Snell', 'edge = snell, edge.test, 1234, psk=fixture'], ['WireGuard native config', '[Interface]\nPrivateKey = fixture\n[Peer]\nEndpoint = edge.test:1234']]) {
+  const exported = clientAccessExport({profile:{format,uri}}, 'url');
+  assert.equal(exported.value, uri); assert.equal(exported.outputs[0].extension, 'conf');
+}
+const variants = { profile: { ...native.profile, variants: [
+  {name:'direct', profile:exportSample.profile, mihomo_yaml:exportSample.mihomo_yaml},
+  {name:'split', profile:{uri_error:'no URL', xray_json:native.profile.uri}},
+] } };
+for (const format of ['url','mihomo']) {
+  const exported = clientAccessExport(variants, format);
+  assert.equal(exported.outputs.length, 2);assert.equal(exported.errors.length, 0);
+  assert.equal(exported.outputs[1].value, native.profile.uri);
+  assert.equal(exported.outputs[0].value, format === 'url' ? exportSample.profile.uri : exportSample.mihomo_yaml);
+}
+assert.ok(clientAccessExport({error:'missing credential',profile:exportSample.profile},'url').error);
+assert.equal(clientAccessExport({profile:{uri:'vless://uuid@host:443',uri_error:'use JSON'}},'url').value, '');
 const accessEntries = [
   {
     agent_id: "alpha",
@@ -60,11 +77,18 @@ assert.deepEqual(
   ["auto", "ipv4", "ipv6"],
   "client configuration exposes both address families",
 );
-assert.equal(
-  clientAccessEntryForAddress(accessEntries[0], "ipv6").address,
-  "2001:db8::10",
-  "client configuration switches to the IPv6 profile variant",
-);
+assert.equal(accessEntries[0].profiles[0].address_overridden, true);
+const batchEntries = [
+  {...accessEntries[0], config_id:'one', profiles:[{...accessEntries[0].profiles[0], ...native}]},
+  {...accessEntries[0], engine:'xray', config_id:'two', profiles:[{...accessEntries[0].profiles[0], ...variants}]},
+  {...accessEntries[0], agent_id:'different', agent_name:accessEntries[0].agent_name, profiles:[{...accessEntries[0].profiles[0], ...yaml}]},
+];
+assert.notEqual(clientAccessRecordKey(batchEntries[0],batchEntries[0].profiles[0]),clientAccessRecordKey(batchEntries[1],batchEntries[1].profiles[0]));
+const batch = clientAccessBatchExport(groupClientAccessEntries([...batchEntries, batchEntries[0]]),'url');
+assert.equal(batch.outputs.length,4,'same tag/port and same name must retain distinct records and schemes');
+assert.equal(batch.errors.length,0);assert.ok(batch.value.includes(native.profile.uri));assert.ok(batch.value.includes('[different]'));
+const partial = clientAccessBatchExport(groupClientAccessEntries([...batchEntries,{agent_id:'missing',engine:'xray',address_required:true,profiles:[]}]),'url');
+assert.equal(partial.outputs.length,4);assert.equal(partial.errors.length,1);
 const accessAgents = [
   { id: "alpha", name: "Alpha node", labels: {}, status: "online" },
   { id: "beta", name: "Beta node", labels: {}, status: "online" },

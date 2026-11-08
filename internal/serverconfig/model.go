@@ -32,30 +32,31 @@ const (
 )
 
 type Protocol struct {
-	SupportsManagedTLS   bool     `json:"supports_managed_tls,omitempty"`
-	Key                  string   `json:"key"`
-	Group                string   `json:"group,omitempty"`
-	Name                 string   `json:"name"`
-	Badge                string   `json:"badge"`
-	Description          string   `json:"description"`
-	Docs                 string   `json:"docs"`
-	DefaultPort          int      `json:"default_port"`
-	Credential           string   `json:"credential_label"`
-	SecondaryCredential  string   `json:"secondary_credential_label"`
-	IgnoresUsername      bool     `json:"ignores_username"`
-	Methods              []string `json:"methods"`
-	Transports           []string `json:"transports"`
-	SupportsTLS          bool     `json:"supports_tls"`
-	RequiresTLS          bool     `json:"requires_tls"`
-	DefaultTLS           bool     `json:"default_tls"`
-	TransportConfig      bool     `json:"transport_config"`
-	UsesReality          bool     `json:"uses_reality"`
-	SupportsRealityMLDSA bool     `json:"supports_reality_mldsa"`
-	UsesVLESSEncryption  bool     `json:"uses_vless_encryption"`
-	PortForward          bool     `json:"port_forward"`
-	DefaultListen        string   `json:"default_listen,omitempty"`
-	UsesWireGuard        bool     `json:"uses_wireguard,omitempty"`
-	UsesEndpoint         bool     `json:"uses_endpoint,omitempty"`
+	StaticPages          []StaticPage `json:"static_pages,omitempty"`
+	SupportsManagedTLS   bool         `json:"supports_managed_tls,omitempty"`
+	Key                  string       `json:"key"`
+	Group                string       `json:"group,omitempty"`
+	Name                 string       `json:"name"`
+	Badge                string       `json:"badge"`
+	Description          string       `json:"description"`
+	Docs                 string       `json:"docs"`
+	DefaultPort          int          `json:"default_port"`
+	Credential           string       `json:"credential_label"`
+	SecondaryCredential  string       `json:"secondary_credential_label"`
+	IgnoresUsername      bool         `json:"ignores_username"`
+	Methods              []string     `json:"methods"`
+	Transports           []string     `json:"transports"`
+	SupportsTLS          bool         `json:"supports_tls"`
+	RequiresTLS          bool         `json:"requires_tls"`
+	DefaultTLS           bool         `json:"default_tls"`
+	TransportConfig      bool         `json:"transport_config"`
+	UsesReality          bool         `json:"uses_reality"`
+	SupportsRealityMLDSA bool         `json:"supports_reality_mldsa"`
+	UsesVLESSEncryption  bool         `json:"uses_vless_encryption"`
+	PortForward          bool         `json:"port_forward"`
+	DefaultListen        string       `json:"default_listen,omitempty"`
+	UsesWireGuard        bool         `json:"uses_wireguard,omitempty"`
+	UsesEndpoint         bool         `json:"uses_endpoint,omitempty"`
 }
 
 type Input struct {
@@ -76,6 +77,7 @@ type Input struct {
 	XHTTPTLSPort                 int    `json:"xhttp_tls_port,omitempty"`
 	XHTTPCDN                     string `json:"xhttp_cdn,omitempty"`
 	TLSMode                      string `json:"tls_mode,omitempty"`
+	TLSStaticHTML                string `json:"tls_static_html,omitempty"`
 	TLSACMEEmail                 string `json:"tls_acme_email,omitempty"`
 	TLSPublicPort                int    `json:"tls_public_port,omitempty"`
 	Protocol                     string `json:"protocol"`
@@ -342,6 +344,9 @@ func Protocols(engine core.Engine) []Protocol {
 				Transports: []string{"raw"}, SupportsTLS: true, RequiresTLS: true, DefaultTLS: true,
 			},
 		)
+	}
+	if engine == core.EngineMihomo {
+		protocols = append(protocols, xhttpProtocols()[0])
 	}
 	if engine == core.EngineXray {
 		protocols = append(protocols, xhttpProtocols()...)

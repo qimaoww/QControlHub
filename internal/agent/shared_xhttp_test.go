@@ -16,6 +16,9 @@ func TestSharedXHTTPAgentAuthorization(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			protocol, _ := serverconfig.FindProtocol(core.EngineXray, key)
 			input, err := serverconfig.NewPlan(protocol)
+			input.TLSMode = "native"
+			input.TLSServerName, input.RealityServerName = "tls.example.test", "reality.example.test"
+			input.CertificatePath, input.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 			if err != nil {
 				t.Fatal(err)
 			}

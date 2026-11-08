@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -241,51 +242,64 @@ func TestNotificationSecretsOwnershipAndUpdateCache(t *testing.T) {
 }
 
 func TestNotificationMigrationLegacyCompatibilityAndRollback(t *testing.T) {
-	ctx, s := optionalTrafficTestStore(t)
-	settings := core.DefaultPanelSettings()
-	settings.WebhookURL = "https://example.com/legacy?token=fixture"
-	settings.NotifyTaskFailed = true
-	if _, err := s.SavePanelSettings(ctx, settings); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.pool.Exec(ctx, `DROP TABLE notification_rule_states,notification_deliveries,notification_events,notification_update_cache,notification_configs;
- DROP INDEX notification_failed_tasks; ALTER TABLE tasks DROP COLUMN notification_failure_attempt;
- DELETE FROM qcontrolhub_schema_migrations WHERE version>90; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(90) ON CONFLICT DO NOTHING; CREATE TABLE notification_events(id integer);`); err != nil {
-		t.Fatal(err)
-	}
-	database := s.pool.Config().ConnString()
-	if broken, err := Open(ctx, database, true); err == nil {
-		broken.Close()
-		t.Fatal("migration fault was ignored")
-	}
-	var version int
-	var present bool
-	if err := s.pool.QueryRow(ctx, `SELECT max(version),EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='notification_failure_attempt') FROM qcontrolhub_schema_migrations`).Scan(&version, &present); err != nil || version != 90 || present {
-		t.Fatalf("migration did not roll back %d %v %v", version, present, err)
-	}
-	if _, err := s.pool.Exec(ctx, `DROP TABLE notification_events`); err != nil {
-		t.Fatal(err)
-	}
-	migrated, err := OpenWithConfigKey(ctx, database, true, strings.Repeat("n", 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer migrated.Close()
-	c, err := migrated.NotificationConfiguration(ctx)
-	if err != nil || len(c.Channels) != 1 || c.Channels[0].ID != "legacy-webhook" || c.Channels[0].Get("url") != settings.WebhookURL {
-		t.Fatalf("legacy migration %+v %v", c.Redacted(), err)
-	}
-	c, err = migrated.SaveNotificationConfiguration(ctx, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var raw string
-	if err = migrated.pool.QueryRow(ctx, `SELECT content FROM notification_configs WHERE owner_id=''`).Scan(&raw); err != nil || strings.Contains(raw, "example.com") {
-		t.Fatal("notification secrets not encrypted", err)
-	}
-	unchanged, err := migrated.PanelSettings(ctx)
-	if err != nil || unchanged.WebhookURL != settings.WebhookURL || !unchanged.NotifyTaskFailed {
-		t.Fatal("legacy settings lost", err)
+	for _, previous := range []int{90, 91} {
+		t.Run(fmt.Sprint(previous), func(t *testing.T) {
+			ctx, s := optionalTrafficTestStore(t)
+			settings := core.DefaultPanelSettings()
+			settings.WebhookURL = "https://example.com/legacy?token=fixture"
+			settings.NotifyTaskFailed = true
+			if _, err := s.SavePanelSettings(ctx, settings); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.pool.Exec(ctx, `DROP TABLE notification_rule_states,notification_deliveries,notification_events,notification_update_cache,notification_configs;
+		 DROP INDEX notification_failed_tasks; ALTER TABLE tasks DROP COLUMN notification_failure_attempt;
+		 DELETE FROM qcontrolhub_schema_migrations; CREATE TABLE notification_events(id integer);`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.pool.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations(version) VALUES($1)`, previous); err != nil {
+				t.Fatal(err)
+			}
+			database := s.pool.Config().ConnString()
+			if broken, err := Open(ctx, database, true); err == nil {
+				broken.Close()
+				t.Fatal("migration fault was ignored")
+			}
+			var version int
+			var present bool
+			if err := s.pool.QueryRow(ctx, `SELECT max(version),EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='notification_failure_attempt') FROM qcontrolhub_schema_migrations`).Scan(&version, &present); err != nil || version != previous || present {
+				t.Fatalf("migration did not roll back %d %v %v", version, present, err)
+			}
+			if _, err := s.pool.Exec(ctx, `DROP TABLE notification_events`); err != nil {
+				t.Fatal(err)
+			}
+			migrated, err := OpenWithConfigKey(ctx, database, true, strings.Repeat("n", 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer migrated.Close()
+			if err := migrated.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil || version != currentSchemaVersion {
+				t.Fatalf("migrated version=%d: %v", version, err)
+			}
+			if _, err := migrated.SiteBranding(ctx); err != nil {
+				t.Fatalf("branding missing after notification migration: %v", err)
+			}
+			c, err := migrated.NotificationConfiguration(ctx)
+			if err != nil || len(c.Channels) != 1 || c.Channels[0].ID != "legacy-webhook" || c.Channels[0].Get("url") != settings.WebhookURL {
+				t.Fatalf("legacy migration %+v %v", c.Redacted(), err)
+			}
+			c, err = migrated.SaveNotificationConfiguration(ctx, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw string
+			if err = migrated.pool.QueryRow(ctx, `SELECT content FROM notification_configs WHERE owner_id=''`).Scan(&raw); err != nil || strings.Contains(raw, "example.com") {
+				t.Fatal("notification secrets not encrypted", err)
+			}
+			unchanged, err := migrated.PanelSettings(ctx)
+			if err != nil || unchanged.WebhookURL != settings.WebhookURL || !unchanged.NotifyTaskFailed {
+				t.Fatal("legacy settings lost", err)
+			}
+		})
 	}
 }
 

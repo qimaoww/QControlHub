@@ -27,8 +27,11 @@ const tlsFrontendState = "/var/lib/qcontrolhub-tls"
 var tlsFrontendMutex sync.Mutex
 
 type tlsDeployment struct {
-	Frontends []core.TLSFrontend `json:"frontends"`
-	Stopped   bool               `json:"stopped,omitempty"`
+	RetiredFrontends []core.TLSFrontend `json:"retired_frontends,omitempty"`
+	PendingConfig    string             `json:"pending_config,omitempty"`
+	NativeHandoff    *tlsDeployment     `json:"native_handoff,omitempty"`
+	Frontends        []core.TLSFrontend `json:"frontends"`
+	Stopped          bool               `json:"stopped,omitempty"`
 }
 type tlsDeployments map[string]tlsDeployment
 
@@ -69,13 +72,71 @@ func (m *tlsFrontendManager) load() (tlsDeployments, error) {
 		if !safeServiceName(service) {
 			return nil, errors.New("unsafe managed TLS service binding")
 		}
-		for _, f := range d.Frontends {
+		if d.NativeHandoff != nil {
+			if d.NativeHandoff.NativeHandoff != nil {
+				return nil, errors.New("nested TLS handoff")
+			}
+			for _, f := range d.NativeHandoff.Frontends {
+				if err = f.Validate(); err != nil {
+					return nil, err
+				}
+			}
+		}
+		for _, f := range append(append([]core.TLSFrontend{}, d.Frontends...), d.RetiredFrontends...) {
 			if err = f.Validate(); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return result, nil
+}
+
+func staticPageFile(f core.TLSFrontend) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%d:%s", f.StaticPageOwner, f.Tag, f.BackendPort, f.StaticHTML)))
+	return "page-" + hex.EncodeToString(sum[:16])
+}
+
+// Remove only immutable page directories previously owned by this manifest.
+// Stopped deployments retain their page for the next start and for rollback.
+func (m *tlsFrontendManager) cleanupStaticPages(before, after tlsDeployments) error {
+	keep := map[string]bool{}
+	for service, deployment := range after {
+		refs := deployment.Frontends
+		if deployment.NativeHandoff != nil {
+			refs = append(append([]core.TLSFrontend{}, refs...), deployment.NativeHandoff.Frontends...)
+		}
+		for _, f := range refs {
+			f.StaticPageOwner = service
+			if f.StaticHTML != "" {
+				keep[staticPageFile(f)] = true
+			}
+		}
+	}
+	for service, deployment := range before {
+		refs := deployment.Frontends
+		if deployment.NativeHandoff != nil {
+			refs = append(append([]core.TLSFrontend{}, refs...), deployment.NativeHandoff.Frontends...)
+		}
+		for _, f := range refs {
+			f.StaticPageOwner = service
+			if f.StaticHTML == "" || keep[staticPageFile(f)] {
+				continue
+			}
+			path := filepath.Join(m.root, staticPageFile(f))
+			if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			if err := validateProtectedDirectoryChain(m.root); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func frontendKey(f core.TLSFrontend) string {
@@ -90,8 +151,11 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 	localBackends := map[int]bool{}
 	paths := map[string]bool{}
 	backends := map[int]bool{}
+	siteOwners := map[string]string{}
+	var routes []core.TLSFrontend
 	emails := map[string]string{}
 	certificateModes := map[string]bool{}
+	panelCertificates := map[string]string{}
 	services := make([]string, 0, len(deployments))
 	for service := range deployments {
 		services = append(services, service)
@@ -103,6 +167,7 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			continue
 		}
 		for _, f := range d.Frontends {
+			f.StaticPageOwner = service
 			if err := f.Validate(); err != nil {
 				return nil, err
 			}
@@ -130,6 +195,37 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 				}
 				certificateModes[identity] = f.AutomaticCertificate
 			}
+			// Caddy selects certificates by SNI across all its listeners. Nginx
+			// also needs one unambiguous pair per virtual host. Immutable copies
+			// in different instances may refer to the same certificate version.
+			identity := f.Mode + "/" + strings.ToLower(f.Domain)
+			if f.Mode == "nginx" {
+				identity += "/" + strconv.Itoa(f.PublicPort)
+			}
+			certificate := "automatic"
+			if f.UsesPanelCertificate() {
+				certificate = strings.Split(strings.SplitN(f.CertificatePath, "/panel-certificates/", 2)[1], "/")[0]
+			}
+			if previous, exists := panelCertificates[identity]; exists && previous != certificate {
+				return nil, fmt.Errorf("域名 %s 的反代证书不一致，请选择同一面板证书", f.Domain)
+			}
+			panelCertificates[identity] = certificate
+			siteKey := fmt.Sprintf("%d/%s", f.PublicPort, f.Domain)
+			if f.StaticHTML != "" {
+				if owner := siteOwners[siteKey]; owner != "" && owner != service+"/"+f.Tag {
+					return nil, fmt.Errorf("同域名静态页面已由其他入站维护")
+				}
+				siteOwners[siteKey] = service + "/" + f.Tag
+			}
+			for _, old := range routes {
+				if old.PublicPort == f.PublicPort && (old.Transport == "xhttp" || f.Transport == "xhttp") {
+					a, b := strings.TrimSuffix(old.Path, "/")+"/", strings.TrimSuffix(f.Path, "/")+"/"
+					if strings.HasPrefix(a, b) || strings.HasPrefix(b, a) {
+						return nil, fmt.Errorf("XHTTP 路径与其他入站重叠")
+					}
+				}
+			}
+			routes = append(routes, f)
 			route := strconv.Itoa(f.PublicPort) + f.Path
 			if paths[route] {
 				return nil, fmt.Errorf("公网端口 %d 上的路径 %s 已被其他入站使用", f.PublicPort, f.Path)
@@ -140,12 +236,9 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 			result = append(result, f)
 		}
 	}
-	for port, mode := range owners {
+	for port := range owners {
 		if backends[port] {
 			return nil, fmt.Errorf("公网反代端口 %d 与内部端口冲突", port)
-		}
-		if port == 80 && mode == "caddy" {
-			return nil, errors.New("Caddy 自动证书需要独立的 HTTP 验证端口 80，公网 HTTPS 端口不能为 80")
 		}
 	}
 	for _, f := range result {
@@ -160,27 +253,80 @@ func renderCaddyFrontends(frontends []core.TLSFrontend, state string) (string, e
 	return renderCaddyWithFallback(frontends, state, nil)
 }
 
-func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallback map[string]bool) (string, error) {
+func newerFrontendCertificate(a, b core.TLSFrontend) core.TLSFrontend {
+	if a.CertificatePath == "" {
+		return b
+	}
+	version := func(f core.TLSFrontend) int {
+		value, _ := strconv.Atoi(strings.TrimPrefix(filepath.Base(filepath.Dir(f.CertificatePath)), "v"))
+		return value
+	}
+	if version(b) > version(a) {
+		return b
+	}
+	return a
+}
+
+func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallback map[string]bool, roots ...string) (string, error) {
+	pageRoot := tlsFrontendRoot
+	if len(roots) > 0 {
+		pageRoot = roots[0]
+	}
 	servers := map[string]any{}
 	domains := map[string]string{}
+	files := []any{}
+	seenFiles := map[string]bool{}
+	selectedFiles := map[string]core.TLSFrontend{}
+	automatic := false
 	byPort := map[int][]any{}
+	for _, f := range frontends {
+		if f.Mode == "caddy" && f.UsesPanelCertificate() {
+			id := strings.Split(strings.SplitN(f.CertificatePath, "/panel-certificates/", 2)[1], "/")[0]
+			selectedFiles[id] = newerFrontendCertificate(selectedFiles[id], f)
+		}
+	}
 	for _, f := range frontends {
 		if f.Mode != "caddy" {
 			continue
 		}
-		if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
-			domains[f.Domain] = f.ACMEEmail
+		if f.UsesPanelCertificate() {
+			id := strings.Split(strings.SplitN(f.CertificatePath, "/panel-certificates/", 2)[1], "/")[0]
+			pair := selectedFiles[id]
+			if !seenFiles[pair.CertificatePath] {
+				files = append(files, map[string]any{"certificate": pair.CertificatePath, "key": pair.PrivateKeyPath})
+				seenFiles[pair.CertificatePath] = true
+			}
+		} else {
+			automatic = true
+			if email := domains[f.Domain]; email == "" || f.ACMEEmail != "" {
+				domains[f.Domain] = f.ACMEEmail
+			}
 		}
 		versions := []string{"1.1"}
-		if f.Transport == "http" {
+		if f.Transport == "http" || f.Transport == "xhttp" {
 			versions = []string{"h2c"}
 		}
-		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": []string{f.Path}}}, "handle": []any{map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": versions}}}, "terminal": true})
+		paths := []string{f.Path}
+		if f.Transport == "xhttp" {
+			paths = []string{strings.TrimSuffix(f.Path, "/") + "/", strings.TrimSuffix(f.Path, "/") + "/*"}
+		}
+		proxy := map[string]any{"handler": "reverse_proxy", "headers": map[string]any{"request": map[string]any{"set": map[string]any{"X-Forwarded-For": []string{"{http.request.remote.host}"}}}}, "upstreams": []any{map[string]any{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(f.BackendPort))}}, "transport": map[string]any{"protocol": "http", "versions": versions}}
+		if f.Transport == "xhttp" {
+			proxy["flush_interval"] = -1
+		}
+		byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"path": paths}}, "handle": []any{proxy}, "terminal": true})
+	}
+	for _, f := range frontends {
+		if f.Mode == "caddy" && f.StaticHTML != "" {
+			byPort[f.PublicPort] = append(byPort[f.PublicPort], map[string]any{"match": []any{map[string]any{"host": []string{f.Domain}}}, "handle": []any{map[string]any{"handler": "file_server", "root": filepath.Join(pageRoot, staticPageFile(f)), "index_names": []string{"index.html"}}}, "terminal": true})
+		}
 	}
 	// A fixed route delegates only ACME challenge paths to the authenticated
 	// Agent's in-memory, Host/token scoped handler. Caddy's own ACME solver
 	// retains precedence. No per-order edits to business routes are necessary.
-	servers["http_challenges"] = managedCaddyHTTPChallenges()
+	if automatic {
+		servers["http_challenges"] = managedCaddyHTTPChallenges()
+	}
 	names := []string{}
 	for domain := range domains {
 		names = append(names, domain)
@@ -199,13 +345,20 @@ func renderCaddyWithFallback(frontends []core.TLSFrontend, state string, fallbac
 		policies = append(policies, map[string]any{"subjects": []string{name}, "issuers": issuers})
 	}
 	for port, routes := range byPort {
-		servers["https_"+strconv.Itoa(port)] = map[string]any{"listen": []string{":" + strconv.Itoa(port)}, "routes": append(routes, map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}), "protocols": []string{"h1", "h2"}, "tls_connection_policies": []any{map[string]any{"alpn": []string{"h2", "http/1.1"}}}, "automatic_https": map[string]any{"disable_redirects": true}}
+		servers["https_"+strconv.Itoa(port)] = map[string]any{"listen": []string{":" + strconv.Itoa(port)}, "routes": append(routes, map[string]any{"handle": []any{map[string]any{"handler": "static_response", "status_code": 404}}}), "protocols": []string{"h1", "h2"}, "tls_connection_policies": []any{map[string]any{"alpn": []string{"h2", "http/1.1"}}}, "automatic_https": map[string]any{"disable_redirects": true, "disable": !automatic}}
+	}
+	certificates := map[string]any{}
+	if len(names) > 0 {
+		certificates["automate"] = names
+	}
+	if len(files) > 0 {
+		certificates["load_files"] = files
 	}
 	config := map[string]any{
 		"admin":   map[string]any{"listen": "unix/" + filepath.Join(state, "caddy-admin.sock"), "config": map[string]any{"persist": false}},
 		"logging": map[string]any{"logs": map[string]any{"default": map[string]any{"writer": map[string]any{"output": "file", "filename": filepath.Join(state, "caddy.log"), "roll_size_mb": 1, "roll_keep": 2, "roll_keep_days": 3}}}},
 		"storage": map[string]any{"module": "file_system", "root": filepath.Join(state, "caddy")},
-		"apps":    map[string]any{"http": map[string]any{"servers": servers}, "tls": map[string]any{"certificates": map[string]any{"automate": names}, "automation": map[string]any{"policies": policies}}},
+		"apps":    map[string]any{"http": map[string]any{"servers": servers}, "tls": map[string]any{"certificates": certificates, "automation": map[string]any{"policies": policies}}},
 	}
 	value, err := json.MarshalIndent(config, "", "  ")
 	return string(value), err
@@ -237,8 +390,20 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, mana
 	sort.Ints(sorted)
 	for _, port := range sorted {
 		domains := map[string]core.TLSFrontend{}
+		pages := map[string]core.TLSFrontend{}
+		http2 := ""
 		for _, f := range ports[port] {
-			domains[f.Domain] = f
+			if old, exists := domains[f.Domain]; exists && f.UsesPanelCertificate() {
+				domains[f.Domain] = newerFrontendCertificate(old, f)
+			} else {
+				domains[f.Domain] = f
+			}
+			if f.StaticHTML != "" {
+				pages[f.Domain] = f
+			}
+			if f.Transport == "xhttp" {
+				http2 = " http2"
+			}
 		}
 		names := []string{}
 		for name := range domains {
@@ -248,26 +413,39 @@ func renderNginxFrontends(frontends []core.TLSFrontend, root, state string, mana
 		for _, name := range names {
 			f := domains[name]
 			key := frontendKey(f)
-			if f.Transport == "xhttp" {
+			if f.Transport == "xhttp" && f.LocalOnly {
 				renderNginxXHTTP(&body, f)
 				continue
 			}
-			fmt.Fprintf(&body, " server {\n  listen %d ssl;\n  server_name %s;\n  ssl_protocols TLSv1.2 TLSv1.3;\n  ssl_certificate %s;\n  ssl_certificate_key %s;\n", port, name, filepath.Join(root, key+".crt"), filepath.Join(root, key+".key"))
+			cert, privateKey := filepath.Join(root, key+".crt"), filepath.Join(root, key+".key")
+			if f.UsesPanelCertificate() {
+				cert, privateKey = f.CertificatePath, f.PrivateKeyPath
+			}
+			fmt.Fprintf(&body, " server {\n  listen %d ssl%s;\n  server_name %s;\n  ssl_protocols TLSv1.2 TLSv1.3;\n  ssl_certificate %s;\n  ssl_certificate_key %s;\n", port, http2, name, cert, privateKey)
 			// All paths on a port are available in every virtual host. HTTP Host is
 			// independent of TLS SNI, including clients connecting to an IP address.
 			for _, route := range ports[port] {
+				if route.Transport == "xhttp" {
+					fmt.Fprintf(&body, "  location ^~ %s {\n   grpc_pass grpc://127.0.0.1:%d;\n   grpc_set_header Host $http_host;\n   grpc_set_header X-Forwarded-For $remote_addr;\n   grpc_socket_keepalive on;\n   grpc_read_timeout 86400s;\n   grpc_send_timeout 86400s;\n   client_max_body_size 0;\n   client_body_timeout 86400s;\n  }\n", strings.TrimSuffix(route.Path, "/")+"/", route.BackendPort)
+					continue
+				}
 				fmt.Fprintf(&body, "  location = %s {\n   proxy_pass http://127.0.0.1:%d;\n   proxy_http_version 1.1;\n   proxy_set_header Host $http_host;\n   proxy_set_header X-Forwarded-For $remote_addr;\n   proxy_set_header Upgrade $http_upgrade;\n   proxy_set_header Connection $qch_connection;\n   proxy_buffering off;\n   proxy_request_buffering off;\n   proxy_read_timeout 86400s;\n   proxy_send_timeout 86400s;\n  }\n", route.Path, route.BackendPort)
 			}
-			body.WriteString("  location / { return 404; }\n }\n")
+			if page, ok := pages[name]; ok {
+				fmt.Fprintf(&body, "  location / { root %s; default_type text/html; try_files /index.html =404; }\n }\n", filepath.Join(root, staticPageFile(page)))
+			} else {
+				body.WriteString("  location / { return 404; }\n }\n")
+			}
 		}
 	}
-	hasCaddy, hasHTTPPort, automaticNginx := false, false, false
+	hasCaddy, hasHTTPPort, automaticNginx, legacyNginx := false, false, false, false
 	for _, f := range frontends {
 		hasCaddy = hasCaddy || f.Mode == "caddy"
 		automaticNginx = automaticNginx || f.AutomaticCertificate
+		legacyNginx = legacyNginx || f.Mode == "nginx" && !f.UsesPanelCertificate()
 		hasHTTPPort = hasHTTPPort || f.PublicPort == 80
 	}
-	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && (automaticNginx || len(managedHTTP) > 0 && managedHTTP[0]) {
+	if len(ports) > 0 && !hasCaddy && !hasHTTPPort && (automaticNginx || legacyNginx && len(managedHTTP) > 0 && managedHTTP[0]) {
 		body.WriteString(" # qch-managed-http-challenges-v1\n server {\n listen 80;\n listen [::]:80;\n server_name _;\n location ^~ /.well-known/acme-challenge/ { proxy_pass http://127.0.0.1:9080; proxy_set_header Host $host; }\n location / { return 404; }\n }\n")
 	}
 	body.WriteString("}\n")
@@ -397,12 +575,36 @@ func (m *tlsFrontendManager) prepare(ctx context.Context, frontends []core.TLSFr
 	modes := map[string]bool{}
 	for _, f := range frontends {
 		modes[f.Mode] = true
-		if f.Mode == "nginx" && f.Transport == "xhttp" {
+		if f.StaticHTML != "" {
+			pageDir := filepath.Join(m.root, staticPageFile(f))
+			if err := os.MkdirAll(pageDir, 0750); err != nil {
+				return err
+			}
+			if err := validateProtectedDirectoryChain(pageDir); err != nil {
+				return err
+			}
+			identity, err := managedCoreServiceIdentity()
+			if err != nil {
+				return err
+			}
+			if err := os.Chown(pageDir, 0, int(identity.gid)); err != nil {
+				return err
+			}
+			// The OpenRC Agent's private umask can make MkdirAll create 0700.
+			// Permit the fixed proxy group to traverse this owned page directory.
+			if err := os.Chmod(pageDir, 0750); err != nil {
+				return err
+			}
+			if err := m.writeConfig(filepath.Join(pageDir, "index.html"), f.StaticHTML, false); err != nil {
+				return err
+			}
+		}
+		if f.UsesPanelCertificate() || f.Mode == "nginx" && f.Transport == "xhttp" && f.LocalOnly {
 			if err := validateXHTTPCertificate(ctx, f); err != nil {
 				return err
 			}
 		}
-		if f.Mode == "nginx" && f.Transport != "xhttp" && !f.AutomaticCertificate {
+		if f.Mode == "nginx" && !f.LocalOnly && !f.AutomaticCertificate && !f.UsesPanelCertificate() {
 			if _, err := tls.X509KeyPair([]byte(f.Certificate), []byte(f.PrivateKey)); err != nil {
 				return fmt.Errorf("托管 Nginx 证书无效：%w", err)
 			}
@@ -454,7 +656,7 @@ func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, fronte
 		content := renderNginxFrontends(frontends, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
 			var err error
-			content, err = renderCaddyFrontends(frontends, m.state)
+			content, err = renderCaddyWithFallback(frontends, m.state, nil, m.root)
 			if err != nil {
 				return err
 			}
@@ -482,7 +684,7 @@ func (m *tlsFrontendManager) validateFrontendConfigs(ctx context.Context, fronte
 	return nil
 }
 
-func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontends []core.TLSFrontend, candidate ...string) error {
+func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontends []core.TLSFrontend, candidate ...string) (resultErr error) {
 	tlsFrontendMutex.Lock()
 	defer tlsFrontendMutex.Unlock()
 	deployments, err := m.load()
@@ -493,7 +695,14 @@ func (m *tlsFrontendManager) stage(ctx context.Context, service string, frontend
 	if err != nil {
 		return err
 	}
+	original := tlsDeployments{}
+	for key, value := range deployments {
+		original[key] = value
+	}
 	deployments[service] = tlsDeployment{Frontends: frontends}
+	// Stage files are recreated during apply. Keep only pages referenced by the
+	// committed manifest, including stopped instances and an unfinished handoff.
+	defer func() { resultErr = errors.Join(resultErr, m.cleanupStaticPages(deployments, original)) }()
 	next, err := activeTLSFrontends(deployments)
 	if err != nil {
 		return err
@@ -601,7 +810,7 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 		}
 		content := renderNginxFrontends(frontends, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
-			content, err = renderCaddyWithFallback(frontends, m.state, fallback)
+			content, err = renderCaddyWithFallback(frontends, m.state, fallback, m.root)
 			if err == nil && len(certificateRoutes) > 0 {
 				previous, previousErr := activeTLSFrontends(certificateRoutes[0])
 				if previousErr != nil {
@@ -659,7 +868,7 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 	return nil
 }
 
-func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontends []core.TLSFrontend, action core.Action) error {
+func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontends []core.TLSFrontend, action core.Action, deferCleanup ...bool) error {
 	tlsFrontendMutex.Lock()
 	defer tlsFrontendMutex.Unlock()
 	previous, err := m.load()
@@ -694,6 +903,12 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 		delete(next, service)
 	default:
 		return errors.New("unsupported managed TLS lifecycle action")
+	}
+	if held := previous[service].NativeHandoff; held != nil && action != core.ActionUninstall {
+		value := next[service]
+		value.NativeHandoff = held
+		value.PendingConfig = previous[service].PendingConfig
+		next[service] = value
 	}
 	oldActive, err := activeTLSFrontends(previous)
 	if err != nil {
@@ -735,6 +950,7 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 	}
 	if err == nil {
 		var encoded []byte
+		retainRetiredTLS(previous, next)
 		encoded, err = json.Marshal(next)
 		if err == nil {
 			err = m.writeConfig(filepath.Join(m.root, "deployments.json"), string(encoded), true)
@@ -754,18 +970,23 @@ func (m *tlsFrontendManager) apply(ctx context.Context, service string, frontend
 		if rollbackErr != nil {
 			return fmt.Errorf("托管 TLS 部署失败：%w；反代恢复失败：%v", err, rollbackErr)
 		}
-		return fmt.Errorf("托管 TLS 部署失败：%w；已恢复原反代状态", err)
+		return fmt.Errorf("托管 TLS 部署失败：%w；已恢复原反代状态", errors.Join(err, m.cleanupStaticPages(next, previous)))
 	}
-	return nil
+	if len(deferCleanup) > 0 && deferCleanup[0] {
+		return nil
+	}
+	return m.cleanupRetiredTLS(ctx, next)
 }
 
 func probeFrontendTLS(ctx context.Context, f core.TLSFrontend, protocol ...bool) error {
 	config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: f.Domain, NextProtos: []string{"http/1.1"}}
-	if f.Transport == "http" {
+	if f.Transport == "http" || f.Transport == "xhttp" {
 		config.NextProtos = []string{"h2"}
 	}
-	if f.Transport == "xhttp" {
+	if f.Transport == "xhttp" && !f.LocalOnly {
 		config.NextProtos = []string{"h2"}
+	}
+	if f.UsesPanelCertificate() || f.Transport == "xhttp" && f.LocalOnly {
 		data, err := os.ReadFile(f.CertificatePath)
 		if err != nil {
 			return err

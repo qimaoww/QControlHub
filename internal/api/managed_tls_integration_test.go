@@ -113,7 +113,7 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan.PanelCertificateID = "crt_conflicting_fixture"
-	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusBadRequest, nil)
+	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusForbidden, nil)
 	plan.PanelCertificateID = ""
 	var saved configMutationResult
 	response := admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
@@ -169,7 +169,7 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 func TestManagedTLSSharedDomainOnlyPortsAPI(t *testing.T) {
 	db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-domain-only", core.EngineSingBox)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
+	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}

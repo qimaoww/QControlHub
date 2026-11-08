@@ -83,6 +83,38 @@ func TestTLSFrontendRejectsMixedNginxTrustOnSameSNI(t *testing.T) {
 	}
 }
 
+func TestTLSFrontendPanelCertificatesShareOneProvider(t *testing.T) {
+	for _, mode := range []string{"nginx", "caddy"} {
+		a := core.TLSFrontend{Tag: "xhttp", Mode: mode, Domain: "tls.example.test", PublicPort: 443, BackendPort: 21001, Transport: "xhttp", Path: "/xhttp", CertificatePath: "/etc/qagent/xray/panel-certificates/crt_0000000000000001/v1/cert.pem", PrivateKeyPath: "/etc/qagent/xray/panel-certificates/crt_0000000000000001/v1/key.pem"}
+		b := a
+		b.Tag, b.Path, b.Transport, b.BackendPort = "ws", "/ws", "websocket", 21002
+		b.CertificatePath = "/etc/qagent/sing-box/panel-certificates/crt_0000000000000001/v2/cert.pem"
+		b.PrivateKeyPath = "/etc/qagent/sing-box/panel-certificates/crt_0000000000000001/v2/key.pem"
+		active, err := activeTLSFrontends(tlsDeployments{"xray": {Frontends: []core.TLSFrontend{a}}, "sing-box": {Frontends: []core.TLSFrontend{b}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := renderNginxFrontends(active, "/owned", "/state", true)
+		if mode == "caddy" {
+			content, err = renderCaddyFrontends(active, "/state")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !strings.Contains(content, b.CertificatePath) || strings.Contains(content, a.CertificatePath) || strings.Contains(content, ":80") || strings.Contains(content, "listen 80") || strings.Contains(content, `"automate"`) || strings.Contains(content, `"http_challenges"`) {
+			t.Fatal("panel proxy did not select the renewed pair without ACME", content)
+		}
+		if !strings.Contains(content, "21001") || !strings.Contains(content, "21002") {
+			t.Fatal("shared protocol route lost")
+		}
+		b.CertificatePath = strings.Replace(b.CertificatePath, "0000000000000001", "0000000000000002", 1)
+		b.PrivateKeyPath = strings.Replace(b.PrivateKeyPath, "0000000000000001", "0000000000000002", 1)
+		if _, err := activeTLSFrontends(tlsDeployments{"one": {Frontends: []core.TLSFrontend{a, b}}}); err == nil {
+			t.Fatal("different certificates accepted for same SNI")
+		}
+	}
+}
+
 func TestTLSFrontendIndependentNginxChallenges(t *testing.T) {
 	f := core.TLSFrontend{Tag: "auto", Mode: "nginx", AutomaticCertificate: true, Domain: "auto.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/auto"}
 	nginx := renderNginxFrontends([]core.TLSFrontend{f}, "/tls", "/state", false)
@@ -98,6 +130,52 @@ func TestTLSFrontendIndependentNginxChallenges(t *testing.T) {
 	config, err := renderCaddyFrontends(frontends, "/state")
 	if err != nil || strings.Contains(config, f.Domain) || !strings.Contains(config, caddy.Domain) {
 		t.Fatal("Caddy still manages automatic Nginx certificates or lost a shared inbound", err)
+	}
+}
+
+func TestXHTTPStaticPageOwnershipAndMixedRoutes(t *testing.T) {
+	a := core.TLSFrontend{Tag: "site", Mode: "nginx", AutomaticCertificate: true, Domain: "tls.example.test", PublicPort: 8443, BackendPort: 23456, Transport: "xhttp", Path: "/xhttp", StaticHTML: "<html><p>site</p></html>"}
+	b := a
+	b.Tag, b.Transport, b.Path, b.BackendPort, b.StaticHTML = "ws", "websocket", "/ws", 23457, ""
+	for _, routes := range [][]core.TLSFrontend{{a, b}, {b, a}} {
+		nginx := renderNginxFrontends(routes, "/tls", "/state")
+		if !strings.Contains(nginx, "listen 8443 ssl http2;") || !strings.Contains(nginx, "root /tls/"+staticPageFile(a)) || !strings.Contains(nginx, "grpc_pass grpc://127.0.0.1:23456") || !strings.Contains(nginx, "location = /ws") {
+			t.Fatal("route order lost the page, WebSocket or XHTTP HTTP/2")
+		}
+	}
+	b = a
+	b.Tag, b.Path, b.BackendPort = "other", "/other", 23457
+	if _, err := activeTLSFrontends(tlsDeployments{"one": {Frontends: []core.TLSFrontend{a}}, "two": {Frontends: []core.TLSFrontend{b}}}); err == nil {
+		t.Fatal("two instances may not claim the same public page")
+	}
+	b.StaticHTML, b.Path = "", a.Path+"/child"
+	if _, err := activeTLSFrontends(tlsDeployments{"one": {Frontends: []core.TLSFrontend{a, b}}}); err == nil {
+		t.Fatal("overlapping XHTTP subpaths accepted")
+	}
+	// Identical names, ports and HTML in stopped instances remain separate resources.
+	m := tlsFrontendManager{root: t.TempDir()}
+	before := tlsDeployments{"one": {Frontends: []core.TLSFrontend{a}, Stopped: true}, "two": {Frontends: []core.TLSFrontend{a}, Stopped: true}}
+	paths := map[string]string{}
+	for service := range before {
+		f := a
+		f.StaticPageOwner = service
+		paths[service] = filepath.Join(m.root, staticPageFile(f))
+		if err := os.Mkdir(paths[service], 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(paths[service], "index.html"), []byte(a.StaticHTML), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after := tlsDeployments{"two": before["two"]}
+	if err := m.cleanupStaticPages(before, after); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths["one"]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("removed instance retained its page", err)
+	}
+	if _, err := os.Stat(paths["two"]); err != nil {
+		t.Fatal("cleanup released another instance's page", err)
 	}
 }
 

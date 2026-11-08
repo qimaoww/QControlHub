@@ -37,7 +37,7 @@ func testNativeWebSocketTLSClientRoutingIsolation(t *testing.T, engine core.Engi
 	var plans [2]serverconfig.Input
 	var results [2]configMutationResult
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "native-ws-shared", engine)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances)
+	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ export function connectionQuery(filters, cursor = "", nodeOrder = []) {
   // This page has no timeline chart. Avoid a second distinct aggregate over
   // the same history range while preserving the API default for other callers.
   const params = new URLSearchParams({ group_by: "ip", timeline: "false" });
-  for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
+  for (const key of ["agent_id", "engine", "client_ip", "country_code", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }
   let since, until;

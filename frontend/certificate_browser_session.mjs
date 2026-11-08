@@ -334,6 +334,8 @@ try {
   await set(a,'[name=search]','alice-private.example.test');
   await wait(a,"document.querySelector('[name=search]')?.value==='alice-private.example.test'");
   await click(a,'[title=退出登录]');await wait(a,"!!document.querySelector('#login-form,.a-login form')");
+  // Native close events remove retired dialogs after the login form mounts.
+  await wait(a,"document.querySelectorAll('dialog.a-dialog').length===0");
   assert.equal(await evaluate(a,"document.querySelectorAll('dialog.a-dialog').length"),0);
   const switched=await login(a,'bob');await open(a);
   assert.equal(await evaluate(a,"document.querySelector('[name=search]').value"),'');

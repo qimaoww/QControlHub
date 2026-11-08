@@ -25,6 +25,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	}
 	if input.Transport == "xhttp" {
 		address = xhttpClientAddress(input, address)
+		if proxiedTLS(input) {
+			input.Port = input.TLSPublicPort
+		}
 		if input.ClientPort > 0 {
 			input.Port = input.ClientPort
 		}
@@ -33,7 +36,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			input.TLSALPN = input.TLSClientALPN
 		}
 	}
-	if proxiedTLS(input) {
+	if proxiedTLS(input) && input.Transport != "xhttp" {
 		input.Port = input.TLSPublicPort
 	}
 	input.Protocol = nativeProtocol(input.Protocol)

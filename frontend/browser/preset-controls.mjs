@@ -26,6 +26,7 @@ export async function createPresetEditor(engine, options) {
   const writes = () => fixture.writes.filter(write=>write.path.endsWith("/server-inbounds"));
   const save = async (intent="deploy") => {
     const count=fixture.writes.length+1;
+    await waitFor(()=>!control("panel_certificate_id")?.validationMessage.includes("正在加载证书"), "selected certificate did not finish loading");
     assert(form().checkValidity(), `invalid preset fields: ${[...form().elements].filter(control=>control.willValidate&&!control.validity.valid).map(control=>`${control.name}: ${control.validationMessage}`).join('; ')}`);
     fixture.submit(intent);
     try { await fixture.settle(count); }

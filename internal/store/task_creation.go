@@ -353,6 +353,13 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
+		if task.Engine == core.EngineMihomo && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+			for _, input := range serverconfig.ParseAll(task.Engine, task.ConfigContent) {
+				if input.Protocol == serverconfig.ProtocolXHTTPTLS {
+					return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以校验 Mihomo XHTTP TLS 服务端能力（%s）", ErrConflict, core.AgentFeatureXHTTPTLS)
+				}
+			}
+		}
 		if task.Engine == core.EngineXray && len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureXHTTP) {
 			return core.Task{}, fmt.Errorf("%w: XHTTP 组合需要新版 Agent（xhttp-presets-v1），请先升级 Agent", ErrInvalid)
 		}
@@ -373,6 +380,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 		}
 		for _, frontend := range task.TLSFrontends {
+			if frontend.Transport == "xhttp" && !frontend.LocalOnly && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持独立 XHTTP TLS（%s）", ErrConflict, core.AgentFeatureXHTTPTLS)
+			}
 			if frontend.AutomaticCertificate && !containsFeature(features, core.AgentFeatureNginxACME) {
 				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Nginx 独立申请和续期证书（%s）", ErrConflict, core.AgentFeatureNginxACME)
 			}
@@ -437,12 +447,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := s.prepareStatusSnapshotTx(ctx, tx, &task, features); err != nil {
 		return core.Task{}, err
 	}
+	if err := s.prepareManagedTLSCleanupTx(ctx, tx, &task, features); err != nil {
+		return core.Task{}, err
+	}
 	if err := s.checkTaskPortUseTx(ctx, tx, &task, false); err != nil {
 		return core.Task{}, err
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks existing
 		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
@@ -488,7 +501,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, err
 		}
 	}
-	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync)
+	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync, task.ManagedTLSCleanup)
 	if err != nil {
 		return core.Task{}, err
 	}

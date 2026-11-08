@@ -28,7 +28,7 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	if os.Getenv("QCH_TEST_TLS_MANAGER") == ServiceManagerOpenRC {
 		kind = ServiceManagerOpenRC
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
 	if _, err := os.Stat(tlsFrontendRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("fixture must start without TLS configuration directories: %v", err)
@@ -179,28 +179,30 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		t.Fatalf("deleted frontend was restored: %s %v", status, err)
 	}
 	invoke(service, core.ActionUninstall, false, nil, true)
-	caddy := frontends[0]
-	caddy.Mode = "caddy"
-	caddy.Certificate = ""
-	caddy.PrivateKey = ""
-	invoke(service, core.ActionValidate, true, []core.TLSFrontend{caddy}, false)
-	if err := validatePrivilegedExecutable(managedCaddyBinary); err != nil {
-		t.Fatal("official Caddy installation", err)
-	}
-	fixtureArgs := []string{"-test.run=^TestManagedTLSRuntimePersistenceSandbox$", "-test.v"}
-	if kind == ServiceManagerSystemd {
-		args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test"}
-		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", append(args, fixtureArgs...)); err != nil {
-			t.Fatalf("Caddy runtime: %v\n%s", err, output)
-		} else {
-			t.Log(output)
+	verifyCaddyRuntime := func(stageAvailable bool) {
+		caddy := frontends[0]
+		caddy.Mode = "caddy"
+		caddy.Certificate = ""
+		caddy.PrivateKey = ""
+		invoke(service, core.ActionValidate, true, []core.TLSFrontend{caddy}, stageAvailable)
+		if err := validatePrivilegedExecutable(managedCaddyBinary); err != nil {
+			t.Fatal("official Caddy installation", err)
 		}
-	} else {
-		args := append([]string{"QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test"}, fixtureArgs...)
-		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
-			t.Fatalf("Caddy runtime: %v\n%s", err, output)
+		fixtureArgs := []string{"-test.run=^TestManagedTLSRuntimePersistenceSandbox$", "-test.v"}
+		if kind == ServiceManagerSystemd {
+			args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test"}
+			if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", append(args, fixtureArgs...)); err != nil {
+				t.Fatalf("Caddy runtime: %v\n%s", err, output)
+			} else {
+				t.Log(output)
+			}
 		} else {
-			t.Log(output)
+			args := append([]string{"QCH_TEST_TLS_RUNTIME_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test"}, fixtureArgs...)
+			if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
+				t.Fatalf("Caddy runtime: %v\n%s", err, output)
+			} else {
+				t.Log(output)
+			}
 		}
 	}
 	// The same privileged helper must handle local Xray targets while the
@@ -244,6 +246,7 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		t.Fatalf("last Xray target not stopped: %s %v", status, err)
 	}
 	t.Log("XHTTP local targets validated, deployed, isolated, rolled back, restarted and removed as non-root on " + kind)
+	verifyCaddyRuntime(false)
 	// Exercise automatic issuance/renewal with real proxies and an isolated CA,
 	// through the same fixed helper sandbox (never a public certificate order).
 	if kind == ServiceManagerSystemd {
@@ -257,6 +260,22 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 			t.Fatalf("Nginx ACME: %v\n%s", err, output)
 		}
 	}
+	if kind == ServiceManagerSystemd {
+		args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_XHTTP_TLS_LIFECYCLE=1", "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test", "-test.run=^TestXHTTPTLSManagedLifecycleSandbox$", "-test.v"}
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", args); err != nil {
+			t.Fatalf("XHTTP lifecycle: %v\n%s", err, output)
+		} else {
+			t.Log(output)
+		}
+	} else {
+		args := []string{"QCH_TEST_XHTTP_TLS_LIFECYCLE=1", "QCH_TEST_TLS_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestXHTTPTLSManagedLifecycleSandbox$", "-test.v"}
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
+			t.Fatalf("XHTTP lifecycle: %v\n%s", err, output)
+		} else {
+			t.Log(output)
+		}
+	}
+	verifyCaddyRuntime(true)
 	t.Log("managed TLS installed, validated, reloaded, preserved shared routes, rejected conflicts, stopped and restarted under the shipped Agent sandbox")
 }
 

@@ -104,7 +104,7 @@ func xrayStream(input Input) map[string]any {
 		stream["xhttpSettings"] = xhttpServerSettings(input)
 	}
 	stream["network"] = network
-	if input.TLSEnabled {
+	if input.TLSEnabled && !proxiedTLS(input) {
 		stream["security"] = "tls"
 		stream["tlsSettings"] = map[string]any{"serverName": input.TLSServerName, "alpn": xhttpALPN(input.TLSALPN), "minVersion": "1.2", "certificates": []any{map[string]any{
 			"certificateFile": input.CertificatePath, "keyFile": input.PrivateKeyPath,

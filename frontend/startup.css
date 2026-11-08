@@ -16,7 +16,7 @@ body:has(> #app > .qch-startup) { margin: 0; }
 }
 .qch-startup-mark {
   display: grid; place-items: center; width: 58px; height: 58px;
-  border-radius: 16px; background: #18181b; color: #fff;
+  border-radius: 16px; background: #18181b; color: #fff; object-fit: contain;
 }
 .qch-startup-mark svg { display: block; width: 32px; height: 32px; }
 .qch-startup-signal { stroke-dasharray: 48 48; animation: qch-startup-signal 2.4s ease-in-out infinite; }

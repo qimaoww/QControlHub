@@ -30,6 +30,7 @@ type clientAccessProfile struct {
 	OutboundError     string          `json:"outbound_error,omitempty"`
 	MihomoYAML        string          `json:"mihomo_yaml,omitempty"`
 	MihomoError       string          `json:"mihomo_error,omitempty"`
+	Error             string          `json:"error,omitempty"`
 }
 
 type clientAccessAddressOption struct {
@@ -150,30 +151,19 @@ func (s *Server) clientAccessEntries(ctx context.Context, outboundEngine ...core
 				}
 			}
 		}
+		entry := clientAccessEntry{
+			AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+			Profiles: profiles, AddressOptions: addressOptions, AddressMode: clientAddressMode,
+			AddressRequired: len(addressOptions) == 0 && len(candidates) == 0,
+			ConfigVersion:   deployment.ConfigVersion, ServiceStatus: agent.Runtime[deployment.Engine].ServiceStatus,
+		}
 		if len(addressOptions) > 0 {
-			primary := addressOptions[0]
-			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-				Address: primary.Address, Source: primary.Source, Profiles: profiles, AddressOptions: addressOptions,
-				AddressMode: clientAddressMode,
-			})
+			entry.Address, entry.Source = addressOptions[0].Address, addressOptions[0].Source
 		}
-		if len(addressOptions) == 0 && len(candidates) == 0 {
-			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-				AddressRequired: true, Profiles: []clientAccessProfile{}, AddressMode: clientAddressMode,
-			})
+		if instance := agent.Runtime[deployment.Engine].Instance; instance != nil {
+			entry.InstanceID = instance.ID
 		}
-		if len(entries) > 0 {
-			entry := &entries[len(entries)-1]
-			if entry.AgentID == agent.ID && entry.Engine == deployment.Engine {
-				entry.ConfigVersion = deployment.ConfigVersion
-				entry.ServiceStatus = agent.Runtime[deployment.Engine].ServiceStatus
-				if instance := agent.Runtime[deployment.Engine].Instance; instance != nil {
-					entry.InstanceID = instance.ID
-				}
-			}
-		}
+		entries = append(entries, entry)
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].AgentName != entries[j].AgentName {

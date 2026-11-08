@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,48 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
+
+func TestRegionReferencePermissions(t *testing.T) {
+	server := New(nil, Config{GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+		return regionTestResponse(http.StatusOK, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><path d="M0 0h4v3H0z"/></svg>`), nil
+	})}})
+	for token, permission := range map[string]core.Permission{
+		"logs-reader":      core.PermissionCoreLogsRead,
+		"node-reader":      core.PermissionAgentsRead,
+		"unrelated-reader": core.PermissionOverviewRead,
+	} {
+		server.roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: []core.Permission{permission}}
+	}
+	handler := server.Handler()
+	for _, token := range []string{"logs-reader", "node-reader", "unrelated-reader", ""} {
+		for _, path := range []string{"/api/v1/regions", "/api/v1/region-flags/US", "/api/v1/region-flags/TW"} {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			if token != "" {
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, request)
+			want := http.StatusOK
+			if token == "" {
+				want = http.StatusUnauthorized
+			} else if token == "unrelated-reader" {
+				want = http.StatusForbidden
+			}
+			if w.Code != want {
+				t.Fatalf("%s %s: %d %s", token, path, w.Code, w.Body.String())
+			}
+		}
+	}
+	for _, path := range []string{"/api/v1/agents", "/api/v1/agents/node/region"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer logs-reader")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, request)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("logs-only node access %s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+}
 
 func TestRegionAPIValidationAndPermissions(t *testing.T) {
 	admin, reader := strings.Repeat("a", 48), strings.Repeat("r", 48)

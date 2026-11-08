@@ -84,7 +84,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
         await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);
         await evaluate(page, "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
         assert.ok(await evaluate(page, `(() => {
-          const card=document.querySelector('.a-card');
+          const card=document.querySelector('#panel-settings-form .a-card');
           const fields=[...card.querySelectorAll('.a-field')];
           const controls=fields.map(field=>field.querySelector('input,select').getBoundingClientRect());
           const labels=fields.map(field=>field.querySelector('.a-field-label').getBoundingClientRect());

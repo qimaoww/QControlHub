@@ -57,11 +57,16 @@ func (client configScopeAPIClient) call(method, path string, body any, status in
 
 func newConfigScopeAPIFixture(t *testing.T) (*store.Store, context.Context, configScopeAPIClient, configScopeAPIClient, configScopeAPIClient) {
 	t.Helper()
+	return newConfigScopeAPIFixtureWithin(t, 45*time.Second)
+}
+
+func newConfigScopeAPIFixtureWithin(t *testing.T, timeout time.Duration) (*store.Store, context.Context, configScopeAPIClient, configScopeAPIClient, configScopeAPIClient) {
+	t.Helper()
 	database := os.Getenv("QCH_TEST_DATABASE_URL")
 	if database == "" {
 		t.Skip("QCH_TEST_DATABASE_URL is not configured")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
 	schema, err := testdb.IsolatePostgres(ctx, database)
 	if err != nil {

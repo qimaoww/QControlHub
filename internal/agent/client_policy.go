@@ -112,11 +112,13 @@ func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
+		core.AgentFeatureManagedTLSCertificates,
 		core.AgentFeatureCertificates,
 		core.AgentFeatureCaddyCertificates,
 		core.AgentFeatureNodeCertificates,
 		core.AgentFeatureManagedTLSH2,
 		core.AgentFeatureXHTTP,
+		core.AgentFeatureXHTTPTLS,
 		core.AgentFeatureACMEFallback,
 		core.AgentFeatureNginxACME,
 		"managed-tls-nginx-acme-v1", // Remain compatible with older panels.

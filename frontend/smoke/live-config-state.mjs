@@ -146,6 +146,7 @@ for (const intent of ["validate", "deploy"]) {
   assert.equal(result.task.action, intent);
   assert.equal(requests.at(-1).path, "/agents/node/configs/xray/source");
   assert.equal(requests.at(-1).body.version, 1);
+  assert.equal(requests.at(-1).body.expected_instance_id, "");
 }
 assert.equal(requests.length, 2);
 }

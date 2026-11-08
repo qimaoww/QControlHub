@@ -187,3 +187,66 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 		})
 	}
 }
+
+func TestXHTTPTLSExecutionSnapshotAndDowngrade(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
+		for _, mode := range []string{"caddy", "nginx", "native"} {
+			if engine == core.EngineXray && mode == "native" {
+				continue // Existing Xray native TLS does not need the new proxy capability.
+			}
+			for _, state := range []string{"pending", "running"} {
+				t.Run(string(engine)+"/"+mode+"/"+state, func(t *testing.T) {
+					db, ctx, _ := isolatedConfigScopeStore(t)
+					agent, _ := enrollTaskTestAgent(t, ctx, db)
+					if _, err := db.pool.Exec(ctx, `UPDATE agents SET capabilities=jsonb_build_array($2::text),supported_capabilities=jsonb_build_array($2::text),features=features||'["managed-tls-v1","xhttp-presets-v1","managed-xhttp-tls-v1","managed-tls-nginx-acme-v2"]'::jsonb WHERE id=$1`, agent.ID, engine); err != nil {
+						t.Fatal(err)
+					}
+					protocol, _ := serverconfig.FindProtocol(engine, serverconfig.ProtocolXHTTPTLS)
+					plan, err := serverconfig.NewPlan(protocol)
+					if err != nil {
+						t.Fatal(err)
+					}
+					plan.TLSMode, plan.TLSServerName, plan.Port, plan.TLSPublicPort = mode, "tls.example.test", 23456, 8443
+					if mode == "native" {
+						plan.Listen, plan.TLSPublicPort = "0.0.0.0", 0
+						plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/server.crt", "/etc/qcontrolhub/tls/server.key"
+					}
+					content, err := serverconfig.Generate(engine, plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					metadata, err := serverconfig.MarshalClientMetadataWithPrevious(plan, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, task, err := db.SaveAgentConfigAndTask(ctx, core.Config{AgentID: agent.ID, Engine: engine, Name: "XHTTP TLS downgrade", Content: content}, 0, ConfigMutationOptions{Action: core.ActionDeploy, ClientMetadata: &ConfigClientMetadataMutation{Tag: plan.Tag, Content: metadata}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					readTask := db.ClaimTask
+					if state == "running" {
+						claimed, err := db.ClaimTask(ctx, agent.ID)
+						if err != nil || claimed == nil || claimed.ID != task.ID {
+							t.Fatal("current Agent could not claim XHTTP TLS task", err)
+						}
+						readTask = db.RunningTask
+					}
+					if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features-$2 WHERE id=$1`, agent.ID, core.AgentFeatureXHTTPTLS); err != nil {
+						t.Fatal(err)
+					}
+					if received, err := readTask(ctx, agent.ID); err != nil || received != nil {
+						t.Fatal("downgraded Agent received an XHTTP TLS task", err)
+					}
+					var status, reason string
+					var snapshot, lease *string
+					if err := db.pool.QueryRow(ctx, `SELECT status,COALESCE(error,''),config_content,lease_id FROM tasks WHERE id=$1`, task.ID).Scan(&status, &reason, &snapshot, &lease); err != nil {
+						t.Fatal(err)
+					}
+					if status != string(core.TaskFailed) || snapshot != nil || lease != nil || !strings.Contains(reason, core.AgentFeatureXHTTPTLS) {
+						t.Fatalf("unsafe downgrade result: %s %s", status, reason)
+					}
+				})
+			}
+		}
+	}
+}

@@ -24,7 +24,17 @@ func waitPanelCertificateListeners(ctx context.Context, task core.Task) error {
 	if len(task.Certificates) == 0 {
 		return nil
 	}
-	for _, input := range serverconfig.ParseAll(task.Engine, task.ConfigContent) {
+	inputs := serverconfig.ParseAll(task.Engine, task.ConfigContent)
+	for _, f := range task.TLSFrontends {
+		if f.UsesPanelCertificate() {
+			alpn := "http/1.1"
+			if f.Transport == "xhttp" || f.Transport == "http" {
+				alpn = "h2"
+			}
+			inputs = append(inputs, serverconfig.Input{Tag: f.Tag, Listen: "127.0.0.1", Port: f.PublicPort, Protocol: serverconfig.ProtocolVLESS, TLSServerName: f.Domain, TLSALPN: alpn, CertificatePath: f.CertificatePath})
+		}
+	}
+	for _, input := range inputs {
 		var material *core.DeploymentCertificate
 		for i := range task.Certificates {
 			candidate := &task.Certificates[i]

@@ -211,6 +211,11 @@ func (e *Executor) validateSnapshotCandidate(ctx context.Context, engine core.En
 	if _, err := exec.LookPath(binary); err != nil {
 		return "", fmt.Errorf("%s binary not found in PATH", binary)
 	}
+	if engine == core.EngineMihomo {
+		if err := validateMihomoXHTTPCapabilities(ctx, binary, content); err != nil {
+			return "", err
+		}
+	}
 	if engine == core.EngineXray {
 		if err := validateXrayXHTTPCapabilities(ctx, binary, content); err != nil {
 			return "", err

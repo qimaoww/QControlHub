@@ -16,6 +16,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
@@ -138,6 +139,14 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	}
 	selector := func(tag string, port int) map[string]any {
 		return map[string]any{"engine": "ss-rust", "tag": tag, "port": port}
+	}
+	for _, target := range []map[string]any{
+		{"engine": "ss-rust", "tag": "one", "port": 20001, "config_id": xray.ID},
+		{"engine": "ss-rust", "tag": "one", "port": 20001, "config_id": config.ID, "config_version": config.Version + 1},
+	} {
+		if w := request(map[string]any{"profile": target, "name": "wrong deployment"}); w.Code != http.StatusNotFound {
+			t.Fatalf("stale config selection accepted: %d", w.Code)
+		}
 	}
 	setName := func(tag string, port int, name string) {
 		t.Helper()
@@ -386,5 +395,86 @@ func TestClientProfileDisplayParametersAreScopedToDeployedPorts(t *testing.T) {
 	stored, err := db.GetAgent(ctx, agent.ID)
 	if err != nil || stored.Labels["client_address"] != address || stored.Labels["client_address_mode"] != core.SubStoreAddressModeIPv4 {
 		t.Fatalf("node defaults changed: %+v %v", stored.Labels, err)
+	}
+}
+
+func TestClientAccessNativeDeployedFormatsAndExportOnlyAccounts(t *testing.T) {
+	cases := []struct {
+		engine           core.Engine
+		protocol, format string
+	}{
+		{core.EngineMihomo, serverconfig.ProtocolSnell, "Surge Snell"},
+		{core.EngineMihomo, serverconfig.ProtocolMieru, "YAML"},
+		{core.EngineMihomo, serverconfig.ProtocolSudoku, "YAML"},
+		{core.EngineXray, serverconfig.ProtocolWireGuard, "WireGuard"},
+	}
+	for _, test := range cases {
+		t.Run(test.protocol, func(t *testing.T) {
+			db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "native-shared", test.engine)
+			if err := db.SetAgentClientAddress(ctx, agent.ID, "edge.example.test"); err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 21002)
+			base := "/agents/" + agent.ID + "/configs/" + string(test.engine)
+			var result configMutationResult
+			var plan serverconfig.Input
+			recipient.call("POST", base+"/plans", map[string]string{"protocol": test.protocol}, http.StatusCreated, &plan)
+			plan.Tag, plan.Port = "same-native-tag", 21002
+			recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &result)
+			completeConfigScopeAPITask(t, ctx, db, result.Task)
+			var entries []clientAccessEntry
+			recipient.call("GET", "/client-access", nil, http.StatusOK, &entries)
+			if len(entries) != 1 || entries[0].ConfigID != result.Config.ID || entries[0].InstanceID != result.Task.SharedTrafficID || len(entries[0].Profiles) != 1 {
+				t.Fatal("native deployed record missing")
+			}
+			item := entries[0].Profiles[0]
+			if item.Error != "" || item.Profile.URI == "" || !strings.Contains(item.Profile.Format, test.format) || !strings.Contains(item.Profile.URI, "edge.example.test") {
+				t.Fatalf("native format missing: %s / %s", item.Profile.Format, item.Error)
+			}
+			if test.protocol == serverconfig.ProtocolWireGuard && !strings.Contains(item.Profile.URI, plan.WireGuardClientPrivateKey) {
+				t.Fatal("native peer metadata lost")
+			}
+			if test.protocol == serverconfig.ProtocolSnell && !strings.Contains(item.Profile.URI, plan.Credential) {
+				t.Fatal("Snell credential lost")
+			}
+			if strings.Contains(test.format, "YAML") {
+				var doc any
+				if yaml.Unmarshal([]byte(item.Profile.URI), &doc) != nil {
+					t.Fatal("native YAML invalid")
+				}
+			}
+			for _, client := range []configScopeAPIClient{owner, admin} {
+				client.call("GET", "/client-access", nil, http.StatusOK, &entries)
+				for _, entry := range entries {
+					if entry.ConfigID == result.Config.ID {
+						t.Fatal("private recipient configuration leaked to host manager")
+					}
+				}
+			}
+			permissions := []core.Permission{core.PermissionClientAccessRead}
+			admin.call("PUT", "/users/"+recipient.userID, core.UserUpdate{Permissions: &permissions}, http.StatusOK, nil)
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"bob","token":"config scope password fixture"}`))
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			recipient.handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("export account login: %d", w.Code)
+			}
+			var session struct {
+				CSRF string `json:"csrf_token"`
+			}
+			if json.Unmarshal(w.Body.Bytes(), &session) != nil {
+				t.Fatal("invalid login response")
+			}
+			exporter := configScopeAPIClient{t: t, handler: recipient.handler, cookie: w.Result().Cookies()[0], csrf: session.CSRF}
+
+			exporter.call("GET", "/agents", nil, http.StatusForbidden, nil)
+			exporter.call("GET", "/client-access", nil, http.StatusOK, &entries)
+			if len(entries) != 1 || entries[0].Profiles[0].Profile.URI != item.Profile.URI {
+				t.Fatal("export-only key lost native authorized data")
+			}
+			exporter.call("PUT", "/agents/"+agent.ID+"/client-address", map[string]any{"profile": clientProfileSelector{Engine: test.engine, Tag: plan.Tag, Port: plan.Port, ConfigID: result.Config.ID, ConfigVersion: result.Config.Version}, "name": "forbidden"}, http.StatusForbidden, nil)
+		})
 	}
 }
