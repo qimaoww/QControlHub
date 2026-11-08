@@ -113,6 +113,9 @@ type Task struct {
 }
 
 type TaskRequest struct {
+	// Optional comparison guard; the authenticated allocation still determines
+	// the target. An empty value pins the main instance.
+	ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 	// Reserved for atomic configuration submissions; never decoded from task JSON.
 	MutationTaskID string `json:"-"`
 	// Only the atomic inbound mutation and its retries may request installation.

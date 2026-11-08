@@ -1,15 +1,15 @@
 import { assert, delay, waitFor } from './assertions.mjs';
-import { nativeBatchButton } from './agent-batch-actions.mjs';
+import { nativeBatchButton, selectBatch } from './agent-batch-actions.mjs';
 
 export async function testBatchCoreUpdates({ testAPI, form }) {
   const box = form.closest('dialog');
   const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };
   const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), '版本提交未结束');
   const alpha = form.elements['batch:alpha'];
-  for (const input of form.querySelectorAll('input[type=checkbox]')) input.checked = false;
+  for (const input of form.querySelectorAll('input[type=checkbox]')) selectBatch(input, false);
   change('action', 'install'); change('engine', 'sing-box');
   assert.ok(alpha.disabled, '批量更新不能安装未安装的内核');
-  change('engine', 'mihomo'); alpha.checked = true;
+  change('engine', 'mihomo'); selectBatch(alpha);
   assert.ok(form.elements.custom_version.closest('.a-field').hidden, '稳定版不应显示指定版本');
   assert.ok(form.elements['batch:charlie'].disabled, '离线节点仍允许更新内核');
   const confirm = async label => {
@@ -23,7 +23,7 @@ export async function testBatchCoreUpdates({ testAPI, form }) {
   for (const channel of ['stable', 'development']) {
     change('release_channel', channel); await confirm(channel === 'stable' ? '最新稳定版' : '最新开发版');
     await waitFor(() => testAPI.pendingTasks.length === next + 1, '版本任务未提交');
-    const expected = { agent_id: 'alpha', action: 'install', engine: 'mihomo', core_version: channel, ...(channel === 'development' ? { core_source: 'official' } : {}) };
+    const expected = { agent_id: 'alpha', action: 'install', engine: 'mihomo', core_version: channel, ...(channel === 'development' ? { core_source: 'official' } : {}), expected_instance_id: '' };
     assert.equal(JSON.stringify(testAPI.pendingTasks[next].payload), JSON.stringify(expected), '版本任务参数错误');
     assert.ok(form.elements.release_channel.matches(':disabled'), '版本选项未锁定');
     testAPI.pendingTasks[next++].ok({ id: `core-${channel}` }); await idle();
@@ -47,6 +47,6 @@ export async function testBatchCoreUpdates({ testAPI, form }) {
   assert.equal(JSON.stringify(testAPI.pendingTasks[next].payload), JSON.stringify(original), '重试未保留原动作及版本');
   testAPI.pendingTasks[next++].ok({ id: 'core-retry' }); await idle();
   await confirm('重启'); await waitFor(() => testAPI.pendingTasks.length === next + 1, '服务操作未提交');
-  assert.equal(JSON.stringify(testAPI.pendingTasks[next].payload), JSON.stringify({ agent_id: 'alpha', action: 'restart', engine: 'mihomo' }), '普通服务操作携带版本参数');
+  assert.equal(JSON.stringify(testAPI.pendingTasks[next].payload), JSON.stringify({ agent_id: 'alpha', action: 'restart', engine: 'mihomo', expected_instance_id: '' }), '普通服务操作携带版本参数');
   testAPI.pendingTasks[next].ok({ id: 'restart-after-core' }); await idle();
 }

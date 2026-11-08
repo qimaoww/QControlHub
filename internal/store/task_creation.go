@@ -128,6 +128,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 		return core.Task{}, err
 	}
+	if request.ExpectedInstanceID != nil {
+		instanceID := ""
+		if sharedRecipient {
+			if err := tx.QueryRow(ctx, `SELECT id FROM agent_shares
+				WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted' AND $3=ANY(engines)`,
+				scope.OwnerID, request.AgentID, request.Engine).Scan(&instanceID); err != nil {
+				return core.Task{}, mapError(err)
+			}
+		}
+		if *request.ExpectedInstanceID != instanceID {
+			return core.Task{}, fmt.Errorf("%w: target instance changed; select the node again", ErrConflict)
+		}
+	}
 	var capabilities []core.Engine
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
 		return core.Task{}, err
