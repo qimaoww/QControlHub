@@ -32,7 +32,6 @@ export async function connectionsPage(ctx) {
   // later refreshes continue to read the current authenticated preference.
   initialOrder?.finally(() => { initialOrder = null; }).catch(() => {});
   let sources = restored?.sources || [], result = null, resultAt = 0, expiryTimer, loading = true, forcePending = false, controller, serial = 0, cursor = restored?.cursor || "", cursors = restored?.cursors || [], nextCursor = "", nodeOrder = restored?.nodeOrder || savedNodeOrder();
-  let regionCodes = data.analyticsConnectionRegions || [], regionState = regionCodes.length ? "ready" : "loading";
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
   collection.trigger.dataset.connectionSourceStatus = "";
@@ -58,29 +57,16 @@ export async function connectionsPage(ctx) {
     }), button("刷新", () => void load({ target: cursor, history: cursors, force: true }))));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild, controls.querySelector(".a-check")));
   function updateRegions() {
-    const select = controls.elements.country_code, value = select.value;
-    select.title = geoRegionDetails(value)?.name || "全部国家/地区";
-    const codes = new Set([...regionCodes, value, ...(result?.records || []).filter(row => !row.location?.non_public).map(row => row.location?.country_code)]);
-    const regions = [...codes].map(geoRegionDetails).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-    const signature = JSON.stringify([regions.map(region => region.code), regionState]);
-    if (select.dataset.options === signature) return;
-    select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部国家/地区"),
-      ...regions.map(region => node("option", { value: region.code }, node("span", { className: "a-probe-name" }, regionFlag(region, true), node("span", {}, region.name)))),
-      regionState !== "ready" && node("option", { disabled: true }, regionState === "loading" ? "正在加载…" : "国家/地区加载失败，刷新重试"));
-    select.dataset.options = signature; select.value = value;
-  }
-  async function loadRegions() {
-    regionState = "loading"; updateRegions();
-    try {
-      const codes = await ctx.api("/regions", { signal: ctx.signal });
-      if (!ctx.current()) return;
-      regionCodes = data.analyticsConnectionRegions = Array.isArray(codes) ? codes : [];
-      regionState = regionCodes.length ? "ready" : "failed";
-    } catch (failure) {
-      if (!ctx.current() || failure.name === "AbortError") return;
-      regionState = "failed";
+    const select = controls.elements.country_code, value = filters.country_code || "";
+    const regions = (result?.country_codes || []).map(geoRegionDetails).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    const signature = JSON.stringify(regions.map(region => region.code));
+    if (select.dataset.options !== signature) {
+      select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部国家/地区"),
+        ...regions.map(region => node("option", { value: region.code }, node("span", { className: "a-probe-name" }, regionFlag(region, true), node("span", {}, region.name)))));
+      select.dataset.options = signature;
     }
-    updateRegions();
+    select.value = regions.some(region => region.code === value) ? value : "";
+    select.title = geoRegionDetails(select.value)?.name || "全部国家/地区";
   }
   function updateSources() {
     const select = controls.elements.agent_id, value = filters.agent_id || "";
@@ -96,6 +82,7 @@ export async function connectionsPage(ctx) {
     select.value = value;
   }
   function paint() {
+    updateRegions();
     const records = result?.records || [], reportSources = result?.sources || [];
     const warnings = reportSources.filter(source => source.status !== "ok" || source.truncated || !source.updated_at);
     const totals = result?.preview ? "结果待更新" : `独立 IP ${result?.ips ?? "—"} · 观测连接 ${result?.flows ?? "—"} · 采集节点 ${result ? reportSources.length : "—"} · 需关注 ${result ? warnings.length : "—"}`;
@@ -135,7 +122,6 @@ export async function connectionsPage(ctx) {
   async function load({ target = "", history = [], force = false, changedScope = false } = {}) {
     if (force && forcePending) return;
     if (force) forcePending = true;
-    if (force && regionState === "failed") void loadRegions();
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, revision = ++serial;
     const current = () => ctx.current() && !signal.aborted && serial === revision;
@@ -152,7 +138,7 @@ export async function connectionsPage(ctx) {
         nodeOrder = order.ids;
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();
-      const cached = cache.get(key);
+      const entry = cache.get(key), cached = Array.isArray(entry?.result?.country_codes) ? entry : null;
       if (changedScope) { result = cached?.result || cache.preview(params); resultAt = cached?.at || result?.snapshotAt || 0; cursor = target; cursors = history; nextCursor = ""; }
       if (result && (Date.now() < resultAt || Date.now() - resultAt >= connectionRetention)) result = null;
       status.textContent = cached?.fresh && !force ? "已读取" : result ? "上次结果 · 正在更新…" : "正在读取…";
@@ -162,6 +148,11 @@ export async function connectionsPage(ctx) {
       if (!current()) return;
       const fetchedAt = cached?.fresh && !force ? cached.at : Date.now();
       if (!cached?.fresh || force) { cache.bind(fresh.cache_scope); cache.set(key, fresh, fetchedAt, false); }
+      if (filters.country_code && Array.isArray(fresh.country_codes) && !fresh.country_codes.includes(filters.country_code)) {
+        filters = { ...filters, country_code: "" }; data.analyticsConnectionFilters = filters;
+        queueMicrotask(() => { if (current()) void load({ changedScope: true, force: true }); });
+        return;
+      }
       result = fresh; resultAt = fetchedAt;
       cursor = target; cursors = history; nextCursor = result.next_cursor || "";
       if (!filters.agent_id) sources = result.sources || [];
@@ -180,6 +171,7 @@ export async function connectionsPage(ctx) {
           }
           const locations = new Map(enriched.records.map(record => [record.id, record.location]));
           result = { ...result, records: result.records.map(record => ({ ...record, location: locations.get(record.id) || record.location })) };
+          result.country_codes = [...new Set([...(result.country_codes || []), ...result.records.filter(record => !record.location?.non_public).map(record => record.location?.country_code).filter(Boolean)])];
           cache.set(key, result, fetchedAt, true); paint();
         }).catch(failure => {
           if (!current() || failure.name === "AbortError") return;
@@ -198,7 +190,7 @@ export async function connectionsPage(ctx) {
     } finally {
       if (force) forcePending = false;
       if (current()) {
-        loading = false; updateSources(); updateRegions(); paint();
+        loading = false; updateSources(); paint();
         scheduleExpiry();
       }
     }
@@ -240,8 +232,7 @@ export async function connectionsPage(ctx) {
   scopeWatch.start();
   ctx.signal.addEventListener("abort", () => { controller?.abort(); clearTimeout(timer); clearTimeout(expiryTimer); scopeWatch.stop(); cache.flush(); }, { once: true });
   ctx.onRefresh(() => load({ target: cursor, history: cursors, force: true }), { local: true });
-  updateSources(); updateRegions(); paint();
-  if (regionState !== "ready") void loadRegions();
+  updateSources(); paint();
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
   void load({ target: cursor, history: cursors, changedScope: true });

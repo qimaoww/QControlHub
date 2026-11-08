@@ -37,7 +37,7 @@ export async function testClientConnectionsRuntime(preview = false) {
       const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
         records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} })),
-        ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
+        country_codes: [], ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
       }), { status: 200, headers: { "Content-Type": "application/json" } });

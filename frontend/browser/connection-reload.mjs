@@ -26,14 +26,14 @@ export async function bootConnectionReloadFixture() {
     else if (path.endsWith('/auth/login')) { const body = JSON.parse(options.body); config.user = body.username; config.login++; save(); value = identity(); }
     else if (path.endsWith('/preferences/node-order')) value = { ids: config.order };
     else if (path.endsWith('/preferences/theme')) value = { theme_id: 'analytics' };
-    else if (path.endsWith('/regions')) { status = config.regionsFailure || 200; value = status === 200 ? ['CN', 'US', 'JP', 'TW', 'HK', 'ST'] : { error: '国家目录暂不可用' }; }
     else if (path.endsWith('/client-connections')) {
       if (url.searchParams.get('scope_only') === 'true') { status = config.scopeFailure || 200; value = status === 200 ? { scope: scope() } : { error: '访问范围暂不可用' }; }
       else {
         const params = url.searchParams, failure = config.failure;
         config.reads++; save();
-        const selected = config.empty ? [] : records.filter(row => (config.user !== 'shared' || row.agent_id === 'bravo') && (!params.get('agent_id') || params.get('agent_id') === row.agent_id) && (!params.get('engine') || params.get('engine') === row.engine) && (!params.get('client_ip') || params.get('client_ip') === row.client_ip) && (!params.get('country_code') || params.get('country_code') === row.location.country_code));
-        const snapshot = { records: params.has('cursor') ? selected.slice(3) : selected.slice(0, 3), ips: selected.length, flows: selected.length * 10001, sources: [...new Set(selected.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: records.find(row => row.agent_id === agent_id).agent_name, status: 'ok', updated_at: records[0].last_seen })), timeline: [], next_cursor: !params.has('cursor') && selected.length > 3 ? 'page-2' : '', cache_scope: scope() };
+        const available = config.empty ? [] : records.filter(row => (config.user !== 'shared' || row.agent_id === 'bravo') && (!params.get('agent_id') || params.get('agent_id') === row.agent_id) && (!params.get('engine') || params.get('engine') === row.engine) && (!params.get('client_ip') || params.get('client_ip') === row.client_ip));
+        const selected = available.filter(row => !params.get('country_code') || params.get('country_code') === row.location.country_code);
+        const snapshot = { country_codes: [...new Set(available.map(row => row.location.country_code))].sort(), records: params.has('cursor') ? selected.slice(3) : selected.slice(0, 3), ips: selected.length, flows: selected.length * 10001, sources: [...new Set(selected.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: records.find(row => row.agent_id === agent_id).agent_name, status: 'ok', updated_at: records[0].last_seen })), timeline: [], next_cursor: !params.has('cursor') && selected.length > 3 ? 'page-2' : '', cache_scope: scope() };
         await new Promise(resolve => setTimeout(resolve, config.delay)); // Deliberately ignore abort: the app must reject late results.
         status = failure || 200; value = status === 200 ? snapshot : { error: status === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' };
         config.bytes += JSON.stringify(value).length; save();

@@ -59,12 +59,13 @@ type ClientConnectionSource struct {
 }
 
 type ClientConnectionHistory struct {
-	Records    []ClientConnectionRecord `json:"records"`
-	Timeline   []ClientConnectionBucket `json:"timeline"`
-	Sources    []ClientConnectionSource `json:"sources"`
-	Flows      int64                    `json:"flows"`
-	IPs        int64                    `json:"ips"`
-	NextBefore int64                    `json:"next_before,omitempty"`
-	NextCursor string                   `json:"next_cursor,omitempty"`
-	PageCursor string                   `json:"page_cursor,omitempty"`
+	Records      []ClientConnectionRecord `json:"records"`
+	Timeline     []ClientConnectionBucket `json:"timeline"`
+	Sources      []ClientConnectionSource `json:"sources"`
+	CountryCodes []string                 `json:"country_codes"`
+	Flows        int64                    `json:"flows"`
+	IPs          int64                    `json:"ips"`
+	NextBefore   int64                    `json:"next_before,omitempty"`
+	NextCursor   string                   `json:"next_cursor,omitempty"`
+	PageCursor   string                   `json:"page_cursor,omitempty"`
 }

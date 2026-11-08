@@ -140,7 +140,7 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 }
 
 func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQuery) (core.ClientConnectionHistory, error) {
-	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}}
+	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}, CountryCodes: []string{}}
 	q.CountryCode = strings.ToUpper(strings.TrimSpace(q.CountryCode))
 	if err := q.Validate(); err != nil {
 		return result, err
@@ -153,6 +153,30 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	where, args := connectionHistoryWhere(ctx, q)
 	from := ` FROM client_connections c JOIN agents a ON a.id=c.agent_id`
 	if !q.RecordsOnly {
+		// Offer countries across the entire authorized result, independently of
+		// pagination and the current country choice. Other filters still apply.
+		countries := q
+		countries.CountryCode = ""
+		countries.IncludeNonPublic = false
+		countryWhere, countryArgs := connectionHistoryWhere(ctx, countries)
+		rows, err := tx.Query(ctx, `SELECT DISTINCT location.country_code`+from+` JOIN client_connection_locations location ON location.client_ip=c.client_ip`+countryWhere+` AND location.country_code<>'' ORDER BY location.country_code`, countryArgs...)
+		if err != nil {
+			return result, err
+		}
+		for rows.Next() {
+			var code string
+			if err := rows.Scan(&code); err != nil {
+				rows.Close()
+				return result, err
+			}
+			if geoip.ValidRegionCode(code) {
+				result.CountryCodes = append(result.CountryCodes, code)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return result, err
+		}
 		// Summary is independent of pagination and counts distinct observed tuples,
 		// not the number of minute rows or inferred authenticated sessions.
 		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`

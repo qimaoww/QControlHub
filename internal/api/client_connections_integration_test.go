@@ -201,6 +201,13 @@ func TestClientConnectionCountryFilter(t *testing.T) {
 			if result.IPs != test.ips || result.Flows != test.flows || len(result.Timeline) != 1 || result.Timeline[0].Flows != test.flows {
 				t.Fatalf("country summary/timeline grouped=%v: %+v", grouped, result)
 			}
+			wantCountries := "AU,US"
+			if test.client.userID == bob.userID {
+				wantCountries = "US"
+			}
+			if strings.Join(result.CountryCodes, ",") != wantCountries {
+				t.Fatalf("country options cross ownership or follow selected country: %v", result.CountryCodes)
+			}
 			for _, row := range result.Records {
 				if row.Location.CountryCode != "US" || row.ClientIP == "10.0.0.1" || row.ClientIP == "8.8.4.4" || (test.client.userID == bob.userID && row.AgentID != other.ID) {
 					t.Fatalf("country or shared-owner isolation failed: %+v", row)
@@ -215,19 +222,36 @@ func TestClientConnectionCountryFilter(t *testing.T) {
 	if len(first.Records) != 1 || len(second.Records) != 1 || first.Records[0].ID == second.Records[0].ID || first.NextCursor == "" || second.NextCursor != "" || first.Flows != second.Flows {
 		t.Fatalf("country pagination: %+v / %+v", first, second)
 	}
+	if strings.Join(first.CountryCodes, ",") != "AU,US" || strings.Join(second.CountryCodes, ",") != "AU,US" {
+		t.Fatalf("country options depend on current page: %v / %v", first.CountryCodes, second.CountryCodes)
+	}
+	for ip, want := range map[string]string{"8.8.8.8": "US", "1.1.1.1": "AU", "8.8.4.4": "", "10.0.0.1": ""} {
+		alice.call("GET", "/client-connections?include_non_public=true&locations=cached&client_ip="+ip, nil, http.StatusOK, &empty)
+		if strings.Join(empty.CountryCodes, ",") != want {
+			t.Fatalf("country options ignore IP/private/unknown filtering: %s %v", ip, empty.CountryCodes)
+		}
+	}
+	alice.call("GET", "/client-connections?engine=xray&locations=cached", nil, http.StatusOK, &empty)
+	if len(empty.CountryCodes) != 0 {
+		t.Fatalf("country options ignore engine: %v", empty.CountryCodes)
+	}
+	alice.call("GET", "/client-connections?since="+time.Now().Add(48*time.Hour).UTC().Format(time.RFC3339)+"&until="+time.Now().Add(49*time.Hour).UTC().Format(time.RFC3339), nil, http.StatusOK, &empty)
+	if len(empty.CountryCodes) != 0 {
+		t.Fatalf("country options ignore dates: %v", empty.CountryCodes)
+	}
 	alice.call("GET", "/client-connections?country_code=CN&locations=cached", nil, http.StatusOK, &empty)
 	if empty.IPs != 0 || len(empty.Records) != 0 {
 		t.Fatalf("unknown countries matched: %+v", empty)
 	}
 	bob.call("GET", query+"&agent_id="+owned.ID, nil, http.StatusOK, &empty)
-	if empty.IPs != 0 || len(empty.Records) != 0 || len(empty.Sources) != 0 {
+	if empty.IPs != 0 || len(empty.Records) != 0 || len(empty.Sources) != 0 || len(empty.CountryCodes) != 0 {
 		t.Fatalf("country filter expanded shared host authority: %+v", empty)
 	}
 	if err := db.SetAgentAdminHidden(store.WithConfigScope(ctx, alice.userID, false), owned.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	admin.call("GET", path, nil, http.StatusOK, &empty)
-	if empty.IPs != 1 || len(empty.Records) != 1 || empty.Records[0].AgentID != other.ID {
+	if empty.IPs != 1 || len(empty.Records) != 1 || empty.Records[0].AgentID != other.ID || strings.Join(empty.CountryCodes, ",") != "US" {
 		t.Fatalf("country filter bypassed hidden node: %+v", empty)
 	}
 	permissions := []core.Permission{core.PermissionCoreLogsRead}

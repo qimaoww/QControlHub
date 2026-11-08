@@ -25,7 +25,7 @@ export async function testConnectionReadLifecycle() {
     const gate = locationOnly ? locationGate : historyGate;
     if (gate) await gate.promise; // Ignore abort deliberately; view ownership must reject late responses.
     if (!locationOnly && failure) return reply({ error: failure === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' }, failure);
-    return reply({ records: snapshot.map(row => ({ ...row, location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1' });
+    return reply({ country_codes: geography === 'unknown' ? [] : ['CN'], records: snapshot.map(row => ({ ...row, location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1' });
   };
   const main = () => document.querySelector('.a-main');
   const form = () => main()?.querySelector('form');

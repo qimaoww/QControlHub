@@ -92,10 +92,13 @@ try {
   assert.equal(await evaluate(`document.querySelector('td[data-column="国家 / 地区"] [data-region-code=TW] img').getAttribute('src')`), '/api/v1/region-flags/cn');
   assert.ok(await evaluate(`document.querySelector('td[data-column="国家 / 地区"]').textContent.includes('中国台湾')`));
   await screenshot('country-taiwan-1920x1080');
-  await change('country_code', 'ST'); await wait(ready);
-  assert.equal(await evaluate(rows), 0);
-  assert.equal(await evaluate(`document.querySelector('[name=country_code]').title`), '圣多美和普林西比');
+  assert.deepEqual(await evaluate(`[...document.querySelector('[name=country_code]').options].map(option=>option.value).sort()`), ['', 'CN', 'TW', 'US'], 'options must include countries on later pages and exclude unused catalog entries');
+  assert.equal(await evaluate(`[...document.querySelector('[name=country_code]').childNodes].some(node=>node.nodeType===Node.TEXT_NODE && node.textContent.trim())`), false, 'literal boolean in country selector');
+  await configure({empty:true}); await refresh(); await wait(ready);
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), '');
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').options.length`), 1);
   await screenshot('country-empty-1920x1080');
+  await configure({empty:false}); await refresh(); await wait(ready);
   await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='清除筛选').click()`); await wait(ready);
   assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), '');
   await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()`); await wait(ready);
@@ -119,6 +122,7 @@ try {
   await change('agent_id', 'alpha'); await wait(ready);
   await change('engine', 'xray'); await wait(ready);
   await change('client_ip', '8.8.8.1'); await wait(ready);
+  assert.deepEqual(await evaluate(`[...document.querySelector('[name=country_code]').options].map(option=>option.value)`), ['', 'US'], 'country options ignored other query filters');
   const filtered = await counts(); await reload(); await wait(ready);
   assert.equal((await counts()).reads, filtered.reads, 'reload first queried the default filters');
   assert.equal(await evaluate(`document.querySelector('[name=client_ip]').value`), '8.8.8.1');
@@ -159,11 +163,6 @@ try {
   assert.equal(await evaluate(rows), 0, 'revoked permission retained IP history');
   await configure({ failure: 0 }); await refresh(); await wait(ready);
   await reload(); await wait(ready); // Re-enable session storage after the disabled-storage document.
-  await configure({ regionsFailure: 503 }); await reload(); await wait(ready);
-  await wait(`document.querySelector('[name=country_code]').textContent.includes('国家/地区加载失败')`);
-  assert.ok(await evaluate(rows) > 0, 'country catalog failure blocked history');
-  await configure({ regionsFailure: 0 }); await refresh(); await wait(ready);
-  await wait(`document.querySelector('[name=country_code] option[value=CN]')`);
   const beforeDouble = await counts(); await refresh(); await refresh(); await wait(ready);
   assert.equal((await counts()).reads, beforeDouble.reads + 1, 'repeated force refresh duplicated an in-flight query');
   await evaluate(`document.querySelector('.a-main [name=client_ip]').value='unsubmitted-search';document.querySelector('.a-main [name=client_ip]').focus();document.activeElement.setSelectionRange(2,5);window.savedInput=document.activeElement;`);
