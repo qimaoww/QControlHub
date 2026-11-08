@@ -1,6 +1,7 @@
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
+import { siteBrandingSettings } from "./site-branding.js";
 
 const numericFields = [
   ["task_page_size", "任务每页条数", [50, 100, 500]],
@@ -26,6 +27,7 @@ const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 export async function settingsPage(ctx) {
   let [settings, deployment] = await Promise.all([ctx.api("/settings"), ctx.api("/settings/deployment")]);
   const writable = ctx.can("settings.manage");
+  let brandingDirty = false;
   const input = (name, label, attrs = {}) => field(label, name, settings[name], { ...attrs, disabled: !writable });
   const numeric = numericFields.map(([name, label, options]) => input(name, label, { options }));
   const saveState = muted("已保存");
@@ -90,7 +92,7 @@ export async function settingsPage(ctx) {
   function sync() {
     if (!ctx.current()) return;
     const changed = writable && snapshot() !== baseline;
-    ctx.setDirty(changed);
+    ctx.setDirty(changed || brandingDirty);
     submit.disabled = !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
     saveState.textContent = phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
     const heartbeat = form.elements.agent_heartbeat_interval_seconds, offline = form.elements.agent_offline_threshold_seconds;
@@ -106,8 +108,10 @@ export async function settingsPage(ctx) {
   form.addEventListener("change", changed);
   submit.addEventListener("mutationend", sync);
   const refreshState = notice('');
+  const branding = ctx.session.role === "admin" && writable ? await siteBrandingSettings(ctx, changed => { brandingDirty = changed; sync(); }) : null;
   let refreshSequence = 0;
   ctx.onRefresh(async () => {
+    if (branding) await branding.refresh();
     const sequence = ++refreshSequence;
     const latest = await ctx.api('/settings');
     if (!ctx.current() || sequence !== refreshSequence) return;
@@ -158,7 +162,7 @@ export async function settingsPage(ctx) {
       ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
     updateResult, actions(check)))));
   if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
-  return stack(form, refreshState, extra);
+  return stack(branding?.element, form, refreshState, extra);
 }
 
 async function apiKeys(ctx) {

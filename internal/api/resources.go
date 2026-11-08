@@ -23,6 +23,7 @@ type configInboundTargetResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
+	ClientSource    string                           `json:"client_source,omitempty"`
 	Deployment      store.ConfigManagementDeployment `json:"deployment"`
 	Management      serverconfig.ManagedState        `json:"management"`
 	ManagedObjects  []serverconfig.ManagedObject     `json:"managed_objects"`
@@ -184,12 +185,13 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
 			})
 		}
-		if config.ID != "" {
+		if config.ID != "" && !previewChanged {
 			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
 				writeInternalError(w, err)
 				return
 			}
 		}
+		result.ClientSource = workspaceClientSource(agent, config, result.Inbounds)
 		if engine == core.EngineShadowsocksRust {
 			destination := false
 			byKey := make(map[string]core.MainlandAccessPolicy, len(policies))

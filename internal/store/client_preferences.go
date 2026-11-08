@@ -84,3 +84,23 @@ func (s *Store) SetConfigClientPreferences(ctx context.Context, agentID string, 
 	}
 	return tx.Commit(ctx)
 }
+
+// ConfigClientPreferences reads only the caller's current workspace, even for administrators.
+func (s *Store) ConfigClientPreferences(ctx context.Context, configID string) (map[string]string, error) {
+	args := []any{configID}
+	where := workspaceOwnerClause(ctx, "c.owner_id", &args) + configAgentAccessClause(ctx, "c.agent_id", "c.engine", &args)
+	rows, err := s.pool.Query(ctx, `SELECT p.label,p.value FROM config_client_preferences p JOIN configs c ON c.id=p.config_id WHERE c.id=$1 AND c.deleted_at IS NULL`+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		result[key] = value
+	}
+	return result, rows.Err()
+}

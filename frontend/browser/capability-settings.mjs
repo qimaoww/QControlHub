@@ -7,6 +7,7 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   const session = await (await fetch('/api/v1/auth/session')).json();
   (await import('../analytics/app.js')).startAnalytics({ app: document.querySelector('#app'), session });
   const form = await waitFor(() => document.querySelector('#panel-settings-form'), '面板设置未加载');
+  if (!mode.endsWith("-readonly")) await testSiteBranding(testAPI);
   const inputs = [...form.querySelectorAll('[name^="engine:"]')];
   const save = document.querySelector('.a-top [form="panel-settings-form"]');
   const status = () => form.querySelector('[role=status]').textContent;
@@ -24,6 +25,7 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   const page = document.querySelector('.a-main');
   assert.match(page.textContent, /控制面发行版本/); assert.match(page.textContent, /QAgent 安装包版本/); assert.match(page.textContent, /可信代理/);
   if (mode.endsWith('-readonly')) {
+    assert.equal(document.querySelector('#site-branding-form'), null, '普通账号出现站点品牌入口');
     assert.ok(inputs.every(input => input.disabled), '只读用户可改内核'); assert.ok(acme.disabled, '只读用户可改邮箱'); assert.equal(save, null, '只读用户出现保存入口');
     form.requestSubmit(); await delay(40); assert.equal(writes(), 0, '只读表单提交触发写入'); return;
   }
@@ -92,4 +94,31 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   assert.equal(description.value, '其他会话的设置', '无草稿刷新未同步当前设置'); assert.ok(save.disabled);
   await testSettingsAPIKeysRuntime();
   if (new URLSearchParams(location.search).has('preview')) await new Promise(() => {});
+}
+
+async function testSiteBranding(testAPI) {
+  const form=await waitFor(()=>document.querySelector('#site-branding-form'),'Logo settings did not load');
+  const save=form.querySelector('[type=submit]'), file=form.elements.logo_file;
+  const select=async(name,blob)=>{
+    const transfer=new DataTransfer();transfer.items.add(new File([blob],name,{type:blob.type}));file.files=transfer.files;
+    file.dispatchEvent(new Event('change',{bubbles:true}));await delay(50);
+  };
+  const canvas=document.createElement('canvas');canvas.width=180;canvas.height=36;
+  const context=canvas.getContext('2d');context.fillStyle='#7c3aed';context.fillRect(0,0,180,36);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+  assert.ok(save.disabled&&!document.querySelector('.a-brand img'),'default brand unavailable');
+  await select('brand.png',blob);await waitFor(()=>!save.disabled,'Logo preview not ready');
+  assert.ok(form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'unsaved preview became public');
+  testAPI.brandingFailure=true;form.requestSubmit();await waitFor(()=>form.textContent.includes('保存失败'),'Logo failure missing');
+  assert.ok(!save.disabled&&form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'Logo failure lost preview');
+  testAPI.brandingFailure=false;form.requestSubmit();await waitFor(()=>testAPI.branding.revision===2,'Logo save failed');
+  await waitFor(()=>document.querySelector('.a-brand img')?.complete&&save.disabled,'saved logo not applied');
+  const image=document.querySelector('.a-brand img');assert.equal(getComputedStyle(image).objectFit,'contain');assert.equal(form.querySelector(".a-mark img").getBoundingClientRect().width,32);
+  const current=testAPI.branding.logo;
+  await select('invalid.png',new Blob(['broken'],{type:'image/png'}));
+  assert.equal(testAPI.branding.logo,current);assert.ok(form.textContent.includes('图片内容无效'),'invalid image accepted');
+  const reset=[...form.querySelectorAll('button')].find(control=>control.textContent==='恢复默认');reset.click();
+  assert.ok(!form.querySelector('.a-mark img')&&document.querySelector('.a-brand img'),'reset preview prematurely applied');
+  form.requestSubmit();await waitFor(()=>testAPI.branding.revision===3,'default not saved');
+  await waitFor(()=>!document.querySelector('.a-brand img')&&save.disabled,'default brand not restored');
 }
