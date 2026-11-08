@@ -87,6 +87,16 @@ try {
   assert.equal((await counts()).reads, countryRead.reads, 'reload repeated a fresh country query');
   assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'CN');
   assert.ok(await evaluate(`[...document.querySelectorAll('td[data-column="国家 / 地区"]')].every(cell=>cell.textContent.includes('中国') && cell.querySelector('[data-region-code=CN]'))`));
+  await configure({ failure: 503 }); await change('engine', 'xray');
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'CN', 'pending filter read cleared the selected country');
+  await screenshot('country-filter-pending-1920x1080');
+  await wait(`document.querySelector('.a-main').textContent.includes('连接查询暂不可用')`);
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'CN', 'failed filter read cleared the selected country');
+  await configure({ failure: 0 }); await change('client_ip', '8.8.8.5');
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'CN', 'consecutive filter change dropped the selected country');
+  await wait(ready); assert.equal(await evaluate(rows), 1);
+  await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='清除筛选').click()`); await wait(ready);
+  await change('country_code', 'CN'); await wait(ready);
   await change('country_code', 'TW'); await wait(ready);
   assert.equal(await evaluate(rows), 1);
   assert.equal(await evaluate(`document.querySelector('td[data-column="国家 / 地区"] [data-region-code=TW] img').getAttribute('src')`), '/api/v1/region-flags/cn');

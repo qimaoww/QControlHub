@@ -58,7 +58,9 @@ export async function connectionsPage(ctx) {
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild, controls.querySelector(".a-check")));
   function updateRegions() {
     const select = controls.elements.country_code, value = filters.country_code || "";
-    const regions = (result?.country_codes || []).map(geoRegionDetails).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    // A pending/failed query has no new country list yet. Keep its selected
+    // filter available until an authoritative response can replace it.
+    const regions = (result?.country_codes || (value ? [value] : [])).map(geoRegionDetails).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
     const signature = JSON.stringify(regions.map(region => region.code));
     if (select.dataset.options !== signature) {
       select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部国家/地区"),
