@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -146,6 +147,9 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 		return err
 	}
 	if _, err = atomicDeployWithDefaultMetadata(binary, string(value), fileMetadata{mode: 0755}); err != nil {
+		return err
+	}
+	if _, err = atomicDeploy(binary+".qch-owned", fmt.Sprintf("%x", sha256.Sum256(value))); err != nil {
 		return err
 	}
 	output, err := runInDirectoryWithEnvironment(ctx, "", "XDG_CONFIG_HOME="+m.state, binary, "version")

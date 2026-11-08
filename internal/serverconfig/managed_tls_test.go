@@ -12,7 +12,15 @@ import (
 // defaults are verified separately with their versioned auxiliary metadata.
 func nativeTLSFixturePlan(protocol Protocol) (Input, error) {
 	protocol.SupportsManagedTLS = false
-	return NewPlan(protocol)
+	input, err := NewPlan(protocol)
+	if input.Transport == "xhttp" {
+		input.TLSServerName = "tls.example.test"
+		input.CertificatePath, input.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
+		if isXHTTPGroup(input.Protocol) {
+			input.RealityServerName = "reality.example.test"
+		}
+	}
+	return input, err
 }
 
 func TestManagedTLSHTTPAndExternalExport(t *testing.T) {

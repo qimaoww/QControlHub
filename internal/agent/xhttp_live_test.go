@@ -38,6 +38,7 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 		t.Skip("set QCH_XRAY_BINARY for actual Xray validation and connections")
 	}
 	nginx := os.Getenv("QCH_NGINX_BINARY")
+	t.Run("standalone-tls", func(t *testing.T) { testStandaloneXHTTPTLSLiveMatrix(t, xray, os.Getenv("QCH_MIHOMO_BINARY"), nginx) })
 	dir := t.TempDir()
 	certPath, keyPath := xhttpTestCertificate(t, dir)
 	type deployment struct {
@@ -61,6 +62,10 @@ func TestXHTTPLiveMatrix(t *testing.T) {
 			}
 			input.Listen, input.Port, input.ClientPort, input.ClientAddress = "::", singBoxFreePort(t), 0, "127.0.0.1"
 			input.BlockMainlandDestination, input.BlockMainlandSource = false, false
+			input.TLSMode = "native"
+			if key == serverconfig.ProtocolXHTTPTLS {
+				input.TLSALPN = "h2,http/1.1"
+			}
 			input.CertificatePath, input.PrivateKeyPath = certPath, keyPath
 			input.TLSServerName, input.RealityServerName, input.XHTTPTLSAddress = "tls.example.test", "reality.example.test", "127.0.0.1"
 			group := key != serverconfig.ProtocolVLESSXHTTP && key != serverconfig.ProtocolXHTTPTLS
@@ -342,6 +347,23 @@ func xhttpTestTarget(t *testing.T, certPath, keyPath string) string {
 }
 
 func TestXHTTPOldKernelAndListenerConflict(t *testing.T) {
+	protocol, _ := serverconfig.FindProtocol(core.EngineMihomo, serverconfig.ProtocolXHTTPTLS)
+	plan, _ := serverconfig.NewPlan(protocol)
+	plan.TLSServerName = "tls.example.test"
+	content, err := serverconfig.Generate(core.EngineMihomo, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []struct {
+		value string
+		valid bool
+	}{{"1.19.32", false}, {"1.19.33", true}, {"1.20.0", true}, {"unknown", false}} {
+		binary := filepath.Join(t.TempDir(), "mihomo")
+		writeExecutable(t, binary, "#!/bin/sh\nprintf 'Mihomo v"+version.value+"\\n'\n")
+		if err := validateMihomoXHTTPCapabilities(context.Background(), binary, content); (err == nil) != version.valid {
+			t.Fatalf("Mihomo server %s: %v", version.value, err)
+		}
+	}
 	for _, version := range []struct {
 		value string
 		valid bool
@@ -358,7 +380,7 @@ func TestXHTTPOldKernelAndListenerConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	content := fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d,"streamSettings":{"network":"xhttp"}}]}`, listener.Addr().(*net.TCPAddr).Port)
+	content = fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d,"streamSettings":{"network":"xhttp"}}]}`, listener.Addr().(*net.TCPAddr).Port)
 	if err := checkXHTTPListenerPorts(EngineSpec{ConfigPath: filepath.Join(t.TempDir(), "new.json")}, content); err == nil {
 		t.Fatal("listener conflict accepted")
 	}

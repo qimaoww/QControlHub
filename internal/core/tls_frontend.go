@@ -6,15 +6,18 @@ import (
 	"net"
 	"net/mail"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const AgentFeatureManagedTLS = "managed-tls-v1"
+const AgentFeatureXHTTPTLS = "managed-xhttp-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
 const AgentFeatureManagedTLSH2 = "managed-tls-h2-v1"
 const AgentFeatureNginxACME = "managed-tls-nginx-acme-v2"
 const AgentFeatureACMEFallback = "managed-tls-acme-fallback-v1"
+const AgentFeatureManagedTLSCertificates = "managed-tls-panel-certificates-v1"
 
 // Includes optional core installation, environment checks, both issuers and independent recovery.
 const ManagedTLSOperationTimeout = 6 * time.Minute
@@ -23,6 +26,9 @@ const ManagedTLSLeaseTimeout = 12 * time.Minute
 // TLSFrontend is delivered only in the encrypted execution snapshot. PrivateKey
 // must never be returned by panel task APIs or included in client exports.
 type TLSFrontend struct {
+	// Assigned from the local deployment manifest, never accepted from a task.
+	StaticPageOwner      string   `json:"-"`
+	StaticHTML           string   `json:"static_html,omitempty"`
 	AutomaticCertificate bool     `json:"automatic_certificate,omitempty"`
 	LocalOnly            bool     `json:"local_only,omitempty"`
 	RealityNames         []string `json:"reality_names,omitempty"`
@@ -46,14 +52,21 @@ type TLSFrontend struct {
 // UsesACME includes independently managed automatic Nginx certificates.
 // Legacy self-signed Nginx and local XHTTP remain unchanged.
 func (f TLSFrontend) UsesACME() bool {
-	return f.Mode == "caddy" || f.Mode == "nginx" && f.AutomaticCertificate
+	return !f.UsesPanelCertificate() && (f.Mode == "caddy" || f.Mode == "nginx" && f.AutomaticCertificate)
 }
 
+func (f TLSFrontend) UsesPanelCertificate() bool { return !f.LocalOnly && f.CertificatePath != "" }
+
+var managedPanelCertificate = regexp.MustCompile(`^(/etc/qcontrolhub/panel-certificates/crt_[0-9a-f]{16}|/etc/qagent/(xray|mihomo|sing-box)/(shares/shr_[0-9a-f]{16}/)?panel-certificates/crt_[0-9a-f]{16}/v[1-9][0-9]*)/cert\.pem$`)
+
 func (f TLSFrontend) Validate() error {
-	if f.AutomaticCertificate && (f.Mode != "nginx" || f.Transport != "websocket" || f.LocalOnly || f.Certificate != "" || f.PrivateKey != "") {
-		return fmt.Errorf("Nginx 自动证书仅支持公网 WebSocket，不能同时指定证书或私钥")
+	if len(f.StaticHTML) > 64<<10 || f.StaticHTML != "" && (f.Transport != "xhttp" || f.LocalOnly) {
+		return fmt.Errorf("静态页面仅支持独立 XHTTP 反代，最大 64 KiB")
 	}
-	if f.Transport == "xhttp" {
+	if f.AutomaticCertificate && (f.Mode != "nginx" || (f.Transport != "websocket" && f.Transport != "xhttp") || f.LocalOnly || f.Certificate != "" || f.PrivateKey != "") {
+		return fmt.Errorf("Nginx 自动证书仅支持公网 WebSocket / XHTTP，不能同时指定证书或私钥")
+	}
+	if f.Transport == "xhttp" && f.LocalOnly {
 		if !f.LocalOnly || f.Mode != "nginx" || f.RealityName == "" || f.PublicPort < 1024 || f.BackendPort < 1024 || f.Domain == f.RealityName {
 			return fmt.Errorf("XHTTP 组合需独立本地 Nginx TLS 目标及不同 SNI")
 		}
@@ -81,8 +94,15 @@ func (f TLSFrontend) Validate() error {
 			}
 		}
 		f.Transport, f.Certificate, f.PrivateKey = "websocket", "reference", "reference"
-	} else if len(f.RealityNames) > 0 || f.LocalOnly || f.RealityName != "" || f.CertificatePath != "" || f.PrivateKeyPath != "" {
+	} else if len(f.RealityNames) > 0 || f.LocalOnly || f.RealityName != "" {
 		return fmt.Errorf("本地目标字段仅支持 XHTTP 组合")
+	}
+	if f.UsesPanelCertificate() {
+		if !managedPanelCertificate.MatchString(f.CertificatePath) || f.PrivateKeyPath != strings.TrimSuffix(f.CertificatePath, "cert.pem")+"key.pem" || f.AutomaticCertificate || f.Certificate != "" || f.PrivateKey != "" || f.ACMEEmail != "" {
+			return fmt.Errorf("面板证书必须成对引用，不能同时指定自动证书或内嵌证书")
+		}
+	} else if !f.LocalOnly && f.PrivateKeyPath != "" {
+		return fmt.Errorf("面板证书必须成对引用")
 	}
 
 	if len(f.Method) > 32 || strings.ContainsAny(f.Method, " \t\r\n") {
@@ -119,13 +139,13 @@ func (f TLSFrontend) Validate() error {
 	if f.UsesACME() && (net.ParseIP(f.Domain) != nil || !strings.Contains(f.Domain, ".")) {
 		return fmt.Errorf("自动证书需要指向节点的公网域名")
 	}
-	if f.Transport != "websocket" && f.Transport != "httpupgrade" && !(f.Transport == "http" && f.Mode == "caddy") {
-		return fmt.Errorf("托管 TLS 反代当前支持 WebSocket、HTTPUpgrade 和 Caddy HTTP/H2；其他传输请选择原生 TLS")
+	if f.Transport != "websocket" && f.Transport != "xhttp" && f.Transport != "httpupgrade" && !(f.Transport == "http" && f.Mode == "caddy") {
+		return fmt.Errorf("托管 TLS 反代当前支持 XHTTP、WebSocket、HTTPUpgrade 和 Caddy HTTP/H2；其他传输请选择原生 TLS")
 	}
 	if !strings.HasPrefix(f.Path, "/") || len(f.Path) > 256 || strings.ContainsAny(f.Path, "\r\n\t \"'`$\\{};#?*%") {
 		return fmt.Errorf("反代路径必须以 / 开头，不得包含查询参数、空白或配置控制字符")
 	}
-	if f.Mode == "nginx" && !f.AutomaticCertificate && (f.Certificate == "" || f.PrivateKey == "") {
+	if f.Mode == "nginx" && !f.AutomaticCertificate && !f.UsesPanelCertificate() && (f.Certificate == "" || f.PrivateKey == "") {
 		return fmt.Errorf("Nginx 托管证书缺少证书或私钥")
 	}
 	return nil
@@ -143,18 +163,25 @@ func ValidateACMEEmail(email string) error {
 }
 
 type executionSnapshot struct {
-	Version         int           `json:"qcontrolhub_deployment"`
-	Content         string        `json:"content"`
-	Frontends       []TLSFrontend `json:"tls_frontends"`
-	CertificateSync bool          `json:"certificate_sync,omitempty"`
+	Version           int           `json:"qcontrolhub_deployment"`
+	Content           string        `json:"content"`
+	Frontends         []TLSFrontend `json:"tls_frontends"`
+	CertificateSync   bool          `json:"certificate_sync,omitempty"`
+	ManagedTLSCleanup bool          `json:"managed_tls_cleanup,omitempty"`
 }
 
 func EncodeExecutionSnapshot(content string, frontends []TLSFrontend, certificateSync ...bool) (string, error) {
-	if content == "" && len(frontends) == 0 {
+	if content == "" && len(frontends) == 0 && !(len(certificateSync) > 1 && certificateSync[1]) {
 		return "", nil
 	}
-	value, err := json.Marshal(executionSnapshot{Version: 1, Content: content, Frontends: frontends, CertificateSync: len(certificateSync) > 0 && certificateSync[0]})
+	value, err := json.Marshal(executionSnapshot{Version: 1, Content: content, Frontends: frontends, CertificateSync: len(certificateSync) > 0 && certificateSync[0], ManagedTLSCleanup: len(certificateSync) > 1 && certificateSync[1]})
 	return "qcontrolhub-deployment-v1\n" + string(value), err
+}
+
+func RequiresManagedTLSCleanup(content string) bool {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	var snapshot executionSnapshot
+	return strings.HasPrefix(content, prefix) && json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) == nil && snapshot.Version == 1 && snapshot.ManagedTLSCleanup
 }
 
 // Only server-created encrypted execution envelopes can carry this intent.

@@ -2,6 +2,7 @@ package serverconfig
 
 import (
 	"encoding/hex"
+	"fmt"
 	"net"
 	"strings"
 
@@ -11,6 +12,14 @@ import (
 )
 
 func generateMihomo(input Input) (string, error) {
+	if input.Protocol == ProtocolXHTTPTLS && input.TLSALPN != "" && input.TLSALPN != "h2" && input.TLSALPN != "h2,http/1.1" && input.TLSALPN != "http/1.1,h2" {
+		return "", fmt.Errorf("Mihomo XHTTP 服务端固定支持 h2,http/1.1，请使用 h2")
+	}
+	if input.Transport == "xhttp" {
+		if _, err := mihomoXHTTPConfig(input); err != nil {
+			return "", err
+		}
+	}
 	listener := map[string]any{
 		"name": input.Tag, "listen": input.Listen, "port": input.Port,
 	}
@@ -29,7 +38,7 @@ func generateMihomo(input Input) (string, error) {
 		listener["cipher"] = input.Method
 		listener["password"] = input.Credential
 		listener["udp"] = true
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
+	case ProtocolVLESS, ProtocolXHTTPTLS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		listener["type"] = "vless"
 		user := map[string]any{"username": input.Username, "uuid": input.Credential}
 		if input.Flow != "" {
@@ -106,7 +115,12 @@ func generateMihomo(input Input) (string, error) {
 		listener["network"] = strings.Split(input.Network, ",")
 		listener["target"] = forwardTarget(input)
 	}
-	if input.TLSEnabled {
+	if input.Protocol == ProtocolXHTTPTLS && managedTLS(input) {
+		// v1.19.33 requires this server-side opt-in for a plaintext backend.
+		// Generate validates that this listener is bound to loopback.
+		listener["allow-insecure"] = true
+	}
+	if input.TLSEnabled && !proxiedTLS(input) {
 		listener["certificate"] = input.CertificatePath
 		listener["private-key"] = input.PrivateKeyPath
 	}
@@ -250,6 +264,8 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	if config := mapValue(listener["xhttp-config"]); config != nil {
 		input.Transport, input.TransportPath = "xhttp", stringValue(config["path"])
+		input.TransportHost, input.XHTTPMode = stringValue(config["host"]), xhttpMode(stringValue(config["mode"]))
+		input.XHTTPServerExtra = parseMihomoXHTTPExtra(config)
 	}
 	if user := firstMap(listener["users"]); user != nil {
 		input.Username = stringValue(user["username"])
@@ -272,6 +288,9 @@ func parseMihomo(content string) (Input, bool) {
 		}
 	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
 		input.Protocol = ProtocolVLESSXHTTP
+		if input.TLSEnabled {
+			input.Protocol = ProtocolXHTTPTLS
+		}
 	}
 	if input.Protocol == ProtocolTrojan {
 		if user := firstMap(listener["users"]); user != nil {
@@ -316,7 +335,7 @@ func mihomoTransport(listener map[string]any, input Input) {
 	case "grpc":
 		listener["grpc-service-name"] = input.TransportPath
 	case "xhttp":
-		listener["xhttp-config"] = map[string]any{"path": input.TransportPath, "mode": "auto"}
+		listener["xhttp-config"], _ = mihomoXHTTPConfig(input)
 	}
 }
 

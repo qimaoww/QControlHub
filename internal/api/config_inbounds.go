@@ -55,9 +55,22 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	if engine == core.EngineSingBox && protocol.SupportsManagedTLS && !agent.CanManage && (plan.TLSMode == "caddy" || plan.TLSMode == "nginx") {
-		plan.Port, err = s.sharedManagedTLSPlanPort(request.Context(), s.configOwnerID(request), agent.ID, plan, input.Input)
+	if protocol.SupportsManagedTLS && !agent.CanManage && (plan.TLSMode == "caddy" || plan.TLSMode == "nginx") {
+		if input.Input == nil {
+			plan.TLSPublicPort, err = s.sharedManagedTLSPublicPort(request.Context(), s.configOwnerID(request), agent.ID, engine)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+		}
+		plan.Port, err = s.sharedManagedTLSPlanPort(request.Context(), s.configOwnerID(request), agent.ID, engine, plan, input.Input)
 		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
+	if !agent.CanManage && (plan.Protocol == serverconfig.ProtocolXHTTPFive || plan.Protocol == serverconfig.ProtocolXHTTPTLSReality || plan.Protocol == serverconfig.ProtocolXHTTPRealityTLS) {
+		if err = s.sharedXHTTPGroupPlan(request.Context(), s.configOwnerID(request), agent.ID, engine, &plan, input.Input); err != nil {
 			writeStoreError(w, err)
 			return
 		}
@@ -148,8 +161,8 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	if input.Operation != "delete" && input.Input.PanelCertificateID != "" {
-		if input.Input.Protocol == "vless-ws-tls" && input.Input.TLSMode != "" && input.Input.TLSMode != "native" {
-			mutationError("反代模式不能同时选择原生 TLS 证书，请重新选择证书方式")
+		if input.Input.TLSMode == "external" {
+			mutationError("外部反代请自行配置证书")
 			return
 		}
 		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, &input.Input); err != nil {

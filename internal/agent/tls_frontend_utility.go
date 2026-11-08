@@ -15,6 +15,8 @@ import (
 )
 
 type tlsFrontendRequest struct {
+	DeferCleanup  bool                           `json:"defer_cleanup,omitempty"`
+	NativeHandoff string                         `json:"native_handoff,omitempty"`
 	Service       string                         `json:"service"`
 	Kind          string                         `json:"kind"`
 	Action        core.Action                    `json:"action"`
@@ -63,9 +65,8 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		return err
 	}
 	engine, _, ok := managedSpecForService(request.Service, request.Kind)
-	nodeRead := request.SyncSource != nil && request.SyncSource.Source == "node"
-	if !ok || engine != core.EngineSingBox && engine != core.EngineXray && !(nodeRead && engine == core.EngineMihomo) {
-		return errors.New("TLS request must target a standard managed Xray or sing-box service")
+	if !ok || engine != core.EngineSingBox && engine != core.EngineXray && engine != core.EngineMihomo {
+		return errors.New("TLS request must target a standard managed Xray, Mihomo or sing-box service")
 	}
 	services, err := NewServiceManager(request.Kind)
 	if err != nil {
@@ -95,7 +96,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 	}
 	defer lock.Close()
 	for _, f := range request.Frontends {
-		if (engine == core.EngineXray) != (f.Transport == "xhttp") {
+		if (engine == core.EngineXray || engine == core.EngineMihomo) != (f.Transport == "xhttp") || engine == core.EngineMihomo && f.LocalOnly {
 			return errors.New("TLS frontend transport does not belong to this managed core")
 		}
 		if err = f.Validate(); err != nil {
@@ -107,7 +108,17 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
 		defer cancel()
 	}
+	if request.NativeHandoff != "" {
+		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff, request.Frontends)
+	}
 	if request.Action == core.ActionStatus {
+		deployments, err := manager.load()
+		if err != nil {
+			return err
+		}
+		if err = manager.cleanupRetiredTLS(ctx, deployments); err != nil {
+			return err
+		}
 		if request.Certificates {
 			deployments, err := manager.load()
 			if err != nil {
@@ -123,7 +134,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 	if request.Stage {
 		return manager.stage(ctx, request.Service, request.Frontends, request.ConfigContent)
 	}
-	return manager.apply(ctx, request.Service, request.Frontends, request.Action)
+	return manager.apply(ctx, request.Service, request.Frontends, request.Action, request.DeferCleanup)
 }
 
 func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task core.Task, stage bool, reports ...*strings.Builder) error {
@@ -131,9 +142,13 @@ func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task
 }
 
 func (e *Executor) executeTLSFrontendRequest(ctx context.Context, spec EngineSpec, task core.Task, stage, certificates bool, reports ...*strings.Builder) error {
-	if task.Engine != core.EngineSingBox && task.Engine != core.EngineXray {
+	return e.executeTLSFrontendOperation(ctx, spec, task, stage, certificates, "", reports...)
+}
+
+func (e *Executor) executeTLSFrontendOperation(ctx context.Context, spec EngineSpec, task core.Task, stage, certificates bool, handoff string, reports ...*strings.Builder) error {
+	if task.Engine != core.EngineSingBox && task.Engine != core.EngineXray && task.Engine != core.EngineMihomo {
 		if len(task.TLSFrontends) > 0 {
-			return errors.New("managed TLS requires Xray or sing-box")
+			return errors.New("managed TLS requires Xray, Mihomo or sing-box")
 		}
 		return nil
 	}
@@ -144,10 +159,10 @@ func (e *Executor) executeTLSFrontendRequest(ctx context.Context, spec EngineSpe
 	}
 	engine, _, ok := managedSpecForService(spec.Service, e.serviceManager().Kind())
 	if !ok || engine != task.Engine {
-		return errors.New("托管 TLS 需要标准面板管理的 Xray / sing-box 服务")
+		return errors.New("托管 TLS 需要标准面板管理的 Xray / Mihomo / sing-box 服务")
 	}
-	request := tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates}
-	if stage && !certificates {
+	request := tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates, NativeHandoff: handoff, DeferCleanup: task.Action == core.ActionDeploy && !stage}
+	if stage && !certificates || handoff != "" {
 		request.ConfigContent = task.ConfigContent
 	}
 	name, err := writeTLSFrontendRequest(request)
@@ -239,7 +254,7 @@ func managedTLSStateExists() bool {
 }
 
 func stopServiceTLSFrontends(ctx context.Context, manager *ServiceManager, engine core.Engine, spec EngineSpec) error {
-	if engine != core.EngineSingBox && engine != core.EngineXray || !managedTLSStateExists() {
+	if engine != core.EngineSingBox && engine != core.EngineXray && engine != core.EngineMihomo || !managedTLSStateExists() {
 		return nil
 	}
 	executor := &Executor{Services: manager}

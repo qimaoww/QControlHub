@@ -8,12 +8,13 @@ trap cleanup EXIT INT TERM
 cd "$root"
 CGO_ENABLED=0 go build -buildvcs=false -o "$work/qagent" ./cmd/agent
 CGO_ENABLED=0 go test -buildvcs=false -c -o "$work/tls.test" ./internal/agent
+sh deploy/tests/fetch-permission-cores.sh "$work/cores" managed-tls
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
  -subj /CN=tls.example.test -addext subjectAltName=DNS:tls.example.test,DNS:reality.example.test \
  -keyout "$work/xhttp.key" -out "$work/xhttp.crt" >/dev/null 2>&1
 docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_start=1024 --cap-add NET_ADMIN --cap-add SYS_PTRACE \
  -v "$work:/fixtures:ro" -v "$root:/src:ro" alpine:3.24 sh -ec '
- apk add --no-cache openrc libcap >/dev/null
+ apk add --no-cache openrc libcap iproute2 nftables >/dev/null
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
  mkdir -p /usr/local/lib/qagent /run/openrc /etc/qcontrolhub/tls
  cp /fixtures/xhttp.crt /fixtures/xhttp.key /etc/qcontrolhub/tls/
@@ -21,13 +22,16 @@ docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_sta
  chmod 0750 /etc/qcontrolhub/tls
  chmod 0640 /etc/qcontrolhub/tls/*
  cp /fixtures/qagent /fixtures/tls.test /usr/local/lib/qagent/
+ mkdir -p /usr/local/lib/qagent/cores
+ cp /fixtures/cores/bin/* /usr/local/lib/qagent/cores/
+ cp /fixtures/cores/musl/sing-box /usr/local/lib/qagent/cores/sing-box
  echo default > /run/openrc/softlevel
  cp /src/deploy/openrc/qagent /etc/init.d/qagent
  sed -i "s|command=\"/usr/local/lib/qagent/qagent\"|command=\"/usr/local/lib/qagent/tls.test\"|" /etc/init.d/qagent
  printf "\nexport QCH_TEST_MANAGED_TLS_SYSTEMD=1\nexport QCH_TEST_TLS_MANAGER=openrc\ncommand_args=\"-test.run=^TestManagedTLSSystemdSandbox$ -test.count=1 -test.v\"\n" >> /etc/init.d/qagent
  chmod +x /etc/init.d/qagent
  rc-service qagent start
- for attempt in $(seq 1 240); do
+ for attempt in $(seq 1 540); do
   if grep -Eq "^--- (PASS|FAIL): TestManagedTLSSystemdSandbox" /var/log/qagent/qagent.log 2>/dev/null; then break; fi
   sleep 1
  done

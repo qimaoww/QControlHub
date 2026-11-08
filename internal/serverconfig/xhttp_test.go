@@ -15,7 +15,7 @@ func newXHTTPTestPlan(t *testing.T, key string) Input {
 	if !ok {
 		t.Fatal(key)
 	}
-	input, err := NewPlan(protocol)
+	input, err := nativeTLSFixturePlan(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}

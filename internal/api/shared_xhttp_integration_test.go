@@ -19,7 +19,7 @@ func TestSharedXHTTPRecipientLifecycleAndExports(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-xhttp", core.EngineXray)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances, core.AgentFeatureXHTTP)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances, core.AgentFeatureXHTTP, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true}}}); err != nil {
 				t.Fatal(err)
 			}
@@ -38,6 +38,9 @@ func TestSharedXHTTPRecipientLifecycleAndExports(t *testing.T) {
 				recipient.call("POST", base+"/plans", map[string]string{"protocol": key}, http.StatusCreated, &plan)
 				plan.Port, plan.ClientPort = 24443, 24443
 				plan.ClientAddress = "upload.example.test"
+				plan.TLSMode = "native"
+				plan.TLSServerName, plan.RealityServerName = "tls.example.test", "reality.example.test"
+				plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 				plan.XHTTPTLSAddress, plan.XHTTPTLSClientPort = "cdn.example.test", 443
 				group := key != serverconfig.ProtocolXHTTPTLS
 				if group {
@@ -149,7 +152,10 @@ func TestSharedXHTTPRequiresEveryAllocatedListener(t *testing.T) {
 			grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, ports...)
 			base := "/agents/" + agent.ID + "/configs/xray"
 			var plan serverconfig.Input
-			recipient.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolXHTTPFive}, http.StatusCreated, &plan)
+			recipient.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolXHTTPFive}, http.StatusBadRequest, nil)
+			owner.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolXHTTPFive}, http.StatusCreated, &plan)
+			plan.TLSServerName, plan.RealityServerName = "tls.example.test", "reality.example.test"
+			plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 			plan.Port, plan.ClientPort, plan.XHTTPBackendPort, plan.XHTTPTLSPort = 24443, 24443, 35001, 35002
 			var conflict struct {
 				Code, Field string
@@ -195,6 +201,8 @@ func TestSharedXHTTPOwnerCoexistenceQuotaAndRevocation(t *testing.T) {
 		plan := &plans[i]
 		// Identical tags belong to different processes; listener ports do not.
 		plan.Tag = "same-five"
+		plan.TLSServerName, plan.RealityServerName = "tls.example.test", "reality.example.test"
+		plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 		plan.Port, plan.ClientPort, plan.XHTTPBackendPort, plan.XHTTPTLSPort = 24444-i, 24444-i, 35003-2*i, 35004-2*i
 		client.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &results[i])
 		completeConfigScopeAPITask(t, ctx, db, results[i].Task)

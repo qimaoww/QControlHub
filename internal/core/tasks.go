@@ -84,6 +84,7 @@ const (
 
 type Task struct {
 	CertificateSync        bool                    `json:"-"`
+	ManagedTLSCleanup      bool                    `json:"-"`
 	Certificates           []DeploymentCertificate `json:"certificates,omitempty"`
 	TLSFrontends           []TLSFrontend           `json:"tls_frontends,omitempty"`
 	CNIPSource             *CNIPSource             `json:"cnip_source,omitempty"`

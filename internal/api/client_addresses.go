@@ -45,7 +45,7 @@ func clientProfileAddress(candidates []clientAddressCandidate, mode string) clie
 }
 
 func managedTLSClientDomain(input serverconfig.Input) string {
-	if input.TLSMode == "caddy" || input.TLSMode == "nginx" {
+	if input.TLSMode == "caddy" || input.TLSMode == "nginx" || input.Protocol == serverconfig.ProtocolXHTTPTLS && input.TLSEnabled {
 		return strings.TrimSpace(input.TLSServerName)
 	}
 	return ""

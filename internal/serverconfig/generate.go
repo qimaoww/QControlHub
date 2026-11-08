@@ -28,7 +28,7 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")
 	}
-	if engine == core.EngineXray {
+	if engine == core.EngineXray || input.Protocol == ProtocolXHTTPTLS {
 		if err := validateXHTTPInput(&input); err != nil {
 			return "", err
 		}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"net"
 	"os"
 	"regexp"
@@ -51,6 +53,30 @@ func checkXHTTPListenerPorts(spec EngineSpec, content string) error {
 	return checkXrayListenerPorts(spec, content, false)
 }
 
+func checkMihomoXHTTPTLSListenerPorts(spec EngineSpec, content string) error {
+	previous := map[string]bool{}
+	if data, err := os.ReadFile(spec.ConfigPath); err == nil {
+		for _, input := range serverconfig.ParseAll(core.EngineMihomo, string(data)) {
+			previous[net.JoinHostPort(input.Listen, strconv.Itoa(input.Port))] = true
+		}
+	}
+	for _, input := range serverconfig.ParseAll(core.EngineMihomo, content) {
+		if input.Transport != "xhttp" || input.RealityEnabled || input.VLESSDecryption != "" {
+			continue
+		}
+		address := net.JoinHostPort(input.Listen, strconv.Itoa(input.Port))
+		if previous[address] {
+			continue
+		}
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			return fmt.Errorf("Mihomo XHTTP 监听预检 %s：%w；请检查地址及端口占用", address, err)
+		}
+		listener.Close()
+	}
+	return nil
+}
+
 func checkXrayListenerPorts(spec EngineSpec, content string, allListeners bool) error {
 	type inbound struct {
 		Listen string `json:"listen"`
@@ -93,6 +119,32 @@ func checkXrayListenerPorts(spec EngineSpec, content string, allListeners bool) 
 			return fmt.Errorf("Xray 监听预检 %s：%w；请检查地址是否属于节点、IPv6 支持及端口占用", address, err)
 		}
 		listener.Close()
+	}
+	return nil
+}
+
+// Require the official server implementation actually exercised by our matrix.
+func validateMihomoXHTTPCapabilities(ctx context.Context, binary, content string) error {
+	found := false
+	for _, input := range serverconfig.ParseAll(core.EngineMihomo, content) {
+		found = found || input.Protocol == serverconfig.ProtocolXHTTPTLS || input.Transport == "xhttp" && !input.RealityEnabled && input.VLESSDecryption == ""
+	}
+	if !found {
+		return nil
+	}
+	output, err := run(ctx, binary, "-v")
+	if err != nil {
+		return fmt.Errorf("Mihomo XHTTP 服务端版本检查：%w", err)
+	}
+	match := regexp.MustCompile(`Mihomo(?: Meta)? v?([0-9]+)\.([0-9]+)\.([0-9]+)`).FindStringSubmatch(output)
+	if len(match) != 4 {
+		return fmt.Errorf("无法确认 Mihomo XHTTP 服务端能力，请安装官方稳定版 >= 1.19.33")
+	}
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
+	patch, _ := strconv.Atoi(match[3])
+	if major*1000000+minor*1000+patch < 1019033 {
+		return fmt.Errorf("Mihomo XHTTP 服务端需要 >= 1.19.33，请先升级内核")
 	}
 	return nil
 }

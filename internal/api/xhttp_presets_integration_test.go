@@ -56,6 +56,9 @@ func TestXHTTPPresetSaveReloadSnapshotsWithPostgreSQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			input.TLSMode = "native"
+			input.TLSServerName, input.RealityServerName = "tls.example.test", "reality.example.test"
+			input.CertificatePath, input.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 			input.Port, input.ClientPort = 22000+index, 8443
 			input.XHTTPBackendPort, input.XHTTPTLSPort = 32000+index, 33000+index
 			if key == serverconfig.ProtocolXHTTPTLS {

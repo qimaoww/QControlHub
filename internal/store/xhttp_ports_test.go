@@ -19,6 +19,8 @@ func TestXHTTPQueuedGroupReservesEveryListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	input.TLSServerName, input.RealityServerName = "tls.example.test", "reality.example.test"
+	input.CertificatePath, input.PrivateKeyPath = "/etc/ssl/test.crt", "/etc/ssl/test.key"
 	input.Port, input.XHTTPBackendPort, input.XHTTPTLSPort = 24443, 35001, 35002
 	content, err := serverconfig.Generate(core.EngineXray, input)
 	if err != nil {

@@ -13,6 +13,7 @@ trap cleanup EXIT INT TERM
 cd "$root"
 CGO_ENABLED=0 go build -buildvcs=false -o "$work/qagent" ./cmd/agent
 CGO_ENABLED=0 go test -buildvcs=false -c -o "$work/tls.test" ./internal/agent
+sh deploy/tests/fetch-permission-cores.sh "$work/cores" managed-tls
 python3 - "$work/qagent.service" <<'PY'
 from pathlib import Path
 import sys
@@ -35,7 +36,7 @@ done
 [ "$ready" = true ] || { docker logs "$container" >&2; exit 1; }
 docker exec "$container" systemctl start qagent.service
 finished=false
-for attempt in $(seq 1 300); do
+for attempt in $(seq 1 540); do
  state=$(docker exec "$container" systemctl show qagent.service -p ActiveState --value)
  case "$state" in inactive|failed) finished=true; break ;; esac
  sleep 1

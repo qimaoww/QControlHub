@@ -40,7 +40,11 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if err != nil {
 		return Input{}, err
 	}
-	suffixBytes := make([]byte, 4)
+	suffixSize := 4
+	if protocol.Key == ProtocolXHTTPTLS || isXHTTPGroup(protocol.Key) {
+		suffixSize = 16
+	}
+	suffixBytes := make([]byte, suffixSize)
 	if _, err := rand.Read(suffixBytes); err != nil {
 		return Input{}, err
 	}
@@ -59,7 +63,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		transportPath = "/" + suffix
 	}
 	input := Input{
-		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix, Listen: "0.0.0.0",
+		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix[:8], Listen: "0.0.0.0",
 		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
 		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
@@ -218,7 +222,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.TransportHost = current.TransportHost
 	plan.TransportHTTPMethod = current.TransportHTTPMethod
 	plan.TLSMode, plan.TLSPublicPort = current.TLSMode, current.TLSPublicPort
-	plan.TLSACMEEmail = current.TLSACMEEmail
+	plan.TLSACMEEmail, plan.TLSStaticHTML = current.TLSACMEEmail, current.TLSStaticHTML
 	plan.TLSServerName = current.TLSServerName
 	plan.TLSALPN = current.TLSALPN
 	plan.TLSClientCertificate = current.TLSClientCertificate

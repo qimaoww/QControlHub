@@ -1,6 +1,6 @@
 export const labels = {
   tag:'入站名称',listen:'监听地址',port:'监听端口',username:'用户名',credential:'凭据',secondary_credential:'用户密码',method:'加密方法',flow:'Flow',transport:'传输协议',transport_path:'传输路径',transport_host:'传输 Host',transport_http_method:'HTTP 方法',
-  tls_enabled:'启用 TLS',tls_mode:'TLS 终止方式',tls_server_name:'TLS Server Name',tls_alpn:'TLS ALPN',tls_client_alpn:'客户端 ALPN',tls_acme_email:'ACME 邮箱',tls_public_port:'TLS 公网端口',tls_client_certificate:'客户端证书',certificate_path:'证书路径',private_key_path:'私钥路径',panel_certificate_id:'面板证书',
+  tls_static_page:'静态页面',tls_static_html:'静态页面 HTML（可选）',tls_enabled:'启用 TLS',tls_mode:'TLS 终止方式',tls_server_name:'TLS 域名',tls_alpn:'TLS ALPN',tls_client_alpn:'客户端 ALPN',tls_acme_email:'ACME 邮箱',tls_public_port:'TLS 公网端口',tls_client_certificate:'客户端证书',certificate_path:'证书路径',private_key_path:'私钥路径',panel_certificate_id:'面板证书',
   reality_enabled:'启用 Reality',reality_private_key:'Reality 私钥',reality_public_key:'Reality 公钥',reality_short_id:'Reality Short ID',reality_server_name:'Reality Server Name',reality_server_names:'Reality 允许域名',reality_target:'Reality 目标',reality_min_client_ver:'最低客户端版本',reality_mldsa65_seed:'ML-DSA-65 Seed',reality_mldsa65_verify:'ML-DSA-65 Verify',
   client_address:'客户端地址',client_port:'客户端端口',client_host:'客户端 Host',target_address:'目标地址',target_port:'目标端口',network:'网络',listener_routing_mark:'路由标记',listener_rule:'入站规则',listener_proxy:'入站出口',
   vless_decryption:'VLESS Decryption',vless_encryption:'VLESS Encryption',block_mainland_destination:'限制访问中国大陆',block_mainland_source:'限制中国大陆来源',
@@ -15,4 +15,4 @@ export const labels = {
 };
 export const numeric = new Set(['port','client_port','tls_public_port','target_port','listener_routing_mark','xhttp_tls_client_port','xhttp_backend_port','xhttp_tls_port','snell_version','snell_shadow_tls_version','sudoku_padding_min','sudoku_padding_max','sudoku_handshake_timeout','wireguard_mtu','wireguard_keepalive']);
 export const booleans = new Set(['tls_enabled','reality_enabled','snell_udp','snell_reuse','sudoku_enable_pure_downlink','sudoku_httpmask_enabled','sudoku_httpmask_tls','ss_rust_ipv6_first','block_mainland_destination','block_mainland_source']);
-export const multiline = new Set(['xhttp_extra','xhttp_server_extra','mieru_custom_pattern','tls_client_certificate']);
+export const multiline = new Set(['tls_static_html','xhttp_extra','xhttp_server_extra','mieru_custom_pattern','tls_client_certificate']);

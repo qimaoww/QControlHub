@@ -34,6 +34,9 @@ func (e *Executor) validateCoreUpdateCandidate(ctx context.Context, engine core.
 	var args []string
 	switch engine {
 	case core.EngineMihomo:
+		if err := validateMihomoXHTTPCapabilities(ctx, binary, content); err != nil {
+			return err
+		}
 		environment = "SAFE_PATHS=" + filepath.Dir(spec.ConfigPath) + ":/etc/qcontrolhub/tls"
 		if e.serviceManager().Kind() == ServiceManagerOpenRC {
 			// Mihomo may write/download data during -t. Use the existing isolated

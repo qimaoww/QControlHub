@@ -18,7 +18,54 @@ import (
 
 var panelCertificateFile = regexp.MustCompile(`^/etc/qcontrolhub/panel-certificates/(crt_[0-9a-f]{16})/(cert|key)\.pem$`)
 
-func certificateReferences(engine core.Engine, content string) ([]string, error) {
+func requireManagedTLSCertificates(task core.Task, features []string) error {
+	if task.ManagedTLSCleanup && !containsFeature(features, core.AgentFeatureManagedTLSCertificates) {
+		return fmt.Errorf("%w: 请先升级 Agent，以清理已部署的反代资源（%s）", ErrConflict, core.AgentFeatureManagedTLSCertificates)
+	}
+	for _, f := range task.TLSFrontends {
+		if f.UsesPanelCertificate() && !containsFeature(features, core.AgentFeatureManagedTLSCertificates) {
+			return fmt.Errorf("%w: 请先升级 Agent，以支持反代使用面板证书（%s）", ErrConflict, core.AgentFeatureManagedTLSCertificates)
+		}
+	}
+	return nil
+}
+
+func (s *Store) prepareManagedTLSCleanupTx(ctx context.Context, tx pgx.Tx, task *core.Task, features []string) error {
+	if task.Action != core.ActionDeploy && task.Action != core.ActionUninstall {
+		return nil
+	}
+	for _, f := range task.TLSFrontends {
+		task.ManagedTLSCleanup = task.ManagedTLSCleanup || f.UsesPanelCertificate()
+	}
+	var secret, id string
+	var version int
+	err := tx.QueryRow(ctx, `SELECT state.config_id,state.config_version,COALESCE(revision.content,CASE WHEN config.version=state.config_version THEN config.content END,'')
+        FROM (SELECT config_id,config_version FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$2 AND NOT $3::boolean
+        UNION ALL SELECT config_id,config_version FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND $3::boolean AND share_id=$4) state
+        LEFT JOIN configs config ON config.id=state.config_id
+        LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
+        WHERE state.config_id<>''`, task.AgentID, task.Engine, task.SharedInstance, task.SharedTrafficID).Scan(&id, &version, &secret)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if secret != "" {
+		content, err := s.decryptContent(secret)
+		if err != nil {
+			return err
+		}
+		frontends, err := s.managedTLSFrontendsTx(ctx, tx, id, version, task.Engine, content)
+		if err != nil {
+			return err
+		}
+		// Legacy automatic certificates own routes, pages and service state too.
+		// A previous Agent may remove routes without completing resource cleanup.
+		task.ManagedTLSCleanup = task.ManagedTLSCleanup || len(frontends) > 0
+	}
+
+	return requireManagedTLSCertificates(*task, features)
+}
+
+func certificateReferences(engine core.Engine, content string, frontends ...core.TLSFrontend) ([]string, error) {
 	ids := map[string]bool{}
 	_, err := serverconfig.MapCertificateFiles(engine, content, func(path string) (string, error) {
 		if strings.HasPrefix(path, core.PanelCertificatePrefix) {
@@ -30,6 +77,17 @@ func certificateReferences(engine core.Engine, content string) ([]string, error)
 		}
 		return path, nil
 	})
+	for _, f := range frontends {
+		for _, path := range []string{f.CertificatePath, f.PrivateKeyPath} {
+			if strings.HasPrefix(path, core.PanelCertificatePrefix) {
+				m := panelCertificateFile.FindStringSubmatch(path)
+				if m == nil {
+					return nil, fmt.Errorf("%w: 面板证书引用无效", ErrInvalid)
+				}
+				ids[m[1]] = true
+			}
+		}
+	}
 	out := []string{}
 	for id := range ids {
 		out = append(out, id)
@@ -41,7 +99,10 @@ func certificateReferences(engine core.Engine, content string) ([]string, error)
 // Called in the same transaction as config/task creation. The config's owner,
 // rather than a client-provided owner or administrator role, determines access.
 func (s *Store) bindTaskCertificatesTx(ctx context.Context, tx pgx.Tx, task core.Task, owner string, features []string) error {
-	ids, err := certificateReferences(task.Engine, task.ConfigContent)
+	if err := requireManagedTLSCertificates(task, features); err != nil {
+		return err
+	}
+	ids, err := certificateReferences(task.Engine, task.ConfigContent, task.TLSFrontends...)
 	if err != nil {
 		return err
 	}
@@ -72,10 +133,13 @@ func (s *Store) bindTaskCertificatesTx(ctx context.Context, tx pgx.Tx, task core
 	return err
 }
 func (s *Store) prepareCertificateExecutionTx(ctx context.Context, tx pgx.Tx, task *core.Task, features []string) error {
+	if err := requireManagedTLSCertificates(*task, features); err != nil {
+		return err
+	}
 	if task.ConfigContent == "" {
 		return nil
 	}
-	ids, err := certificateReferences(task.Engine, task.ConfigContent)
+	ids, err := certificateReferences(task.Engine, task.ConfigContent, task.TLSFrontends...)
 	if err != nil {
 		return err
 	}
@@ -246,7 +310,8 @@ func (s *Store) openCertificateExecution(ctx context.Context, tx pgx.Tx, task *c
 
 func (s *Store) ResolveCertificatePlan(ctx context.Context, id string, engine core.Engine, input *serverconfig.Input) error {
 	protocol, ok := serverconfig.FindProtocol(engine, input.Protocol)
-	if !ok || (!protocol.SupportsTLS && !protocol.RequiresTLS) || protocol.UsesReality || protocol.UsesWireGuard {
+	group := input.Protocol == serverconfig.ProtocolXHTTPFive || input.Protocol == serverconfig.ProtocolXHTTPTLSReality || input.Protocol == serverconfig.ProtocolXHTTPRealityTLS
+	if !ok || (!group && ((!protocol.SupportsTLS && !protocol.RequiresTLS) || protocol.UsesReality)) || protocol.UsesWireGuard {
 		return fmt.Errorf("%w: 此协议没有可使用面板证书的原生 TLS 入口", ErrInvalid)
 	}
 	if err := certificateUseTx(ctx, s.pool, id, certificateActor(ctx)); err != nil {
@@ -273,8 +338,17 @@ func (s *Store) ResolveCertificatePlan(ctx context.Context, id string, engine co
 	input.TLSServerName = names[0]
 	input.CertificatePath = core.PanelCertificatePrefix + id + "/cert.pem"
 	input.PrivateKeyPath = core.PanelCertificatePrefix + id + "/key.pem"
-	input.TLSMode = "native"
-	input.TLSEnabled = true
+	if group {
+		if err := certificates.Covers(pair, []string{input.RealityServerName}); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	} else {
+		if !protocol.SupportsManagedTLS || input.TLSMode != "nginx" && input.TLSMode != "caddy" {
+			input.TLSMode = "native"
+		}
+		input.TLSEnabled = true
+		input.PanelCertificateID = id
+	}
 	return nil
 }
 func (s *Store) validateCertificateConfigNamesTx(ctx context.Context, tx pgx.Tx, task *core.Task, id string, pair certificates.Pair) error {
@@ -314,11 +388,16 @@ func (s *Store) validateCertificateConfigNamesTx(ctx context.Context, tx pgx.Tx,
 			if err := certificates.Covers(pair, []string{plan.TLSServerName}); err != nil {
 				return fmt.Errorf("%w: %v", ErrInvalid, err)
 			}
+			if plan.RealityEnabled {
+				if err := certificates.Covers(pair, []string{plan.RealityServerName}); err != nil {
+					return fmt.Errorf("%w: %v", ErrInvalid, err)
+				}
+			}
 			found = true
 		}
 	}
 	if !found {
-		return fmt.Errorf("%w: 面板证书仅支持可识别的原生 TLS 入站", ErrInvalid)
+		return fmt.Errorf("%w: 面板证书仅支持可识别的 TLS 入站", ErrInvalid)
 	}
 	return nil
 }
