@@ -238,6 +238,20 @@ function assertStageOrder(events) {
   }
 }
 
+function assertTasksExited(events) {
+  for (const event of events.filter(event => event.type === "start")) {
+    try {
+      // Container PID 1 may retain an exited child as a zombie. It cannot run;
+      // the runner cannot control when the container's init reaps that PID.
+      const stat = readFileSync(`/proc/${event.pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      assert.ok(state === "Z" || state === "X", `task ${event.task} is still running (${state})`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+}
+
 test("waits for every parallel task, then runs repeatable after-checks sequentially in CLI order", async (t) => {
   const fixture = createFixture(t, { gated: [...parallelTasks, afterTasks[0]] });
   const { result } = fixture.start();
@@ -384,9 +398,7 @@ test("cancellation stops gated subprocesses and never starts after-checks", asyn
   const completed = await result;
   assert.equal(completed.code, 143);
   assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
-  for (const event of fixture.events().filter(event => event.type === "start")) {
-    assert.throws(() => process.kill(event.pid, 0), { code: "ESRCH" });
-  }
+  assertTasksExited(fixture.events());
 });
 
 test("cancellation also terminates both independent database shards", async t => {
@@ -398,9 +410,7 @@ test("cancellation also terminates both independent database shards", async t =>
   const completed = await result;
   assert.equal(completed.code, 143);
   assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
-  for (const event of fixture.events().filter(event => event.type === "start")) {
-    assert.throws(() => process.kill(event.pid, 0), { code: "ESRCH" });
-  }
+  assertTasksExited(fixture.events());
 });
 
 test("format gate excludes downloaded templates and checks new source directories", t => {
