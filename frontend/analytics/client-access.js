@@ -181,9 +181,11 @@ export async function clientAccessPage(ctx) {
         row.key = clientAccessRecordKey(entry, item);
         return row;
       }));
+      const records = table(['入站', '协议', '客户端', '操作'], rows, { label: '客户端接入', rowKey: row => row.key });
+      records.querySelector('.a-table-scroll').classList.add('a-traffic-list');
       const card = section(node('span', { className: 'a-probe-name' }, nodeRegionFlag(ctx, agent), first.agent_name || group.agent_id), stack(
         ...group.entries.filter(entry => !entry.profiles?.length).map(entry => node('div', { className: 'a-card-body' }, notice(entry.error || (entry.address_required ? '暂无接入地址' : '暂无可用接入配置')))),
-        Boolean(rows.length) && node('div', { className: 'a-traffic-list' }, table(['入站', '协议', '客户端', '操作'], rows, { label: '客户端接入', rowKey: row => row.key })),
+        Boolean(rows.length) && records,
       ), actions(button('复制全部协议', event => void copyBatch(group.agent_id, event.currentTarget))));
       card.dataset.clientAgent = group.agent_id; card.dataset.refreshKey = group.agent_id;
       return card;

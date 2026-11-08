@@ -116,6 +116,9 @@ export async function testClientLayoutRuntime({ testAPI }) {
   const search=value=>{const control=document.querySelector('.a-main input[name=search]');control.value=value;control.dispatchEvent(new Event('input',{bubbles:true}));};
   assert.equal(nodeCount(),8,'client layout lost a node');
   assert.ok(document.documentElement.scrollWidth<=innerWidth,'client page overflows viewport');
+  if(matchMedia('(max-width:96rem)').matches) for(const row of rows()) {
+    for(const cell of [...row.cells].slice(0,-1)) assert.equal(getComputedStyle(cell).display,'grid','responsive labels must stack above content in every row');
+  }
   assert.ok(document.querySelector('input[name=search]').getBoundingClientRect().width>=140,'search input unusable');
   select('agent','sjc-06');
   assert.equal(rows().length,2,'engine filter must show every Mihomo profile');
