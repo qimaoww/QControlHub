@@ -9,7 +9,7 @@ import { nodeRegion, nodeRegionFlag } from './node-region.js';
 import { nodeMetrics } from './node-metrics.js';
 import { metricTrack } from './metric-track.js';
 import { nodeDeleteControl } from './node-delete.js';
-import { publicAddressRows, manualConnectionAddressNote, nodeAddressSetting } from '../modules/agent-address-model.js';
+import { publicAddressRows, manualConnectionAddressNote } from '../modules/agent-address-model.js';
 import { geoRegionDetails } from '../modules/region-model.js';
 import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
@@ -126,7 +126,6 @@ export async function nodesPage(ctx) {
               if (ctx.current()) ctx.announce('复制失败，请重试。', 'error');
             } finally { if (control.isConnected) control.disabled = false; }
           }, { glyph: 'copy', className: 'a-ip-copy', title: `复制 ${row.label}`, 'aria-label': `复制 ${agent.name} 的 ${row.label}：${row.value}` })))) : muted('暂无公网 IP'),
-      muted(`地址 · ${nodeAddressSetting(agent.labels).mode === 'manual' ? '手动设置' : '自动获取'}`),
       manualConnectionAddressNote(agent.labels) && node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, muted(manualConnectionAddressNote(agent.labels)))));
   }
 
