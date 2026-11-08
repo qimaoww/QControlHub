@@ -21,9 +21,13 @@ func TestNotificationAPIConfigurationOwnershipPreviewAndTests(t *testing.T) {
 	t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
 	for _, client := range []configScopeAPIClient{alice, bob} {
 		var loaded struct {
-			Configuration notify.Configuration `json:"configuration"`
+			Configuration            notify.Configuration `json:"configuration"`
+			WebhookSigningConfigured *bool                `json:"webhook_signing_configured"`
 		}
 		client.call("GET", "/settings/notifications", nil, 200, &loaded)
+		if loaded.WebhookSigningConfigured == nil {
+			t.Fatal("notification page cannot read the legacy Webhook signing status")
+		}
 		c := loaded.Configuration
 		c.Channels = []notify.Channel{{ID: "hook", Name: "通知目标", Type: "webhook", Enabled: true, Values: map[string]string{}, Secrets: map[string]string{"url": endpoint.URL, "secret": "notification-private-fixture"}}}
 		c.Rules = []notify.Rule{{ID: "offline", Name: "离线提醒", Event: notify.TypeAgentOffline, Enabled: true, Channels: []string{"hook"}, Duration: 30, Cooldown: 60}}

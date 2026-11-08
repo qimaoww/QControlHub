@@ -156,5 +156,8 @@ export async function notificationsPage(ctx) {
     section("通知规则", node("div", { className: "a-card-body a-stack" }, muted("新规则先建立当前状态基线；速度异常与恢复均需满足持续窗口。"), ruleList), writable && button("添加规则", () => editRule())),
     section("通知模板", node("div", { className: "a-card-body" }, node("details", { className: "a-disclosure" }, node("summary", {}, "编辑事件模板"), node("div", { className: "a-disclosure-body" }, templateForm)))),
     section("投递记录", node("div", { className: "a-card-body a-stack" }, muted("保留最近 14 天记录，每个账号最多 5000 条，当前显示最近 100 条。"), records), button("刷新记录", event => void ctx.mutate(event.currentTarget, loadRecords))),
+    section("通知服务状态", node("div", { className: "a-card-body" }, table(["项目", "状态"], [
+      ["原有 Webhook 默认签名", badge(resource.webhook_signing_configured ? "已配置" : "未配置", resource.webhook_signing_configured ? "ok" : "warn")],
+    ], { label: "通知服务状态" }))),
   );
 }

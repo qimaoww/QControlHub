@@ -25,7 +25,7 @@ func (s *Server) getNotifications(w http.ResponseWriter, r *http.Request) {
 		defaults[event] = notify.DefaultTemplate(event)
 	}
 	update, _ := s.store.NotificationUpdateStatus(r.Context())
-	writeJSON(w, 200, map[string]any{"configuration": s.notificationConfigurationResponse(c), "events": notify.EventNames, "variables": notify.Variables, "variable_descriptions": notify.VariableDescriptions, "defaults": defaults, "update": update})
+	writeJSON(w, 200, map[string]any{"configuration": s.notificationConfigurationResponse(c), "events": notify.EventNames, "variables": notify.Variables, "variable_descriptions": notify.VariableDescriptions, "defaults": defaults, "update": update, "webhook_signing_configured": s.webhookSigningConfigured})
 }
 func (s *Server) putNotifications(w http.ResponseWriter, r *http.Request) {
 	var c notify.Configuration

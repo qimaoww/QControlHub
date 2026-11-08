@@ -58,8 +58,10 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(settingsContent, "notificationSettings") || strings.Contains(settingsContent, "/settings/notifications") {
-		t.Error("panel settings must not load notification management")
+	for _, notification := range []string{"notificationSettings", "/settings/notifications", "Webhook", "notify_"} {
+		if strings.Contains(settingsContent, notification) {
+			t.Errorf("panel settings still contains notification concern %q", notification)
+		}
 	}
 	for _, required := range []string{`["notifications", "通知", "activity", "settings.read"]`, `notifications: ['notifications', 'notificationsPage']`, `"settings-notify": "notifications"`} {
 		if !strings.Contains(appContent, required) {
@@ -67,7 +69,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 	notificationContent := string(mustReadFrontendFile(t, "analytics/notification-settings.js"))
-	for _, title := range []string{"通知渠道", "通知规则", "通知模板", "投递记录"} {
+	for _, title := range []string{"通知渠道", "通知规则", "通知模板", "投递记录", "通知服务状态"} {
 		if !strings.Contains(notificationContent, `section("`+title+`"`) {
 			t.Errorf("notification group missing %s", title)
 		}

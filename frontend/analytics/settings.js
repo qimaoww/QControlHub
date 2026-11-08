@@ -20,7 +20,6 @@ const numericFields = [
   ["task_retention_days", "任务保留天数", [[0, "不清理"], 30, 90, 180]],
   ["config_revision_retention", "配置历史保留份数", [[0, "不清理"], 50, 100]],
 ];
-const toggles = [["notify_task_failed", "任务失败"], ["notify_agent_offline", "节点离线"], ["notify_agent_online", "节点上线"], ["notify_traffic_quota", "流量超额"]];
 const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 
 export async function settingsPage(ctx) {
@@ -65,7 +64,6 @@ export async function settingsPage(ctx) {
     delete body.cnip_ipv4_url;
     delete body.cnip_ipv6_url;
     for (const engine of engineIDs) delete body[`engine:${engine}`];
-    for (const [name] of toggles) body[name] = element.elements.namedItem(name)?.checked ?? settings[name];
     for (const name of [...numericFields.map(([key]) => key), "ui_font_scale", "client_connection_retention_days"]) body[name] = Number(body[name]);
     phase = "saving"; sync();
     try {
@@ -146,7 +144,7 @@ export async function settingsPage(ctx) {
   }));
   const security = [
     ["控制面安全传输", deployment.secure_transport], ["数据库 TLS 校验", deployment.database_tls_verified],
-    ["配置加密", deployment.config_encryption_configured], ["Webhook 签名", deployment.webhook_signing_configured],
+    ["配置加密", deployment.config_encryption_configured],
   ];
   const extra = stack(section("部署状态", node("div", { className: "a-card-body" }, stack(
     table(["项目", "状态"], [...security.map(([name, enabled]) => [name, badge(enabled ? "已配置" : "未配置", enabled ? "ok" : "warn")]),
