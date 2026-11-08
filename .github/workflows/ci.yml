@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.27.3-bookworm
     timeout-minutes: 35
+    # These disposable databases perform hundreds of real DDL migrations.
+    # Bound their data in RAM while retaining PostgreSQL WAL/fsync semantics.
     services:
       postgres:
         image: postgres:17-alpine
@@ -34,6 +36,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
       # A separate cluster isolates xmin and migration locks for the second
       # database shard; separate databases on postgres would not isolate them.
       postgres-secondary:
@@ -47,6 +50,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
     env:
       GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
       GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
@@ -159,6 +163,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
       postgres-secondary:
         image: postgres:17-alpine
         env:
@@ -172,6 +177,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -265,7 +271,9 @@ jobs:
       - name: Verify IPQuality installation with actual systemd and mirror+file
         run: make ip-quality-systemd-test
       - name: Verify managed TLS under the shipped Agent sandbox
-        run: make managed-tls-systemd-test managed-tls-openrc-test
+        # Separate containers have private init systems, files, ports and core
+        # services. Make waits for both targets and preserves either failure.
+        run: make -j2 managed-tls-systemd-test managed-tls-openrc-test
 
   core-permissions:
     name: All cores / actual service permissions
