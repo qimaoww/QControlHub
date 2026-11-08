@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,7 +167,7 @@ func processOwnsTCPPort(pid, port int) error {
 
 // A durable held deployment keeps rollback certificates/pages and prevents
 // renewal or another instance's deployment from restoring a released route.
-func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candidate, operation string) error {
+func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candidate, operation string, incoming ...[]core.TLSFrontend) error {
 	tlsFrontendMutex.Lock()
 	defer tlsFrontendMutex.Unlock()
 	previous, err := m.load()
@@ -174,7 +175,10 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 		return err
 	}
 	deployment, exists := previous[service]
-	if !exists {
+	if !exists && (operation != "release" || len(incoming) == 0 || len(incoming[0]) == 0) {
+		if operation == "commit" {
+			return m.cleanupRetiredTLS(ctx, previous)
+		}
 		return nil
 	}
 	next := tlsDeployments{}
@@ -184,12 +188,19 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 	switch operation {
 	case "release":
 		engine, _, ok := managedSpecForService(service, m.services.Kind())
-		if !ok || (engine != core.EngineXray && engine != core.EngineMihomo) {
+		if !ok {
+			return nil
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate)))
+		if deployment.NativeHandoff != nil && deployment.PendingConfig != "" {
+			if deployment.PendingConfig != digest {
+				return errors.New("上次 TLS 部署尚未完成，请先重试原配置")
+			}
 			return nil
 		}
 		ports := map[int]bool{}
 		for _, input := range serverconfig.ParseAll(engine, candidate) {
-			if input.Transport == "xhttp" && input.TLSEnabled && !input.RealityEnabled {
+			if input.TLSEnabled && !input.RealityEnabled {
 				ports[input.Port] = true
 			}
 		}
@@ -217,9 +228,8 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 			}
 		}
 		var retained []core.TLSFrontend
-		released := false
 		for _, f := range deployment.Frontends {
-			if f.LocalOnly || f.Transport != "xhttp" || !ports[f.PublicPort] {
+			if f.LocalOnly || !ports[f.PublicPort] {
 				retained = append(retained, f)
 				continue
 			}
@@ -249,25 +259,24 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 					return err
 				}
 			}
-			released = true
-		}
-		if !released {
-			return nil
 		}
 		held := deployment
 		if deployment.NativeHandoff != nil {
 			held = *deployment.NativeHandoff
 		}
-		deployment.Frontends, deployment.NativeHandoff = retained, &held
+		deployment.Frontends, deployment.NativeHandoff, deployment.PendingConfig = retained, &held, digest
 		next[service] = deployment
 	case "restore", "commit":
 		if deployment.NativeHandoff == nil {
+			if operation == "commit" {
+				return m.cleanupRetiredTLS(ctx, previous)
+			}
 			return nil
 		}
 		if operation == "restore" {
 			next[service] = *deployment.NativeHandoff
 		} else {
-			deployment.NativeHandoff = nil
+			deployment.NativeHandoff, deployment.PendingConfig = nil, ""
 			if len(deployment.Frontends) == 0 {
 				delete(next, service)
 			} else {
@@ -281,6 +290,7 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 		return err
 	}
 	if err = m.sync(ctx, next); err == nil {
+		retainRetiredTLS(previous, next)
 		data, encodeErr := json.Marshal(next)
 		if encodeErr != nil {
 			err = encodeErr
@@ -293,5 +303,8 @@ func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candida
 		defer cancel()
 		return errors.Join(err, m.sync(recovery, previous))
 	}
-	return m.cleanupStaticPages(previous, next)
+	if operation == "release" {
+		return nil
+	}
+	return m.cleanupRetiredTLS(ctx, next)
 }

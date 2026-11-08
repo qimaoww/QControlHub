@@ -1,7 +1,7 @@
 import { node, field, button, notice, muted, actions, list } from './ui.js';
 
 const prefix = '/etc/qcontrolhub/panel-certificates/';
-export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {} }) {
+export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {}, requireManagedCertificate = false }) {
   const group = ['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(protocol?.key);
   if (!form || !group && (protocol?.uses_reality || !(protocol?.supports_tls || protocol?.requires_tls)) || protocol?.uses_wireguard) return;
   const input = name => form.elements?.namedItem(name) || form.querySelector(`[name="${name}"]`);
@@ -15,7 +15,7 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     select = wrapper.querySelector('select');
   }
   wrapper.dataset.analyticsCertificateSelector = '';
-  const summary = notice('');
+  const summary = notice('', 'info');
   const retry = button('重试', () => void refresh());
   const feedback = node('div', { className: 'a-stack' }, summary, actions(retry));
   wrapper.after(feedback);
@@ -41,11 +41,15 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     ].filter(Boolean).join(' · ');
   };
   function mode() {
-    const external = protocol.supports_managed_tls && ['caddy','nginx','external'].includes(input('tls_mode')?.value);
+    const external = protocol.supports_managed_tls && input('tls_mode')?.value === 'external';
     wrapper.hidden = feedback.hidden = external;
     select.disabled = external;
+    select.required = Boolean(requireManagedCertificate && protocol.supports_managed_tls && ['caddy','nginx'].includes(input('tls_mode')?.value));
+    const empty = [...select.options].find(option => !option.value);
+    if (empty) empty.textContent = select.required ? '请选择已签发的面板证书' : '节点已有证书 / 原有 TLS 方式';
   }
   function update(event, refreshOnly = false) {
+    mode();
     const id = select.value, active = Boolean(id), cert = items.find(item => item.id === id);
     const sni = input('tls_server_name');
     if (event && active && cert) {
@@ -58,13 +62,15 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     const realityName = input('reality_server_name')?.value.trim().toLowerCase();
     const reason = active && !loading && !failed ? availability(cert) || (!name ? '请填写 TLS SNI' : '') || (!list(cert.domains).some(domain => matches(domain.toLowerCase(), name)) ? '证书不覆盖当前 TLS SNI' : '') || (group && (!realityName || realityName === name || !list(cert.domains).some(domain => matches(domain.toLowerCase(), realityName))) ? '请选择证书覆盖的不同 Reality 域名' : '') : '';
     select.setCustomValidity(reason || (active && loading ? '正在加载证书，请稍候' : '') || (active && failed ? '证书列表加载失败，请重试' : ''));
-    const text = loading ? '正在加载证书…' : failed ? '证书列表加载失败，已保留选择' : reason || (cert ? description(cert) : items.length ? '使用节点原有证书配置' : '暂无可选证书，可使用节点原有配置');
+    const text = loading ? '正在加载证书…' : failed ? '证书列表加载失败，已保留选择' : reason || (cert ? description(cert) : select.required ? '请选择面板已签发的证书，续期后自动同步。' : items.length ? '使用节点原有证书配置' : '暂无可选证书，可使用节点原有配置');
+    summary.className = `a-notice ${failed || reason ? 'error' : 'info'}`;
+    summary.setAttribute('role', failed || reason ? 'alert' : 'status');
     if (summary.textContent !== text) summary.textContent = text;
     select.title = cert ? `${cert.name || list(cert.domains).join('、')} · ${description(cert)}` : text;
     retry.hidden = !failed;
     if (refreshOnly) return;
     const tlsMode = input('tls_mode');
-    if (active && tlsMode && event) { tlsMode.value = 'native'; tlsMode.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (active && tlsMode && event && !['caddy','nginx'].includes(tlsMode.value)) { tlsMode.value = 'native'; tlsMode.dispatchEvent(new Event('change', { bubbles: true })); }
     const tls = input('tls_enabled');
     if (active && tls && !tls.checked && !group) { tls.checked = true; tls.dispatchEvent(new Event('change', { bubbles: true })); }
     for (const [name,file] of [['certificate_path','cert.pem'],['private_key_path','key.pem']]) {
@@ -80,7 +86,7 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
   if (initial && ![...select.options].some(option => option.value === initial)) select.add(new Option('正在加载所选证书…', initial));
   select.value = initial;
   select.addEventListener('change', event => update(event));
-  input('tls_mode')?.addEventListener('change', mode);
+  input('tls_mode')?.addEventListener('change', () => { mode(); update(undefined, true); });
   for (const name of ['tls_server_name','reality_server_name']) input(name)?.addEventListener('input', () => update(undefined, true));
   function options() {
     const next = JSON.stringify(items.map(cert => [cert.id, cert.owned, cert.name, description(cert)]));
@@ -88,7 +94,7 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     signature = next;
     const value = select.value;
     const picker = select.querySelector(':scope > button');
-    select.replaceChildren(...(picker ? [picker] : []), new Option('节点已有证书 / 原有 TLS 方式', ''));
+    select.replaceChildren(...(picker ? [picker] : []), new Option(select.required ? '请选择已签发的面板证书' : '节点已有证书 / 原有 TLS 方式', ''));
     for (const owned of [true,false]) {
       const group = node('optgroup', { label: owned ? '我的证书' : '授权给我的证书' });
       for (const cert of items.filter(item => item.owned === owned)) {

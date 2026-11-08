@@ -113,7 +113,11 @@ func certificatePreparationRoutes(content string, previous []core.TLSFrontend, s
 	}
 	// HTTP-01 does not need a new HTTPS listener. Reuse only committed
 	// Caddy listeners so an outgoing Nginx can keep serving the same port.
-	nextRoot["apps"].(map[string]any)["http"].(map[string]any)["servers"] = servers(oldRoot)
+	retained := servers(oldRoot)
+	if challenge, ok := servers(nextRoot)["http_challenges"]; ok {
+		retained["http_challenges"] = challenge
+	}
+	nextRoot["apps"].(map[string]any)["http"].(map[string]any)["servers"] = retained
 	data, err := json.MarshalIndent(nextRoot, "", "  ")
 	return string(data), err
 }
@@ -124,7 +128,7 @@ func (m *tlsFrontendManager) prepareCertificates(ctx context.Context, previous, 
 	}
 	needed := false
 	for _, f := range next[service].Frontends {
-		needed = needed || f.Mode == "caddy" && !m.hasValidCertificate(f.Domain)
+		needed = needed || f.Mode == "caddy" && f.UsesACME() && !m.hasValidCertificate(f.Domain)
 	}
 	if !needed {
 		return nil

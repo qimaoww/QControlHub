@@ -112,6 +112,7 @@ func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
+		core.AgentFeatureManagedTLSCertificates,
 		core.AgentFeatureCertificates,
 		core.AgentFeatureCaddyCertificates,
 		core.AgentFeatureNodeCertificates,

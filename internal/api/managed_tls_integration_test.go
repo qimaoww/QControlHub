@@ -113,7 +113,7 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan.PanelCertificateID = "crt_conflicting_fixture"
-	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusBadRequest, nil)
+	admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusForbidden, nil)
 	plan.PanelCertificateID = ""
 	var saved configMutationResult
 	response := admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &saved)

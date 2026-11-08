@@ -6,7 +6,8 @@ export async function testPresetCatalogRuntime(catalog) {
   const covered=new Set();
   const cases=[...catalog,...catalog.filter(entry=>entry.engine==='xray'&&entry.plan.transport==='xhttp').map(entry=>({...entry,shared:true}))];
   for(const actual of cases) {
-    const test=await createPresetEditor(actual.engine,{protocol:actual.protocol.key,shared:actual.shared});
+    const certificate={id:'crt_fixture',name:'面板证书',domains:['tls.example.test'],source:'import',owned:true,version:1,not_after:'2099-01-01T00:00:00Z'};
+    const test=await createPresetEditor(actual.engine,{protocol:actual.protocol.key,shared:actual.shared,certificates:[certificate]});
     const {form,control,edit,open,save}=test;
     covered.add(actual.engine);
     try {
@@ -16,7 +17,9 @@ export async function testPresetCatalogRuntime(catalog) {
         assert(control('tls_mode').value==='caddy'&&control('tls_public_port').value==='443','managed TLS defaults lost');
         assert(control('listen').value==='127.0.0.1'&&control('listen').readOnly,'managed backend is not loopback');
         assert(control('tls_server_name').required&&!control('tls_server_name').checkValidity(),'managed domain is not required');
-        assert(!control('tls_acme_email').disabled&&control('tls_acme_email').type==='email','Caddy ACME email is not editable');
+        assert(control('tls_acme_email').disabled&&control('panel_certificate_id').required,'new proxy must use a panel certificate');
+        await waitFor(()=>control('panel_certificate_id').options.length>1,'panel certificate catalog did not load');
+        edit('panel_certificate_id',certificate.id);
         edit('tls_server_name','tls.example.test');
         assert(form().checkValidity()&&form().textContent.includes(`tls.example.test:443${control('transport_path').value}`),'domain-only Caddy flow or route is invalid');
         edit('tls_mode','native');
@@ -26,9 +29,9 @@ export async function testPresetCatalogRuntime(catalog) {
         edit('tls_acme_email','certs@example.test');edit('tls_public_port','8443');
         const proxyMode=actual.plan.transport==='http'?'external':'nginx',automatic=['vless-ws-tls','vless-xhttp-tls'].includes(actual.protocol.key);
         edit('tls_mode',proxyMode);
-        assert(control('tls_acme_email').disabled===(!automatic||proxyMode==='external'),'ACME email does not follow selected TLS provider');
+        assert(control('tls_acme_email').disabled,'panel certificate unexpectedly needs node ACME');
         assert(control('certificate_path').disabled&&control('private_key_path').disabled,'proxy certificate paths remain enabled');
-        assert(form().textContent.includes(proxyMode==='external'?'自行配置':automatic?'TCP 80':'自签证书'),'provider guidance does not follow selected TLS mode');
+        assert(form().textContent.includes(proxyMode==='external'?'自行配置':'使用面板证书'),'provider guidance does not follow selected TLS mode');
         const version=test.saved().version;
         test.portConflict='tls_public_port';test.submit('deploy');
         await waitFor(()=>!test.root.hasAttribute('aria-busy')&&form().textContent.includes('草稿已保留'),'public port conflict blocked retry');
@@ -63,7 +66,7 @@ export async function testPresetCatalogRuntime(catalog) {
       }
       if(actual.engine==='sing-box') {
         assert(saved.transport===actual.plan.transport,'native transport changed during save');
-        if(actual.protocol.supports_managed_tls)assert(saved.tls_mode===(actual.plan.transport==='http'?'external':'nginx')&&saved.tls_acme_email===(['vless-ws-tls','vless-xhttp-tls'].includes(actual.protocol.key)?'certs@example.test':'')&&saved.tls_public_port===8443&&saved.listen==='127.0.0.1'&&control('tls_public_port').value==='8443','managed TLS lost provider/public port/email on reopen');
+        if(actual.protocol.supports_managed_tls)assert(saved.tls_mode===(actual.plan.transport==='http'?'external':'nginx')&&!saved.tls_acme_email&&saved.tls_public_port===8443&&saved.listen==='127.0.0.1'&&control('tls_public_port').value==='8443','managed TLS lost provider/public port on reopen');
         if(actual.plan.tls_enabled)assert(saved.tls_server_name==='tls.example.test'&&control('tls_server_name').value===saved.tls_server_name&&control('tls_alpn').value===saved.tls_alpn,'native TLS values lost on reopen');
         if(control('transport_host')&&!control('transport_host').disabled)assert(saved.transport_host==='http.example.test'&&control('transport_host').value===saved.transport_host,'HTTP Host was conflated with TLS SNI');
         if(saved.transport==='http')assert(saved.transport_http_method==='POST'&&control('transport_http_method').value==='POST','HTTP Method lost on reopen');

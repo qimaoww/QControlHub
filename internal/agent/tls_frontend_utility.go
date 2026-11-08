@@ -15,6 +15,7 @@ import (
 )
 
 type tlsFrontendRequest struct {
+	DeferCleanup  bool                           `json:"defer_cleanup,omitempty"`
 	NativeHandoff string                         `json:"native_handoff,omitempty"`
 	Service       string                         `json:"service"`
 	Kind          string                         `json:"kind"`
@@ -108,9 +109,16 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		defer cancel()
 	}
 	if request.NativeHandoff != "" {
-		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff)
+		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff, request.Frontends)
 	}
 	if request.Action == core.ActionStatus {
+		deployments, err := manager.load()
+		if err != nil {
+			return err
+		}
+		if err = manager.cleanupRetiredTLS(ctx, deployments); err != nil {
+			return err
+		}
 		if request.Certificates {
 			deployments, err := manager.load()
 			if err != nil {
@@ -126,7 +134,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 	if request.Stage {
 		return manager.stage(ctx, request.Service, request.Frontends, request.ConfigContent)
 	}
-	return manager.apply(ctx, request.Service, request.Frontends, request.Action)
+	return manager.apply(ctx, request.Service, request.Frontends, request.Action, request.DeferCleanup)
 }
 
 func (e *Executor) executeTLSFrontend(ctx context.Context, spec EngineSpec, task core.Task, stage bool, reports ...*strings.Builder) error {
@@ -153,7 +161,7 @@ func (e *Executor) executeTLSFrontendOperation(ctx context.Context, spec EngineS
 	if !ok || engine != task.Engine {
 		return errors.New("托管 TLS 需要标准面板管理的 Xray / Mihomo / sing-box 服务")
 	}
-	request := tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates, NativeHandoff: handoff}
+	request := tlsFrontendRequest{Service: spec.Service, Kind: e.serviceManager().Kind(), Action: task.Action, Stage: stage, Frontends: task.TLSFrontends, Deadline: tlsOperationDeadline(ctx), Certificates: certificates, NativeHandoff: handoff, DeferCleanup: task.Action == core.ActionDeploy && !stage}
 	if stage && !certificates || handoff != "" {
 		request.ConfigContent = task.ConfigContent
 	}

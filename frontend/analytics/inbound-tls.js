@@ -1,7 +1,7 @@
 import { muted, stack, node } from "./ui.js";
 
 // Keep the native editor's active controls aligned with the submitted protocol.
-export function bindInboundTransport(form, protocol) {
+export function bindInboundTransport(form, protocol, { requireManagedCertificate = false } = {}) {
   const input = name => form.elements.namedItem(name);
   const wrap = control => control?.closest(".a-field,.a-check");
   const show = (name, visible, required = false) => {
@@ -29,7 +29,8 @@ export function bindInboundTransport(form, protocol) {
     show("flow", kind !== "xhttp" || Boolean(protocol.uses_vless_encryption));
     const enabled = Boolean(protocol.requires_tls || tls?.checked);
     const managed = enabled && protocol.supports_managed_tls && ["caddy", "nginx", "external"].includes(mode?.value);
-    show("tls_client_certificate", enabled && (!mode || mode.value === "native" || mode.value === "nginx" && !automaticNginx));
+    const panelCertificate = Boolean(input("panel_certificate_id")?.value) || requireManagedCertificate && ["caddy", "nginx"].includes(mode?.value);
+    show("tls_client_certificate", enabled && !panelCertificate && (!mode || mode.value === "native" || mode.value === "nginx" && !automaticNginx));
     if (previousMode === "nginx" && mode?.value !== "nginx" && input("tls_client_certificate")) input("tls_client_certificate").value = "";
     previousMode = mode?.value;
     if (mode) {
@@ -43,9 +44,10 @@ export function bindInboundTransport(form, protocol) {
       show("tls_static_page", managed && protocol.key === "vless-xhttp-tls");
       show("tls_static_html", managed && protocol.key === "vless-xhttp-tls" && (!input("tls_static_page") || input("tls_static_page").value === "custom"));
       publicPort?.setCustomValidity(managed && publicPort.value === input("port")?.value ? "公网端口不能与内部监听端口相同" : "");
-      show("tls_acme_email", enabled && (mode.value === "caddy" || mode.value === "nginx" && automaticNginx));
+      show("tls_acme_email", enabled && !panelCertificate && (mode.value === "caddy" || mode.value === "nginx" && automaticNginx));
       hint.hidden = route.hidden = !managed;
       hint.textContent = mode.value === "external" ? "自行配置公网 TLS 反代，回源到本机内部端口与路径。"
+        : panelCertificate ? "使用面板证书，续期后自动同步。多个入站可共用代理和公网端口，路径需分别设置。"
         : mode.value === "nginx" && !automaticNginx ? "使用自签证书；客户端需使用导出的公共证书验证。"
         : "域名需解析到节点，放行 TCP 80 和公网端口，以自动申请并续期证书。";
       route.textContent = `公网入口：${domain?.value || "待填写域名"}:${publicPort?.value || "443"}${input("transport_path")?.value || ""}；回源：${listen.value}:${input("port")?.value || ""}`;

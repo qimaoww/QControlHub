@@ -161,8 +161,8 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	if input.Operation != "delete" && input.Input.PanelCertificateID != "" {
-		if (input.Input.Protocol == "vless-ws-tls" || input.Input.Protocol == serverconfig.ProtocolXHTTPTLS) && input.Input.TLSMode != "" && input.Input.TLSMode != "native" {
-			mutationError("反代模式不能同时选择原生 TLS 证书，请重新选择证书方式")
+		if input.Input.TLSMode == "external" {
+			mutationError("外部反代请自行配置证书")
 			return
 		}
 		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, &input.Input); err != nil {

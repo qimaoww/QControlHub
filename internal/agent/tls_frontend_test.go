@@ -83,6 +83,38 @@ func TestTLSFrontendRejectsMixedNginxTrustOnSameSNI(t *testing.T) {
 	}
 }
 
+func TestTLSFrontendPanelCertificatesShareOneProvider(t *testing.T) {
+	for _, mode := range []string{"nginx", "caddy"} {
+		a := core.TLSFrontend{Tag: "xhttp", Mode: mode, Domain: "tls.example.test", PublicPort: 443, BackendPort: 21001, Transport: "xhttp", Path: "/xhttp", CertificatePath: "/etc/qagent/xray/panel-certificates/crt_0000000000000001/v1/cert.pem", PrivateKeyPath: "/etc/qagent/xray/panel-certificates/crt_0000000000000001/v1/key.pem"}
+		b := a
+		b.Tag, b.Path, b.Transport, b.BackendPort = "ws", "/ws", "websocket", 21002
+		b.CertificatePath = "/etc/qagent/sing-box/panel-certificates/crt_0000000000000001/v2/cert.pem"
+		b.PrivateKeyPath = "/etc/qagent/sing-box/panel-certificates/crt_0000000000000001/v2/key.pem"
+		active, err := activeTLSFrontends(tlsDeployments{"xray": {Frontends: []core.TLSFrontend{a}}, "sing-box": {Frontends: []core.TLSFrontend{b}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := renderNginxFrontends(active, "/owned", "/state", true)
+		if mode == "caddy" {
+			content, err = renderCaddyFrontends(active, "/state")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !strings.Contains(content, b.CertificatePath) || strings.Contains(content, a.CertificatePath) || strings.Contains(content, ":80") || strings.Contains(content, "listen 80") || strings.Contains(content, `"automate"`) || strings.Contains(content, `"http_challenges"`) {
+			t.Fatal("panel proxy did not select the renewed pair without ACME", content)
+		}
+		if !strings.Contains(content, "21001") || !strings.Contains(content, "21002") {
+			t.Fatal("shared protocol route lost")
+		}
+		b.CertificatePath = strings.Replace(b.CertificatePath, "0000000000000001", "0000000000000002", 1)
+		b.PrivateKeyPath = strings.Replace(b.PrivateKeyPath, "0000000000000001", "0000000000000002", 1)
+		if _, err := activeTLSFrontends(tlsDeployments{"one": {Frontends: []core.TLSFrontend{a, b}}}); err == nil {
+			t.Fatal("different certificates accepted for same SNI")
+		}
+	}
+}
+
 func TestTLSFrontendIndependentNginxChallenges(t *testing.T) {
 	f := core.TLSFrontend{Tag: "auto", Mode: "nginx", AutomaticCertificate: true, Domain: "auto.example.test", PublicPort: 443, BackendPort: 23456, Transport: "websocket", Path: "/auto"}
 	nginx := renderNginxFrontends([]core.TLSFrontend{f}, "/tls", "/state", false)

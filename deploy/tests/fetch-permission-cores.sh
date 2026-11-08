@@ -22,6 +22,10 @@ cp "$stage/sing-box-1.14.4-linux-amd64/sing-box" "$root/bin/sing-box"
 fetch https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64-musl.tar.gz sing-box-musl.tar.gz 8f7c5f0651238850d96a0e488e5473cd77ec1a0098f63942e943f475a12057ca 669526765
 tar -xzf "$stage/sing-box-musl.tar.gz" -C "$stage"
 cp "$stage/sing-box-1.14.4-linux-amd64-musl/sing-box" "$root/musl/sing-box"
+if [ "${2:-}" = managed-tls ]; then
+  chmod 0755 "$root/bin/"* "$root/musl/"*
+  exit 0
+fi
 fetch https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/shadowsocks-v1.25.0.x86_64-unknown-linux-musl.tar.xz ss.tar.xz 8439bf43c324b0fc273e663d0b1f8926fd8f666cbd1e0fd59b35096f0e778e92 531449939
 tar -xf "$stage/ss.tar.xz" -C "$root/bin" ssserver sslocal
 fetch https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_linux_amd64.tar.gz caddy.tar.gz 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb 711594947

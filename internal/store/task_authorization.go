@@ -38,8 +38,12 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 			return err
 		}
 		task.CertificateSync = core.IsCertificateSyncSnapshot(content)
+		task.ManagedTLSCleanup = core.RequiresManagedTLSCleanup(content)
 		task.ConfigContent, task.TLSFrontends, err = core.DecodeExecutionSnapshot(content)
 		if err != nil {
+			return err
+		}
+		if err = requireManagedTLSCertificates(*task, features); err != nil {
 			return err
 		}
 		if task.Engine == core.EngineXray && len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureXHTTP) {

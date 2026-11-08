@@ -77,6 +77,9 @@ func (m *tlsFrontendManager) repairRuntime(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if len(deployments) == 0 {
+		return nil
+	}
 	if err = m.prepareDirectories(); err != nil {
 		return err
 	}
@@ -154,6 +157,13 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 		}
 		content := renderNginxFrontends(active, m.root, m.state, m.nginxHTTPRouteAvailable())
 		if mode == "caddy" {
+			automatic := false
+			for _, f := range active {
+				automatic = automatic || f.Mode == "caddy" && f.UsesACME()
+			}
+			if !automatic {
+				continue
+			}
 			content, err = upgradeCaddyHTTPChallengeConfig(string(old))
 			if err != nil {
 				return err

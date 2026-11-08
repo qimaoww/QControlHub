@@ -50,6 +50,9 @@ func validateXHTTPCertificate(ctx context.Context, f core.TLSFrontend) error {
 		return err
 	}
 	for _, name := range append([]string{f.Domain, f.RealityName}, f.RealityNames...) {
+		if name == "" {
+			continue
+		}
 		if err := leaf.VerifyHostname(name); err != nil {
 			return fmt.Errorf("组合证书须同时覆盖 TLS SNI 与 Reality 本地目标 SNI (%s)：%w", name, err)
 		}

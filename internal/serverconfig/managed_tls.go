@@ -24,7 +24,10 @@ func proxiedTLS(input Input) bool { return managedTLS(input) || input.TLSMode ==
 
 func frontendFor(input Input) core.TLSFrontend {
 	f := core.TLSFrontend{StaticHTML: input.TLSStaticHTML, Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath, Host: input.TransportHost, Method: input.TransportHTTPMethod}
-	f.AutomaticCertificate = (input.Protocol == "vless-ws-tls" || input.Protocol == ProtocolXHTTPTLS) && input.TLSMode == "nginx"
+	if input.PanelCertificateID != "" && managedTLS(input) {
+		f.CertificatePath, f.PrivateKeyPath = core.PanelCertificatePrefix+input.PanelCertificateID+"/cert.pem", core.PanelCertificatePrefix+input.PanelCertificateID+"/key.pem"
+	}
+	f.AutomaticCertificate = !f.UsesPanelCertificate() && (input.Protocol == "vless-ws-tls" || input.Protocol == ProtocolXHTTPTLS) && input.TLSMode == "nginx"
 	if f.UsesACME() {
 		f.ACMEEmail = input.TLSACMEEmail
 	}
@@ -47,7 +50,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 	}
 	f := frontendFor(input)
 	// Certificate generation happens after validating the logical plan.
-	if f.Mode == "nginx" && !f.AutomaticCertificate {
+	if f.Mode == "nginx" && !f.AutomaticCertificate && !f.UsesPanelCertificate() {
 		f.Certificate, f.PrivateKey = "pending", "pending"
 	}
 	if input.TLSMode == "external" {
@@ -89,10 +92,10 @@ func MarshalClientMetadataWithPrevious(input Input, previous string) (string, er
 		data, err := json.Marshal(metadata)
 		return string(data), err
 	}
-	if oldValid && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain && !f.AutomaticCertificate {
+	if oldValid && old.Frontend != nil && old.Frontend.Mode == f.Mode && old.Frontend.Domain == f.Domain && !f.AutomaticCertificate && !f.UsesPanelCertificate() {
 		f.Certificate, f.PrivateKey = old.Frontend.Certificate, old.Frontend.PrivateKey
 	}
-	if f.Mode == "nginx" && !f.AutomaticCertificate {
+	if f.Mode == "nginx" && !f.AutomaticCertificate && !f.UsesPanelCertificate() {
 		authority, authorityKey := old.TLSClientCertificate, old.TLSAuthorityKey
 		if authorityKey == "" {
 			authority, authorityKey, err = newFrontendAuthority()

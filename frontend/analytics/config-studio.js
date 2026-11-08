@@ -252,8 +252,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         const field = input.closest('.a-field');
         if (field) (field.querySelector('.a-actions') || field.appendChild(actions())).append(generate);
       }
-      bindAnalyticsCertificateSelector(ctx, { form: area, protocol, plan });
-      bindInboundTransport(form, protocol);
+      bindAnalyticsCertificateSelector(ctx, { form: area, protocol, plan, requireManagedCertificate: operation === 'add' });
+      bindInboundTransport(form, protocol, { requireManagedCertificate: operation === 'add' });
       form.elements.namedItem('tls_static_page')?.addEventListener('change', event => {
         const page = (protocol.static_pages || []).find(page => page.key === event.target.value);
         if (page) form.elements.namedItem('tls_static_html').value = page.html;

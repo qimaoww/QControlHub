@@ -447,6 +447,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := s.prepareStatusSnapshotTx(ctx, tx, &task, features); err != nil {
 		return core.Task{}, err
 	}
+	if err := s.prepareManagedTLSCleanupTx(ctx, tx, &task, features); err != nil {
+		return core.Task{}, err
+	}
 	if err := s.checkTaskPortUseTx(ctx, tx, &task, false); err != nil {
 		return core.Task{}, err
 	}
@@ -498,7 +501,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, err
 		}
 	}
-	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync)
+	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync, task.ManagedTLSCleanup)
 	if err != nil {
 		return core.Task{}, err
 	}
