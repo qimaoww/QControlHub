@@ -77,17 +77,19 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 			name, nameOverridden = value, true
 		}
 		profile, err := serverconfig.BuildClientProfileNamed(input, address, serverName, name)
-		if err != nil {
-			continue
-		}
 		protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
 		if !found {
-			continue
+			protocol.Name = input.Protocol
+		}
+		failure := ""
+		if err != nil {
+			failure = err.Error()
 		}
 		profiles = append(profiles, clientAccessProfile{
 			Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile,
 			ClientName: name, NameOverridden: nameOverridden,
 			Address: address, AddressMode: mode, AddressOverridden: overridden,
+			Error: failure,
 		})
 	}
 	return profiles

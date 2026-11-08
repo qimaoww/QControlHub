@@ -7,8 +7,9 @@ import (
 )
 
 type ClientVariant struct {
-	Name    string        `json:"name"`
-	Profile ClientProfile `json:"profile"`
+	Name       string        `json:"name"`
+	Profile    ClientProfile `json:"profile"`
+	MihomoYAML string        `json:"mihomo_yaml,omitempty"`
 }
 
 func xhttpClientAddress(input Input, address string) string {

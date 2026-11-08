@@ -105,7 +105,7 @@ export async function testClientNodeOrderRuntime({ testAPI }) {
   assert.equal(cardNodes(),pickerNodes(),'client/picker order disagree');
   assert.equal(testAPI.nodeOrder.revision,1,'opening clients only reads preference');
   const alpha=cards().filter(card=>card.dataset.clientAgent==='alpha');
-  assert.equal(alpha.map(card=>card.dataset.clientEngine).join(','),'xray,mihomo','sorting nodes changed engine order');
+  assert.equal(alpha.length,1,'one node still has engine cards');
   assert.equal(alpha.flatMap(card=>[...card.querySelectorAll('tbody tr')].map(row=>row.cells[0].firstElementChild.firstChild.textContent)).join(','),'alpha-20002,alpha-20001,alpha-20002,alpha-20001','sorting nodes changed profile order');
   const saved=JSON.stringify(['charlie','delta','bravo','alpha']);
   testAPI.nodeOrder={ids:JSON.parse(saved),revision:2};
@@ -114,12 +114,12 @@ export async function testClientNodeOrderRuntime({ testAPI }) {
   assert.equal([...document.querySelectorAll('article.a-probe[data-agent-id]')].map(card=>card.dataset.agentId).join(','),'charlie,delta,bravo,alpha','nodes ignored saved order');
   location.hash='#client-access';await waitFor(()=>cardNodes()==='charlie,bravo,alpha','client navigation ignored saved order');
   assert.equal(cardNodes(),pickerNodes(),'nodes without exports disrupted client order');
-  select('engine','xray');assert.equal(cardNodes(),'charlie,alpha','engine filtering lost node order');
+  assert.equal(document.querySelector('select[name=engine]'),null,'obsolete engine filter remains');
   select('agent','alpha');assert.equal(cardNodes(),'alpha','node filtering chose wrong card');
-  select('agent','');assert.equal(cardNodes(),'charlie,alpha','clearing node filter lost order');
+  select('agent','');assert.equal(cardNodes(),'charlie,bravo,alpha','clearing node filter lost order');
   const search=document.querySelector('input[name=search]');search.value='20001';search.dispatchEvent(new Event('input',{bubbles:true}));
-  assert.equal(cardNodes(),'charlie,alpha','profile search lost node order');
-  assert.equal(document.querySelectorAll('[data-client-agent] tbody tr').length,2,'profile search did not narrow results');
+  assert.equal(cardNodes(),'charlie,bravo,alpha','profile search lost node order');
+  assert.equal(document.querySelectorAll('[data-client-agent] tbody tr').length,4,'profile search did not narrow results');
   [...document.querySelectorAll('button')].find(control=>control.textContent==='重置').click();
   assert.equal(cardNodes(),'charlie,bravo,alpha','clearing filters lost order');
   assert.equal(accountStorage.getItem('qcontrolhub:node-card-order'),saved,'filters rewrote node order');
@@ -128,8 +128,7 @@ export async function testClientNodeOrderRuntime({ testAPI }) {
   await waitFor(()=>cardNodes()==='bravo,alpha,charlie','refresh ignored updated order');
   assert.equal(cardNodes(),pickerNodes(),'refresh client/picker order disagree');
   const reads=testAPI.calls.length;
-  select('engine','xray');select('agent','bravo');
-  assert.equal(document.querySelector('select[name=engine]').value,'','切换节点未清除不兼容内核');
+  select('agent','bravo');
   assert.equal(cardNodes(),'bravo','不兼容内核让已有客户端看起来为空');
   select('agent','');assert.equal(cardNodes(),'bravo,alpha,charlie');
   assert.equal(testAPI.calls.length,reads,'本地筛选重新读取 API');
@@ -150,11 +149,11 @@ export async function testClientNodeOrderRuntime({ testAPI }) {
     const added={...structuredClone(testAPI.clientAccessEntries.find(entry=>entry.agent_id==='alpha')),engine:'ss-rust'};
     testAPI.clientAccessEntries.push(added);
     const refresh=()=>[...document.querySelectorAll('button')].find(control=>control.textContent==='刷新');
-    refresh().click();await waitFor(()=>[...document.querySelector('select[name=engine]').options].some(option=>option.value==='ss-rust'),'刷新没有提供新增内核筛选');
-    select('engine','ss-rust');assert.equal(cardNodes(),'alpha','新增内核无法筛选');
+    const alphaRows=()=>document.querySelector('[data-client-agent=alpha]').querySelectorAll('tbody tr').length;
+    refresh().click();await waitFor(()=>alphaRows()===6,'new engine profiles not merged into node');
     testAPI.clientAccessEntries=testAPI.clientAccessEntries.filter(entry=>entry!==added);
     await waitFor(()=>!refresh().disabled,'新增内核刷新没有结束');refresh().click();
-    await waitFor(()=>!refresh().disabled&&document.querySelector('select[name=engine]').value==='','内核移除后未清理失效筛选');
+    await waitFor(()=>!refresh().disabled&&alphaRows()===4,'removed engine left stale profiles');
     assert.equal(cardNodes(),'alpha,charlie');
   }finally{window.fetch=originalFetch;}
 }

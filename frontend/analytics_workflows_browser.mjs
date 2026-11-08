@@ -236,6 +236,16 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=name]').form;form.elements.name.value='主题接入名称';form.requestSubmit()})()");
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('主题接入名称')");
   assert.ok((await api(page,identity,'GET','/client-access')).find(entry=>entry.agent_id===agentID).profiles.some(item=>item.client_name==='主题接入名称'));
+  const authorizedClients=await api(page,identity,'GET','/client-access');
+  const readClipboard=async()=>{const result=await call('Runtime.evaluate',{expression:'navigator.clipboard.readText()',awaitPromise:true,returnByValue:true,userGesture:true},page);return result.result.value;};
+  await click('复制全部协议','.a-main');await wait(page,"!document.querySelector('[aria-busy=true]')");
+  const nodeClipboard=await readClipboard();
+  for(const entry of authorizedClients.filter(entry=>entry.agent_id===agentID))for(const item of entry.profiles)assert.ok(nodeClipboard.includes(item.profile.uri),'real API node batch omitted a profile');
+  await evaluate(page,"(() => {const input=document.querySelector('input[name=search]');input.value='no-visible-client';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await click('复制全部节点','.a-main');await wait(page,"!document.querySelector('[aria-busy=true]')");
+  const allClipboard=await readClipboard();
+  for(const entry of authorizedClients)for(const item of entry.profiles)assert.ok(allClipboard.includes(item.profile.uri),'real API all batch was narrowed by filters');
+  await evaluate(page,"(() => {const input=document.querySelector('input[name=search]');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await click('参数详情','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('参数详情'))");await screenshot(page,'analytics-client-details');await close();
   const policies=(await api(page,identity,'GET','/traffic-policies')).filter(policy=>policy.agent_id===agentID);assert.ok(policies.length);
   await navigate('#traffic');await click('批量操作','.a-main');

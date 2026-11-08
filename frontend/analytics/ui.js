@@ -234,11 +234,14 @@ export function query(path, params) {
 }
 export const list = value => Array.isArray(value) ? value : [];
 
-export async function copyText(value) {
+export async function copyText(value, { current = () => true } = {}) {
+  const check = () => { if (!current()) throw new DOMException("页面已切换", "AbortError"); };
+  check();
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(String(value)); return; }
     catch { /* HTTP previews and browser restrictions use native selection. */ }
   }
+  check();
   const active = document.activeElement;
   const source = node("textarea", { className: "a-clipboard", readonly: true });
   source.value = String(value);
