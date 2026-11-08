@@ -312,8 +312,8 @@ strong, b { font-weight: 600; }
 .a-ip-copy.a-button:is(:hover,:focus-visible):not(:disabled) { background: var(--tint); color: var(--ink); }
 .a-ip-copy.a-button:active:not(:disabled) { background: var(--border); }
 .a-ip-copy .a-icon, .a-ip-copy svg { width: 14px; height: 14px; }
-@media (pointer: coarse) { .a-ip-copy.a-button { width: 44px; min-height: 44px; padding: 13px; } }
-.a-probe-addresses > .a-muted { font-size: 12px; }
+.a-probe-addresses > .a-muted { display: flex; align-items: center; min-height: 28px; font-size: 12px; }
+@media (pointer: coarse) { .a-ip-copy.a-button { width: 44px; min-height: 44px; padding: 13px; } .a-probe-addresses > .a-muted { min-height: 44px; } }
 .a-probe-body { padding: 4px 20px 20px; display: grid; gap: 20px; }
 .a-probe-meters { display: grid; gap: 14px; min-width: 180px; font-variant-numeric: tabular-nums; }
 .a-probe-meter { display: grid; gap: 7px; }
