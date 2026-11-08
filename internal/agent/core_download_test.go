@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/githubfetch"
 )
 
 func TestDownloadAssetRequiresAndVerifiesGitHubDigest(t *testing.T) {
@@ -117,5 +119,68 @@ func TestDownloadTotalBudgetIncludesRetryBackoff(t *testing.T) {
 	_, err := updater.downloadAsset(context.Background(), asset)
 	if !errors.Is(err, context.DeadlineExceeded) || attempts > 2 {
 		t.Fatalf("retry reset total budget: attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestDownloadOfficialAssetAPIFallback(t *testing.T) {
+	t.Parallel()
+	contents := bytes.Repeat([]byte{0x4a}, 1<<20)
+	digest := sha256.Sum256(contents)
+	for _, scenario := range []string{"gateway", "network", "corrupt-fallback", "permanent", "invalid-digest", "tls", "cancel"} {
+		t.Run(scenario, func(t *testing.T) {
+			asset := githubReleaseAsset{ID: 123, Name: "fixture.gz", Size: int64(len(contents)), Digest: "sha256:" + hex.EncodeToString(digest[:]), BrowserDownloadURL: "https://github.com/owner/repo/releases/download/v1/fixture.gz"}
+			var routes []string
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			updater := &CoreUpdater{trustedURL: trustedCoreReleaseURL, downloadAttempts: 1, client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				routes = append(routes, request.URL.String())
+				status := http.StatusOK
+				if request.URL.Host == "github.com" {
+					switch scenario {
+					case "gateway", "corrupt-fallback":
+						status = http.StatusGatewayTimeout
+					case "network", "tls":
+						category := "network"
+						if scenario == "tls" {
+							category = "validation"
+						}
+						return nil, &githubfetch.Failure{Direct: errors.New("fixture transport failure"), Category: category}
+					case "permanent":
+						status = http.StatusNotFound
+					case "invalid-digest":
+						return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(strings.Repeat("x", len(contents))))}, nil
+					case "cancel":
+						cancel()
+						return nil, context.Canceled
+					}
+				}
+				if request.Header.Get("Accept") != "application/octet-stream" || request.Header.Get("Authorization") != "" {
+					t.Fatal("asset route must request public binary content without credentials")
+				}
+				value := contents
+				if scenario == "corrupt-fallback" {
+					value = bytes.Repeat([]byte{'x'}, len(contents))
+				}
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(value))}, nil
+			})}}
+			path, err := updater.downloadAsset(ctx, asset)
+			if path != "" {
+				defer os.Remove(path)
+			}
+			wantSuccess := scenario == "gateway" || scenario == "network"
+			if (err == nil) != wantSuccess {
+				t.Fatalf("download result: path=%q err=%v", path, err)
+			}
+			wantFallback := wantSuccess || scenario == "corrupt-fallback"
+			if (len(routes) == 2) != wantFallback || len(routes) > 2 {
+				t.Fatalf("unexpected routes: %v", routes)
+			}
+			if wantFallback && routes[1] != "https://api.github.com/repos/owner/repo/releases/assets/123" {
+				t.Fatalf("unexpected asset API: %v", routes)
+			}
+			if scenario == "corrupt-fallback" && !strings.Contains(err.Error(), "SHA-256") {
+				t.Fatalf("fallback bypassed digest validation: %v", err)
+			}
+		})
 	}
 }

@@ -27,6 +27,16 @@ func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubRelea
 	if updater.trustedURL == nil || !updater.trustedURL(parsed) {
 		return "", errors.New("refusing untrusted release download URL")
 	}
+	// The official asset API reaches the same immutable file through a separate
+	// route when the release URL's DNS, gateway or connection is unavailable.
+	var fallback *url.URL
+	parts := strings.Split(parsed.Path, "/")
+	if asset.ID > 0 && parsed.Host == "github.com" && len(parts) == 7 && parts[3] == "releases" && parts[4] == "download" {
+		candidate, _ := url.Parse(fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/assets/%d", url.PathEscape(parts[1]), url.PathEscape(parts[2]), asset.ID))
+		if updater.trustedURL(candidate) {
+			fallback = candidate
+		}
+	}
 	attempts := updater.downloadAttempts
 	if attempts <= 0 {
 		attempts = defaultDownloadAttempts
@@ -53,6 +63,11 @@ func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubRelea
 		performedAttempts = attempt
 		attemptContext, cancel := context.WithTimeout(ctx, attemptTimeout)
 		path, err := updater.downloadAssetOnce(attemptContext, parsed, asset)
+		if err != nil && fallback != nil && attemptContext.Err() == nil && assetRouteUnavailable(err) {
+			slog.Warn("GitHub release route unavailable; trying official asset API", "error", err)
+			parsed, fallback = fallback, nil
+			path, err = updater.downloadAssetOnce(attemptContext, parsed, asset)
+		}
 		cancel()
 		if err == nil {
 			return path, nil
@@ -79,6 +94,12 @@ func (updater *CoreUpdater) downloadAsset(ctx context.Context, asset githubRelea
 		return "", fmt.Errorf("release download failed after %d attempts: %w", performedAttempts, lastErr)
 	}
 	return "", lastErr
+}
+
+func assetRouteUnavailable(err error) bool {
+	var retryable retryableCoreDownloadError
+	var failure *githubfetch.Failure
+	return errors.As(err, &retryable) || (errors.As(err, &failure) && failure.Category == "network")
 }
 
 func (updater *CoreUpdater) downloadAssetOnce(ctx context.Context, parsed *url.URL, asset githubReleaseAsset) (_ string, err error) {
