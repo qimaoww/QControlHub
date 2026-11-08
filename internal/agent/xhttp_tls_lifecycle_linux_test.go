@@ -229,7 +229,13 @@ func TestXHTTPTLSManagedLifecycleSandbox(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					xhttpAssertClient(t, e.Specs[core.EngineXray].Binary, profile.Xray, certPath)
+					// Each mode owns its client/echo processes. Release them before
+					// a later mode reclaims the currently unused backend port.
+					if !t.Run(mode+"-client", func(t *testing.T) {
+						xhttpAssertClient(t, e.Specs[core.EngineXray].Binary, profile.Xray, certPath)
+					}) {
+						t.FailNow()
+					}
 					if mode != "native" {
 						client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: input.TLSServerName}}}
 						request, _ := http.NewRequest(http.MethodGet, "https://127.0.0.1:"+strconv.Itoa(public)+"/", nil)

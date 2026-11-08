@@ -141,6 +141,7 @@ async function testXHTTPTLSRuntime() {
       assert(control('tls_mode').value==='caddy' && control('tls_server_name').value==='' && control('transport').value==='xhttp','XHTTP defaults were replaced by legacy TLS/Reality');
       assert([...control('tls_mode').options].map(option=>option.value).join(',')==='native,caddy,nginx','XHTTP mode list differs from supported modes');
       edit('tls_server_name','proxy.example.test');
+      edit('xhttp_cdn','other');edit('client_host','proxy.example.test');
       const html='<!doctype html>\n<title>静态页面</title>\n<p>'+ '长页面内容'.repeat(200)+'</p>';
       edit('tls_static_page','custom');edit('tls_static_html',html);
       for (const key of ['cleanfolio','minimalio','uisual-line']) {
@@ -160,7 +161,7 @@ async function testXHTTPTLSRuntime() {
         if (!managed) {edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key');}
         else {edit('tls_static_page','custom');edit('tls_static_html',html);}
         const saved=await test.save();
-        assert(saved.tls_mode===mode && saved.credential===credential && saved.transport_path===path && saved.transport==='xhttp','XHTTP mode switch changed transport identity');
+        assert(saved.tls_mode===mode && saved.credential===credential && saved.transport_path===path && saved.transport==='xhttp' && saved.xhttp_cdn==='other','XHTTP mode switch changed transport identity or custom CDN');
         assert(managed ? saved.tls_static_html===html && !saved.certificate_path && !saved.private_key_path : !saved.tls_static_html && !saved.tls_public_port,'XHTTP static/native fields leaked across modes');
         assert(control('tls_mode').value===mode && control('tls_server_name').value==='proxy.example.test','XHTTP reopen applied defaults over the chosen mode');
       }
