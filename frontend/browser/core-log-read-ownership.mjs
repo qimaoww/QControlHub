@@ -181,6 +181,11 @@ export async function testLogReadOwnership() {
     await waitFor(() => ready() && rows().length === 200, 'initial source failure did not recover');
     location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'timeout route departure failed');
     location.hash = '#core-logs'; await waitFor(() => ready() && rows().length === 200, 'timeout recovery did not survive page reentry');
+    const unmatched = document.querySelector('[data-log-filters] [name=q]');
+    unmatched.value = 'no-authorized-log-matches'; unmatched.dispatchEvent(new Event('input', { bubbles: true }));
+    await waitFor(() => rows().length === 0, 'unmatched keyword retained rows');
+    assert.equal(document.querySelector('[aria-label=内核日志]').nextElementSibling.textContent, '没有匹配日志', 'loaded history was mislabeled as awaiting first delivery');
+    assert.ok(main().textContent.includes('已加载 1000 条'));
   } finally { window.dispatchEvent(new Event('pagehide')); globalThis.fetch = nativeFetch; }
 }
 function deferred() { let resolve; const promise = new Promise(accept => { resolve = accept; }); return { promise, resolve }; }

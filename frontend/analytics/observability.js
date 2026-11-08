@@ -118,7 +118,7 @@ export async function logsPage(ctx) {
       return [heading,
         node("pre", { className: "a-code a-log-message", tabindex: "0", "aria-label": `${source?.name || record.agent_id} · ${engine} · 日志正文` }, redactDiagnostic(record.message))];
     }, !entries.length && readState === "loading" ? "正在读取日志…" : !entries.length && readState === "failed" ? "日志读取失败" :
-      !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
+      entries.length ? "没有匹配日志" : !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
     count.textContent = `${visible.length} 条日志${visible.length !== entries.length ? ` · 已加载 ${entries.length} 条` : ""}${visible.length > 200 ? ` · 第 ${page + 1} / ${Math.ceil(visible.length / 200)} 页` : ""} · 信息 ${counts.level.info} · 警告 ${counts.level.warning} · 错误 ${counts.level.error}`;
     previous.disabled = page === 0; next.disabled = start + 200 >= visible.length; pageTools.hidden = visible.length <= 200;
   }
