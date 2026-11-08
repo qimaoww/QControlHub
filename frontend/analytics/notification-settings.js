@@ -149,9 +149,9 @@ export async function notificationsPage(ctx) {
         parts.push(node(tag, attrs, line.slice(start, end))); cursor = end;
       }
       parts.push(line.slice(cursor)); offset += line.length + 1;
-      return node("div", {}, line ? parts : node("br"));
+      return node("p", {}, line ? parts : node("br"));
     });
-    preview.replaceChildren(muted("脱敏示例"), node("strong", {}, result.title), node("div", {}, lines));
+    preview.replaceChildren(muted("脱敏示例"), node("p", {}, node("strong", {}, result.title)), node("div", {}, lines));
   }
   const templateForm = ctx.form([templateEvent, formatField, title, body,
     node("details", { className: "a-disclosure" }, node("summary", {}, "模板变量"), node("div", { className: "a-disclosure-body" }, table(["变量", "含义"], resource.variables.map(v => [`{{${v}}}`, resource.variable_descriptions[v]]), { label: "模板变量" }))),

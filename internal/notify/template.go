@@ -2,7 +2,9 @@ package notify
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -45,6 +47,7 @@ func RenderFormatted(t Template, e Event, panel, zone string) (Rendered, error) 
 		location = time.UTC
 	}
 	v["time_display"] = e.Time.In(location).Format("2006-01-02 15:04:05 -07:00")
+	v["current_display"], v["threshold_display"] = humanRate(e.Current), humanRate(e.Threshold)
 	if e.Port > 0 {
 		v["port"] = fmt.Sprint(e.Port)
 	}
@@ -98,6 +101,26 @@ func humanBytes(value uint64) string {
 		}
 	}
 	return ""
+}
+
+func humanRate(raw string) string {
+	if !strings.HasSuffix(raw, " B/s") {
+		return raw
+	}
+	n, err := strconv.ParseFloat(strings.TrimSuffix(raw, " B/s"), 64)
+	if err != nil || n < 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+		return raw
+	}
+	for _, unit := range []string{"B/s", "KB/s", "MB/s", "GB/s", "TB/s", "PB/s"} {
+		if n < 1000 || unit == "PB/s" {
+			if unit == "B/s" {
+				return fmt.Sprintf("%.0f %s", n, unit)
+			}
+			return fmt.Sprintf("%.2f %s", n, unit)
+		}
+		n /= 1000
+	}
+	return raw
 }
 func Sample(event string) Event {
 	e := Event{Type: event, Time: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), Message: "脱敏示例：" + EventNames[event]}

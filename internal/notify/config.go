@@ -53,10 +53,11 @@ var EventNames = map[string]string{
 	TypeTaskFailed: "任务失败", TypeAgentOffline: "节点离线", TypeAgentOnline: "节点恢复", TypeTrafficQuota: "流量超额",
 	"traffic.warning": "流量预警", "speed.high": "持续高速", "speed.low": "持续低速", "speed.recovered": "速度恢复", "panel.update": "面板更新",
 }
-var Variables = []string{"panel", "type", "time", "time_display", "agent_id", "agent", "engine", "task_id", "action", "port", "used_bytes", "limit_bytes", "used", "limit", "percent", "period", "direction", "current", "threshold", "status", "error", "version", "message"}
+var Variables = []string{"panel", "type", "time", "time_display", "agent_id", "agent", "engine", "task_id", "action", "port", "used_bytes", "limit_bytes", "used", "limit", "percent", "period", "direction", "current", "threshold", "current_display", "threshold_display", "status", "error", "version", "message"}
 var VariableDescriptions = map[string]string{
 	"panel": "面板名称", "type": "事件标识", "time": "事件时间（RFC3339）", "agent_id": "节点 ID", "agent": "节点名称", "engine": "内核", "task_id": "任务 ID", "action": "任务操作", "port": "端口", "used_bytes": "已用字节数", "limit_bytes": "限额字节数", "percent": "配额百分比", "period": "统计周期", "direction": "收发方向", "current": "当前值（含单位）", "threshold": "阈值（含单位）", "status": "状态", "error": "脱敏错误", "version": "完整更新版本", "message": "事件摘要",
 	"used": "易读用量（KiB、MiB、GiB，1024 进制）", "limit": "易读限额（1024 进制）", "time_display": "面板时区时间；浏览器自动模式使用 UTC",
+	"current_display": "易读当前值；速率按 1000 进制换算 KB/s、MB/s", "threshold_display": "易读阈值；速率按 1000 进制换算 KB/s、MB/s",
 }
 var placeholder = regexp.MustCompile(`\{\{([a-z_]+)\}\}`)
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -72,15 +73,19 @@ func DefaultTemplate(event string) Template {
 	body := "{{message}}"
 	switch event {
 	case TypeTaskFailed:
-		body = "**节点**　{{agent}}\n**内核**　{{engine}} · {{action}}\n**任务**　`{{task_id}}`\n\n**错误**\n{{error}}"
+		body = "**{{agent}}** · {{engine}}\n操作　{{action}}\n任务　`{{task_id}}`\n\n**失败原因**\n{{error}}"
 	case TypeAgentOffline, TypeAgentOnline:
-		body = "**节点**　{{agent}}"
+		body = "**{{agent}}**"
 	case TypeTrafficQuota, "traffic.warning":
-		body = "**节点**　{{agent}}\n**端口**　{{engine}} / {{port}}\n\n**用量**　{{used}} / {{limit}}\n**比例**　{{percent}}\n**周期**　{{period}}\n**方向**　{{direction}}"
+		body = "**用量 {{percent}}**\n{{used}} / {{limit}}\n\n**{{agent}}** · `{{engine}}:{{port}}`\n{{direction}}\n周期　{{period}}"
 	case "speed.high", "speed.low", "speed.recovered":
-		body = "**节点**　{{agent}}\n**方向**　{{direction}}\n\n**当前速率**　{{current}}\n**阈值**　{{threshold}}"
+		label := "异常阈值"
+		if event == "speed.recovered" {
+			label = "恢复阈值"
+		}
+		body = "**当前 {{current_display}}**\n{{agent}} · {{direction}}\n" + label + "　{{threshold_display}}"
 	case "panel.update":
-		body = "**可用版本**　`{{version}}`"
+		body = "**可用版本**\n`{{version}}`"
 	}
 	return Template{Title: "{{panel}} · " + EventNames[event], Body: body + "\n\n{{time_display}}", Format: "markdown"}
 }

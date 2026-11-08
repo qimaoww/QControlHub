@@ -104,3 +104,21 @@ func TestNotificationMarkdownLimitsAndReadableDefaults(t *testing.T) {
 		t.Fatal("unbounded formatting entities")
 	}
 }
+
+func TestNotificationReadableRateKeepsRawUnitsAndRecoveryMeaning(t *testing.T) {
+	e := Sample("speed.recovered")
+	e.Current, e.Threshold = "5000000 B/s", "8000000 B/s"
+	r, err := RenderFormatted(DefaultTemplate(e.Type), e, "panel", "UTC")
+	if err != nil || !strings.HasPrefix(r.Body, "当前 5.00 MB/s") || !strings.Contains(r.Body, "恢复阈值　8.00 MB/s") {
+		t.Fatal("recovery message lost key values", r, err)
+	}
+	_, raw, err := Render(Template{Title: "raw", Body: "{{current}} / {{threshold}}"}, e, "panel")
+	if err != nil || raw != "5000000 B/s / 8000000 B/s" {
+		t.Fatal("raw variables changed", raw, err)
+	}
+	for input, expected := range map[string]string{"0 B/s": "0 B/s", "500 B/s": "500 B/s", "1000 B/s": "1.00 KB/s", "1000000 B/s": "1.00 MB/s", "NaN B/s": "NaN B/s", "10 bit/s": "10 bit/s"} {
+		if got := humanRate(input); got != expected {
+			t.Fatal(input, got, expected)
+		}
+	}
+}

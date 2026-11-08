@@ -350,6 +350,10 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   assert.equal(await evaluate(page,"document.querySelector('select[name=template_test_channel]').options.length"),1,'disabled channels are not offered for template tests');
   await click('测试已保存模板','.a-main');
   await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请选择测试渠道。')");
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='**长文本**\\n'+'abcdefghij'.repeat(200)+'\\n`'+'0123456789'.repeat(100)+'`';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await click('渲染预览','.a-main');
+  await wait(page,"[...document.querySelectorAll('.a-main [role=status]')].some(p=>p.textContent.includes('abcdefghij'))");
+  assert.ok(await evaluate(page,"[...document.querySelectorAll('.a-main [role=status]')].filter(p=>p.textContent.includes('abcdefghij')).every(p=>p.scrollWidth<=p.clientWidth+1)"),'long Markdown preview stays readable without clipping');
   await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='未保存的并发草稿';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
   const remoteNotifications=(await api(page,identity,'GET','/settings/notifications')).configuration;
   remoteNotifications.channels.find(c=>c.id===notificationChannel.id).name=notificationName+' refreshed';
