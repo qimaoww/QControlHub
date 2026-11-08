@@ -5,9 +5,9 @@ export async function checkAnalyticsNodeBatch({ page, mode, fixture, evaluate, w
   await wait(page, "!!document.querySelector('.a-probe-toolbar') && !document.querySelector('[aria-busy=true]')");
   const click = (label, selector = '.a-main') => evaluate(page, `[...document.querySelectorAll(${JSON.stringify(selector + ' button')})].find(button=>button.textContent===${JSON.stringify(label)}).click()`);
   await click('批量操作');
-  await evaluate(page, `(() => {const input=document.querySelector('[name=${JSON.stringify('select:' + fixture.analyticsAgent)}]');input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  await click('执行批量操作');
   await wait(page, "!!document.querySelector('dialog[open] [name=action]')");
+  assert.ok(await evaluate(page, "!document.querySelector('.a-main input[type=checkbox],.a-probe-batch') && document.querySelector('dialog[open] [type=submit]').disabled"));
+  await evaluate(page, `document.querySelector('dialog[open] [name=${JSON.stringify('batch:' + fixture.analyticsAgent)}]').click()`);
   assert.ok(await evaluate(page, "['install','upgrade-agent','status','start','restart','stop'].every(value=>document.querySelector('dialog[open] [name=action] option[value=\"'+value+'\"]'))"), 'all original batch actions are exposed');
   await evaluate(page, `window.__batchOriginalFetch=window.fetch;window.__batchBodies=[];window.__batchFailures=1;window.fetch=(url,options)=>{if(String(url).endsWith('/api/v1/tasks')&&options?.method==='POST'){window.__batchBodies.push(JSON.parse(options.body));if(window.__batchFailures-->0)return Promise.resolve(new Response(JSON.stringify({error:'批量提交暂时失败'}),{status:503,headers:{'Content-Type':'application/json'}}));}return window.__batchOriginalFetch(url,options);}`);
   try {

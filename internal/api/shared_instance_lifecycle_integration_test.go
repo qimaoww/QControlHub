@@ -100,3 +100,38 @@ func TestSharedInstanceOldAgentCannotFallBackToHostService(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchTaskExpectedInstanceCannotRetarget(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "batch-instance-guard")
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21001)
+	var agents []core.Agent
+	bob.call("GET", "/agents", nil, http.StatusOK, &agents)
+	instanceID := agents[0].Runtime[core.EngineMihomo].Instance.ID
+	admin.call("POST", "/users", core.UserRequest{Username: "batch-manager", Password: "batch manager fixture password", Role: core.RoleAdmin}, http.StatusCreated, nil)
+	manager, _ := managementLogin(t, admin.handler, "batch-manager", "batch manager fixture password", http.StatusOK)
+	mainID, foreignID := "", "foreign-instance"
+	for _, client := range []configScopeAPIClient{admin, manager, alice, bob} {
+		request := core.TaskRequest{AgentID: agent.ID, Action: core.ActionStatus, Engine: core.EngineMihomo, ExpectedInstanceID: &foreignID}
+		client.call("POST", "/tasks", request, http.StatusConflict, nil)
+		if client.userID == bob.userID {
+			request.ExpectedInstanceID = &mainID
+			client.call("POST", "/tasks", request, http.StatusConflict, nil)
+			request.ExpectedInstanceID = &instanceID
+		} else {
+			request.ExpectedInstanceID = &instanceID
+			client.call("POST", "/tasks", request, http.StatusConflict, nil)
+			request.ExpectedInstanceID = &mainID
+		}
+		var task core.Task
+		client.call("POST", "/tasks", request, http.StatusCreated, &task)
+		if client.userID == bob.userID && (!task.SharedInstance || task.SharedTrafficID != instanceID) {
+			t.Fatalf("batch request escaped the authenticated allocation: %+v", task)
+		}
+		completeConfigScopeAPITask(t, ctx, db, task)
+	}
+	var access core.AgentAccess
+	admin.call("GET", "/users/"+bob.userID+"/agent-access", nil, http.StatusOK, &access)
+	admin.call("PUT", "/users/"+bob.userID+"/agent-access", core.AgentAccessRequest{Revision: access.Revision, Isolated: true}, http.StatusOK, nil)
+	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Action: core.ActionStatus, Engine: core.EngineMihomo, ExpectedInstanceID: &instanceID}, http.StatusNotFound, nil)
+}

@@ -2,38 +2,26 @@ import { testBatchCoreUpdates } from './agent-batch-core.mjs';
 import { startNativeNodes } from './agent-detail-actions.mjs';
 import { assert, delay, waitFor } from './assertions.mjs';
 
+export function selectBatch(input, checked = true) { input.checked = checked; input.dispatchEvent(new Event('change', { bubbles: true })); }
 export const nativeBatchButton = (text, root = document) => [...root.querySelectorAll('button')].find(item => item.textContent === text);
 export async function openNativeBatch(fixture) {
   await startNativeNodes();
   nativeBatchButton('批量操作').click();
-  const card = document.querySelector('article[data-agent-id]');
-  if (card) {
-    const choice = card.querySelector('input[type=checkbox]');
-    card.querySelector('h2').click(); assert.ok(choice.checked, '点击卡片标题未选择节点');
-    card.querySelector('.a-probe-body').click(); assert.ok(!choice.checked, '点击卡片内容未取消选择');
-    card.querySelector('label').click(); assert.ok(choice.checked, '选择框标签重复切换');
-    card.focus(); card.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    assert.ok(!choice.checked, '空格键未取消卡片选择');
-    assert.ok(choice.closest('.a-probe-head'), '选择框未整合进卡片标题栏');
-    assert.equal(card.querySelector('.a-probe-footer'), null, '多选模式仍保留普通操作栏');
-    const dialogs = document.querySelectorAll('dialog[open]').length;
-    card.querySelector('.a-probe-meta').click();
-    assert.ok(choice.checked && card.dataset.selected === 'true', '多选模式下卡片底部不能选择');
-    assert.equal(document.querySelectorAll('dialog[open]').length, dialogs, '多选点击误打开设置');
-    choice.click(); assert.ok(!choice.checked, '直接点击选择框重复切换');
-  }
-  const all = () => document.querySelector('input[name=select-all]');
+  assert.equal(document.querySelectorAll('.a-main input[type=checkbox],.a-probe-batch').length, 0, '父页面残留批量选择');
+  const form = await waitFor(() => document.querySelector('dialog[open] form'), '批量操作未直接打开');
+  nativeBatchButton('批量操作').click();
+  assert.equal(document.querySelectorAll('dialog[open]').length, 1, '重复打开批量弹窗');
+  const choices = () => [...form.querySelectorAll('[name^="batch:"]')];
+  const all = () => nativeBatchButton('全选', form) || nativeBatchButton('取消全选', form);
+  const submit = form.querySelector('[type=submit]');
+  assert.ok(submit.disabled && choices().every(input => !input.checked), '首次打开默认选择或允许空提交');
   all().click();
-  assert.ok(all().checked && !all().indeterminate, '全选状态错误');
-  const multiple = document.querySelectorAll('input[name^="select:"]:enabled').length > 1;
-  const first = document.querySelector('input[name^="select:"]'); first.click();
-  assert.ok(!all().checked && all().indeterminate === multiple, '部分选择状态错误');
-  all().click(); assert.ok(all().checked && !all().indeterminate, '混合状态全选失败');
-  all().click(); assert.ok(!all().checked && !all().indeterminate, '取消全选状态错误');
-  assert.equal(document.querySelectorAll('input[name^="select:"]:checked').length, 0, '取消全选未清空选择');
+  assert.equal(all().textContent, '取消全选', '全选按钮未切换');
+  const first = choices().find(input => !input.disabled); first.click();
+  assert.equal(all().textContent, '全选', '部分选择按钮错误');
+  all().click(); assert.equal(all().textContent, '取消全选', '部分选择后全选失败');
+  all().click(); assert.ok(submit.disabled && choices().every(input => !input.checked), '取消全选未清空选择');
   all().click();
-  nativeBatchButton('执行批量操作', document.querySelector('.a-probe-batch')).click();
-  const form = await waitFor(() => document.querySelector('dialog[open] form'), '批量操作未打开');
   if (fixture.mode?.endsWith('mobile')) {
     assert.equal(innerWidth, 390, '批量操作移动视口不正确');
     assert.ok(matchMedia('(pointer:coarse)').matches, '批量操作未使用触摸模拟');
@@ -75,7 +63,7 @@ export async function testAgentBatchActions(fixture) {
   ]) {
     testAPI.agents = populatedAgents.map(agent => structuredClone(agent));
     await refresh(); change('action', action);
-    for (const id of ['alpha', 'bravo', 'delta']) choose(id).checked = id === 'alpha';
+    for (const id of ['alpha', 'bravo', 'delta']) selectBatch(choose(id), id === 'alpha');
     const before = writes(), confirmation = await confirm();
     mutate(testAPI.agents[0]);
     nativeBatchButton('执行批量操作', confirmation).click(); await idle();
@@ -83,7 +71,7 @@ export async function testAgentBatchActions(fixture) {
     assert.ok(row('alpha').textContent.includes('离线') || row('alpha').textContent.includes('旧版 Agent') || row('alpha').textContent.includes('未安装'), '失效原因未呈现');
   }
   testAPI.agents = populatedAgents.map(agent => structuredClone(agent)); await refresh(); change('action', 'upgrade-agent');
-  choose('alpha').checked = choose('bravo').checked = true;
+  selectBatch(choose('alpha')); selectBatch(choose('bravo'));
   let confirmation = await confirm(); form.requestSubmit();
   assert.equal(document.querySelectorAll('dialog[open]').length, 2, '重复提交打开额外确认');
   let next = writes(); nativeBatchButton('执行批量操作', confirmation).click();
@@ -130,10 +118,12 @@ export async function testAgentBatchActions(fixture) {
   await waitFor(() => writes() === next + 1, '失败重试未提交'); await delay(30);
   assert.equal(writes(), next + 1, '重试未阻止并行提交');
   assert.ok(form.elements.action.matches(':disabled') && choose('bravo').matches(':disabled') && submit.matches(':disabled'), '重试未锁定所有操作');
-  testAPI.pendingTasks[next++].fail('alpha retry still failing'); await idle();
+  testAPI.pendingTasks[next++].fail('alpha retry still failing · ' + '连接错误详情'.repeat(50)); await idle();
   nativeBatchButton('重试提交', row('alpha')).click();
   await waitFor(() => writes() === next + 1, '重试失败后不能再次重试');
   testAPI.pendingTasks[next++].ok({ id: 'task-alpha-retry' }); await idle();
+  testAPI.taskStates.set('task-alpha-retry', { id: 'task-alpha-retry', status: 'succeeded' }); await refresh();
+  assert.ok(row('alpha').textContent.includes('执行成功'), '任务状态刷新未区分提交与执行结果');
   testAPI.agents[1].status = 'offline'; await refresh();
   const retry = nativeBatchButton('重试提交', row('bravo'));
   assert.ok(retry.disabled, '离线节点重试未禁用');
