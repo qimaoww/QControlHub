@@ -83,6 +83,9 @@ try {
   const paged = await counts(); await reload(); await wait(ready);
   assert.equal((await counts()).reads, paged.reads, 'reload lost the cursor page');
   assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 2 页')`));
+  await configure({ order: ['bravo', 'alpha'] }); await reload(); await wait(ready);
+  assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 1 页')`), 'changed authenticated node order reused an old cursor');
+  assert.equal((await counts()).reads, paged.reads + 1, 'changed node order reused an incompatible page');
   await change('agent_id', 'alpha'); await wait(ready);
   await change('engine', 'xray'); await wait(ready);
   await change('client_ip', '8.8.8.1'); await wait(ready);
@@ -126,6 +129,8 @@ try {
   assert.equal(await evaluate(rows), 0, 'revoked permission retained IP history');
   await configure({ failure: 0 }); await refresh(); await wait(ready);
   await reload(); await wait(ready); // Re-enable session storage after the disabled-storage document.
+  const beforeDouble = await counts(); await refresh(); await refresh(); await wait(ready);
+  assert.equal((await counts()).reads, beforeDouble.reads + 1, 'repeated force refresh duplicated an in-flight query');
   await evaluate(`document.querySelector('.a-main [name=client_ip]').value='unsubmitted-search';document.querySelector('.a-main [name=client_ip]').focus();document.activeElement.setSelectionRange(2,5);window.savedInput=document.activeElement;`);
   await refresh(); await wait(ready);
   assert.ok(await evaluate(`document.activeElement===savedInput && savedInput.value==='unsubmitted-search' && savedInput.selectionStart===2 && savedInput.selectionEnd===5`), 'refresh disturbed input focus, selection or unsubmitted edits');

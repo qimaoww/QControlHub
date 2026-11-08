@@ -115,7 +115,7 @@ export async function connectionsPage(ctx) {
     try {
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
-      if (force || !sources.length) {
+      if (force || initialOrder || !sources.length) {
         const order = await (!force && initialOrder || ctx.api("/preferences/node-order", { signal }));
         if (!current()) return;
         if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; }
