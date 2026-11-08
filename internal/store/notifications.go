@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -133,20 +134,30 @@ func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c 
 		return c, err
 	}
 	// A modified rule starts from the current journal, without replaying history.
+	retainedRules := []notify.Rule{}
+	for _, next := range c.Rules {
+		for _, old := range previous.Rules {
+			if next.Enabled && old.Enabled && next.ID == old.ID && next.Event == old.Event && next.AgentID == old.AgentID && next.PolicyID == old.PolicyID {
+				retainedRules = append(retainedRules, next)
+			}
+		}
+	}
 	for _, r := range previous.Rules {
 		same := false
 		for _, next := range c.Rules {
-			a, _ := json.Marshal(r)
-			b, _ := json.Marshal(next)
-			if string(a) == string(b) {
+			if sameNotificationRule(r, next) {
 				same = true
 			}
 		}
 		if !same {
+			retained, er := preserveNotificationSourceRules(ctx, tx, owner, r.ID, retainedRules)
+			if er != nil {
+				return c, er
+			}
 			if _, err = tx.Exec(ctx, `DELETE FROM notification_rule_states WHERE owner_id=$1 AND rule_id=$2`, owner, r.ID); err != nil {
 				return c, err
 			}
-			if _, err = tx.Exec(ctx, `UPDATE notification_deliveries SET status='canceled',error='规则已修改',updated_at=now() WHERE owner_id=$1 AND rule_id=$2 AND status IN ('pending','sending')`, owner, r.ID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE notification_deliveries SET status='canceled',error='规则已修改',updated_at=now() WHERE owner_id=$1 AND rule_id=$2 AND status IN ('pending','sending') AND NOT(id=ANY($3::bigint[]))`, owner, r.ID, retained); err != nil {
 				return c, err
 			}
 		}
@@ -154,9 +165,7 @@ func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c 
 	for _, old := range previous.Channels {
 		same := false
 		for _, next := range c.Channels {
-			a, _ := json.Marshal(old)
-			b, _ := json.Marshal(next)
-			if string(a) == string(b) && next.Enabled {
+			if sameNotificationChannel(old, next) && next.Enabled {
 				same = true
 			}
 		}
@@ -184,6 +193,86 @@ func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c 
 	}
 	c.Revision++
 	return c, nil
+}
+
+// Labels and recipient ordering do not change detection or revoke queued work.
+func sameNotificationRule(a, b notify.Rule) bool {
+	a.Name, b.Name = "", ""
+	a.Channels, b.Channels = append([]string{}, a.Channels...), append([]string{}, b.Channels...)
+	sort.Strings(a.Channels)
+	sort.Strings(b.Channels)
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+func sameNotificationChannel(a, b notify.Channel) bool {
+	a.Name, b.Name, a.Configured, b.Configured = "", "", nil, nil
+	if len(a.Values) == 0 {
+		a.Values = nil
+	}
+	if len(b.Values) == 0 {
+		b.Values = nil
+	}
+	if len(a.Secrets) == 0 {
+		a.Secrets = nil
+	}
+	if len(b.Secrets) == 0 {
+		b.Secrets = nil
+	}
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// Overlapping subscriptions share a source delivery. Removing one subscription
+// must retain work still covered by an existing, enabled subscription.
+func preserveNotificationSourceRules(ctx context.Context, tx pgx.Tx, owner, rule string, retained []notify.Rule) ([]int64, error) {
+	ids := []int64{}
+	if len(retained) == 0 {
+		return ids, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id,channel_id,event FROM notification_deliveries WHERE owner_id=$1 AND rule_id=$2 AND status IN ('pending','sending') AND starts_with(dedupe,'source:') LIMIT 1000`, owner, rule)
+	if err != nil {
+		return nil, err
+	}
+	type item struct {
+		id      int64
+		channel string
+		event   notify.Event
+	}
+	items := []item{}
+	for rows.Next() {
+		var v item
+		if err = rows.Scan(&v.id, &v.channel, &v.event); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		items = append(items, v)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range items {
+		for _, r := range retained {
+			if r.Event != v.event.Type || r.AgentID != "" && r.AgentID != v.event.AgentID || r.PolicyID != "" && r.PolicyID != v.event.ResourceID {
+				continue
+			}
+			for _, channel := range r.Channels {
+				if channel != v.channel {
+					continue
+				}
+				if _, err = tx.Exec(ctx, `UPDATE notification_deliveries SET rule_id=$2 WHERE id=$1`, v.id, r.ID); err != nil {
+					return nil, err
+				}
+				ids = append(ids, v.id)
+				goto nextItem
+			}
+		}
+	nextItem:
+	}
+	return ids, nil
 }
 func (s *Store) validateNotificationRule(ctx context.Context, x storeExecutor, r notify.Rule) error {
 	if !s.notificationCanEvent(ctx, x, notificationOwner(ctx), r.Event) {
@@ -321,12 +410,13 @@ type NotificationDelivery struct {
 	Attempts      int          `json:"attempts"`
 	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt     time.Time    `json:"updated_at"`
+	NextAt        time.Time    `json:"next_at"`
 	Error         string       `json:"error"`
 	Lease         string       `json:"-"`
 }
 
 func (s *Store) NotificationDeliveries(ctx context.Context) ([]NotificationDelivery, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id,rule_id,channel_id,event,resource_owner,status,attempts,created_at,updated_at,error FROM notification_deliveries WHERE owner_id=$1 ORDER BY id DESC LIMIT 100`, notificationOwner(ctx))
+	rows, err := s.pool.Query(ctx, `SELECT id,rule_id,channel_id,event,resource_owner,status,attempts,created_at,updated_at,next_at,error FROM notification_deliveries WHERE owner_id=$1 ORDER BY id DESC LIMIT 100`, notificationOwner(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +424,7 @@ func (s *Store) NotificationDeliveries(ctx context.Context) ([]NotificationDeliv
 	out := []NotificationDelivery{}
 	for rows.Next() {
 		var d NotificationDelivery
-		if err = rows.Scan(&d.ID, &d.RuleID, &d.ChannelID, &d.Event, &d.ResourceOwner, &d.Status, &d.Attempts, &d.CreatedAt, &d.UpdatedAt, &d.Error); err != nil {
+		if err = rows.Scan(&d.ID, &d.RuleID, &d.ChannelID, &d.Event, &d.ResourceOwner, &d.Status, &d.Attempts, &d.CreatedAt, &d.UpdatedAt, &d.NextAt, &d.Error); err != nil {
 			return nil, err
 		}
 		if s.notificationEventAllowed(ctx, s.pool, notificationOwner(ctx), d.Event, d.ResourceOwner) {

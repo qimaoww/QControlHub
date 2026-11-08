@@ -14,27 +14,29 @@ const statusNames = { pending: "等待投递", sending: "投递中", accepted: "
 const id = () => crypto.randomUUID().replaceAll("-", "");
 
 export async function notificationsPage(ctx) {
-  const [resource, agents, policies] = await Promise.all([
+  let [resource, agents, policies] = await Promise.all([
     ctx.api("/settings/notifications"), ctx.can("agents.read") ? ctx.api("/agents") : [], ctx.can("traffic.read") ? ctx.api("/traffic-policies") : [],
   ]);
   let config = resource.configuration;
   const writable = ctx.can("settings.manage");
   const feedback = notice("", "info");
   const channelList = node("div"), ruleList = node("div");
-  const records = table(["时间", "事件", "渠道", "状态", "尝试", "反馈"], [], { label: "通知投递", emptyText: "暂无投递记录" });
-  let recordSequence = 0, templateDirty = false, modalDirty = false;
+  const records = table(["时间", "事件", "渠道", "状态", "尝试", "反馈"], [], { label: "通知投递", emptyText: "暂无投递记录", rowKey: row => row[0].dataset.deliveryId });
+  let recordSequence = 0, refreshSequence = 0, templateDirty = false, modalDirty = false, activeModal = null, pollTimer, activeTestID, hasPending = false, recordError = false;
+  ctx.signal.addEventListener("abort", () => clearTimeout(pollTimer), { once: true });
   const syncDirty = () => { if (ctx.current()) ctx.setDirty(templateDirty || modalDirty); };
   function protectDraft(box, form) {
+    activeModal = box;
     const changed = () => { modalDirty = true; syncDirty(); };
     form.addEventListener("input", changed); form.addEventListener("change", changed);
     box.onRequestClose = async () => { if (!modalDirty || await ctx.confirm("放弃当前草稿？", "关闭编辑")) box.close(); };
-    box.addEventListener("close", () => { modalDirty = false; syncDirty(); }, { once: true });
+    box.addEventListener("close", () => { activeModal = null; modalDirty = false; syncDirty(); }, { once: true });
   }
   const save = async next => {
     let saved;
     try { saved = await ctx.api("/settings/notifications", { method: "PUT", body: next }); }
     catch (error) {
-      if (error.status === 409 && ctx.current()) { const latest = await ctx.api("/settings/notifications"); if (ctx.current()) { config = latest.configuration; draw(); } }
+      if (error.status === 409) throw new Error("通知配置已变化，请刷新后重试。当前草稿已保留。");
       throw error;
     }
     if (!ctx.current()) return false;
@@ -107,7 +109,7 @@ export async function notificationsPage(ctx) {
       button("编辑", () => editChannel(ch)), button(ch.enabled ? "停用" : "启用", event => void ctx.mutate(event.currentTarget, () => change(c => { c.channels.find(v => v.id === ch.id).enabled = !ch.enabled; }))),
       button("测试已保存配置", event => void ctx.mutate(event.currentTarget, async () => {
         const result = await ctx.api("/settings/notifications/test", { method: "POST", body: { channel_id: ch.id, revision: config.revision } });
-        if (!ctx.current()) return; feedback.textContent = `测试已入队（${result.id}），投递结果见下方记录。`; await loadRecords();
+        if (!ctx.current()) return; activeTestID = result.id; hasPending = true; feedback.textContent = "测试已入队，正在等待投递结果。"; await loadRecords();
       }), { disabled: !ch.enabled }), button("删除", event => void removeChannel(ch, event.currentTarget), { tone: "danger" })) : null,
     ]), { label: "通知渠道", emptyText: "尚未添加通知渠道" }));
     ruleList.replaceChildren(table(["名称", "事件 / 范围", "接收渠道", "状态", "操作"], config.rules.map(r => [r.name,
@@ -137,19 +139,52 @@ export async function notificationsPage(ctx) {
     }))), preview,
   ], "保存模板", async values => { if (await change(c => { c.templates ||= {}; c.templates[selection.value] = { title: values.title, body: values.body }; })) { templateDirty = false; syncDirty(); ctx.announce("模板已保存"); } });
   templateForm.dataset.event = selection.value;
-  templateForm.addEventListener("input", () => { templateDirty = true; syncDirty(); previewSequence++; });
+  templateForm.addEventListener("input", () => { templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
   if (!writable) templateForm.querySelector('button[type="submit"]').remove();
   loadTemplate();
   async function loadRecords() {
+    clearTimeout(pollTimer);
     const sequence = ++recordSequence;
     try {
       const result = await ctx.api("/settings/notifications/deliveries");
       if (!ctx.current() || sequence !== recordSequence) return;
-      records.updateRows(result.map(d => [date(d.created_at), d.event.test ? "测试" : resource.events[d.event.type] || d.event.type,
-        config.channels.find(c => c.id === d.channel_id)?.name || "已删除", badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn"), String(d.attempts), d.error || "—"]));
-    } catch (error) { if (!ctx.current() || sequence !== recordSequence) return; if (error.status === 403) records.updateRows([]); feedback.textContent = `读取投递记录失败：${error.message}`; }
+      records.updateRows(result.map(d => [node("div", { className: "a-stack", "data-delivery-id": d.id }, date(d.created_at), muted(`更新：${date(d.updated_at)}`)), d.event.test ? "测试" : resource.events[d.event.type] || d.event.type,
+        config.channels.find(c => c.id === d.channel_id)?.name || "已删除", stack(node("div", {}, badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn")),
+          d.status === "pending" && d.attempts > 0 ? muted(`重试：${date(d.next_at)}`) : null), String(d.attempts), d.error || "—"]));
+      if (recordError && !activeTestID) feedback.textContent = "";
+      recordError = false;
+      const test = result.find(d => d.id === activeTestID);
+      if (test) {
+        feedback.textContent = test.status === "accepted" ? "测试消息已被平台接受。" : test.status === "failed" || test.status === "canceled" ? `测试${statusNames[test.status]}：${test.error || "请检查渠道配置"}` : test.attempts > 0 && test.status === "pending" ? `测试暂未成功，将于 ${date(test.next_at)} 重试。` : "测试正在投递，请稍候。";
+        if (!["pending", "sending"].includes(test.status)) activeTestID = null;
+      }
+      hasPending = result.some(d => ["pending", "sending"].includes(d.status));
+      if (hasPending) pollTimer = setTimeout(() => void loadRecords(), 3000);
+    } catch (error) {
+      if (!ctx.current() || sequence !== recordSequence) return;
+      if (error.status === 403) { records.updateRows([]); hasPending = false; activeTestID = null; }
+      else if (hasPending) pollTimer = setTimeout(() => void loadRecords(), 10000);
+      recordError = true; feedback.textContent = `读取投递记录失败：${error.message}`;
+    }
   }
-  ctx.onRefresh(loadRecords);
+  async function refreshConfiguration() {
+    const sequence = ++refreshSequence, revision = config.revision;
+    const latest = await Promise.all([
+      ctx.api("/settings/notifications"), ctx.can("agents.read") ? ctx.api("/agents") : [], ctx.can("traffic.read") ? ctx.api("/traffic-policies") : [],
+    ]);
+    if (!ctx.current() || sequence !== refreshSequence || config.revision !== revision) return;
+    if (latest[0].configuration.revision !== config.revision) {
+      if ((templateDirty || activeModal) && !await ctx.confirm("通知配置已更新，载入最新配置将放弃当前草稿。", "刷新通知配置")) return loadRecords();
+      if (!ctx.current() || sequence !== refreshSequence || config.revision !== revision) return;
+      activeModal?.close();
+      [resource, agents, policies] = latest; config = resource.configuration;
+      draw(); loadTemplate(); templateForm.querySelector(":scope > .a-notice").textContent = "";
+    } else {
+      [resource, agents, policies] = latest;
+    }
+    await loadRecords();
+  }
+  ctx.onRefresh(refreshConfiguration);
   draw(); await loadRecords();
   return stack(
     section("通知渠道", node("div", { className: "a-card-body a-stack" }, feedback, channelList), writable && button("添加渠道", () => editChannel())),

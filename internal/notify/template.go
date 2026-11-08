@@ -2,11 +2,12 @@ package notify
 
 import (
 	"fmt"
-	"github.com/qimaoww/qcontrolhub/internal/core"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 var secretText = regexp.MustCompile(`(?i)(?:bearer\s+\S+|(?:token|password|passwd|secret|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+|https?://[^\s<>]+|\b[0-9]{6,}:[A-Za-z0-9_-]{20,})`)
@@ -37,8 +38,10 @@ func Render(t Template, e Event, panel string) (string, string, error) {
 	if e.Port > 0 {
 		v["port"] = fmt.Sprint(e.Port)
 	}
-	if e.LimitBytes > 0 {
+	if strings.HasPrefix(e.Type, "traffic.") || e.UsedBytes > 0 {
 		v["used_bytes"] = fmt.Sprint(e.UsedBytes)
+	}
+	if e.LimitBytes > 0 {
 		v["limit_bytes"] = fmt.Sprint(e.LimitBytes)
 		v["percent"] = fmt.Sprintf("%.2f%%", float64(e.UsedBytes)/float64(e.LimitBytes)*100)
 	}
@@ -54,5 +57,28 @@ func Render(t Template, e Event, panel string) (string, string, error) {
 	return Clip(render(t.Title), 400), Clip(render(t.Body), 12000), nil
 }
 func Sample(event string) Event {
-	return Event{Type: event, Time: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), AgentID: "agt_example", TaskID: "tsk_example", Action: "validate", Agent: "示例节点", Engine: "xray", Port: 443, UsedBytes: 80 << 30, LimitBytes: 100 << 30, Current: "12 MB/s", Threshold: "10 MB/s", Period: "2026-01-01 / 2026-02-01", Direction: "上传", Version: "v1.2.3", Error: "示例错误（已脱敏）", Message: "脱敏示例：" + EventNames[event]}
+	e := Event{Type: event, Time: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), Message: "脱敏示例：" + EventNames[event]}
+	if event != "panel.update" {
+		e.AgentID, e.Agent = "agt_example", "示例节点"
+	}
+	switch event {
+	case TypeTaskFailed:
+		e.TaskID, e.Action, e.Engine, e.Error = "tsk_example", "validate", "xray", "示例错误（已脱敏）"
+	case TypeTrafficQuota, "traffic.warning":
+		e.Engine, e.Port = "xray", 443
+		e.UsedBytes, e.LimitBytes = 80<<30, 100<<30
+		e.Current, e.Threshold, e.Period, e.Direction = "80.00%", "80.00%", "2026-01-01 / 2026-02-01", "上传 + 下载（计费口径）"
+	case "speed.high", "speed.low", "speed.recovered":
+		e.Current, e.Threshold, e.Direction = "12 MB/s", "10 MB/s", "上传（TX）"
+		if event == "speed.low" {
+			e.Current, e.Threshold = "500 B/s", "1000 B/s"
+		}
+		if event == "speed.recovered" {
+			e.Current, e.Threshold = "5 MB/s", "8 MB/s"
+		}
+	case "panel.update":
+		e.Version = "v1.2.3"
+	}
+	e.Status = event
+	return e
 }

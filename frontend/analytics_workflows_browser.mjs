@@ -334,8 +334,25 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('保存模板','.a-main');
   await wait(page,"!document.querySelector('[aria-busy=true]')");
   assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='未保存的并发草稿';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  const remoteNotifications=(await api(page,identity,'GET','/settings/notifications')).configuration;
+  remoteNotifications.channels.find(c=>c.id===notificationChannel.id).name=notificationName+' refreshed';
+  await api(page,identity,'PUT','/settings/notifications',remoteNotifications);
+  await click('保存模板','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('通知配置已变化')");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').value"),'未保存的并发草稿','conflict preserves the draft');
+  await click('刷新','.a-top');
+  await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
+  await click('取消');
+  await wait(page,"!document.querySelector('dialog[open]')");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').value"),'未保存的并发草稿','refresh cancellation preserves the draft');
+  await click('刷新','.a-top');
+  await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
+  await click('刷新通知配置');
+  await wait(page,`!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-main td')].some(c=>c.textContent===${JSON.stringify(notificationName+' refreshed')})`);
+  assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"),'explicit refresh loads the saved template and current channels');
   await screenshot(page,'analytics-notification-templates');
-  record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save and refresh draft preservation passed`);
+  record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save, stale-save conflict and explicit refresh draft preservation passed`);
   await evaluate(page,"location.hash='#archive-config'");
   await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
 

@@ -145,3 +145,20 @@ func TestNotificationTemplatesAndConfiguration(t *testing.T) {
 		t.Fatal("accepted invalid hysteresis")
 	}
 }
+
+func TestNotificationPreviewFieldsAndQuotaWithoutLimit(t *testing.T) {
+	template := Template{Title: "{{type}}", Body: "{{agent}}|{{task_id}}|{{port}}|{{used_bytes}}|{{limit_bytes}}|{{percent}}|{{version}}"}
+	_, body, err := Render(template, Sample("panel.update"), "panel")
+	if err != nil || body != "—|—|—|—|—|—|v1.2.3" {
+		t.Fatalf("update example leaked unrelated fields: %s %v", body, err)
+	}
+	event := Event{Type: "traffic.warning", Time: time.Now().UTC(), UsedBytes: 123}
+	_, body, err = Render(template, event, "panel")
+	if err != nil || body != "—|—|—|123|—|—|—" {
+		t.Fatalf("no-limit usage: %s %v", body, err)
+	}
+	_, body, err = Render(template, Sample(TypeAgentOffline), "panel")
+	if err != nil || body != "示例节点|—|—|—|—|—|—" {
+		t.Fatalf("presence example: %s %v", body, err)
+	}
+}

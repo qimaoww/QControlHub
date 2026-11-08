@@ -86,6 +86,31 @@ func TestNotificationPresenceOutboxRetryRestartAndCancellation(t *testing.T) {
 		_ = s.pool.QueryRow(ctx, `SELECT jsonb_build_object('sources',(SELECT jsonb_agg(e) FROM notification_events e),'states',(SELECT jsonb_agg(st) FROM notification_rule_states st))::text`).Scan(&diagnostic)
 		t.Fatalf("durable dedupe %+v %v %s agent=%+v", rows, err, diagnostic, a)
 	}
+	// Cosmetic edits must not revoke pending work or reset detection state.
+	c.Channels[0].Name = "renamed channel"
+	c.Rules[0].Name = "renamed subscription"
+	c, err = s.SaveNotificationConfiguration(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := s.NotificationDeliveries(ctx)
+	if err != nil || renamed[0].Status != "pending" {
+		t.Fatalf("rename canceled work: %+v %v", renamed, err)
+	}
+	var states int
+	if err = s.pool.QueryRow(ctx, `SELECT count(*) FROM notification_rule_states WHERE rule_id='offline'`).Scan(&states); err != nil || states == 0 {
+		t.Fatalf("rename reset detection: %d %v", states, err)
+	}
+	// A shared source remains deliverable through the other unchanged rule.
+	c.Rules[0].Enabled = false
+	c, err = s.SaveNotificationConfiguration(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err = s.NotificationDeliveries(ctx)
+	if err != nil || renamed[0].Status != "pending" || renamed[0].RuleID != overlapping.ID {
+		t.Fatalf("overlapping subscription lost work: %+v %v", renamed, err)
+	}
 	sender := notify.NewSender()
 	if ok, err := s.DeliverNotification(ctx, sender, ""); err != nil || !ok {
 		t.Fatalf("attempt %v %v", ok, err)
@@ -359,15 +384,27 @@ func TestNotificationSharedAllocationAndRevocation(t *testing.T) {
 func TestNotificationUpdatesDeduplicateFullVersionsAndKeepFailures(t *testing.T) {
 	ctx, s, _, c := notificationFixture(t)
 	c.Rules = []notify.Rule{{ID: "update", Name: "update", Event: "panel.update", Enabled: true, Channels: []string{"hook"}, Duration: 10, Cooldown: 60, Interval: 3600}}
-	if _, err := s.SaveNotificationConfiguration(ctx, c); err != nil {
+	overlap := c.Rules[0]
+	overlap.ID = "update-overlap"
+	c.Rules = append(c.Rules, overlap)
+	var err error
+	c, err = s.SaveNotificationConfiguration(ctx, c)
+	if err != nil {
 		t.Fatal(err)
 	}
 	forceNotificationScan(t, ctx, s)
-	for _, version := range []string{strings.Repeat("a", 39) + "1", strings.Repeat("a", 39) + "1", strings.Repeat("a", 39) + "2"} {
+	for i, version := range []string{strings.Repeat("a", 39) + "1", strings.Repeat("a", 39) + "1", strings.Repeat("a", 39) + "2"} {
+		if i == 1 {
+			c.Rules[0].Interval = 7200
+			c, err = s.SaveNotificationConfiguration(ctx, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := s.pool.Exec(ctx, `UPDATE notification_update_cache SET version=$1,error='',checked_at=now()+interval '1 second';`, version); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.pool.Exec(ctx, `UPDATE notification_rule_states SET state=jsonb_set(state,'{last}',to_jsonb(now()-interval '1 second')) WHERE rule_id='update'`); err != nil {
+		if _, err := s.pool.Exec(ctx, `UPDATE notification_rule_states SET state=jsonb_set(state,'{last}',to_jsonb(now()-interval '1 second')) WHERE rule_id IN ('update','update-overlap')`); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.SetNotificationUpdateComparison(ctx, version, true); err != nil {
@@ -511,5 +548,135 @@ func TestNotificationTestSendHonorsQueueCapacity(t *testing.T) {
 	}
 	if err := s.CleanNotificationRecords(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNotificationChannelBackoffIsolatedAndResumable(t *testing.T) {
+	ctx, s, _, c := notificationFixture(t)
+	var limited, other atomic.Int64
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/limited" && limited.Add(1) == 1 {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(429)
+			return
+		}
+		if r.URL.Path == "/other" {
+			other.Add(1)
+		}
+		w.WriteHeader(204)
+	}))
+	defer endpoint.Close()
+	t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
+	c.Channels[0].Secrets["url"] = endpoint.URL + "/limited"
+	c.Channels = append(c.Channels, notify.Channel{ID: "other", Name: "other", Type: "webhook", Enabled: true, Secrets: map[string]string{"url": endpoint.URL + "/other"}})
+	var err error
+	c, err = s.SaveNotificationConfiguration(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"hook", "hook", "other"} {
+		if _, err = s.QueueNotificationTest(ctx, channel, c.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sender := notify.NewSender()
+	if ok, err := s.DeliverNotification(ctx, sender, ""); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err = s.pool.Exec(ctx, `UPDATE notification_deliveries SET updated_at=now()-interval '1 minute' WHERE attempts>0`); err != nil {
+		t.Fatal(err)
+	}
+	// The subsequent message on this channel waits for Retry-After; another channel proceeds.
+	if ok, err := s.DeliverNotification(ctx, sender, ""); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := s.DeliverNotification(ctx, sender, ""); err != nil || ok {
+		t.Fatal("backoff bypassed", ok, err)
+	}
+	if limited.Load() != 1 || other.Load() != 1 {
+		t.Fatal("channels not isolated", limited.Load(), other.Load())
+	}
+	rows, err := s.NotificationDeliveries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.ChannelID == "hook" && r.Attempts == 1 && time.Until(r.NextAt) < 100*time.Second {
+			t.Fatal("lost retry timing", r.NextAt)
+		}
+	}
+	if _, err = s.pool.Exec(ctx, `UPDATE notification_deliveries SET next_at=now()-interval '1 second',updated_at=now()-interval '1 minute' WHERE status='pending' AND attempts>0`); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DeliverNotification(ctx, sender, ""); err != nil || !ok {
+		t.Fatal("retry did not resume", ok, err)
+	}
+	if limited.Load() != 2 {
+		t.Fatal("retry not sent", limited.Load())
+	}
+}
+
+func TestNotificationQueueCapacityCountsOnlyNewEnabledTargets(t *testing.T) {
+	ctx, s, a, c := notificationFixture(t)
+	c.Channels = append(c.Channels, notify.Channel{ID: "disabled", Name: "disabled", Type: "webhook", Enabled: false, Secrets: map[string]string{"url": "https://example.com"}})
+	c.Rules[0].Channels = append(c.Rules[0].Channels, "disabled")
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO notification_deliveries(owner_id,rule_id,channel_id,dedupe,event) SELECT '','offline','hook',n::text,'{}'::jsonb FROM generate_series(1,999) n`); err != nil {
+		t.Fatal(err)
+	}
+	event := notify.Event{Type: notify.TypeAgentOffline, Time: time.Now().UTC(), AgentID: a.ID}
+	if err = s.queueNotification(ctx, tx, "", c, c.Rules[0], event, "source:fixture", ""); err != nil {
+		t.Fatal("disabled target consumed capacity", err)
+	}
+	overlap := c.Rules[0]
+	overlap.ID = "overlap"
+	if err = s.queueNotification(ctx, tx, "", c, overlap, event, "source:fixture", ""); err != nil {
+		t.Fatal("dedupe consumed capacity", err)
+	}
+	if err = s.queueNotification(ctx, tx, "", c, overlap, event, "source:new", ""); err == nil {
+		t.Fatal("new delivery exceeded capacity")
+	}
+}
+
+func TestNotificationRemovingOneTargetRetainsOtherQueuedTargets(t *testing.T) {
+	ctx, s, a, c := notificationFixture(t)
+	c.Channels = append(c.Channels, notify.Channel{ID: "second", Name: "second", Type: "webhook", Enabled: true, Secrets: map[string]string{"url": "https://example.com/second"}})
+	c.Rules[0].Channels = append(c.Rules[0].Channels, "second")
+	var err error
+	c, err = s.SaveNotificationConfiguration(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if err = s.queueNotification(ctx, tx, "", c, c.Rules[0], notify.Event{Type: notify.TypeAgentOffline, Time: time.Now().UTC(), AgentID: a.ID}, "source:two-targets", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c.Channels = c.Channels[1:]
+	c.Rules[0].Channels = []string{"second"}
+	if _, err = s.SaveNotificationConfiguration(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.NotificationDeliveries(ctx)
+	if err != nil || len(rows) != 2 {
+		t.Fatal(rows, err)
+	}
+	for _, row := range rows {
+		if row.ChannelID == "second" && row.Status != "pending" {
+			t.Fatal("unaffected target lost queued message", row)
+		}
+		if row.ChannelID == "hook" && row.Status != "canceled" {
+			t.Fatal("revoked target retained queued message", row)
+		}
 	}
 }

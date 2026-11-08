@@ -39,18 +39,45 @@ func writeNotificationState(ctx context.Context, tx pgx.Tx, owner, rule, resourc
 	return err
 }
 func (s *Store) queueNotification(ctx context.Context, tx pgx.Tx, owner string, c notify.Configuration, r notify.Rule, e notify.Event, key, resourceOwner string) error {
-	// Backpressure aborts the transaction, preserving source cursors and rule states for retry.
+	if !strings.HasPrefix(key, "source:") {
+		key = fmt.Sprintf("%d:%s", c.Revision, key)
+	}
+	targets := []string{}
+	for _, id := range r.Channels {
+		for _, ch := range c.Channels {
+			if ch.ID == id && ch.Enabled {
+				targets = append(targets, id)
+			}
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT target FROM unnest($1::text[]) target WHERE NOT EXISTS(
+ SELECT 1 FROM notification_deliveries d WHERE d.owner_id=$2 AND d.channel_id=target AND d.dedupe=$3 AND (d.rule_id=$4 OR starts_with($3,'source:')))`, targets, owner, key, r.ID)
+	if err != nil {
+		return err
+	}
+	missing := []string{}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		missing = append(missing, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(missing) == 0 {
+		return err
+	}
+	// Backpressure counts only new, enabled targets and preserves cursors for retry.
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM notification_deliveries WHERE owner_id=$1 AND status IN ('pending','sending') LIMIT 1000) q`, owner).Scan(&count); err != nil {
 		return err
 	}
-	if count+len(r.Channels) > 1000 {
+	if count+len(missing) > 1000 {
 		return errors.New("notification queue capacity reached")
 	}
 	e.Error = notify.Redact(e.Error)
-	if !strings.HasPrefix(key, "source:") {
-		key = fmt.Sprintf("%d:%s", c.Revision, key)
-	}
 	authorization, err := s.notificationAuthorization(ctx, tx, owner)
 	if err != nil {
 		return err
@@ -59,16 +86,7 @@ func (s *Store) queueNotification(ctx context.Context, tx pgx.Tx, owner string, 
 	if err != nil {
 		return err
 	}
-	for _, id := range r.Channels {
-		enabled := false
-		for _, ch := range c.Channels {
-			if ch.ID == id && ch.Enabled {
-				enabled = true
-			}
-		}
-		if !enabled {
-			continue
-		}
+	for _, id := range missing {
 		if _, err = tx.Exec(ctx, `INSERT INTO notification_deliveries(owner_id,rule_id,channel_id,dedupe,event,resource_owner,principal_stamp) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, owner, r.ID, id, key, raw, resourceOwner, authorization); err != nil {
 			return err
 		}
@@ -276,7 +294,7 @@ func (s *Store) scanSpeedRule(ctx context.Context, tx pgx.Tx, owner string, c no
 		return nil
 	}
 	st.Sample = metrics.NetworkSampledAt
-	rate := float64(metrics.NetworkRXBPS + metrics.NetworkTXBPS)
+	rate := float64(metrics.NetworkRXBPS) + float64(metrics.NetworkTXBPS)
 	if r.Direction == "upload" {
 		rate = float64(metrics.NetworkTXBPS)
 	} else if r.Direction == "download" {

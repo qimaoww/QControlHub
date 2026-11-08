@@ -24,7 +24,7 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	var authorization string
 	err = tx.QueryRow(ctx, `SELECT d.id,d.owner_id,d.rule_id,d.channel_id,d.event,d.resource_owner,d.attempts,d.principal_stamp
  FROM notification_deliveries d WHERE ((d.status='pending' AND d.next_at<=now()) OR (d.status='sending' AND d.lease_until<now()))
- AND NOT EXISTS(SELECT 1 FROM notification_deliveries busy WHERE busy.owner_id=d.owner_id AND busy.channel_id=d.channel_id AND busy.id<>d.id AND ((busy.status='sending' AND busy.lease_until>now()) OR busy.updated_at>now()-interval '3 seconds' AND busy.attempts>0))
+ AND NOT EXISTS(SELECT 1 FROM notification_deliveries busy WHERE busy.owner_id=d.owner_id AND busy.channel_id=d.channel_id AND busy.id<>d.id AND ((busy.status='sending' AND busy.lease_until>now()) OR (busy.status='pending' AND busy.attempts>0 AND busy.next_at>now()) OR busy.updated_at>now()-interval '3 seconds' AND busy.attempts>0))
  ORDER BY d.next_at,d.id FOR UPDATE OF d SKIP LOCKED LIMIT 1`).Scan(&d.ID, &d.Owner, &d.RuleID, &d.ChannelID, &d.Event, &d.ResourceOwner, &d.Attempts, &authorization)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -41,7 +41,7 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 		return false, nil
 	}
 	var busy bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_deliveries WHERE owner_id=$1 AND channel_id=$2 AND id<>$3 AND ((status='sending' AND lease_until>now()) OR updated_at>now()-interval '3 seconds' AND attempts>0))`, d.Owner, d.ChannelID, d.ID).Scan(&busy); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_deliveries WHERE owner_id=$1 AND channel_id=$2 AND id<>$3 AND ((status='sending' AND lease_until>now()) OR (status='pending' AND attempts>0 AND next_at>now()) OR updated_at>now()-interval '3 seconds' AND attempts>0))`, d.Owner, d.ChannelID, d.ID).Scan(&busy); err != nil {
 		return false, err
 	}
 	if busy {

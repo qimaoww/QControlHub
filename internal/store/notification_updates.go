@@ -83,7 +83,7 @@ func (s *Store) scanUpdateRule(ctx context.Context, tx pgx.Tx, owner string, c n
 	_ = tx.QueryRow(ctx, `SELECT COALESCE((state->>'active')::boolean,false) FROM notification_rule_states WHERE owner_id='' AND rule_id='_update-comparison' AND resource=$1`, current).Scan(&available)
 	if failure == "" && available && checked.After(st.Since) && latest != "" && latest != st.Identity && !now.Before(st.Last) {
 		e := notify.Event{Type: "panel.update", Time: now, Version: latest, Message: "面板发现可用更新：" + latest}
-		if err = s.queueNotification(ctx, tx, owner, c, r, e, "version:"+latest, ""); err != nil {
+		if err = s.queueNotification(ctx, tx, owner, c, r, e, "source:update:"+latest, ""); err != nil {
 			return err
 		}
 		st.Identity = latest
