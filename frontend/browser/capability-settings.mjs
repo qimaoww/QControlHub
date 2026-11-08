@@ -99,6 +99,7 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
 async function testSiteBranding(testAPI) {
   const form=await waitFor(()=>document.querySelector('#site-branding-form'),'Logo settings did not load');
   const save=form.querySelector('[type=submit]'), file=form.elements.logo_file;
+  const siteIcon=()=>document.querySelector('#qch-site-icon');
   const select=async(name,blob)=>{
     const transfer=new DataTransfer();transfer.items.add(new File([blob],name,{type:blob.type}));file.files=transfer.files;
     file.dispatchEvent(new Event('change',{bubbles:true}));await delay(50);
@@ -107,18 +108,34 @@ async function testSiteBranding(testAPI) {
   const context=canvas.getContext('2d');context.fillStyle='#7c3aed';context.fillRect(0,0,180,36);
   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
   assert.ok(save.disabled&&!document.querySelector('.a-brand img'),'default brand unavailable');
+  assert.ok(siteIcon()?.href.endsWith('/assets/favicon.svg'),'default browser icon missing');
   await select('brand.png',blob);await waitFor(()=>!save.disabled,'Logo preview not ready');
   assert.ok(form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'unsaved preview became public');
+  assert.ok(siteIcon().href.endsWith('/assets/favicon.svg'),'unsaved preview changed browser icon');
   testAPI.brandingFailure=true;form.requestSubmit();await waitFor(()=>form.textContent.includes('保存失败'),'Logo failure missing');
   assert.ok(!save.disabled&&form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'Logo failure lost preview');
   testAPI.brandingFailure=false;form.requestSubmit();await waitFor(()=>testAPI.branding.revision===2,'Logo save failed');
   await waitFor(()=>document.querySelector('.a-brand img')?.complete&&save.disabled,'saved logo not applied');
+  await waitFor(()=>siteIcon().href.startsWith('data:image/png;base64,'),'saved browser icon not applied');
+  const browserIcon=new Image();browserIcon.src=siteIcon().href;await browserIcon.decode();
+  const iconCanvas=document.createElement('canvas');iconCanvas.width=iconCanvas.height=64;
+  const iconContext=iconCanvas.getContext('2d');iconContext.drawImage(browserIcon,0,0);
+  assert.equal(browserIcon.naturalWidth,64);assert.equal(browserIcon.naturalHeight,64);
+  assert.equal(iconContext.getImageData(32,0,1,1).data[3],0,'wide browser icon was stretched');
+  assert.ok(iconContext.getImageData(32,32,1,1).data[3]>0,'browser icon is empty');
+  const {applySiteBranding}=await import('../modules/site-branding.js');
+  applySiteBranding({logo:'data:image/png;base64,AAAA'});
+  await waitFor(()=>siteIcon().href.endsWith('/assets/favicon.svg'),'broken browser icon did not fall back');
+  applySiteBranding(testAPI.branding);
+  await waitFor(()=>siteIcon().href.startsWith('data:image/png;base64,'),'browser icon did not recover');
   const image=document.querySelector('.a-brand img');assert.equal(getComputedStyle(image).objectFit,'contain');assert.equal(form.querySelector(".a-mark img").getBoundingClientRect().width,32);
   const current=testAPI.branding.logo;
   await select('invalid.png',new Blob(['broken'],{type:'image/png'}));
   assert.equal(testAPI.branding.logo,current);assert.ok(form.textContent.includes('图片内容无效'),'invalid image accepted');
   const reset=[...form.querySelectorAll('button')].find(control=>control.textContent==='恢复默认');reset.click();
   assert.ok(!form.querySelector('.a-mark img')&&document.querySelector('.a-brand img'),'reset preview prematurely applied');
+  assert.ok(siteIcon().href.startsWith('data:image/png;base64,'),'reset preview changed browser icon');
   form.requestSubmit();await waitFor(()=>testAPI.branding.revision===3,'default not saved');
   await waitFor(()=>!document.querySelector('.a-brand img')&&save.disabled,'default brand not restored');
+  assert.ok(siteIcon().href.endsWith('/assets/favicon.svg'),'default browser icon not restored');
 }
