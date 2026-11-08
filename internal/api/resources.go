@@ -23,20 +23,21 @@ type configInboundTargetResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
-	ClientSource    string                           `json:"client_source,omitempty"`
-	Deployment      store.ConfigManagementDeployment `json:"deployment"`
-	Management      serverconfig.ManagedState        `json:"management"`
-	ManagedObjects  []serverconfig.ManagedObject     `json:"managed_objects"`
-	AccountingPlan  *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
-	AccountingError string                           `json:"accounting_error,omitempty"`
-	Agent           core.Agent                       `json:"agent"`
-	Config          *core.Config                     `json:"config,omitempty"`
-	Catalog         configschema.Catalog             `json:"catalog"`
-	Protocols       []serverconfig.Protocol          `json:"protocols"`
-	Inbounds        []serverconfig.Input             `json:"inbounds"`
-	InboundTargets  []configInboundTargetResource    `json:"inbound_targets"`
-	PresentFields   map[string]bool                  `json:"present_fields"`
-	RealityPresets  []string                         `json:"reality_presets"`
+	OutboundBindings map[string]string                `json:"outbound_bindings"`
+	ClientSource     string                           `json:"client_source,omitempty"`
+	Deployment       store.ConfigManagementDeployment `json:"deployment"`
+	Management       serverconfig.ManagedState        `json:"management"`
+	ManagedObjects   []serverconfig.ManagedObject     `json:"managed_objects"`
+	AccountingPlan   *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
+	AccountingError  string                           `json:"accounting_error,omitempty"`
+	Agent            core.Agent                       `json:"agent"`
+	Config           *core.Config                     `json:"config,omitempty"`
+	Catalog          configschema.Catalog             `json:"catalog"`
+	Protocols        []serverconfig.Protocol          `json:"protocols"`
+	Inbounds         []serverconfig.Input             `json:"inbounds"`
+	InboundTargets   []configInboundTargetResource    `json:"inbound_targets"`
+	PresentFields    map[string]bool                  `json:"present_fields"`
+	RealityPresets   []string                         `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -177,6 +178,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		} else {
 			result.AccountingError = planErr.Error()
 		}
+		result.OutboundBindings = serverconfig.ManagedOutboundBindings(engine, config.Content)
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
 		// Selection for restrictions/deletion also includes native named
 		// listeners that cannot be reconstructed as a preset form.

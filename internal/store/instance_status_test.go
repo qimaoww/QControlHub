@@ -83,6 +83,10 @@ func TestStatusRefreshRecoversFailedHostDeploymentAcrossEnginesAndInstances(t *t
 						if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "无法确认实例的端口状态") {
 							t.Fatalf("%s: expected reproduction for %s: %v", label, action, err)
 						}
+						var conflict *PortConflictError
+						if !errors.As(err, &conflict) || (!sharedTarget && conflict.RecoveryEngine != string(foreign.Engine)) || (sharedTarget && conflict.RecoveryEngine != "") {
+							t.Fatalf("status recovery crossed instance ownership: %+v", conflict)
+						}
 					}
 					saved, err := db.AgentConfig(targetContext, node.ID, target.Engine)
 					if err != nil || saved.Version != target.Version {

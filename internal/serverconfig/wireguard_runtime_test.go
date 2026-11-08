@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -49,9 +50,28 @@ func TestWireGuardNativeCoreRoundTrip(t *testing.T) {
 			if engine == core.EngineXray {
 				input.Listen = "127.0.0.1"
 			}
+			payload := strings.Repeat("WireGuard native loopback regression\n", 2048)
+			target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if string(body) != payload {
+					http.Error(w, "request payload mismatch", http.StatusBadRequest)
+					return
+				}
+				_, _ = io.WriteString(w, payload)
+			}))
+			// gVisor deliberately drops tunneled 127/8 destinations as martian
+			// packets. Bind to an address owned by this host instead; no packet
+			// leaves the host and no system interface/route is changed.
+			_ = target.Listener.Close()
+			target.Listener = wireGuardLocalHTTPListener(t)
+			target.Start()
+			defer target.Close()
 			content, err := Generate(engine, input)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if engine == core.EngineXray {
+				content = allowXrayFixtureTarget(t, content, target.URL)
 			}
 			plan, err := PrepareIndependentEgress(engine, content)
 			if err != nil {
@@ -92,22 +112,6 @@ func TestWireGuardNativeCoreRoundTrip(t *testing.T) {
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
-			payload := strings.Repeat("WireGuard native loopback regression\n", 2048)
-			target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				if string(body) != payload {
-					http.Error(w, "request payload mismatch", http.StatusBadRequest)
-					return
-				}
-				_, _ = io.WriteString(w, payload)
-			}))
-			// gVisor deliberately drops tunneled 127/8 destinations as martian
-			// packets. Bind to an address owned by this host instead; no packet
-			// leaves the host and no system interface/route is changed.
-			_ = target.Listener.Close()
-			target.Listener = wireGuardLocalHTTPListener(t)
-			target.Start()
-			defer target.Close()
 			proxyURL, _ := url.Parse("socks5://" + socksAddress)
 			transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
 			defer transport.CloseIdleConnections()
@@ -121,6 +125,8 @@ func TestWireGuardNativeCoreRoundTrip(t *testing.T) {
 			if err != nil || response.StatusCode != http.StatusOK || string(body) != payload {
 				t.Fatalf("native WireGuard transfer corrupted bytes: status=%d error=%v", response.StatusCode, err)
 			}
+			_ = response.Body.Close()
+			transport.CloseIdleConnections()
 			if engine == core.EngineXray && plan.Source == "core-api" {
 				assertWireGuardXrayCounters(t, serverBinary, plan, input.Tag, len(payload))
 			}
@@ -132,29 +138,41 @@ func assertWireGuardXrayCounters(t *testing.T, binary string, plan AccountingPla
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, binary, "api", "statsquery", "--server="+plan.API).CombinedOutput()
-	if err != nil {
-		t.Fatalf("read native WireGuard counters: %v: %s", err, output)
-	}
-	var response struct {
-		Stats []struct {
-			Name  string      `json:"name"`
-			Value json.Number `json:"value"`
-		} `json:"stat"`
-	}
-	if err := json.Unmarshal(output, &response); err != nil {
-		t.Fatalf("decode native WireGuard counters: %v: %s", err, output)
-	}
-	counters := make(map[string]int64)
-	for _, stat := range response.Stats {
-		counters[stat.Name], _ = stat.Value.Int64()
-	}
-	for _, side := range []string{"inbound>>>" + inbound, "outbound>>>" + plan.Ports[0].Outbounds[0]} {
-		for _, direction := range []string{"uplink", "downlink"} {
-			name := side + ">>>traffic>>>" + direction
-			if counters[name] < int64(payloadBytes) {
-				t.Fatalf("native WireGuard counter %s = %d, below transferred payload %d", name, counters[name], payloadBytes)
+	for {
+		output, err := exec.CommandContext(ctx, binary, "api", "statsquery", "--server="+plan.API).CombinedOutput()
+		if err != nil {
+			t.Fatalf("read native WireGuard counters: %v: %s", err, output)
+		}
+		var response struct {
+			Stats []struct {
+				Name  string      `json:"name"`
+				Value json.Number `json:"value"`
+			} `json:"stat"`
+		}
+		if err := json.Unmarshal(output, &response); err != nil {
+			t.Fatalf("decode native WireGuard counters: %v: %s", err, output)
+		}
+		counters := make(map[string]int64)
+		for _, stat := range response.Stats {
+			counters[stat.Name], _ = stat.Value.Int64()
+		}
+		pending := ""
+		for _, side := range []string{"inbound>>>" + inbound, "outbound>>>" + plan.Ports[0].Outbounds[0]} {
+			for _, direction := range []string{"uplink", "downlink"} {
+				name := side + ">>>traffic>>>" + direction
+				if counters[name] < int64(payloadBytes) {
+					pending = fmt.Sprintf("%s = %d, below transferred payload %d", name, counters[name], payloadBytes)
+				}
 			}
+		}
+		if pending == "" {
+			return
+		}
+		// Xray settles counters asynchronously after the client connection closes.
+		select {
+		case <-ctx.Done():
+			t.Fatalf("native WireGuard counter did not settle: %s", pending)
+		case <-time.After(20 * time.Millisecond):
 		}
 	}
 }

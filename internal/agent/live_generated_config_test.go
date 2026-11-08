@@ -46,10 +46,8 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if input.TLSEnabled {
-					input.CertificatePath = certificate
-					input.PrivateKeyPath = privateKey
-				}
+				input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", serverconfig.DefaultRealityServerName
+				input.CertificatePath, input.PrivateKeyPath = certificate, privateKey
 				content, err := serverconfig.Generate(engine, input)
 				if err != nil {
 					t.Fatal(err)
@@ -69,6 +67,8 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", serverconfig.DefaultRealityServerName
+					input.CertificatePath, input.PrivateKeyPath = certificate, privateKey
 					content, err := serverconfig.Generate(engine, input)
 					if err != nil {
 						t.Fatal(err)
@@ -165,11 +165,12 @@ func TestGeneratedMihomoClientYAMLWithLiveCore(t *testing.T) {
 				t.Fatal(err)
 			}
 			var proxy map[string]any
-			if err := yaml.Unmarshal([]byte(profile.URI), &proxy); err != nil {
+			if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
 				t.Fatal(err)
 			}
 			content, err := yaml.Marshal(map[string]any{
 				"log-level": "info", "proxies": []any{proxy},
+				"listeners":    []any{map[string]any{"name": "validation", "type": "http", "listen": "127.0.0.1", "port": 24111}},
 				"proxy-groups": []any{map[string]any{"name": "TEST", "type": "select", "proxies": []string{"LIVE"}}},
 				"rules":        []string{"MATCH,TEST"},
 			})

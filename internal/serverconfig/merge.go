@@ -62,6 +62,11 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 }
 
 func mutateGenerated(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
+	if operation == "modify" {
+		if result, handled, err := mutatePresetFields(engine, currentContent, generatedContent, matchValue); handled {
+			return result, err
+		}
+	}
 	if engine == core.EngineXray {
 		if merged, handled, err := mutateXHTTPGroup(currentContent, generatedContent, matchValue, operation); handled {
 			return merged, err

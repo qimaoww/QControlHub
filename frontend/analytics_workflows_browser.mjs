@@ -215,14 +215,14 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   }
   await click('添加出站','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=fragment]')");
-  await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=fragment]');input.value='name: unused-exit\\ntype: http\\nserver: 127.0.0.1\\nport: 443\\n';input.form.requestSubmit()})()");
+  await evaluate(page,"(()=>{const mode=document.querySelector('dialog[open] [data-outbound-mode]');mode.value='json';mode.dispatchEvent(new Event('change',{bubbles:true}));const input=document.querySelector('dialog[open] [name=fragment]');input.value='name: unused-exit\\ntype: http\\nserver: 127.0.0.1\\nport: 443\\n';input.form.requestSubmit()})()");
   await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('unused-exit')");
   await close();await cancelPending();
   const exitWorkspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);
   assert.ok(exitWorkspace.managed_objects.some(item=>!item.inbound&&item.tag==='unused-exit'));
   await evaluate(page,"(()=>{const row=[...document.querySelectorAll('.a-main tr')].find(row=>row.textContent.includes('unused-exit'));[...row.querySelectorAll('button')].find(button=>button.textContent==='删除').click()})()");
-  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='删除出站')");
+  await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='删除出站') && !!document.querySelector('dialog[open] [name=intent]')");
   await evaluate(page,"document.querySelector('dialog[open] [name=intent]').form.requestSubmit()");
   await confirmDeploy();
   await wait(page,"!document.querySelector('[aria-busy=true]') && !document.querySelector('.a-main').textContent.includes('unused-exit')");

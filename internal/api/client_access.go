@@ -86,8 +86,8 @@ func loadClientAccessSnapshot(ctx context.Context, source clientAccessDataSource
 
 func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) {
 	outboundEngine := core.Engine(request.URL.Query().Get("outbound_engine"))
-	if outboundEngine != "" && outboundEngine != core.EngineXray && outboundEngine != core.EngineSingBox {
-		writeError(w, http.StatusBadRequest, "outbound_engine must be xray or sing-box")
+	if outboundEngine != "" && outboundEngine != core.EngineXray && outboundEngine != core.EngineSingBox && outboundEngine != core.EngineMihomo {
+		writeError(w, http.StatusBadRequest, "outbound_engine must be mihomo, xray or sing-box")
 		return
 	}
 	entries, err := s.clientAccessEntries(request.Context(), outboundEngine)

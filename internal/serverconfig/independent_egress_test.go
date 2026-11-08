@@ -60,7 +60,7 @@ func TestIndependentEgressRejectsBypasses(t *testing.T) {
 	}{
 		{"mihomo-direct-mode", core.EngineMihomo, "mode: direct\nlisteners: [{name: a, type: http, port: 21001}]\n"},
 		{"mihomo-global-mode", core.EngineMihomo, "mode: global\nlisteners: [{name: a, type: http, port: 21001}]\n"},
-		{"mihomo-shared-group", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nproxy-groups: []\n"},
+		{"mihomo-shared-group", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nproxy-groups: [{name: dynamic, type: select, include-all: true}]\nrules: ['MATCH,dynamic']\n"},
 		{"mihomo-tun", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\ntun: {enable: true}\n"},
 		{"mihomo-tunnel", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\ntunnels: [{network: tcp, address: '0.0.0.0:21002', target: 'example.test:80', proxy: DIRECT}]\n"},
 		{"mihomo-mutable-api", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nexternal-controller: 127.0.0.1:9090\n"},

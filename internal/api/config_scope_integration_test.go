@@ -85,7 +85,12 @@ func newConfigScopeAPIFixtureWithin(t *testing.T, timeout time.Duration) (*store
 	}
 	t.Cleanup(db.Close)
 	const adminToken = "config-scope-administrator-fixture"
-	handler := New(db, Config{AdminToken: adminToken, OperatorTokens: []string{"legacy-alice-fixture", "legacy-bob-fixture"}}).Handler()
+	handler := New(db, Config{AdminToken: adminToken, OperatorTokens: []string{"legacy-alice-fixture", "legacy-bob-fixture"},
+		// Scope checks must not depend on an external geolocation provider.
+		GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+			return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+		})},
+	}).Handler()
 	admin := configScopeAPIClient{t: t, handler: handler, token: adminToken}
 	login := func(name string) configScopeAPIClient {
 		t.Helper()

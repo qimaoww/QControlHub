@@ -38,7 +38,9 @@ func mergeJSONListItem(content, generatedContent, listKey, matchKey, matchValue,
 		}
 	}
 	var generatedObject map[string]any
-	if json.Unmarshal(generatedItems[0], &generatedObject) != nil {
+	generatedDecoder := json.NewDecoder(strings.NewReader(string(generatedItems[0])))
+	generatedDecoder.UseNumber()
+	if generatedDecoder.Decode(&generatedObject) != nil {
 		return "", errors.New("generated list entry must be a JSON object")
 	}
 	generatedMatch, ok := generatedObject[matchKey].(string)
@@ -77,7 +79,9 @@ func mergeJSONListItem(content, generatedContent, listKey, matchKey, matchValue,
 			break
 		}
 		var existingObject map[string]any
-		if json.Unmarshal(items[foundIndex], &existingObject) != nil {
+		decoder := json.NewDecoder(strings.NewReader(string(items[foundIndex])))
+		decoder.UseNumber()
+		if decoder.Decode(&existingObject) != nil {
 			return "", errors.New("list entries must be JSON objects")
 		}
 		for key := range replacedKeys {

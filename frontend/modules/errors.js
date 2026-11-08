@@ -156,6 +156,7 @@ export async function requestJSON(url, options, {
       error.stage = body.stage;
     }
     if (body?.code === "port_conflict") {
+      if (["mihomo","xray","sing-box","ss-rust"].includes(body.recovery_engine)) error.recoveryEngine = body.recovery_engine;
       error.code = body.code;
       error.field = ["port", "tls_public_port", "xhttp_backend_port", "xhttp_tls_port"].includes(body.field) ? body.field : "";
     }

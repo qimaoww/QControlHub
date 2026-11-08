@@ -1,3 +1,4 @@
+import { recoverConfigInstance } from "./config-status-recovery.js";
 import { labels, numeric, booleans, multiline } from "./inbound-fields.js";
 import { bindAnalyticsCertificateSelector } from "./certificate-selector.js";
 import { bindInboundTransport } from "./inbound-tls.js";
@@ -6,7 +7,7 @@ import { protocolOptions, outboundPresetFields } from "./inbound-options.js";
 import { editInboundAccess } from "./access-control.js";
 import { deploymentStatus } from "./config-deployment.js";
 import { editInboundSource } from "./inbound-source.js";
-import { outboundEntries, inboundOutbound, bindOutbound, changeInboundOutbound, outboundCanBind } from '../modules/config-outbound-model.js';
+import { inboundOutbound } from '../modules/config-outbound-model.js';
 import { bindOutboundPresetController } from '../modules/outbound-preset-controller.js';
 import { commonConfigFields } from '../modules/config-field-model.js';
 import { xrayMutableAPIServices } from '../modules/xray-api.js';
@@ -77,22 +78,64 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     receipt.hidden = true; draw(); void deployment.refresh();
   }
   async function write(path, body, box, method = 'POST') {
-    try { return await ctx.api(path, { method, body }); }
+    const candidate = {...body};
+    if (box.mutationVersion !== undefined) {
+      if ('version' in candidate) candidate.version = box.mutationVersion;
+      if ('expected_version' in candidate) candidate.expected_version = box.mutationVersion;
+    }
+    try { return await ctx.api(path, { method, body: {...candidate, expected_instance_id:agent.shared_allocation?.id || ""} }); }
     catch (error) {
       if (error.name === 'AbortError') throw error;
       if (error.code === 'port_conflict') {
         const form = box.querySelector('form'), field = form.elements.namedItem(error.field || 'port');
         error.message += ' 草稿已保留。';
+        if(error.recoveryEngine && ctx.can('tasks.read') && !form.querySelector('[data-port-recovery]')) {
+          const feedback=notice(''),control=button('核对实例状态',async event=>{
+            await ctx.mutate(event.currentTarget,async()=>{
+              feedback.textContent='正在核对实例状态…';
+              await recoverConfigInstance(ctx,agent,error.recoveryEngine,()=>ctx.current()&&box.isConnected);
+              feedback.textContent='状态已核对，可继续提交；草稿已保留。';
+            });
+          });
+          const recovery=stack(feedback,actions(control));recovery.dataset.portRecovery='';form.append(recovery);
+        }
         form.querySelector('button[type=submit]').addEventListener('mutationend', () => {
           if (!ctx.current() || !box.open || !field) return;
           for (let parent = field.parentElement; parent && parent !== form; parent = parent.parentElement)
             if (parent.tagName === 'DETAILS') parent.open = true;
           field.focus();
         }, { once: true });
+      } else if (error.status === 409 && error.configSubmissionRejected) {
+        const form = box.querySelector('form'), submit = form.querySelector('button[type=submit]');
+        box.conflictPending = true;
+        submit.addEventListener('mutationend', () => { if (box.conflictPending) submit.disabled = true; }, {once:true});
+        if (!form.querySelector('[data-conflict-recovery]')) {
+          const feedback = notice('尚未保存，当前草稿已保留。');
+          const preview = group('最新已保存配置',notice('请先读取最新配置。'));
+          let fresh;
+          const adopt = button('在最新配置上继续编辑', () => {
+            if (!fresh || !ctx.current() || !box.isConnected) return;
+            box.mutationVersion = fresh.config?.version || 0;
+            box.conflictPending = false; submit.disabled = !execute;
+            feedback.textContent = '已更新保存目标，当前草稿已保留，可修正后提交。';
+            adopt.disabled = true;
+          }, {disabled:true});
+          const reload = button('核对最新配置', event => void ctx.mutate(event.currentTarget, async () => {
+            const result = await ctx.api(`${base}/workspace`);
+            if (!ctx.current() || !box.isConnected) return;
+            if (current.config?.id && result.config?.id !== current.config.id) throw new Error('配置目标已变化，请保留草稿并重新选择实例。');
+            fresh = result;
+            preview.querySelector('.a-disclosure-body').replaceChildren(code(result.config?.content || '尚无已保存配置'));
+            preview.open = true; adopt.disabled = false;
+          }));
+          const recovery = stack(feedback,preview,actions(reload,adopt));
+          recovery.dataset.conflictRecovery = ''; form.append(recovery);
+        }
       } else if (!error.status || error.status === 200 || error.status === 408 || error.status >= 500 || error.status === 409) {
         const form = box.querySelector('form'), submit = form.querySelector('button[type=submit]');
         submit.addEventListener('mutationend', () => { submit.disabled = true; }, { once: true });
-        form.append(notice('保存结果需重新核对，草稿已保留。请勿重复提交。'), actions(button('重新读取并核对', async event => {
+        form.append(notice('保存结果需重新核对，草稿已保留。请勿重复提交。'), actions(button(error.recoverConfigSubmission?'核对提交结果':'重新读取并核对', async event => {
+          if(error.recoverConfigSubmission){await ctx.mutate(event.currentTarget,async()=>{const result=await error.recoverConfigSubmission();if(ctx.current()&&box.isConnected)await committed(result,box);});return;}
           if (!await ctx.confirm('重新读取已保存配置并放弃此弹窗草稿？请先核对任务记录，避免重复执行。', '重新读取配置') || !ctx.current()) return;
           await ctx.mutate(event.currentTarget, async () => { ctx.setDirty(false); box.close(); await reloadSaved(); });
         })));
@@ -170,10 +213,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     });
     const native = input && operation === 'modify' && button('完整入站配置',async event=>{
       const control = event.currentTarget;
-      if (baseline && (protocol.key !== input.protocol || JSON.stringify(read()) !== JSON.stringify(baseline)) && !await ctx.confirm('切换编辑方式会放弃当前参数修改，确定继续？','切换编辑方式')) return;
       if (!ctx.current()) return;
-      ctx.setDirty(false); box.close();
-      await ctx.mutate(control,()=>inboundSource(input));
+      await ctx.mutate(control,()=>inboundSource(input,box,()=>ctx.setDirty(JSON.stringify(read())!==JSON.stringify(baseline))));
     });
     const form = ctx.form([protocolSelect,area,actions(regenerate,native),protocolHint,intents(),feedback],'保存并部署',async values=>{
       if(!protocol || !baseline || protocol.key !== form.elements.protocol.value) throw new Error('请等待方案加载');
@@ -316,10 +357,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     box=ctx.dialog(operation==='add'?'添加入站':`修改入站 · ${input.tag}`,form,{wide:true});
     track(form,box); await choose();
   }
-  async function inboundSource(target) {
+  async function inboundSource(target,parent,restoreDirty) {
     if (!await latest() || !current.config) return;
     const config=current.config, draft=getDraft();
-    await editInboundSource(ctx,{target,agent,engine,base,workspace:current,preparing,write,committed,track,isCurrent:()=>ctx.current()&&current.config===config&&getDraft()===draft});
+    const child = await editInboundSource(ctx,{target,agent,engine,base,workspace:current,preparing,write,committed:async(result,editor)=>{parent?.close();await committed(result,editor);},track,isCurrent:()=>ctx.current()&&current.config===config&&getDraft()===draft});
+    child?.addEventListener('close',()=>{if(parent?.isConnected&&parent.open)restoreDirty?.();},{once:true});
   }
   async function files() {
     if(!await latest()||!current.config)return;
@@ -384,74 +426,87 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     track(form,box,true,()=>{ capture(); return [...drafts].some(([key,value])=>value!==baseline.get(key)); });choose();
   }
   async function outbound(inbound,operation) {
-    if (dirty()) throw new Error('配置源码有未保存修改，请先保存，再操作出站。');
-    const loading=muted('正在读取出站配置…');loading.setAttribute('role','status');
-    const box=ctx.dialog(`${inbound.tag} · 出站`,loading,{wide:true});
+    if(dirty())throw new Error('配置源码有未保存修改，请先保存，再操作出站。');
+    const loading=ctx.dialog(`${inbound.tag} · 出站`,muted('正在读取出站配置…'),{wide:true});
+    try {
+      if(!await latest()||!loading.isConnected)return;
+      const binding=outboundBinding(inbound);
+      const chosen=list(current.managed_objects).find(item=>!item.inbound&&item.tag===binding);
+      if(['modify','delete'].includes(operation)&&!chosen)throw new Error('当前入站尚未绑定可编辑出站');
+      loading.close();
+      await outboundObject(chosen,operation,inbound,true);
+    }catch(error){if(!ctx.current()||error.name==='AbortError')return;if(loading.isConnected)loading.querySelector('.a-dialog-body').replaceChildren(notice(error.message));else ctx.announce(error.message,'error');}
+  }
+  function outboundBinding(inbound) {
+    if(current.outbound_bindings)return current.outbound_bindings[inbound.tag]||'';
+    return engine==='mihomo'?'':inboundOutbound(current.config.content,engine,inbound);
+  }
+  async function outboundObject(object,operation='modify',inbound,loaded=false) {
+    const box=ctx.dialog(operation==='add'?'添加出站':operation==='bind'?'绑定已有出站':operation==='delete'?'删除出站':`${object.tag} · 出站`,muted('正在读取出站配置…'),{wide:true});
     let preset;
     box.addEventListener('close',()=>preset?.dispose(),{once:true});
     try {
-      if(!await latest()||!current.config||!box.isConnected)return;
-      const config=current.config,content=config.content,binding=inboundOutbound(content,engine,inbound);
-      const entries=outboundEntries(content).filter(entry=>outboundCanBind(entry,engine)),chosen=entries.find(entry=>entry.tag===binding);
-      if(['modify','delete'].includes(operation)&&!chosen)throw new Error('当前入站尚未绑定可编辑出站');
-      const selecting=operation==='bind',deleting=operation==='delete';
-      const fragment=field('出站 JSON','fragment',chosen?.content||JSON.stringify(engine==='xray'?{tag:`exit-${inbound.port}`,protocol:'freedom'}:{tag:`exit-${inbound.port}`,type:'direct'},null,2),{multiline:12,spellcheck:false,readonly:selecting||deleting});
-      fragment.querySelector('textarea').setAttribute('aria-label','出站配置 JSON');
-      const picker=selecting&&field('已有出站','tag',binding||entries[0]?.tag||'',{options:entries.map(entry=>[entry.tag,entry.tag]),required:true});
-      const context=stack(muted(`${agent.name} · ${engine} · ${agent.shared_allocation?'当前共享实例':'主实例'} · 入站 ${inbound.tag} · ${inbound.port}`),
-        muted(`mark · 0x${(0x51430000|inbound.port).toString(16)} · 绑定作为当前入站的兜底出口`));
+      if(!loaded&&!await latest()||!ctx.current()||!box.isConnected||!current.config&&operation!=='add')return;
+      const config=current.config||{version:0}, selecting=operation==='bind', deleting=operation==='delete';
+      const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
+      const sectionName=object?.section||sections[0][0];
+      let initialObject, content=engine==='mihomo'?`name: ${inbound?`exit-${inbound.port}`:'new-exit'}\ntype: direct\n`:JSON.stringify({tag:inbound?`exit-${inbound.port}`:'new-exit',[engine==='xray'?'protocol':'type']:engine==='xray'?'freedom':'direct'},null,2);
+      if(object&&!selecting){
+        const selected=await ctx.api(`${base}/outbounds/${pathID(object.section)}/${pathID(object.tag)}${current.snapshot_task_id?`?snapshot=${pathID(current.snapshot_task_id)}`:''}`);
+        if(!ctx.current()||!box.isConnected)return;
+        if(selected.version!==config.version)throw new Error('配置已变化，请重新读取');
+        content=selected.fragment; initialObject=selected.object?JSON.parse(selected.object):undefined;
+      }
+      const entries=list(current.managed_objects).filter(item=>!item.inbound&&item.enabled&&!['dns','blackhole','block'].includes(item.kind));
       const form=ctx.form([
-        picker,fragment,intents(),
+        inbound&&muted(`${agent.name} · ${engine} · ${agent.shared_allocation?'当前共享实例':'主实例'} · 入站 ${inbound.tag} · ${inbound.port}`),
+        selecting?field('已有出站','tag',outboundBinding(inbound),{options:[['','请选择出站'],...entries.map(item=>[item.tag,item.tag])],required:true}):deleting?stack(muted(`删除 ${object.tag}？`),replacementField(object)):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
+        group('出站配置',field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',content,{multiline:12,spellcheck:false,readonly:selecting||deleting}), selecting||deleting||sectionName==='proxy-groups'),
+        object&&operation==='modify'&&muted('保存会更新所有引用此出站的入站。'),intents(),
       ],'保存并部署',async values=>{
-        const raw=preset?await preset.verifiedContent():form.elements.fragment.value;
-        if((deleting||selecting)&&!await ctx.confirm(deleting?'删除当前绑定出站？默认或共享出口不可在此删除。':'将当前入站绑定到所选出站？已有条件分流保持不变。',deleting?'删除出站':'绑定出站'))return;
-        if(!ctx.current()||!box.isConnected||!await preparing(values.intent))return;
-        let next;
-        try { next=selecting?bindOutbound(content,engine,inbound,values.tag):changeInboundOutbound(content,engine,inbound,operation,chosen?.index,raw); }
-        catch(error){if(error instanceof SyntaxError)throw new Error('出站 JSON 格式无效，请检查后重试。',{cause:error});throw error;}
-        const result=await write(`${base}/source`,{name:config.name,description:config.description,content:next,version:config.version,intent:values.intent},box);
+        const raw=!selecting&&!deleting&&activePreset()?await preset.verifiedContent():values.fragment||'';
+        if(!selecting&&!deleting&&engine!=='mihomo'){try{JSON.parse(raw);}catch(error){throw new Error('出站 JSON 格式无效，请检查后重试。',{cause:error});}}
+        if(object&&operation==='modify'&&!await ctx.confirm(`更新“${object.tag}”及其所有引用？`,'更新出站'))return;
+        if(!await preparing(values.intent))return;
+        const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:current.snapshot_task_id,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
+          ...(['add','bind'].includes(operation)&&inbound?{inbound_tag:inbound.tag,inbound_port:inbound.port}:{})},box);
         await committed(result,box);
       });
+      form.elements.fragment.setAttribute('aria-label',engine==='mihomo'?'出站配置 YAML':'出站配置 JSON');
       if(deleting)form.querySelector('button[type=submit]').classList.add('danger');
-      box.querySelector('.a-dialog-body').replaceChildren(form);
-      track(form,box);
+      const activePreset=()=>preset&&(form.elements.section?.value||sectionName)!=='proxy-groups';
+      box.querySelector('.a-dialog-body').replaceChildren(form);track(form,box);
       if(selecting){
-        const update=()=>{form.elements.fragment.value=entries.find(entry=>entry.tag===form.elements.tag.value)?.content||'';};
-        form.elements.tag.addEventListener('change',update);update();
-      }
-      if(operation==='add'){
+        let epoch=0;
+        const preview=async()=>{
+          const tag=form.elements.tag.value, selected=entries.find(item=>item.tag===tag), request=++epoch;
+          form.elements.fragment.value='';if(!selected)return;
+          try {
+            const result=await ctx.api(`${base}/outbounds/${pathID(selected.section)}/${pathID(tag)}${current.snapshot_task_id?`?snapshot=${pathID(current.snapshot_task_id)}`:''}`);
+            if(!ctx.current()||!box.isConnected||request!==epoch)return;
+            if(result.version!==config.version)throw new Error('配置已变化，请重新读取');
+            form.elements.fragment.value=result.fragment;
+          }catch(error){if(ctx.current()&&box.isConnected&&request===epoch)ctx.announce(error.message,'error');}
+        };
+        form.elements.tag.addEventListener('change',()=>void preview());void preview();
+      }else if(!deleting){
+        const host=outboundPresetFields(engine);host.dataset.outboundPresetHost='';
         preset=bindOutboundPresetController({form:form.querySelector('fieldset'),input:form.elements.fragment,engine,agentId:agent.id,
           api:ctx.api,canReadPeers:ctx.can('client-access.read'),active:()=>ctx.current()&&box.isConnected,
-          onChange:()=>form.dispatchEvent(new Event('input',{bubbles:true})),host:outboundPresetFields(engine),
-          visibility:(element,visible)=>{if(element)element.hidden=!visible;},feedback:(element,value)=>{element.textContent=value;},
-        });
+          initialMode:sectionName==='proxy-groups'?'json':object?'auto':'preset',initialObject,onChange:()=>form.dispatchEvent(new Event('input',{bubbles:true})),host});
+        const drafts=new Map([['proxy-groups','name: new-group\ntype: select\nproxies: [DIRECT]\n']]);let previous=sectionName;
+        const choose=()=>{
+          drafts.set(previous,form.elements.fragment.value);previous=form.elements.section.value;
+          host.hidden=previous==='proxy-groups';
+          if(previous==='proxy-groups')form.elements.fragment.closest('details').open=true;
+          form.elements.fragment.value=drafts.get(previous)||'';
+          form.elements.fragment.readOnly=previous==='proxy-groups'?false:host.querySelector('[data-outbound-mode]').value!=='json';
+          if(previous!=='proxy-groups')preset.refresh();
+        };
+        form.elements.section?.addEventListener('change',choose);
+        if(sectionName==='proxy-groups')host.hidden=true;
       }
-      form.prepend(context);
     }catch(error){if(ctx.current()&&box.isConnected&&error.name!=='AbortError')box.querySelector('.a-dialog-body').replaceChildren(notice(error.message));}
-  }
-  async function outboundObject(object,operation='modify') {
-    if(!await latest()||!current.config)return;
-    const config=current.config;
-    const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
-    const sectionName=object?.section||sections[0][0];
-    let content=engine==='mihomo'?'name: new-exit\ntype: direct\n':JSON.stringify({tag:'new-exit',[engine==='xray'?'protocol':'type']:engine==='xray'?'freedom':'direct'},null,2);
-    if(object) {
-      const selected=await ctx.api(`${base}/outbounds/${pathID(object.section)}/${pathID(object.tag)}`);
-      if(!ctx.current())return;
-      if(selected.version!==config.version)throw new Error('配置已变化，请重新读取');
-      content=selected.fragment;
-    }
-    const form=ctx.form([
-      operation==='delete'?muted(`删除 ${object.tag}？仍被引用的出站会拒绝删除。`):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
-      operation!=='delete'&&field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',content,{multiline:12,spellcheck:false}),
-      object&&operation==='modify'&&muted('保存会更新所有引用此出站的入站。'),intents(),
-    ],'保存并部署',async values=>{
-      if(object&&operation==='modify'&&!await ctx.confirm(`更新“${object.tag}”及其所有引用？`,'更新出站'))return;
-      if(!await preparing(values.intent))return;
-      const result=await write(`${base}/outbounds`,{version:config.version,intent:values.intent,section:object?.section||values.section,tag:object?.tag||'',fragment:values.fragment||'',operation},box);
-      await committed(result,box);
-    });
-    const box=ctx.dialog(operation==='add'?'添加出站':operation==='delete'?'删除出站':`${object.tag} · 出站`,form,{wide:true});track(form,box);
   }
   async function removeInbound(target) {
     if (!await latest() || !current.config) return;
@@ -476,6 +531,10 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     });
     const box = ctx.dialog('删除入站', form); track(form, box);
   }
+  function replacementField(object) {
+    const choices=list(current.managed_objects).filter(item=>!item.inbound&&item.enabled&&item.tag!==object.tag);
+    return field('替代出站','replacement_tag','',{options:[['','保留现有引用；被引用时提示调整'],...choices.map(item=>[item.tag,item.tag])]});
+  }
   function draw() {
     deployment.resetPorts();
     const inbounds=list(current.inbounds),targets=list(current.inbound_targets);
@@ -487,9 +546,9 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const disabled=list(current.management?.disabled).filter(item=>item.section!==object.section||item.tag!==object.tag);
       const expectedVersion=current.config.version;
       if(object.enabled)disabled.push({section:object.section,tag:object.tag});
-      const form=ctx.form([muted(`${object.enabled?'停用':'启用'} ${object.tag}`),intents()], '保存并部署',async values=>{
+      const form=ctx.form([muted(`${object.enabled?'停用':'启用'} ${object.tag}`),object.enabled&&!object.inbound&&replacementField(object),intents()], '保存并部署',async values=>{
         if(!await preparing(values.intent))return;
-        const result=await write(`${base}/management`,{version:expectedVersion,disabled,intent:values.intent},box,'PUT');
+        const result=await write(`${base}/management`,{version:expectedVersion,disabled,intent:values.intent,outbound_tag:object.tag,replacement_tag:values.replacement_tag||''},box,'PUT');
         await committed(result,box);
       });
       const box=ctx.dialog(object.enabled?'停用配置对象':'启用配置对象',form); track(form, box);
@@ -506,8 +565,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         writable&&button('修改',event=>void ctx.mutate(event.currentTarget,()=>input?inboundEdit(input):inboundSource(target))),
         ctx.can('client-access.read')&&input&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(input))),
         writable&&button('删除',event=>void ctx.mutate(event.currentTarget,()=>removeInbound(target)),{tone:'danger'}),
-        writable&&['xray','sing-box'].includes(engine)&&button('出站',()=>{
-          let binding='';try{binding=inboundOutbound(current.config.content,engine,target);}catch(error){ctx.announce(error.message,'error');return;}
+        writable&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
+          let binding='';try{binding=outboundBinding(target);}catch(error){ctx.announce(error.message,'error');return;}
           const chooser=ctx.dialog(`${target.tag} · 出站操作`,actions(['add','bind','modify','delete'].map((operation,index)=>button(['添加并绑定','绑定已有出站','修改绑定出站','删除绑定出站'][index],()=>{chooser.close();void outbound(target,operation);},{disabled:['modify','delete'].includes(operation)&&!binding}))));
         }),
         writable&&engine==='ss-rust'&&button('端口配置项',event=>void ctx.mutate(event.currentTarget,()=>fieldChooser(target))),

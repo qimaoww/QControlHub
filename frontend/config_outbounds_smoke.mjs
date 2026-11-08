@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { outboundEntries, mutateOutbound, bindOutbound, inboundOutbound, changeInboundOutbound } from "./modules/config-outbound-model.js";
-import { outboundPreset, outboundProtocols, outboundPeers } from "./modules/outbound-preset-model.js";
+import { outboundPreset, outboundProtocols, outboundPeers, readOutboundPreset, outboundPresetText } from "./modules/outbound-preset-model.js";
 const source = '{"large":9007199254740993,"outbounds":[{"tag":"direct","type":"direct"},{"tag":"unused","type":"direct"},{"tag":"qch-trf-443-abcdef012345","type":"direct"}],"route":{"final":"direct"}}';
 assert.deepEqual(outboundEntries(source).map(o=>o.tag), ["direct","unused"]);
 assert.throws(()=>mutateOutbound(source,"delete",0,""), /引用/);
@@ -135,4 +135,18 @@ for (const reference of [
   const config = {...JSON.parse(sameText), ...reference};
   config.outbounds = [{tag:"unused",type:"direct"}, ...(reference.outbounds || [])];
   assert.throws(() => mutateOutbound(JSON.stringify(config), "delete", 0), /引用/);
+}
+
+for(const engine of ["xray","sing-box","mihomo"]){
+  const values={tag:"native-form",server:"edge.example.test",port:443,credential:"123e4567-e89b-42d3-a456-426614174000",username:"reader",password:"fixture-password",method:"aes-128-gcm",security:"tls",serverName:"tls.example.test"};
+  for(const [protocol] of outboundProtocols(engine)){
+    const generated=outboundPreset(engine,protocol,values), parsed=readOutboundPreset(engine,generated);
+    assert.equal(parsed.protocol,protocol);
+    assert.deepEqual(outboundPreset(engine,parsed.protocol,parsed.values),generated,`${engine}/${protocol} did not reverse-fill`);
+    assert(outboundPresetText(engine,generated).includes("native-form"));
+    if (["hysteria2", "tuic"].includes(protocol))
+      assert.deepEqual(engine === "mihomo" ? generated.alpn : generated.tls.alpn,["h3"],"QUIC presets must negotiate the listener ALPN");
+  }
+  const unsupported=engine==="xray"?{protocol:"vless",settings:{vnext:[{}]},streamSettings:{network:"kcp"}}:{type:"vless",transport:{type:"quic"},network:"quic"};
+  assert.equal(readOutboundPreset(engine,unsupported),null,"unrepresentable native transport entered a lossy form");
 }

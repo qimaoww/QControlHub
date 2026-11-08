@@ -3,9 +3,10 @@ package store
 // PortConflictError identifies a correctable port/allocation constraint. It
 // must not be presented as a stale configuration revision requiring reload.
 type PortConflictError struct {
-	Port  int
-	Field string
-	Cause error
+	RecoveryEngine string
+	Port           int
+	Field          string
+	Cause          error
 }
 
 func (e *PortConflictError) Error() string { return e.Cause.Error() }

@@ -182,13 +182,20 @@ export function startAnalytics({ app, session }) {
       element.setAttribute("aria-busy", "true");
       void mutate(submit, async () => {
         feedback.textContent = "";
+        let invalid;
         try { await save(values, element); }
         catch (error) {
           if (error.name === "AbortError") return;
           feedback.textContent = error.message;
+          invalid = error.field && element.elements.namedItem(error.field);
         } finally {
           controls.disabled = false;
           element.removeAttribute("aria-busy");
+          if (invalid && !invalid.disabled) {
+            for (let parent = invalid.parentElement; parent && parent !== element; parent = parent.parentElement)
+              if (parent.tagName === "DETAILS") parent.open = true;
+            invalid.focus();
+          }
         }
       });
     });

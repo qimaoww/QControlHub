@@ -8,6 +8,45 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestAccountingSourceFromRevisionRecoversMarkedSingBoxRuntime(t *testing.T) {
+	const source = `{"log":{"level":"warn"},"inbounds":[{"type":"http","tag":"listener","listen":"127.0.0.1","listen_port":21001}],"outbounds":[{"type":"direct","tag":"original"}],"route":{"rules":[{"domain":["example.test"],"outbound":"original"}]}}`
+	apiPlan, err := PrepareAccounting(core.EngineSingBox, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := PrepareMarkedSingBoxAccounting(apiPlan.Content)
+	if err != nil || apiPlan.Source != "core-api" || runtime.Source != "nft-dual" {
+		t.Fatalf("expected alternate runtime backends: %v", err)
+	}
+	// Legacy source saves could retain the Agent's marked runtime copies after
+	// changing a listener port. The archive still holds the core-API source.
+	stale := strings.Replace(runtime.Content, `"listen_port": 21001`, `"listen_port": 22001`, 1)
+	if _, err := PrepareIndependentEgress(core.EngineSingBox, stale); err == nil {
+		t.Fatal("stale runtime was already valid")
+	}
+	for _, revision := range []string{source, apiPlan.Content} {
+		recovered, err := AccountingSourceFromRevision(core.EngineSingBox, stale, revision)
+		if err != nil {
+			t.Fatalf("verified alternate runtime was not recovered: %v", err)
+		}
+		if strings.Contains(recovered, accountingPrefix) || strings.Contains(recovered, "routing_mark") {
+			t.Fatal("recovered source retained generated exits")
+		}
+		plan, err := PrepareAccounting(core.EngineSingBox, recovered)
+		if err != nil || len(plan.Ports) != 1 || plan.Ports[0].Port != 22001 || !strings.Contains(recovered, "example.test") {
+			t.Fatalf("recovery changed the edited listener or original routes: %v", err)
+		}
+		for _, corrupted := range []string{
+			strings.Replace(stale, `"routing_mark":`, `"unexpected": true, "routing_mark":`, 1),
+			strings.ReplaceAll(stale, `"action": "route"`, `"action": "route", "domain": ["untrusted.test"]`),
+		} {
+			if _, err := AccountingSourceFromRevision(core.EngineSingBox, corrupted, revision); err == nil {
+				t.Fatal("recovery trusted an edited generated object")
+			}
+		}
+	}
+}
+
 // A complete submitted plan must be recoverable from a broken saved source.
 func TestAccountingUpdateRepairsInvalidPreviousFromVerifiedSubmission(t *testing.T) {
 	const source = `{"inbounds":[{"type":"http","tag":"a","listen_port":21001}],"outbounds":[{"type":"direct","tag":"exit","bind_interface":"lo"}],"route":{"final":"exit","rules":[{"domain":["example.test"],"outbound":"exit"}]}}`
