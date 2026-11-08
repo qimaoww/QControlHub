@@ -104,6 +104,7 @@ export async function requestJSON(url, options, {
   // Validators are opt-in and belong to an exact in-memory representation.
   // Never let a bodyless 304 stand in for a value the caller no longer owns.
   const { conditional, onResponse, ...requestOptions } = options || {};
+  const readOnly = ["GET", "HEAD"].includes((requestOptions.method || "GET").toUpperCase());
   const validator = conditional?.etag && Object.hasOwn(conditional, "value") ? conditional : null;
   if (validator) requestOptions.headers = { ...requestOptions.headers, "If-None-Match": validator.etag };
   try {
@@ -112,7 +113,10 @@ export async function requestJSON(url, options, {
     assertCurrent();
     // Navigation cancellation must remain silent and retain its identity.
     if (canceled(cause)) throw cause;
-    const message = cause?.name === "TimeoutError"
+    const message = readOnly ? cause?.name === "TimeoutError"
+      ? "读取超时，请检查网络后重试。"
+      : "无法读取数据，请检查网络和面板地址后重试。"
+      : cause?.name === "TimeoutError"
       ? "请求超时，请检查网络；若刚提交了操作，请刷新确认结果，避免重复提交。"
       : "无法连接服务器，请检查网络和面板地址；若刚提交了操作，请刷新确认结果，避免重复提交。";
     throw new Error(message, { cause });
@@ -140,7 +144,8 @@ export async function requestJSON(url, options, {
       // A proxy may return HTML instead of JSON.
     }
     assertCurrent();
-    const message = errorMessage(body?.error, response.status);
+    let message = errorMessage(body?.error, response.status);
+    if (readOnly && message === statusMessages[504]) message = "读取超时，请重试。";
     const requestID = body?.request_id || response.headers?.get?.("X-Request-ID");
     const safeRequestID = typeof requestID === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(requestID) ? requestID : "";
     const error = new Error(`${message}${safeRequestID ? `（请求 ID：${safeRequestID}）` : ""}`);
@@ -165,7 +170,8 @@ export async function requestJSON(url, options, {
   } catch (cause) {
     assertCurrent();
     if (canceled(cause)) throw cause;
-    const error = new Error("服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。", { cause });
+    const error = new Error(readOnly ? "服务器响应不完整或格式无效，请重试。"
+      : "服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。", { cause });
     error.status = response.status;
     throw error;
   }
