@@ -1,0 +1,106 @@
+package notify
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+	"unicode/utf16"
+	"unicode/utf8"
+)
+
+func TestNotificationMarkdownLiteralVariablesAndTelegramEntities(t *testing.T) {
+	e := Sample(TypeTaskFailed)
+	e.Agent = "节点😀 **不能注入** _name_ <>&"
+	e.Error = "`literal` **error**\n<script>literal</script>"
+	template := Template{Title: "面板😀 {{agent}}", Format: "markdown", Body: "**节点** {{agent}}\n*斜体* ~~删除~~ `{{task_id}}`\n```text\n{{error}}\n```\n[详情](https://example.com/details)"}
+	rendered, err := RenderFormatted(template, e, "panel", "Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered.Body, e.Agent) || !strings.Contains(rendered.Body, e.Error) || !strings.Contains(rendered.Body, "斜体 删除 tsk_example") || !strings.Contains(rendered.Body, "详情") {
+		t.Fatalf("literal variables or markup lost: %+v", rendered)
+	}
+	want := []string{"bold", "bold", "italic", "strikethrough", "code", "pre", "text_link"}
+	if len(rendered.Entities) != len(want) {
+		t.Fatalf("markup injection changed entities: %+v", rendered.Entities)
+	}
+	all := utf16.Encode([]rune(rendered.Title + "\n\n" + rendered.Body))
+	for i, entity := range rendered.Entities {
+		if entity.Type != want[i] || entity.Offset+entity.Length > len(all) {
+			t.Fatal("invalid UTF-16 entity", entity)
+		}
+		value := string(utf16.Decode(all[entity.Offset : entity.Offset+entity.Length]))
+		if i == 1 && value != "节点" || entity.Type == "pre" && value != e.Error || entity.Type == "text_link" && (value != "详情" || entity.URL != "https://example.com/details") {
+			t.Fatal("wrong entity span", entity, value)
+		}
+	}
+	for _, kind := range []string{"telegram", "webhook"} {
+		c := Channel{Type: kind, Values: map[string]string{"chat_id": "fixture"}, Secrets: map[string]string{"url": "https://example.com", "token": "fixture"}}
+		e.Title, e.Message, e.Entities = rendered.Title, rendered.Body, rendered.Entities
+		sender := &Sender{HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			var p map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				t.Fatal(err)
+			}
+			response := ""
+			if kind == "telegram" {
+				if len(p["entities"]) == 0 || len(p["parse_mode"]) != 0 || !strings.Contains(string(p["link_preview_options"]), "true") {
+					t.Fatal("missing native formatting or unsafe parse mode", p)
+				}
+				response = `{"ok":true}`
+			} else if p["entities"] != nil || p["message"] == nil || p["task_id"] == nil {
+				t.Fatal("Webhook compatibility lost", p)
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
+		})}}
+		if err = sender.Send(context.Background(), c, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestNotificationMarkdownLimitsAndReadableDefaults(t *testing.T) {
+	for event := range EventNames {
+		rendered, err := RenderFormatted(DefaultTemplate(event), Sample(event), "QControlHub", "Asia/Shanghai")
+		if err != nil || len(rendered.Entities) == 0 || strings.Contains(rendered.Body, "**") || !strings.Contains(rendered.Body, "2026-01-01 20:00:00 +08:00") {
+			t.Fatal("default format or timezone lost", event, rendered, err)
+		}
+		if strings.HasPrefix(event, "traffic.") && (!strings.Contains(rendered.Body, "GiB") || strings.Contains(rendered.Body, "107374182400")) {
+			t.Fatal("raw byte counts in default", rendered)
+		}
+	}
+	e := Sample(TypeTaskFailed)
+	e.Agent = strings.Repeat("😀中文", 3000)
+	r, err := RenderFormatted(Template{Title: "标题😀", Body: "**{{agent}}**", Format: "markdown"}, e, "panel", "browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := Clip(r.Title+"\n\n"+r.Body, 4000)
+	entities := clippedEntities(r.Entities, text)
+	if !utf8.ValidString(text) || len(text) > 4000 || len(entities) != 2 {
+		t.Fatal("invalid long Unicode message")
+	}
+	for _, entity := range entities {
+		if entity.Offset+entity.Length > utf16Length(strings.TrimSuffix(text, "…")) {
+			t.Fatal("formatting extends past truncation", entity)
+		}
+	}
+	plain, err := RenderFormatted(Template{Title: "{{agent}}", Body: "**literal**", Format: "text"}, Sample(TypeTaskFailed), "panel", "UTC")
+	if err != nil || plain.Body != "**literal**" || len(plain.Entities) != 0 {
+		t.Fatal("plain text compatibility lost")
+	}
+	if ValidateTemplate(Template{Title: "title", Body: "body", Format: "html"}) == nil {
+		t.Fatal("accepted unknown template format")
+	}
+	jsonCode, err := RenderFormatted(Template{Title: "JSON", Body: "```json\n{\"ok\": true}\n```\n<script>literal</script>", Format: "markdown"}, e, "panel", "UTC")
+	if err != nil || !strings.Contains(jsonCode.Body, "{\"ok\": true}") || !strings.Contains(jsonCode.Body, "<script>literal</script>") {
+		t.Fatal("literal JSON or HTML changed", jsonCode, err)
+	}
+	text, entities = markdownText(strings.Repeat("**中文😀** ", 1000), func(s string) string { return s })
+	if len(entities) > 99 || !utf8.ValidString(text) {
+		t.Fatal("unbounded formatting entities")
+	}
+}

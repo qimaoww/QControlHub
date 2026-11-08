@@ -31,31 +31,32 @@ const (
 
 // Event is the structured payload sent to the configured webhook.
 type Event struct {
-	Title         string    `json:"title,omitempty"`
-	Version       string    `json:"version,omitempty"`
-	ConfigID      string    `json:"config_id,omitempty"`
-	ConfigVersion int       `json:"config_version,omitempty"`
-	ResourceID    string    `json:"resource_id,omitempty"`
-	ResourceOwner string    `json:"-"`
-	ShareID       string    `json:"share_id,omitempty"`
-	Period        string    `json:"period,omitempty"`
-	Direction     string    `json:"direction,omitempty"`
-	Current       string    `json:"current,omitempty"`
-	Threshold     string    `json:"threshold,omitempty"`
-	Status        string    `json:"status,omitempty"`
-	Test          bool      `json:"test,omitempty"`
-	Type          string    `json:"type"`
-	Time          time.Time `json:"time"`
-	AgentID       string    `json:"agent_id,omitempty"`
-	Agent         string    `json:"agent,omitempty"`
-	Engine        string    `json:"engine,omitempty"`
-	TaskID        string    `json:"task_id,omitempty"`
-	Action        string    `json:"action,omitempty"`
-	Port          int       `json:"port,omitempty"`
-	UsedBytes     uint64    `json:"used_bytes,omitempty"`
-	LimitBytes    uint64    `json:"limit_bytes,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	Message       string    `json:"message"`
+	Title         string          `json:"title,omitempty"`
+	Version       string          `json:"version,omitempty"`
+	ConfigID      string          `json:"config_id,omitempty"`
+	ConfigVersion int             `json:"config_version,omitempty"`
+	ResourceID    string          `json:"resource_id,omitempty"`
+	ResourceOwner string          `json:"-"`
+	ShareID       string          `json:"share_id,omitempty"`
+	Period        string          `json:"period,omitempty"`
+	Direction     string          `json:"direction,omitempty"`
+	Current       string          `json:"current,omitempty"`
+	Threshold     string          `json:"threshold,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	Test          bool            `json:"test,omitempty"`
+	Type          string          `json:"type"`
+	Time          time.Time       `json:"time"`
+	AgentID       string          `json:"agent_id,omitempty"`
+	Agent         string          `json:"agent,omitempty"`
+	Engine        string          `json:"engine,omitempty"`
+	TaskID        string          `json:"task_id,omitempty"`
+	Action        string          `json:"action,omitempty"`
+	Port          int             `json:"port,omitempty"`
+	UsedBytes     uint64          `json:"used_bytes,omitempty"`
+	LimitBytes    uint64          `json:"limit_bytes,omitempty"`
+	Error         string          `json:"error,omitempty"`
+	Message       string          `json:"message"`
+	Entities      []MessageEntity `json:"entities,omitempty"`
 }
 
 // Client sends signed events over HTTP. It is safe for concurrent use.

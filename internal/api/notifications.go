@@ -46,16 +46,21 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 		Event    string          `json:"event"`
 		Template notify.Template `json:"template"`
 	}
-	if err := decodeJSON(w, r, &in, 16<<10); err != nil || notify.EventNames[in.Event] == "" {
+	if err := decodeJSON(w, r, &in, 128<<10); err != nil || notify.EventNames[in.Event] == "" {
 		writeError(w, 400, "模板事件无效")
 		return
 	}
-	title, body, err := notify.Render(in.Template, notify.Sample(in.Event), "示例面板")
+	settings, err := s.store.PanelSettings(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	rendered, err := notify.RenderFormatted(in.Template, notify.Sample(in.Event), "示例面板", settings.TimeZone)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]string{"title": title, "body": body})
+	writeJSON(w, 200, rendered)
 }
 func (s *Server) testNotification(w http.ResponseWriter, r *http.Request) {
 	var in struct {

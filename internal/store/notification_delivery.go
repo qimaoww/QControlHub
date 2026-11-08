@@ -95,12 +95,11 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 		d.Event.Title = "QControlHub 测试通知"
 		d.Event.Message = "这是使用已保存渠道配置发送的测试消息。"
 	} else if !d.Event.Test {
-		title, body, er := notify.Render(template, d.Event, settings.PanelName)
+		rendered, er := notify.RenderFormatted(template, d.Event, settings.PanelName, settings.TimeZone)
 		if er != nil {
 			return false, er
 		}
-		d.Event.Title = title
-		d.Event.Message = body
+		d.Event.Title, d.Event.Message, d.Event.Entities = rendered.Title, rendered.Body, rendered.Entities
 	}
 	if _, configured := channel.Secrets["secret"]; channel.ID == "legacy-webhook" && !configured {
 		if channel.Secrets == nil {
@@ -210,12 +209,11 @@ func (s *Store) QueueNotificationTemplateTest(ctx context.Context, id string, re
 		if er != nil {
 			return 0, er
 		}
-		title, body, er := notify.Render(template, e, settings.PanelName)
+		rendered, er := notify.RenderFormatted(template, e, settings.PanelName, settings.TimeZone)
 		if er != nil {
 			return 0, er
 		}
-		e.Title = notify.Clip("【测试】"+title, 400)
-		e.Message = "已保存模板测试（脱敏示例）\n" + body
+		e.Title, e.Message, e.Entities = rendered.Title, rendered.Body, rendered.Entities
 	}
 	b, _ := json.Marshal(e)
 	authorization, err := s.notificationAuthorization(ctx, tx, owner)

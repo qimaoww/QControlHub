@@ -44,17 +44,19 @@ type Rule struct {
 	Interval  int      `json:"interval_seconds"`
 }
 type Template struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Format string `json:"format,omitempty"`
 }
 
 var EventNames = map[string]string{
 	TypeTaskFailed: "任务失败", TypeAgentOffline: "节点离线", TypeAgentOnline: "节点恢复", TypeTrafficQuota: "流量超额",
 	"traffic.warning": "流量预警", "speed.high": "持续高速", "speed.low": "持续低速", "speed.recovered": "速度恢复", "panel.update": "面板更新",
 }
-var Variables = []string{"panel", "type", "time", "agent_id", "agent", "engine", "task_id", "action", "port", "used_bytes", "limit_bytes", "percent", "period", "direction", "current", "threshold", "status", "error", "version", "message"}
+var Variables = []string{"panel", "type", "time", "time_display", "agent_id", "agent", "engine", "task_id", "action", "port", "used_bytes", "limit_bytes", "used", "limit", "percent", "period", "direction", "current", "threshold", "status", "error", "version", "message"}
 var VariableDescriptions = map[string]string{
 	"panel": "面板名称", "type": "事件标识", "time": "事件时间（RFC3339）", "agent_id": "节点 ID", "agent": "节点名称", "engine": "内核", "task_id": "任务 ID", "action": "任务操作", "port": "端口", "used_bytes": "已用字节数", "limit_bytes": "限额字节数", "percent": "配额百分比", "period": "统计周期", "direction": "收发方向", "current": "当前值（含单位）", "threshold": "阈值（含单位）", "status": "状态", "error": "脱敏错误", "version": "完整更新版本", "message": "事件摘要",
+	"used": "易读用量（KiB、MiB、GiB，1024 进制）", "limit": "易读限额（1024 进制）", "time_display": "面板时区时间；浏览器自动模式使用 UTC",
 }
 var placeholder = regexp.MustCompile(`\{\{([a-z_]+)\}\}`)
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -67,22 +69,25 @@ func SecretField(key string) bool {
 	return key == "url" || key == "token" || key == "password" || key == "secret" || key == "authorization" || key == "device_key"
 }
 func DefaultTemplate(event string) Template {
-	body := "{{message}}\n时间：{{time}}"
+	body := "{{message}}"
 	switch event {
 	case TypeTaskFailed:
-		body += "\n节点：{{agent}}\n内核：{{engine}}\n任务：{{task_id}}\n错误：{{error}}"
+		body = "**节点**　{{agent}}\n**内核**　{{engine}} · {{action}}\n**任务**　`{{task_id}}`\n\n**错误**\n{{error}}"
 	case TypeAgentOffline, TypeAgentOnline:
-		body += "\n节点：{{agent}}（{{agent_id}}）"
+		body = "**节点**　{{agent}}"
 	case TypeTrafficQuota, "traffic.warning":
-		body += "\n节点：{{agent}}\n端口：{{port}}\n用量：{{used_bytes}} / {{limit_bytes}} B\n比例：{{percent}}\n周期：{{period}}\n方向：{{direction}}"
+		body = "**节点**　{{agent}}\n**端口**　{{engine}} / {{port}}\n\n**用量**　{{used}} / {{limit}}\n**比例**　{{percent}}\n**周期**　{{period}}\n**方向**　{{direction}}"
 	case "speed.high", "speed.low", "speed.recovered":
-		body += "\n节点：{{agent}}\n方向：{{direction}}\n当前速率：{{current}}\n阈值：{{threshold}}"
+		body = "**节点**　{{agent}}\n**方向**　{{direction}}\n\n**当前速率**　{{current}}\n**阈值**　{{threshold}}"
 	case "panel.update":
-		body += "\n可用版本：{{version}}"
+		body = "**可用版本**　`{{version}}`"
 	}
-	return Template{Title: "{{panel}} · " + EventNames[event], Body: body}
+	return Template{Title: "{{panel}} · " + EventNames[event], Body: body + "\n\n{{time_display}}", Format: "markdown"}
 }
 func ValidateTemplate(t Template) error {
+	if t.Format != "" && t.Format != "text" && t.Format != "markdown" {
+		return errors.New("模板格式无效")
+	}
 	for _, v := range []string{t.Title, t.Body} {
 		if !utf8.ValidString(v) || len(v) > 12000 {
 			return errors.New("模板必须是有效 UTF-8，且不超过 12000 字节")
@@ -96,7 +101,7 @@ func ValidateTemplate(t Template) error {
 			}
 			return s
 		})
-		if strings.ContainsAny(rest, "{}") {
+		if strings.Contains(rest, "{{") || strings.Contains(rest, "}}") {
 			return errors.New("模板含未知变量或语法错误，请使用 {{变量名}}")
 		}
 	}

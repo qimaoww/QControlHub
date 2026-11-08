@@ -128,19 +128,38 @@ export async function notificationsPage(ctx) {
   const selection = templateEvent.querySelector("select");
   const title = field("标题", "title", "", { maxlength: 400, required: true, disabled: !writable });
   const body = field("正文", "body", "", { multiline: 8, maxlength: 12000, required: true, disabled: !writable });
-  const preview = node("pre", { className: "a-code", role: "status" });
+  const formatField = field("格式", "template_format", "text", { options: [["markdown", "Markdown"], ["text", "纯文本"]], disabled: !writable });
+  const format = formatField.querySelector("select");
+  const preview = node("div", { className: "a-stack", role: "status" });
   const testChannelField = field("测试渠道", "template_test_channel", "", { options: [["", "选择测试渠道"]] });
   const testChannel = testChannelField.querySelector("select");
   let previewSequence = 0;
-  function loadTemplate() { previewSequence++; const t = config.templates?.[selection.value] || resource.defaults[selection.value]; title.querySelector("input").value = t.title; body.querySelector("textarea").value = t.body; preview.textContent = ""; templateDirty = false; syncDirty(); }
+  function loadTemplate() { previewSequence++; const t = config.templates?.[selection.value] || resource.defaults[selection.value]; title.querySelector("input").value = t.title; body.querySelector("textarea").value = t.body; format.value = t.format || "text"; preview.textContent = ""; templateDirty = false; syncDirty(); }
   selection.addEventListener("change", async () => { if (templateDirty && !await ctx.confirm("放弃当前模板草稿？", "切换模板")) { selection.value = templateForm.dataset.event; return; } templateForm.dataset.event = selection.value; loadTemplate(); });
-  const templateForm = ctx.form([templateEvent, title, body,
+  function showPreview(result) {
+    let offset = result.title.length + 2;
+    const lines = result.body.split("\n").map(line => {
+      const parts = []; let cursor = 0;
+      for (const entity of result.entities || []) {
+        const start = Math.max(0, entity.offset - offset), end = Math.min(line.length, entity.offset + entity.length - offset);
+        if (end <= start) continue;
+        parts.push(line.slice(cursor, start));
+        const tag = { bold: "strong", italic: "em", strikethrough: "s", code: "code", pre: "code", text_link: "a" }[entity.type] || "span";
+        const attrs = tag === "a" && /^https?:\/\//i.test(entity.url || "") ? { href: entity.url, target: "_blank", rel: "noopener noreferrer" } : {};
+        parts.push(node(tag, attrs, line.slice(start, end))); cursor = end;
+      }
+      parts.push(line.slice(cursor)); offset += line.length + 1;
+      return node("div", {}, line ? parts : node("br"));
+    });
+    preview.replaceChildren(muted("脱敏示例"), node("strong", {}, result.title), node("div", {}, lines));
+  }
+  const templateForm = ctx.form([templateEvent, formatField, title, body,
     node("details", { className: "a-disclosure" }, node("summary", {}, "模板变量"), node("div", { className: "a-disclosure-body" }, table(["变量", "含义"], resource.variables.map(v => [`{{${v}}}`, resource.variable_descriptions[v]]), { label: "模板变量" }))),
-    muted("不适用的变量显示为 —。标题和正文按渠道长度限制截断，均使用纯文本。"),
+    muted("Markdown 支持 **粗体**、*斜体*、~~删除线~~、行内代码、代码块和链接。Telegram 保留格式，其他渠道使用纯文本。不适用的变量显示为 —。"),
     actions(button("渲染预览", event => void ctx.mutate(event.currentTarget, async () => {
       const sequence = ++previewSequence, selected = selection.value;
-      const result = await ctx.api("/settings/notifications/preview", { method: "POST", body: { event: selected, template: { title: title.querySelector("input").value, body: body.querySelector("textarea").value } } });
-      if (ctx.current() && sequence === previewSequence && selected === selection.value) preview.textContent = `脱敏示例\n${result.title}\n${result.body}`;
+      const result = await ctx.api("/settings/notifications/preview", { method: "POST", body: { event: selected, template: { title: title.querySelector("input").value, body: body.querySelector("textarea").value, format: format.value } } });
+      if (ctx.current() && sequence === previewSequence && selected === selection.value) showPreview(result);
     })), writable && button("恢复默认", event => void ctx.mutate(event.currentTarget, async () => {
       if (await change(c => { delete c.templates[selection.value]; })) { loadTemplate(); ctx.announce("已恢复默认模板"); }
     }))), preview,
@@ -149,9 +168,9 @@ export async function notificationsPage(ctx) {
       if (!testChannel.value) throw new Error("请选择测试渠道。");
       await testSaved(testChannel.value, selection.value);
     })))),
-  ], "保存模板", async values => { if (await change(c => { c.templates ||= {}; c.templates[selection.value] = { title: values.title, body: values.body }; })) { templateDirty = false; syncDirty(); ctx.announce("模板已保存"); } });
+  ], "保存模板", async values => { if (await change(c => { c.templates ||= {}; c.templates[selection.value] = { title: values.title, body: values.body, format: values.template_format }; })) { templateDirty = false; syncDirty(); ctx.announce("模板已保存"); } });
   templateForm.dataset.event = selection.value;
-  templateForm.addEventListener("input", event => { if (!event.target.matches('[name="title"],[name="body"]')) return; templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
+  templateForm.addEventListener("input", event => { if (!event.target.matches('[name="title"],[name="body"],[name="template_format"]')) return; templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
   if (!writable) templateForm.querySelector('button[type="submit"]').remove();
   loadTemplate();
   async function loadRecords() {

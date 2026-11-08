@@ -98,7 +98,7 @@ func TestNotificationEveryTemplateTestUsesSavedSnapshotWithoutAlertState(t *test
 				t.Fatalf("expected default and custom tests, got %d", len(received))
 			}
 			for _, e := range received {
-				if !e.Test || e.Type != event || !strings.HasPrefix(e.Title, "【测试】") || !strings.HasPrefix(e.Message, "已保存模板测试（脱敏示例）\n") || strings.Contains(e.Message, "{{") || strings.Contains(e.Message, "undefined") || strings.Contains(e.Message, "null") {
+				if !e.Test || e.Type != event || !strings.HasPrefix(e.Title, "【测试】") || e.Message == "" || strings.Contains(e.Message, "{{") || strings.Contains(e.Message, "undefined") || strings.Contains(e.Message, "null") {
 					t.Fatalf("invalid rendered test: %+v", e)
 				}
 			}

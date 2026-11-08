@@ -343,7 +343,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await click('测试已保存模板','.a-main');
   await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请先保存模板，再测试。')");
   await click('渲染预览','.a-main');
-  await wait(page,"[...document.querySelectorAll('pre[role=status]')].some(p=>p.textContent.includes('示例节点'))");
+  await wait(page,"[...document.querySelectorAll('[role=status]')].some(p=>p.textContent.includes('脱敏示例')&&p.textContent.includes('示例节点'))");
   await click('保存模板','.a-main');
   await wait(page,"!document.querySelector('[aria-busy=true]')");
   assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');

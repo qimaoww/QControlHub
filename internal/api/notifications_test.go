@@ -103,9 +103,9 @@ func TestNotificationAPISavedTemplateTest(t *testing.T) {
 	c.Templates[notify.TypeTaskFailed] = notify.Template{Title: "任务测试 {{agent}}", Body: "{{error}}\n中文 <>& 😀\n{{version}}"}
 	alice.call("PUT", "/settings/notifications", c, 200, &c)
 	for event := range notify.EventNames {
-		var preview map[string]string
+		var preview notify.Rendered
 		alice.call("POST", "/settings/notifications/preview", map[string]any{"event": event, "template": notify.DefaultTemplate(event)}, 200, &preview)
-		if preview["title"] == "" || preview["body"] == "" || strings.Contains(preview["body"], "{{") {
+		if preview.Title == "" || preview.Body == "" || strings.Contains(preview.Body, "{{") {
 			t.Fatal("invalid preview", event, preview)
 		}
 	}

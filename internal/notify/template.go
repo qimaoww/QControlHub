@@ -31,18 +31,30 @@ func Clip(s string, n int) string {
 	return s[:n] + "…"
 }
 func Render(t Template, e Event, panel string) (string, string, error) {
+	r, err := RenderFormatted(t, e, panel, "UTC")
+	return r.Title, r.Body, err
+}
+
+func RenderFormatted(t Template, e Event, panel, zone string) (Rendered, error) {
 	if err := ValidateTemplate(t); err != nil {
-		return "", "", err
+		return Rendered{}, err
 	}
 	v := map[string]string{"panel": panel, "type": e.Type, "time": e.Time.Format(time.RFC3339), "agent_id": e.AgentID, "agent": e.Agent, "engine": e.Engine, "task_id": e.TaskID, "action": e.Action, "error": Redact(e.Error), "version": e.Version, "message": Redact(e.Message), "period": e.Period, "direction": e.Direction, "status": e.Status, "current": e.Current, "threshold": e.Threshold}
+	location, err := time.LoadLocation(zone)
+	if err != nil || zone == "" || zone == "browser" {
+		location = time.UTC
+	}
+	v["time_display"] = e.Time.In(location).Format("2006-01-02 15:04:05 -07:00")
 	if e.Port > 0 {
 		v["port"] = fmt.Sprint(e.Port)
 	}
 	if strings.HasPrefix(e.Type, "traffic.") || e.UsedBytes > 0 {
 		v["used_bytes"] = fmt.Sprint(e.UsedBytes)
+		v["used"] = humanBytes(e.UsedBytes)
 	}
 	if e.LimitBytes > 0 {
 		v["limit_bytes"] = fmt.Sprint(e.LimitBytes)
+		v["limit"] = humanBytes(e.LimitBytes)
 		v["percent"] = fmt.Sprintf("%.2f%%", float64(e.UsedBytes)/float64(e.LimitBytes)*100)
 	}
 	render := func(s string) string {
@@ -54,7 +66,38 @@ func Render(t Template, e Event, panel string) (string, string, error) {
 			return value
 		})
 	}
-	return Clip(render(t.Title), 400), Clip(render(t.Body), 12000), nil
+	title, body := render(t.Title), render(t.Body)
+	var entities []MessageEntity
+	if t.Format == "markdown" {
+		title, _ = markdownText(t.Title, render)
+		body, entities = markdownText(t.Body, render)
+	}
+	if e.Test {
+		title = "【测试】" + title
+	}
+	title, body = Clip(title, 400), Clip(body, 12000)
+	entities = clippedEntities(entities, body)
+	for i := range entities {
+		entities[i].Offset += utf16Length(title + "\n\n")
+	}
+	if t.Format == "markdown" {
+		entities = append([]MessageEntity{{Type: "bold", Length: utf16Length(title)}}, entities...)
+	}
+	return Rendered{Title: title, Body: body, Entities: entities}, nil
+}
+
+func humanBytes(value uint64) string {
+	if value < 1024 {
+		return fmt.Sprintf("%d B", value)
+	}
+	n := float64(value)
+	for _, unit := range []string{"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"} {
+		n /= 1024
+		if n < 1024 || unit == "EiB" {
+			return fmt.Sprintf("%.2f %s", n, unit)
+		}
+	}
+	return ""
 }
 func Sample(event string) Event {
 	e := Event{Type: event, Time: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), Message: "脱敏示例：" + EventNames[event]}

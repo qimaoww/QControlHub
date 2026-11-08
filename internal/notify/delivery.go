@@ -83,12 +83,20 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 	headers := map[string]string{}
 	switch c.Type {
 	case "webhook":
+		// Formatting metadata belongs to Telegram; legacy Webhook fields remain plain.
+		plain := e
+		plain.Entities = nil
+		payload = plain
 		if a := c.Get("authorization"); a != "" {
 			headers["Authorization"] = a
 		}
 	case "telegram":
 		target = "https://api.telegram.org/bot" + url.PathEscape(c.Get("token")) + "/sendMessage"
-		p := map[string]any{"chat_id": c.Get("chat_id"), "text": Clip(text, 4000)}
+		text = Clip(e.Title+"\n\n"+e.Message, 4000)
+		p := map[string]any{"chat_id": c.Get("chat_id"), "text": text, "link_preview_options": map[string]bool{"is_disabled": true}}
+		if entities := clippedEntities(e.Entities, text); len(entities) > 0 {
+			p["entities"] = entities
+		}
 		for _, key := range []string{"message_thread_id", "direct_messages_topic_id"} {
 			if v := c.Get(key); v != "" {
 				n, _ := strconv.ParseInt(v, 10, 64)
