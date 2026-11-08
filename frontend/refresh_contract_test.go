@@ -63,7 +63,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"liveTable.updateRows(rows)",
 			"poll({ ...ctx, onRefreshError: failedRefresh }, load)",
 			"if (error.status === 403",
-			"agents = []; selected.clear(); draw(true)",
+			"agents = []; draw(true)",
 		},
 		"analytics/client-access.js": {
 			"if (!ctx.current() || sequence !== readSequence) return;",

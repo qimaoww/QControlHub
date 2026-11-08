@@ -39,24 +39,23 @@ func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 	agents := frontendSources(t, "analytics/nodes.js", "analytics/node-batch.js")
 	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
 	for _, required := range []string{
-		`let view = preference.view === 'list' ? 'list' : 'cards', selecting = false;`,
-		`const batchToggle = ctx.can('tasks.execute')`, `batchBar.hidden = !selecting`,
-		`batchToggle.hidden = selecting`, `all.querySelector('input').indeterminate`,
-		`selected.clear(); draw()`, `className:'a-probe-choice'`, `selecting?['选择']:[]`,
-		`disabled: !selectable(agent)`, `agent.can_manage !== false || ctx.can('instance.manage', agent)`,
+		`let view = preference.view === 'list' ? 'list' : 'cards';`,
+		`const batchToggle = ctx.can('tasks.execute')`, `batchBox?.isConnected`,
+		`openNodeBatch(ctx, (value = agents) => orderNodesBySavedOrder(value, ordering.ids()))`,
 		`openedScopes.get(agent.id)?.get(options.engine)`, `if (!ctx.can('tasks.execute'))`,
-		`if (scope(agent, options.engine) !==`, `row.retry.disabled = busy`,
+		`if (scope(agent, options.engine) !==`, `row.selected = !selected`,
+		`已选 ${selected} / 可选 ${eligible} 个节点`, `expected_instance_id: original[2]`,
 	} {
 		if !strings.Contains(agents, required) {
 			t.Errorf("native node selection missing %q", required)
 		}
 	}
-	for _, required := range []string{".a-probe-grid { display: grid;", ".a-probe-batch[hidden] { display: none; }", ".a-probe-choice", ".a-probe-list"} {
+	for _, required := range []string{".a-probe-grid { display: grid;", ".a-probe-list"} {
 		if !strings.Contains(styles, required) {
 			t.Errorf("native node selection styles missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"node-page-intro", "node-batch-panel"} {
+	for _, forbidden := range []string{"node-page-intro", "node-batch-panel", "selecting", "selected.has(", "drawBatch"} {
 		if strings.Contains(agents, forbidden) {
 			t.Errorf("native node settings retains a redundant panel: %q", forbidden)
 		}
@@ -82,16 +81,14 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 		"analytics/node-batch.js": {
 			`const options = readOptions(values)`,
 			`if (!await ctx.confirm(`,
-			`agents = list(await ctx.api('/agents'))`,
+			`const fresh = list(await ctx.api('/agents'))`,
 			`for (const id of targets)`,
 			`const reason = eligibility(agents.find(agent => agent.id === id), options)`,
-			`row.retry.disabled = busy`,
-			`if (busy || !row.result) return`,
+			`disabled: busy || Boolean(result && eligibility`,
+			`if (busy || !row.result?.error) return`,
 			`已提交 ${submitted}，提交失败 ${failed}`,
 		},
 		"analytics/nodes.js": {
-			`all.querySelector('input').indeterminate`,
-			`disabled: !selectable(agent)`,
 			`if (!ctx.current() || !box.isConnected) return`,
 			`if (!ctx.current() || !box.open) return`,
 			`删除此添加记录？已接入的节点不会被卸载。`,
