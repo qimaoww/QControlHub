@@ -42,6 +42,9 @@ await readCoreLogWindow(api, new URLSearchParams("agent_id=alpha&limit=1000"), {
 assert.equal(requests.at(-1).headers?.["If-None-Match"], undefined, "related limits cannot validate one another");
 await readCoreLogWindow(api, new URLSearchParams("agent_id=beta&limit=2000"), { ...options, previous: changed });
 assert.equal(requests.at(-1).headers?.["If-None-Match"], undefined, "validators cannot cross node scopes");
+assert.equal(await readCoreLogWindow(api, params, { ...options, previous: changed }), changed);
+assert.equal(requests.at(-1).headers?.["If-None-Match"], tag,
+  "identical sparse windows at related URLs must not overwrite the original URL's validator");
 await readCoreLogWindow(api, params, options);
 assert.equal(requests.at(-1).headers?.["If-None-Match"], undefined, "evicted or new-account windows need a body");
 
