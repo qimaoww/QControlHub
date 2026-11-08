@@ -10,6 +10,7 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"invalid scope_only":                                                                                      "请选择有效的连接访问范围查询模式。",
 	"target instance changed; select the node again":                                                          "目标实例已变化，请重新选择节点后提交。",
 	"task has no configuration revision; submit a new task":                                                   "旧任务缺少配置版本，无法确认重试内容，请核对配置后重新提交任务。",
 	"account authorization changed; sign in again":                                                            "账号权限或登录凭据已变更，本次操作未提交，请重新登录。",

@@ -56,8 +56,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	styles := mustReadFrontendFile(t, "analytics/theme.css")
 	// Preserve the reviewed native surface, including the requested compact
 	// card-selection header, node network column, settings section selection
-	// and proportional raster logo containment in the existing brand mark.
-	const expected = "f8a0051fa9e791684c98ba0bdc3f2c2d9bbc12f091b0acbe69ba606519cf10d9"
+	// proportional raster logo containment in the existing brand mark, and
+	// unavailable public-IP placeholders aligned with normal address rows.
+	const expected = "821f1d41c7638b685ed4278774027836796197e21d99bdd7840be4eed39bfe50"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

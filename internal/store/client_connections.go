@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -9,8 +12,32 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/geoip"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
+
+// ClientConnectionScope only reads node metadata, using the same host telemetry
+// authority as history. Shared kernel grants deliberately do not enter it.
+func (s *Store) ClientConnectionScope(ctx context.Context) (string, error) {
+	args := []any{}
+	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT a.id,a.name,COALESCE(a.owner_id,'') FROM agents a`+where+` ORDER BY a.id`, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	hash := sha256.New()
+	for rows.Next() {
+		var id, name, owner string
+		if err := rows.Scan(&id, &name, &owner); err != nil {
+			return "", err
+		}
+		if err := json.NewEncoder(hash).Encode([]string{id, name, owner}); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), rows.Err()
+}
 
 type ClientConnectionQuery struct {
 	// GroupByIP deduplicates within each agent and engine, never across them.
@@ -26,6 +53,7 @@ type ClientConnectionQuery struct {
 	Inbound          string
 	Transport        string
 	ClientIP         string
+	CountryCode      string
 	NodeOrder        []string
 	Port             int
 	Since            time.Time
@@ -37,6 +65,9 @@ type ClientConnectionQuery struct {
 }
 
 func (q ClientConnectionQuery) Validate() error {
+	if q.CountryCode != "" && !geoip.ValidRegionCode(q.CountryCode) {
+		return fmt.Errorf("%w: unsupported country/region code", ErrInvalid)
+	}
 	if len(q.NodeOrder) > 500 {
 		return fmt.Errorf("%w: too many ordered nodes", ErrInvalid)
 	}
@@ -68,7 +99,7 @@ func (q ClientConnectionQuery) Validate() error {
 func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
 	args := []any{q.Since.UTC().Truncate(time.Minute), q.Until.UTC(), q.Since.UTC()}
 	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL AND c.source='core_logs'`
-	if !q.IncludeNonPublic {
+	if !q.IncludeNonPublic || q.CountryCode != "" {
 		args = append(args, netpolicy.NonPublicPrefixes())
 		where += fmt.Sprintf(" AND NOT (c.client_ip <<= ANY($%d::inet[]))", len(args))
 	}
@@ -95,6 +126,10 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 		ip, _ := netip.ParseAddr(q.ClientIP)
 		add("c.client_ip", ip.Unmap().String())
 	}
+	if q.CountryCode != "" {
+		args = append(args, q.CountryCode)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM client_connection_locations location WHERE location.client_ip=c.client_ip AND location.country_code=$%d)", len(args))
+	}
 	if q.Port > 0 {
 		add("COALESCE(c.inbound_port,c.local_port)", q.Port)
 	}
@@ -105,7 +140,8 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 }
 
 func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQuery) (core.ClientConnectionHistory, error) {
-	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}}
+	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}, CountryCodes: []string{}}
+	q.CountryCode = strings.ToUpper(strings.TrimSpace(q.CountryCode))
 	if err := q.Validate(); err != nil {
 		return result, err
 	}
@@ -117,6 +153,30 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	where, args := connectionHistoryWhere(ctx, q)
 	from := ` FROM client_connections c JOIN agents a ON a.id=c.agent_id`
 	if !q.RecordsOnly {
+		// Offer countries across the entire authorized result, independently of
+		// pagination and the current country choice. Other filters still apply.
+		countries := q
+		countries.CountryCode = ""
+		countries.IncludeNonPublic = false
+		countryWhere, countryArgs := connectionHistoryWhere(ctx, countries)
+		rows, err := tx.Query(ctx, `SELECT DISTINCT location.country_code`+from+` JOIN client_connection_locations location ON location.client_ip=c.client_ip`+countryWhere+` AND location.country_code<>'' ORDER BY location.country_code`, countryArgs...)
+		if err != nil {
+			return result, err
+		}
+		for rows.Next() {
+			var code string
+			if err := rows.Scan(&code); err != nil {
+				rows.Close()
+				return result, err
+			}
+			if geoip.ValidRegionCode(code) {
+				result.CountryCodes = append(result.CountryCodes, code)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return result, err
+		}
 		// Summary is independent of pagination and counts distinct observed tuples,
 		// not the number of minute rows or inferred authenticated sessions.
 		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
@@ -182,6 +242,11 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 			result.Records = result.Records[:q.Limit]
 			result.NextBefore = result.Records[len(result.Records)-1].ID
 		}
+	}
+	// Country membership is determined in this transaction, before grouping,
+	// totals and pagination. Unknown and non-public IPs cannot match a country.
+	for i := range result.Records {
+		result.Records[i].Location.CountryCode = q.CountryCode
 	}
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)

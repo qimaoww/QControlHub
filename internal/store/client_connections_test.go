@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"net/netip"
 	"testing"
 	"time"
@@ -8,6 +9,38 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
+
+func TestClientConnectionScopeDoesNotReadHistory(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	before, err := db.ClientConnectionScope(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `LOCK TABLE client_connections IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	started := time.Now()
+	after, err := db.ClientConnectionScope(deadline)
+	if err != nil || after != before {
+		t.Fatalf("scope waited on history: %q %v", after, err)
+	}
+	t.Logf("metadata scope under exclusive history lock: %s", time.Since(started))
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := db.ClientConnectionScope(ctx)
+	if err != nil || revoked == before {
+		t.Fatalf("revocation retained cache scope: %q %v", revoked, err)
+	}
+}
 
 func TestClientConnectionHistoryDefaultsToPublicSources(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
