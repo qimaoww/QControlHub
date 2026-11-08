@@ -58,6 +58,7 @@ type githubRelease struct {
 }
 
 type githubReleaseAsset struct {
+	ID                 int64  `json:"id"`
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Digest             string `json:"digest"`
