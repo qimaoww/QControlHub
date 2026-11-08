@@ -14,11 +14,12 @@ import (
 
 func main() {
 	type entry struct {
-		Engine    core.Engine                 `json:"engine"`
-		Protocol  serverconfig.Protocol       `json:"protocol"`
-		Plan      serverconfig.Input          `json:"plan"`
-		Profile   *serverconfig.ClientProfile `json:"profile,omitempty"`
-		SavedPlan *serverconfig.Input         `json:"saved_plan,omitempty"`
+		Engine     core.Engine                 `json:"engine"`
+		Protocol   serverconfig.Protocol       `json:"protocol"`
+		Plan       serverconfig.Input          `json:"plan"`
+		Profile    *serverconfig.ClientProfile `json:"profile,omitempty"`
+		MihomoYAML string                      `json:"mihomo_yaml,omitempty"`
+		SavedPlan  *serverconfig.Input         `json:"saved_plan,omitempty"`
 	}
 	var catalog []entry
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
@@ -28,12 +29,16 @@ func main() {
 				panic(err)
 			}
 			fixture := entry{Engine: engine, Protocol: protocol, Plan: plan}
-			if engine == core.EngineXray && (plan.Transport == "xhttp" || plan.Protocol == serverconfig.ProtocolVLESS) {
-				profile, err := serverconfig.BuildClientProfile(plan, "203.0.113.10", "")
-				if err != nil {
-					panic(err)
+			profile, profileErr := serverconfig.BuildClientProfile(plan, "203.0.113.10", "")
+			if profileErr != nil && engine == core.EngineXray && (plan.Transport == "xhttp" || plan.Protocol == serverconfig.ProtocolVLESS) {
+				panic(profileErr)
+			}
+			if profileErr == nil {
+				fixture.Profile, fixture.MihomoYAML = &profile, profile.Mihomo
+				for index := range fixture.Profile.Variants {
+					variant := &fixture.Profile.Variants[index]
+					variant.MihomoYAML = variant.Profile.Mihomo
 				}
-				fixture.Profile = &profile
 			}
 			if protocol.Key == serverconfig.ProtocolWireGuard {
 				// Exercise the real Go wire format: a JS-only zero would hide

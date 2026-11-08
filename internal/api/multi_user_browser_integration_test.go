@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -26,7 +27,10 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			name = "mobile"
 		}
 		t.Run(name, func(t *testing.T) {
-			db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+			// This complete browser journey includes animation and screenshot
+			// checks; the API-only fixture's 45s budget can expire at its final
+			// isolation assertions. Keep the browser's own 60s limit bounded.
+			db, ctx, admin, alice, bob := newConfigScopeAPIFixtureWithin(t, 90*time.Second)
 			var analyticsUser core.User
 			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
 			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)
