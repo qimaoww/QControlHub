@@ -1,6 +1,7 @@
 import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
+import { bindSiteLogo, refreshSiteBranding } from "./site-brand.js";
 import { setStorageAccount } from "../modules/account-storage.js";
 import { accountRequest } from "../modules/account-request.js";
 import { effectiveTheme } from "../modules/theme-registry.js";
@@ -192,7 +193,7 @@ export function startAnalytics({ app, session }) {
   }
   function rail(mobile = false) {
     return node("aside", { className: "a-rail" },
-      node("a", { className: "a-brand", href: "#dashboard" }, node("span", { className: "a-mark" }, icon("brand")), "QControlHub"),
+      node("a", { className: "a-brand", href: "#dashboard" }, bindSiteLogo(node("span", { className: "a-mark" }, icon("brand"))), "QControlHub"),
       mobile && button("", () => drawer.close(), { glyph: "close", title: "关闭导航", className: "a-icon-button a-drawer-close" }),
       node("nav", { "aria-label": "主导航" }, destinations.map(([group, entries]) => {
         const allowed = entries.filter(([id, , , permission]) => id === "themes" || can(permission));
@@ -274,6 +275,7 @@ export function startAnalytics({ app, session }) {
     await mutate(null, async () => { await api("/auth/logout", { method: "POST", body: {} }); login(); });
   }
   function login(message = "") {
+    void refreshSiteBranding();
     routeAbort?.abort();
     watch.stop();
     const loginURL = new URL(location.href);
@@ -315,7 +317,7 @@ export function startAnalytics({ app, session }) {
     });
     loginForm.setAttribute("aria-label", "登录控制台");
     app.replaceChildren(node("main", { className: "a-login" },
-      node("div", { className: "a-login-brand" }, node("span", { className: "a-mark" }, icon("brand")), node("strong", {}, "QControlHub")),
+      node("div", { className: "a-login-brand" }, bindSiteLogo(node("span", { className: "a-mark" }, icon("brand"))), node("strong", {}, "QControlHub")),
       node("section", { className: "a-login-card", "aria-labelledby": "a-login-heading" },
         node("header", { className: "a-login-heading" }, node("h1", { id: "a-login-heading" }, "登录控制台")),
         message && notice(message), loginForm)));

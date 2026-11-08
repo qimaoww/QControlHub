@@ -234,18 +234,31 @@ export function query(path, params) {
 }
 export const list = value => Array.isArray(value) ? value : [];
 
-export async function copyText(value) {
+export async function copyText(value, isCurrent = () => true) {
+  const check = () => { if (!isCurrent()) throw new DOMException('复制目标已变化', 'AbortError'); };
+  check();
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(String(value)); return; }
     catch { /* HTTP previews and browser restrictions use native selection. */ }
   }
+  check();
   const active = document.activeElement;
+  const selection = document.getSelection();
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
+  const controlSelection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
   const source = node("textarea", { className: "a-clipboard", readonly: true });
   source.value = String(value);
   (document.querySelector('dialog:modal') || document.body).append(source);
   source.focus({ preventScroll: true }); source.select();
   try { if (!document.execCommand('copy')) throw new Error('浏览器拒绝了剪贴板操作'); }
-  finally { source.remove(); active?.focus?.({ preventScroll: true }); }
+  finally {
+    source.remove();
+    if (isCurrent()) {
+      active?.focus?.({ preventScroll: true });
+      if (selection && ranges.length) { selection.removeAllRanges(); for (const range of ranges) selection.addRange(range); }
+      if (controlSelection) active.setSelectionRange(...controlSelection);
+    }
+  }
 }
 
 // Lock the document without shifting its content when a native modal opens.

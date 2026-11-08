@@ -9,6 +9,16 @@ import (
 )
 
 func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine) (string, error) {
+	return s.readTaskConfigSnapshot(ctx, taskID, agentID, engine, false)
+}
+
+// ReadWorkspaceTaskConfigSnapshot binds client exports to the current account,
+// including administrators who can inspect other accounts' fleet tasks.
+func (s *Store) ReadWorkspaceTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine) (string, error) {
+	return s.readTaskConfigSnapshot(ctx, taskID, agentID, engine, true)
+}
+
+func (s *Store) readTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine, workspace bool) (string, error) {
 	if err := requireConfigSnapshotAccess(ctx, s.pool, agentID, engine); err != nil {
 		return "", err
 	}
@@ -18,7 +28,12 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 		return "", err
 	}
 	args := []any{taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig}
-	where := ownerClause(ctx, "owner_id", &args)
+	var where string
+	if workspace {
+		where = workspaceOwnerClause(ctx, "owner_id", &args)
+	} else {
+		where = ownerClause(ctx, "owner_id", &args)
+	}
 	if shared {
 		where += ` AND shared_instance`
 	} else {

@@ -78,7 +78,7 @@ export async function createConfigFixture(engine, options = {}) {
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
   let disabled = [];
-  const workspace = () => ({agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
+  const workspace = () => ({client_source:`source-${saved?.version || 0}`, agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
     deployment:{state: test.deploymentState || ([...tasks.values()].some(task=>task.action==='deploy'&&task.config_version===saved?.version) ?
       test.taskStatus==='succeeded'?'applied':test.taskStatus==='failed'?'failed':test.taskStatus==='canceled'?'canceled':'deploying' : 'pending'),
       service_status:agent.status==='online'?agent.runtime[engine].service_status:'unknown',
@@ -94,6 +94,12 @@ export async function createConfigFixture(engine, options = {}) {
   const api = async (path, request = {}) => {
     test.calls.push({path, method:request.method || "GET"});
     const body = request.body && JSON.parse(request.body);
+    if (path.includes('/configs/') && path.includes('/client-access?')) {
+      if(test.exportGate)await test.exportGate;
+      if(test.exportFailure)throw Object.assign(new Error('配置已变化，请重新读取'),{status:409});
+      return {content:options.exportContent || 'ss://dGVzdDpwYXNz@node.example.test:21001#first',format:'URL',source:new URLSearchParams(path.split('?')[1]).has('snapshot')?'snapshot':'saved'};
+    }
+    if (path === "/branding") return {logo:""};
     if (path === "/auth/session") return session;
     if (path === "/settings") return {};
     if (path === "/agent-access") return {revision:1,shares:[]};
@@ -295,7 +301,7 @@ export async function createConfigFixture(engine, options = {}) {
   const nativeFetch = globalThis.fetch;
   const permissions = ['overview.read','agents.read','agent-config.read','agent-config.write','configs.read','configs.write','configs.restore','tasks.read','tasks.execute','client-access.read','templates.read','settings.read'];
   const session = {role:options.shared||options.readonly||options.noFleet||options.noTasks||options.noPeerRead?'user':'admin',username:options.shared?'shared-user':'owner',csrf_token:'fixture',
-    permissions:permissions.filter(permission=>(!options.readonly || ['agents.read','agent-config.read','configs.read','tasks.read'].includes(permission))&&!(options.noFleet&&permission==='agents.read')&&!(options.noTasks&&permission==='tasks.execute')&&!(options.noPeerRead&&permission==='client-access.read'))};
+    permissions:permissions.filter(permission=>(!options.readonly || ['agents.read','agent-config.read','configs.read','tasks.read','client-access.read'].includes(permission))&&!(options.noFleet&&permission==='agents.read')&&!(options.noTasks&&permission==='tasks.execute')&&!(options.noPeerRead&&permission==='client-access.read'))};
   globalThis.fetch = async (url, request={}) => {
     if (!String(url).startsWith('/api/v1')) return nativeFetch(url,request);
     try {
