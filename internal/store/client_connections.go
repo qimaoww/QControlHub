@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/geoip"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
@@ -52,6 +53,7 @@ type ClientConnectionQuery struct {
 	Inbound          string
 	Transport        string
 	ClientIP         string
+	CountryCode      string
 	NodeOrder        []string
 	Port             int
 	Since            time.Time
@@ -63,6 +65,9 @@ type ClientConnectionQuery struct {
 }
 
 func (q ClientConnectionQuery) Validate() error {
+	if q.CountryCode != "" && !geoip.ValidRegionCode(q.CountryCode) {
+		return fmt.Errorf("%w: unsupported country/region code", ErrInvalid)
+	}
 	if len(q.NodeOrder) > 500 {
 		return fmt.Errorf("%w: too many ordered nodes", ErrInvalid)
 	}
@@ -94,7 +99,7 @@ func (q ClientConnectionQuery) Validate() error {
 func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
 	args := []any{q.Since.UTC().Truncate(time.Minute), q.Until.UTC(), q.Since.UTC()}
 	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL AND c.source='core_logs'`
-	if !q.IncludeNonPublic {
+	if !q.IncludeNonPublic || q.CountryCode != "" {
 		args = append(args, netpolicy.NonPublicPrefixes())
 		where += fmt.Sprintf(" AND NOT (c.client_ip <<= ANY($%d::inet[]))", len(args))
 	}
@@ -121,6 +126,10 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 		ip, _ := netip.ParseAddr(q.ClientIP)
 		add("c.client_ip", ip.Unmap().String())
 	}
+	if q.CountryCode != "" {
+		args = append(args, q.CountryCode)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM client_connection_locations location WHERE location.client_ip=c.client_ip AND location.country_code=$%d)", len(args))
+	}
 	if q.Port > 0 {
 		add("COALESCE(c.inbound_port,c.local_port)", q.Port)
 	}
@@ -132,6 +141,7 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 
 func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQuery) (core.ClientConnectionHistory, error) {
 	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}}
+	q.CountryCode = strings.ToUpper(strings.TrimSpace(q.CountryCode))
 	if err := q.Validate(); err != nil {
 		return result, err
 	}
@@ -208,6 +218,11 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 			result.Records = result.Records[:q.Limit]
 			result.NextBefore = result.Records[len(result.Records)-1].ID
 		}
+	}
+	// Country membership is determined in this transaction, before grouping,
+	// totals and pagination. Unknown and non-public IPs cannot match a country.
+	for i := range result.Records {
+		result.Records[i].Location.CountryCode = q.CountryCode
 	}
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)

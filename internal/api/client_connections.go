@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -17,6 +18,7 @@ import (
 
 func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientConnectionQuery, error) {
 	q := store.ClientConnectionQuery{AgentID: values.Get("agent_id"), Engine: core.Engine(values.Get("engine")), Protocol: values.Get("protocol"), Inbound: values.Get("inbound"), Transport: values.Get("transport"), ClientIP: values.Get("client_ip"), Since: now.Add(-24 * time.Hour), Until: now, Limit: 100, Bucket: "hour"}
+	q.CountryCode = strings.ToUpper(strings.TrimSpace(values.Get("country_code")))
 	if group := values.Get("group_by"); group != "" {
 		if group != "ip" {
 			return q, fmt.Errorf("invalid group_by")
@@ -112,6 +114,15 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 		return
 	}
 	s.resolveClientConnectionLocations(request.Context(), history.Records, locationMode == "cached")
+	if query.CountryCode != "" {
+		// A deferred lookup may reclassify an IP for later queries. This response
+		// still describes the filtered database snapshot used for its totals.
+		for i := range history.Records {
+			if history.Records[i].Location.CountryCode != query.CountryCode {
+				history.Records[i].Location = core.ClientIPLocation{CountryCode: query.CountryCode}
+			}
+		}
+	}
 	// User disablement, role/permission changes and session expiry can happen
 	// while the history or deferred geography read is in progress.
 	// Drop the middleware's per-request session snapshot before revalidating.

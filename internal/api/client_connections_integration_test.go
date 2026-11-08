@@ -161,6 +161,114 @@ func TestClientConnectionAPIIsolation(t *testing.T) {
 	}
 }
 
+func TestClientConnectionCountryFilter(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	owned, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "country-owner", core.EngineMihomo)
+	other, _ := ownedConfigScopeAPIAgent(t, ctx, db, bob, "country-other", core.EngineMihomo)
+	grantConfigScopeAPIAgent(t, ctx, db, owned, bob, 23450)
+	for index, item := range []struct {
+		agent string
+		ips   []string
+	}{{owned.ID, []string{"8.8.8.8", "8.8.8.8", "9.9.9.9", "1.1.1.1", "8.8.4.4", "10.0.0.1"}}, {other.ID, []string{"1.0.0.1"}}} {
+		batch := core.CoreLogBatch{ID: fmt.Sprintf("log_%016x", 0xcf000+index)}
+		for i, ip := range item.ips {
+			batch.Entries = append(batch.Entries, core.CoreLogEntry{Engine: core.EngineMihomo, Level: "info", Message: fmt.Sprintf("[TCP] %s --> example.invalid:443 using DIRECT", net.JoinHostPort(ip, strconv.Itoa(50000+i)))})
+		}
+		if err := db.StoreCoreLogs(ctx, item.agent, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var locations []store.ClientConnectionLocation
+	for ip, code := range map[string]string{"8.8.8.8": "US", "9.9.9.9": "US", "1.1.1.1": "AU", "10.0.0.1": "US", "1.0.0.1": "US"} {
+		locations = append(locations, store.ClientConnectionLocation{IP: ip, ClientIPLocation: core.ClientIPLocation{CountryCode: code}, RetryAfter: time.Now().Add(time.Hour)})
+	}
+	if err := db.SaveClientConnectionLocations(ctx, locations); err != nil {
+		t.Fatal(err)
+	}
+	path := "/client-connections?country_code=us&include_non_public=true&locations=cached"
+	for _, grouped := range []bool{false, true} {
+		query := path
+		if grouped {
+			query += "&group_by=ip"
+		}
+		for _, test := range []struct {
+			client configScopeAPIClient
+			ips    int64
+			flows  int64
+		}{{alice, 2, 3}, {admin, 3, 4}, {bob, 1, 1}} {
+			var result core.ClientConnectionHistory
+			test.client.call("GET", query, nil, http.StatusOK, &result)
+			if result.IPs != test.ips || result.Flows != test.flows || len(result.Timeline) != 1 || result.Timeline[0].Flows != test.flows {
+				t.Fatalf("country summary/timeline grouped=%v: %+v", grouped, result)
+			}
+			for _, row := range result.Records {
+				if row.Location.CountryCode != "US" || row.ClientIP == "10.0.0.1" || row.ClientIP == "8.8.4.4" || (test.client.userID == bob.userID && row.AgentID != other.ID) {
+					t.Fatalf("country or shared-owner isolation failed: %+v", row)
+				}
+			}
+		}
+	}
+	var first, second, empty core.ClientConnectionHistory
+	query := path + "&group_by=ip&timeline=false&limit=1"
+	alice.call("GET", query, nil, http.StatusOK, &first)
+	alice.call("GET", query+"&cursor="+first.NextCursor, nil, http.StatusOK, &second)
+	if len(first.Records) != 1 || len(second.Records) != 1 || first.Records[0].ID == second.Records[0].ID || first.NextCursor == "" || second.NextCursor != "" || first.Flows != second.Flows {
+		t.Fatalf("country pagination: %+v / %+v", first, second)
+	}
+	alice.call("GET", "/client-connections?country_code=CN&locations=cached", nil, http.StatusOK, &empty)
+	if empty.IPs != 0 || len(empty.Records) != 0 {
+		t.Fatalf("unknown countries matched: %+v", empty)
+	}
+	bob.call("GET", query+"&agent_id="+owned.ID, nil, http.StatusOK, &empty)
+	if empty.IPs != 0 || len(empty.Records) != 0 || len(empty.Sources) != 0 {
+		t.Fatalf("country filter expanded shared host authority: %+v", empty)
+	}
+	if err := db.SetAgentAdminHidden(store.WithConfigScope(ctx, alice.userID, false), owned.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	admin.call("GET", path, nil, http.StatusOK, &empty)
+	if empty.IPs != 1 || len(empty.Records) != 1 || empty.Records[0].AgentID != other.ID {
+		t.Fatalf("country filter bypassed hidden node: %+v", empty)
+	}
+	permissions := []core.Permission{core.PermissionCoreLogsRead}
+	admin.call("PUT", "/users/"+alice.userID, core.UserUpdate{Permissions: &permissions}, http.StatusOK, nil)
+	alice, _ = managementLogin(t, alice.handler, "alice", "config scope password fixture", http.StatusOK)
+	alice.call("GET", path, nil, http.StatusOK, &empty)
+	if empty.IPs != 2 {
+		t.Fatalf("logs-only country filter: %+v", empty)
+	}
+	alice.call("GET", "/regions", nil, http.StatusOK, nil)
+	alice.call("GET", "/agents", nil, http.StatusForbidden, nil)
+}
+
+func TestClientConnectionCountrySnapshotDuringEnrichment(t *testing.T) {
+	db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "country-reclassified", core.EngineMihomo)
+	if err := storeAPIConnectionLogs(ctx, db, agent.ID, clientConnectionFixtures{Connections: []core.ClientConnection{{ClientIP: "8.8.8.8", ClientPort: 50000}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveClientConnectionLocations(ctx, []store.ClientConnectionLocation{{IP: "8.8.8.8", ClientIPLocation: core.ClientIPLocation{CountryCode: "CN"}, RetryAfter: time.Now().Add(-time.Hour)}}); err != nil {
+		t.Fatal(err)
+	}
+	handler := New(db, Config{AdminToken: admin.token, GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"country_code":"US"}`)), Header: make(http.Header)}, nil
+	})}}).Handler()
+	client, _ := managementLogin(t, handler, "alice", "config scope password fixture", http.StatusOK)
+	var snapshot, latest core.ClientConnectionHistory
+	client.call("GET", "/client-connections?country_code=CN&group_by=ip", nil, http.StatusOK, &snapshot)
+	if snapshot.IPs != 1 || len(snapshot.Records) != 1 || snapshot.Records[0].Location.CountryCode != "CN" {
+		t.Fatalf("enrichment changed membership without recomputing totals: %+v", snapshot)
+	}
+	client.call("GET", "/client-connections?country_code=CN&group_by=ip", nil, http.StatusOK, &latest)
+	if latest.IPs != 0 || len(latest.Records) != 0 {
+		t.Fatalf("next read ignored refreshed geography: %+v", latest)
+	}
+	client.call("GET", "/client-connections?country_code=US&group_by=ip", nil, http.StatusOK, &latest)
+	if latest.IPs != 1 || len(latest.Records) != 1 || latest.Records[0].Location.CountryCode != "US" {
+		t.Fatalf("refreshed country missing: %+v", latest)
+	}
+}
+
 func TestClientConnectionAPIGrouping(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "group-owner", core.EngineMihomo)

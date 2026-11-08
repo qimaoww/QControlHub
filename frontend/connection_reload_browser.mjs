@@ -78,6 +78,31 @@ try {
   const restored = await evaluate('({visibleMs:performance.now(),...connectionFixture.counts()})');
   assert.equal(restored.reads, cold.reads, 'real reload repeated fresh full history');
   await screenshot('restored-1920x1080');
+  await wait(`document.querySelector('[name=country_code] option[value=CN]')`);
+  assert.equal(await evaluate(`document.querySelector('td[data-column="国家 / 地区"] [data-region-code=US] img').getAttribute('src')`), '/api/v1/region-flags/us');
+  await change('country_code', 'CN'); await wait(ready);
+  assert.equal(await evaluate(rows), 2);
+  assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('独立 IP 2')`));
+  const countryRead = await counts(); await reload(); await wait(ready);
+  assert.equal((await counts()).reads, countryRead.reads, 'reload repeated a fresh country query');
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'CN');
+  assert.ok(await evaluate(`[...document.querySelectorAll('td[data-column="国家 / 地区"]')].every(cell=>cell.textContent.includes('中国') && cell.querySelector('[data-region-code=CN]'))`));
+  await change('country_code', 'TW'); await wait(ready);
+  assert.equal(await evaluate(rows), 1);
+  assert.equal(await evaluate(`document.querySelector('td[data-column="国家 / 地区"] [data-region-code=TW] img').getAttribute('src')`), '/api/v1/region-flags/cn');
+  assert.ok(await evaluate(`document.querySelector('td[data-column="国家 / 地区"]').textContent.includes('中国台湾')`));
+  await screenshot('country-taiwan-1920x1080');
+  await change('country_code', 'ST'); await wait(ready);
+  assert.equal(await evaluate(rows), 0);
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').title`), '圣多美和普林西比');
+  await screenshot('country-empty-1920x1080');
+  await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='清除筛选').click()`); await wait(ready);
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), '');
+  await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()`); await wait(ready);
+  await change('country_code', 'CN'); await wait(ready);
+  assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 1 页')`), 'country filter retained a previous query cursor');
+  assert.equal(await evaluate(rows), 2);
+  await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='清除筛选').click()`); await wait(ready);
   await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()`); await wait(ready);
   assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 2 页')`));
   const paged = await counts(); await reload(); await wait(ready);
@@ -134,6 +159,11 @@ try {
   assert.equal(await evaluate(rows), 0, 'revoked permission retained IP history');
   await configure({ failure: 0 }); await refresh(); await wait(ready);
   await reload(); await wait(ready); // Re-enable session storage after the disabled-storage document.
+  await configure({ regionsFailure: 503 }); await reload(); await wait(ready);
+  await wait(`document.querySelector('[name=country_code]').textContent.includes('国家/地区加载失败')`);
+  assert.ok(await evaluate(rows) > 0, 'country catalog failure blocked history');
+  await configure({ regionsFailure: 0 }); await refresh(); await wait(ready);
+  await wait(`document.querySelector('[name=country_code] option[value=CN]')`);
   const beforeDouble = await counts(); await refresh(); await refresh(); await wait(ready);
   assert.equal((await counts()).reads, beforeDouble.reads + 1, 'repeated force refresh duplicated an in-flight query');
   await evaluate(`document.querySelector('.a-main [name=client_ip]').value='unsubmitted-search';document.querySelector('.a-main [name=client_ip]').focus();document.activeElement.setSelectionRange(2,5);window.savedInput=document.activeElement;`);
@@ -143,9 +173,11 @@ try {
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }, page);
   assert.ok(await evaluate(`document.activeElement!==savedInput`), 'keyboard navigation is blocked');
   await change('client_ip', ''); await wait(ready); await change('engine', ''); await wait(ready); await change('agent_id', ''); await wait(ready);
+  await change('country_code', 'US'); await wait(ready);
   for (const [width, height, mobile] of [[1920,1080,false],[3840,2160,false],[1280,900,false],[960,800,false],[600,900,false],[390,844,true],[844,390,true],[768,1024,true],[1024,768,true]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile }, page);
     await call('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 }, page);
+    await evaluate(`document.activeElement?.blur();window.scrollTo(0,0)`);
     await pause(80);
     assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth+1`), `${width}x${height}: viewport overflow`);
     await screenshot(`result-${width}x${height}`);

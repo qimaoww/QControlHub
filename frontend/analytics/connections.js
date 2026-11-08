@@ -2,12 +2,13 @@ import { createConnectionCache, connectionSessionStorage, connectionRetention } 
 import { createPoller } from "../modules/poller.js";
 import { defaultConnectionFilters, connectionQuery, connectionLocationLabel, connectionSourceLabel, connectionSourceDetail } from "../modules/client-connection-model.js";
 import { savedNodeOrder, orderNodesBySavedOrder } from "../modules/node-order.js";
+import { geoRegionDetails } from "../modules/region-model.js";
 import { redactDiagnostic } from "../modules/errors.js";
 import { node, button, actions, stack, section, filterbar, field, badge, muted, notice, formData } from "./ui.js";
 import { observationTable } from "./observability-table.js";
 import { date } from "./operations.js";
 import { sourceStatus } from "./source-status.js";
-import { nodeName, nodeRegionFlag } from "./node-region.js";
+import { nodeName, nodeRegionFlag, regionFlag } from "./node-region.js";
 
 const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" })[value] || value;
 
@@ -31,6 +32,7 @@ export async function connectionsPage(ctx) {
   // later refreshes continue to read the current authenticated preference.
   initialOrder?.finally(() => { initialOrder = null; }).catch(() => {});
   let sources = restored?.sources || [], result = null, resultAt = 0, expiryTimer, loading = true, forcePending = false, controller, serial = 0, cursor = restored?.cursor || "", cursors = restored?.cursors || [], nextCursor = "", nodeOrder = restored?.nodeOrder || savedNodeOrder();
+  let regionCodes = data.analyticsConnectionRegions || [], regionState = regionCodes.length ? "ready" : "loading";
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
   collection.trigger.dataset.connectionSourceStatus = "";
@@ -43,6 +45,7 @@ export async function connectionsPage(ctx) {
     field("日期", "date", filters.date, { type: "date", required: true }),
     field("查询范围", "period", filters.period, { options: [["day", "当天"], ["month", "所在月份"]] }),
     field("客户端来源 IP", "client_ip", filters.client_ip, { type: "search" }),
+    field("国家/地区", "country_code", filters.country_code, { options: [["", "全部国家/地区"], ...(filters.country_code ? [[filters.country_code, geoRegionDetails(filters.country_code)?.name || filters.country_code]] : [])] }),
     field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...["mihomo", "xray", "sing-box", "ss-rust"].map(value => [value, engineName(value)])] })),
     field("包含非公网地址", "include_non_public", filters.include_non_public === "true", { type: "checkbox" }),
     actions(button("今日", () => {
@@ -50,10 +53,35 @@ export async function connectionsPage(ctx) {
       controls.elements.date.value = recent.date; controls.elements.period.value = "day"; controls.elements.include_non_public.checked = false; changed();
     }), button("本月", () => { controls.elements.date.value = defaultConnectionFilters().date; controls.elements.period.value = "month"; changed(); }),
     button("清除筛选", () => {
-      for (const name of ["agent_id", "engine", "client_ip"]) controls.elements[name].value = "";
+      for (const name of ["agent_id", "engine", "client_ip", "country_code"]) controls.elements[name].value = "";
       controls.elements.include_non_public.checked = false; changed();
     }), button("刷新", () => void load({ target: cursor, history: cursors, force: true }))));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild, controls.querySelector(".a-check")));
+  function updateRegions() {
+    const select = controls.elements.country_code, value = select.value;
+    select.title = geoRegionDetails(value)?.name || "全部国家/地区";
+    const codes = new Set([...regionCodes, value, ...(result?.records || []).filter(row => !row.location?.non_public).map(row => row.location?.country_code)]);
+    const regions = [...codes].map(geoRegionDetails).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    const signature = JSON.stringify([regions.map(region => region.code), regionState]);
+    if (select.dataset.options === signature) return;
+    select.replaceChildren(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")), node("option", { value: "" }, "全部国家/地区"),
+      ...regions.map(region => node("option", { value: region.code }, node("span", { className: "a-probe-name" }, regionFlag(region, true), node("span", {}, region.name)))),
+      regionState !== "ready" && node("option", { disabled: true }, regionState === "loading" ? "正在加载…" : "国家/地区加载失败，刷新重试"));
+    select.dataset.options = signature; select.value = value;
+  }
+  async function loadRegions() {
+    regionState = "loading"; updateRegions();
+    try {
+      const codes = await ctx.api("/regions", { signal: ctx.signal });
+      if (!ctx.current()) return;
+      regionCodes = data.analyticsConnectionRegions = Array.isArray(codes) ? codes : [];
+      regionState = regionCodes.length ? "ready" : "failed";
+    } catch (failure) {
+      if (!ctx.current() || failure.name === "AbortError") return;
+      regionState = "failed";
+    }
+    updateRegions();
+  }
   function updateSources() {
     const select = controls.elements.agent_id, value = filters.agent_id || "";
     const ordered = orderNodesBySavedOrder(sources.map(source => ({ ...source, id: source.agent_id })), nodeOrder);
@@ -78,7 +106,8 @@ export async function connectionsPage(ctx) {
     view.update(records, record => {
       const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
       const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), connectionLocationLabel(record.location), node("span", {}, nodeRegionFlag(ctx, agent), " ", agent.name),
+      const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
+      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", {}, nodeRegionFlag(ctx, agent), " ", agent.name),
         badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
     }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试");
     collection.update(reportSources.map(source => ({
@@ -106,6 +135,7 @@ export async function connectionsPage(ctx) {
   async function load({ target = "", history = [], force = false, changedScope = false } = {}) {
     if (force && forcePending) return;
     if (force) forcePending = true;
+    if (force && regionState === "failed") void loadRegions();
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, revision = ++serial;
     const current = () => ctx.current() && !signal.aborted && serial === revision;
@@ -168,7 +198,7 @@ export async function connectionsPage(ctx) {
     } finally {
       if (force) forcePending = false;
       if (current()) {
-        loading = false; updateSources(); paint();
+        loading = false; updateSources(); updateRegions(); paint();
         scheduleExpiry();
       }
     }
@@ -210,7 +240,8 @@ export async function connectionsPage(ctx) {
   scopeWatch.start();
   ctx.signal.addEventListener("abort", () => { controller?.abort(); clearTimeout(timer); clearTimeout(expiryTimer); scopeWatch.stop(); cache.flush(); }, { once: true });
   ctx.onRefresh(() => load({ target: cursor, history: cursors, force: true }), { local: true });
-  updateSources(); paint();
+  updateSources(); updateRegions(); paint();
+  if (regionState !== "ready") void loadRegions();
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
   void load({ target: cursor, history: cursors, changedScope: true });

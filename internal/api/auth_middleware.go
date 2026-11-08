@@ -23,6 +23,16 @@ func (s *Server) requirePermission(permission core.Permission, next http.Handler
 // requireAllPermissions guards sensitive compound operations whose resource
 // visibility and content access are separate capabilities.
 func (s *Server) requireAllPermissions(permissions []core.Permission, next http.Handler) http.Handler {
+	return s.requirePermissions(permissions, false, next)
+}
+
+// requireAnyPermission permits shared reference data used by distinct features.
+// Authentication, API key restrictions and resource authorization stay identical.
+func (s *Server) requireAnyPermission(permissions []core.Permission, next http.Handler) http.Handler {
+	return s.requirePermissions(permissions, true, next)
+}
+
+func (s *Server) requirePermissions(permissions []core.Permission, anyPermission bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var valid bool
 		request, valid = s.validateSession(w, request)
@@ -76,11 +86,21 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
 		}
+		allowed := !anyPermission
 		for _, permission := range permissions {
-			if !s.sessionAllows(request, permission) {
-				writeError(w, http.StatusForbidden, "token role does not permit this operation")
-				return
+			if s.sessionAllows(request, permission) {
+				if anyPermission {
+					allowed = true
+					break
+				}
+			} else if !anyPermission {
+				allowed = false
+				break
 			}
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "token role does not permit this operation")
+			return
 		}
 		if bearerToken(request) == "" && request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
 			value, sessionOK := s.sessionForRequest(request)

@@ -86,7 +86,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
           && Array.isArray(saved.cursors) && saved.cursors.length <= 100 && saved.cursors.every(value => typeof value === "string")
           && Array.isArray(saved.nodeOrder) && saved.nodeOrder.length <= 500 && saved.nodeOrder.every(value => typeof value === "string")
           && Array.isArray(saved.sources) && saved.sources.every(source => source && typeof source.agent_id === "string" && (source.agent_name === undefined || typeof source.agent_name === "string"))
-          && ["agent_id", "engine", "client_ip", "include_non_public"].every(key => saved.filters[key] === undefined || typeof saved.filters[key] === "string")) selection = saved;
+          && ["agent_id", "engine", "client_ip", "country_code", "include_non_public"].every(key => saved.filters[key] === undefined || typeof saved.filters[key] === "string")) selection = saved;
       } catch { clear(); }
       finally { restoring = false; }
     },
@@ -119,8 +119,8 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
       for (const [key, entry] of [...entries].reverse()) {
         const candidate = new URLSearchParams(key);
         if (candidate.has("cursor") || ["since", "until", "include_non_public", "group_by", "timeline", "bucket", "limit"].some(name => candidate.get(name) !== query.get(name)) || JSON.stringify(candidate.getAll("node_order")) !== JSON.stringify(query.getAll("node_order"))) continue;
-        if (["agent_id", "engine", "client_ip"].some(name => candidate.get(name) && candidate.get(name) !== query.get(name))) continue;
-        const records = entry.result.records.filter(row => (!query.get("agent_id") || row.agent_id === query.get("agent_id")) && (!query.get("engine") || row.engine === query.get("engine")) && (!query.get("client_ip") || row.client_ip === query.get("client_ip")));
+        if (["agent_id", "engine", "client_ip", "country_code"].some(name => candidate.get(name) && candidate.get(name) !== query.get(name))) continue;
+        const records = entry.result.records.filter(row => (!query.get("agent_id") || row.agent_id === query.get("agent_id")) && (!query.get("engine") || row.engine === query.get("engine")) && (!query.get("client_ip") || row.client_ip === query.get("client_ip")) && (!query.get("country_code") || !row.location?.non_public && row.location?.country_code === query.get("country_code")));
         if (!records.length) continue;
         return { records, sources: entry.result.sources.filter(source => !query.get("agent_id") || source.agent_id === query.get("agent_id")), timeline: [], preview: true, snapshotAt: entry.at };
       }
