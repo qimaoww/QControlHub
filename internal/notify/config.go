@@ -111,7 +111,7 @@ func (c Configuration) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, ch := range c.Channels {
-		if !identifier.MatchString(ch.ID) || seen[ch.ID] || strings.TrimSpace(ch.Name) == "" || len(ch.Name) > 100 {
+		if !identifier.MatchString(ch.ID) || seen[ch.ID] || strings.TrimSpace(ch.Name) == "" || !utf8.ValidString(ch.Name) || utf8.RuneCountInString(ch.Name) > 100 {
 			return errors.New("渠道标识或名称无效")
 		}
 		seen[ch.ID] = true
@@ -169,7 +169,7 @@ func (c Configuration) Validate() error {
 	}
 	ids := map[string]bool{}
 	for _, r := range c.Rules {
-		if !identifier.MatchString(r.ID) || ids[r.ID] || len(r.Name) > 100 || strings.TrimSpace(r.Name) == "" || EventNames[r.Event] == "" || r.Event == "speed.recovered" {
+		if !identifier.MatchString(r.ID) || ids[r.ID] || !utf8.ValidString(r.Name) || utf8.RuneCountInString(r.Name) > 100 || strings.TrimSpace(r.Name) == "" || EventNames[r.Event] == "" || r.Event == "speed.recovered" {
 			return errors.New("规则标识、名称或事件无效")
 		}
 		ids[r.ID] = true

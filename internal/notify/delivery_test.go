@@ -162,3 +162,19 @@ func TestNotificationPreviewFieldsAndQuotaWithoutLimit(t *testing.T) {
 		t.Fatalf("presence example: %s %v", body, err)
 	}
 }
+
+func TestNotificationNamesSupportUnicodeCharacterLimit(t *testing.T) {
+	c := Configuration{Channels: []Channel{{ID: "channel", Name: strings.Repeat("渠道😀", 33), Type: "webhook"}}, Rules: []Rule{{ID: "rule", Name: strings.Repeat("规则😀", 33), Event: TypeAgentOffline, Channels: []string{"channel"}, Duration: 30, Cooldown: 60}}}
+	if err := c.Validate(); err != nil {
+		t.Fatal("valid Unicode names rejected", err)
+	}
+	c.Channels[0].Name = strings.Repeat("名", 101)
+	if c.Validate() == nil {
+		t.Fatal("oversized channel name accepted")
+	}
+	c.Channels[0].Name = "valid"
+	c.Rules[0].Name = strings.Repeat("名", 101)
+	if c.Validate() == nil {
+		t.Fatal("oversized rule name accepted")
+	}
+}
