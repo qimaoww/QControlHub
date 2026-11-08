@@ -148,7 +148,7 @@ export async function notificationsPage(ctx) {
     try {
       const result = await ctx.api("/settings/notifications/deliveries");
       if (!ctx.current() || sequence !== recordSequence) return;
-      records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), d.event.test ? "测试" : resource.events[d.event.type] || d.event.type,
+      records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? "测试" : resource.events[d.event.type] || d.event.type),
         config.channels.find(c => c.id === d.channel_id)?.name || "已删除", stack(node("div", {}, badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn")),
           d.status === "pending" && d.attempts > 0 ? muted(`重试：${date(d.next_at)}`) : null), String(d.attempts), d.error || "—"]));
       if (recordError && !activeTestID) feedback.textContent = "";
