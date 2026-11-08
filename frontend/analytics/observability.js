@@ -152,13 +152,14 @@ export async function logsPage(ctx) {
       filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
       const key = coreLogScopeKey(filters), changedScope = scope !== key;
       if (changedScope) {
-        scope = key; entries = cache.get(key) || []; incomplete = false; page = 0; anchor = null; draw();
-        if (entries.length) status.textContent = "已显示缓存，正在刷新…";
+        const cached = cache.preview(key);
+        scope = key; entries = cached?.entries || []; incomplete = cached ? !cached.complete : false; page = 0; anchor = null; draw();
+        if (entries.length) status.textContent = incomplete ? "已显示部分日志，正在补齐…" : "已显示缓存，正在刷新…";
       }
       const params = new URLSearchParams({ limit: String(filters.limit) });
       for (const name of ["agent_id", "instance_id", "user_id"]) if (filters[name]) params.set(name, filters[name]);
-      const result = await readCoreLogWindow(ctx.api, params, { signal, previous: entries, preview: (!entries.length || incomplete) && filters.limit > 200, engines,
-        onPreview(value) { if (current()) { entries = value; incomplete = true; error.textContent = ""; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
+      const result = await readCoreLogWindow(ctx.api, params, { signal, previous: entries, preview: !entries.length && filters.limit > 200, engines,
+        onPreview(value) { if (current()) { entries = value; incomplete = true; cache.set(key, value, { complete: false }); error.textContent = ""; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
       if (!current()) return;
       entries = result; incomplete = false; readState = "ready"; cache.set(key, result); failures = 0; error.textContent = ""; draw();
       status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";

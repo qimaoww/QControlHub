@@ -186,6 +186,58 @@ export async function testLogReadOwnership() {
     await waitFor(() => rows().length === 0, 'unmatched keyword retained rows');
     assert.equal(document.querySelector('[aria-label=内核日志]').nextElementSibling.textContent, '没有匹配日志', 'loaded history was mislabeled as awaiting first delivery');
     assert.ok(main().textContent.includes('已加载 1000 条'));
+
+    // Reuse only the same authorized resource when changing the window size.
+    session = { ...session, user_id: 'cache-windows' };
+    const shared = 'shr_0000000000000002';
+    sources = [source('alpha'), { ...source('alpha'), instance_id: shared, owner_id: 'shared-owner', username: '共享用户' }];
+    boot('#core-logs', { instance_id: 'main', limit: 100 });
+    await waitFor(() => ready() && rows().length === 100, 'small initial cache window did not load');
+    const setLimit = value => {
+      const control = document.querySelector('[data-log-filters] [name=limit]');
+      control.value = String(value); control.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    directory = deferred(); windows.set('alpha:2000', deferred());
+    const beforeExpand = calls.length;
+    setLimit(2000);
+    await waitFor(() => calls.length > beforeExpand, 'window expansion did not check grants');
+    assert.equal(rows().length, 0, 'related cache bypassed fresh authorization');
+    directory.resolve(); directory = null;
+    await waitFor(() => rows().length === 100 && main().textContent.includes('正在补齐'), 'larger window discarded the smaller authorized cache');
+    assert.equal(calls.slice(beforeExpand).filter(call => call.kind === 'window').length, 1, 'cached expansion started an unnecessary preview request');
+    failedWindows.add('alpha:2000'); windows.get('alpha:2000').resolve([]);
+    await waitFor(() => ready() && main().textContent.includes('补齐失败，当前仅显示部分日志'), 'failed expansion claimed a complete cache window');
+    assert.equal(rows().length, 100);
+    failedWindows.clear(); windows.clear();
+
+    // A failed staged read retains its preview across route departure.
+    windows.set('alpha:2000', deferred());
+    windows.set('alpha:200', deferred());
+    const instance = document.querySelector('[data-log-filters] [name=instance_id]');
+    instance.value = shared; instance.dispatchEvent(new Event('change', { bubbles: true }));
+    const beforeShared = calls.length;
+    await waitFor(() => calls.slice(beforeShared).filter(call => call.kind === 'window').length === 2, 'shared scope did not start fresh stages');
+    assert.equal(rows().length, 0, 'main-instance cache leaked into the shared instance');
+    assert.ok(calls.slice(beforeShared).filter(call => call.kind === 'window').every(call => call.instance === shared));
+    windows.get('alpha:200').resolve(entries('alpha', 200).map(row => ({ ...row, instance_id: shared })));
+    await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'shared preview did not display');
+    failedWindows.add('alpha:2000'); windows.get('alpha:2000').resolve([]);
+    await waitFor(() => ready() && main().textContent.includes('补齐失败'), 'shared completion failure did not settle');
+    failedWindows.clear(); windows.set('alpha:2000', deferred());
+    location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'partial-cache departure failed');
+    const beforeCachedReturn = calls.length; location.hash = '#core-logs';
+    await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'authorized partial cache was lost on route return');
+    assert.equal(calls.slice(beforeCachedReturn).filter(call => call.kind === 'window').length, 1, 'retained preview was fetched again before completion');
+    windows.get('alpha:2000').resolve(entries('alpha', 2000).map(row => ({ ...row, instance_id: shared })));
+    await waitFor(() => ready() && main().textContent.includes('2000 条日志'), 'partial cache did not complete'); windows.clear();
+
+    windows.set('alpha:1000', deferred()); const beforeShrink = calls.length; setLimit(1000);
+    await waitFor(() => main().textContent.includes('1000 条日志') && main().textContent.includes('已显示缓存'), 'smaller window did not render its cached slice before the network');
+    assert.equal(calls.slice(beforeShrink).filter(call => call.kind === 'window').length, 1, 'cached shrink started a redundant preview');
+    const corrected = entries('alpha', 999).map(row => ({ ...row, instance_id: shared }));
+    corrected[0].message = 'cache correction after retention';
+    windows.get('alpha:1000').resolve(corrected);
+    await waitFor(() => ready() && main().textContent.includes('999 条日志') && main().textContent.includes('cache correction after retention'), 'revalidation kept corrected or deleted cached rows');
   } finally { window.dispatchEvent(new Event('pagehide')); globalThis.fetch = nativeFetch; }
 }
 function deferred() { let resolve; const promise = new Promise(accept => { resolve = accept; }); return { promise, resolve }; }

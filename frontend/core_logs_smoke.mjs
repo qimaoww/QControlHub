@@ -4,6 +4,7 @@ import { readCoreLogWindow } from "./modules/core-log-read.js";
 import { reuseCoreLogEntries } from "./modules/core-log-projection.js";
 import { coreLogSourceState, coreLogSourceStatus } from './modules/core-log-source-status.js';
 import { coreLogStoragePolicy } from './modules/core-log-model.js';
+import { coreLogScopeKey } from './modules/core-log-scope.js';
 
 // Actual theme rendering, preferences, authorization-gated staged reads and
 // account/target races run in browser/core-log-{source-states,read-ownership}.
@@ -84,6 +85,32 @@ assert.equal(cache.get("a"), null, "reading a snapshot does not extend its fresh
 const byteCache = createCoreLogCache({ maxScopes: 10, maxBytes: 1200 });
 for (const key of ["a", "b", "c"]) byteCache.set(key, entries(key, 1));
 assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below the scope cap");
+
+{
+  const windows = createCoreLogCache({ now: () => clock, ttl: 100 });
+  const key = (limit, instance_id = 'main', user_id = 'alice') => coreLogScopeKey({ agent_id: 'alpha', limit, instance_id, user_id });
+  const snapshot = entries('alpha', 1000);
+  windows.set(key(1000), snapshot);
+  assert.equal(windows.preview(key(1000)).entries, snapshot, 'exact cache hits preserve the validator and projection identity');
+  assert.equal(windows.preview(key(2000, 'shr_bob', 'bob')), null, 'related windows cannot cross instances or users on the same node');
+  assert.equal(windows.preview(key(2000, 'main', 'bob')), null, 'owner filters are part of the cache scope');
+  assert.equal(windows.preview(coreLogScopeKey({ agent_id: 'alpha', limit: 2000 })), null, 'an instance window cannot become an all-instance window');
+  const smaller = windows.preview(key(100));
+  assert.equal(smaller.entries.length, 100);
+  assert.equal(smaller.complete, true);
+  const mixed = [...entries('alpha', 1000), ...entries('alpha', 400).map(row => ({ ...row, engine: 'sing-box' }))];
+  const perEngine = createCoreLogCache();
+  perEngine.set(key(1000), mixed);
+  const capped = perEngine.preview(key(100)).entries;
+  assert.equal(capped.filter(row => row.engine === 'xray').length, 100);
+  assert.equal(capped.filter(row => row.engine === 'sing-box').length, 100, 'related windows retain each quiet engine independently');
+  assert.equal(windows.preview(key(2000)).complete, false, 'a smaller window cannot be declared complete after expansion');
+  windows.set(key(2000), snapshot.slice(0, 200), { complete: false });
+  assert.equal(windows.preview(key(2000)).complete, false, 'retained previews keep their incomplete state');
+  assert.equal(windows.preview(key(500)).complete, false, 'a partial snapshot cannot validate a smaller complete window');
+  clock += 100;
+  assert.equal(windows.preview(key(2000)), null, 'derived cache reads cannot extend the freshness TTL');
+}
 
 {
   const preview = deferred(), full = deferred();

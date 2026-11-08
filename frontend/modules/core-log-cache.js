@@ -13,44 +13,52 @@ export function createCoreLogCache({ now = Date.now, maxScopes = 3, maxBytes = 1
     for (const [key, snapshot] of snapshots)
       if (now() - snapshot.at >= ttl) remove(key);
   };
+  const touch = (key, snapshot) => {
+    snapshots.delete(key);
+    snapshots.set(key, snapshot);
+  };
   return {
     get(key) {
       prune();
       const snapshot = snapshots.get(key);
       if (!snapshot) return null;
-      snapshots.delete(key);
-      snapshots.set(key, snapshot);
+      touch(key, snapshot);
       return snapshot.entries;
     },
     preview(key) {
       prune();
-      const [agent, limit] = JSON.parse(key);
-      const scopes = [...snapshots].reverse();
-      const related = scopes.find(([scope]) => JSON.parse(scope)[0] === agent);
+      const [agent, limit, instance = "", user = ""] = JSON.parse(key);
+      const related = snapshots.has(key) ? [key, snapshots.get(key)] : [...snapshots].reverse().find(([scope]) => {
+        const [otherAgent, , otherInstance = "", otherUser = ""] = JSON.parse(scope);
+        return agent === otherAgent && instance === otherInstance && user === otherUser;
+      });
       if (!related) return null;
       const [scope, snapshot] = related;
+      touch(scope, snapshot);
+      if (scope === key) return { entries: snapshot.entries, complete: snapshot.complete };
       const counts = new Map();
       const entries = snapshot.entries.filter(entry => {
         const count = counts.get(entry.engine) || 0;
         counts.set(entry.engine, count + 1);
         return count < limit;
       });
-      return { entries, complete: JSON.parse(scope)[1] >= limit };
+      return { entries: entries.length === snapshot.entries.length ? snapshot.entries : entries,
+        complete: snapshot.complete && JSON.parse(scope)[1] >= limit };
     },
-    set(key, entries) {
+    set(key, entries, { complete = true } = {}) {
       prune();
       const existing = snapshots.get(key);
       if (existing?.entries === entries) {
         existing.at = now();
-        snapshots.delete(key);
-        snapshots.set(key, existing);
+        existing.complete = complete;
+        touch(key, existing);
         return;
       }
       remove(key);
       // Conservative UTF-16 text estimate plus per-entry object overhead.
       const size = entries.reduce((total, entry) => total + 512 + 2 * String(entry.message || "").length, 0);
       if (size > maxBytes) return;
-      snapshots.set(key, { entries, bytes: size, at: now() });
+      snapshots.set(key, { entries, complete, bytes: size, at: now() });
       bytes += size;
       while (snapshots.size > maxScopes || bytes > maxBytes)
         remove(snapshots.keys().next().value);

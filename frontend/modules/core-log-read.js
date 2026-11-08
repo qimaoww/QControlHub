@@ -6,15 +6,21 @@ import { reuseCoreLogEntries } from "./core-log-projection.js";
 const validators = new WeakMap();
 async function readSnapshot(api, params, signal, previous) {
   const path = `/core-logs?${params}`;
-  const known = previous && validators.get(previous);
+  const known = previous && validators.get(previous)?.get(path);
   let etag = "";
   const entries = await api(path, {
     signal,
-    ...(known?.path === path ? { conditional: { etag: known.etag, value: previous } } : {}),
+    ...(known ? { conditional: { etag: known, value: previous } } : {}),
     onResponse: response => { etag = response.headers?.get("ETag") || ""; },
   });
   const snapshot = reuseCoreLogEntries(previous, entries);
-  if (etag) validators.set(snapshot, { path, etag });
+  const tags = validators.get(snapshot) || new Map();
+  tags.delete(path);
+  if (etag) tags.set(path, etag);
+  // A sparse window can be identical at several limits. Keep each validator
+  // tied to its exact URL without retaining an unbounded list of query strings.
+  while (tags.size > 3) tags.delete(tags.keys().next().value);
+  if (tags.size) validators.set(snapshot, tags);
   else validators.delete(snapshot);
   return snapshot;
 }
