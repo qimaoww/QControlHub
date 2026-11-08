@@ -12,7 +12,7 @@ export function openNodeBatch(ctx, getAgents) {
   const openedScopes = new Map();
   const guard = createServiceActionGuard(ctx.can);
   const engine = field('内核', 'engine', 'mihomo', { options: ['mihomo', 'xray', 'sing-box', 'ss-rust'] });
-  const action = field('操作', 'action', 'status', { options: [['status', '查询状态'], ['start', '启动'], ['restart', '重启'], ['stop', '停止'], ['install', '更新内核'], ['upgrade-agent', '更新 Agent']] });
+  const action = field('操作', 'action', 'upgrade-agent', { options: [['upgrade-agent', '更新 Agent'], ['start', '启动'], ['restart', '重启'], ['stop', '停止'], ['install', '更新内核']] });
   const channel = field('发行通道', 'release_channel', 'stable', { options: [['stable', '稳定版'], ['development', '开发版'], ['custom', '指定版本']] });
   const version = field('指定版本号', 'custom_version', '', { maxlength: 100 });
   const source = field('开发版来源', 'core_source', 'official', { options: [['official', 'MetaCubeX 官方'], ['mirror', 'vernesong 镜像']] });
@@ -36,7 +36,7 @@ export function openNodeBatch(ctx, getAgents) {
     if (scope(agent, options.engine) !== openedScopes.get(agent.id)?.get(options.engine)) return '目标实例已变化，请关闭后重新选择';
     if (!ctx.can('tasks.execute')) return '需要任务执行权限';
     if (!(agent.capabilities || []).includes(options.engine) && options.action !== 'upgrade-agent') return '内核能力未启用或不受支持';
-    if (agent.can_manage === false && ['status', 'start', 'restart', 'stop'].includes(options.action)) {
+    if (agent.can_manage === false && ['start', 'restart', 'stop'].includes(options.action)) {
       const runtime = agent.runtime?.[options.engine] || {};
       return guard(options.action, agent.status === 'online', runtime.installed, runtime.service_status, agent, options.engine) ? '本人实例当前状态或权限不支持此操作' : '';
     }

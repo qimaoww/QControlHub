@@ -14,7 +14,7 @@ export async function testAgentBatchLayout(fixture) {
   };
   const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };
   const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), '取消确认没有解锁');
-  for (const action of ['upgrade-agent', 'start', 'stop', 'restart', 'status', 'install']) {
+  for (const action of ['upgrade-agent', 'start', 'stop', 'restart', 'install']) {
     change('action', action);
     if (action === 'install') { change('release_channel', 'custom'); change('custom_version', 'v1.19.29'); }
     for (const input of form.querySelectorAll('input[type=checkbox]')) if (!input.disabled) selectBatch(input);

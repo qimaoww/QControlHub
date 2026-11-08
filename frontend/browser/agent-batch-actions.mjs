@@ -14,7 +14,11 @@ export async function openNativeBatch(fixture) {
   const choices = () => [...form.querySelectorAll('[name^="batch:"]')];
   const all = () => nativeBatchButton('全选', form) || nativeBatchButton('取消全选', form);
   const submit = form.querySelector('[type=submit]');
+  assert.equal(form.elements.action.value, 'upgrade-agent', '默认操作不是更新 Agent');
+  assert.equal(form.elements.action.options[0].value, 'upgrade-agent', '更新 Agent 不是首项');
+  assert.ok(!form.elements.action.querySelector('option[value=status]'), '批量操作残留查询状态');
   assert.ok(submit.disabled && choices().every(input => !input.checked), '首次打开默认选择或允许空提交');
+  if (all().disabled) return form;
   all().click();
   assert.equal(all().textContent, '取消全选', '全选按钮未切换');
   const first = choices().find(input => !input.disabled); first.click();
@@ -137,6 +141,7 @@ export async function testAgentBatchActions(fixture) {
   testAPI.agents = [shared];
   const sharedForm = await openNativeBatch(fixture);
   sharedForm.elements.action.value = 'restart'; sharedForm.elements.action.dispatchEvent(new Event('change', { bubbles: true }));
+  sharedForm.elements['batch:shared-batch'].click();
   const sharedBefore = writes(); sharedForm.requestSubmit();
   const sharedConfirm = await waitFor(() => [...document.querySelectorAll('dialog[open]')].find(item => item !== sharedForm.closest('dialog')), '共享批量操作没有确认');
   shared.runtime.mihomo.instance.id = 'instance-two';

@@ -38,7 +38,7 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			admin.call("POST", "/users", core.UserRequest{Username: "default-theme-user", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			// This browser fixture declares the current Agent traffic capability.
 			// Runtime/feature state is separate from the metrics sample below.
-			analyticsAgent.Features = append(analyticsAgent.Features, "port-traffic-v1", core.AgentFeatureMihomoDevelopmentSource)
+			analyticsAgent.Features = append(analyticsAgent.Features, "port-traffic-v1", core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureSelfUpgrade)
 			if err := db.Heartbeat(analyticsScope, analyticsAgent.ID, core.HeartbeatRequest{Features: analyticsAgent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
 				t.Fatal(err)
 			}
