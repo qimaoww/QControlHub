@@ -68,8 +68,8 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"analytics/client-access.js": {
 			"if (!ctx.current() || sequence !== readSequence) return;",
 			"patch(result, node('div'",
-			"JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || ''])",
-			"card.dataset.refreshKey = key",
+			"row.key = clientAccessRecordKey(entry, item)",
+			"card.dataset.refreshKey = group.agent_id",
 			"ctx.onRefresh(reload)",
 			"ctx.setDirty(true)",
 		},
