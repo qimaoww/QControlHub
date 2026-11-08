@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
@@ -19,7 +21,7 @@ import (
 // probes again after the core restart, when the public port must be free.
 func (m *tlsFrontendManager) checkNativeTLSHandoff(ctx context.Context, service, candidate string, frontends []core.TLSFrontend, port int) error {
 	engine, spec, ok := managedSpecForService(service, m.services.Kind())
-	if !ok || engine != core.EngineSingBox {
+	if !ok || engine != core.EngineSingBox && engine != core.EngineXray && engine != core.EngineMihomo {
 		return errors.New("unrecognized native TLS service")
 	}
 	public := false
@@ -41,7 +43,7 @@ func (m *tlsFrontendManager) checkNativeTLSHandoff(ctx context.Context, service,
 	if err != nil {
 		return err
 	}
-	if !nativeTLSListener(previous, port) {
+	if !nativeTLSListenerForEngine(engine, previous, port) {
 		return errors.New("previous configuration has no native TLS listener on this port")
 	}
 	pid, err := managedServiceProcessPID(ctx, m.services, service)
@@ -53,6 +55,11 @@ func (m *tlsFrontendManager) checkNativeTLSHandoff(ctx context.Context, service,
 		return err
 	}
 	configPath, configDirectory, workDirectory, matched := parseExistingArgv(engine, spec.Binary, before.Argv)
+	if engine == core.EngineMihomo {
+		argv := before.Argv
+		matched = len(argv) == 5 && argv[0] == spec.Binary && argv[1] == "-d" && argv[2] == coreCertificateWorkingDirectory(engine, spec, m.services.Kind()) && argv[3] == "-f" && argv[4] == spec.ConfigPath
+		configPath, configDirectory, workDirectory = spec.ConfigPath, "", ""
+	}
 	if before.Executable != spec.Binary || !matched || configPath != spec.ConfigPath || configDirectory != spec.ConfigDirectory || workDirectory != spec.WorkingDirectory {
 		return errors.New("running core does not match the managed binary and configuration")
 	}
@@ -68,6 +75,18 @@ func (m *tlsFrontendManager) checkNativeTLSHandoff(ctx context.Context, service,
 		return errors.New("service process changed during TLS handoff inspection")
 	}
 	return nil
+}
+
+func nativeTLSListenerForEngine(engine core.Engine, content string, port int) bool {
+	if engine != core.EngineSingBox {
+		for _, input := range serverconfig.ParseAll(engine, content) {
+			if input.Port == port && input.TLSEnabled && !input.RealityEnabled {
+				return true
+			}
+		}
+		return false
+	}
+	return nativeTLSListener(content, port)
 }
 
 func nativeTLSListener(content string, port int) bool {
@@ -143,4 +162,136 @@ func processOwnsTCPPort(pid, port int) error {
 		return errors.New("target service has no matching TCP listener")
 	}
 	return nil
+}
+
+// A durable held deployment keeps rollback certificates/pages and prevents
+// renewal or another instance's deployment from restoring a released route.
+func (m *tlsFrontendManager) nativeHandoff(ctx context.Context, service, candidate, operation string) error {
+	tlsFrontendMutex.Lock()
+	defer tlsFrontendMutex.Unlock()
+	previous, err := m.load()
+	if err != nil {
+		return err
+	}
+	deployment, exists := previous[service]
+	if !exists {
+		return nil
+	}
+	next := tlsDeployments{}
+	for key, value := range previous {
+		next[key] = value
+	}
+	switch operation {
+	case "release":
+		engine, _, ok := managedSpecForService(service, m.services.Kind())
+		if !ok || (engine != core.EngineXray && engine != core.EngineMihomo) {
+			return nil
+		}
+		ports := map[int]bool{}
+		for _, input := range serverconfig.ParseAll(engine, candidate) {
+			if input.Transport == "xhttp" && input.TLSEnabled && !input.RealityEnabled {
+				ports[input.Port] = true
+			}
+		}
+		for other, value := range previous {
+			if other == service || value.Stopped {
+				continue
+			}
+			for _, f := range value.Frontends {
+				if ports[f.PublicPort] {
+					return fmt.Errorf("端口 %d 仍由其他实例使用", f.PublicPort)
+				}
+			}
+		}
+		if held := deployment.NativeHandoff; held != nil {
+			// A retry after an interrupted Agent may continue the same handoff.
+			// Keep its original rollback resources until the retry commits.
+			for _, f := range held.Frontends {
+				retained := false
+				for _, current := range deployment.Frontends {
+					retained = retained || current.Tag == f.Tag && current.PublicPort == f.PublicPort
+				}
+				if !retained && !ports[f.PublicPort] {
+					return errors.New("上次 TLS 模式切换尚未完成，请先重试原生 TLS 部署")
+				}
+			}
+		}
+		var retained []core.TLSFrontend
+		released := false
+		for _, f := range deployment.Frontends {
+			if f.LocalOnly || f.Transport != "xhttp" || !ports[f.PublicPort] {
+				retained = append(retained, f)
+				continue
+			}
+			for other, value := range previous {
+				if other == service || value.Stopped {
+					continue
+				}
+				for _, foreign := range value.Frontends {
+					if foreign.PublicPort == f.PublicPort {
+						return fmt.Errorf("端口 %d 仍由其他实例使用", f.PublicPort)
+					}
+				}
+			}
+			listener, listenErr := net.Listen("tcp", ":"+strconv.Itoa(f.PublicPort))
+			if listenErr == nil {
+				listener.Close()
+			} else {
+				proxy := "qagent-tls-" + f.Mode
+				if m.services.Kind() == ServiceManagerSystemd {
+					proxy += ".service"
+				}
+				pid, pidErr := managedServiceProcessPID(ctx, m.services, proxy)
+				if pidErr != nil {
+					return pidErr
+				}
+				if err = processOwnsTCPPort(pid, f.PublicPort); err != nil {
+					return err
+				}
+			}
+			released = true
+		}
+		if !released {
+			return nil
+		}
+		held := deployment
+		if deployment.NativeHandoff != nil {
+			held = *deployment.NativeHandoff
+		}
+		deployment.Frontends, deployment.NativeHandoff = retained, &held
+		next[service] = deployment
+	case "restore", "commit":
+		if deployment.NativeHandoff == nil {
+			return nil
+		}
+		if operation == "restore" {
+			next[service] = *deployment.NativeHandoff
+		} else {
+			deployment.NativeHandoff = nil
+			if len(deployment.Frontends) == 0 {
+				delete(next, service)
+			} else {
+				next[service] = deployment
+			}
+		}
+	default:
+		return errors.New("unknown native TLS handoff operation")
+	}
+	if _, err = activeTLSFrontends(next); err != nil {
+		return err
+	}
+	if err = m.sync(ctx, next); err == nil {
+		data, encodeErr := json.Marshal(next)
+		if encodeErr != nil {
+			err = encodeErr
+		} else {
+			err = m.writeConfig(filepath.Join(m.root, "deployments.json"), string(data), true)
+		}
+	}
+	if err != nil {
+		recovery, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, m.sync(recovery, previous))
+	}
+	return m.cleanupStaticPages(previous, next)
 }

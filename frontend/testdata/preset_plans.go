@@ -29,6 +29,12 @@ func main() {
 				panic(err)
 			}
 			fixture := entry{Engine: engine, Protocol: protocol, Plan: plan}
+			if plan.Transport == "xhttp" {
+				plan.TLSServerName = "tls.example.test"
+				if plan.RealityEnabled && plan.RealityServerName == "" {
+					plan.RealityServerName = "reality.example.test"
+				}
+			}
 			profile, profileErr := serverconfig.BuildClientProfile(plan, "203.0.113.10", "")
 			if profileErr != nil && engine == core.EngineXray && (plan.Transport == "xhttp" || plan.Protocol == serverconfig.ProtocolVLESS) {
 				panic(profileErr)

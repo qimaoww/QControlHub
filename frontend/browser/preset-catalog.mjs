@@ -11,6 +11,7 @@ export async function testPresetCatalogRuntime(catalog) {
     covered.add(actual.engine);
     try {
       await open('add');
+      if(['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(actual.protocol.key)) { edit('tls_server_name','tls.example.test');edit('reality_server_name','reality.example.test');edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key'); }
       if(actual.protocol.supports_managed_tls) {
         assert(control('tls_mode').value==='caddy'&&control('tls_public_port').value==='443','managed TLS defaults lost');
         assert(control('listen').value==='127.0.0.1'&&control('listen').readOnly,'managed backend is not loopback');
@@ -23,7 +24,7 @@ export async function testPresetCatalogRuntime(catalog) {
         edit('tls_mode','caddy');
         assert(control('listen').value==='127.0.0.1'&&control('certificate_path').disabled,'Caddy retained native fields');
         edit('tls_acme_email','certs@example.test');edit('tls_public_port','8443');
-        const proxyMode=actual.plan.transport==='http'?'external':'nginx',automatic=actual.protocol.key==='vless-ws-tls';
+        const proxyMode=actual.plan.transport==='http'?'external':'nginx',automatic=['vless-ws-tls','vless-xhttp-tls'].includes(actual.protocol.key);
         edit('tls_mode',proxyMode);
         assert(control('tls_acme_email').disabled===(!automatic||proxyMode==='external'),'ACME email does not follow selected TLS provider');
         assert(control('certificate_path').disabled&&control('private_key_path').disabled,'proxy certificate paths remain enabled');
@@ -62,7 +63,7 @@ export async function testPresetCatalogRuntime(catalog) {
       }
       if(actual.engine==='sing-box') {
         assert(saved.transport===actual.plan.transport,'native transport changed during save');
-        if(actual.protocol.supports_managed_tls)assert(saved.tls_mode===(actual.plan.transport==='http'?'external':'nginx')&&saved.tls_acme_email===(actual.protocol.key==='vless-ws-tls'?'certs@example.test':'')&&saved.tls_public_port===8443&&saved.listen==='127.0.0.1'&&control('tls_public_port').value==='8443','managed TLS lost provider/public port/email on reopen');
+        if(actual.protocol.supports_managed_tls)assert(saved.tls_mode===(actual.plan.transport==='http'?'external':'nginx')&&saved.tls_acme_email===(['vless-ws-tls','vless-xhttp-tls'].includes(actual.protocol.key)?'certs@example.test':'')&&saved.tls_public_port===8443&&saved.listen==='127.0.0.1'&&control('tls_public_port').value==='8443','managed TLS lost provider/public port/email on reopen');
         if(actual.plan.tls_enabled)assert(saved.tls_server_name==='tls.example.test'&&control('tls_server_name').value===saved.tls_server_name&&control('tls_alpn').value===saved.tls_alpn,'native TLS values lost on reopen');
         if(control('transport_host')&&!control('transport_host').disabled)assert(saved.transport_host==='http.example.test'&&control('transport_host').value===saved.transport_host,'HTTP Host was conflated with TLS SNI');
         if(saved.transport==='http')assert(saved.transport_http_method==='POST'&&control('transport_http_method').value==='POST','HTTP Method lost on reopen');

@@ -290,7 +290,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		return "", err
 	}
 	timeout := 45 * time.Second
-	if len(task.TLSFrontends) > 0 || (task.Engine == core.EngineSingBox || task.Engine == core.EngineXray) && managedTLSStateExists() {
+	if len(task.TLSFrontends) > 0 || (task.Engine == core.EngineSingBox || task.Engine == core.EngineXray || task.Engine == core.EngineMihomo) && managedTLSStateExists() {
 		timeout = core.ManagedTLSOperationTimeout
 	}
 	if task.Action == core.ActionInstall {
@@ -340,21 +340,6 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		value, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		return report.String() + "\n" + value, tlsPhaseError("配置生成及校验", err)
 	case core.ActionDeploy:
-		if task.Engine == core.EngineXray {
-			preflight := task.ConfigContent
-			if task.SharedInstance {
-				// Shared runtime removes the host's reserved statistics listener.
-				// Probe new public listeners before touching the running instance.
-				content, prepareErr := serverconfig.SharedInstanceRuntimeContent(task.Engine, preflight)
-				if prepareErr != nil {
-					return "", prepareErr
-				}
-				preflight = content
-			}
-			if err := checkXrayListenerPorts(spec, preflight, task.SharedInstance); err != nil {
-				return "", err
-			}
-		}
 		var report strings.Builder
 		if err := e.executeTLSFrontend(ctx, spec, task, true, &report); err != nil {
 			return "", tlsPhaseError("依赖和环境检查", err)
@@ -443,6 +428,41 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			applying.Applying = true
 			if err := writeSharedDeploymentState(spec, applying); err != nil {
 				return validation, err
+			}
+		}
+		// Release only this instance's proxy routes after validation. The held
+		// manifest retains rollback resources until the core and proxy commit.
+		if err := e.executeTLSFrontendOperation(ctx, spec, task, false, false, "release"); err != nil {
+			return validation, errors.Join(err, restoreIdentity())
+		}
+		defer func() {
+			recovery, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+			defer cancel()
+			operation := "commit"
+			if resultErr != nil {
+				operation = "restore"
+			}
+			resultErr = errors.Join(resultErr, e.executeTLSFrontendOperation(recovery, spec, task, false, false, operation))
+		}()
+		if task.Engine == core.EngineMihomo {
+			if err := checkMihomoXHTTPTLSListenerPorts(spec, task.ConfigContent); err != nil {
+				return validation, errors.Join(err, restoreIdentity())
+			}
+		}
+
+		if task.Engine == core.EngineXray {
+			preflight := task.ConfigContent
+			if task.SharedInstance {
+				// Shared runtime removes the host's reserved statistics listener.
+				// Probe new public listeners before touching the running instance.
+				content, prepareErr := serverconfig.SharedInstanceRuntimeContent(task.Engine, preflight)
+				if prepareErr != nil {
+					return validation, errors.Join(prepareErr, restoreIdentity())
+				}
+				preflight = content
+			}
+			if err := checkXrayListenerPorts(spec, preflight, task.SharedInstance); err != nil {
+				return validation, errors.Join(err, restoreIdentity())
 			}
 		}
 		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)

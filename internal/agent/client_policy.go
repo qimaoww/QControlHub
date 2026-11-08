@@ -117,6 +117,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureNodeCertificates,
 		core.AgentFeatureManagedTLSH2,
 		core.AgentFeatureXHTTP,
+		core.AgentFeatureXHTTPTLS,
 		core.AgentFeatureACMEFallback,
 		core.AgentFeatureNginxACME,
 		"managed-tls-nginx-acme-v1", // Remain compatible with older panels.

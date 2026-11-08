@@ -5,6 +5,7 @@ import { readServerPlanInput } from "../modules/inbound-options-model.js";
 const certificate = {id:"crt_fixture",name:"原生 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"};
 export async function testManagedTLSRuntime() {
   await testNativeFieldRegeneration();
+  await testXHTTPTLSRuntime();
   for (const shared of [false,true]) {
     const test = await createPresetEditor("sing-box", {protocol:"vless-ws-tls", shared, certificates:[certificate]});
     const {form,control,edit,open,save}=test;
@@ -128,5 +129,46 @@ async function testNativeFieldRegeneration() {
       await new Promise(resolve => setTimeout(resolve, 30));
       assert(control('credential').value === savedCredential && !test.writes.length, 'retired account/page applied generation or wrote configuration');
     } finally { test.dispose(); }
+  }
+}
+
+async function testXHTTPTLSRuntime() {
+  for (const engine of ['xray','mihomo']) for (const shared of [false,true]) {
+    const test = await createPresetEditor(engine,{protocol:'vless-xhttp-tls',shared,certificates:[certificate]});
+    const {control,edit,form}=test;
+    try {
+      await test.open('add');
+      assert(control('tls_mode').value==='caddy' && control('tls_server_name').value==='' && control('transport').value==='xhttp','XHTTP defaults were replaced by legacy TLS/Reality');
+      assert([...control('tls_mode').options].map(option=>option.value).join(',')==='native,caddy,nginx','XHTTP mode list differs from supported modes');
+      edit('tls_server_name','proxy.example.test');
+      const html='<!doctype html>\n<title>静态页面</title>\n<p>'+ '长页面内容'.repeat(200)+'</p>';
+      edit('tls_static_page','custom');edit('tls_static_html',html);
+      for (const key of ['cleanfolio','minimalio','uisual-line']) {
+        edit('tls_static_page',key);
+        const saved=await test.save();
+        assert(saved.tls_static_html.includes('<html') && control('tls_static_page').value===key && control('tls_static_html').disabled,'bundled static page lost API/save binding');
+      }
+      const bundledHTML=control('tls_static_html').value;
+      edit('tls_static_page','custom');
+      assert(control('tls_static_html').value===bundledHTML && bundledHTML.includes('<html'),'customizing a bundled page lost its HTML');
+      edit('tls_static_page','custom');edit('tls_static_html',html);
+      const credential=control('credential').value,path=control('transport_path').value;
+      for (const mode of ['caddy','nginx','native','nginx','caddy']) {
+        edit('tls_mode',mode);
+        const managed=mode!=='native';
+        assert(control('tls_static_page').disabled===!managed && control('certificate_path').disabled===managed,'hidden XHTTP fields still active');
+        if (!managed) {edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key');}
+        else {edit('tls_static_page','custom');edit('tls_static_html',html);}
+        const saved=await test.save();
+        assert(saved.tls_mode===mode && saved.credential===credential && saved.transport_path===path && saved.transport==='xhttp','XHTTP mode switch changed transport identity');
+        assert(managed ? saved.tls_static_html===html && !saved.certificate_path && !saved.private_key_path : !saved.tls_static_html && !saved.tls_public_port,'XHTTP static/native fields leaked across modes');
+        assert(control('tls_mode').value===mode && control('tls_server_name').value==='proxy.example.test','XHTTP reopen applied defaults over the chosen mode');
+      }
+      edit('tls_mode','native');edit('port','443');
+      edit('tls_mode','caddy');
+      await waitFor(()=>control('port').value!=='443' && !test.root.hasAttribute('aria-busy'),'native public port was not replaced by a generated backend');
+      assert(control('credential').value===credential && control('transport_path').value===path,'backend handoff generation changed credentials');
+      assert(form().scrollWidth<=form().clientWidth+1,'XHTTP editor content overflow');
+    } finally {test.dispose();}
   }
 }

@@ -257,6 +257,21 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 			t.Fatalf("Nginx ACME: %v\n%s", err, output)
 		}
 	}
+	if kind == ServiceManagerSystemd {
+		args := []string{"--wait", "--pipe", "--collect", "--setenv=QCH_TEST_XHTTP_TLS_LIFECYCLE=1", "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test", "-test.run=^TestXHTTPTLSManagedLifecycleSandbox$", "-test.v"}
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", args); err != nil {
+			t.Fatalf("XHTTP lifecycle: %v\n%s", err, output)
+		} else {
+			t.Log(output)
+		}
+	} else {
+		args := []string{"QCH_TEST_XHTTP_TLS_LIFECYCLE=1", "QCH_TEST_TLS_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestXHTTPTLSManagedLifecycleSandbox$", "-test.v"}
+		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", args); err != nil {
+			t.Fatalf("XHTTP lifecycle: %v\n%s", err, output)
+		} else {
+			t.Log(output)
+		}
+	}
 	t.Log("managed TLS installed, validated, reloaded, preserved shared routes, rejected conflicts, stopped and restarted under the shipped Agent sandbox")
 }
 

@@ -18,7 +18,7 @@ import (
 // Verify the configured route and backend's transport handshake after TLS.
 // Authentication/egress traffic is covered by the exported-client live matrix.
 func probeFrontendProtocol(ctx context.Context, f core.TLSFrontend, config *tls.Config) error {
-	if f.Transport == "xhttp" {
+	if f.Transport == "xhttp" && f.LocalOnly {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -28,20 +28,27 @@ func probeFrontendProtocol(ctx context.Context, f core.TLSFrontend, config *tls.
 	if host == "" {
 		host = f.Domain
 	}
-	if f.Transport == "http" {
+	if f.Transport == "http" || f.Transport == "xhttp" {
 		transport := &http2.Transport{TLSClientConfig: config, DialTLSContext: func(ctx context.Context, network, _ string, cfg *tls.Config) (net.Conn, error) {
 			return (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 2 * time.Second}, Config: cfg}).DialContext(ctx, network, address)
 		}}
 		defer transport.CloseIdleConnections()
 		method := f.Method
-		if method == "" {
+		path := f.Path
+		if f.Transport == "xhttp" {
+			method = http.MethodOptions
+			path = strings.TrimSuffix(f.Path, "/") + "/"
+		} else if method == "" {
 			method = http.MethodPut
 		}
-		request, err := http.NewRequestWithContext(ctx, method, "https://"+f.Domain+f.Path, nil)
+		request, err := http.NewRequestWithContext(ctx, method, "https://"+f.Domain+path, nil)
 		if err != nil {
 			return err
 		}
 		request.Host = host
+		if f.Transport == "xhttp" {
+			request.Header.Set("Access-Control-Request-Method", "POST")
+		}
 		response, err := transport.RoundTrip(request)
 		if err != nil {
 			return err

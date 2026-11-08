@@ -30,6 +30,9 @@ type xhttpMetadata struct {
 }
 
 func xhttpBinding(input Input) string {
+	if !input.RealityEnabled {
+		input.RealityServerName, input.RealityServerNames = "", ""
+	}
 	values := []string{input.Tag, input.Listen, strconv.Itoa(input.Port), input.Credential, input.TransportPath, input.TransportHost, input.RealityPublicKey, input.RealityShortID, strings.Join(xhttpRealityNames(input), ","), strconv.Itoa(input.XHTTPBackendPort), strconv.Itoa(input.XHTTPTLSPort)}
 	sum := sha256.Sum256([]byte(strings.Join(values, "\x00")))
 	return hex.EncodeToString(sum[:])
@@ -45,6 +48,9 @@ func applyXHTTPMetadata(input *Input, m clientMetadata) {
 		return
 	}
 	input.XHTTPMode, input.XHTTPExtra = x.Mode, x.Extra
+	if input.TLSEnabled && !input.RealityEnabled && input.TLSServerName == "" {
+		input.TLSServerName = x.TLSName
+	}
 	input.ClientAddress, input.ClientPort, input.ClientHost = x.Address, x.Port, x.Host
 	input.TLSClientALPN, input.XHTTPCDN = x.ALPN, x.CDN
 	if slices.Contains(xhttpRealityNames(*input), x.RealityName) {

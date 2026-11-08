@@ -244,7 +244,15 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 		if err := serverconfig.ValidateIndependentEgress(revision.Engine, revision.Content); err != nil {
 			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
-		ids, err := certificateReferences(revision.Engine, revision.Content)
+		metadata, err := s.configClientMetadataTx(ctx, tx, configID, revision.Version)
+		if err != nil {
+			return core.Config{}, err
+		}
+		frontends, err := serverconfig.ManagedTLSFrontends(revision.Engine, revision.Content, metadata)
+		if err != nil {
+			return core.Config{}, err
+		}
+		ids, err := certificateReferences(revision.Engine, revision.Content, frontends...)
 		if err != nil {
 			return core.Config{}, err
 		}

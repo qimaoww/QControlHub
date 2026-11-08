@@ -353,6 +353,13 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
+		if task.Engine == core.EngineMihomo && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+			for _, input := range serverconfig.ParseAll(task.Engine, task.ConfigContent) {
+				if input.Protocol == serverconfig.ProtocolXHTTPTLS {
+					return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以校验 Mihomo XHTTP TLS 服务端能力（%s）", ErrConflict, core.AgentFeatureXHTTPTLS)
+				}
+			}
+		}
 		if task.Engine == core.EngineXray && len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureXHTTP) {
 			return core.Task{}, fmt.Errorf("%w: XHTTP 组合需要新版 Agent（xhttp-presets-v1），请先升级 Agent", ErrInvalid)
 		}
@@ -373,6 +380,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 		}
 		for _, frontend := range task.TLSFrontends {
+			if frontend.Transport == "xhttp" && !frontend.LocalOnly && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持独立 XHTTP TLS（%s）", ErrConflict, core.AgentFeatureXHTTPTLS)
+			}
 			if frontend.AutomaticCertificate && !containsFeature(features, core.AgentFeatureNginxACME) {
 				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持 Nginx 独立申请和续期证书（%s）", ErrConflict, core.AgentFeatureNginxACME)
 			}

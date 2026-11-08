@@ -23,8 +23,8 @@ func managedTLS(input Input) bool { return input.TLSMode == "caddy" || input.TLS
 func proxiedTLS(input Input) bool { return managedTLS(input) || input.TLSMode == "external" }
 
 func frontendFor(input Input) core.TLSFrontend {
-	f := core.TLSFrontend{Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath, Host: input.TransportHost, Method: input.TransportHTTPMethod}
-	f.AutomaticCertificate = input.Protocol == "vless-ws-tls" && input.TLSMode == "nginx"
+	f := core.TLSFrontend{StaticHTML: input.TLSStaticHTML, Tag: input.Tag, Mode: input.TLSMode, Domain: input.TLSServerName, PublicPort: input.TLSPublicPort, BackendPort: input.Port, Transport: input.Transport, Path: input.TransportPath, Host: input.TransportHost, Method: input.TransportHTTPMethod}
+	f.AutomaticCertificate = (input.Protocol == "vless-ws-tls" || input.Protocol == ProtocolXHTTPTLS) && input.TLSMode == "nginx"
 	if f.UsesACME() {
 		f.ACMEEmail = input.TLSACMEEmail
 	}
@@ -35,8 +35,12 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 	if input.TLSMode == "" || input.TLSMode == "native" {
 		return nil
 	}
-	if engine != core.EngineSingBox || !input.TLSEnabled || input.RealityEnabled {
+	xhttp := input.Protocol == ProtocolXHTTPTLS && input.Transport == "xhttp" && (engine == core.EngineXray || engine == core.EngineMihomo)
+	if (engine != core.EngineSingBox && !xhttp) || !input.TLSEnabled || input.RealityEnabled {
 		return fmt.Errorf("托管反代仅支持 sing-box 的 TLS WebSocket / HTTPUpgrade / Caddy HTTP/H2 方案")
+	}
+	if xhttp && input.TLSMode != "caddy" && input.TLSMode != "nginx" {
+		return fmt.Errorf("独立 XHTTP TLS 请选择 Caddy、Nginx 或内核 TLS")
 	}
 	if input.Listen != "127.0.0.1" {
 		return fmt.Errorf("托管反代的内部监听地址必须为 127.0.0.1")
@@ -53,7 +57,7 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 		return err
 	}
 	alpn := "http/1.1"
-	if input.Transport == "http" {
+	if input.Transport == "http" || xhttp {
 		alpn = "h2"
 	}
 	if input.TLSALPN != "" && input.TLSALPN != alpn {
@@ -218,8 +222,13 @@ func ManagedTLSFrontends(engine core.Engine, content string, metadata map[string
 			} `json:"transport"`
 		} `json:"inbounds"`
 	}
-	if engine == core.EngineXray {
-		return xhttpManagedFrontends(content, metadata)
+	if engine == core.EngineXray || engine == core.EngineMihomo {
+		frontends, err := standaloneXHTTPFrontends(engine, content, metadata)
+		if err != nil || engine == core.EngineMihomo {
+			return frontends, err
+		}
+		groups, err := xhttpManagedFrontends(content, metadata)
+		return append(frontends, groups...), err
 	}
 	if engine != core.EngineSingBox {
 		return nil, nil

@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,14 +19,15 @@ func isXHTTPGroup(protocol string) bool {
 func xhttpProtocols() []Protocol {
 	var result []Protocol
 	for _, item := range []struct{ key, name, description string }{
-		{ProtocolXHTTPTLS, "VLESS-XHTTP-TLS / CDN", "独立部署：Xray 原生 TLS，无需反代；直连需可信证书，CDN 需正确配置严格回源与不缓存路径。"},
+		{ProtocolXHTTPTLS, "VLESS-XHTTP-TLS / CDN", "独立 XHTTP：支持 Caddy、Nginx 自动证书或内核 TLS；CDN 需严格回源并绕过路径缓存。"},
 		{ProtocolXHTTPTLSReality, "XHTTP · TLS/CDN 上传 → Reality 下载", "独立混合方案：一个公共 Reality 入口、一个共享 XHTTP 后端与受管 Nginx 本地 TLS 目标。"},
 		{ProtocolXHTTPRealityTLS, "XHTTP · Reality 上传 → TLS/CDN 下载", "独立混合方案：一个公共 Reality 入口、一个共享 XHTTP 后端与受管 Nginx 本地 TLS 目标。"},
 		{ProtocolXHTTPFive, "XHTTP · 五合一组合", "五种客户端连接共享公共端口、凭据与 XHTTP 路径；依赖域名证书及受管 Nginx。"},
 	} {
 		group := isXHTTPGroup(item.key)
-		result = append(result, Protocol{Key: item.key, Name: item.name, Badge: "XHTTP", Group: "VLESS", Description: item.description, Docs: "https://github.com/XTLS/Xray-core/discussions/4118", DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"xhttp"}, TransportConfig: true, UsesReality: group, SupportsTLS: !group, RequiresTLS: !group, DefaultTLS: !group})
+		result = append(result, Protocol{Key: item.key, Name: item.name, Badge: "XHTTP", Group: "VLESS", Description: item.description, Docs: "https://github.com/XTLS/Xray-core/discussions/4118", DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"xhttp"}, TransportConfig: true, UsesReality: group, SupportsTLS: !group, RequiresTLS: !group, DefaultTLS: !group, SupportsManagedTLS: !group})
 	}
+	result[0].StaticPages = xhttpStaticPages()
 	return result
 }
 
@@ -35,8 +37,8 @@ func initializeXHTTPPlan(protocol Protocol, input *Input) error {
 	}
 	input.XHTTPMode = "auto"
 	if input.TLSEnabled {
-		input.TLSServerName = "tls.example.com"
-		input.TLSALPN, input.TLSClientALPN = "h2,http/1.1", "h2"
+		input.TLSServerName = ""
+		input.TLSALPN, input.TLSClientALPN = "h2", "h2"
 	}
 	if !isXHTTPGroup(protocol.Key) {
 		return nil
@@ -46,11 +48,16 @@ func initializeXHTTPPlan(protocol Protocol, input *Input) error {
 		return err
 	}
 	input.RealityEnabled, input.TLSEnabled = true, false
-	input.RealityServerName, input.RealityMinClientVer = "reality.example.com", "0.0.0"
-	input.TLSServerName = "tls.example.com"
+	input.RealityServerName, input.RealityMinClientVer = "", "0.0.0"
+	input.CertificatePath, input.PrivateKeyPath = "", ""
+	input.TLSServerName = ""
 	input.RealityPrivateKey = base64.RawURLEncoding.EncodeToString(key.Bytes())
 	input.RealityPublicKey = base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
-	input.RealityShortID = strings.TrimPrefix(input.TransportPath, "/")
+	shortID := make([]byte, 8)
+	if _, err := rand.Read(shortID); err != nil {
+		return err
+	}
+	input.RealityShortID = hex.EncodeToString(shortID)
 	input.XHTTPBackendPort, input.XHTTPTLSPort = input.Port+1, input.Port+2
 	input.Port, input.ClientPort = 443, 443
 	input.TLSALPN, input.TLSClientALPN = "h2", "h2"

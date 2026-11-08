@@ -13,6 +13,7 @@ trap cleanup EXIT INT TERM
 cd "$root"
 CGO_ENABLED=0 go build -buildvcs=false -o "$work/qagent" ./cmd/agent
 CGO_ENABLED=0 go test -buildvcs=false -c -o "$work/tls.test" ./internal/agent
+sh deploy/tests/fetch-permission-cores.sh "$work/cores" xhttp
 python3 - "$work/qagent.service" <<'PY'
 from pathlib import Path
 import sys

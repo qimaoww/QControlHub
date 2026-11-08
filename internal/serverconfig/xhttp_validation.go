@@ -105,6 +105,9 @@ func validateXHTTPInput(input *Input) error {
 			return fmt.Errorf("TLS SNI：%w", err)
 		}
 		for _, path := range []string{input.CertificatePath, input.PrivateKeyPath} {
+			if proxiedTLS(*input) {
+				continue
+			}
 			if !filepath.IsAbs(path) || strings.ContainsAny(path, "\r\n\t\"'`;{}$\\") {
 				return fmt.Errorf("证书 / 私钥须使用有效绝对路径，且目标服务组可读取")
 			}
@@ -114,6 +117,9 @@ func validateXHTTPInput(input *Input) error {
 		return fmt.Errorf("未知 CDN 类型")
 	}
 	tlsPort := input.ClientPort
+	if proxiedTLS(*input) {
+		tlsPort = input.TLSPublicPort
+	}
 	if tlsPort == 0 {
 		tlsPort = input.Port
 	}

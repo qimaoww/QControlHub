@@ -11,7 +11,7 @@ import (
 
 // This suggests a port from the caller's allocation. Saving/deploying still
 // performs the transactional ownership and reservation checks.
-func (s *Server) sharedManagedTLSPlanPort(ctx context.Context, owner, agentID string, plan serverconfig.Input, current *serverconfig.Input) (int, error) {
+func (s *Server) sharedManagedTLSPlanPort(ctx context.Context, owner, agentID string, targetEngine core.Engine, plan serverconfig.Input, current *serverconfig.Input, excluded ...int) (int, error) {
 	access, err := s.store.UserAgentAccess(ctx, owner)
 	if err != nil {
 		return 0, err
@@ -22,7 +22,7 @@ func (s *Server) sharedManagedTLSPlanPort(ctx context.Context, owner, agentID st
 			continue
 		}
 		for _, engine := range share.Engines {
-			if engine == core.EngineSingBox {
+			if engine == targetEngine {
 				ports = share.Ports
 			}
 		}
@@ -35,6 +35,9 @@ func (s *Server) sharedManagedTLSPlanPort(ctx context.Context, owner, agentID st
 		return 0, err
 	}
 	used := map[int]bool{plan.TLSPublicPort: true, 80: true}
+	for _, port := range excluded {
+		used[port] = true
+	}
 	if current != nil {
 		used[current.Port] = true
 	}
@@ -62,10 +65,72 @@ func (s *Server) sharedManagedTLSPlanPort(ctx context.Context, owner, agentID st
 	// A single allocated backend can keep its port while rotating credentials.
 	if current != nil && current.Port != plan.TLSPublicPort && current.Port != 80 {
 		for _, port := range ports {
-			if port == current.Port {
+			if port == current.Port && !containsPlanPort(excluded, port) {
 				return port, nil
 			}
 		}
 	}
 	return 0, fmt.Errorf("%w: 已授权端口中没有可用的内部监听端口；请节点所有者分配公网 HTTPS 端口之外的内部端口", store.ErrInvalid)
+}
+
+func containsPlanPort(ports []int, port int) bool {
+	for _, value := range ports {
+		if value == port {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) sharedXHTTPGroupPlan(ctx context.Context, owner, agentID string, engine core.Engine, plan *serverconfig.Input, current *serverconfig.Input) error {
+	previousPublic := plan.Port
+	selected := []int{}
+	for index, field := range []*int{&plan.Port, &plan.XHTTPBackendPort, &plan.XHTTPTLSPort} {
+		candidate := *plan
+		candidate.Port, candidate.TLSPublicPort = *field, 0
+		var prior *serverconfig.Input
+		if current != nil {
+			copy := *current
+			copy.Port = []int{current.Port, current.XHTTPBackendPort, current.XHTTPTLSPort}[index]
+			prior = &copy
+		}
+		port, err := s.sharedManagedTLSPlanPort(ctx, owner, agentID, engine, candidate, prior, selected...)
+		if err != nil {
+			return err
+		}
+		*field = port
+		selected = append(selected, port)
+	}
+	if plan.ClientPort == previousPublic {
+		plan.ClientPort = plan.Port
+	}
+	return nil
+}
+
+func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID string, engine core.Engine) (int, error) {
+	access, err := s.store.UserAgentAccess(ctx, owner)
+	if err != nil {
+		return 0, err
+	}
+	for _, share := range access.Shares {
+		if share.AgentID != agentID || !share.Enabled || share.Status != core.AgentShareAccepted {
+			continue
+		}
+		matched := false
+		for _, allowed := range share.Engines {
+			matched = matched || allowed == engine
+		}
+		if !matched {
+			continue
+		}
+		if core.UnrestrictedSharedPorts(share.Ports) || containsPlanPort(share.Ports, 443) {
+			return 443, nil
+		}
+		for _, port := range share.Ports {
+			if port != 80 {
+				return port, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("%w: 未分配可用的公网 HTTPS 端口", store.ErrInvalid)
 }

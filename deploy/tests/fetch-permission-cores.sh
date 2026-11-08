@@ -12,6 +12,10 @@ fetch https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linu
 gzip -dc "$stage/mihomo.gz" > "$root/bin/mihomo"
 fetch https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip xray.zip e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214 695486844
 unzip -p "$stage/xray.zip" xray > "$root/bin/xray"
+if [ "${2:-}" = xhttp ]; then
+  chmod 0755 "$root/bin/"*
+  exit 0
+fi
 fetch https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz sing-box.tar.gz 699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 669526810
 tar -xzf "$stage/sing-box.tar.gz" -C "$stage"
 cp "$stage/sing-box-1.14.4-linux-amd64/sing-box" "$root/bin/sing-box"

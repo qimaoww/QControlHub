@@ -68,6 +68,9 @@ func xhttpClientStream(input Input, name string) map[string]any {
 func xhttpEndpoint(input Input, tls bool) map[string]any {
 	address := input.ClientAddress
 	port := input.Port
+	if proxiedTLS(input) {
+		port = input.TLSPublicPort
+	}
 	if input.ClientPort != 0 {
 		port = input.ClientPort
 	}
@@ -96,6 +99,9 @@ func xhttpEndpoint(input Input, tls bool) map[string]any {
 func xrayVLESSOutbound(input Input, address, serverName string) map[string]any {
 	address = xhttpClientAddress(input, address)
 	port := input.Port
+	if proxiedTLS(input) {
+		port = input.TLSPublicPort
+	}
 	if input.ClientPort != 0 {
 		port = input.ClientPort
 	}

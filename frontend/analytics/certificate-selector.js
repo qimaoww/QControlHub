@@ -2,7 +2,8 @@ import { node, field, button, notice, muted, actions, list } from './ui.js';
 
 const prefix = '/etc/qcontrolhub/panel-certificates/';
 export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {} }) {
-  if (!form || protocol?.uses_reality || protocol?.uses_wireguard || !(protocol?.supports_tls || protocol?.requires_tls)) return;
+  const group = ['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(protocol?.key);
+  if (!form || !group && (protocol?.uses_reality || !(protocol?.supports_tls || protocol?.requires_tls)) || protocol?.uses_wireguard) return;
   const input = name => form.elements?.namedItem(name) || form.querySelector(`[name="${name}"]`);
   const certificatePath = input('certificate_path');
   if (!certificatePath || form.querySelector('[data-analytics-certificate-selector]')) return;
@@ -47,9 +48,15 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
   function update(event, refreshOnly = false) {
     const id = select.value, active = Boolean(id), cert = items.find(item => item.id === id);
     const sni = input('tls_server_name');
-    if (event && active && cert?.domains?.length === 1 && !cert.domains[0].startsWith('*.') && sni && !sni.value) sni.value = cert.domains[0];
+    if (event && active && cert) {
+      const names = list(cert.domains).filter(name => !name.startsWith('*.'));
+      if (sni && !sni.value && (group || names.length === 1)) sni.value = names[0] || '';
+      const reality = input('reality_server_name');
+      if (group && reality && !reality.value) reality.value = names.find(name => name !== sni?.value) || '';
+    }
     const name = sni?.value.trim().toLowerCase();
-    const reason = active && !loading && !failed ? availability(cert) || (!name ? '请填写 TLS SNI' : '') || (!list(cert.domains).some(domain => matches(domain.toLowerCase(), name)) ? '证书不覆盖当前 TLS SNI' : '') : '';
+    const realityName = input('reality_server_name')?.value.trim().toLowerCase();
+    const reason = active && !loading && !failed ? availability(cert) || (!name ? '请填写 TLS SNI' : '') || (!list(cert.domains).some(domain => matches(domain.toLowerCase(), name)) ? '证书不覆盖当前 TLS SNI' : '') || (group && (!realityName || realityName === name || !list(cert.domains).some(domain => matches(domain.toLowerCase(), realityName))) ? '请选择证书覆盖的不同 Reality 域名' : '') : '';
     select.setCustomValidity(reason || (active && loading ? '正在加载证书，请稍候' : '') || (active && failed ? '证书列表加载失败，请重试' : ''));
     const text = loading ? '正在加载证书…' : failed ? '证书列表加载失败，已保留选择' : reason || (cert ? description(cert) : items.length ? '使用节点原有证书配置' : '暂无可选证书，可使用节点原有配置');
     if (summary.textContent !== text) summary.textContent = text;
@@ -59,7 +66,7 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     const tlsMode = input('tls_mode');
     if (active && tlsMode && event) { tlsMode.value = 'native'; tlsMode.dispatchEvent(new Event('change', { bubbles: true })); }
     const tls = input('tls_enabled');
-    if (active && tls && !tls.checked) { tls.checked = true; tls.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (active && tls && !tls.checked && !group) { tls.checked = true; tls.dispatchEvent(new Event('change', { bubbles: true })); }
     for (const [name,file] of [['certificate_path','cert.pem'],['private_key_path','key.pem']]) {
       const control = input(name); if (!control) continue;
       if (active) { if (!managed) localPaths.set(name, control.value); control.value = `${prefix}${id}/${file}`; }
@@ -74,7 +81,7 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
   select.value = initial;
   select.addEventListener('change', event => update(event));
   input('tls_mode')?.addEventListener('change', mode);
-  input('tls_server_name')?.addEventListener('input', () => update(undefined, true));
+  for (const name of ['tls_server_name','reality_server_name']) input(name)?.addEventListener('input', () => update(undefined, true));
   function options() {
     const next = JSON.stringify(items.map(cert => [cert.id, cert.owned, cert.name, description(cert)]));
     if (next === signature || document.activeElement === select || select.contains(document.activeElement) || select.matches(':open')) return;
