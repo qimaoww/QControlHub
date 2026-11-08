@@ -17,7 +17,7 @@ import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { enrollmentInstallCommand } from '../modules/enrollment-command.js';
 import { formatSharedPorts } from '../modules/user-model.js';
 import { sharedInstancePresentation } from '../modules/shared-instance-model.js';
-import { bindSelectionSurface, copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
+import { copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
 import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
@@ -39,17 +39,15 @@ export async function nodesPage(ctx) {
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
-  bindSelectionSurface(results, { selector: 'article[data-agent-id]', active: () => selecting, signal: ctx.signal });
   const dragging = bindNodeOrdering(ctx, results, {
-    enabled: () => !selecting,
+    enabled: () => true,
     order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
   });
-  const selected = new Set();
-  let view = preference.view === 'list' ? 'list' : 'cards', selecting = false;
-  const batchBar = node('div', {className:'a-probe-batch'});
+  let view = preference.view === 'list' ? 'list' : 'cards';
+  let batchBox;
   const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
   const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
-  const batchToggle = ctx.can('tasks.execute') && button('批量操作', () => { selecting = true; draw(); });
+  const batchToggle = ctx.can('tasks.execute') && button('批量操作', batch);
   async function setView(value) {
     if (value === view) return;
     cardToggle.disabled = listToggle.disabled = true;
@@ -73,38 +71,6 @@ export async function nodesPage(ctx) {
     const ordered = orderNodesBySavedOrder(agents, ordering.ids());
     return ordered.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
   };
-  const selectable = agent => ctx.can('tasks.execute') &&
-    (agent.can_manage !== false || ctx.can('instance.manage', agent));
-  function choice(agent) { return field('选择', `select:${agent.id}`, selected.has(agent.id), {
-    type: 'checkbox', 'aria-label': `选择 ${agent.name}`, disabled: !selectable(agent), onchange(event) {
-      event.target.checked ? selected.add(agent.id) : selected.delete(agent.id); drawBatch();
-    },
-  }); }
-  function drawBatch() {
-    results.querySelectorAll('article[data-agent-id]').forEach(card => {
-      const input = card.querySelector('input[type=checkbox]');
-      if (input) {
-        input.checked = selected.has(card.dataset.agentId);
-        card.dataset.selected = String(input.checked);
-        input.nextElementSibling.textContent = input.checked ? '已选择' : '选择';
-        card.setAttribute('aria-label', `${agents.find(agent => agent.id === card.dataset.agentId)?.name || ''}，${input.checked ? '已选择' : '未选择'}`);
-      }
-    });
-    batchBar.hidden = !selecting;
-    if (batchToggle) batchToggle.hidden = selecting;
-    if (!selecting) { batchBar.replaceChildren(); return; }
-    const eligible = shownAgents().filter(selectable);
-    const count = eligible.filter(agent => selected.has(agent.id)).length;
-    const all = field('全选', 'select-all', eligible.length > 0 && count === eligible.length, {
-      type: 'checkbox', disabled: !eligible.length, onchange(event) {
-        eligible.forEach(agent => event.target.checked ? selected.add(agent.id) : selected.delete(agent.id)); draw();
-        batchBar.querySelector('[name="select-all"]').focus({ preventScroll: true });
-      },
-    });
-    all.querySelector('input').indeterminate = count > 0 && count < eligible.length;
-    batchBar.replaceChildren(all, muted(`已选 ${selected.size} 个节点`), button('执行批量操作', batch, { disabled: !selected.size }),
-      button('取消选择', () => { selecting = false; selected.clear(); draw(); }));
-  }
   const percentage=(used,total)=>total>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):0;
   function meter(label,value,available,detail){
     const percent=Math.min(100,Math.max(0,Number(value)||0));
@@ -115,7 +81,7 @@ export async function nodesPage(ctx) {
     meter('CPU',m.cpu_percent,online&&m.cpu_available),
     meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
-  function dragControl(agent) { return dragHandle(agent.id, agent.name, selecting); }
+  function dragControl(agent) { return dragHandle(agent.id, agent.name); }
   function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
     button(compact?'设置':'查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent)),{title:'查看设置'}),
     dragControl(agent));}
@@ -180,7 +146,7 @@ export async function nodesPage(ctx) {
     }
     catch (error) {
       if (error.status === 403 && ctx.current() && sequence === loadSequence) {
-        agents = []; selected.clear(); draw(true);
+        agents = []; draw(true);
         dialogUpdates.forEach(update => update());
       }
       throw error;
@@ -190,7 +156,6 @@ export async function nodesPage(ctx) {
     const existing = new Map(agents.map(agent => [agent.id, agent]));
     agents = received.map(agent => { const current = existing.get(agent.id); if (!current) return agent; for (const name of Object.keys(current)) if (!(name in agent)) delete current[name]; return Object.assign(current, agent); });
     if (refreshState.textContent !== '正在实时更新') refreshState.textContent = '正在实时更新';
-    for (const id of selected) if (!agents.some(agent => agent.id === id)) selected.delete(id);
     draw(true);
     dialogUpdates.forEach(update => update());
   }
@@ -208,26 +173,24 @@ export async function nodesPage(ctx) {
   function draw(live = false) {
     if (dragging.active()) return;
     const shown = shownAgents();
-    for (const id of selected) if (!shown.some(agent => agent.id === id && selectable(agent))) selected.delete(id);
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
-    if (!live) drawBatch();
     // Only retain the current projection, within this page/account lifetime.
-    // Include permissions, selection and formatted time (including relative
+    // Include permissions and formatted time (including relative
     // age), so unchanged payloads never suppress a visible state transition.
-    const signature = JSON.stringify([view, selecting, Boolean(agents.length), [...selected], shown,
-      ctx.can('agents.read'), ctx.can('agent-config.read'), shown.map(agent => [canManage(agent), selectable(agent), date(agent.last_seen)])]);
+    const signature = JSON.stringify([view, Boolean(agents.length), shown,
+      ctx.can('agents.read'), ctx.can('agent-config.read'), shown.map(agent => [canManage(agent), date(agent.last_seen)])]);
     // Legacy responses without a resolved region still need their lookup's
     // normal retry/update path. Current API lists always include region_code.
     const regionsResolved = shown.every(agent => Object.hasOwn(agent, 'region_code') || geoRegionDetails(agent.labels?.region_code) || !ctx.can('agents.read'));
     if (regionsResolved && renderSignature === signature) return;
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));renderSignature = signature;return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
-      node('article',{className:'a-card a-probe','data-agent-id':agent.id, 'data-selected': selecting ? String(selected.has(agent.id)) : null, tabindex: selecting && selectable(agent) ? 0 : null, role: selecting ? 'group' : null, 'aria-label': selecting ? `${agent.name}，${selected.has(agent.id) ? '已选择' : '未选择'}` : null},
+      node('article',{className:'a-card a-probe','data-agent-id':agent.id},
         node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),
-          selecting ? node('div',{className:'a-probe-choice'},status(agent.status),choice(agent)) : status(agent.status)),
+          status(agent.status)),
         node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
         node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
-        !selecting&&node('footer',{className:'a-probe-footer'},controls(agent)))));
+        node('footer',{className:'a-probe-footer'},controls(agent)))));
       if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
     }
     else{
@@ -238,10 +201,10 @@ export async function nodesPage(ctx) {
           metricTrack(percent, available),
           detail&&muted(available?detail:'暂无数据'));
       };
-      const columns = [...(selecting?['选择']:[]),'节点','状态','CPU','内存','磁盘','网络收发','操作'];
+      const columns = ['节点','状态','CPU','内存','磁盘','网络收发','操作'];
       const rows = shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
-        return [...(selecting?[choice(agent)]:[]),
+        return [
           node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
             muted(agent.can_manage===false?'本人共享实例':'主实例')),
           node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
@@ -257,17 +220,11 @@ export async function nodesPage(ctx) {
       });
       if (live && liveTable) liveTable.updateRows(rows);
       else {
-        const widths = { '选择': 64, '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络收发': 230, '操作': 190 };
+        const widths = { '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络收发': 230, '操作': 190 };
         liveTable = table(columns, rows, {label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
         results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
       }
     }
-    results.querySelectorAll('input[type=checkbox]').forEach(input => {
-      if (input.name.startsWith('select:')) {
-        input.checked = selected.has(input.name.slice(7));
-        input.nextElementSibling.textContent = input.checked ? '已选择' : '选择';
-      }
-    });
     renderSignature = signature;
   }
 
@@ -634,7 +591,10 @@ export async function nodesPage(ctx) {
     dialogUpdates.add(update);
     box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
   }
-  function batch() { openNodeBatch(ctx, () => agents, selected); }
+  function batch() {
+    if (batchBox?.isConnected) { batchBox.focus(); return; }
+    batchBox = openNodeBatch(ctx, (value = agents) => orderNodesBySavedOrder(value, ordering.ids()));
+  }
 
   const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : '更新失败，保留上次数据'; };
   poll({ ...ctx, onRefreshError: failedRefresh }, load);
@@ -653,5 +613,5 @@ export async function nodesPage(ctx) {
     ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
     batchToggle,
-  )), refreshState, batchBar, results);
+  )), refreshState, results);
 }
