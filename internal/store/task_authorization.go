@@ -52,7 +52,17 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 		if len(task.TLSFrontends) > 0 && !containsFeature(features, core.AgentFeatureManagedTLS) {
 			return fmt.Errorf("Agent 不再支持托管 TLS 反代（managed-tls-v1），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交")
 		}
+		if task.Engine == core.EngineMihomo && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+			for _, input := range serverconfig.ParseAll(task.Engine, task.ConfigContent) {
+				if input.Protocol == serverconfig.ProtocolXHTTPTLS {
+					return fmt.Errorf("Agent 不再支持 Mihomo XHTTP TLS 服务端能力校验（%s），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交", core.AgentFeatureXHTTPTLS)
+				}
+			}
+		}
 		for _, frontend := range task.TLSFrontends {
+			if frontend.Transport == "xhttp" && !frontend.LocalOnly && !containsFeature(features, core.AgentFeatureXHTTPTLS) {
+				return fmt.Errorf("Agent 不再支持独立 XHTTP TLS（%s），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交", core.AgentFeatureXHTTPTLS)
+			}
 			if frontend.AutomaticCertificate && !containsFeature(features, core.AgentFeatureNginxACME) {
 				return fmt.Errorf("Agent 不再支持 Nginx 独立申请和续期证书（%s），无法安全恢复任务；断线前是否已执行未知，请升级 Agent 后重新提交", core.AgentFeatureNginxACME)
 			}
