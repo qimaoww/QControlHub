@@ -20,7 +20,7 @@ var panelCertificateFile = regexp.MustCompile(`^/etc/qcontrolhub/panel-certifica
 
 func requireManagedTLSCertificates(task core.Task, features []string) error {
 	if task.ManagedTLSCleanup && !containsFeature(features, core.AgentFeatureManagedTLSCertificates) {
-		return fmt.Errorf("%w: 请先升级 Agent，以清理已部署的反代面板证书（%s）", ErrConflict, core.AgentFeatureManagedTLSCertificates)
+		return fmt.Errorf("%w: 请先升级 Agent，以清理已部署的反代资源（%s）", ErrConflict, core.AgentFeatureManagedTLSCertificates)
 	}
 	for _, f := range task.TLSFrontends {
 		if f.UsesPanelCertificate() && !containsFeature(features, core.AgentFeatureManagedTLSCertificates) {
@@ -57,9 +57,9 @@ func (s *Store) prepareManagedTLSCleanupTx(ctx context.Context, tx pgx.Tx, task 
 		if err != nil {
 			return err
 		}
-		for _, f := range frontends {
-			task.ManagedTLSCleanup = task.ManagedTLSCleanup || f.UsesPanelCertificate()
-		}
+		// Legacy automatic certificates own routes, pages and service state too.
+		// A previous Agent may remove routes without completing resource cleanup.
+		task.ManagedTLSCleanup = task.ManagedTLSCleanup || len(frontends) > 0
 	}
 
 	return requireManagedTLSCertificates(*task, features)

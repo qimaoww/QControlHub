@@ -27,7 +27,7 @@ func TestXHTTPFiveCertificateGrantVersionsAndRestore(t *testing.T) {
 	if _, err = db.RespondAgentShare(recipient, share.ID, core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "accept"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["panel-certificates-v1","managed-tls-v1","xhttp-presets-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["panel-certificates-v1","managed-tls-v1","xhttp-presets-v1","managed-tls-panel-certificates-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	names := []string{"tls.example.test", "reality.example.test"}

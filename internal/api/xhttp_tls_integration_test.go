@@ -64,7 +64,7 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 							operation, original = "modify", plan.Tag
 						}
 						body := map[string]any{"operation": operation, "original_tag": original, "expected_version": version, "intent": "deploy", "input": plan}
-						if panelCertificate && index == 0 {
+						if panelCertificate && index == 0 || index == 1 || index == 2 {
 							var old []string
 							for _, feature := range agent.Features {
 								if feature != core.AgentFeatureManagedTLSCertificates {
@@ -185,32 +185,35 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 						if err = db.CompleteTask(ctx, agent.ID, renewal.ID, result); err != nil {
 							t.Fatal(err)
 						}
-						deletion := map[string]any{"operation": "delete", "original_tag": plan.Tag, "expected_version": version, "intent": "deploy"}
-						var old []string
-						for _, feature := range agent.Features {
-							if feature != core.AgentFeatureManagedTLSCertificates {
-								old = append(old, feature)
-							}
+					}
+					deletion := map[string]any{"operation": "delete", "original_tag": plan.Tag, "expected_version": version, "intent": "deploy"}
+					var old []string
+					for _, feature := range agent.Features {
+						if feature != core.AgentFeatureManagedTLSCertificates {
+							old = append(old, feature)
 						}
-						if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: old, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
-							t.Fatal(err)
-						}
-						actor.call("POST", base+"/server-inbounds", deletion, 409, nil)
-						if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
-							t.Fatal(err)
-						}
-						actor.call("POST", base+"/server-inbounds", deletion, 200, &last)
-						removal, err := db.ClaimTask(ctx, agent.ID)
-						if err != nil || removal == nil || len(removal.TLSFrontends) != 0 || len(removal.Certificates) != 0 {
-							t.Fatalf("deleted inbound retained proxy certificate: %v", err)
-						}
-						result.LeaseID = removal.LeaseID
-						if shared {
-							result.InstanceStatus = &core.SharedInstanceStatus{Engine: engine, ShareID: removal.SharedTrafficID, ConfigID: removal.ConfigID, ConfigVersion: removal.ConfigVersion, AppliedTaskID: removal.ID, TaskID: removal.ID, Status: "active", ObservedAt: time.Now().UTC()}
-						}
-						if err = db.CompleteTask(ctx, agent.ID, removal.ID, result); err != nil {
-							t.Fatal(err)
-						}
+					}
+					if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: old, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+						t.Fatal(err)
+					}
+					actor.call("POST", base+"/server-inbounds", deletion, 409, nil)
+					if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+						t.Fatal(err)
+					}
+					actor.call("POST", base+"/server-inbounds", deletion, 200, &last)
+					removal, err := db.ClaimTask(ctx, agent.ID)
+					if err != nil || removal == nil || len(removal.TLSFrontends) != 0 || len(removal.Certificates) != 0 {
+						t.Fatalf("deleted inbound retained proxy certificate: %v", err)
+					}
+					result := core.TaskResultRequest{LeaseID: removal.LeaseID, Success: true}
+					if shared {
+						result.TrafficSettled = true
+						result.InstanceStatus = &core.SharedInstanceStatus{Engine: engine, ShareID: removal.SharedTrafficID, ConfigID: removal.ConfigID, ConfigVersion: removal.ConfigVersion, AppliedTaskID: removal.ID, TaskID: removal.ID, Status: "active", ObservedAt: time.Now().UTC()}
+					}
+					if err = db.CompleteTask(ctx, agent.ID, removal.ID, result); err != nil {
+						t.Fatal(err)
+					}
+					if panelCertificate {
 						owner.call("DELETE", "/certificates/"+certificate.ID, nil, 204, nil)
 					}
 

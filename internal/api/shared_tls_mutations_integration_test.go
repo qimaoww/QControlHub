@@ -17,7 +17,7 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, ctx, _, owner, cdn := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-tls-edits", core.EngineSingBox)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, ctx, _, owner, cdn := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-tls-port-conflicts", core.EngineSingBox)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 				t.Fatal(err)
 			}
