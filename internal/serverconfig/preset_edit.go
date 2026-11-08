@@ -26,14 +26,14 @@ func mutatePresetFields(engine core.Engine, source, generated, original string) 
 		}
 	}
 	after, ok := Parse(engine, generated)
-	if !found || !ok || before.Protocol != after.Protocol || engine == core.EngineShadowsocksRust || isXHTTPGroup(before.Protocol) || before.Protocol == ProtocolWireGuard || before.Protocol == ProtocolSudoku {
+	if !found || !ok || before.Protocol != after.Protocol || engine == core.EngineShadowsocksRust || isXHTTPGroup(before.Protocol) || before.Protocol == ProtocolWireGuard {
 		return "", false, nil
 	}
 	canonical, err := Generate(engine, before)
 	if err != nil {
-		// The saved core source can be the plaintext backend of managed TLS.
-		// Build its comparison projection without revalidating absent frontend
-		// metadata. Only the new candidate goes through Generate validation.
+		// Native source can omit panel-only client keys or frontend TLS metadata.
+		// Build its comparison projection without requiring those fields again.
+		// Only the new candidate goes through Generate validation.
 		switch engine {
 		case core.EngineXray:
 			canonical, err = generateXray(before)

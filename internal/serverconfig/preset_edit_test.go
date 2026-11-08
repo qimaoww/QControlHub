@@ -1,11 +1,82 @@
 package serverconfig
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestSpecialPresetEditsRetainNativeContent(t *testing.T) {
+	for _, pair := range []struct {
+		engine   core.Engine
+		protocol string
+	}{{core.EngineMihomo, ProtocolSudoku}, {core.EngineXray, ProtocolXHTTPFive}, {core.EngineXray, ProtocolXHTTPTLSReality}, {core.EngineShadowsocksRust, ProtocolSS2022}} {
+		t.Run(string(pair.engine)+"/"+pair.protocol, func(t *testing.T) {
+			protocol, _ := FindProtocol(pair.engine, pair.protocol)
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Tag, input.Port = "selected", 24111
+			input.XHTTPBackendPort, input.XHTTPTLSPort = 24112, 24113
+			input.TLSMode, input.TLSServerName = "native", "fixture.example.test"
+			input.RealityServerName = DefaultRealityServerName
+			input.CertificatePath, input.PrivateKeyPath = "/tmp/fixture.crt", "/tmp/fixture.key"
+			source, err := Generate(pair.engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, err := managedDocument(pair.engine, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root["exact"] = json.Number("9007199254740993")
+			if pair.engine == core.EngineMihomo {
+				mapValue(firstMap(root["listeners"])["httpmask"])["native-extension"] = "keep-mask"
+			}
+			if pair.engine == core.EngineXray {
+				mapValue(firstMap(root["inbounds"])["streamSettings"])["native-extension"] = "keep-primary"
+				mapValue(root["inbounds"].([]any)[1])["native-extension"] = "keep-backend"
+			}
+			encoded, _ := json.Marshal(root)
+			input.Tag, input.Port = "renamed", 24114
+			generated, err := Generate(pair.engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := MutateGenerated(pair.engine, string(encoded), generated, "selected", "modify")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, token := range []string{"9007199254740993", "24114", "renamed"} {
+				if !strings.Contains(result, token) {
+					t.Fatalf("lost %s: %s", token, result)
+				}
+			}
+			for _, token := range []string{"keep-mask", "keep-primary", "keep-backend"} {
+				if strings.Contains(string(encoded), token) && !strings.Contains(result, token) {
+					t.Fatalf("lost %s: %s", token, result)
+				}
+			}
+			if pair.engine == core.EngineShadowsocksRust {
+				input.Tag, input.Port = "neighbor", 24115
+				generated, err = Generate(pair.engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err = MutateGenerated(pair.engine, result, generated, "", "add")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(result, "9007199254740993") {
+					t.Fatal("second add rounded native integer")
+				}
+			}
+		})
+	}
+}
 
 func TestPresetEditRetainsNativeAccountsAndExactNumbers(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
