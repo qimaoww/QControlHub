@@ -8,8 +8,8 @@ chmod -R a+rwX "$cache"
 fixture=$(mktemp -d /tmp/qch-ss-rust-native.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 archive=shadowsocks-v1.25.0.x86_64-unknown-linux-musl.tar.xz
-curl --fail --location --retry 3 --max-time 120 "https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/$archive" -o "$fixture/$archive"
-printf '%s  %s\n' 8439bf43c324b0fc273e663d0b1f8926fd8f666cbd1e0fd59b35096f0e778e92 "$fixture/$archive" | sha256sum -c -
+sh deploy/tests/fetch-official-asset.sh "https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/$archive" \
+  "$fixture/$archive" 8439bf43c324b0fc273e663d0b1f8926fd8f666cbd1e0fd59b35096f0e778e92 531449939
 tar -xf "$fixture/$archive" -C "$fixture" ssserver sslocal
 chmod 0755 "$fixture" "$fixture/ssserver" "$fixture/sslocal"
 sh .github/scripts/run-ci-container.sh --rm --read-only --network none --user "$(id -u):$(id -g)" --cap-drop ALL \

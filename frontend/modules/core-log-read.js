@@ -6,15 +6,21 @@ import { reuseCoreLogEntries } from "./core-log-projection.js";
 const validators = new WeakMap();
 async function readSnapshot(api, params, signal, previous) {
   const path = `/core-logs?${params}`;
-  const known = previous && validators.get(previous);
+  const known = previous && validators.get(previous)?.get(path);
   let etag = "";
   const entries = await api(path, {
     signal,
-    ...(known?.path === path ? { conditional: { etag: known.etag, value: previous } } : {}),
+    ...(known ? { conditional: { etag: known, value: previous } } : {}),
     onResponse: response => { etag = response.headers?.get("ETag") || ""; },
   });
   const snapshot = reuseCoreLogEntries(previous, entries);
-  if (etag) validators.set(snapshot, { path, etag });
+  const tags = validators.get(snapshot) || new Map();
+  tags.delete(path);
+  if (etag) tags.set(path, etag);
+  // A sparse window can be identical at several limits. Keep each validator
+  // tied to its exact URL without retaining an unbounded list of query strings.
+  while (tags.size > 3) tags.delete(tags.keys().next().value);
+  if (tags.size) validators.set(snapshot, tags);
   else validators.delete(snapshot);
   return snapshot;
 }
@@ -30,18 +36,22 @@ export async function readCoreLogWindow(api, params, { signal, preview, engines,
   const previewParams = new URLSearchParams(params);
   previewParams.set("limit", "200");
   const first = readSnapshot(api, previewParams, previewController.signal)
-    .then(entries => ({ stage: "preview", entries }), () => ({ stage: "preview-failed" }));
+    .then(entries => ({ stage: "preview", entries }), error => ({ stage: "preview-failed", error }));
   const full = readSnapshot(api, params, fullController.signal)
     .then(entries => ({ stage: "full", entries }), error => ({ stage: "full-failed", error }));
   try {
     let result = await Promise.race([first, full]);
     if (result.stage === "full") return result.entries;
+    const checkAccess = result => {
+      // A failed authorization in either stage invalidates any older preview.
+      if ([401, 403, 404].includes(result.error?.status)) throw result.error;
+    };
+    checkAccess(result);
     let failed = null;
     if (result.stage === "full-failed") {
       failed = result.error;
-      // Access failures take precedence over a possibly older authorized read.
-      if ([403, 404].includes(failed.status)) throw failed;
       result = await first;
+      checkAccess(result);
     }
     if (result.stage === "preview" && !signal.aborted) {
       const counts = coreLogFilterCounts(result.entries, engines);
