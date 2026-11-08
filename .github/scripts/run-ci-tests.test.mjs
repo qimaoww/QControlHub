@@ -39,7 +39,7 @@ function waitForGate(name) {
 }
 
 async function runTask(name) {
-  record({ type: "start", task: name, databaseURL: process.env.QCH_TEST_DATABASE_URL });
+  record({ type: "start", task: name, pid: process.pid, databaseURL: process.env.QCH_TEST_DATABASE_URL });
   const completed = new Set(readFileSync(eventPath, "utf8").trim().split("\\n")
     .filter(Boolean).map((line) => JSON.parse(line))
     .filter((event) => event.type === "finish").map((event) => event.task));
@@ -73,7 +73,10 @@ if (tool === "go") {
   record({ type: "tool", tool, args });
   // Report that the fixture databases exist; never contact a PostgreSQL server.
   if (!args.includes("-tAc")) throw new Error("unexpected psql invocation");
-  console.log("1");
+  if (args.at(-1).includes("pg_control_system")) {
+    if (config.identityError) process.exit(7);
+    console.log(config.sharedCluster || !args[0].includes("secondary") ? "1001" : "1002");
+  } else console.log("1");
 } else if (tool === "task") {
   await runTask(args[0]);
 } else {
@@ -85,7 +88,7 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function createFixture(t, { failures = {}, gated = [] } = {}) {
+function createFixture(t, { failures = {}, gated = [], clusters = 1, sharedCluster = false, identityError = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "qch-ci-runner-"));
   const binPath = join(root, "bin");
   const eventPath = join(root, "events.jsonl");
@@ -95,20 +98,21 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
   writeFileSync(eventPath, "");
   writeFileSync(stubPath, stubSource);
 
-  const packages = ["database", "unit"].map((name) => {
+  const packages = (clusters === 2 ? ["database", "database2", "unit"] : ["database", "unit"]).map((name) => {
     const directory = join(root, name);
     mkdirSync(directory);
     writeFileSync(join(directory, "fixture_test.go"),
       'package fixture\nimport "testing"\nfunc TestFixture(t *testing.T) {}\n');
-    if (name === "database") {
+    if (name.startsWith("database")) {
       writeFileSync(join(directory, "fixture.go"),
         'package fixture\nconst databaseEnv = "QCH_TEST_DATABASE_URL"\n');
     }
     return { name: `example.invalid/${name}`, directory };
   });
+  const tasks = clusters === 2 ? [...parallelTasks, "go-3"] : parallelTasks;
   const dependencies = Object.fromEntries(afterTasks.map((task, index) =>
-    [task, [...parallelTasks, ...afterTasks.slice(0, index)]]));
-  writeFileSync(join(root, "config.json"), JSON.stringify({ failures, gated, packages, dependencies }));
+    [task, [...tasks, ...afterTasks.slice(0, index)]]));
+  writeFileSync(join(root, "config.json"), JSON.stringify({ failures, gated, packages, dependencies, sharedCluster, identityError }));
   for (const tool of ["go", "psql"]) {
     writeFileSync(join(binPath, tool),
       `#!/usr/bin/env bash\nexec ${shellQuote(process.execPath)} ${shellQuote(stubPath)} ${tool} "$@"\n`,
@@ -157,7 +161,8 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
         // Fixture planners/summary writers must not overwrite real CI evidence.
         QCH_CI_REPORT_DIR: join(root, "reports"),
         QCH_TEST_DATABASE_URL: "postgresql://fixture.invalid/ci_runner_base?sslmode=disable",
-        QCH_TEST_SHARDS: "2",
+        QCH_TEST_DATABASE_URL_2: clusters === 2 ? "postgresql://secondary.invalid/ci_runner_base?sslmode=disable" : "",
+        QCH_TEST_SHARDS: clusters === 2 ? "3" : "2",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -204,6 +209,7 @@ function createFixture(t, { failures = {}, gated = [] } = {}) {
 
   return {
     start, events, taskCommand, waitForEvents,
+    plan: () => JSON.parse(readFileSync(join(root, "reports", "shard-plan.json"), "utf8")),
     addPackage(name, imports = ["", "", ""]) {
       const directory = join(root, "new-package");
       mkdirSync(directory);
@@ -229,6 +235,20 @@ function assertStageOrder(events) {
         `${predecessor} must finish before ${task} starts`);
     }
     assert.ok(events.some((event) => event.type === "finish" && event.task === task), `${task} must finish`);
+  }
+}
+
+function assertTasksExited(events) {
+  for (const event of events.filter(event => event.type === "start")) {
+    try {
+      // Container PID 1 may retain an exited child as a zombie. It cannot run;
+      // the runner cannot control when the container's init reaps that PID.
+      const stat = readFileSync(`/proc/${event.pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      assert.ok(state === "Z" || state === "X", `task ${event.task} is still running (${state})`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
   }
 }
 
@@ -321,6 +341,55 @@ test("unknown extra tasks wait for the cluster-wide database transaction horizon
     events.findIndex(event => event.type === "start" && event.task === "extra"));
 });
 
+test("two clusters auto-assign every package once and dry-run never connects", async t => {
+  const fixture = createFixture(t, { clusters: 2 });
+  fixture.addPackage("example.invalid/new", ["", "example.invalid/database", ""]);
+  const completed = await fixture.start({ dryRun: true }).result;
+  assert.equal(completed.code, 0, completed.stdout + completed.stderr);
+  const plan = fixture.plan();
+  assert.equal(plan.databaseClusterCount, 2);
+  assert.deepEqual(plan.shards.flatMap(shard => shard.packages).sort(),
+    ["example.invalid/database", "example.invalid/database2", "example.invalid/new", "example.invalid/unit"]);
+  assert.deepEqual(plan.shards.slice(2).flatMap(shard => shard.packages), ["example.invalid/unit"]);
+  assert.ok(fixture.events().every(event => event.tool === "go" && event.args[0] === "list"));
+});
+
+test("independent clusters overlap but unknown extras wait for both and retain a second-shard failure", async t => {
+  const fixture = createFixture(t, { clusters: 2, gated: ["go-1", "go-2"], failures: { "go-2": 7 } });
+  const { result } = fixture.start({ extraIndependent: false });
+  await fixture.waitForEvents(events => ["go-1", "go-2"].every(task =>
+    events.some(event => event.type === "start" && event.task === task)));
+  const starts = fixture.events().filter(event => event.type === "start" && ["go-1", "go-2"].includes(event.task));
+  assert.match(starts.find(event => event.task === "go-1").databaseURL, /fixture.invalid\/ci_runner_base_shard1/);
+  assert.match(starts.find(event => event.task === "go-2").databaseURL, /secondary.invalid\/ci_runner_base_shard2/);
+  fixture.release("go-1");
+  await fixture.waitForEvents(events => events.some(event => event.type === "finish" && event.task === "go-1"));
+  assert.equal(fixture.events().some(event => event.type === "start" && event.task === "extra"), false);
+  fixture.release("go-2");
+  const completed = await result;
+  assert.notEqual(completed.code, 0, "second cluster failure must survive successful later checks");
+  assert.match(completed.stdout, /2 independent PostgreSQL clusters verified/);
+  assert.match(completed.stdout, /failure in go-2: exit 7/);
+  const events = fixture.events();
+  assert.deepEqual(events.filter(event => event.type === "premature"), []);
+  const extraStart = events.findIndex(event => event.type === "start" && event.task === "extra");
+  for (const task of ["go-1", "go-2"]) {
+    assert.ok(events.findIndex(event => event.type === "finish" && event.task === task) < extraStart);
+  }
+});
+
+test("cluster aliases and unverifiable identities fail before launching any tasks", async t => {
+  for (const mode of ["sharedCluster", "identityError"]) {
+    await t.test(mode, async t => {
+      const fixture = createFixture(t, { clusters: 2, [mode]: true });
+      const completed = await fixture.start().result;
+      assert.notEqual(completed.code, 0);
+      assert.equal(fixture.events().some(event => event.type === "start"), false);
+      if (mode === "sharedCluster") assert.match(completed.stderr, /independent PostgreSQL clusters/);
+    });
+  }
+});
+
 test("cancellation stops gated subprocesses and never starts after-checks", async t => {
   const fixture = createFixture(t, { gated: parallelTasks });
   const { child, result } = fixture.start();
@@ -329,6 +398,19 @@ test("cancellation stops gated subprocesses and never starts after-checks", asyn
   const completed = await result;
   assert.equal(completed.code, 143);
   assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
+  assertTasksExited(fixture.events());
+});
+
+test("cancellation also terminates both independent database shards", async t => {
+  const fixture = createFixture(t, { clusters: 2, gated: ["go-1", "go-2"] });
+  const { child, result } = fixture.start();
+  await fixture.waitForEvents(events => ["go-1", "go-2"].every(task =>
+    events.some(event => event.type === "start" && event.task === task)));
+  child.kill("SIGTERM");
+  const completed = await result;
+  assert.equal(completed.code, 143);
+  assert.equal(fixture.events().some(event => event.type === "start" && afterTasks.includes(event.task)), false);
+  assertTasksExited(fixture.events());
 });
 
 test("format gate excludes downloaded templates and checks new source directories", t => {

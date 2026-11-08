@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.27.3-bookworm
     timeout-minutes: 35
+    # These disposable databases perform hundreds of real DDL migrations.
+    # Bound their data in RAM while retaining PostgreSQL WAL/fsync semantics.
     services:
       postgres:
         image: postgres:17-alpine
@@ -34,11 +36,28 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
+      # A separate cluster isolates xmin and migration locks for the second
+      # database shard; separate databases on postgres would not isolate them.
+      postgres-secondary:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qcontrolhub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
     env:
       GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
       GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
       QCH_CI_PLATFORM: debian
       QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qcontrolhub?sslmode=disable
+      QCH_TEST_DATABASE_URL_2: postgresql://postgres:postgres@postgres-secondary:5432/qcontrolhub?sslmode=disable
+      QCH_TEST_API_FIXTURE_TEMPLATE: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -145,6 +164,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
+      postgres-secondary:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qcontrolhub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -165,6 +199,8 @@ jobs:
         run: |
           sh .github/scripts/run-ci-container.sh --rm --init --network host \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
+            -e QCH_TEST_DATABASE_URL_2=postgresql://postgres:postgres@127.0.0.1:5433/qcontrolhub?sslmode=disable \
+            -e QCH_TEST_API_FIXTURE_TEMPLATE=1 \
             -e QCH_TEST_SHARDS=4 \
             -e GOFLAGS=-buildvcs=false -e QCH_CI_PLATFORM=alpine \
             -e QCH_CI_REPORT_DIR=/src/.ci-report \
@@ -237,7 +273,9 @@ jobs:
       - name: Verify IPQuality installation with actual systemd and mirror+file
         run: make ip-quality-systemd-test
       - name: Verify managed TLS under the shipped Agent sandbox
-        run: make managed-tls-systemd-test managed-tls-openrc-test
+        # Separate containers have private init systems, files, ports and core
+        # services. Make waits for both targets and preserves either failure.
+        run: make -j2 managed-tls-systemd-test managed-tls-openrc-test
 
   core-permissions:
     name: All cores / actual service permissions
