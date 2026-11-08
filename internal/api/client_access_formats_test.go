@@ -132,3 +132,60 @@ func TestMieruUDPDeclarationSurvivesConfigAndSubStoreFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestClientAccessFormatsRetainEveryXHTTPVariant(t *testing.T) {
+	protocol, _ := serverconfig.FindProtocol(core.EngineXray, serverconfig.ProtocolXHTTPFive)
+	plan, err := serverconfig.NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := serverconfig.BuildClientProfile(plan, "203.0.113.10", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []clientAccessEntry{{Profiles: []clientAccessProfile{{Profile: profile}}}}
+	prepareClientAccessFormats(entries)
+	variants := entries[0].Profiles[0].Profile.Variants
+	if len(variants) != 5 {
+		t.Fatalf("lost variants: %d", len(variants))
+	}
+	for index, variant := range variants {
+		if variant.Profile.Xray != profile.Variants[index].Profile.Xray || variant.Profile.URI != profile.Variants[index].Profile.URI {
+			t.Fatal("variant content changed")
+		}
+		if variant.Profile.MihomoError == "" {
+			var proxy map[string]any
+			if variant.MihomoYAML == "" || yaml.Unmarshal([]byte(variant.MihomoYAML), &proxy) != nil || proxy["server"] == nil {
+				t.Fatal("usable variant YAML omitted")
+			}
+		} else if variant.MihomoYAML != "" {
+			t.Fatal("unsupported variant disguised as YAML")
+		}
+	}
+	wire, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received []clientAccessEntry
+	if json.Unmarshal(wire, &received) != nil || received[0].Profiles[0].Profile.Variants[0].MihomoYAML == "" {
+		t.Fatal("variant YAML lost on the API wire")
+	}
+}
+
+func TestClientAccessGenerationFailuresStayVisible(t *testing.T) {
+	protocol, _ := serverconfig.FindProtocol(core.EngineXray, serverconfig.ProtocolVLESS)
+	plan, err := serverconfig.NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []string{"", "invalid address", "203.0.113.10"} {
+		broken := plan
+		if address != "" {
+			broken.Credential = ""
+		}
+		profiles := buildClientAccessProfiles(core.EngineXray, []serverconfig.Input{broken}, []clientAddressCandidate{{address: address}}, "", nil)
+		if len(profiles) != 1 || profiles[0].Tag != plan.Tag || profiles[0].Port != plan.Port || profiles[0].Error == "" || profiles[0].Profile.URI != "" {
+			t.Fatalf("generation failure silently disappeared: %+v", profiles)
+		}
+	}
+}

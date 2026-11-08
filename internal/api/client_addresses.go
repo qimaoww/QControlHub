@@ -60,9 +60,10 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 	profiles := make([]clientAccessProfile, 0, len(inputs))
 	for _, input := range inputs {
 		profile, err := buildClientAccessProfile(engine, input, candidates, serverName, labels)
-		if err == nil {
-			profiles = append(profiles, profile)
+		if err != nil {
+			profile.Error = err.Error()
 		}
+		profiles = append(profiles, profile)
 	}
 	return profiles
 }
@@ -87,18 +88,18 @@ func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, cand
 		name, nameOverridden = value, true
 	}
 	profile, err := serverconfig.BuildClientProfileNamed(input, address, serverName, name)
-	if err != nil {
-		return clientAccessProfile{}, err
-	}
 	protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
 	if !found {
-		return clientAccessProfile{}, fmt.Errorf("不支持此入站协议")
+		protocol.Name = input.Protocol
+		if err == nil {
+			err = fmt.Errorf("不支持此入站协议")
+		}
 	}
 	return clientAccessProfile{
 		Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile,
 		ClientName: name, NameOverridden: nameOverridden,
 		Address: address, AddressMode: mode, AddressOverridden: overridden,
-	}, nil
+	}, err
 }
 
 func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labelSets ...map[string]string) []clientAccessAddressOption {

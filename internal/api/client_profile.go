@@ -11,9 +11,11 @@ import (
 )
 
 type clientProfileSelector struct {
-	Engine core.Engine `json:"engine"`
-	Tag    string      `json:"tag"`
-	Port   int         `json:"port"`
+	Engine        core.Engine `json:"engine"`
+	Tag           string      `json:"tag"`
+	Port          int         `json:"port"`
+	ConfigID      string      `json:"config_id,omitempty"`
+	ConfigVersion int         `json:"config_version,omitempty"`
 }
 
 // Resolve only the actually deployed revision, not a pending server draft or
@@ -28,6 +30,9 @@ func (s *Server) clientProfileNameLabel(ctx context.Context, agentID string, sel
 	}
 	for _, deployment := range deployments {
 		if deployment.AgentID != agentID || deployment.Engine != selected.Engine {
+			continue
+		}
+		if selected.ConfigID != "" && selected.ConfigID != deployment.ConfigID || selected.ConfigVersion != 0 && selected.ConfigVersion != deployment.ConfigVersion {
 			continue
 		}
 		config, err := s.store.ConfigRevision(ctx, deployment.ConfigID, deployment.ConfigVersion)

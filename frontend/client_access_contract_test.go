@@ -8,24 +8,29 @@ import (
 func TestClientAccessUsesOneScopedNodeFilter(t *testing.T) {
 	content := frontendSources(t, "analytics/client-access.js", "modules/client-access-model.js")
 	for _, required := range []string{
-		`const agentFilter = field('节点', 'agent', ''`, `const engineFilter = field('内核', 'engine', ''`,
+		`const agentFilter = field('节点', 'agent', ''`,
 		`const search = field('搜索接入配置'`, `normalizeClientAccessFilters`, `groupClientAccessEntries(entries, agents)`,
 		`orderNodesBySavedOrder(list(nodes), ordering.ids())`, `filterClientAccessEntries`,
-		`agentFilter.querySelector('select').value`, `engineFilter.querySelector('select').value`,
+		`agentFilter.querySelector('select').value`,
 		`loadClientDisplayFormat()`, `saveClientDisplayFormat`,
-		`button('参数详情', () => details(entry, item))`, `part.secret ? secret(part.label, part.value)`,
+		`button('参数详情', () => details(entry, item))`, `part.secret ? secret(part.label, part.value, false, check)`,
 		`type: 'password', readonly: true, autocomplete: 'off'`, `if (multiline) input.value = '••••••••'`,
-		`disabled: Boolean(exported.error || !exported.value)`, `secret('完整 Xray JSON', value.xray_json, true)`,
+		`disabled: !exported.value`, `...exported.outputs.map(output => secret(`,
 		`button('修改显示参数', () => display(entry, item))`, `ctx.dialog('修改显示参数'`,
 		`客户端地址协议栈`, `disabled: Boolean(item.address_overridden)`, `恢复自动识别`,
-		`const selector = { engine: entry.engine, tag: item.tag, port: Number(item.port) }`,
+		`config_id: entry.config_id, config_version: entry.config_version`,
 		`/agents/${pathID(entry.agent_id)}/client-address`, `address: '', profile: selector`,
-		`JSON.stringify([entry.agent_id, entry.engine, entry.instance_id || ''])`,
+		`clientAccessRecordKey(entry, item)`, `clientAccessBatchExport(groups, requestedFormat)`, `button('复制全部节点'`, `button('复制全部协议'`,
 		`if (!ctx.current() || sequence !== readSequence) return`, `patch(result, node('div', { className: 'a-stack' }, content))`,
 		`agent && ctx.can('agents.manage', agent)`, `ctx.signal.addEventListener('abort'`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("native client access contract missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"预览地址", "服务端配置", "engineFilter", "clientAccessEntryForAddress", "addressModes", "card.dataset.clientEngine"} {
+		if strings.Contains(string(mustReadFrontendFile(t, "analytics/client-access.js")), forbidden) {
+			t.Errorf("obsolete client control: %s", forbidden)
 		}
 	}
 	navigation := string(mustReadFrontendFile(t, "analytics/app.js"))

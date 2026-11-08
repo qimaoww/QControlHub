@@ -10,16 +10,76 @@ export function saveClientDisplayFormat(format) {
   catch { /* The current view still works when browser storage is unavailable. */ }
 }
 export function clientAccessExport(item, format) {
-  if (format === "mihomo") {
-    const value = String(item.mihomo_yaml || "");
-    const error = item.mihomo_error || (value ? "" : "此配置暂不支持 Mihomo YAML");
-    return { value: error ? "" : value, format: "Mihomo YAML", error };
+  // A group profile repeats its first variant at the top level. Export each
+  // real scheme once, choosing a format independently for every variant.
+  const variants = item.profile?.variants;
+  const schemes = variants?.length ? variants : [{ profile: item.profile, mihomo_yaml: item.mihomo_yaml, mihomo_error: item.mihomo_error }];
+  const outputs = [], errors = [];
+  for (const scheme of schemes) {
+    const profile = scheme.profile || {}, uri = String(profile.uri || "");
+    const isURL = /^(?:ss|vless|vmess|trojan|hysteria2|tuic|socks5|anytls):\/\/[^\s]+$/i.test(uri);
+    const yaml = scheme.mihomo_error || profile.mihomo_error ? "" : String(scheme.mihomo_yaml || "");
+    let output;
+    const native = () => {
+      if (uri && !isURL) {
+        // The builders deliberately put native content in `uri`. The label
+        // alone is never proof of a URL (or of valid JSON).
+        if (/YAML/i.test(profile.format || "")) return { value: uri, format: profile.format, extension: "yaml", mime: "application/yaml" };
+        try {
+          const parsed = JSON.parse(uri);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray(parsed.outbounds) && parsed.outbounds.length)
+            return { value: uri, format: /sing-box/i.test(profile.format || "") ? "sing-box JSON" : /Xray/i.test(profile.format || "") ? "Xray JSON" : "客户端 JSON", extension: "json", mime: "application/json" };
+        } catch { /* Other native formats are emitted by dedicated builders. */ }
+        if (/^Surge Snell/.test(profile.format || "") || profile.format === "WireGuard native config")
+          return { value: uri, format: profile.format === "WireGuard native config" ? "WireGuard 配置" : profile.format, extension: "conf", mime: "text/plain" };
+      }
+      if (profile.xray_json) return { value: profile.xray_json, format: "Xray JSON", extension: "json", mime: "application/json" };
+      if (yaml) return { value: yaml, format: "Mihomo YAML", extension: "yaml", mime: "application/yaml" };
+      return null;
+    };
+    if (!item.error) {
+      if (format === "mihomo" && yaml) output = { value: yaml, format: "Mihomo YAML", extension: "yaml", mime: "application/yaml" };
+      else if (isURL && !profile.uri_error) output = { value: uri, format: "URL", extension: "txt", mime: "text/plain", isURL: true };
+      else output = native();
+    }
+    if (output) outputs.push({ ...output, name: scheme.name || "" });
+    else errors.push([scheme.name, item.error || profile.uri_error || scheme.mihomo_error || item.mihomo_error || "暂无可用接入配置"].filter(Boolean).join(" · "));
   }
-  const profile = item.profile || {};
-  const value = String(profile.uri || "");
-  const isURL = /^(?:ss|vless|vmess|trojan|hysteria2|tuic|socks5|anytls):\/\/[^\r\n]+$/i.test(value);
-  const error = profile.uri_error || (isURL ? "" : value ? "请在参数详情中使用原生配置。" : "暂无可用 URL");
-  return { value: error ? "" : value, format: profile.format || "URL", error };
+  return {
+    outputs, errors, value: clientAccessExportText(outputs),
+    format: [...new Set(outputs.map(output => output.format))].join(" / "), error: errors.join("；"),
+  };
+}
+
+export function clientAccessExportText(outputs) {
+  if (outputs.every(output => output.isURL)) return outputs.map(output => output.value).join("\n");
+  if (outputs.length === 1) return outputs[0].value;
+  return outputs.map((output, index) => `===== ${output.label || output.name || `方案 ${index + 1}`} · ${output.format} =====\n${output.value}`).join("\n\n");
+}
+
+export function clientAccessRecordKey(entry, item) {
+  return JSON.stringify([entry.agent_id, entry.engine, entry.config_id || "", entry.instance_id || "", item?.tag || "", item?.port || 0]);
+}
+
+export function clientAccessBatchExport(groups, format) {
+  const outputs = [], errors = [], seen = new Set();
+  for (const group of groups) for (const entry of group.entries) {
+    const nodeName = entry.agent_name || entry.agent_id;
+    if (!entry.profiles?.length) errors.push(`${nodeName} · ${entry.engine}：${entry.error || (entry.address_required ? "暂无接入地址" : "暂无可用接入配置")}`);
+    for (const item of entry.profiles || []) {
+      const key = clientAccessRecordKey(entry, item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const label = `${nodeName} [${entry.agent_id}] · ${item.protocol || entry.engine} · ${item.tag} · ${item.port}`;
+      const exported = clientAccessExport(item, format);
+      outputs.push(...exported.outputs.map(output => ({ ...output, label: [label, output.name].filter(Boolean).join(" · ") })));
+      errors.push(...exported.errors.map(error => `${label}：${error}`));
+    }
+  }
+  // Even a single native result in a batch needs its node and scheme boundary.
+  const value = outputs.every(output => output.isURL) ? clientAccessExportText(outputs)
+    : outputs.map(output => `===== ${output.label} · ${output.format} =====\n${output.value}`).join("\n\n");
+  return { value, outputs, errors };
 }
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
   const agentIDs = new Set((agents || []).map((agent) => agent.id));
@@ -112,14 +172,4 @@ export function clientAccessAddressChoices(entry) {
     { value: "ipv4", label: `IPv4 · ${byFamily.get("ipv4").address}` },
     { value: "ipv6", label: `IPv6 · ${byFamily.get("ipv6").address}` },
   ];
-}
-
-export function clientAccessEntryForAddress(entry, mode = "auto") {
-  const options = entry?.address_options || [];
-  const selected = mode === "auto"
-    ? options[0]
-    : options.find((option) => option.family === mode) || options[0];
-  return selected
-    ? { ...entry, address: selected.address, source: selected.source, profiles: selected.profiles }
-    : entry;
 }

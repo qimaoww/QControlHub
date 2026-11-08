@@ -12,6 +12,12 @@ func prepareClientAccessFormats(entries []clientAccessEntry) {
 	prepare := func(profiles []clientAccessProfile) {
 		for index := range profiles {
 			item := &profiles[index]
+			for variant := range item.Profile.Variants {
+				value := &item.Profile.Variants[variant]
+				if value.Profile.MihomoError == "" {
+					value.MihomoYAML = value.Profile.Mihomo
+				}
+			}
 			item.MihomoYAML = ""
 			item.MihomoError = item.Profile.MihomoError
 			if item.MihomoError != "" {
