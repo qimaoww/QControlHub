@@ -19,7 +19,7 @@ export async function siteBrandingSettings(ctx, setDirty) {
   const preview = node("div", { className: "a-field" }, node("span", { className: "a-field-label" }, "预览"), actions(mark, "QControlHub", reset));
   const form = ctx.form([node("div", { className: "a-form-grid" }, upload, preview), status, feedback], "保存全站 Logo", async () => {
     const submitted = draft;
-    phase = "saving"; sync();
+    phase = "saving"; feedback.textContent = ""; sync();
     try {
       const result = await ctx.api("/settings/branding", { method: "PUT", body: { logo: submitted, revision: saved.revision } });
       if (!ctx.current()) return;
