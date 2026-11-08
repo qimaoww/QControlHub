@@ -10,6 +10,10 @@ const format = '{{.ImportPath}}|{{.Dir}}|{{join .Imports ","}}|{{join .TestImpor
 const metadata = execFileSync("go", ["list", "-f", format, "./..."], { encoding: "utf8" });
 const metadataSeconds = (performance.now() - started) / 1000;
 const count = Number(process.argv[2]);
+const databaseCount = Number(process.argv[4] || 1);
+if (!Number.isInteger(count) || !Number.isInteger(databaseCount) || databaseCount < 1 || databaseCount > count) {
+  throw new Error("database cluster count must fit within the test shards");
+}
 const exclude = process.argv[3] ? new RegExp(process.argv[3]) : null;
 const history = JSON.parse(readFileSync(new URL("../ci-package-times.json", import.meta.url), "utf8"));
 const platform = process.env.QCH_CI_PLATFORM || "debian";
@@ -37,10 +41,17 @@ const selected = packages.filter(pkg => !exclude?.test(pkg.name));
 if (!selected.length) throw new Error("no Go packages selected for the test shards");
 const shards = Array.from({ length: count }, () => ({ seconds: 0, packages: [] }));
 function assign(shard, pkg) { shard.seconds += pkg.seconds; shard.packages.push(pkg.name); }
-for (const pkg of selected.filter(pkg => database.has(pkg.name))) assign(shards[0], pkg);
+// A database shard owns a separate PostgreSQL cluster, not just a database.
+// Keep packages sequential within it so migration locks and xmin cannot affect
+// another package's HOT/VACUUM measurements. One cluster remains the default.
+const lightest = candidates => candidates.reduce((best, shard) => shard.seconds < best.seconds ? shard : best);
+const databaseShards = shards.slice(0, databaseCount);
+const databasePackages = selected.filter(pkg => database.has(pkg.name));
+if (databaseCount > 1) databasePackages.sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
+for (const pkg of databasePackages) assign(lightest(databaseShards), pkg);
 for (const pkg of selected.filter(pkg => !database.has(pkg.name))
   .sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name))) {
-  assign(shards.reduce((best, shard) => shard.seconds < best.seconds ? shard : best), pkg);
+  assign(lightest(shards), pkg);
 }
 const assigned = shards.flatMap(shard => shard.packages).sort();
 if (new Set(assigned).size !== assigned.length || JSON.stringify(assigned) !== JSON.stringify(selected.map(pkg => pkg.name).sort())) {
@@ -52,7 +63,8 @@ if (process.env.QCH_CI_REPORT_DIR) {
   mkdirSync(process.env.QCH_CI_REPORT_DIR, { recursive: true });
   writeFileSync(join(process.env.QCH_CI_REPORT_DIR, "shard-plan.json"), JSON.stringify({
     metadataSeconds, plannerSeconds, packageCount: packages.length,
-    selectedCount: selected.length, excluded: packages.filter(pkg => !selected.includes(pkg)).map(pkg => pkg.name), shards,
+    selectedCount: selected.length, databaseClusterCount: databaseCount,
+    excluded: packages.filter(pkg => !selected.includes(pkg)).map(pkg => pkg.name), shards,
   }, null, 2) + "\n");
 }
 for (const shard of shards) process.stdout.write(`${shard.seconds.toFixed(2)}\t${shard.packages.join(" ")}\n`);
