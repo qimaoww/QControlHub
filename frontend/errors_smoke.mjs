@@ -107,8 +107,8 @@ for (const name of ["TypeError", "TimeoutError"]) {
   cause.name = name;
   await assert.rejects(send(null, { fetchImpl: async () => { throw cause; } }), (error) => {
     assert.equal(error.cause, cause);
-    assert.match(error.message, name === "TimeoutError" ? /请求超时/ : /无法连接服务器/);
-    assert.match(error.message, /避免重复提交/);
+    assert.match(error.message, name === "TimeoutError" ? /读取超时/ : /无法读取数据/);
+    assert.doesNotMatch(error.message, /确认操作结果|重复提交/);
     return true;
   });
 }
@@ -116,7 +116,24 @@ const abort = new DOMException("The operation was aborted", "AbortError");
 const timeout = new DOMException("The operation timed out", "TimeoutError");
 await assert.rejects(requestJSON("/test", { signal: AbortSignal.abort(timeout) }, {
   fetchImpl: async () => { throw timeout; },
-}), /请求超时/);
+}), /读取超时/);
+for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {
+  const readOnly = ["GET", "HEAD"].includes(method);
+  for (const failure of ["gateway", "network", "timeout", "body"]) {
+    await assert.rejects(requestJSON("/api/v1/core-logs?limit=1000", { method }, {
+      fetchImpl: async () => {
+        if (failure === "gateway") return new Response("<html>Gateway Timeout</html>", { status: 504, headers: { "X-Request-ID": "read-timeout-1" } });
+        if (failure === "network") throw new TypeError("Failed to fetch");
+        if (failure === "timeout") throw timeout;
+        return new Response("broken JSON");
+      },
+    }), error => {
+      assert.equal(/确认操作结果|避免重复提交/.test(error.message), !readOnly, `${method} ${failure}: ${error.message}`);
+      if (failure === "gateway") { assert.equal(error.status, 504); assert.equal(error.requestID, "read-timeout-1"); }
+      return true;
+    });
+  }
+}
 await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error === abort);
 await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error === abort);
 await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error === abort);

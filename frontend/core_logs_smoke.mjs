@@ -131,4 +131,28 @@ assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below 
   assert.equal(partial, 200, "a failed full read still permits a successful preview before reporting incompleteness");
 }
 
+// Revocation in either racing request must finish immediately and cancel the
+// other read, including when the full failure preceded a denied preview.
+for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "full", "preview-after-full-failure"]) {
+  const preview = deferred(), full = deferred(), signals = [];
+  const failure = Object.assign(new Error("access revoked"), { status });
+  let shown = 0;
+  const read = readCoreLogWindow((path, { signal }) => {
+    signals.push(signal);
+    return path.endsWith("limit=200") ? preview.promise : full.promise;
+  }, new URLSearchParams("limit=1000"), {
+    signal: new AbortController().signal, preview: true, engines: ["xray"], onPreview: () => shown++,
+  });
+  const rejected = assert.rejects(read, error => error === failure);
+  if (deniedStage === "full") full.reject(failure);
+  else {
+    if (deniedStage === "preview-after-full-failure") { full.reject(Object.assign(new Error("gateway timeout"), { status: 504 })); await flush(); }
+    preview.reject(failure);
+  }
+  await rejected;
+  assert.ok(signals.every(signal => signal.aborted));
+  assert.equal(shown, 0, "denial cannot publish an older authorized preview");
+  preview.resolve([]); full.resolve([]);
+}
+
 console.log("Core log staged loading/cache smoke passed");

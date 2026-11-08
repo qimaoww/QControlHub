@@ -7,7 +7,8 @@ export async function testLogReadOwnership() {
   const nativeFetch = globalThis.fetch;
   let session = { role: 'admin', user_id: 'native-log-ownership', username: 'log-owner' };
   const source = agent => ({ agent_id: agent, name: agent.toUpperCase(), engine: 'xray', instance_id: 'main', owner_id: session.user_id, username: session.username, status: 'active', grant_revision: '1' });
-  let sources = ['alpha', 'beta', 'gamma'].map(source), directory = deferred(), windows = new Map(), denied = false;
+  let sources = ['alpha', 'beta', 'gamma'].map(source), directory = deferred(), order = deferred(), windows = new Map(), denied = false;
+  let sourceFailure = 0, orderFailure = 0, windowFailure = 503;
   const calls = [], failedWindows = new Set();
   const entries = (agent, count) => Array.from({ length: count }, (_, index) => ({ id: index + 1, agent_id: agent, engine: 'xray', instance_id: 'main', level: 'info', message: `${agent} authorized log ${index}`, logged_at: '2026-09-07T00:00:00Z' }));
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -15,30 +16,30 @@ export async function testLogReadOwnership() {
     const url = new URL(input instanceof Request ? input.url : input, location.href), path = url.pathname;
     if (path === '/api/v1/auth/session') return reply(session);
     if (path === '/api/v1/settings') return reply({});
-    if (path === '/api/v1/preferences/node-order') return reply({ ids: ['gamma', 'beta', 'alpha'], revision: 1 });
+    if (path === '/api/v1/preferences/node-order') { if (order) await order.promise; return reply({ ids: ['gamma', 'beta', 'alpha'], revision: 1 }, orderFailure || 200); }
     if (path === '/api/v1/core-log-sources') {
       const item = { kind: 'directory', signal: options.signal }; calls.push(item);
       const snapshot = structuredClone(sources), gate = directory;
       if (gate) await gate.promise;
       // Deliberately ignore abort to prove view ownership rejects late results.
-      return denied ? reply({ error: '日志权限已撤销' }, 403) : reply(snapshot);
+      return denied ? reply({ error: '日志权限已撤销' }, 403) : sourceFailure ? reply({}, sourceFailure) : reply(snapshot);
     }
     if (path === '/api/v1/core-logs') {
       const agent = url.searchParams.get('agent_id') || sources[0]?.agent_id || '', limit = Number(url.searchParams.get('limit'));
       calls.push({ kind: 'window', agent, instance: url.searchParams.get('instance_id'), engine: url.searchParams.get('engine'), limit, signal: options.signal });
       const gate = windows.get(`${agent}:${limit}`);
       const result = gate ? await gate.promise : agent ? entries(agent, limit).map(record => ({ ...record, instance_id: url.searchParams.get('instance_id') || 'main' })) : [];
-      return failedWindows.has(`${agent}:${limit}`) ? reply({ error: '所选日志窗口读取失败' }, 503) : reply(result);
+      return failedWindows.has(`${agent}:${limit}`) ? reply({}, windowFailure) : reply(result);
     }
     return nativeFetch(input, options);
   };
   const main = () => document.querySelector('.a-main');
   const rows = () => document.querySelectorAll('[data-log-entry]');
   const ready = () => !main()?.querySelector('[aria-busy=true]') && !document.querySelector('[data-log-refresh-label][aria-busy=true]');
-  const boot = (hash = '#core-logs') => {
+  const boot = (hash = '#core-logs', preferences = {}) => {
     window.dispatchEvent(new Event('pagehide'));
     setStorageAccount(session);
-    accountStorage.setItem('qcontrolhub:core-log-preferences', JSON.stringify({ agent_id: 'alpha', limit: 2000, auto_refresh: false }));
+    accountStorage.setItem('qcontrolhub:core-log-preferences', JSON.stringify({ agent_id: 'alpha', limit: 2000, auto_refresh: false, ...preferences }));
     document.body.replaceChildren(Object.assign(document.createElement('div'), { id: 'native-log-read-test' }));
     history.replaceState(null, '', hash);
     startAnalytics({ app: document.querySelector('#native-log-read-test'), session });
@@ -55,7 +56,8 @@ export async function testLogReadOwnership() {
     assert.equal(calls.filter(call => call.kind === 'window').length, 0, 'logs were requested before authorization');
     directory.resolve(); directory = null;
     await waitFor(() => calls.filter(call => call.kind === 'window').length === 2, 'preview and full windows did not start concurrently');
-    assert.equal(document.querySelector('[name=agent_id]').options[1].value, 'gamma', 'log node choices ignored the server order');
+    order.resolve(); order = null;
+    await waitFor(() => document.querySelector('[name=agent_id]').options[1]?.value === 'gamma', 'log node choices ignored the delayed server order');
     windows.get('alpha:200').resolve(entries('alpha', 200));
     await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'preview did not display before the complete window');
     windows.get('alpha:2000').resolve(entries('alpha', 2000));
@@ -144,6 +146,41 @@ export async function testLogReadOwnership() {
     denied = true; boot();
     await waitFor(() => ready() && main().textContent.includes('日志权限已撤销'), 'initial source denial did not show a distinct failure');
     assert.equal(rows().length, 0, 'initial permission denial retained history');
+
+    // Reproduce entry -> 504 -> retry -> preview -> full recovery. Retries
+    // must keep the 200/engine first paint even after scope was initialized.
+    denied = false; windowFailure = 504; orderFailure = 504;
+    session = { ...session, user_id: 'timeout-recovery' }; sources = [source('alpha')];
+    failedWindows.add('alpha:200'); failedWindows.add('alpha:1000');
+    boot('#core-logs', { agent_id: '', limit: 1000 });
+    await waitFor(() => ready() && main().textContent.includes('读取超时，请重试。'), 'initial window timeout did not finish');
+    assert.equal(rows().length, 0);
+    assert.equal(document.querySelector('[aria-label=内核日志]').nextElementSibling.textContent, '日志读取失败', 'healthy collection masked the query failure');
+    assert.ok(!main().textContent.includes('避免重复提交'), 'GET timeout used mutation advice');
+    failedWindows.clear(); windows.set('alpha:1000', deferred());
+    const beforeRetry = calls.length; refresh(); refresh(); refresh();
+    await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'retry lost the fast preview after an initial timeout');
+    const retry = calls.slice(beforeRetry);
+    assert.equal(retry.filter(call => call.kind === 'directory').length, 1, 'consecutive refreshes restarted authorization');
+    assert.equal(retry.filter(call => call.kind === 'window').length, 2, 'consecutive refreshes stacked log reads');
+    assert.ok(retry.every(call => !call.signal.aborted), 'consecutive refreshes canceled useful pending reads');
+    assert.ok(!main().textContent.includes('读取超时'), 'successful preview retained an obsolete read error');
+    windows.get('alpha:1000').resolve(entries('alpha', 1000));
+    await waitFor(() => ready() && main().textContent.includes('1000 条日志'), 'timeout retry did not finish the selected window');
+    assert.equal(document.querySelector('[data-log-refresh-label]').textContent, '自动更新已暂停');
+    windows.clear(); sourceFailure = 504; refresh();
+    await waitFor(() => ready() && main().textContent.includes('刷新失败，保留上次数据'), 'source failure discarded readable history');
+    assert.equal(rows().length, 200);
+    sourceFailure = 0; refresh();
+    await waitFor(() => ready() && !main().textContent.includes('读取超时'), 'source retry failed to clear its old error');
+    session = { ...session, user_id: 'source-timeout' }; sourceFailure = 504;
+    boot('#core-logs', { agent_id: '', limit: 1000 });
+    await waitFor(() => ready() && main().textContent.includes('读取超时'), 'initial source timeout did not settle');
+    assert.equal(document.querySelector('[aria-label=内核日志]').nextElementSibling.textContent, '日志读取失败');
+    sourceFailure = 0; refresh();
+    await waitFor(() => ready() && rows().length === 200, 'initial source failure did not recover');
+    location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'timeout route departure failed');
+    location.hash = '#core-logs'; await waitFor(() => ready() && rows().length === 200, 'timeout recovery did not survive page reentry');
   } finally { window.dispatchEvent(new Event('pagehide')); globalThis.fetch = nativeFetch; }
 }
 function deferred() { let resolve; const promise = new Promise(accept => { resolve = accept; }); return { promise, resolve }; }

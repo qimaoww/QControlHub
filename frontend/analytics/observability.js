@@ -28,7 +28,7 @@ export async function logsPage(ctx) {
       engine: engines.includes(target.get('engine')) ? target.get('engine') : '' };
   }
   let filters = { limit: 1000, ...data.coreLogFilters }, automatic = data.coreLogAutoRefresh !== false;
-  let entries = [], sources = [], page = 0, anchor = null, serial = 0, controller, failures = 0, incomplete = false;
+  let entries = [], sources = [], page = 0, anchor = null, serial = 0, controller, pendingRead, failures = 0, incomplete = false, readState = "loading";
   let signature = data.analyticsLogAccessSignature || "", scope = "", queryFrame, cache = data.analyticsLogCache ||= createCoreLogCache();
   let nodeOrder = savedNodeOrder();
   const status = muted("正在读取日志…"); status.setAttribute("data-log-refresh-label", "");
@@ -44,7 +44,7 @@ export async function logsPage(ctx) {
   const toggle = button(automatic ? "暂停更新" : "自动更新", () => {
     automatic = !automatic; remember(); toggle.textContent = automatic ? "暂停更新" : "自动更新";
     if (automatic) void poller.trigger(); else poller.stop();
-    status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
+    if (!status.hasAttribute("aria-busy") && !failures) status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
   });
   const controls = node("form", { className: "a-stack a-filter-form a-auto-filter", "data-log-filters": "" }, node("div", { className: "a-form-grid" },
     field("节点", "agent_id", filters.agent_id, { options: [["", "全部获授权节点"]] }),
@@ -117,23 +117,35 @@ export async function logsPage(ctx) {
         node("time", { className: "a-muted", datetime: record.logged_at }, date(record.logged_at)));
       return [heading,
         node("pre", { className: "a-code a-log-message", tabindex: "0", "aria-label": `${source?.name || record.agent_id} · ${engine} · 日志正文` }, redactDiagnostic(record.message))];
-    }, !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
+    }, !entries.length && readState === "loading" ? "正在读取日志…" : !entries.length && readState === "failed" ? "日志读取失败" :
+      !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
     count.textContent = `${visible.length} 条日志${visible.length !== entries.length ? ` · 已加载 ${entries.length} 条` : ""}${visible.length > 200 ? ` · 第 ${page + 1} / ${Math.ceil(visible.length / 200)} 页` : ""} · 信息 ${counts.level.info} · 警告 ${counts.level.warning} · 错误 ${counts.level.error}`;
     previous.disabled = page === 0; next.disabled = start + 200 >= visible.length; pageTools.hidden = visible.length <= 200;
   }
-  async function load() {
+  function load() {
+    // Initial, manual and scheduled refreshes share the current read. A target
+    // change explicitly releases it below before starting the replacement.
+    if (pendingRead) return pendingRead;
+    const read = readLogs().finally(() => { if (pendingRead === read) pendingRead = null; });
+    pendingRead = read;
+    return read;
+  }
+  async function readLogs() {
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, revision = ++serial;
     const current = () => ctx.current() && !signal.aborted && serial === revision;
     status.setAttribute("aria-busy", "true");
-    if (!entries.length) status.textContent = "正在读取日志…";
+    readState = "loading";
+    status.textContent = entries.length ? incomplete ? "已显示部分日志，正在补齐…" : "正在刷新日志…" : "正在读取日志…";
+    draw();
     try {
-      const [receivedSources, order] = await Promise.all([
-        ctx.api("/core-log-sources", { signal }),
-        ctx.api('/preferences/node-order', { signal }).catch(failure => { if (failure.name === 'AbortError') throw failure; return null; }),
-      ]);
+      // Ordering is presentation metadata. Its latency or failure must never
+      // gate an authorized log read, including on first entry and retry.
+      void ctx.api('/preferences/node-order', { signal }).then(order => {
+        if (current() && Array.isArray(order?.ids)) { nodeOrder = order.ids; sourceOptions(); }
+      }).catch(() => {});
+      const receivedSources = await ctx.api("/core-log-sources", { signal });
       if (!current()) return;
-      if (Array.isArray(order?.ids)) nodeOrder = order.ids;
       const access = JSON.stringify(receivedSources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
       if (access !== signature) { cache = data.analyticsLogCache = createCoreLogCache(); entries = []; incomplete = false; draw(); }
       data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
@@ -145,17 +157,18 @@ export async function logsPage(ctx) {
       }
       const params = new URLSearchParams({ limit: String(filters.limit) });
       for (const name of ["agent_id", "instance_id", "user_id"]) if (filters[name]) params.set(name, filters[name]);
-      const result = await readCoreLogWindow(ctx.api, params, { signal, previous: entries, preview: changedScope && !entries.length && filters.limit > 200, engines,
-        onPreview(value) { if (current()) { entries = value; incomplete = true; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
+      const result = await readCoreLogWindow(ctx.api, params, { signal, previous: entries, preview: (!entries.length || incomplete) && filters.limit > 200, engines,
+        onPreview(value) { if (current()) { entries = value; incomplete = true; error.textContent = ""; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
       if (!current()) return;
-      entries = result; incomplete = false; cache.set(key, result); failures = 0; error.textContent = ""; draw();
+      entries = result; incomplete = false; readState = "ready"; cache.set(key, result); failures = 0; error.textContent = ""; draw();
       status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;
-      failures++;
+      failures++; readState = "failed";
       if ([401, 403, 404].includes(failure.status)) { entries = []; sources = []; incomplete = false; data.analyticsLogAccessSignature = signature = ""; data.analyticsLogCache = cache = createCoreLogCache(); draw(); sourceOptions(); }
       error.textContent = redactDiagnostic(failure.message);
       status.textContent = entries.length ? incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据" : "读取失败，请重试";
+      draw();
     } finally { if (current()) status.removeAttribute("aria-busy"); }
   }
   const poller = createPoller({ run: load, isActive: () => ctx.current() && automatic && !document.hidden, delay: () => Math.min(60000, 10000 * 2 ** failures) });
@@ -164,7 +177,7 @@ export async function logsPage(ctx) {
     const before = coreLogScopeKey(filters);
     filters = { ...formData(controls), limit: Number(controls.elements.limit.value) };
     page = 0; anchor = null; remember();
-    if (before !== coreLogScopeKey(filters)) { controller?.abort(); serial++; scope = ""; entries = []; incomplete = false; draw(); void load(); }
+    if (before !== coreLogScopeKey(filters)) { controller?.abort(); serial++; pendingRead = null; scope = ""; entries = []; incomplete = false; readState = "loading"; draw(); void load(); }
     else { sourceOptions(); draw(); }
   }
   controls.addEventListener("submit", event => { event.preventDefault(); changed(); });
