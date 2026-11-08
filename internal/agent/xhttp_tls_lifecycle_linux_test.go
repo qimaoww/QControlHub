@@ -92,7 +92,11 @@ func TestXHTTPTLSManagedLifecycleSandbox(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err = os.WriteFile(filepath.Join(storage, "tls.example.test.json"), []byte(`{"sans":["tls.example.test"],"issuer_data":{"ca":"https://acme-v02.api.letsencrypt.org/directory"}}`), 0644); err != nil {
+	issuerPath := filepath.Join(storage, "tls.example.test.json")
+	if err = os.WriteFile(issuerPath, []byte(`{"sans":["tls.example.test"],"issuer_data":{"ca":"https://acme-v02.api.letsencrypt.org/directory"}}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chown(issuerPath, int(identity.uid), int(identity.gid)); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
