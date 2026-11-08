@@ -24,7 +24,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	outbounds, _ := root["outbounds"].([]any)
 	if len(outbounds) == 0 {
-		return fmt.Errorf("no explicit default outbound")
+		return fmt.Errorf("no configured outbounds")
 	}
 	xray := engine == core.EngineXray
 	if xray {
@@ -139,8 +139,11 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		byTag[tag] = out
 		originals = append(originals, raw)
 	}
-	if len(originals) == 0 || len(originals) > 64 {
-		return fmt.Errorf("no explicit default outbound")
+	if len(originals) == 0 {
+		return fmt.Errorf("no original outbounds; only generated accounting copies remain")
+	}
+	if len(originals) > 64 {
+		return fmt.Errorf("original outbound count exceeds 64")
 	}
 	if xray && (!tagPattern.MatchString(apiTag) || byTag[apiTag] != nil || strings.HasPrefix(apiTag, accountingPrefix)) {
 		return fmt.Errorf("Xray API tag conflicts with proxy outbound tags")

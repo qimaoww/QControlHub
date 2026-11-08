@@ -17,6 +17,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     return;
   }
   await testCopyInboundConnections();
+  await testSourceCorrection();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
   await testInboundProtocolChanges();
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {
@@ -127,6 +128,27 @@ export async function testConfigInboundsRuntime(preview = false) {
   selector.value=original;selector.dispatchEvent(new Event('change',{bubbles:true}));await waitFor(()=>editor().elements.tag.value==='protocol-specific-draft','protocol draft was not restored');drafts.dispose();
   const refresh=await fixture('xray');refresh.click('add');await ready();refresh.failRefresh=true;refresh.confirm=true;refresh.submit('deploy');await refresh.settle(1);assert(document.querySelector('.a-main').textContent.includes('配置已保存且任务已提交，状态读取失败'),'durable mutation was reported failed after readback error');refresh.failRefresh=false;refresh.clickButton('重新读取状态');await waitFor(()=>![...document.querySelectorAll('.a-main .a-notice')].some(message=>message.checkVisibility()&&message.textContent.includes('配置已保存且任务已提交，状态读取失败')),'readback recovery missing');assert(refresh.writes.length===1,'readback recovery repeated mutation');refresh.dispose();
   await testConfigOutboundsRuntime();await testCommonConfigRuntime();
+}
+
+async function testSourceCorrection() {
+  for (const shared of [false, true]) {
+    const test = await fixture('sing-box', {shared});
+    const form = test.root.querySelector('form:has([name=content])'), input = form.elements.content;
+    const edit = value => { input.value=value; input.dispatchEvent(new Event('input',{bubbles:true})); };
+    test.confirm=true;
+    test.sourceFailure={status:400}; edit('{}'); form.requestSubmit();
+    await waitFor(()=>form.textContent.includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'source rejection did not settle');
+    assert(input.value==='{}'&&!form.querySelector('[type=submit]').disabled&&!test.writes.length,'validation failure discarded or permanently blocked draft');
+    const valid=JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
+    test.sourceFailure=null; test.normalizedSource=JSON.stringify({...JSON.parse(valid),log:{level:'warn'}},null,2);
+    edit(valid); form.requestSubmit(); form.requestSubmit(); await test.settle(1);
+    assert(test.writes[0].content===valid&&test.writes[0].version===1,'retry submitted old source or baseline');
+    assert(input.value===test.normalizedSource&&input.defaultValue===test.normalizedSource,'saved editor does not match normalized server source');
+    assert(!form.textContent.includes('测试源码保存失败')&&form.textContent.includes('已保存'),'saved state retained old error');
+    test.clickButton('重置修改'); assert(input.value===test.normalizedSource,'reset restored stale source');
+    test.taskStatus='succeeded'; await pause();
+    test.dispose();
+  }
 }
 
 export async function testInboundProtocolChanges() {

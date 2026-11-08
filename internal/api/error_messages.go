@@ -10,7 +10,8 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
-	"invalid scope_only": "请选择有效的连接访问范围查询模式。",
+	"invalid scope_only":                                                                                      "请选择有效的连接访问范围查询模式。",
+	"target instance changed; select the node again":                                                          "目标实例已变化，请重新选择节点后提交。",
 	"task has no configuration revision; submit a new task":                                                   "旧任务缺少配置版本，无法确认重试内容，请核对配置后重新提交任务。",
 	"account authorization changed; sign in again":                                                            "账号权限或登录凭据已变更，本次操作未提交，请重新登录。",
 	"shared users may only prepare a missing stable core; version changes require the node owner":             "共享用户可安装缺少的稳定版内核；已有版本直接复用，切换版本请联系所有者。",
@@ -103,7 +104,10 @@ var errorMessages = map[string]string{
 	"global outbound mark must be reviewed before per-port accounting":                                        "配置已有全局出口标记，启用按端口统计前需要人工核对，避免统计冲突。",
 	"unsupported accounting engine":                                                                           "当前内核不支持此流量统计方式。",
 	"no attributable listeners":                                                                               "未找到可明确归属的监听端口，请检查入站配置。",
-	"no explicit default outbound":                                                                            "未配置明确的默认出口，请先设置默认出口再启用统计。",
+	"no explicit default outbound":                                                                            "未找到可用的默认出口，请检查原始出站配置。",
+	"no configured outbounds":                                                                                 "未配置出站，请添加有效的原始出站。",
+	"no original outbounds; only generated accounting copies remain":                                          "配置仅有统计生成出口，请补充原始出站。",
+	"original outbound count exceeds 64":                                                                      "原始出站超过 64 个，无法建立独立出口归属。",
 	"balancer/endpoint routing requires explicit accounting mapping":                                          "负载均衡或端点路由需要明确的流量统计归属，请先核对路由配置。",
 	"existing Xray API inbound must listen on loopback before enabling statistics":                            "启用统计前，现有 Xray API 入站必须仅监听回环地址。",
 	"reserved statistics protection outbound conflicts with custom configuration":                             "统计保护专用出口与自定义配置冲突，请检查出口标签和路由。",
@@ -361,6 +365,7 @@ func chineseErrorMessage(status int, message string) string {
 		{"无法安全更新独立出口配置：", "无法安全更新独立出口配置："},
 		{"删除入站失败：", "删除入站失败："},
 		{"cannot verify previous accounting configuration: ", "无法验证原有统计配置："},
+		{"cannot verify submitted accounting configuration: ", "无法验证提交的统计配置："},
 		{"stored revision is invalid: ", "已保存的历史版本无效："},
 		{"rendered template is invalid: ", "模板生成的配置无效："},
 	} {

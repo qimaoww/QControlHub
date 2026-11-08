@@ -12,11 +12,12 @@ import (
 var configMutationTaskID = regexp.MustCompile(`^tsk_[a-f0-9]{16}$`)
 
 type ConfigMutationOptions struct {
-	ManagementState  *serverconfig.ManagedState
-	TaskID           string
-	Action           core.Action
-	ClientMetadata   *ConfigClientMetadataMutation
-	InstallIfMissing bool
+	ManagementState    *serverconfig.ManagedState
+	TaskID             string
+	Action             core.Action
+	ClientMetadata     *ConfigClientMetadataMutation
+	InstallIfMissing   bool
+	ExpectedInstanceID *string
 	// nil preserves existing policies; a non-nil empty slice clears them.
 	MainlandPolicies []core.MainlandAccessPolicy
 }
@@ -55,7 +56,8 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 	task, err := s.createTaskTx(ctx, tx, core.TaskRequest{
 		MutationTaskID: options.TaskID, AgentID: saved.AgentID, Engine: saved.Engine, Action: options.Action,
 		ConfigID: saved.ID, ExpectedConfigVersion: saved.Version,
-		InstallIfMissing: options.InstallIfMissing,
+		InstallIfMissing:   options.InstallIfMissing,
+		ExpectedInstanceID: options.ExpectedInstanceID,
 	}, 0)
 	if err != nil {
 		return core.Config{}, core.Task{}, err

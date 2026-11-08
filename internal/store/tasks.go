@@ -38,7 +38,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks
 		WHERE `+where+fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance
+		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks WHERE id=$1`+ownerWhere, args...)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -104,7 +104,7 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.InstallIfMissing, &task.SharedInstance)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.InstallIfMissing, &task.SharedInstance, &task.SharedTrafficID)
 	}
 	if err == nil && len(tcpSettingsJSON) > 0 {
 		err = json.Unmarshal(tcpSettingsJSON, &task.TCPSettings)
