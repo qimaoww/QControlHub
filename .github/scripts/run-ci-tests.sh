@@ -3,14 +3,17 @@
 #
 # Migration and HOT-page regressions observe PostgreSQL's cluster-wide xmin
 # horizon, so packages that connect to PostgreSQL must stay sequential with
-# each other ("go test -p 1"). Those packages share one shard and one database,
-# the remaining packages run in parallel shards with databases of their own,
+# each other ("go test -p 1") within each PostgreSQL cluster. A second database
+# shard is enabled only with a verified independent cluster. The remaining
+# packages run in parallel shards with databases of their own,
 # and the non-Go checks run as separate tasks. Optional after-checks wait for
 # every parallel task before running serially, so duplicate browser suites do
 # not compete with each other or the remaining parallel work.
 #
 # Environment:
 #   QCH_TEST_DATABASE_URL  base PostgreSQL URL; shard databases add a suffix
+#   QCH_TEST_DATABASE_URL_2 optional independent PostgreSQL cluster, never a
+#                          different database/schema in the first cluster
 #   QCH_TEST_SHARDS        number of parallel Go test shards (default 4)
 #
 # Options:
@@ -40,6 +43,10 @@ usage() {
 }
 
 base_url="${QCH_TEST_DATABASE_URL:-}"
+secondary_url="${QCH_TEST_DATABASE_URL_2:-}"
+declare -a cluster_urls=("$base_url")
+if [ -n "$secondary_url" ]; then cluster_urls+=("$secondary_url"); fi
+database_shard_count="${#cluster_urls[@]}"
 shard_count="${QCH_TEST_SHARDS:-4}"
 exclude=""
 extra=""
@@ -97,6 +104,9 @@ case "$shard_count" in
     ''|*[!0-9]*) printf '%s\n' 'QCH_TEST_SHARDS must be a positive integer' >&2; exit 2 ;;
 esac
 [ "$shard_count" -ge 1 ] || { printf '%s\n' 'QCH_TEST_SHARDS must be a positive integer' >&2; exit 2; }
+[ "$shard_count" -ge "$database_shard_count" ] || {
+    printf '%s\n' 'each PostgreSQL cluster requires a test shard' >&2; exit 2;
+}
 
 if [ "$dry_run" = false ]; then
     [ -n "$base_url" ] || { printf '%s\n' 'QCH_TEST_DATABASE_URL is required' >&2; exit 2; }
@@ -106,39 +116,55 @@ if [ "$dry_run" = false ]; then
     }
 fi
 
-base_name=""
-base_prefix=""
-base_query=""
-if [ -n "$base_url" ]; then
-    base_without_query="${base_url%%\?*}"
+for cluster_url in "${cluster_urls[@]}"; do
+    [ -n "$cluster_url" ] || continue
+    base_without_query="${cluster_url%%\?*}"
     base_name="${base_without_query##*/}"
     case "$base_name" in
         ''|*[!A-Za-z0-9_]*) printf '%s\n' 'cannot derive a database name from QCH_TEST_DATABASE_URL' >&2; exit 2 ;;
     esac
-    base_prefix="${base_without_query%/*}/"
-    case "$base_url" in
-        *\?*) base_query="?${base_url#*\?}" ;;
-    esac
-fi
+done
 
 database_url() {
-    printf '%s' "${base_prefix}${base_name}_$1${base_query}"
+    local base="$1" suffix="$2" query=""
+    case "$base" in *\?*) query="?${base#*\?}" ;; esac
+    printf '%s' "${base%%\?*}_${suffix}${query}"
 }
 
-# Separate databases isolate data only. The planner puts all PostgreSQL
-# users in one sequential shard because xmin is cluster-wide.
+# Separate databases isolate data only. Distinct system identifiers prove
+# these endpoints do not share xmin, WAL, buffers or migration advisory locks.
+# Fail closed before any tests start, including for aliases of the same cluster.
+if [ "$dry_run" = false ] && [ "$database_shard_count" -gt 1 ]; then
+    declare -a cluster_ids=()
+    for cluster_url in "${cluster_urls[@]}"; do
+        cluster_id="$(psql "$cluster_url" -X -v ON_ERROR_STOP=1 -tAc 'SELECT system_identifier FROM pg_control_system()')"
+        case "$cluster_id" in
+            ''|*[!0-9]*) printf '%s\n' 'cannot verify PostgreSQL cluster identity' >&2; exit 1 ;;
+        esac
+        for previous_id in "${cluster_ids[@]}"; do
+            [ "$cluster_id" != "$previous_id" ] || {
+                printf '%s\n' 'database shards require independent PostgreSQL clusters' >&2; exit 1;
+            }
+        done
+        cluster_ids+=("$cluster_id")
+    done
+    printf 'database isolation: %s independent PostgreSQL clusters verified\n' "$database_shard_count"
+fi
+
 ensure_database() {
-    local name="$1"
-    if [ "$(psql "$base_url" -tAc "SELECT 1 FROM pg_database WHERE datname = '$name'")" = "1" ]; then
+    local base="$1" suffix="$2"
+    local name="${base%%\?*}"
+    name="${name##*/}_${suffix}"
+    if [ "$(psql "$base" -X -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = '$name'")" = "1" ]; then
         return 0
     fi
-    psql "$base_url" -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE \"$name\"" >/dev/null
+    psql "$base" -X -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE \"$name\"" >/dev/null
     printf 'created test database %s\n' "$name"
 }
 
 # Runtime weights come from real CI package timings; unknown packages use a
 # conservative test-count estimate. The planner loads all metadata once.
-assignment="$(node "$(dirname "$0")/plan-ci-tests.mjs" "$shard_count" "$exclude")"
+assignment="$(node "$(dirname "$0")/plan-ci-tests.mjs" "$shard_count" "$exclude" "$database_shard_count")"
 declare -a shard_loads=() shard_packages=()
 while IFS=$'\t' read -r weight list; do
     shard_loads+=("$weight")
@@ -158,7 +184,7 @@ if [ "$dry_run" = true ]; then
     exit 0
 fi
 
-declare -a task_pids=()
+declare -a task_pids=() database_task_pids=()
 cleanup() {
     trap - EXIT INT TERM
     for pid in "${task_pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
@@ -182,13 +208,16 @@ for ((index = 1; index <= shard_count; index++)); do
     list="${shard_packages[index - 1]}"
     [ -n "$list" ] || continue
     name="go-tests-$index-of-$shard_count"
-    ensure_database "${base_name}_shard${index}"
+    cluster_url="$base_url"
+    if [ "$index" -le "$database_shard_count" ]; then cluster_url="${cluster_urls[index - 1]}"; fi
+    ensure_database "$cluster_url" "shard${index}"
     printf '%s\n' "-> $name: $list"
     setsid bash -o pipefail -c '
         QCH_TEST_DATABASE_URL="$1" go test -json -count=1 -timeout 20m -p 1 -skip "^TestAgentBrowserRuntimeSmoke$" ${@:4} 2>&1 |
             node "$3" "$2"
-    ' _ "$(database_url "shard${index}")" "$name" "$summary_script" $list &
+    ' _ "$(database_url "$cluster_url" "shard${index}")" "$name" "$summary_script" $list &
     task_pids+=("$!")
+    if [ "$index" -le "$database_shard_count" ]; then database_task_pids+=("$!"); fi
 done
 
 
@@ -200,16 +229,18 @@ done
 
 status=0
 if [ -n "$extra" ] && [ "$extra_independent" = false ]; then
-    # A different database still shares xmin: unknown extra tasks wait for
-    # the database shard. Only explicitly database-free extras may overlap.
-    if ! wait "${task_pids[0]}"; then status=1; fi
+    # Unknown extra tasks wait for every database shard. Only explicitly
+    # database-free extras may overlap with PostgreSQL tests.
+    for pid in "${database_task_pids[@]}"; do
+        if ! wait "$pid"; then status=1; fi
+    done
 fi
 if [ -n "$extra" ]; then
-    ensure_database "${base_name}_extra"
+    ensure_database "$base_url" extra
     name="go-tests-extra"
     setsid bash -o pipefail -c '
         QCH_TEST_DATABASE_URL="$1" bash -c "$3" 2>&1 | node "$4" "$2"
-    ' _ "$(database_url extra)" "$name" "$extra" "$prefix_script" &
+    ' _ "$(database_url "$base_url" extra)" "$name" "$extra" "$prefix_script" &
     task_pids+=("$!")
 fi
 

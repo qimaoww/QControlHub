@@ -34,11 +34,25 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      # A separate cluster isolates xmin and migration locks for the second
+      # database shard; separate databases on postgres would not isolate them.
+      postgres-secondary:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qcontrolhub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       GOCACHE: ${{ github.workspace }}/.ci-cache/debian-build
       GOMODCACHE: ${{ github.workspace }}/.ci-cache/debian-mod
       QCH_CI_PLATFORM: debian
       QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qcontrolhub?sslmode=disable
+      QCH_TEST_DATABASE_URL_2: postgresql://postgres:postgres@postgres-secondary:5432/qcontrolhub?sslmode=disable
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -145,6 +159,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      postgres-secondary:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qcontrolhub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -165,6 +192,7 @@ jobs:
         run: |
           sh .github/scripts/run-ci-container.sh --rm --init --network host \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
+            -e QCH_TEST_DATABASE_URL_2=postgresql://postgres:postgres@127.0.0.1:5433/qcontrolhub?sslmode=disable \
             -e QCH_TEST_SHARDS=4 \
             -e GOFLAGS=-buildvcs=false -e QCH_CI_PLATFORM=alpine \
             -e QCH_CI_REPORT_DIR=/src/.ci-report \
