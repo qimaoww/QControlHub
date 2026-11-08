@@ -228,6 +228,11 @@ jobs:
             ${{ env.QCH_SANDBOX_GOCACHE }}
       - run: go mod download
       - run: make upgrade-sandbox-test
+      - name: Cache verified official assets
+        uses: actions/cache@v6
+        with:
+          path: .ci-cache/official-assets
+          key: official-assets-${{ runner.os }}-${{ runner.arch }}-sandbox-${{ hashFiles('deploy/tests/fetch-official-asset.sh', 'deploy/tests/ss-rust-runtime.sh') }}
       - run: make ss-rust-runtime-test
       - name: Verify IPQuality installation with actual systemd and mirror+file
         run: make ip-quality-systemd-test
@@ -246,6 +251,11 @@ jobs:
           cache-dependency-path: go.sum
       - name: Verify fixture address readiness regressions
         run: sudo unshare --net env QCH_TEST_PERMISSION_NETNS=1 python3 -B deploy/tests/core_permission_network_test.py
+      - name: Cache verified official assets
+        uses: actions/cache@v6
+        with:
+          path: .ci-cache/official-assets
+          key: official-assets-${{ runner.os }}-${{ runner.arch }}-cores-${{ hashFiles('deploy/tests/fetch-official-asset.sh', 'deploy/tests/fetch-permission-cores.sh') }}
       - name: Fetch verified official kernels
         run: sh deploy/tests/fetch-permission-cores.sh "$RUNNER_TEMP/permission-cores"
       - name: Verify all sing-box upstream presets and exported TCP/UDP clients
@@ -258,9 +268,6 @@ jobs:
           QCH_CADDY_BINARY: ${{ runner.temp }}/permission-cores/bin/caddy
           QCH_NGINX_BINARY: /usr/sbin/nginx
         run: |
-          curl --fail --location --retry 3 --max-time 120 https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_linux_amd64.tar.gz -o "$RUNNER_TEMP/caddy.tar.gz"
-          printf '%s  %s\n' 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb "$RUNNER_TEMP/caddy.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP/permission-cores/bin" caddy
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes nginx
           go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLS(ProxyLiveMatrix|IssuerFallbackLive)$'

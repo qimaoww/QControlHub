@@ -4,6 +4,7 @@ import { readCoreLogWindow } from "./modules/core-log-read.js";
 import { reuseCoreLogEntries } from "./modules/core-log-projection.js";
 import { coreLogSourceState, coreLogSourceStatus } from './modules/core-log-source-status.js';
 import { coreLogStoragePolicy } from './modules/core-log-model.js';
+import { coreLogScopeKey } from './modules/core-log-scope.js';
 
 // Actual theme rendering, preferences, authorization-gated staged reads and
 // account/target races run in browser/core-log-{source-states,read-ownership}.
@@ -86,6 +87,32 @@ for (const key of ["a", "b", "c"]) byteCache.set(key, entries(key, 1));
 assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below the scope cap");
 
 {
+  const windows = createCoreLogCache({ now: () => clock, ttl: 100 });
+  const key = (limit, instance_id = 'main', user_id = 'alice') => coreLogScopeKey({ agent_id: 'alpha', limit, instance_id, user_id });
+  const snapshot = entries('alpha', 1000);
+  windows.set(key(1000), snapshot);
+  assert.equal(windows.preview(key(1000)).entries, snapshot, 'exact cache hits preserve the validator and projection identity');
+  assert.equal(windows.preview(key(2000, 'shr_bob', 'bob')), null, 'related windows cannot cross instances or users on the same node');
+  assert.equal(windows.preview(key(2000, 'main', 'bob')), null, 'owner filters are part of the cache scope');
+  assert.equal(windows.preview(coreLogScopeKey({ agent_id: 'alpha', limit: 2000 })), null, 'an instance window cannot become an all-instance window');
+  const smaller = windows.preview(key(100));
+  assert.equal(smaller.entries.length, 100);
+  assert.equal(smaller.complete, true);
+  const mixed = [...entries('alpha', 1000), ...entries('alpha', 400).map(row => ({ ...row, engine: 'sing-box' }))];
+  const perEngine = createCoreLogCache();
+  perEngine.set(key(1000), mixed);
+  const capped = perEngine.preview(key(100)).entries;
+  assert.equal(capped.filter(row => row.engine === 'xray').length, 100);
+  assert.equal(capped.filter(row => row.engine === 'sing-box').length, 100, 'related windows retain each quiet engine independently');
+  assert.equal(windows.preview(key(2000)).complete, false, 'a smaller window cannot be declared complete after expansion');
+  windows.set(key(2000), snapshot.slice(0, 200), { complete: false });
+  assert.equal(windows.preview(key(2000)).complete, false, 'retained previews keep their incomplete state');
+  assert.equal(windows.preview(key(500)).complete, false, 'a partial snapshot cannot validate a smaller complete window');
+  clock += 100;
+  assert.equal(windows.preview(key(2000)), null, 'derived cache reads cannot extend the freshness TTL');
+}
+
+{
   const preview = deferred(), full = deferred();
   const signals = [];
   let previews = 0;
@@ -129,6 +156,30 @@ assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below 
   delayedPreview.resolve(entries("alpha", 200));
   await rejected;
   assert.equal(partial, 200, "a failed full read still permits a successful preview before reporting incompleteness");
+}
+
+// Revocation in either racing request must finish immediately and cancel the
+// other read, including when the full failure preceded a denied preview.
+for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "full", "preview-after-full-failure"]) {
+  const preview = deferred(), full = deferred(), signals = [];
+  const failure = Object.assign(new Error("access revoked"), { status });
+  let shown = 0;
+  const read = readCoreLogWindow((path, { signal }) => {
+    signals.push(signal);
+    return path.endsWith("limit=200") ? preview.promise : full.promise;
+  }, new URLSearchParams("limit=1000"), {
+    signal: new AbortController().signal, preview: true, engines: ["xray"], onPreview: () => shown++,
+  });
+  const rejected = assert.rejects(read, error => error === failure);
+  if (deniedStage === "full") full.reject(failure);
+  else {
+    if (deniedStage === "preview-after-full-failure") { full.reject(Object.assign(new Error("gateway timeout"), { status: 504 })); await flush(); }
+    preview.reject(failure);
+  }
+  await rejected;
+  assert.ok(signals.every(signal => signal.aborted));
+  assert.equal(shown, 0, "denial cannot publish an older authorized preview");
+  preview.resolve([]); full.resolve([]);
 }
 
 console.log("Core log staged loading/cache smoke passed");

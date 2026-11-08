@@ -142,6 +142,7 @@ deploy-modules-check:
 	sh -n deploy/remote/install-agent.sh
 	sh -n deploy/remote/install-core-engines.sh
 	sh deploy/tests/github-download.sh
+	sh deploy/tests/fetch-official-asset-test.sh
 	sh deploy/tests/core-gzip-staging.sh
 
 installer-test:
