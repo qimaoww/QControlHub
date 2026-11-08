@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 export async function checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity }) {
+  // Multi-context checks leave older tabs behind. Keep this motion target
+  // foregrounded so Chromium delivers media-query changes and animation frames.
+  await call("Page.bringToFront", {}, page);
+  await call("Emulation.setFocusEmulationEnabled", { enabled: true }, page);
   await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }, page);
   await evaluate(page, `(() => {
     window.__analyticsMotion=[];window.__nativeAnimate=Element.prototype.animate;

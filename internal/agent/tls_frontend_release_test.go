@@ -107,15 +107,16 @@ func TestCaddyReleaseOfficialRecovery(t *testing.T) {
 
 func TestCaddyReleaseCancellationStopsRecovery(t *testing.T) {
 	updater := NewCoreUpdater()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	calls := 0
 	updater.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
+		cancel()
 		return &http.Response{StatusCode: 503, Header: make(http.Header), Body: http.NoBody, Request: r}, nil
 	})
 	_, err := updater.caddyRelease(ctx)
-	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
+	if !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("calls=%d error=%v", calls, err)
 	}
 }
