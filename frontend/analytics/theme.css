@@ -562,7 +562,7 @@ strong, b { font-weight: 600; }
   .a-traffic-list thead { display: none; }
   .a-traffic-list tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px; border-bottom: 1px solid var(--border); }
   .a-traffic-list tbody tr:last-child { border-bottom: 0; }
-  .a-traffic-list tbody td, .a-traffic-list tbody tr:last-child td { display: grid; align-content: start; gap: 4px; min-width: 0; max-width: none; padding: 0; border: 0; }
+  .a-traffic-list.a-table-scroll tbody td, .a-traffic-list tbody tr:last-child td { display: grid; align-content: start; gap: 4px; min-width: 0; max-width: none; padding: 0; border: 0; }
   .a-traffic-list tbody td:last-child { grid-column: 1 / -1; width: auto; }
   .a-traffic-list tbody td::before { content: attr(data-column); color: var(--soft-ink); font-size: var(--text-caption); }
   .a-traffic-list tbody td:last-child::before { content: none; }

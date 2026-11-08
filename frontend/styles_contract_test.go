@@ -54,9 +54,9 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 
 func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	styles := mustReadFrontendFile(t, "analytics/theme.css")
-	// Preserve the reviewed native surface, including responsive batch cells,
-	// the node network column and settings section selection.
-	const expected = "d7ae86a5d5b7335538fbbf10fa1a7f920ca56715da59c4cb98275b95994d8e4e"
+	// Preserve the reviewed native surface, including the requested compact
+	// card-selection header, node network column and settings section selection.
+	const expected = "57e5673c07947a43e35c09d651ad217f7c8c962be567237c6d18a376169c33e4"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

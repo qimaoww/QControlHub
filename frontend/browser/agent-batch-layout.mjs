@@ -11,6 +11,8 @@ export async function testAgentBatchLayout(fixture) {
     assert.ok(bounds.left >= 0 && bounds.right <= innerWidth + 1 && bounds.top >= 0 && bounds.bottom <= innerHeight + 1, '批量弹窗超出屏幕');
     assert.ok(dialog.scrollWidth <= dialog.clientWidth + 1, '批量弹窗横向溢出');
     assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, '页面横向溢出');
+    const head = dialog.querySelector('thead');
+    if (head && innerWidth > 768) assert.notEqual(getComputedStyle(head).display, 'none', '桌面批量列表过早转为卡片');
   };
   const change = (name, value) => { form.elements[name].value = value; form.elements[name].dispatchEvent(new Event('change', { bubbles: true })); };
   const idle = () => waitFor(() => !document.querySelector('#app[aria-busy=true]'), '取消确认没有解锁');

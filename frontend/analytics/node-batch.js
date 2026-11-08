@@ -144,7 +144,7 @@ export function openNodeBatch(ctx, getAgents) {
   }
   const form = ctx.form([
     operationFields, stale,
-    muted('全部授权节点；全选覆盖所有分页中符合当前操作的节点。'), actions(all, selection),
+    actions(all, selection, muted('全选覆盖全部授权节点中的可执行项，包含其他分页。')),
   ], '执行批量操作', async values => {
     if (busy) return;
     const options = readOptions(values);
@@ -169,8 +169,8 @@ export function openNodeBatch(ctx, getAgents) {
     return Object.assign(() => {
       const result = row.result;
       const text = result?.task ? ({pending:'等待执行',running:'执行中',succeeded:'执行成功',failed:'执行失败',canceled:'已取消'}[result.task.status] || '已提交') : result?.error || (result ? '正在提交' : '');
-      return [field('选择', `batch:${row.id}`, row.selected, { type: 'checkbox', disabled: busy || Boolean(row.reason), 'aria-label': `批量操作：${row.name}`,
-        onchange(event) { row.selected = event.target.checked; controls(); } }), row.name, muted(row.reason || '可执行'), stack(node('span', {}, text), notice(result?.task?.error || ''), actions(
+      return [field(row.name, `batch:${row.id}`, row.selected, { type: 'checkbox', disabled: busy || Boolean(row.reason), 'aria-label': `批量操作：${row.name}`,
+        onchange(event) { row.selected = event.target.checked; controls(); } }), muted(row.reason || '可执行'), stack(result?.error ? notice(text, 'error') : node('span', {}, text), notice(result?.task?.error || '', 'error'), actions(
         button('重试提交', () => void ctx.mutate(null, async () => {
           if (busy || !row.result?.error) return;
           const options = { ...row.result.options };
@@ -182,10 +182,10 @@ export function openNodeBatch(ctx, getAgents) {
       ))];
     }, { id: row.id });
   }
-  targetTable = table(['', '节点', '条件', '执行结果'], [], {
+  targetTable = table(['节点', '条件', '执行结果'], [], {
     label: '批量操作节点与结果', rowKey: row => row.id, emptyText: '暂无授权节点',
   });
-  form.querySelector('fieldset').append(node('div', { className: 'a-traffic-list' }, targetTable));
+  form.querySelector('fieldset').append(node('div', { className: 'a-port-list' }, targetTable));
   form.append(summary);
   for (const control of [engine, action, channel, source]) element(control).addEventListener('change', controls);
   form.querySelector('[type=submit]').addEventListener('mutationend', controls);
