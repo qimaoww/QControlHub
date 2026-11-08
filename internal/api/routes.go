@@ -14,6 +14,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", s.readiness)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("GET /api/v1/auth/session", s.session)
+	mux.HandleFunc("GET /api/v1/branding", s.getPublicBranding)
+	mux.Handle("GET /api/v1/settings/branding", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.siteBranding)))
+	mux.Handle("PUT /api/v1/settings/branding", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.siteBranding)))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/agent-installer", s.serveAgentInstaller)
 
@@ -82,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/management", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigManagement)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}/management", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.putConfigManagement)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/client-access", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigRead, core.PermissionClientAccessRead}, http.HandlerFunc(s.exportWorkspaceInbound)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace/snapshots/{snapshot}", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigRead, core.PermissionTasksRead}, http.HandlerFunc(s.agentConfigWorkspace)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/state", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigState)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))

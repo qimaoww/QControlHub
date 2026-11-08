@@ -59,7 +59,7 @@ strong, b { font-weight: 600; }
 }
 .a-collapsed .a-rail { display: none; }
 .a-brand { display: flex; align-items: center; gap: 10px; height: var(--header-height); padding-inline: 16px; flex: none; font-size: 1rem; font-weight: 600; text-decoration: none; letter-spacing: -.02em; border-bottom: 1px solid transparent; }
-.a-mark, .a-avatar { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--ink); color: white; }
+.a-mark, .a-avatar { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--ink); color: white; object-fit: contain; }
 .a-avatar { border-radius: 50%; background: #e4e4e7; color: var(--ink); font-size: var(--text-caption); font-weight: 500; }
 .a-user { display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 68px; margin-top: auto; border-top: 1px solid var(--border); font-size: var(--text-label); flex: none; }
 .a-user > div { flex: 1; min-width: 0; }

@@ -1,9 +1,13 @@
 import { disposeTheme } from "./modules/theme-lifecycle.js";
 import { accountRequest } from "./modules/account-request.js";
 import { effectiveTheme, loginTheme } from "./modules/theme-registry.js";
+import { bindSiteLogo, refreshSiteBranding } from "./analytics/site-brand.js";
 
 const app = document.querySelector("#app");
 const startup = app.querySelector(".qch-startup");
+const startupMark = startup?.querySelector(".qch-startup-mark");
+if (startupMark) bindSiteLogo(startupMark);
+void refreshSiteBranding();
 const startupStyle = document.querySelector("#qch-startup-style");
 const startupObserver = new MutationObserver(() => {
   if (!startup?.isConnected) finishStartup();

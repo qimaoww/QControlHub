@@ -489,6 +489,16 @@ window.fetch = async (input, options = {}) => {
     return json(mode.startsWith("client-layout")
       ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
       : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
+  if (path === "/branding") return json({logo: testAPI.branding?.logo || ""});
+  if (path === "/settings/branding") {
+    testAPI.branding ||= {logo:"",revision:1};
+    if (method === "GET") return json(testAPI.branding);
+    if (testAPI.brandingGate) await testAPI.brandingGate;
+    if (testAPI.brandingFailure) return json({error:"Logo 保存失败"},409);
+    const body=JSON.parse(options.body);
+    if (body.revision !== testAPI.branding.revision) return json({error:"Logo 已由其他会话修改"},409);
+    testAPI.branding={logo:body.logo,revision:body.revision+1}; return json(testAPI.branding);
+  }
   if (method === "GET" && path === "/settings")
     return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
   if (mode.startsWith("users-layout") && method === "GET" && path === "/agent-directory") return json(testAPI.agents);

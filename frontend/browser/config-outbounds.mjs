@@ -47,6 +47,7 @@ export async function testConfigOutboundsRuntime() {
     await openOutbound(test,'bind');outboundForm().elements.tag.value='exit-b';outboundForm().elements.tag.dispatchEvent(new Event('change',{bubbles:true}));test.submit('deploy');await test.settle(4);
     await openOutbound(test,'delete');assert(outboundInput().readOnly&&outboundInput().value.includes('exit-b')&&outboundForm().querySelector('button[type=submit]').classList.contains('danger'),'delete lacks readonly preview/danger action');
     test.confirm=false;test.submit('deploy');await pause();assert(test.writes.length===4&&outboundForm(),'canceling delete wrote data');
+    await waitFor(()=>!outboundForm().hasAttribute('aria-busy')&&!outboundForm().querySelector('[type=submit]').disabled,'canceled deletion did not release its form');
     test.confirm=true;test.submit('deploy');await test.settle(5);
     assert(!root().outbounds.some(entry=>entry.tag==='exit-b')&&!root()[routeKey].rules.length&&JSON.stringify(root()[section])===JSON.stringify(listeners),'delete left binding or modified another inbound');
     test.dispose();

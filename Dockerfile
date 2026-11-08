@@ -71,6 +71,7 @@ LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
 
 COPY frontend/index.html /usr/share/nginx/html/index.html
 COPY frontend/bootstrap.js /usr/share/nginx/html/assets/bootstrap.js
+COPY frontend/favicon.svg /usr/share/nginx/html/assets/favicon.svg
 COPY frontend/analytics /usr/share/nginx/html/assets/analytics
 # Keep the shipped shared-module graph aligned with the active theme.
 # frontend/module_policy_test.mjs verifies this list transitively.
