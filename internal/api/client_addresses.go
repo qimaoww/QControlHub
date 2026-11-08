@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/netip"
 	"sort"
 	"strings"
@@ -58,41 +59,47 @@ func managedTLSClientDomain(input serverconfig.Input) string {
 func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labels map[string]string) []clientAccessProfile {
 	profiles := make([]clientAccessProfile, 0, len(inputs))
 	for _, input := range inputs {
-		mode := core.SubStoreAddressModeAuto
-		if value, exists := labels[core.ClientProfileFamilyLabel(engine, input.Listen, input.Port)]; exists {
-			mode = normalizeClientAddressMode(value)
-		}
-		address, overridden := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]), false
-		if address != "" {
-			overridden = true
-		} else {
-			available := candidates
-			if domain := managedTLSClientDomain(input); domain != "" && strings.TrimSpace(labels["client_address"]) == "" {
-				available = append([]clientAddressCandidate{{address: domain, family: "hostname"}}, candidates...)
-			}
-			address = clientProfileAddress(available, mode).address
-		}
-		name, nameOverridden := "", false
-		if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
-			name, nameOverridden = value, true
-		}
-		profile, err := serverconfig.BuildClientProfileNamed(input, address, serverName, name)
-		protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
-		if !found {
-			protocol.Name = input.Protocol
-		}
-		failure := ""
+		profile, err := buildClientAccessProfile(engine, input, candidates, serverName, labels)
 		if err != nil {
-			failure = err.Error()
+			profile.Error = err.Error()
 		}
-		profiles = append(profiles, clientAccessProfile{
-			Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile,
-			ClientName: name, NameOverridden: nameOverridden,
-			Address: address, AddressMode: mode, AddressOverridden: overridden,
-			Error: failure,
-		})
+		profiles = append(profiles, profile)
 	}
 	return profiles
+}
+
+func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, candidates []clientAddressCandidate, serverName string, labels map[string]string) (clientAccessProfile, error) {
+	mode := core.SubStoreAddressModeAuto
+	if value, exists := labels[core.ClientProfileFamilyLabel(engine, input.Listen, input.Port)]; exists {
+		mode = normalizeClientAddressMode(value)
+	}
+	address, overridden := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]), false
+	if address != "" {
+		overridden = true
+	} else {
+		available := candidates
+		if domain := managedTLSClientDomain(input); domain != "" && strings.TrimSpace(labels["client_address"]) == "" {
+			available = append([]clientAddressCandidate{{address: domain, family: "hostname"}}, candidates...)
+		}
+		address = clientProfileAddress(available, mode).address
+	}
+	name, nameOverridden := "", false
+	if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
+		name, nameOverridden = value, true
+	}
+	profile, err := serverconfig.BuildClientProfileNamed(input, address, serverName, name)
+	protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
+	if !found {
+		protocol.Name = input.Protocol
+		if err == nil {
+			err = fmt.Errorf("不支持此入站协议")
+		}
+	}
+	return clientAccessProfile{
+		Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile,
+		ClientName: name, NameOverridden: nameOverridden,
+		Address: address, AddressMode: mode, AddressOverridden: overridden,
+	}, err
 }
 
 func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labelSets ...map[string]string) []clientAccessAddressOption {

@@ -81,8 +81,8 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 	if updater == nil {
 		updater = NewCoreUpdater()
 	}
-	var release githubRelease
-	if err := updater.getJSON(ctx, updater.apiBase+"/repos/caddyserver/caddy/releases/latest", &release); err != nil {
+	release, err := updater.caddyRelease(ctx)
+	if err != nil {
 		return fmt.Errorf("下载 Caddy 官方发布信息：%w", err)
 	}
 	if release.Draft || release.Prerelease || !strings.HasPrefix(release.TagName, "v2.") {

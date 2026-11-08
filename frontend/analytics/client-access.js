@@ -52,7 +52,7 @@ export async function clientAccessPage(ctx) {
   function copy(value, control, check, error = "") {
     return ctx.mutate(control, async () => {
       await check();
-      await copyText(String(value), { current });
+      await copyText(String(value), current);
       if (current()) ctx.announce(error ? `已复制可用方案；未输出：${error}` : '已复制', error ? 'error' : undefined);
     });
   }
@@ -63,7 +63,7 @@ export async function clientAccessPage(ctx) {
       const groups = groupClientAccessEntries(received, agents).filter(group => !agentID || group.agent_id === agentID);
       const exported = clientAccessBatchExport(groups, requestedFormat);
       if (!exported.value) throw new Error(exported.errors.join('；') || '暂无可复制的接入配置');
-      await copyText(exported.value, { current });
+      await copyText(exported.value, current);
       if (!current()) return;
       ctx.announce(exported.errors.length ? `已复制 ${exported.outputs.length} 个方案；未输出：${exported.errors.join('；')}` : `已复制 ${exported.outputs.length} 个方案`, exported.errors.length ? 'error' : undefined);
     });
