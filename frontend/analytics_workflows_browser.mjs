@@ -340,11 +340,16 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').selectionStart"),2);
   assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"));
+  await click('测试已保存模板','.a-main');
+  await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请先保存模板，再测试。')");
   await click('渲染预览','.a-main');
   await wait(page,"[...document.querySelectorAll('pre[role=status]')].some(p=>p.textContent.includes('示例节点'))");
   await click('保存模板','.a-main');
   await wait(page,"!document.querySelector('[aria-busy=true]')");
   assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');
+  assert.equal(await evaluate(page,"document.querySelector('select[name=template_test_channel]').options.length"),1,'disabled channels are not offered for template tests');
+  await click('测试已保存模板','.a-main');
+  await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请选择测试渠道。')");
   await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='未保存的并发草稿';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
   const remoteNotifications=(await api(page,identity,'GET','/settings/notifications')).configuration;
   remoteNotifications.channels.find(c=>c.id===notificationChannel.id).name=notificationName+' refreshed';

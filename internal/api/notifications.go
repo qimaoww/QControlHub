@@ -61,12 +61,13 @@ func (s *Server) testNotification(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ChannelID string `json:"channel_id"`
 		Revision  int64  `json:"revision"`
+		Event     string `json:"event"`
 	}
 	if err := decodeJSON(w, r, &in, 1024); err != nil {
 		writeError(w, 400, "测试请求无效")
 		return
 	}
-	id, err := s.store.QueueNotificationTest(r.Context(), in.ChannelID, in.Revision)
+	id, err := s.store.QueueNotificationTemplateTest(r.Context(), in.ChannelID, in.Revision, in.Event)
 	if err != nil {
 		writeStoreError(w, err)
 		return

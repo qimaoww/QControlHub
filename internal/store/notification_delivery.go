@@ -91,10 +91,10 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	if !ok {
 		template = notify.DefaultTemplate(d.Event.Type)
 	}
-	if d.Event.Test {
+	if d.Event.Test && d.Event.Type == "test" {
 		d.Event.Title = "QControlHub 测试通知"
 		d.Event.Message = "这是使用已保存渠道配置发送的测试消息。"
-	} else {
+	} else if !d.Event.Test {
 		title, body, er := notify.Render(template, d.Event, settings.PanelName)
 		if er != nil {
 			return false, er
@@ -147,6 +147,15 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	return true, err
 }
 func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision int64) (int64, error) {
+	return s.QueueNotificationTemplateTest(ctx, id, revision, "")
+}
+
+// QueueNotificationTemplateTest snapshots a saved template with synthetic data.
+// It never publishes a real event or changes a rule's detection/cooldown state.
+func (s *Store) QueueNotificationTemplateTest(ctx context.Context, id string, revision int64, event string) (int64, error) {
+	if event != "" && notify.EventNames[event] == "" {
+		return 0, ErrInvalid
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -156,6 +165,9 @@ func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision i
 		return 0, err
 	}
 	owner := notificationOwner(ctx)
+	if event != "" && !s.notificationCanEvent(ctx, tx, owner, event) {
+		return 0, ErrForbidden
+	}
 	c, err := s.notificationConfig(ctx, tx, owner, true)
 	if err != nil {
 		return 0, err
@@ -187,6 +199,24 @@ func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision i
 		return 0, fmt.Errorf("%w: 通知队列已满", ErrConflict)
 	}
 	e := notify.Event{Type: "test", Time: time.Now().UTC(), Test: true, Message: "测试通知"}
+	if event != "" {
+		e = notify.Sample(event)
+		e.Test, e.Time = true, time.Now().UTC()
+		template, ok := c.Templates[event]
+		if !ok {
+			template = notify.DefaultTemplate(event)
+		}
+		settings, er := s.panelSettingsForOwner(ctx, tx, owner)
+		if er != nil {
+			return 0, er
+		}
+		title, body, er := notify.Render(template, e, settings.PanelName)
+		if er != nil {
+			return 0, er
+		}
+		e.Title = notify.Clip("【测试】"+title, 400)
+		e.Message = "已保存模板测试（脱敏示例）\n" + body
+	}
 	b, _ := json.Marshal(e)
 	authorization, err := s.notificationAuthorization(ctx, tx, owner)
 	if err != nil {

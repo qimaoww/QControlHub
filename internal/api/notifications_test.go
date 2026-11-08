@@ -82,3 +82,50 @@ func TestNotificationAPIConfigurationOwnershipPreviewAndTests(t *testing.T) {
 		t.Fatal("other user's node event exposed")
 	}
 }
+
+func TestNotificationAPISavedTemplateTest(t *testing.T) {
+	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
+	var received notify.Event
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(204)
+	}))
+	defer endpoint.Close()
+	t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
+	var loaded struct {
+		Configuration notify.Configuration `json:"configuration"`
+	}
+	alice.call("GET", "/settings/notifications", nil, 200, &loaded)
+	c := loaded.Configuration
+	c.Channels = []notify.Channel{{ID: "hook", Name: "自己的目标", Type: "webhook", Enabled: true, Secrets: map[string]string{"url": endpoint.URL}}}
+	c.Templates[notify.TypeTaskFailed] = notify.Template{Title: "任务测试 {{agent}}", Body: "{{error}}\n中文 <>& 😀\n{{version}}"}
+	alice.call("PUT", "/settings/notifications", c, 200, &c)
+	for event := range notify.EventNames {
+		var preview map[string]string
+		alice.call("POST", "/settings/notifications/preview", map[string]any{"event": event, "template": notify.DefaultTemplate(event)}, 200, &preview)
+		if preview["title"] == "" || preview["body"] == "" || strings.Contains(preview["body"], "{{") {
+			t.Fatal("invalid preview", event, preview)
+		}
+	}
+	alice.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "hook", "revision": c.Revision, "event": "unknown"}, 400, nil)
+	alice.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "hook", "revision": c.Revision - 1, "event": notify.TypeTaskFailed}, 409, nil)
+	bob.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "hook", "revision": c.Revision, "event": notify.TypeTaskFailed}, 409, nil)
+	alice.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "hook", "revision": c.Revision, "event": notify.TypeTaskFailed}, 202, nil)
+	if ok, err := db.DeliverNotification(ctx, notify.NewSender(), ""); err != nil || !ok {
+		t.Fatalf("delivery %t %v", ok, err)
+	}
+	if !received.Test || received.Type != notify.TypeTaskFailed || !strings.Contains(received.Title, "任务测试 示例节点") || !strings.Contains(received.Message, "示例错误（已脱敏）\n中文 <>& 😀\n—") {
+		t.Fatalf("custom template was not delivered: %+v", received)
+	}
+	var records []store.NotificationDelivery
+	bob.call("GET", "/settings/notifications/deliveries", nil, 200, &records)
+	if len(records) != 0 {
+		t.Fatal("template test leaked to another account")
+	}
+	alice.call("GET", "/settings/notifications/deliveries", nil, 200, &records)
+	if len(records) != 1 || records[0].Status != "accepted" || !records[0].Event.Test || records[0].Event.Type != notify.TypeTaskFailed {
+		t.Fatal("template test record missing", records)
+	}
+}

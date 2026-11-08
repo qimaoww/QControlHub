@@ -104,13 +104,15 @@ export async function notificationsPage(ctx) {
     if (!await ctx.confirm(`删除“${ch.name}”？仅引用此渠道的规则将停用。`, "删除通知渠道") || !ctx.current()) return;
     await ctx.mutate(control, async () => { await change(c => { c.channels = c.channels.filter(v => v.id !== ch.id); c.rules = c.rules.map(r => ({ ...r, channels: r.channels.filter(id => id !== ch.id), enabled: r.enabled && r.channels.some(id => id !== ch.id) })); }); });
   }
+  async function testSaved(channelID, event) {
+    const result = await ctx.api("/settings/notifications/test", { method: "POST", body: { channel_id: channelID, revision: config.revision, ...(event ? { event } : {}) } });
+    if (!ctx.current()) return;
+    activeTestID = result.id; hasPending = true; feedback.textContent = "测试已入队，正在等待投递结果。"; await loadRecords();
+  }
   function draw() {
     channelList.replaceChildren(table(["名称", "类型", "状态", "操作"], config.channels.map(ch => [ch.name, badge(types.find(([t]) => t === ch.type)?.[1]), badge(ch.enabled ? "启用" : "停用"), writable ? actions(
       button("编辑", () => editChannel(ch)), button(ch.enabled ? "停用" : "启用", event => void ctx.mutate(event.currentTarget, () => change(c => { c.channels.find(v => v.id === ch.id).enabled = !ch.enabled; }))),
-      button("测试已保存配置", event => void ctx.mutate(event.currentTarget, async () => {
-        const result = await ctx.api("/settings/notifications/test", { method: "POST", body: { channel_id: ch.id, revision: config.revision } });
-        if (!ctx.current()) return; activeTestID = result.id; hasPending = true; feedback.textContent = "测试已入队，正在等待投递结果。"; await loadRecords();
-      }), { disabled: !ch.enabled }), button("删除", event => void removeChannel(ch, event.currentTarget), { tone: "danger" })) : null,
+      button("测试已保存配置", event => void ctx.mutate(event.currentTarget, () => testSaved(ch.id)), { disabled: !ch.enabled }), button("删除", event => void removeChannel(ch, event.currentTarget), { tone: "danger" })) : null,
     ]), { label: "通知渠道", emptyText: "尚未添加通知渠道" }));
     ruleList.replaceChildren(table(["名称", "事件 / 范围", "接收渠道", "状态", "操作"], config.rules.map(r => [r.name,
       stack(resource.events[r.event], muted(r.policy_id ? (() => { const p = policies.find(p => p.id === r.policy_id); return p ? `${agents.find(a => a.id === p.agent_id)?.name || p.agent_id} · ${p.engine} · ${p.port} · ${p.name}` : "统计对象已不可用"; })() : agents.find(a => a.id === r.agent_id)?.name || (r.agent_id ? "节点已不可用" : r.event === "panel.update" ? "面板" : "有权接收的资源"))),
@@ -118,12 +120,17 @@ export async function notificationsPage(ctx) {
         button("编辑", () => editRule(r)), button(r.enabled ? "停用" : "启用", event => void ctx.mutate(event.currentTarget, () => change(c => { c.rules.find(v => v.id === r.id).enabled = !r.enabled; }))),
         button("删除", async event => { const control = event.currentTarget; if (await ctx.confirm(`删除“${r.name}”？`, "删除通知规则") && ctx.current()) await ctx.mutate(control, () => change(c => { c.rules = c.rules.filter(v => v.id !== r.id); })); }, { tone: "danger" })) : null,
     ]), { label: "通知规则", emptyText: "尚未添加通知规则" }));
+    const selected = testChannel.value;
+    testChannel.replaceChildren(node("option", { value: "" }, "选择测试渠道"), ...config.channels.filter(ch => ch.enabled).map(ch => node("option", { value: ch.id }, ch.name)));
+    testChannel.value = config.channels.some(ch => ch.enabled && ch.id === selected) ? selected : "";
   }
   const templateEvent = field("事件", "template_event", "agent.offline", { options: Object.entries(resource.events) });
   const selection = templateEvent.querySelector("select");
   const title = field("标题", "title", "", { maxlength: 400, required: true, disabled: !writable });
   const body = field("正文", "body", "", { multiline: 8, maxlength: 12000, required: true, disabled: !writable });
   const preview = node("pre", { className: "a-code", role: "status" });
+  const testChannelField = field("测试渠道", "template_test_channel", "", { options: [["", "选择测试渠道"]] });
+  const testChannel = testChannelField.querySelector("select");
   let previewSequence = 0;
   function loadTemplate() { previewSequence++; const t = config.templates?.[selection.value] || resource.defaults[selection.value]; title.querySelector("input").value = t.title; body.querySelector("textarea").value = t.body; preview.textContent = ""; templateDirty = false; syncDirty(); }
   selection.addEventListener("change", async () => { if (templateDirty && !await ctx.confirm("放弃当前模板草稿？", "切换模板")) { selection.value = templateForm.dataset.event; return; } templateForm.dataset.event = selection.value; loadTemplate(); });
@@ -137,9 +144,14 @@ export async function notificationsPage(ctx) {
     })), writable && button("恢复默认", event => void ctx.mutate(event.currentTarget, async () => {
       if (await change(c => { delete c.templates[selection.value]; })) { loadTemplate(); ctx.announce("已恢复默认模板"); }
     }))), preview,
+    writable && stack(testChannelField, actions(button("测试已保存模板", event => void ctx.mutate(event.currentTarget, async () => {
+      if (templateDirty) throw new Error("请先保存模板，再测试。");
+      if (!testChannel.value) throw new Error("请选择测试渠道。");
+      await testSaved(testChannel.value, selection.value);
+    })))),
   ], "保存模板", async values => { if (await change(c => { c.templates ||= {}; c.templates[selection.value] = { title: values.title, body: values.body }; })) { templateDirty = false; syncDirty(); ctx.announce("模板已保存"); } });
   templateForm.dataset.event = selection.value;
-  templateForm.addEventListener("input", () => { templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
+  templateForm.addEventListener("input", event => { if (!event.target.matches('[name="title"],[name="body"]')) return; templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
   if (!writable) templateForm.querySelector('button[type="submit"]').remove();
   loadTemplate();
   async function loadRecords() {
@@ -148,7 +160,7 @@ export async function notificationsPage(ctx) {
     try {
       const result = await ctx.api("/settings/notifications/deliveries");
       if (!ctx.current() || sequence !== recordSequence) return;
-      records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? "测试" : resource.events[d.event.type] || d.event.type),
+      records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? `测试${resource.events[d.event.type] ? ` · ${resource.events[d.event.type]}` : ""}` : resource.events[d.event.type] || d.event.type),
         config.channels.find(c => c.id === d.channel_id)?.name || "已删除", stack(node("div", {}, badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn")),
           d.status === "pending" && d.attempts > 0 ? muted(`重试：${date(d.next_at)}`) : null), String(d.attempts), d.error || "—"]));
       if (recordError && !activeTestID) feedback.textContent = "";

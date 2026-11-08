@@ -68,6 +68,9 @@ func Sample(event string) Event {
 		e.Engine, e.Port = "xray", 443
 		e.UsedBytes, e.LimitBytes = 80<<30, 100<<30
 		e.Current, e.Threshold, e.Period, e.Direction = "80.00%", "80.00%", "2026-01-01 / 2026-02-01", "上传 + 下载（计费口径）"
+		if event == TypeTrafficQuota {
+			e.UsedBytes, e.Current, e.Threshold = 110<<30, "110.00%", "100.00%"
+		}
 	case "speed.high", "speed.low", "speed.recovered":
 		e.Current, e.Threshold, e.Direction = "12 MB/s", "10 MB/s", "上传（TX）"
 		if event == "speed.low" {

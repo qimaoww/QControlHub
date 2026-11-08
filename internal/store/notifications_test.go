@@ -40,6 +40,80 @@ func forceNotificationScan(t *testing.T, ctx context.Context, s *Store) {
 		t.Fatal(err)
 	}
 }
+
+func TestNotificationEveryTemplateTestUsesSavedSnapshotWithoutAlertState(t *testing.T) {
+	for event := range notify.EventNames {
+		t.Run(event, func(t *testing.T) {
+			ctx, s, _, c := notificationFixture(t)
+			var received []notify.Event
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var e notify.Event
+				if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+					t.Error(err)
+				}
+				received = append(received, e)
+				w.WriteHeader(204)
+			}))
+			defer endpoint.Close()
+			t.Setenv("QCH_NOTIFICATION_ALLOWED_CIDRS", "127.0.0.0/8")
+			c.Channels[0].Secrets["url"] = endpoint.URL
+			var err error
+			c, err = s.SaveNotificationConfiguration(ctx, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := func() string {
+				t.Helper()
+				var value string
+				if er := s.pool.QueryRow(ctx, `SELECT jsonb_build_object('states',(SELECT jsonb_agg(st ORDER BY rule_id,resource) FROM notification_rule_states st),'events',(SELECT jsonb_agg(e ORDER BY id) FROM notification_events e))::text`).Scan(&value); er != nil {
+					t.Fatal(er)
+				}
+				return value
+			}
+			before := state()
+			if _, err = s.QueueNotificationTemplateTest(ctx, "hook", c.Revision, "unknown"); !errors.Is(err, ErrInvalid) {
+				t.Fatal("unknown test event accepted", err)
+			}
+			if _, err = s.QueueNotificationTemplateTest(ctx, "hook", c.Revision, event); err != nil {
+				t.Fatal(err)
+			}
+			// Editing after enqueue must not silently change the template being tested.
+			c.Templates[event] = notify.Template{Title: "自定义😀 {{type}}", Body: "中文 <>&\n{{message}}\n{{error}}\n{{agent}} / {{port}} / {{version}}"}
+			c, err = s.SaveNotificationConfiguration(ctx, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.QueueNotificationTemplateTest(ctx, "hook", c.Revision, event); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if ok, er := s.DeliverNotification(ctx, notify.NewSender(), ""); er != nil || !ok {
+					t.Fatalf("test delivery %t %v", ok, er)
+				}
+				if _, er := s.pool.Exec(ctx, `UPDATE notification_deliveries SET updated_at=now()-interval '1 minute' WHERE status='accepted'`); er != nil {
+					t.Fatal(er)
+				}
+			}
+			if len(received) != 2 {
+				t.Fatalf("expected default and custom tests, got %d", len(received))
+			}
+			for _, e := range received {
+				if !e.Test || e.Type != event || !strings.HasPrefix(e.Title, "【测试】") || !strings.HasPrefix(e.Message, "已保存模板测试（脱敏示例）\n") || strings.Contains(e.Message, "{{") || strings.Contains(e.Message, "undefined") || strings.Contains(e.Message, "null") {
+					t.Fatalf("invalid rendered test: %+v", e)
+				}
+			}
+			if !strings.Contains(received[0].Title, notify.EventNames[event]) || !strings.Contains(received[1].Title, "自定义😀") || !strings.Contains(received[1].Message, "中文 <>&\n") {
+				t.Fatalf("saved snapshot or Unicode formatting lost: %+v", received)
+			}
+			if event == notify.TypeTrafficQuota && !strings.Contains(received[0].Message, "110.00%") {
+				t.Fatal("over-quota sample is below quota")
+			}
+			if after := state(); before != after {
+				t.Fatal("template tests modified real alert state")
+			}
+		})
+	}
+}
 func TestNotificationPresenceOutboxRetryRestartAndCancellation(t *testing.T) {
 	ctx, s, a, c := notificationFixture(t)
 	var attempts atomic.Int64
