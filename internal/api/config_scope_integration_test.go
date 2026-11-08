@@ -16,7 +16,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
-	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
 
 type configScopeAPIClient struct {
@@ -68,41 +67,33 @@ func newConfigScopeAPIFixtureWithin(t *testing.T, timeout time.Duration) (*store
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
-	schema, err := testdb.IsolatePostgres(ctx, database)
+	databaseURL, closeDatabase, fixtureUsers, err := configScopeFixtureDatabase(ctx, database)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanup, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
-		if err := schema.Close(cleanup); err != nil {
+		if err := closeDatabase(cleanup); err != nil {
 			t.Error(err)
 		}
 	})
-	db, err := store.OpenWithConfigKey(ctx, schema.URL, true, strings.Repeat("s", 32))
+	db, err := store.OpenWithConfigKey(ctx, databaseURL, true, strings.Repeat("s", 32))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	const adminToken = "config-scope-administrator-fixture"
-	handler := New(db, Config{AdminToken: adminToken, OperatorTokens: []string{"legacy-alice-fixture", "legacy-bob-fixture"}}).Handler()
-	admin := configScopeAPIClient{t: t, handler: handler, token: adminToken}
+	handler := New(db, configScopeFixtureConfig()).Handler()
+	admin := configScopeAPIClient{t: t, handler: handler, token: configScopeFixtureAdminToken}
 	login := func(name string) configScopeAPIClient {
 		t.Helper()
-		const password = "config scope password fixture"
 		var user core.User
-		admin.call("POST", "/users", core.UserRequest{Username: name, Password: password, Role: core.RoleUser,
-			Permissions: []core.Permission{
-				core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionAgentsManage,
-				core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead,
-				core.PermissionConfigsWrite, core.PermissionConfigsDelete, core.PermissionConfigsRestore,
-				core.PermissionTemplatesRead, core.PermissionTemplatesWrite, core.PermissionTemplatesDelete,
-				core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionClientAccessRead,
-				core.PermissionDeploymentsRead, core.PermissionSettingsManage,
-				core.PermissionSettingsRead, core.PermissionEnrollmentManage, core.PermissionAuditRead,
-				core.PermissionCoreLogsRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTrafficManage,
-			}}, http.StatusCreated, &user)
-		payload, _ := json.Marshal(map[string]string{"username": name, "token": password})
+		if fixtureUsers == nil {
+			admin.call("POST", "/users", configScopeFixtureUser(name), http.StatusCreated, &user)
+		} else {
+			user = fixtureUsers[name]
+		}
+		payload, _ := json.Marshal(map[string]string{"username": name, "token": configScopeFixturePassword})
 		request := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(payload))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
