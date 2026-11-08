@@ -1,4 +1,4 @@
-import { applySiteBranding, renderSiteLogo } from "../modules/site-branding.js";
+import { applySiteBranding, renderSiteLogo } from "./site-brand.js";
 import { node, icon, button, actions, section, field, muted, notice } from "./ui.js";
 
 export async function siteBrandingSettings(ctx, setDirty) {

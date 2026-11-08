@@ -1,7 +1,7 @@
 import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
-import { bindSiteLogo, refreshSiteBranding } from "../modules/site-branding.js";
+import { bindSiteLogo, refreshSiteBranding } from "./site-brand.js";
 import { setStorageAccount } from "../modules/account-storage.js";
 import { accountRequest } from "../modules/account-request.js";
 import { effectiveTheme } from "../modules/theme-registry.js";

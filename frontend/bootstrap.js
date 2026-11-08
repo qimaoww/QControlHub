@@ -1,7 +1,7 @@
 import { disposeTheme } from "./modules/theme-lifecycle.js";
 import { accountRequest } from "./modules/account-request.js";
 import { effectiveTheme, loginTheme } from "./modules/theme-registry.js";
-import { bindSiteLogo, refreshSiteBranding } from "./modules/site-branding.js";
+import { bindSiteLogo, refreshSiteBranding } from "./analytics/site-brand.js";
 
 const app = document.querySelector("#app");
 const startup = app.querySelector(".qch-startup");

@@ -123,7 +123,7 @@ async function testSiteBranding(testAPI) {
   assert.equal(browserIcon.naturalWidth,64);assert.equal(browserIcon.naturalHeight,64);
   assert.equal(iconContext.getImageData(32,0,1,1).data[3],0,'wide browser icon was stretched');
   assert.ok(iconContext.getImageData(32,32,1,1).data[3]>0,'browser icon is empty');
-  const {applySiteBranding}=await import('../modules/site-branding.js');
+  const {applySiteBranding}=await import('../analytics/site-brand.js');
   applySiteBranding({logo:'data:image/png;base64,AAAA'});
   await waitFor(()=>siteIcon().href.endsWith('/assets/favicon.svg'),'broken browser icon did not fall back');
   applySiteBranding(testAPI.branding);
