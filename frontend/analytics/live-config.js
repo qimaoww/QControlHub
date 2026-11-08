@@ -55,7 +55,7 @@ export async function liveConfigPage(ctx) {
   const engines = target.capabilities;
   const engine = engines.includes(selectedEngine) ? selectedEngine : engines.find(id => target.runtime?.[id]?.installed) || engines[0];
   const base = `/agents/${pathID(target.id)}/configs/${pathID(engine)}`;
-  if (ctx.can("tasks.read")) void mutations.recover(target.id, engine);
+  if (ctx.can("tasks.read")) void mutations.recover(target.id, engine, target.shared_allocation?.id || "");
   workspace ||= await ctx.api(`${base}/workspace`);
   const agent = workspace.agent || target;
   const runtime = agent.runtime?.[engine] || {};
@@ -143,8 +143,10 @@ export async function liveConfigPage(ctx) {
           return pendingTask;
         },
         onSavedConfig(config) {
+          if (!ctx.current()) return;
           saved = config;
           inbounds.acceptConfig(config);
+          element.elements.content.value = element.elements.content.defaultValue = config.content;
           if (readHistory) readHistory.disabled = false;
           ctx.setDirty(false);
           liveNotice.textContent = `已保存 · ${date(config.updated_at)}`;
@@ -157,6 +159,7 @@ export async function liveConfigPage(ctx) {
       error.message = diagnosticError(error.message);
       throw error;
     }
+    if (!ctx.current()) return;
     ctx.setDirty(false);
     try { await inbounds.reload(); }
     catch (error) {

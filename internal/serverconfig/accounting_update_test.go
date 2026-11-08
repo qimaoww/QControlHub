@@ -8,6 +8,39 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// A complete submitted plan must be recoverable from a broken saved source.
+func TestAccountingUpdateRepairsInvalidPreviousFromVerifiedSubmission(t *testing.T) {
+	const source = `{"inbounds":[{"type":"http","tag":"a","listen_port":21001}],"outbounds":[{"type":"direct","tag":"exit","bind_interface":"lo"}],"route":{"final":"exit","rules":[{"domain":["example.test"],"outbound":"exit"}]}}`
+	for _, marked := range []bool{false, true} {
+		prepare := func(content string) (AccountingPlan, error) { return PrepareAccounting(core.EngineSingBox, content) }
+		if marked {
+			prepare = PrepareMarkedSingBoxAccounting
+		}
+		plan, err := prepare(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, previous := range []string{`{}`, `{"inbounds":[]}`, strings.Replace(plan.Content, `"tag": "exit"`, `"tag": "missing"`, 1)} {
+			updated, err := AccountingUpdateSource(core.EngineSingBox, plan.Content, previous)
+			if err != nil {
+				t.Fatalf("valid current plan blocked by invalid previous: %v", err)
+			}
+			if strings.Contains(updated, accountingPrefix) {
+				t.Fatal("generated copies retained in editable source")
+			}
+			again, err := prepare(updated)
+			if err != nil || again.Content != plan.Content {
+				t.Fatalf("repair changed routing semantics: %v", err)
+			}
+		}
+		edited := strings.ReplaceAll(plan.Content, `"bind_interface": "lo"`, `"bind_interface": "eth0"`)
+		edited = strings.Replace(edited, `"bind_interface": "eth0"`, `"bind_interface": "lo"`, 1)
+		if _, err := AccountingUpdateSource(core.EngineSingBox, edited, `{}`); err == nil {
+			t.Fatal("trusted an edited generated outbound")
+		}
+	}
+}
+
 func TestAccountingUpdateRegeneratesOriginalEdits(t *testing.T) {
 	for engine, content := range map[core.Engine]string{
 		core.EngineXray:    `{"inbounds":[{"tag":"a","port":1080,"protocol":"socks"}],"outbounds":[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"AsIs"}}]}`,
@@ -18,6 +51,14 @@ func TestAccountingUpdateRegeneratesOriginalEdits(t *testing.T) {
 			plan, err := PrepareAccounting(engine, content)
 			if err != nil {
 				t.Fatal(err)
+			}
+			recovered, err := AccountingUpdateSource(engine, plan.Content, `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rebuilt, err := PrepareAccounting(engine, recovered)
+			if err != nil || rebuilt.Content != plan.Content {
+				t.Fatalf("broken source recovery changed plan: %v", err)
 			}
 			from, to := "eth0", "eth1"
 			if engine == core.EngineXray {

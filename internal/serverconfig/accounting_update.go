@@ -19,7 +19,18 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 		_, err = PrepareMarkedSingBoxAccounting(previous)
 	}
 	if err != nil {
-		return "", fmt.Errorf("cannot verify previous accounting configuration: %w", err)
+		// A full managed snapshot can repair a broken saved source. Rebuild
+		// and verify its complete plan before trusting any reserved artifacts.
+		// Do not use this path for edits against a valid previous plan: its
+		// generated objects remain read-only, even if edited together.
+		plan, candidateErr := PrepareAccounting(engine, content)
+		if candidateErr != nil && engine == core.EngineSingBox {
+			plan, candidateErr = PrepareMarkedSingBoxAccounting(content)
+		}
+		if candidateErr == nil {
+			return stripVerifiedAccounting(engine, content, plan.Content)
+		}
+		return "", fmt.Errorf("cannot verify submitted accounting configuration: %w", candidateErr)
 	}
 	return stripVerifiedAccounting(engine, content, previous)
 }

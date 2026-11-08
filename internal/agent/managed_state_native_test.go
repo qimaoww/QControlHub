@@ -193,6 +193,21 @@ func TestManagedStateAgentNativeDeployments(t *testing.T) {
 					t.Fatalf("unexpected route response: %s", content)
 				}
 			}
+			if engine == core.EngineSingBox {
+				// Reproduce an invalid attempt followed by a corrected complete
+				// managed snapshot, then run the real Agent deployment below.
+				if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionDeploy, Engine: engine, ConfigContent: `{}`}); err == nil {
+					t.Fatal("empty object reached the native deployment")
+				}
+				plan, err := serverconfig.PrepareAccounting(engine, source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source, err = serverconfig.AccountingUpdateSource(engine, plan.Content, `{}`)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			stop := start(source)
 			wait(first)
 			wait(second)
