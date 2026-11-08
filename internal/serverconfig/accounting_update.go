@@ -40,13 +40,23 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 // using a reserved tag never establishes ownership of an outbound or rule.
 func AccountingSourceFromRevision(engine core.Engine, content, revision string) (string, error) {
 	plan, err := PrepareAccounting(engine, revision)
-	if err != nil && engine == core.EngineSingBox {
-		plan, err = PrepareMarkedSingBoxAccounting(revision)
+	if err == nil {
+		var source string
+		source, err = stripVerifiedAccounting(engine, content, plan.Content)
+		if err == nil {
+			return source, nil
+		}
 	}
-	if err != nil {
-		return "", err
+	if engine == core.EngineSingBox {
+		// A saved core-API plan can have a marked runtime on official builds.
+		// Try that verified conversion even when the archive's primary plan
+		// compiled successfully but did not match the submitted artifacts.
+		marked, markedErr := PrepareMarkedSingBoxAccounting(revision)
+		if markedErr == nil {
+			return stripVerifiedAccounting(engine, content, marked.Content)
+		}
 	}
-	return stripVerifiedAccounting(engine, content, plan.Content)
+	return "", err
 }
 
 func stripVerifiedAccounting(engine core.Engine, content, previous string) (string, error) {

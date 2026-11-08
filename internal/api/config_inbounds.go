@@ -250,6 +250,16 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 			content, err = serverconfig.MutateSSRustPort(current.Content, generated, input.OriginalTag, input.Operation)
 		} else {
+			if engine == core.EngineMihomo {
+				// Policies are applied to the merged document below. Copying
+				// providers from this generated scaffold while retaining the
+				// current rules would create apparently unowned resources.
+				generated, err = serverconfig.RemoveMainlandAccessPolicy(engine, generated, input.Input.Tag)
+				if err != nil {
+					mutationError(err.Error())
+					return
+				}
+			}
 			content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
 		}
 		if err != nil {

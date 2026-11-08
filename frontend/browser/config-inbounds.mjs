@@ -36,6 +36,8 @@ export async function testConfigInboundsRuntime(preview = false) {
     const test = await fixture(engine, {protocol}); test.click('modify'); await ready();
     const form = editor(), target = form.elements[field]; assert(target, `${protocol} lacks ${field}`);
     if (form.elements.tls_server_name && !form.elements.tls_server_name.value) form.elements.tls_server_name.value = 'tls.example.test';
+    for (const [name,value] of [['certificate_path','/tmp/fixture.crt'],['private_key_path','/tmp/fixture.key'],['reality_server_name','www.amazon.com']])
+      if (form.elements[name] && !form.elements[name].value) form.elements[name].value = value;
     const panel = target.closest('details'); if (panel) panel.open = false;
     test.portConflict = field; test.confirm=true; test.submit('deploy');
     await waitFor(() => form.textContent.includes('草稿已保留') && !form.querySelector('[type=submit]').disabled, `${field} conflict blocked correction`);
