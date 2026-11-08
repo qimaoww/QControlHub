@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -11,6 +14,29 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
+
+// ClientConnectionScope only reads node metadata, using the same host telemetry
+// authority as history. Shared kernel grants deliberately do not enter it.
+func (s *Store) ClientConnectionScope(ctx context.Context) (string, error) {
+	args := []any{}
+	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT a.id,a.name,COALESCE(a.owner_id,'') FROM agents a`+where+` ORDER BY a.id`, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	hash := sha256.New()
+	for rows.Next() {
+		var id, name, owner string
+		if err := rows.Scan(&id, &name, &owner); err != nil {
+			return "", err
+		}
+		if err := json.NewEncoder(hash).Encode([]string{id, name, owner}); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), rows.Err()
+}
 
 type ClientConnectionQuery struct {
 	// GroupByIP deduplicates within each agent and engine, never across them.

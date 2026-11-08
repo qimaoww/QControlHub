@@ -18,6 +18,7 @@ export async function testConnectionReadLifecycle() {
     if (path === '/api/v1/settings') return reply({});
     if (path === '/api/v1/preferences/node-order') return reply({ ids: ['bravo', 'alpha'], revision: 1 });
     if (path !== '/api/v1/client-connections') return nativeFetch(input, options);
+    if (url.searchParams.get('scope_only') === 'true') return reply({ scope: '' });
     const params = url.searchParams, locationOnly = params.get('locations') === 'only';
     calls.push({ params, signal: options.signal, locationOnly });
     const snapshot = structuredClone(records).filter(row => (!params.get('agent_id') || row.agent_id === params.get('agent_id')) && (!params.get('engine') || row.engine === params.get('engine')) && (!params.get('client_ip') || row.client_ip === params.get('client_ip')));

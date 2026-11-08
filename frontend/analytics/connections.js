@@ -1,4 +1,5 @@
-import { createConnectionCache } from "../modules/client-connection-cache.js";
+import { createConnectionCache, connectionSessionStorage, connectionRetention } from "../modules/client-connection-cache.js";
+import { createPoller } from "../modules/poller.js";
 import { defaultConnectionFilters, connectionQuery, connectionLocationLabel, connectionSourceLabel, connectionSourceDetail } from "../modules/client-connection-model.js";
 import { savedNodeOrder, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { redactDiagnostic } from "../modules/errors.js";
@@ -12,13 +13,24 @@ const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing
 
 export async function connectionsPage(ctx) {
   const data = ctx.state.data;
-  let filters = data.analyticsConnectionFilters ||= defaultConnectionFilters();
-  const cache = data.analyticsConnectionCache ||= createConnectionCache();
+  const cache = data.analyticsConnectionCache ||= createConnectionCache({ storage: connectionSessionStorage() });
+  // No storage candidate means no extra cold-start gate. The lightweight
+  // scope read overlaps module/order initialization and the first history API.
+  if (cache.hasStored() || cache.scope) {
+    try {
+      const verified = await ctx.connectionScope;
+      if (!ctx.current()) return;
+      cache.restore(verified.scope);
+    } catch (failure) { if (ctx.current()) cache.clear(); throw failure; }
+  }
+  const today = defaultConnectionFilters().date;
+  const restored = cache.selection?.day === today ? cache.selection : null;
+  let filters = data.analyticsConnectionFilters ||= restored?.filters || defaultConnectionFilters();
   let initialOrder = ctx.connectionNodeOrder;
   // Filter changes can share the route's pending order read. Once settled,
   // later refreshes continue to read the current authenticated preference.
   initialOrder?.finally(() => { initialOrder = null; }).catch(() => {});
-  let sources = [], result = null, loading = true, controller, serial = 0, cursor = "", cursors = [], nextCursor = "", nodeOrder = savedNodeOrder();
+  let sources = restored?.sources || [], result = null, resultAt = 0, expiryTimer, loading = true, forcePending = false, controller, serial = 0, cursor = restored?.cursor || "", cursors = restored?.cursors || [], nextCursor = "", nodeOrder = restored?.nodeOrder || savedNodeOrder();
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
   collection.trigger.dataset.connectionSourceStatus = "";
@@ -80,7 +92,20 @@ export async function connectionsPage(ctx) {
     page.textContent = result ? `第 ${cursors.length + 1} 页 · 本页 ${records.length} 条` : "";
     previous.disabled = !cursors.length; next.disabled = !nextCursor;
   }
+  function scheduleExpiry() {
+    clearTimeout(expiryTimer);
+    if (!result) return;
+    const at = resultAt;
+    expiryTimer = setTimeout(() => {
+      if (!ctx.current() || !result || resultAt !== at) return;
+      result = null; nextCursor = "";
+      error.textContent = "结果已过期，请刷新";
+      paint();
+    }, Math.max(0, at + connectionRetention - Date.now()));
+  }
   async function load({ target = "", history = [], force = false, changedScope = false } = {}) {
+    if (force && forcePending) return;
+    if (force) forcePending = true;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, revision = ++serial;
     const current = () => ctx.current() && !signal.aborted && serial === revision;
@@ -98,35 +123,54 @@ export async function connectionsPage(ctx) {
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();
       const cached = cache.get(key);
-      if (changedScope) { result = cached?.result || cache.preview(params); cursor = target; cursors = history; nextCursor = ""; paint(); }
-      status.textContent = cached?.fresh && !force ? "已读取" : "正在读取…";
+      if (changedScope) { result = cached?.result || cache.preview(params); resultAt = cached?.at || result?.snapshotAt || 0; cursor = target; cursors = history; nextCursor = ""; }
+      if (result && (Date.now() < resultAt || Date.now() - resultAt >= connectionRetention)) result = null;
+      status.textContent = cached?.fresh && !force ? "已读取" : result ? "上次结果 · 正在更新…" : "正在读取…";
       error.textContent = "";
+      paint(); scheduleExpiry();
       const fresh = cached?.fresh && !force ? cached.result : await ctx.api(`/client-connections?${params}&locations=cached`, { signal });
       if (!current()) return;
-      if (force) cache.clear();
       const fetchedAt = cached?.fresh && !force ? cached.at : Date.now();
-      result = fresh; cache.set(key, result, fetchedAt, cached?.locationsAttempted && !force);
+      if (!cached?.fresh || force) { cache.bind(fresh.cache_scope); cache.set(key, fresh, fetchedAt, false); }
+      result = fresh; resultAt = fetchedAt;
       cursor = target; cursors = history; nextCursor = result.next_cursor || "";
       if (!filters.agent_id) sources = result.sources || [];
       else sources = sources.length ? sources.map(source => result.sources?.find(value => value.agent_id === source.agent_id) || source) : result.sources || [];
+      cache.select({ filters: { ...filters }, cursor, cursors, nodeOrder, day: today, sources: sources.map(source => ({ agent_id: source.agent_id, agent_name: source.agent_name })) });
       status.textContent = "已读取";
       if ((!cached?.locationsAttempted || force) && result.records?.some(record => !record.location?.non_public && (!record.location?.country_code || record.location.country_code === "CN" && !record.location.province))) {
+        cache.set(key, result, fetchedAt, true);
         const locationQuery = new URLSearchParams(params);
         if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);
         void ctx.api(`/client-connections?${locationQuery}&locations=only`, { signal }).then(enriched => {
-          if (!current()) return;
+          if (!current() || !result) return;
+          if (enriched.cache_scope && cache.scope && enriched.cache_scope !== cache.scope) {
+            cache.clear(); result = null; sources = []; nextCursor = "";
+            error.textContent = "访问范围已变化，请刷新"; updateSources(); paint(); return;
+          }
           const locations = new Map(enriched.records.map(record => [record.id, record.location]));
           result = { ...result, records: result.records.map(record => ({ ...record, location: locations.get(record.id) || record.location })) };
           cache.set(key, result, fetchedAt, true); paint();
-        }).catch(failure => { if (current() && failure.name !== "AbortError") { cache.set(key, result, fetchedAt, true); error.textContent = `属地更新失败，可刷新重试：${redactDiagnostic(failure.message)}`; } });
+        }).catch(failure => {
+          if (!current() || failure.name === "AbortError") return;
+          if ([401, 403, 404, 409].includes(failure.status)) {
+            cache.clear(); result = null; sources = []; nextCursor = ""; updateSources(); paint();
+          } else if (result && Date.now() - fetchedAt < connectionRetention) cache.set(key, result, fetchedAt, true);
+          error.textContent = `属地更新失败，可刷新重试：${redactDiagnostic(failure.message)}`;
+        });
       }
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;
-      if ([401, 403, 404].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; }
+      if ([401, 403, 404, 409].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; }
+      if (result && (Date.now() < resultAt || Date.now() - resultAt >= connectionRetention)) result = null;
       error.textContent = redactDiagnostic(failure.message);
       status.textContent = result && !result.preview ? "更新失败，保留上次结果" : "读取失败，请重试";
     } finally {
-      if (current()) { loading = false; updateSources(); paint(); }
+      if (force) forcePending = false;
+      if (current()) {
+        loading = false; updateSources(); paint();
+        scheduleExpiry();
+      }
     }
   }
   function changed() {
@@ -140,12 +184,36 @@ export async function connectionsPage(ctx) {
   controls.addEventListener("change", () => { clearTimeout(timer); changed(); });
   controls.elements.client_ip.addEventListener("input", event => { clearTimeout(timer); controller?.abort(); serial++; if (!event.isComposing) timer = setTimeout(changed, 250); });
   controls.elements.client_ip.addEventListener("compositionend", () => { clearTimeout(timer); timer = setTimeout(changed, 250); });
-  ctx.signal.addEventListener("abort", () => { controller?.abort(); clearTimeout(timer); }, { once: true });
+  // Recheck authority without repeating history aggregates. This also handles
+  // an administrator losing an owner-hidden/revoked node in an idle tab.
+  const scopeWatch = createPoller({
+    isActive: () => ctx.current() && !document.hidden,
+    delay: () => 10_000,
+    async run() {
+      try {
+        const verified = await ctx.api("/client-connections?scope_only=true");
+        if (!ctx.current() || !cache.scope || verified.scope === cache.scope) return;
+        controller?.abort(); serial++; cache.clear(); result = null; sources = []; nextCursor = "";
+        updateSources(); paint();
+        void load({ changedScope: true });
+      } catch (failure) {
+        if (ctx.current() && [401, 403].includes(failure.status)) {
+          controller?.abort(); serial++; cache.clear(); result = null; sources = []; nextCursor = "";
+          loading = false; error.textContent = redactDiagnostic(failure.message); updateSources(); paint();
+        }
+      }
+    },
+  });
+  const visibility = () => document.hidden ? scopeWatch.stop() : void scopeWatch.trigger();
+  document.addEventListener("visibilitychange", visibility, { signal: ctx.signal });
+  window.addEventListener("focus", () => void scopeWatch.trigger(), { signal: ctx.signal });
+  scopeWatch.start();
+  ctx.signal.addEventListener("abort", () => { controller?.abort(); clearTimeout(timer); clearTimeout(expiryTimer); scopeWatch.stop(); cache.flush(); }, { once: true });
   ctx.onRefresh(() => load({ target: cursor, history: cursors, force: true }), { local: true });
-  paint();
+  updateSources(); paint();
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
-  void load({ changedScope: true });
+  void load({ target: cursor, history: cursors, changedScope: true });
   return stack(filterbar(controls), error, section("客户端连接", stack(summary, node("div", { className: "a-card-body a-stack" }, muted("根据内核日志观测，不代表当前在线会话数"), status), view.root,
     node("div", { className: "a-card-body" }, actions(page, previous, next))), collection.trigger));
 }

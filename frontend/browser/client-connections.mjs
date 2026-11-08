@@ -26,6 +26,7 @@ export async function testClientConnectionsRuntime(preview = false) {
     }
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
+      if (url.searchParams.get("scope_only") === "true") return new Response(JSON.stringify({ scope: "" }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url.searchParams.get("locations") === "only") {
         locationRequests.push(url.searchParams);
         await locationsReady;
@@ -164,9 +165,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(requests.at(-1).get("cursor"), "next-page", "refresh retains the current page");
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "refresh retains the node filter");
   assert.ok(pageText().includes("第 2 页"));
+  const beforePrevious = requests.length;
   button("上一页").click();
   await waitFor(() => pageText().includes("第 1 页") && settled(), "previous page missing");
-  assert.ok(!requests.at(-1).has("cursor"));
+  assert.equal(requests.length, beforePrevious, "refresh must retain the other page's fresh snapshot");
+  assert.ok(displayed().every(row => !row.textContent.includes("2026/9/20")), "previous page must not retain the refreshed cursor page");
   const beforeRecent = requests.length;
   button("今日").click();
   await requested(beforeRecent, "today query missing");

@@ -2,6 +2,7 @@ import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
 import { setStorageAccount } from "../modules/account-storage.js";
+import { clearConnectionStorage } from "../modules/client-connection-cache.js";
 import { accountRequest } from "../modules/account-request.js";
 import { effectiveTheme } from "../modules/theme-registry.js";
 import { createPermissionChecker } from "../modules/permissions.js";
@@ -92,6 +93,8 @@ export function startAnalytics({ app, session }) {
   };
   const watch = createSessionWatch({ api, state, onAccessChanged: () => {
     routeAbort?.abort();
+    state.data.analyticsConnectionCache?.clear();
+    clearConnectionStorage();
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
     setStorageAccount(state.session);
     state.data = {};
@@ -275,6 +278,8 @@ export function startAnalytics({ app, session }) {
   }
   function login(message = "") {
     routeAbort?.abort();
+    state.data.analyticsConnectionCache?.clear();
+    clearConnectionStorage();
     watch.stop();
     const loginURL = new URL(location.href);
     loginURL.searchParams.delete("theme");
@@ -369,6 +374,8 @@ export function startAnalytics({ app, session }) {
       if (route === "client-connections") {
         context.connectionNodeOrder = context.api("/preferences/node-order");
         void context.connectionNodeOrder.catch(() => {});
+        context.connectionScope = context.api("/client-connections?scope_only=true");
+        void context.connectionScope.catch(() => {});
       }
       const [module] = await Promise.all([
         routeModules.load(descriptor[0]),
@@ -410,7 +417,7 @@ export function startAnalytics({ app, session }) {
     event.preventDefault();
     event.returnValue = "";
   }, { signal: lifetime.signal });
-  window.addEventListener("pagehide", () => { lifetime.abort(); routeAbort?.abort(); watch.stop(); }, { once: true });
+  window.addEventListener("pagehide", () => { state.data.analyticsConnectionCache?.flush(); lifetime.abort(); routeAbort?.abort(); watch.stop(); }, { once: true });
   window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
   document.addEventListener("visibilitychange", () => document.hidden ? watch.stop() : void watch.trigger(), { signal: lifetime.signal });
   window.addEventListener("focus", () => void watch.trigger(), { signal: lifetime.signal });

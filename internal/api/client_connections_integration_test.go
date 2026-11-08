@@ -3,14 +3,136 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
+
+func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
+	for _, action := range []string{"hide-node", "disable-user", "logout"} {
+		t.Run(action, func(t *testing.T) {
+			db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "scope-race", core.EngineMihomo)
+			if err := storeAPIConnectionLogs(ctx, db, agent.ID, clientConnectionFixtures{Connections: []core.ClientConnection{{ClientIP: "8.8.8.8", ClientPort: 50123}}}); err != nil {
+				t.Fatal(err)
+			}
+			entered, release := make(chan struct{}, 1), make(chan struct{})
+			handler := New(db, Config{AdminToken: admin.token, GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(r *http.Request) (*http.Response, error) {
+				select {
+				case entered <- struct{}{}:
+				default:
+				}
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"country_code":"US"}`)), Header: make(http.Header)}, nil
+			})}}).Handler()
+			username, secret := "alice", "config scope password fixture"
+			if action == "hide-node" {
+				username, secret = "admin", admin.token
+			}
+			client, _ := managementLogin(t, handler, username, secret, http.StatusOK)
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/client-connections?group_by=ip&timeline=false", nil)
+			request.AddCookie(client.cookie)
+			request.Header.Set(csrfHeader, client.csrf)
+			response, done := httptest.NewRecorder(), make(chan struct{})
+			go func() { defer close(done); handler.ServeHTTP(response, request) }()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				close(release)
+				t.Fatal("history did not reach held geography")
+			}
+			want := http.StatusConflict
+			switch action {
+			case "hide-node":
+				if err := db.SetAgentAdminHidden(store.WithConfigScope(ctx, alice.userID, false), agent.ID, true); err != nil {
+					t.Error(err)
+				}
+			case "disable-user":
+				want = http.StatusUnauthorized
+				if _, err := db.SetUserDisabled(ctx, alice.userID, true); err != nil {
+					t.Error(err)
+				}
+			case "logout":
+				client.call("POST", "/auth/logout", nil, http.StatusNoContent, nil)
+			}
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("revoked history did not finish")
+			}
+			if response.Code != want || strings.Contains(response.Body.String(), "8.8.8.8") || response.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("concurrent revocation returned protected rows: %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestClientConnectionCacheScope(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	getScope := func(client configScopeAPIClient) string {
+		t.Helper()
+		var result struct{ Scope string }
+		client.call("GET", "/client-connections?scope_only=true", nil, http.StatusOK, &result)
+		if len(result.Scope) != 64 || strings.Contains(result.Scope, client.csrf) {
+			t.Fatalf("invalid opaque scope: %q", result.Scope)
+		}
+		return result.Scope
+	}
+	// Environment-token logins have a genuine per-login scope too; unlike
+	// preference IDs, it never falls back to a username or role string.
+	administrator, _ := managementLogin(t, admin.handler, "admin", "config-scope-administrator-fixture", http.StatusOK)
+	a0, b0, admin0 := getScope(alice), getScope(bob), getScope(administrator)
+	if a0 == b0 || a0 == admin0 {
+		t.Fatal("different authenticated principals share a cache scope")
+	}
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "scope-owner", core.EngineMihomo)
+	a1, admin1 := getScope(alice), getScope(administrator)
+	if a1 == a0 || admin1 == admin0 || getScope(bob) != b0 {
+		t.Fatal("scope does not follow host administration authority")
+	}
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 23450)
+	if getScope(bob) != b0 {
+		t.Fatal("shared engine use expanded host telemetry scope")
+	}
+	var history struct {
+		core.ClientConnectionHistory
+		CacheScope string `json:"cache_scope"`
+	}
+	alice.call("GET", "/client-connections?group_by=ip&timeline=false&locations=cached", nil, http.StatusOK, &history)
+	if history.CacheScope != a1 || len(history.Sources) != 1 {
+		t.Fatalf("history and lightweight scope disagree: %+v", history)
+	}
+	if err := db.SetAgentAdminHidden(store.WithConfigScope(ctx, alice.userID, false), agent.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if getScope(administrator) != admin0 || getScope(alice) != a1 {
+		t.Fatal("owner-hidden node did not invalidate the administrator alone")
+	}
+	otherLogin, _ := managementLogin(t, alice.handler, "alice", "config scope password fixture", http.StatusOK)
+	if getScope(otherLogin) == a1 {
+		t.Fatal("another login inherited the original session cache authority")
+	}
+	alice.call("POST", "/auth/logout", nil, http.StatusNoContent, nil)
+	alice.call("GET", "/client-connections?scope_only=true", nil, http.StatusUnauthorized, nil)
+	if _, err := db.SetUserDisabled(ctx, bob.userID, true); err != nil {
+		t.Fatal(err)
+	}
+	bob.call("GET", "/client-connections?scope_only=true", nil, http.StatusUnauthorized, nil)
+	t.Logf("scope authority checks completed in isolated fixture at %s", time.Now().UTC().Format(time.RFC3339))
+}
 
 func TestClientConnectionAPIIsolation(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)

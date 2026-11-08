@@ -98,6 +98,7 @@ dock-navigation-browser-check:
 	node frontend/dock_navigation_browser.mjs
 
 frontend-browser-check: dock-navigation-browser-check
+	node frontend/connection_reload_browser.mjs
 	go test -count=1 -timeout 20m ./frontend -run '^TestAgentBrowserRuntimeSmoke$$' -v
 
 module-policy-test:
