@@ -442,7 +442,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks existing
 		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6

@@ -59,6 +59,35 @@ export async function run() {
     const recovered = await interrupted.recoverConfigSubmission();
     assert.equal(recovered.config.version,4);
     assert.equal(delayedWrites,1,"same-page recovery replayed an interrupted write");
+    let receiptInstance = "old-share", instanceWrites = 0, instanceCallbacks = 0;
+    const instance = createConfigMutations({state:{data:{}}, api:async (url, options = {})=>{
+      if (options.method === "POST") {
+        instanceWrites++; id = options.headers["X-Config-Task-ID"];
+        throw TypeError("response lost");
+      }
+      const value = await api(url, options);
+      return url.startsWith("/tasks/") ? {...value, shared_instance:true, shared_traffic_id:receiptInstance} : value;
+    }}, {onTask:()=>instanceCallbacks++, waitForTerminal:()=>completion});
+    let unknownInstance;
+    try { await instance.request(path,{method:"POST",body:JSON.stringify({...JSON.parse(body),expected_instance_id:"share"})}); }
+    catch (error) { unknownInstance = error; }
+    assert.equal(instanceCallbacks,0,"foreign instance receipt was applied");
+    receiptInstance = "share";
+    await instance.recover("node","xray","another-share");
+    assert.equal(instanceCallbacks,0,"previous instance recovered into current page");
+    await unknownInstance.recoverConfigSubmission();
+    assert.equal(instanceCallbacks,1);
+    assert.equal(instanceWrites,1,"instance reconciliation replayed a write");
+    let correctionWrites = 0;
+    const correction = createConfigMutations({state:{data:{}}, api:async (_url, options)=>{
+      correctionWrites++;
+      if (correctionWrites === 1) throw Object.assign(Error("invalid source"),{status:400});
+      assert.equal(JSON.parse(options.body).content,"corrected");
+      return {config:{id:"cfg",version:4},task:{id:options.headers["X-Config-Task-ID"],config_version:4,status:"succeeded"}};
+    }}, {onTask:()=>{},waitForTerminal:()=>completion});
+    await assert.rejects(correction.request(path,{method:"POST",body}),{status:400});
+    await correction.request(path,{method:"POST",body:JSON.stringify({...JSON.parse(body),content:"corrected"})});
+    assert.equal(correctionWrites,2,"business rejection blocked corrected content");
     const superseded = createConfigMutations({state:{data:{}}, api:async (url, options = {})=>{
       if (options.method === "POST") {
         id = options.headers["X-Config-Task-ID"];

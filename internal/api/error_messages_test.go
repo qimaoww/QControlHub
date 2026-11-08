@@ -50,6 +50,9 @@ func TestChineseErrorMessages(t *testing.T) {
 		t.Fatalf("Chinese cause lost: %q", got)
 	}
 	for original, want := range map[string]string{
+		"独立出口校验失败：no configured outbounds":                                                                                                  "独立出口校验失败：未配置出站，请添加有效的原始出站。",
+		"cannot verify submitted accounting configuration: no original outbounds; only generated accounting copies remain":                  "无法验证提交的统计配置：配置仅有统计生成出口，请补充原始出站。",
+		"original outbound count exceeds 64":                                                                                                "原始出站超过 64 个，无法建立独立出口归属。",
 		"conflict: port 443 is already reserved for another user":                                                                           "端口 443 的使用状态需要重新核实，请刷新节点状态后重试。",
 		"conflict: port 443 is reserved for another user":                                                                                   "端口 443 的使用状态需要重新核实，请刷新节点状态后重试。",
 		"conflict: port 443 belongs to another user's deployed configuration":                                                               "端口 443 正由其他用户的部署使用，请选择其他端口。",
@@ -58,7 +61,7 @@ func TestChineseErrorMessages(t *testing.T) {
 		"net.ipv4.tcp_rmem requires ordered integers in [1, 100]":                                                                           "参数 net.ipv4.tcp_rmem 需要按从小到大的顺序填写整数，范围为 1 到 100。",
 		`invalid JSON body: json: unknown field "typo"`:                                                                                     "请求包含不支持的字段 typo，请检查字段名称或刷新页面后重试。",
 		"conflict: invalid or duplicate engine \"xray\"":                                                                                    "内核 xray 无效或重复，请重新选择。",
-		"预设配置无法建立独立出口归属，未保存或部署：no explicit default outbound":                                                                                "预设配置无法建立独立出口归属，未保存或部署：未配置明确的默认出口，请先设置默认出口再启用统计。",
+		"预设配置无法建立独立出口归属，未保存或部署：no explicit default outbound":                                                                                "预设配置无法建立独立出口归属，未保存或部署：未找到可用的默认出口，请检查原始出站配置。",
 		"invalid input: 独立出口校验失败：Mihomo independent exits require rule mode":                                                                "独立出口校验失败：独立出口仅支持 Mihomo 的 rule 模式。",
 		"独立出口校验失败：unknown internal detail /private/path":                                                                                    "独立出口校验失败：提交的参数或配置无效，请检查输入并刷新页面后重试。",
 		"conflict: stop the uncertain xray core before reserving shared ports":                                                              "xray 的部署状态不明，请先停止该内核，再分配端口。",

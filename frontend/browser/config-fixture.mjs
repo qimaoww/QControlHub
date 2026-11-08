@@ -234,8 +234,8 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.sourceFailure) throw Object.assign(new Error("测试源码保存失败"), test.sourceFailure);
       assert(body.version === saved.version, "outbound save lost version check");
       test.writes.push({path, ...body});
-      saved = {...saved, content:body.content, version:saved.version+1,updated_at:savedDate(saved.version+1)};
-      const task = {id:request.headers?.['X-Config-Task-ID'] || `task-${saved.version}`, agent_id:agent.id, engine, shared_instance:Boolean(options.shared), config_id:saved.id,
+      saved = {...saved, name:body.name, description:body.description, content:test.normalizedSource || body.content, version:saved.version+1,updated_at:savedDate(saved.version+1)};
+      const task = {id:request.headers?.['X-Config-Task-ID'] || `task-${saved.version}`, agent_id:agent.id, engine, shared_instance:Boolean(options.shared), shared_traffic_id:agent.shared_allocation?.id || "", config_id:saved.id,
         action:body.intent, config_version:saved.version, status:test.taskStatus};
       tasks.set(task.id, task);
       if (test.supersedeSourceResponse) saved={...saved,version:saved.version+1,content:saved.content+'\n '};

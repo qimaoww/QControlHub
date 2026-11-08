@@ -1,11 +1,56 @@
 package serverconfig
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestSingBoxDefaultOutboundDiagnostics(t *testing.T) {
+	const inbound = `"inbounds":[{"type":"http","tag":"in","listen_port":21001}]`
+	for _, test := range []struct{ name, content, want string }{
+		{"missing", `{` + inbound + `}`, "no configured outbounds"},
+		{"generated-only", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"qch-trf-21001-test"}]}`, "no original outbounds"},
+		{"unknown-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"original"}],"route":{"final":"missing"}}`, "unknown default outbound"},
+		{"implicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}]}`, ""},
+		{"explicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}],"route":{"final":"second"}}`, ""},
+		{"empty-object", `{}`, "no configured outbounds"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := PrepareIndependentEgress(core.EngineSingBox, test.content)
+			if test.want != "" {
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("want %q, got %v", test.want, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := PresetAccountingSource(core.EngineSingBox, plan.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, _ := decodeAccountingRoot(core.EngineSingBox, test.content)
+			restored, _ := decodeAccountingRoot(core.EngineSingBox, source)
+			a, _ := json.Marshal(original["outbounds"])
+			b, _ := json.Marshal(restored["outbounds"])
+			if string(a) != string(b) || stringValue(mapValue(original["route"])["final"]) != stringValue(mapValue(restored["route"])["final"]) {
+				t.Fatal("default or original order changed")
+			}
+		})
+	}
+	outs := make([]string, 65)
+	for i := range outs {
+		outs[i] = fmt.Sprintf(`{"type":"direct","tag":"exit-%d"}`, i)
+	}
+	if _, err := PrepareIndependentEgress(core.EngineSingBox, `{`+inbound+`,"outbounds":[`+strings.Join(outs, ",")+`]}`); err == nil || !strings.Contains(err.Error(), "original outbound count exceeds 64") {
+		t.Fatalf("wrong limit error: %v", err)
+	}
+}
 
 func TestIndependentEgressRejectsBypasses(t *testing.T) {
 	for _, test := range []struct {
