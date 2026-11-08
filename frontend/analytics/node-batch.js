@@ -93,6 +93,8 @@ export function openNodeBatch(ctx, getAgents) {
     const failed = values.filter(value => value.error).length;
     const text = values.length ? `已提交 ${submitted}，提交失败 ${failed}${busy ? ' · 提交中' : ''}` : '';
     if (summary.textContent !== text) summary.textContent = text;
+    summary.classList.toggle('error', failed > 0);
+    summary.classList.toggle('ok', failed === 0);
   }
   function syncCandidates() {
     for (const agent of agents) {
