@@ -118,7 +118,7 @@ export async function connectionsPage(ctx) {
       if (force || initialOrder || !sources.length) {
         const order = await (!force && initialOrder || ctx.api("/preferences/node-order", { signal }));
         if (!current()) return;
-        if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; }
+        if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; changedScope = true; }
         nodeOrder = order.ids;
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();

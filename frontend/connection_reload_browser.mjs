@@ -86,6 +86,11 @@ try {
   await configure({ order: ['bravo', 'alpha'] }); await reload(); await wait(ready);
   assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 1 页')`), 'changed authenticated node order reused an old cursor');
   assert.equal((await counts()).reads, paged.reads + 1, 'changed node order reused an incompatible page');
+  await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()`); await wait(ready);
+  await configure({ order: ['alpha', 'bravo'], failure: 503 }); await refresh();
+  await wait(`document.querySelector('.a-main').textContent.includes('连接查询暂不可用')`);
+  await configure({ failure: 0 }); await refresh(); await wait(ready);
+  assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('第 1 页')`), 'failed order revalidation retained the previous order cursor on retry');
   await change('agent_id', 'alpha'); await wait(ready);
   await change('engine', 'xray'); await wait(ready);
   await change('client_ip', '8.8.8.1'); await wait(ready);
