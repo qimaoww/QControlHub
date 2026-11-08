@@ -19,7 +19,7 @@ func TestSharedXHTTPRecipientLifecycleAndExports(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-xhttp", core.EngineXray)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances, core.AgentFeatureXHTTP)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances, core.AgentFeatureXHTTP, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true}}}); err != nil {
 				t.Fatal(err)
 			}
