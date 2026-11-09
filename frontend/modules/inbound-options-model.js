@@ -12,7 +12,11 @@ export function readXHTTPOptions(form, protocol, values) {
     const security = d[tls ? "tlsSettings" : "realitySettings"] ||= {};
     Object.assign(security, {serverName:values.get("xhttp_download_sni") || "", fingerprint:security.fingerprint || "chrome"});
     if (tls) Object.assign(security, {allowInsecure:false, alpn:(values.get("xhttp_download_alpn") || "h2").split(",").map(x => x.trim()).filter(Boolean), fingerprint:values.get("xhttp_download_alpn")?.trim() === "http/1.1" ? "unsafe" : security.fingerprint === "unsafe" ? "chrome" : security.fingerprint});
-    else Object.assign(security, {publicKey:values.get("reality_public_key") || "", shortId:values.get("reality_short_id") || ""});
+    else {
+      Object.assign(security, {publicKey:values.get("reality_public_key") || "", shortId:values.get("reality_short_id") || ""});
+      if (values.get("reality_mldsa65_verify")) security.mldsa65Verify = values.get("reality_mldsa65_verify");
+      else delete security.mldsa65Verify;
+    }
     const x = d.xhttpSettings ||= {};
     Object.assign(x, {path:values.get("transport_path"), host:values.get("xhttp_download_host") || "", mode:x.mode || "auto"});
   } else if (!group && form.dataset.xhttpSplitChanged === "true") delete extra.downloadSettings;
@@ -57,6 +61,8 @@ export const generatedPlanFields = Object.freeze([
   "reality_private_key",
   "reality_public_key",
   "reality_short_id",
+  "reality_mldsa65_seed",
+  "reality_mldsa65_verify",
   "vless_decryption",
   "vless_encryption",
   "sudoku_client_key",
@@ -76,11 +82,6 @@ export const generatedFieldActions = Object.freeze([
   ["secondary_credential", "secondary_credential", "生成次凭据"],
   ["transport_path", "transport_path", "生成路径或 ServiceName"],
   [
-    "reality_public_key",
-    "reality_private_key,reality_public_key",
-    "生成 Reality 密钥对",
-  ],
-  [
     "reality_private_key",
     "reality_private_key,reality_public_key",
     "生成 Reality 密钥对",
@@ -92,21 +93,14 @@ export const generatedFieldActions = Object.freeze([
     "生成 VLESS-ENC 密钥对",
   ],
   [
-    "vless_encryption",
-    "vless_decryption,vless_encryption",
-    "生成 VLESS-ENC 密钥对",
-  ],
-  [
     "reality_mldsa65_seed",
-    "reality_mldsa65_seed",
+    "reality_mldsa65_seed,reality_mldsa65_verify",
     "生成 ML-DSA-65 密钥对",
   ],
   ["sudoku_client_key", "credential,sudoku_client_key", "生成 Sudoku 密钥对"],
   ["snell_shadow_tls_password", "snell_shadow_tls_password", "生成 ShadowTLS 密码"],
   ["wireguard_server_private_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
-  ["wireguard_server_public_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
   ["wireguard_client_private_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
-  ["wireguard_client_public_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
   ["wireguard_preshared_key", "wireguard_preshared_key", "生成 WireGuard 预共享密钥"],
 ]);
 
@@ -139,6 +133,10 @@ export function readServerPlanInput(form, protocol, values = new FormData(form))
     tls_static_html: protocol.key === "vless-xhttp-tls" && ["caddy", "nginx"].includes(values.get("tls_mode")) ? (values.get("tls_static_page") === "custom" || !form.elements.namedItem("tls_static_page") ? values.get("tls_static_html") || "" : (protocol.static_pages || []).find(page=>page.key === values.get("tls_static_page"))?.html || "") : "",
     tls_server_name: values.get("tls_server_name") || "",
     tls_alpn: values.get("tls_alpn") || "",
+    tls_client_alpn: values.get("tls_client_alpn") || "",
+    client_address: values.get("client_address") || "",
+    client_port: Number(values.get("client_port") || 0),
+    client_host: values.get("client_host") || "",
     tls_client_certificate: values.get("tls_client_certificate") || "",
     tls_enabled: tlsEnabled,
     panel_certificate_id: values.get("tls_mode") === "external" ? "" : values.get("panel_certificate_id") || "",
@@ -149,6 +147,8 @@ export function readServerPlanInput(form, protocol, values = new FormData(form))
     reality_public_key: values.get("reality_public_key") || "",
     reality_short_id: values.get("reality_short_id") || "",
     reality_server_name: values.get("reality_server_name") || "",
+    reality_target: values.get("reality_target") || "",
+    reality_server_names: values.get("reality_server_names") || "",
     reality_min_client_ver:
       values.get("reality_min_client_ver") || "0.0.0",
     reality_mldsa65_seed: values.get("reality_mldsa65_seed") || "",

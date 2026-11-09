@@ -53,29 +53,10 @@ func validateXHTTPInput(input *Input) error {
 	if _, err := validatedSingBoxALPN(input.TLSClientALPN); input.TLSClientALPN != "" && err != nil {
 		return err
 	}
-	if input.RealityEnabled {
-		if len(xhttpRealityNames(*input)) > 16 {
-			return fmt.Errorf("Reality 允许的 SNI 最多 16 个")
-		}
-		for _, name := range xhttpRealityNames(*input) {
-			if _, err := normalizeRealityServerName(name); err != nil {
-				return err
-			}
-		}
-		if !slices.Contains(xhttpRealityNames(*input), input.RealityServerName) {
-			return fmt.Errorf("客户端 Reality SNI 必须在允许的 serverNames 中")
-		}
-		if input.RealityTarget != "" {
-			host, port, err := net.SplitHostPort(input.RealityTarget)
-			n, _ := strconv.Atoi(port)
-			if err != nil || n < 1 || n > 65535 {
-				return fmt.Errorf("独立 Reality target 必须为公网域名:有效端口；组合的本地目标由面板管理")
-			}
-			if _, err := normalizeRealityServerName(host); err != nil {
-				return err
-			}
-		}
+	if err := validateRealityOptions(*input); err != nil {
+		return err
 	}
+
 	group := isXHTTPGroup(input.Protocol)
 	if group {
 		if len(input.Tag) > 61 {
@@ -246,6 +227,9 @@ func validateXHTTPDownload(input Input, raw any) error {
 		if !slices.Contains(xhttpRealityNames(input), stringValue(r["serverName"])) || stringValue(r["publicKey"]) != input.RealityPublicKey || stringValue(r["shortId"]) != input.RealityShortID {
 			return fmt.Errorf("下载 Reality 的 SNI、公钥和 Short ID 必须关联当前入站")
 		}
+		if verify := stringValue(r["mldsa65Verify"]); verify != "" && verify != realityMLDSAVerify(input) {
+			return fmt.Errorf("下载 Reality 的 ML-DSA-65 Verify 必须关联当前入站")
+		}
 		ip := net.ParseIP(address)
 		if ip != nil && input.Listen == "0.0.0.0" && ip.To4() == nil {
 			return fmt.Errorf("下载 IPv6 无法到达 IPv4 监听；将监听改为 :: 或配置可达的转发入口")
@@ -281,6 +265,33 @@ func validateXHTTPDownload(input Input, raw any) error {
 			return fmt.Errorf("下载参数不支持递归 downloadSettings")
 		}
 		return validateXHTTPExtra(e, false)
+	}
+	return nil
+}
+
+func validateRealityOptions(input Input) error {
+	if input.RealityEnabled {
+		if len(xhttpRealityNames(input)) > 16 {
+			return fmt.Errorf("Reality 允许的 SNI 最多 16 个")
+		}
+		for _, name := range xhttpRealityNames(input) {
+			if _, err := normalizeRealityServerName(name); err != nil {
+				return err
+			}
+		}
+		if !slices.Contains(xhttpRealityNames(input), input.RealityServerName) {
+			return fmt.Errorf("客户端 Reality SNI 必须在允许的 serverNames 中")
+		}
+		if input.RealityTarget != "" {
+			host, port, err := net.SplitHostPort(input.RealityTarget)
+			n, _ := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("独立 Reality target 必须为公网域名:有效端口；组合的本地目标由面板管理")
+			}
+			if _, err := normalizeRealityServerName(host); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

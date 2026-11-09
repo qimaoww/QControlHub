@@ -14,12 +14,13 @@ import (
 
 func main() {
 	type entry struct {
-		Engine     core.Engine                 `json:"engine"`
-		Protocol   serverconfig.Protocol       `json:"protocol"`
-		Plan       serverconfig.Input          `json:"plan"`
-		Profile    *serverconfig.ClientProfile `json:"profile,omitempty"`
-		MihomoYAML string                      `json:"mihomo_yaml,omitempty"`
-		SavedPlan  *serverconfig.Input         `json:"saved_plan,omitempty"`
+		Engine          core.Engine                 `json:"engine"`
+		Protocol        serverconfig.Protocol       `json:"protocol"`
+		Plan            serverconfig.Input          `json:"plan"`
+		Profile         *serverconfig.ClientProfile `json:"profile,omitempty"`
+		MihomoYAML      string                      `json:"mihomo_yaml,omitempty"`
+		SavedPlan       *serverconfig.Input         `json:"saved_plan,omitempty"`
+		RegeneratedPlan *serverconfig.Input         `json:"regenerated_plan,omitempty"`
 	}
 	var catalog []entry
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
@@ -29,6 +30,20 @@ func main() {
 				panic(err)
 			}
 			fixture := entry{Engine: engine, Protocol: protocol, Plan: plan}
+			if plan.RealityEnabled {
+				plan.RealityServerName = "reality.example.test"
+				if protocol.Key != serverconfig.ProtocolXHTTPFive && protocol.Key != serverconfig.ProtocolXHTTPTLSReality && protocol.Key != serverconfig.ProtocolXHTTPRealityTLS {
+					saved := plan
+					fixture.SavedPlan = &saved
+				}
+			}
+			if protocol.SupportsRealityMLDSA {
+				regenerated, err := serverconfig.RegeneratePlan(protocol, plan)
+				if err != nil {
+					panic(err)
+				}
+				fixture.RegeneratedPlan = &regenerated
+			}
 			if plan.Transport == "xhttp" {
 				plan.TLSServerName = "tls.example.test"
 				if plan.RealityEnabled && plan.RealityServerName == "" {

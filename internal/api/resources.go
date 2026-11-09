@@ -37,7 +37,6 @@ type agentConfigWorkspaceResource struct {
 	Inbounds         []serverconfig.Input             `json:"inbounds"`
 	InboundTargets   []configInboundTargetResource    `json:"inbound_targets"`
 	PresentFields    map[string]bool                  `json:"present_fields"`
-	RealityPresets   []string                         `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -126,7 +125,6 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		Agent: agent, Catalog: catalog, Protocols: serverconfig.Protocols(engine),
 		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
 		InboundTargets: []configInboundTargetResource{},
-		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
 	if config.ID != "" || request.PathValue("snapshot") != "" {
 		previewChanged := false

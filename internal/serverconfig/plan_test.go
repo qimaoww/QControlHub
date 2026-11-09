@@ -97,3 +97,35 @@ func TestRegeneratePlanUsesCurrentEncryptionMethod(t *testing.T) {
 		t.Fatalf("invalid current method error = %v", err)
 	}
 }
+
+func TestRegeneratePlanPreservesFlowSelection(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo, core.EngineSingBox} {
+		t.Run(string(engine), func(t *testing.T) {
+			key := ProtocolVLESS
+			if engine == core.EngineSingBox {
+				key = ProtocolVLESSTLS
+			}
+			protocol, _ := FindProtocol(engine, key)
+			input, err := nativeTLSFixturePlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.RealityEnabled, input.Flow = false, ""
+			input.TLSEnabled = true
+			input.CertificatePath, input.PrivateKeyPath = "/fixture/server.crt", "/fixture/server.key"
+			if engine == core.EngineSingBox {
+				input.Flow = "xtls-rprx-vision"
+			}
+			plan, err := RegeneratePlan(protocol, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Flow != input.Flow {
+				t.Fatal("regeneration replaced the selected Flow")
+			}
+			if _, err := Generate(engine, plan); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

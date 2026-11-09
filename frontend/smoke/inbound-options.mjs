@@ -22,6 +22,14 @@ assert.equal(JSON.parse(readXHTTPOptions(form, tls, values).xhttp_extra).downloa
 values.set('xhttp_extra', '[]');
 assert.throws(() => readXHTTPOptions(form, tls, values), /JSON 对象/);
 
+const reality = {key:'vless-xhttp-reality',transports:['xhttp']};
+values.set('xhttp_extra', '{"downloadSettings":{"realitySettings":{"mldsa65Verify":"old-key"}}}');
+values.set('xhttp_split','1');
+values.set('reality_mldsa65_verify','new-key');
+assert.equal(JSON.parse(readXHTTPOptions(form,reality,values).xhttp_extra).downloadSettings.realitySettings.mldsa65Verify,'new-key','download retains a stale ML-DSA key');
+values.set('reality_mldsa65_verify','');
+assert.equal(JSON.parse(readXHTTPOptions(form,reality,values).xhttp_extra).downloadSettings.realitySettings.mldsa65Verify,undefined,'clearing ML-DSA retains download verification');
+
 const controls = new Map(Object.entries({ mieru_traffic_pattern: { value: 'custom' },
   mieru_custom_tcp_fragment: { checked: false }, mieru_custom_max_sleep_ms: { value: '8' },
   mieru_custom_nonce_type: { value: 'FIXED' }, mieru_custom_nonce_min_len: { value: '6' }, mieru_custom_nonce_max_len: { value: '8' },

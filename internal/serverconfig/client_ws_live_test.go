@@ -143,11 +143,25 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plan := parsed
-			plan.TransportHost = tc.host
+			plan.ClientAddress, plan.ClientHost, plan.TLSClientALPN = tc.address, tc.host, "http/1.1"
 			if tc.edge {
-				plan.Port = edgePort
+				plan.ClientPort = edgePort
 			}
-			raw, err := BuildClientOutbound(core.EngineSingBox, plan, tc.address, "")
+			metadata, err := MarshalClientMetadata(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, ok := Parse(engine, server)
+			if !ok {
+				t.Fatal("saved origin not recognized")
+			}
+			if err := ApplyClientMetadata(&plan, metadata); err != nil {
+				t.Fatal(err)
+			}
+			if plan.Port != input.Port || plan.ClientAddress != tc.address || plan.ClientHost != tc.host {
+				t.Fatal("client options changed origin or failed to persist")
+			}
+			raw, err := BuildClientOutbound(core.EngineSingBox, plan, "unused.example.test", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +169,7 @@ func testNativeWebSocketTLSAddressOverride(t *testing.T, engine core.Engine, pro
 			if err := json.Unmarshal(raw, &out); err != nil {
 				t.Fatal(err)
 			}
-			profile, err := BuildClientProfile(plan, tc.address, "")
+			profile, err := BuildClientProfile(plan, "unused.example.test", "")
 			if err != nil {
 				t.Fatal(err)
 			}

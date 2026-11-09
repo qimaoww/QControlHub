@@ -29,6 +29,7 @@ func TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey(t *testing
 					t.Fatalf("%s protocol %q does not advertise VLESS Encryption", engine, test.protocol)
 				}
 				input, err := NewPlan(protocol)
+				input.RealityServerName = "reality.example.test"
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -71,6 +72,7 @@ func TestVLESSEncryptionRejectsMismatchedClientKey(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
 		protocol, _ := FindProtocol(engine, ProtocolVLESSEncTCP)
 		input, err := NewPlan(protocol)
+		input.RealityServerName = "reality.example.test"
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,6 +102,7 @@ func TestPlainVLESSEncryptionPresetRunsWithoutTLSOrReality(t *testing.T) {
 				t.Fatalf("%s plain VLESS-ENC preset = %+v (%v)", engine, protocol, ok)
 			}
 			input, err := NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -22,7 +22,7 @@ func TestSpecialPresetEditsRetainNativeContent(t *testing.T) {
 			input.Tag, input.Port = "selected", 24111
 			input.XHTTPBackendPort, input.XHTTPTLSPort = 24112, 24113
 			input.TLSMode, input.TLSServerName = "native", "fixture.example.test"
-			input.RealityServerName = DefaultRealityServerName
+			input.RealityServerName = "reality.example.test"
 			input.CertificatePath, input.PrivateKeyPath = "/tmp/fixture.crt", "/tmp/fixture.key"
 			source, err := Generate(pair.engine, input)
 			if err != nil {

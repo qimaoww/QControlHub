@@ -66,7 +66,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix[:8], Listen: "0.0.0.0",
 		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
-		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
+		TLSEnabled: protocol.DefaultTLS,
 	}
 	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP || protocol.Key == ProtocolXHTTPTLS || isXHTTPGroup(protocol.Key) {
 		input.BlockMainlandDestination = true
@@ -82,8 +82,6 @@ func NewPlan(protocol Protocol) (Input, error) {
 	}
 	if protocol.PortForward {
 		input.Username = ""
-		input.TargetAddress = "127.0.0.1"
-		input.TargetPort = 80
 		input.Network = "tcp"
 	}
 	if protocol.Key == ProtocolTUIC {
@@ -170,7 +168,6 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.RealityPrivateKey = base64.RawURLEncoding.EncodeToString(privateKey.Bytes())
 		input.RealityPublicKey = base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 		input.RealityShortID = hex.EncodeToString(shortID)
-		input.RealityServerName = DefaultRealityServerName
 		input.RealityMinClientVer = "0.0.0"
 	}
 	if protocol.UsesVLESSEncryption {
@@ -218,6 +215,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	}
 	randomTransportPath := plan.TransportPath
 	plan.Transport = current.Transport
+	plan.Flow = current.Flow
 	plan.TransportPath = current.TransportPath
 	plan.TransportHost = current.TransportHost
 	plan.TransportHTTPMethod = current.TransportHTTPMethod

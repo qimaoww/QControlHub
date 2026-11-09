@@ -46,6 +46,9 @@ func TestCatalogInboundLifecycle(t *testing.T) {
 							t.Fatal(err)
 						}
 						input.Tag, input.Port = "selected", 24111
+						if protocol.PortForward {
+							input.TargetAddress, input.TargetPort = "127.0.0.1", 80
+						}
 						input.TLSMode, input.TLSServerName = "native", "fixture.example.test"
 						input.CertificatePath, input.PrivateKeyPath = "/tmp/qch-fixture.crt", "/tmp/qch-fixture.key"
 						input.RealityServerName = "www.amazon.com"

@@ -22,6 +22,7 @@ func TestVLESSXHTTPRealityPlansMatchBothCoreShapes(t *testing.T) {
 				t.Fatalf("%s XHTTP preset was not published", engine)
 			}
 			input, err := NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -57,6 +58,7 @@ func TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +99,7 @@ func TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair(t *testing.T) {
 		t.Fatal("Xray XHTTP preset does not advertise ML-DSA support")
 	}
 	current, err := NewPlan(protocol)
+	current.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,9 +155,13 @@ func TestVLESSRealityPlansGenerateAndRoundTripKeys(t *testing.T) {
 		if !input.RealityEnabled || input.RealityPrivateKey == "" || input.RealityPublicKey == "" || len(input.RealityShortID) != 16 {
 			t.Fatalf("NewPlan(%s) did not create Reality material: %+v", engine, input)
 		}
-		if strings.Contains(strings.ToLower(input.RealityServerName), "cloudflare") {
-			t.Fatalf("NewPlan(%s) selected a Cloudflare Reality target: %s", engine, input.RealityServerName)
+		if input.RealityServerName != "" {
+			t.Fatalf("NewPlan(%s) preselected a Reality SNI", engine)
 		}
+		if _, err := Generate(engine, input); err == nil {
+			t.Fatal("empty Reality SNI was accepted")
+		}
+		input.RealityServerName = "reality.example.test"
 		content, err := Generate(engine, input)
 		if err != nil {
 			t.Fatalf("Generate(%s): %v", engine, err)
@@ -181,6 +188,7 @@ func TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault(t
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}

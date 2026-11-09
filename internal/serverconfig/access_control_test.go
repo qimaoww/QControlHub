@@ -19,6 +19,7 @@ func TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules(t *testi
 				t.Fatalf("%s VLESS preset was not published", engine)
 			}
 			input, err := NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,6 +66,7 @@ func TestMainlandAccessPolicyRejectsTagPortMismatch(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineMihomo, ProtocolVLESS)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +89,7 @@ func TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON(t *testing.T) {
 		t.Fatal("ss-rust Shadowsocks preset was not published")
 	}
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +125,7 @@ func TestMainlandRulesUseExternalCoreResources(t *testing.T) {
 			t.Fatalf("%s VLESS preset missing", engine)
 		}
 		input, err := NewPlan(protocol)
+		input.RealityServerName = "reality.example.test"
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,10 +160,12 @@ func TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts(t *testing.T)
 			t.Parallel()
 			protocol, _ := FindProtocol(engine, ProtocolVLESS)
 			first, err := NewPlan(protocol)
+			first.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
 			second, err := NewPlan(protocol)
+			second.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,6 +239,7 @@ func TestXHTTPPlansBlockMainlandDestinationByDefault(t *testing.T) {
 				t.Fatalf("%s %s preset was not published", engine, key)
 			}
 			input, err := NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,6 +267,7 @@ func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *t
 			t.Parallel()
 			protocol, _ := FindProtocol(engine, ProtocolVLESS)
 			input, err := NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,6 +322,7 @@ func TestXrayMainlandDestinationRestoresOwnedDomainStrategy(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,6 +358,7 @@ func TestXrayMainlandDestinationPreservesOperatorDomainStrategy(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,6 +398,7 @@ func TestXrayMainlandSourceDoesNotChangeDomainStrategy(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,6 +418,7 @@ func TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange(t *testing.
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := NewPlan(protocol)
+	input.RealityServerName = "reality.example.test"
 	if err != nil {
 		t.Fatal(err)
 	}

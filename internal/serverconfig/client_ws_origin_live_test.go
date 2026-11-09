@@ -60,6 +60,9 @@ func nativeWSOriginRun(t *testing.T, engine core.Engine, binary, content string,
 		checkArgs = []string{"-t", "-d", dir, "-f", config}
 		runArgs = []string{"-d", dir, "-f", config}
 	}
+	if engine == core.EngineShadowsocksRust {
+		checkArgs, runArgs = []string{"--version"}, []string{"-c", config}
+	}
 	check := exec.Command(binary, checkArgs...)
 	check.Env = append(os.Environ(), "SAFE_PATHS="+filepath.Dir(certPath), "SSL_CERT_FILE="+certPath)
 	if output, err := check.CombinedOutput(); err != nil {
