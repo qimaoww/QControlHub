@@ -16,6 +16,7 @@ func TestValidationAndDeployRedactCoreEchoedInlineKeys(t *testing.T) {
 		t.Run(string(engine), func(t *testing.T) {
 			protocol, _ := serverconfig.FindProtocol(engine, serverconfig.ProtocolVLESS)
 			input, err := serverconfig.NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
