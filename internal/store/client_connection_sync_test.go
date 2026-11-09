@@ -145,28 +145,32 @@ func TestClientConnectionSyncPaginationAndCountryCounts(t *testing.T) {
 }
 
 func TestClientConnectionSyncUpgradeKeepsHistory(t *testing.T) {
-	db, ctx, _ := isolatedConfigScopeStore(t)
-	agent := sharedTestAgent(t, db, ctx)
-	if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: "log_aaabcdefabcdef01", Entries: []core.CoreLogEntry{{Engine: core.EngineMihomo, Level: "info", Message: "[TCP] 8.8.8.8:50123 --> 1.1.1.1:443 using DIRECT"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.pool.Exec(ctx, `DROP TABLE client_connection_changes; DROP TABLE client_connection_revision; DROP INDEX client_connections_group_time_idx; DELETE FROM qcontrolhub_schema_migrations WHERE version>=93; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(92) ON CONFLICT DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	q := ClientConnectionQuery{Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Hour), GroupByIP: true, SkipTimeline: true, Limit: 100, Bucket: "hour"}
-	h, _, err := db.SyncClientConnections(ctx, q, "upgrade", "")
-	if err != nil || h.Flows != 1 || len(h.Records) != 1 {
-		t.Fatalf("upgrade lost history: %+v %v", h, err)
-	}
-	if _, err = db.pool.Exec(ctx, `UPDATE client_connections SET inbound_port=8443`); err != nil {
-		t.Fatal(err)
-	}
-	h, _, err = db.SyncClientConnections(ctx, q, "upgrade", h.SyncToken)
-	if err != nil || len(h.Records) != 1 || h.Records[0].Endpoints[0].LocalPort != 8443 {
-		t.Fatalf("upgrade did not install tracking: %+v %v", h, err)
+	for _, version := range []int{92, 93} {
+		t.Run(fmt.Sprintf("schema-%d", version), func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			agent := sharedTestAgent(t, db, ctx)
+			if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: "log_aaabcdefabcdef01", Entries: []core.CoreLogEntry{{Engine: core.EngineMihomo, Level: "info", Message: "[TCP] 8.8.8.8:50123 --> 1.1.1.1:443 using DIRECT"}}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.pool.Exec(ctx, fmt.Sprintf(`DROP TABLE client_connection_changes; DROP TABLE client_connection_revision; DROP INDEX client_connections_group_time_idx; DELETE FROM qcontrolhub_schema_migrations WHERE version>=93; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(%d) ON CONFLICT DO NOTHING`, version)); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.migrate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			q := ClientConnectionQuery{Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Hour), GroupByIP: true, SkipTimeline: true, Limit: 100, Bucket: "hour"}
+			h, _, err := db.SyncClientConnections(ctx, q, "upgrade", "")
+			if err != nil || h.Flows != 1 || len(h.Records) != 1 {
+				t.Fatalf("upgrade lost history: %+v %v", h, err)
+			}
+			if _, err = db.pool.Exec(ctx, `UPDATE client_connections SET inbound_port=8443`); err != nil {
+				t.Fatal(err)
+			}
+			h, _, err = db.SyncClientConnections(ctx, q, "upgrade", h.SyncToken)
+			if err != nil || len(h.Records) != 1 || h.Records[0].Endpoints[0].LocalPort != 8443 {
+				t.Fatalf("upgrade did not install tracking: %+v %v", h, err)
+			}
+		})
 	}
 }
 
