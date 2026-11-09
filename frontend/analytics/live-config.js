@@ -228,7 +228,8 @@ export async function liveConfigPage(ctx) {
     sourceBlocked = false; recovery.replaceChildren();
     const feedback = form.querySelector(':scope > .a-notice');
     if (feedback) feedback.textContent = "";
-    form.querySelector('[type=submit]').disabled = !importSource && !canDeploy;
+    const submit = form.querySelector('[type=submit]');
+    if (submit) submit.disabled = !importSource && !canDeploy;
     if (readHistory) readHistory.disabled = false;
     syncDraft();
   }
