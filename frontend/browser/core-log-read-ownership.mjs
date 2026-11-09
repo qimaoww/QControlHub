@@ -180,6 +180,20 @@ export async function testLogReadOwnership() {
     assert.equal(rows().length, 0);
     denied = false;
 
+    // A late metadata failure must finish its status without discarding the
+    // already authorized complete window or preventing a manual recovery.
+    session = { ...session, user_id: 'late-directory-failure' };
+    sources = [source('alpha')]; directory = deferred();
+    const failedMetadata = directory;
+    boot('#core-logs', { agent_id: '', limit: 1000 });
+    await waitFor(() => ready() && main().textContent.includes('1000 条日志'), 'window waited for late failing metadata');
+    sourceFailure = 503; directory = null; failedMetadata.resolve();
+    await waitFor(() => main().textContent.includes('来源状态读取失败'), 'late metadata failure was not reported');
+    assert.equal(document.querySelector('[data-log-refresh-label]').textContent, '自动更新已暂停', 'failed metadata retained a loading status');
+    assert.equal(rows().length, 200, 'late metadata failure discarded authorized history');
+    sourceFailure = 0; refresh();
+    await waitFor(() => ready() && !main().textContent.includes('来源状态读取失败') && main().textContent.includes('1000 条日志'), 'late metadata failure prevented recovery');
+
     // A late grant result can normalize a completed target to a fresh scope.
     session = { ...session, user_id: 'late-target-revocation' };
     sources = [source('beta')]; directory = deferred();

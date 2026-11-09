@@ -233,7 +233,10 @@ export async function logsPage(ctx) {
           if (windowComplete) showReadFailure(failure);
         } else {
           collection.unavailable();
-          if (windowComplete) { failures++; error.textContent = "来源状态读取失败，请刷新重试。"; }
+          if (windowComplete) {
+            failures++; error.textContent = "来源状态读取失败，请刷新重试。";
+            status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
+          }
         }
       }).finally(() => {
         signal.removeEventListener("abort", abortDirectory);
