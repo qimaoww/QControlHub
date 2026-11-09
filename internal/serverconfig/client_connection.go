@@ -10,14 +10,21 @@ import (
 // Detached dial options never change the listener. Bind them to the native
 // endpoint so a source edit cannot attach an old client's options to a new peer.
 type clientConnectionMetadata struct {
-	Binding string `json:"binding"`
-	Address string `json:"address,omitempty"`
-	Port    int    `json:"port,omitempty"`
-	Host    string `json:"host,omitempty"`
-	ALPN    string `json:"alpn,omitempty"`
+	Binding    string `json:"binding"`
+	Address    string `json:"address,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	Host       string `json:"host,omitempty"`
+	ALPN       string `json:"alpn,omitempty"`
+	RealitySNI string `json:"reality_sni,omitempty"`
 }
 
 func clientConnectionBinding(input Input) string {
+	if input.Transport == "" {
+		input.Transport = "raw"
+	}
+	if input.Transport == "raw" || input.Transport == "quic" {
+		input.TransportPath = ""
+	}
 	certificate, key := input.CertificatePath, input.PrivateKeyPath
 	tls := input.TLSEnabled
 	if !tls || proxiedTLS(input) {

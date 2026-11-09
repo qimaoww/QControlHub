@@ -113,6 +113,40 @@ func TestMihomoQUICALPNRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClientConnectionBindingUsesNativeTransportDefaults(t *testing.T) {
+	for _, engine := range core.AllEngines() {
+		for _, transport := range []string{"", "raw"} {
+			t.Run(string(engine)+"/"+transport, func(t *testing.T) {
+				protocol, _ := FindProtocol(engine, ProtocolSS2022)
+				input, err := NewPlan(protocol)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Transport, input.TransportPath = transport, "/inactive-path"
+				input.ClientAddress, input.ClientPort = "edge.example.test", 34443
+				source, err := Generate(engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				metadata, err := MarshalClientMetadata(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed, ok := Parse(engine, source)
+				if !ok {
+					t.Fatal("source not recognized")
+				}
+				if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+					t.Fatal(err)
+				}
+				if parsed.ClientAddress != input.ClientAddress || parsed.ClientPort != input.ClientPort {
+					t.Fatal("native transport normalization lost saved client overrides")
+				}
+			})
+		}
+	}
+}
+
 func TestNewTLSPlansRequireRealCertificateInput(t *testing.T) {
 	for _, engine := range core.AllEngines() {
 		for _, protocol := range Protocols(engine) {
@@ -154,6 +188,45 @@ func TestRealityTargetAndNamesRoundTrip(t *testing.T) {
 			parsed.RealityServerNames = "wrong.example.test"
 			if _, err := Generate(engine, parsed); err == nil {
 				t.Fatal("client SNI missing from server list accepted")
+			}
+		})
+	}
+}
+
+func TestRealityClientSNISelectionSurvivesReadback(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
+		t.Run(string(engine), func(t *testing.T) {
+			protocol, _ := FindProtocol(engine, ProtocolVLESS)
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.RealityServerName = "selected.example.test"
+			input.RealityServerNames = "first.example.test,selected.example.test"
+			source, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata, err := MarshalClientMetadata(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(engine, source)
+			if !ok {
+				t.Fatal("source not recognized")
+			}
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
+			}
+			if parsed.RealityServerName != input.RealityServerName {
+				t.Fatal("server allow-list order replaced the selected client SNI")
+			}
+			parsed.RealityServerName, parsed.RealityServerNames = "changed.example.test", "changed.example.test"
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
+			}
+			if parsed.RealityServerName != "changed.example.test" {
+				t.Fatal("metadata restored a client SNI removed from native source")
 			}
 		})
 	}

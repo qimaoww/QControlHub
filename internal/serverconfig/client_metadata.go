@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -63,8 +64,12 @@ func webSocketClientIdentity(input Input) webSocketClientMetadata {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
-	if input.Transport != "xhttp" && (input.ClientAddress != "" || input.ClientPort != 0 || input.ClientHost != "" || input.TLSClientALPN != "") {
-		metadata.Connection = &clientConnectionMetadata{Binding: clientConnectionBinding(input), Address: input.ClientAddress, Port: input.ClientPort, Host: input.ClientHost, ALPN: input.TLSClientALPN}
+	clientSNI := ""
+	if names := xhttpRealityNames(input); input.RealityEnabled && len(names) > 0 && names[0] != input.RealityServerName {
+		clientSNI = input.RealityServerName
+	}
+	if input.Transport != "xhttp" && (input.ClientAddress != "" || input.ClientPort != 0 || input.ClientHost != "" || input.TLSClientALPN != "" || clientSNI != "") {
+		metadata.Connection = &clientConnectionMetadata{Binding: clientConnectionBinding(input), Address: input.ClientAddress, Port: input.ClientPort, Host: input.ClientHost, ALPN: input.TLSClientALPN, RealitySNI: clientSNI}
 	}
 	if input.Transport == "websocket" && !input.RealityEnabled && !proxiedTLS(input) {
 		ws := webSocketClientIdentity(input)
@@ -146,6 +151,9 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	}
 	if connection := metadata.Connection; connection != nil && connection.Binding == clientConnectionBinding(*input) {
 		input.ClientAddress, input.ClientPort, input.ClientHost, input.TLSClientALPN = connection.Address, connection.Port, connection.Host, connection.ALPN
+		if connection.RealitySNI != "" && input.RealityEnabled && slices.Contains(xhttpRealityNames(*input), connection.RealitySNI) {
+			input.RealityServerName = connection.RealitySNI
+		}
 	}
 	f := metadata.Frontend
 	if metadata.ExternalFrontend != nil {

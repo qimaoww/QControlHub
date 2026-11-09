@@ -208,8 +208,9 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.planGate) await test.planGate;
       if (test.planError) throw Object.assign(new Error("协议方案读取失败"), {status:503});
       const entry = entries.find(item => item.protocol.key === body.protocol);
+      const generated = body.input && entry.regenerated_plan || entry.plan;
       return {...structuredClone(entry.plan), ...body.input,
-        ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(entry.plan,key)).map(key=>[key,entry.plan[key]])),
+        ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(generated,key)).map(key=>[key,generated[key]])),
         tag:`new-${++test.serial}`, port:22000+test.serial,
         ...(body.input && ['vmess','vless-ws-tls'].includes(body.protocol) ? {credential:crypto.randomUUID()} : {})};
     }

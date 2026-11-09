@@ -73,6 +73,9 @@ func TestCrossCoreCatalogConnectionsLive(t *testing.T) {
 						}
 						if input.RealityEnabled {
 							input.RealityServerName = "tls.example.test"
+							if transport != "xhttp" {
+								input.RealityServerNames = "first.example.test,tls.example.test"
+							}
 						}
 						input.ClientAddress, input.ClientPort = "127.0.0.1", input.Port
 						source, err := Generate(engine, input)

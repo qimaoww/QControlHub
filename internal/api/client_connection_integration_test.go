@@ -26,6 +26,9 @@ func TestClientConnectionOptionsStayWithConfigOwner(t *testing.T) {
 				var input serverconfig.Input
 				actor.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolSS2022}, http.StatusCreated, &input)
 				input.Tag, input.Port = "same-tag", 21001+i
+				// API callers may omit the default transport and retain an inactive
+				// path from a previous mode. Native readback must preserve overrides.
+				input.Transport, input.TransportPath = "", "/inactive-path"
 				input.ClientAddress, input.ClientPort = "edge-"+strconv.Itoa(i)+".example.test", 34443+i
 				body := map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": input}
 				var result configMutationResult

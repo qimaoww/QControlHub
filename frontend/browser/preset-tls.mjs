@@ -4,6 +4,7 @@ import { readServerPlanInput } from "../modules/inbound-options-model.js";
 
 const certificate = {id:"crt_fixture",name:"面板 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"};
 export async function testManagedTLSRuntime() {
+  await testMLDSAFieldRegeneration();
   await testNativeFieldRegeneration();
   await testXHTTPTLSRuntime();
   for (const shared of [false,true]) {
@@ -93,6 +94,27 @@ export async function testManagedTLSRuntime() {
     const saved=await test.save();
     assert(saved.tls_mode === "nginx" && saved.panel_certificate_id === certificate.id,"delayed certificate binding leaked into proxy payload");
   } finally { release();test.dispose(); }
+}
+
+async function testMLDSAFieldRegeneration() {
+  const test = await createPresetEditor('xray', {protocol:'vless'});
+  const {control,edit} = test;
+  try {
+    await test.open();
+    const oldCredential = control('credential').value;
+    test.clickButton('重新生成凭据',test.form());
+    await waitFor(()=>control('credential').value!==oldCredential&&!test.root.hasAttribute('aria-busy'),'Reality credential rotation did not finish');
+    assert(!control('reality_mldsa65_seed').value&&!control('reality_mldsa65_verify').value,'credential rotation enabled optional ML-DSA');
+    edit('reality_mldsa65_verify','old-verify');
+    const identity = Object.fromEntries(['tag','port','credential','reality_private_key','reality_short_id'].map(key=>[key,control(key).value]));
+    control('reality_mldsa65_seed').closest('.a-field').querySelector('[aria-label="生成 ML-DSA-65 密钥对"]').click();
+    await waitFor(()=>control('reality_mldsa65_seed').value&&!test.root.hasAttribute('aria-busy'),'ML-DSA generation did not finish');
+    assert(control('reality_mldsa65_verify').value!=='old-verify'&&control('reality_mldsa65_verify').value.length===2603,'ML-DSA generation retained a stale verify key');
+    assert(control('reality_mldsa65_verify').maxLength>=2603,'ML-DSA verify field truncates a valid key');
+    for(const [key,value] of Object.entries(identity))assert(control(key).value===value,`ML-DSA generation changed unrelated ${key}`);
+    const saved = await test.save();
+    assert(saved.reality_mldsa65_verify===control('reality_mldsa65_verify').value&&saved.reality_mldsa65_seed===control('reality_mldsa65_seed').value,'ML-DSA pair lost after save/reopen');
+  } finally {test.dispose();}
 }
 
 async function testNativeFieldRegeneration() {

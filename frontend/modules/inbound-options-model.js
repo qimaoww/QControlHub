@@ -57,6 +57,8 @@ export const generatedPlanFields = Object.freeze([
   "reality_private_key",
   "reality_public_key",
   "reality_short_id",
+  "reality_mldsa65_seed",
+  "reality_mldsa65_verify",
   "vless_decryption",
   "vless_encryption",
   "sudoku_client_key",
@@ -98,7 +100,7 @@ export const generatedFieldActions = Object.freeze([
   ],
   [
     "reality_mldsa65_seed",
-    "reality_mldsa65_seed",
+    "reality_mldsa65_seed,reality_mldsa65_verify",
     "生成 ML-DSA-65 密钥对",
   ],
   ["sudoku_client_key", "credential,sudoku_client_key", "生成 Sudoku 密钥对"],
