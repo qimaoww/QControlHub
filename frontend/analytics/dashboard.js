@@ -288,7 +288,7 @@ export async function dashboardPage(ctx) {
         node("div", {}, muted("峰值日"), node("b", {}, summary.peakDay ? `${summary.peakDay} · ${bytes(summary.peakBytes)}` : "—"))));
       detailTable.updateRows(days.map(day => {
         const usable = day.recorded !== false && day.sample_count > 0;
-        return [day.day, usable ? "有效采样" : day.recorded === false ? "无采集记录" : "数据不完整", usable ? bytes(day.received_bytes) : "—", usable ? bytes(day.sent_bytes) : "—", usable ? bytes(day.received_bytes + day.sent_bytes) : "—", usable ? `${bytes(day.peak_receive_bps)}/s` : "—", usable ? `${bytes(day.peak_send_bps)}/s` : "—"];
+        return [day.day, usable ? "有效" : day.recorded === false ? "无记录" : "不完整", usable ? bytes(day.received_bytes) : "—", usable ? bytes(day.sent_bytes) : "—", usable ? bytes(day.received_bytes + day.sent_bytes) : "—", usable ? `${bytes(day.peak_receive_bps)}/s` : "—", usable ? `${bytes(day.peak_send_bps)}/s` : "—"];
       }));
       plot.updateDays(days);
     } else if (states.get("traffic") === "denied") {

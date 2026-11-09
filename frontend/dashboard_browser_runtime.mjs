@@ -314,9 +314,9 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(historyBands[3].getAttribute("aria-label").includes("采集数据不完整"), "incomplete day was presented as valid");
   [...traffic().querySelectorAll("button")].find(button => button.textContent === "流量明细").click();
   const historyDialog=document.querySelector("dialog[open]"), rows=[...historyDialog.querySelectorAll('[aria-label="每日流量明细"] tbody tr')];
-  assert(rows[1].textContent.includes("无采集记录") && rows[1].textContent.includes("—"), "daily detail converted no records into zero");
-  assert(rows[2].textContent.includes("有效采样") && compact(rows[2].textContent).includes("0B"), "daily detail discarded sampled zero");
-  assert(rows[3].textContent.includes("数据不完整"), "daily detail hid incomplete sampling");
+  assert(rows[1].textContent.includes("无记录") && rows[1].textContent.includes("—"), "daily detail converted no records into zero");
+  assert(rows[2].textContent.includes("有效") && compact(rows[2].textContent).includes("0B"), "daily detail discarded sampled zero");
+  assert(rows[3].textContent.includes("不完整"), "daily detail hid incomplete sampling");
   historyDialog.close();assertLayout();
   if (mode === "dashboard") {
     Object.defineProperty(document,"hidden",{configurable:true,value:true});document.dispatchEvent(new Event("visibilitychange"));const hidden=reads("/panel-metrics");await delay(5200);assert(reads("/panel-metrics") === hidden, "hidden dashboard polled");delete document.hidden;document.dispatchEvent(new Event("visibilitychange"));await waitFor(() => reads("/panel-metrics") > hidden, "visible dashboard did not refresh");
