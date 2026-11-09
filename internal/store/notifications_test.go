@@ -316,7 +316,7 @@ func TestNotificationSecretsOwnershipAndUpdateCache(t *testing.T) {
 }
 
 func TestNotificationMigrationLegacyCompatibilityAndRollback(t *testing.T) {
-	for _, previous := range []int{90, 91} {
+	for _, previous := range []int{90, 91, 92} {
 		t.Run(fmt.Sprint(previous), func(t *testing.T) {
 			ctx, s := optionalTrafficTestStore(t)
 			settings := core.DefaultPanelSettings()
