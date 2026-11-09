@@ -12,6 +12,8 @@ export async function testPresetCatalogRuntime(catalog) {
     covered.add(actual.engine);
     try {
       await open('add');
+      const generationLabels = [...form().querySelectorAll('button[aria-label^="生成"]')].map(control=>control.getAttribute('aria-label'));
+      assert(new Set(generationLabels).size===generationLabels.length,'duplicate generation actions for the same key pair');
       if(actual.plan.reality_enabled) {
         assert(control('reality_server_name').value===''&&!control('reality_server_name').hasAttribute('list')&&control('reality_server_name').required,'new Reality SNI must be an empty required free-text field');
         edit('reality_server_name','reality.example.test');

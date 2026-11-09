@@ -14,9 +14,20 @@ type ClientVariant struct {
 
 func xhttpClientAddress(input Input, address string) string {
 	if input.ClientAddress != "" {
-		return input.ClientAddress
+		address = input.ClientAddress
+	}
+	if normalized, err := NormalizeClientAddress(address); err == nil {
+		return normalized
 	}
 	return address
+}
+
+func realityMLDSAVerify(input Input) string {
+	if input.RealityMLDSA65Verify != "" {
+		return input.RealityMLDSA65Verify
+	}
+	verify, _ := mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
+	return verify
 }
 
 func xhttpClientHost(input Input) string {
@@ -31,17 +42,22 @@ func xhttpClientStream(input Input, name string) map[string]any {
 	if input.Transport == "xhttp" {
 		x := map[string]any{"path": input.TransportPath, "host": xhttpClientHost(input), "mode": xhttpMode(input.XHTTPMode)}
 		if extra, _ := xhttpObject(input.XHTTPExtra); len(extra) > 0 {
+			download := mapValue(extra["downloadSettings"])
+			if address := stringValue(download["address"]); address != "" {
+				download["address"] = xhttpClientAddress(Input{}, address)
+			}
+			if r := mapValue(download["realitySettings"]); input.RealityEnabled && r != nil && stringValue(r["mldsa65Verify"]) == "" {
+				if verify := realityMLDSAVerify(input); verify != "" {
+					r["mldsa65Verify"] = verify
+				}
+			}
 			x["extra"] = extra
 		}
 		stream["network"], stream["xhttpSettings"] = "xhttp", x
 	}
 	if input.RealityEnabled {
 		r := map[string]any{"serverName": input.RealityServerName, "publicKey": input.RealityPublicKey, "shortId": input.RealityShortID, "fingerprint": "chrome"}
-		verify := input.RealityMLDSA65Verify
-		if verify == "" && input.RealityMLDSA65Seed != "" {
-			verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
-		}
-		if verify != "" {
+		if verify := realityMLDSAVerify(input); verify != "" {
 			r["mldsa65Verify"] = verify
 		}
 		stream["security"], stream["realitySettings"] = "reality", r
@@ -92,7 +108,7 @@ func xhttpEndpoint(input Input, tls bool) map[string]any {
 	}
 	input.XHTTPExtra, input.XHTTPMode = "", "auto"
 	stream := xhttpClientStream(input, input.TLSServerName)
-	stream["address"], stream["port"] = address, port
+	stream["address"], stream["port"] = xhttpClientAddress(Input{}, address), port
 	return stream
 }
 

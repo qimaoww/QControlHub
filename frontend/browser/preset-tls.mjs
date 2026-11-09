@@ -5,6 +5,7 @@ import { readServerPlanInput } from "../modules/inbound-options-model.js";
 const certificate = {id:"crt_fixture",name:"面板 TLS 测试证书",domains:["proxy.example.test"],source:"import",owned:true,version:1,not_after:"2099-01-01T00:00:00Z"};
 export async function testManagedTLSRuntime() {
   await testMLDSAFieldRegeneration();
+  await testXHTTPSplitMLDSARegeneration();
   await testNativeFieldRegeneration();
   await testXHTTPTLSRuntime();
   for (const shared of [false,true]) {
@@ -115,6 +116,36 @@ async function testMLDSAFieldRegeneration() {
     const saved = await test.save();
     assert(saved.reality_mldsa65_verify===control('reality_mldsa65_verify').value&&saved.reality_mldsa65_seed===control('reality_mldsa65_seed').value,'ML-DSA pair lost after save/reopen');
   } finally {test.dispose();}
+}
+
+async function testXHTTPSplitMLDSARegeneration() {
+  for (const shared of [false,true]) {
+    const test = await createPresetEditor('xray',{protocol:'vless-xhttp-reality',shared});
+    const {control,edit} = test;
+    try {
+      await test.open();
+      edit('xhttp_split',true);
+      edit('xhttp_download_address','203.0.113.8');
+      const generate = () => control('reality_mldsa65_seed').closest('.a-field').querySelector('[aria-label="生成 ML-DSA-65 密钥对"]').click();
+      generate();
+      await waitFor(()=>control('reality_mldsa65_verify').value&&!test.root.hasAttribute('aria-busy'),'split ML-DSA generation did not finish');
+      let saved = await test.save();
+      const download = () => JSON.parse(saved.xhttp_extra).downloadSettings;
+      assert(download().realitySettings.mldsa65Verify===saved.reality_mldsa65_verify,'split save lost ML-DSA verification');
+      // The fixture reuses one generated key pair; the native/API tests check
+      // fresh identities. Here an explicitly stale client key must be replaced.
+      const previous = 'previous-verification-key', oldCredential = saved.credential;
+      edit('reality_mldsa65_verify',previous);
+      test.clickButton('重新生成凭据',test.form());
+      await waitFor(()=>control('credential').value!==oldCredential&&!test.root.hasAttribute('aria-busy'),'split credential rotation did not finish');
+      saved = await test.save();
+      assert(saved.reality_mldsa65_verify!==previous&&download().realitySettings.mldsa65Verify===saved.reality_mldsa65_verify,'split rotation kept the previous ML-DSA key');
+      assert(download().address==='203.0.113.8','split rotation replaced the download endpoint');
+      edit('reality_mldsa65_seed','');edit('reality_mldsa65_verify','');
+      saved = await test.save();
+      assert(!download().realitySettings.mldsa65Verify,'disabling ML-DSA kept the old download verification');
+    } finally {test.dispose();}
+  }
 }
 
 async function testNativeFieldRegeneration() {

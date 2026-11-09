@@ -12,7 +12,11 @@ export function readXHTTPOptions(form, protocol, values) {
     const security = d[tls ? "tlsSettings" : "realitySettings"] ||= {};
     Object.assign(security, {serverName:values.get("xhttp_download_sni") || "", fingerprint:security.fingerprint || "chrome"});
     if (tls) Object.assign(security, {allowInsecure:false, alpn:(values.get("xhttp_download_alpn") || "h2").split(",").map(x => x.trim()).filter(Boolean), fingerprint:values.get("xhttp_download_alpn")?.trim() === "http/1.1" ? "unsafe" : security.fingerprint === "unsafe" ? "chrome" : security.fingerprint});
-    else Object.assign(security, {publicKey:values.get("reality_public_key") || "", shortId:values.get("reality_short_id") || ""});
+    else {
+      Object.assign(security, {publicKey:values.get("reality_public_key") || "", shortId:values.get("reality_short_id") || ""});
+      if (values.get("reality_mldsa65_verify")) security.mldsa65Verify = values.get("reality_mldsa65_verify");
+      else delete security.mldsa65Verify;
+    }
     const x = d.xhttpSettings ||= {};
     Object.assign(x, {path:values.get("transport_path"), host:values.get("xhttp_download_host") || "", mode:x.mode || "auto"});
   } else if (!group && form.dataset.xhttpSplitChanged === "true") delete extra.downloadSettings;
@@ -78,11 +82,6 @@ export const generatedFieldActions = Object.freeze([
   ["secondary_credential", "secondary_credential", "生成次凭据"],
   ["transport_path", "transport_path", "生成路径或 ServiceName"],
   [
-    "reality_public_key",
-    "reality_private_key,reality_public_key",
-    "生成 Reality 密钥对",
-  ],
-  [
     "reality_private_key",
     "reality_private_key,reality_public_key",
     "生成 Reality 密钥对",
@@ -94,11 +93,6 @@ export const generatedFieldActions = Object.freeze([
     "生成 VLESS-ENC 密钥对",
   ],
   [
-    "vless_encryption",
-    "vless_decryption,vless_encryption",
-    "生成 VLESS-ENC 密钥对",
-  ],
-  [
     "reality_mldsa65_seed",
     "reality_mldsa65_seed,reality_mldsa65_verify",
     "生成 ML-DSA-65 密钥对",
@@ -106,9 +100,7 @@ export const generatedFieldActions = Object.freeze([
   ["sudoku_client_key", "credential,sudoku_client_key", "生成 Sudoku 密钥对"],
   ["snell_shadow_tls_password", "snell_shadow_tls_password", "生成 ShadowTLS 密码"],
   ["wireguard_server_private_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
-  ["wireguard_server_public_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
   ["wireguard_client_private_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
-  ["wireguard_client_public_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
   ["wireguard_preshared_key", "wireguard_preshared_key", "生成 WireGuard 预共享密钥"],
 ]);
 

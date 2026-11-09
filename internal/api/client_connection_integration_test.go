@@ -82,3 +82,94 @@ func TestClientConnectionOptionsStayWithConfigOwner(t *testing.T) {
 		})
 	}
 }
+
+func TestXHTTPSplitRotationStaysWithConfigOwner(t *testing.T) {
+	db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "split-rotation", core.EngineXray)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 21002, 21003)
+	base := "/agents/" + agent.ID + "/configs/xray"
+	for i, actor := range []configScopeAPIClient{owner, recipient} {
+		var input serverconfig.Input
+		actor.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolVLESSXHTTP}, http.StatusCreated, &input)
+		input.RealityServerName, input.BlockMainlandDestination = "reality.example.test", false
+		actor.call("POST", base+"/plans", map[string]any{"protocol": input.Protocol, "input": input}, http.StatusCreated, &input)
+		input.Tag, input.Port = "same-tag", 21001+i
+		input.ClientAddress, input.ClientPort = " [2001:db8::10] ", 34443+i
+		extra := map[string]any{"downloadSettings": map[string]any{"address": " [2001:db8::11] ", "port": input.ClientPort, "network": "xhttp", "security": "reality",
+			"xhttpSettings": map[string]any{"path": input.TransportPath}, "realitySettings": map[string]any{"serverName": input.RealityServerName, "publicKey": input.RealityPublicKey, "shortId": input.RealityShortID, "mldsa65Verify": input.RealityMLDSA65Verify}}}
+		encoded, _ := json.Marshal(extra)
+		input.XHTTPExtra, input.Listen = string(encoded), "::"
+		var saved configMutationResult
+		for _, operation := range []string{"add", "modify"} {
+			if operation == "modify" {
+				previous := input.RealityMLDSA65Verify
+				actor.call("POST", base+"/plans", map[string]any{"protocol": input.Protocol, "input": input}, http.StatusCreated, &input)
+				if input.RealityMLDSA65Verify == previous {
+					t.Fatal("API regeneration reused the previous ML-DSA identity")
+				}
+				input.Tag, input.Port = "same-tag", 21001+i
+			}
+			body := map[string]any{"operation": operation, "expected_version": saved.Config.Version, "intent": "deploy", "input": input}
+			if operation == "modify" {
+				body["original_tag"] = input.Tag
+			}
+			actor.call("POST", base+"/server-inbounds", body, http.StatusOK, &saved)
+			if saved.Task.SharedInstance != (i == 1) || saved.Task.ConfigID != saved.Config.ID || saved.Task.ConfigVersion != saved.Config.Version {
+				t.Fatal("rotation targeted another instance or revision")
+			}
+			task, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || task == nil || task.ID != saved.Task.ID {
+				t.Fatal(err)
+			}
+			parsed, ok := serverconfig.Parse(core.EngineXray, task.ConfigContent)
+			if !ok || parsed.RealityMLDSA65Seed != input.RealityMLDSA65Seed || parsed.RealityMLDSA65Verify != input.RealityMLDSA65Verify {
+				t.Fatal("task snapshot did not rotate the actual server seed")
+			}
+			completion := core.TaskResultRequest{LeaseID: task.LeaseID, Success: true, TrafficSettled: true}
+			if task.SharedInstance {
+				completion.InstanceStatus = &core.SharedInstanceStatus{Engine: task.Engine, ShareID: task.SharedTrafficID, ConfigID: task.ConfigID, ConfigVersion: task.ConfigVersion, TaskID: task.ID, AppliedTaskID: task.ID, Status: "active", ObservedAt: time.Now().UTC()}
+			}
+			if err := db.CompleteTask(ctx, agent.ID, task.ID, completion); err != nil {
+				t.Fatal(err)
+			}
+			var workspace agentConfigWorkspaceResource
+			actor.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
+			if len(workspace.Inbounds) != 1 || workspace.Inbounds[0].XHTTPExtra != input.XHTTPExtra {
+				t.Fatal("workspace lost private download settings")
+			}
+			var entries []clientAccessEntry
+			actor.call("GET", "/client-access?outbound_engine=xray", nil, http.StatusOK, &entries)
+			if len(entries) != 1 || len(entries[0].Profiles) != 1 || entries[0].ConfigID != saved.Config.ID {
+				t.Fatal("client export crossed configuration ownership")
+			}
+			if entries[0].Profiles[0].Address != "2001:db8::10" {
+				t.Fatal("displayed address differs from the native client endpoint")
+			}
+			var out struct {
+				Settings       struct{ VNext []struct{ Address string } }
+				StreamSettings struct {
+					XHTTPSettings struct {
+						Extra struct {
+							DownloadSettings struct {
+								Address         string
+								RealitySettings struct{ MLDSA65Verify string }
+							}
+						}
+					}
+				}
+			}
+			if err := json.Unmarshal(entries[0].Profiles[0].Outbound, &out); err != nil {
+				t.Fatal(err)
+			}
+			download := out.StreamSettings.XHTTPSettings.Extra.DownloadSettings
+			if len(out.Settings.VNext) != 1 || out.Settings.VNext[0].Address != "2001:db8::10" || download.Address != "2001:db8::11" || download.RealitySettings.MLDSA65Verify != input.RealityMLDSA65Verify {
+				t.Fatal("export lost the normalized endpoint or active ML-DSA identity")
+			}
+		}
+	}
+	var workspace agentConfigWorkspaceResource
+	admin.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
+	if len(workspace.Inbounds) != 0 {
+		t.Fatal("node management exposed another user's private configuration")
+	}
+}

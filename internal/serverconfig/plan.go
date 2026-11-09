@@ -215,6 +215,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	}
 	randomTransportPath := plan.TransportPath
 	plan.Transport = current.Transport
+	plan.Flow = current.Flow
 	plan.TransportPath = current.TransportPath
 	plan.TransportHost = current.TransportHost
 	plan.TransportHTTPMethod = current.TransportHTTPMethod

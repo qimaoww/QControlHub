@@ -227,6 +227,9 @@ func validateXHTTPDownload(input Input, raw any) error {
 		if !slices.Contains(xhttpRealityNames(input), stringValue(r["serverName"])) || stringValue(r["publicKey"]) != input.RealityPublicKey || stringValue(r["shortId"]) != input.RealityShortID {
 			return fmt.Errorf("下载 Reality 的 SNI、公钥和 Short ID 必须关联当前入站")
 		}
+		if verify := stringValue(r["mldsa65Verify"]); verify != "" && verify != realityMLDSAVerify(input) {
+			return fmt.Errorf("下载 Reality 的 ML-DSA-65 Verify 必须关联当前入站")
+		}
 		ip := net.ParseIP(address)
 		if ip != nil && input.Listen == "0.0.0.0" && ip.To4() == nil {
 			return fmt.Errorf("下载 IPv6 无法到达 IPv4 监听；将监听改为 :: 或配置可达的转发入口")

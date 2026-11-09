@@ -87,6 +87,9 @@ func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, cand
 	if !overridden && input.ClientAddress != "" {
 		address, overridden = input.ClientAddress, true
 	}
+	if normalized, err := serverconfig.NormalizeClientAddress(address); err == nil {
+		address = normalized
+	}
 	name, nameOverridden := "", false
 	if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
 		name, nameOverridden = value, true
@@ -178,10 +181,14 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 }
 
 func clientInputAddress(engine core.Engine, input serverconfig.Input, labels map[string]string) string {
-	if address := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); address != "" {
-		return address
+	address := input.ClientAddress
+	if override := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); override != "" {
+		address = override
 	}
-	return input.ClientAddress
+	if normalized, err := serverconfig.NormalizeClientAddress(address); err == nil {
+		return normalized
+	}
+	return address
 }
 
 func clientAddressFamily(address string) string {

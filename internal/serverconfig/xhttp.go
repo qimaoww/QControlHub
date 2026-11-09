@@ -93,6 +93,11 @@ func regenerateXHTTPReferences(plan *Input, current Input) error {
 		}
 		if r := mapValue(d["realitySettings"]); r != nil {
 			r["publicKey"], r["shortId"] = plan.RealityPublicKey, plan.RealityShortID
+			if verify := realityMLDSAVerify(*plan); verify != "" {
+				r["mldsa65Verify"] = verify
+			} else {
+				delete(r, "mldsa65Verify")
+			}
 		}
 		if intValue(d["port"]) == current.Port && (current.XHTTPCDN == "" || current.XHTTPCDN == "none") {
 			d["port"] = plan.Port
