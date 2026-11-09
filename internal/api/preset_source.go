@@ -20,6 +20,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 	var input struct {
 		core.Config
 		Intent             string  `json:"intent"`
+		InstallIfMissing   bool    `json:"install_if_missing"`
 		ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
@@ -68,7 +69,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.Version,
-		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing})
 	if err != nil {
 		writeStoreError(w, err)
 		return

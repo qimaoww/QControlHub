@@ -1,3 +1,4 @@
+import { configDeployBlockReason, configDeployConfirmation } from "../modules/core-install-state.js";
 import { readOrderedNodes } from "../modules/node-order.js";
 import { configDefaults } from "../modules/config-defaults.js";
 import { createArchiveDraft, archiveDraftDirty } from "../modules/archive-draft-model.js";
@@ -159,10 +160,9 @@ export async function archivePage(ctx) {
     const box = ctx.dialog(`${config.name} · 保存历史`, content, { wide: true });
   }
   function deliver(config) {
-    const eligible = list(agents).filter(agent => agent.status === "online" &&
-      (agent.capabilities || []).includes(config.engine) &&
-      (!config.agent_id || config.agent_id === agent.id) &&
-      (agent.runtime?.[config.engine]?.installed || agent.shared_allocation?.enabled));
+    const eligible = list(agents).filter(agent =>
+      (agent.supported_capabilities || agent.capabilities || []).includes(config.engine) &&
+      (!config.agent_id || config.agent_id === agent.id));
     const targetLabel = agent => `${agent.name} · ${agent.shared_allocation ? "当前账号共享实例" : "当前账号主实例"}`;
     const form = ctx.form([
       muted(`${config.name} · ${config.engine} · 保存于 ${date(config.updated_at)}`),
@@ -172,16 +172,26 @@ export async function archivePage(ctx) {
     ], "提交任务", async values => {
       const target = eligible.find(agent => agent.id === values.agent_id);
       if (!target) throw new Error("请选择当前账号可用的目标节点与实例。");
-      if (values.action === "deploy" && !await ctx.confirm(`将“${config.name}”已保存的配置部署到 ${targetLabel(target)} · ${config.engine} 并重启此实例内核？`, "部署并重启")) return;
+      const refreshed = list(await readOrderedNodes(ctx.api)).find(agent=>agent.id===target.id);
       if (!ctx.current()) return;
-      const task = await ctx.api("/tasks", { method: "POST", body: {
-        ...values, engine: config.engine, config_id: config.id, expected_config_version: config.version,
+      if (!refreshed || (refreshed.shared_allocation?.id || "") !== (target.shared_allocation?.id || ""))
+        throw new Error("目标实例已变化，请重新选择节点，当前选择已保留。");
+      const reason = configDeployBlockReason(refreshed, config.engine, ctx.can);
+      if (reason) throw new Error(reason);
+      if (values.action === "deploy" || !refreshed.runtime?.[config.engine]?.installed) {
+        const confirmation=configDeployConfirmation(refreshed,config.engine,values.action);
+        if (!await ctx.confirm(confirmation.message,confirmation.title) || !ctx.current()) return;
+      }
+      const task = await ctx.api(`/configs/${pathID(config.id)}/tasks`, { method: "POST", body: {
+        ...values, expected_config_version: config.version,
+        expected_instance_id:refreshed.shared_allocation?.id || "",
+        ...(!refreshed.runtime?.[config.engine]?.installed ? {install_if_missing:true} : {}),
       } });
       box.close();
       ctx.announce("任务已提交");
       if (ctx.can("tasks.read")) await taskDetail(ctx, task.id);
     });
-    const box = ctx.dialog(`${config.name} · 校验与部署`, eligible.length ? form : muted("没有在线且已安装对应内核的可用节点"));
+    const box = ctx.dialog(`${config.name} · 校验与部署`, eligible.length ? form : muted("没有当前账号可用且支持此内核的节点"));
   }
   function drawTemplates() {
     templateResults.replaceChildren(table(["名称", "内核", "保存时间", "操作"], list(templates).map(template => [

@@ -39,6 +39,7 @@ func (s *Server) putConfigManagement(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		OutboundTag        string                         `json:"outbound_tag"`
 		ReplacementTag     string                         `json:"replacement_tag"`
+		InstallIfMissing   bool                           `json:"install_if_missing"`
 		ExpectedInstanceID *string                        `json:"expected_instance_id,omitempty"`
 		Version            int                            `json:"version"`
 		Intent             core.Action                    `json:"intent"`
@@ -77,7 +78,7 @@ func (s *Server) putConfigManagement(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{TaskID: r.Header.Get("X-Config-Task-ID"), ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &serverconfig.ManagedState{Disabled: input.Disabled}})
+	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &serverconfig.ManagedState{Disabled: input.Disabled}})
 	if err != nil {
 		writeStoreError(w, err)
 		return

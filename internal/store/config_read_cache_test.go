@@ -50,7 +50,7 @@ func TestConfigReadCacheInvalidatesBeforeMutationDispatch(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			agent, enrollmentID := enrollTaskTestAgent(t, ctx, db)
 			defer cleanupTaskTestAgent(db, agent.ID, enrollmentID)
-			if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+			if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v2"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 				t.Fatal(err)
 			}
 			reads := []core.Task{

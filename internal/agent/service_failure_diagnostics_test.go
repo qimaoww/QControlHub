@@ -49,3 +49,37 @@ esac
 		t.Fatalf("core failure was hidden by service-manager output: %q", output)
 	}
 }
+
+func TestMihomoFirstDeployPreflightChecksTCPUDPAndInactiveSavedConfig(t *testing.T) {
+	for _, transport := range []string{"tcp", "udp"} {
+		t.Run(transport, func(t *testing.T) {
+			var port int
+			if transport == "tcp" {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer listener.Close()
+				port = listener.Addr().(*net.TCPAddr).Port
+			} else {
+				listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer listener.Close()
+				port = listener.LocalAddr().(*net.UDPAddr).Port
+			}
+			content := fmt.Sprintf("listeners: [{name: first, type: ss, listen: 127.0.0.1, port: %d}]\nrules: ['MATCH,DIRECT']\n", port)
+			spec := EngineSpec{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")}
+			if err := os.WriteFile(spec.ConfigPath, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := checkMihomoListenerPorts(spec, content, false); err == nil || !strings.Contains(err.Error(), "占用") {
+				t.Fatalf("occupied %s listener was accepted: %v", transport, err)
+			}
+			if err := checkMihomoListenerPorts(spec, content, true); err != nil {
+				t.Fatalf("active instance cannot retain its listeners: %v", err)
+			}
+		})
+	}
+}

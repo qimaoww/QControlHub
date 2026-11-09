@@ -40,7 +40,7 @@ func (s *Server) getInboundSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"version": config.Version, "fragment": fragment})
 }
 
-func (s *Server) saveInboundSource(w http.ResponseWriter, r *http.Request, current core.Config, source, tag, fragment, intent string, expectedInstanceID *string) {
+func (s *Server) saveInboundSource(w http.ResponseWriter, r *http.Request, current core.Config, source, tag, fragment, intent string, expectedInstanceID *string, installIfMissing bool) {
 	content, err := serverconfig.ReplaceInboundSource(current.Engine, source, tag, fragment)
 	if err == nil && (strings.Contains(current.Content, "qch-trf-") || strings.Contains(content, "qch-trf-") || current.Engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark")) {
 		content, err = s.accountingUpdateSource(r.Context(), current, content)
@@ -64,7 +64,7 @@ func (s *Server) saveInboundSource(w http.ResponseWriter, r *http.Request, curre
 	// Retain detached client/TLS details. Existing identity checks decide whether
 	// they still apply to the edited native endpoint, peer and transport.
 	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), candidate, current.Version,
-		store.ConfigMutationOptions{ExpectedInstanceID: expectedInstanceID, TaskID: r.Header.Get("X-Config-Task-ID"), Action: core.Action(intent), MainlandPolicies: policies})
+		store.ConfigMutationOptions{InstallIfMissing: installIfMissing, ExpectedInstanceID: expectedInstanceID, TaskID: r.Header.Get("X-Config-Task-ID"), Action: core.Action(intent), MainlandPolicies: policies})
 	if err != nil {
 		writeStoreError(w, err)
 		return

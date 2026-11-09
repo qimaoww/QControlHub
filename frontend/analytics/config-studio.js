@@ -11,18 +11,31 @@ import { inboundOutbound } from '../modules/config-outbound-model.js';
 import { bindOutboundPresetController } from '../modules/outbound-preset-controller.js';
 import { commonConfigFields } from '../modules/config-field-model.js';
 import { xrayMutableAPIServices } from '../modules/xray-api.js';
-import { coreInstallBlockReason } from '../modules/core-install-state.js';
+import { configDeployBlockReason, prepareConfigDeployment } from '../modules/core-install-state.js';
 import { copyText, node, button, actions, stack, grid, section, table, badge, field, code, muted, notice, link, list, pathID } from './ui.js';
 import { taskDetail, date } from './operations.js';
 
 const group = (title, content, open = false) => node('details', { className:'a-disclosure', open }, node('summary',{},title), node('div',{className:'a-disclosure-body'},content));
 
 // All operations stay bound to one account/agent/engine workspace revision.
-export function configStudio(ctx, { agent, engine, base, workspace, getDraft, accept, beforeDeploy, dirty, sourceTools, readOnly = false }) {
+export function configStudio(ctx, { agent, engine, base, workspace, getDraft, accept, beforeDeploy, dirty, sourceTools, readOnly = false, onAgent }) {
   let current = workspace;
   const surface = node('div', {className:'a-stack'});
   const receipt = notice(''); receipt.hidden = true;
-  const deployment = deploymentStatus(ctx, { base, workspace, getConfig: () => current.config, isPreview:()=>Boolean(current.snapshot_task_id), agent, engine });
+  const trackedForms = new Map();
+  const deployment = deploymentStatus(ctx, { base, workspace, getConfig: () => current.config, isPreview:()=>Boolean(current.snapshot_task_id), agent, engine, onWorkspace(fresh) {
+    if (!fresh.agent || fresh.agent.id !== agent.id || (fresh.agent.shared_allocation?.id || "") !== (agent.shared_allocation?.id || "")) return;
+    Object.assign(agent, fresh.agent);
+    execute = !configDeployBlockReason(agent, engine, ctx.can);
+    onAgent?.(agent);
+    for (const [form, box] of trackedForms) {
+      if (!box.isConnected) { trackedForms.delete(form); continue; }
+      const hint = form.querySelector('[data-deploy-block]');
+      if (hint) { hint.textContent = configDeployBlockReason(agent,engine,ctx.can); hint.hidden = !hint.textContent; }
+      if (form.getAttribute("aria-busy") !== "true" && !box.conflictPending && !box.submissionPending && form.dataset.configReady !== "false")
+        form.querySelector("button[type=submit]")?.toggleAttribute("disabled", !execute);
+    }
+  } });
   const workspacePath = () => current.snapshot_task_id ? `${base}/workspace/snapshots/${pathID(current.snapshot_task_id)}` : `${base}/workspace`;
   surface.previewSnapshot = async (id,isCurrent=ctx.current) => {
     const previous = current.config;
@@ -39,7 +52,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     current = {...fresh,snapshot_task_id:current.snapshot_task_id}; draw(); void deployment.refresh();
     return fresh;
   };
-  const editable = !readOnly && ctx.can('agent-config.write'), execute = ctx.can('tasks.execute') && agent.status === 'online';
+  const editable = !readOnly && ctx.can('agent-config.write');
+  let execute = !configDeployBlockReason(agent, engine, ctx.can);
   const writable = editable && ctx.can('tasks.execute') && !agent.runtime?.[engine]?.existing_config_unsupported_reason;
   async function latest() {
     if (dirty() && !await ctx.confirm('打开编辑工具会替换尚未保存的源码修改，确定继续？','打开编辑工具')) return false;
@@ -54,7 +68,12 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     return true;
   }
   function track(form, box, requiresTask = true, isDirty) {
-    if (requiresTask && !execute) { form.querySelector('button[type=submit]').disabled = true; form.append(notice('节点当前离线，可以编辑草稿，节点上线后重新打开再提交。')); }
+    if (requiresTask && form.querySelector("button[type=submit]")) trackedForms.set(form,box);
+    if (requiresTask) {
+      const hint = notice(configDeployBlockReason(agent,engine,ctx.can));
+      hint.dataset.deployBlock = ''; hint.hidden = !hint.textContent; form.append(hint);
+      if (!execute) form.querySelector('button[type=submit]').disabled = true;
+    }
     let changed = false;
     const update = () => { changed = isDirty ? isDirty() : true; ctx.setDirty(changed); };
     form.addEventListener('input', update);
@@ -69,7 +88,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   const intents = () => node('input',{type:'hidden',name:'intent',value:'deploy'});
   async function preparing(intent) {
     if (intent !== 'deploy') throw new Error('请选择保存并部署。');
-    if (!await ctx.confirm(`部署到 ${agent.name} · ${engine} · ${agent.shared_allocation ? '当前共享实例' : '当前主实例'} 并重启此实例内核？`,'部署并重启') || !ctx.current()) return false;
+    if (!await prepareConfigDeployment(ctx, base, agent, engine)) return false;
     if (beforeDeploy) await beforeDeploy();
     return ctx.current();
   }
@@ -78,14 +97,14 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     receipt.hidden = true; draw(); void deployment.refresh();
   }
   async function write(path, body, box, method = 'POST') {
-    const candidate = {...body};
+    const candidate = {...body, ...(!agent.runtime?.[engine]?.installed ? {install_if_missing:true} : {})};
     if (box.mutationVersion !== undefined) {
       if ('version' in candidate) candidate.version = box.mutationVersion;
       if ('expected_version' in candidate) candidate.expected_version = box.mutationVersion;
     }
     try { return await ctx.api(path, { method, body: {...candidate, expected_instance_id:agent.shared_allocation?.id || ""} }); }
     catch (error) {
-      if (error.name === 'AbortError') throw error;
+      if (error.name === 'AbortError' || error.deployPreflight) throw error;
       if (error.code === 'port_conflict') {
         const form = box.querySelector('form'), field = form.elements.namedItem(error.field || 'port');
         error.message += ' 草稿已保留。';
@@ -133,6 +152,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         }
       } else if (!error.status || error.status === 200 || error.status === 408 || error.status >= 500 || error.status === 409) {
         const form = box.querySelector('form'), submit = form.querySelector('button[type=submit]');
+        box.submissionPending = true;
         submit.addEventListener('mutationend', () => { submit.disabled = true; }, { once: true });
         form.append(notice('保存结果需重新核对，草稿已保留。请勿重复提交。'), actions(button(error.recoverConfigSubmission?'核对提交结果':'重新读取并核对', async event => {
           if(error.recoverConfigSubmission){await ctx.mutate(event.currentTarget,async()=>{const result=await error.recoverConfigSubmission();if(ctx.current()&&box.isConnected)await committed(result,box);});return;}
@@ -220,12 +240,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       if(!protocol || !baseline || protocol.key !== form.elements.protocol.value) throw new Error('请等待方案加载');
       const payload=read();
       if(!await preparing(values.intent))return;
-      if(operation==='add' && !agent.runtime?.[engine]?.installed) {
-        const reason=coreInstallBlockReason(current.agent,engine,ctx.can,{automatic:true});
-        if(reason)throw new Error(reason);
-        if(!await ctx.confirm('此内核尚未安装，将自动安装稳定版并部署配置。确定继续？','安装并部署')||!ctx.current())return;
-      }
-      const result=await write(`${base}/server-inbounds`,{operation,original_tag:operation==='add'?'':input.tag,expected_version:current.config?.version||0,name:current.config?.name||`${agent.name} ${engine}`,description:current.config?.description||'',intent:values.intent,input:payload,snapshot_task_id:current.snapshot_task_id,install_if_missing:operation==='add'&&!agent.runtime?.[engine]?.installed,preserve_ss_rust_globals:engine==='ss-rust'},box);
+      const result=await write(`${base}/server-inbounds`,{operation,original_tag:operation==='add'?'':input.tag,expected_version:current.config?.version||0,name:current.config?.name||`${agent.name} ${engine}`,description:current.config?.description||'',intent:values.intent,input:payload,snapshot_task_id:current.snapshot_task_id,preserve_ss_rust_globals:engine==='ss-rust'},box);
       await committed(result,box);
     });
     function read() {
@@ -313,6 +328,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const previous = baseline || protocolDrafts.get(protocol?.key);
       baseline = null;
       const submit = form.querySelector('button[type=submit]');
+      form.dataset.configReady = "false";
       submit.disabled = area.disabled = regenerate.disabled = true;
       if (native) native.disabled = true;
       feedback.textContent = '正在读取协议方案…';
@@ -333,8 +349,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         if (native) native.disabled = false;
         protocol = selected; render(generated);
         protocolHint.hidden = operation !== 'modify' || selected.key === input.protocol;
-        const reason = operation === 'add' && !agent.runtime?.[engine]?.installed ? coreInstallBlockReason(current.agent, engine, ctx.can, { automatic: true }) : '';
-        feedback.textContent = reason || (!execute ? '节点当前离线，草稿可继续编辑，上线后重新打开再提交。' : ''); submit.disabled = !execute || Boolean(reason);
+        feedback.textContent = ''; form.dataset.configReady = "true"; submit.disabled = !execute;
       } catch (error) {
         if (epoch !== request || !ctx.current() || !box.isConnected || error.name === 'AbortError') return;
         baseline = previous;
@@ -342,7 +357,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
           form.elements.protocol.value = protocol.key;
           area.disabled = regenerate.disabled = false;
           if (native) native.disabled = false;
-          submit.disabled = !execute;
+          form.dataset.configReady = "true"; submit.disabled = !execute;
         }
         feedback.textContent = error.message;
       }
@@ -374,10 +389,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     const box=ctx.dialog('展开源码',form,{wide:true});
     track(form,box);
     if(!editable)form.querySelector('button[type=submit]').remove();
-    else if (!agent.runtime?.[engine]?.installed && !agent.shared_allocation?.enabled) {
-      form.querySelector('button[type=submit]').disabled=true;
-      form.append(notice('内核尚未安装，请先安装内核后再部署源码。'));
-    }
+
   }
   async function commonEditor(inbound) {
     if (!await latest() || !current.config) return;
@@ -400,7 +412,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     const capture = () => { if (ready && selectedOperation!=='delete') drafts.set(selected,form.elements.fragment.value); };
     async function load() {
       capture(); const expected=++epoch, operation=form.elements.mutation.value, key=form.elements.key.value;
-      selected=key; selectedOperation=operation; ready=false; form.querySelector('button[type=submit]').disabled=true;
+      selected=key; selectedOperation=operation; ready=false; form.dataset.configReady='false'; form.querySelector('button[type=submit]').disabled=true;
       feedback.textContent=key?'正在读取配置项…':operation==='add'?'没有可添加的配置项':'尚无可操作的配置项';
       fragment.hidden=!key; if(!key)return;
       try {
@@ -410,9 +422,9 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         if((operation==='add')===Boolean(value.present))throw new Error('配置项状态已变化，请重新读取');
         baseline.set(key,value.fragment||'');
         form.elements.fragment.value=operation==='delete'?value.fragment||'':drafts.get(key)??value.fragment??'';
-        form.elements.fragment.readOnly=operation==='delete'; feedback.textContent='';ready=true;
-        form.querySelector('button[type=submit]').disabled=!execute||!agent.runtime?.[engine]?.installed;
-        if(!execute||!agent.runtime?.[engine]?.installed)feedback.textContent='节点离线或内核未安装，草稿可编辑，暂不能提交。';
+        form.elements.fragment.readOnly=operation==='delete'; feedback.textContent='';ready=true;form.dataset.configReady='true';
+        form.querySelector('button[type=submit]').disabled=!execute;
+        feedback.textContent='';
       } catch(error) { if(expected===epoch&&ctx.current()&&box.isConnected&&error.name!=='AbortError')feedback.textContent=error.message; }
     }
     function choose() {

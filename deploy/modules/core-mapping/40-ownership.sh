@@ -23,6 +23,13 @@ qagent_core_service_is_safe_owned() {
   protected_regular_file "$fragment_path" false || return 1
   expected_environment=""
   case "$engine" in
+    mihomo)
+      expected_binary=/usr/local/lib/qagent/cores/mihomo
+      expected_config=/etc/qagent/mihomo/config.yaml
+      expected_argv="$expected_binary -d /var/lib/qcontrolhub-mihomo -f $expected_config"
+      expected_description='Mihomo core managed by QAgent'
+      expected_environment='SAFE_PATHS=/etc/qagent/mihomo:/etc/qcontrolhub/tls'
+      ;;
     xray)
       expected_binary=$qagent_xray_binary
       expected_config=$qagent_xray_config

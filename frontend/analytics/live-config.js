@@ -1,3 +1,4 @@
+import { prepareConfigDeployment, configDeployBlockReason } from "../modules/core-install-state.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
 import { readOrderedNodes } from "../modules/node-order.js";
 import { requestConfigSnapshot } from "../modules/config-snapshot.js";
@@ -112,7 +113,7 @@ export async function liveConfigPage(ctx) {
     if (!result || !ctx.current()) throw new DOMException("目标已切换", "AbortError");
     return result;
   };
-  const canDeploy = execute && !errorText && (runtime.installed || agent.shared_allocation?.enabled);
+  let canDeploy = !configDeployBlockReason(agent, engine, ctx.can);
   const intent = node("input", {type:"hidden", name:"intent", value:importSource ? "import" : "deploy"});
   const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : saved?.content || defaultSource(engine), {
     multiline: 20, required: true, readonly: importSource || !editable, spellcheck: false,
@@ -126,13 +127,13 @@ export async function liveConfigPage(ctx) {
     node("div", { className: "a-editor" }, content), liveNotice, recovery,
   ], importSource ? "导入并迁移" : "保存并部署", async (values, element) => {
     if (!editable || sourceBlocked) return;
-    if (!importSource && !canDeploy) throw new Error("当前节点或内核不可部署，请核对在线及安装状态。");
+    if (!importSource && !canDeploy) throw new Error("没有配置部署权限，草稿已保留。");
     values.intent = importSource ? "import" : "deploy";
     if (values.intent === "import") {
       if (!source?.content) throw new Error("请先读取可导入的系统服务配置。");
       if (!await ctx.confirm("导入此配置并迁移现有系统服务？操作成功后由 QAgent 管理对应内核。", "导入并迁移")) return;
     }
-    if (values.intent === "deploy" && !await ctx.confirm(`部署到 ${agent.name} · ${engine} · ${agent.shared_allocation ? "当前共享实例" : "当前主实例"} 并重启此实例内核？`, "部署并重启")) return;
+    if (values.intent === "deploy" && !await prepareConfigDeployment(ctx, base, agent, engine)) return;
     if (!ctx.current()) return;
     let pendingTask;
     try {
@@ -255,11 +256,11 @@ export async function liveConfigPage(ctx) {
   form.querySelector('button[type="submit"]').addEventListener("mutationend", syncDraft);
   form.querySelector('button[type="submit"]').addEventListener("mutationend", ()=>{if(sourceBlocked || !importSource && !canDeploy)form.querySelector('[type=submit]').disabled=true;});
   form.addEventListener("submit", () => { if (reset && form.getAttribute("aria-busy") === "true") reset.disabled = true; });
+  const deployNotice = notice(configDeployBlockReason(agent,engine,ctx.can));
+  deployNotice.hidden = !deployNotice.textContent || importSource;
   if (!editable) form.querySelector('button[type="submit"]').remove();
-  else if (!importSource && !canDeploy) {
-    form.querySelector('button[type="submit"]').disabled = true;
-    form.append(notice(!execute ? "当前节点离线或没有部署权限，草稿可继续编辑。" : "当前内核不可部署，请先安装内核或检查节点状态。"));
-  }
+  else if (!importSource && !canDeploy) form.querySelector('button[type="submit"]').disabled = true;
+  form.append(deployNotice);
   const read = canReadCurrent && readAction && button(mode === "import" ? "读取系统配置" : "读取托管配置", async event => {
     const control = event.currentTarget;
     if (form.elements.content.value !== form.elements.content.defaultValue &&
@@ -325,6 +326,13 @@ export async function liveConfigPage(ctx) {
   if (readHistory) readHistory.disabled = !saved;
   const sourceTools = actions();
   const inbounds = configStudio(ctx, {
+    onAgent(fresh) {
+      canDeploy = !configDeployBlockReason(fresh, engine, ctx.can);
+      deployNotice.textContent = configDeployBlockReason(fresh,engine,ctx.can);
+      deployNotice.hidden = !deployNotice.textContent;
+      const submit = form.querySelector("button[type=submit]");
+      if (submit && !sourceBlocked && form.getAttribute("aria-busy") !== "true") submit.disabled = !canDeploy;
+    },
     sourceTools, readOnly: importSource,
     agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
     dirty,

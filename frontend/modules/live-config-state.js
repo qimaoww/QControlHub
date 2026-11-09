@@ -63,6 +63,7 @@ export async function submitLiveConfigChange({
         engine, name: form.get("name"), description: form.get("description"),
         content: editor.content, version: Number(form.get("version")), intent,
         expected_instance_id: agent.shared_allocation?.id || "",
+        ...(intent === "deploy" && !agent.runtime?.[engine]?.installed ? {install_if_missing:true} : {}),
       }) },
     );
     if (!result.config?.id || !result.task?.id) throw new Error("未能确认保存与任务结果，请重新读取后核对。");

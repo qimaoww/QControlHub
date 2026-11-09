@@ -121,7 +121,7 @@ func TestPresetAutoInstallNegotiatesBeforeDispatchAndResume(t *testing.T) {
 func TestPresetAutoInstallRequiresPrivatePreparationFeatureAndCurrentPermission(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
-	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v2"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	user, account := sharedTestUser(t, db, ctx, "preset-owner")

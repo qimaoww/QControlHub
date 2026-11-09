@@ -113,7 +113,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`beforeDeploy`, `submitLiveConfigChange`, `if (!source?.content)`,
 		`source, existingAvailable: importSource`, `beforeDeploy,`,
 		`const errorText = runtime.existing_config_unsupported_reason`, `errorText && notice(errorText)`,
-		`canDeploy = execute && !errorText`,
+		`canDeploy = !configDeployBlockReason(agent, engine, ctx.can)`,
 		`field("内核", "engine", engine, { options: engines })`,
 		`const engines = target.capabilities`, `if (values.agent !== agent.id)`,
 		`delete values.engine; delete values.source`,

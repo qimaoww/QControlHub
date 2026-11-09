@@ -100,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/configs", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.listConfigs)))
 	mux.Handle("POST /api/v1/configs", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.createConfig)))
 	mux.Handle("PUT /api/v1/configs/{id}", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.updateConfig)))
+	mux.Handle("POST /api/v1/configs/{id}/tasks", s.requireAllPermissions([]core.Permission{core.PermissionConfigsRead, core.PermissionTasksExecute}, http.HandlerFunc(s.createConfigExecutionTask)))
 	mux.Handle("DELETE /api/v1/configs/{id}", s.requirePermission(core.PermissionConfigsDelete, http.HandlerFunc(s.deleteConfig)))
 	mux.Handle("GET /api/v1/configs/{id}/revisions", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.listConfigRevisions)))
 	mux.Handle("GET /api/v1/configs/{id}/revisions/{version}", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.getConfigRevision)))

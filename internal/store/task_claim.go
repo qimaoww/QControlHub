@@ -102,7 +102,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 			message = "Agent no longer advertises " + core.AgentFeatureCoreUninstall + "; core uninstallation cannot safely resume and previous execution before disconnect is unknown"
 		}
 		if task.InstallIfMissing {
-			message = "Agent no longer advertises preset-auto-install-v1; automatic installation cannot safely resume and previous execution before disconnect is unknown"
+			message = "Agent no longer advertises preset-auto-install-v2; automatic installation cannot safely resume and previous execution before disconnect is unknown"
 		}
 		if task.Action == core.ActionIPQuality {
 			message = "Agent no longer advertises " + core.AgentFeatureIPQuality + "; the IP quality check cannot safely resume and previous execution before disconnect is unknown"

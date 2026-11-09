@@ -16,10 +16,11 @@ import (
 const legacyCoreStateDirectoryInstall = `install -d -o "$service_user" -g "$service_group" -m 0750 "$state_directory"`
 
 type coreServiceBootstrapper struct {
-	scriptPath     string
-	systemdRunPath string
-	assetRoot      string
-	preserveUnit   bool
+	scriptPath        string
+	systemdRunPath    string
+	assetRoot         string
+	preserveUnit      bool
+	configPreparation bool
 }
 
 func defaultCoreServiceBootstrapper() coreServiceBootstrapper {
@@ -33,7 +34,7 @@ func defaultCoreServiceBootstrapper() coreServiceBootstrapper {
 // Existing deployments with a valid managed service skip bootstrap. When
 // bootstrap is needed, use assets bundled with this Agent, not stale files
 // left by an older installer in /usr/local/share.
-func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.Engine, spec EngineSpec, existing bool) error {
+func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.Engine, spec EngineSpec, existing bool, configPreparation ...bool) error {
 	manager := e.serviceManager()
 	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[engine]
 	if !ok || spec != defaultSpec {
@@ -52,10 +53,11 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 		if e.coreBootstrapper != nil {
 			bootstrapper = *e.coreBootstrapper
 		}
+		bootstrapper.configPreparation = len(configPreparation) > 0 && configPreparation[0]
 		// File/service rollback starts inside importExistingConfig. Do not
 		// replace a previously validated unit or change its enablement before
 		// that transaction has recorded the original state.
-		bootstrapper.preserveUnit = existing && status != "not-found"
+		bootstrapper.preserveUnit = (existing || bootstrapper.configPreparation) && status != "not-found"
 		if err := bootstrapper.install(ctx, engine, existing, manager); err != nil {
 			return err
 		}
@@ -220,7 +222,10 @@ func (bootstrapper coreServiceBootstrapper) runSystemd(ctx context.Context, engi
 		"--property=ReadWritePaths=/etc/systemd", "--property=ReadWritePaths=/usr/local/lib/qagent",
 		"--setenv=QCH_SERVICE_MANAGER=systemd",
 	}
-	if existing {
+	if bootstrapper.configPreparation {
+		arguments = append(arguments, "--setenv=QCH_CONFIG_PREPARATION=1")
+	}
+	if existing || bootstrapper.preserveUnit {
 		arguments = append(arguments, "--setenv=QCH_SKIP_CORE_SERVICES="+managedCoreAssetName(engine))
 	}
 	if bootstrapper.preserveUnit {
@@ -249,7 +254,10 @@ func managedCoreBootstrapCapabilities(scriptPath string) (string, error) {
 
 func (bootstrapper coreServiceBootstrapper) runOpenRC(ctx context.Context, engine core.Engine, existing bool) error {
 	environment := []string{"QCH_SERVICE_MANAGER=openrc"}
-	if existing {
+	if bootstrapper.configPreparation {
+		environment = append(environment, "QCH_CONFIG_PREPARATION=1")
+	}
+	if existing || bootstrapper.preserveUnit {
 		environment = append(environment, "QCH_SKIP_CORE_SERVICES="+managedCoreAssetName(engine))
 	}
 	if bootstrapper.preserveUnit {
@@ -272,4 +280,29 @@ func runCoreBootstrapCommand(ctx context.Context, executable string, arguments, 
 		return fmt.Errorf("install managed core service: %s", message)
 	}
 	return nil
+}
+
+// Config preparation must not start or publish the bootstrap configuration.
+// Bootstrap preserves existing files and units. Remove only its newly created
+// default config; deploy will publish the task snapshot after core validation.
+func (e *Executor) prepareConfigCore(ctx context.Context, engine core.Engine, spec EngineSpec) error {
+	if spec != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
+		return nil
+	}
+	if status, err := e.serviceManager().status(ctx, spec.Service); err != nil {
+		return err
+	} else if status == "active" {
+		return fmt.Errorf("service %s is running without its installed binary; owner intervention is required", spec.Service)
+	}
+	_, statErr := os.Lstat(spec.ConfigPath)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	err := e.prepareManagedCoreService(ctx, engine, spec, false, true)
+	if errors.Is(statErr, os.ErrNotExist) {
+		if removeErr := os.Remove(spec.ConfigPath); !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}
+	return err
 }

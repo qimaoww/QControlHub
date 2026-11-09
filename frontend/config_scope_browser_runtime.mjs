@@ -21,7 +21,7 @@ async function configFixture({ writable = true, executable = false, installed = 
   const agent = { id: "shared", name: "共享主机", status: "online", os: "linux", arch: "amd64",
     can_manage: owned,
     shared_allocation: owned ? undefined : { ports:[21001], limit_bytes:1024, used_bytes:0 },
-    capabilities: ["mihomo"], features: ["managed-config-read-v1"],
+    capabilities: ["mihomo"], features: ["managed-config-read-v1", "independent-egress-v1"],
     runtime: { mihomo: { installed, existing_config_available: true } } };
   const state = { route: "live-config", navigationEpoch: 1, session: { role: "user", user_id: "alice" },
     data: { liveAgent: agent.id, liveEngine: "mihomo", liveSources: {

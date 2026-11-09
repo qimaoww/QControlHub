@@ -49,7 +49,7 @@ export async function testPresetRecoveryRuntime() {
       test.sourceFailure=null;sourceForm.requestSubmit();await test.settle(2);
       assert(test.writes[1].version===2&&test.writes[1].content===draft&&test.saved().version===3,'source retry lost current CAS or submitted content');
 
-      test.select('first');test.click('modify');await ready();test.failRefresh=true;test.submit('deploy');await test.settle(3);
+      test.select('first');test.click('modify');await ready();test.failRefresh=3;test.submit('deploy');await test.settle(3);
       assert(notices().includes('配置已保存且任务已提交，状态读取失败'),'accepted write reported failed after readback error');
       test.failRefresh=false;test.clickButton('重新读取状态');
       try {await waitFor(()=>!notices().includes('配置已保存且任务已提交，状态读取失败'),'accepted write recovery did not finish');}

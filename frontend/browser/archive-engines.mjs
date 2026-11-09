@@ -8,8 +8,9 @@ const fill = (form, name, value) => { form.elements[name].value = value; form.el
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 export async function testArchiveEnginesRuntime(preview = false) {
-  const records = { writes: [], templates: [], restores: [] }, configs = [], templates = [], revisions = new Map();
-  let writable = true, saveGate, readGate;
+  const records = { writes: [], templates: [], restores: [], tasks: [] }, configs = [], templates = [], revisions = new Map();
+  let writable = true, executable = false, saveGate, readGate;
+  let agents=[];
   const nativeFetch = globalThis.fetch;
   let session;
   const api = async (path, options) => {
@@ -19,9 +20,14 @@ export async function testArchiveEnginesRuntime(preview = false) {
     if (method === "GET") {
       if (path === "/configs") { const snapshot = configs.map(item => ({ ...item })); if (readGate) await readGate.promise; return snapshot; }
       if (path === "/templates") return templates;
-      if (path === "/agents") return [];
+      if (path === "/agents") return agents;
+      if (path === "/preferences/node-order") return {ids:[],revision:1};
       const match = path.match(/^\/configs\/([^/]+)\/revisions(?:\/(\d+))?/);
       if (match) { const history = revisions.get(match[1]) || []; return match[2] ? history.find(item => item.version === Number(match[2])) : history; }
+    }
+    if (/^\/configs\/[^/]+\/tasks$/.test(path) && method === "POST") {
+      payload.config_id=path.split("/")[2];payload.engine=configs.find(config=>config.id===payload.config_id).engine;
+      records.tasks.push(payload);return {id:`archive-task-${records.tasks.length}`,status:"pending",...payload};
     }
     if (path === "/templates" && method === "POST") {
       records.templates.push(payload); templates.push({ ...payload, id: `tpl-${templates.length + 1}`, updated_at: new Date().toISOString() }); return templates.at(-1);
@@ -57,7 +63,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
   const mount = async (account = "alice") => {
     window.dispatchEvent(new Event("pagehide"));
     document.querySelectorAll("dialog").forEach(box => box.close());
-    session = { user_id: account, username: account, role: "user", csrf_token: "archive-fixture", permissions: ["configs.read", "templates.read", "agents.read", ...(writable ? ["configs.write", "configs.restore", "configs.delete", "templates.write", "templates.delete"] : [])] };
+    session = { user_id: account, username: account, role: "user", csrf_token: "archive-fixture", permissions: ["configs.read", "templates.read", "agents.read", ...(executable ? ["tasks.execute"] : []), ...(writable ? ["configs.write", "configs.restore", "configs.delete", "templates.write", "templates.delete"] : [])] };
     document.body.replaceChildren(Object.assign(document.createElement("div"), { id: "archive-test" })); history.replaceState(null, "", "#archive-config");
     startAnalytics({ app: document.querySelector("#archive-test"), session });
     await waitFor(() => document.querySelector('[aria-label="配置档案"]'), "actual analytics archive did not load"); await settled();
@@ -73,7 +79,16 @@ export async function testArchiveEnginesRuntime(preview = false) {
     if (writable) { assert.equal(button("重置源码", form).disabled, !dirty, "source reset state"); assert.equal(form.querySelector('[type="submit"]').disabled, !valid, "save validity"); }
   };
   await mount();
-  if (preview) { create(); return; }
+  if (preview) {
+    if(new URLSearchParams(location.search).has("prepare")) {
+      executable=true;configs.push({id:"archive-preview",name:"已保存的首次部署配置",engine:"mihomo",content:configDefaults.mihomo,version:1,updated_at:new Date().toISOString()});
+      agents=[{id:"archive-node",name:"首次部署验证节点",status:"online",can_manage:true,capabilities:["mihomo"],features:["independent-egress-v1","preset-auto-install-v2"],runtime:{}}];
+      await mount();button("校验与部署",rowFor(configs[0].name)).click();
+      const delivery=openDialog(`${configs[0].name} · 校验与部署`),form=formOf(delivery);
+      change(form.elements.agent_id,"archive-node");form.requestSubmit();
+    } else create();
+    return;
+  }
   try {
     let box = create(), form = formOf(box);
     fill(form, "name", "My archive"); fill(form, "description", "Keep these notes");
@@ -155,6 +170,36 @@ export async function testArchiveEnginesRuntime(preview = false) {
     const submitted = form.elements.content.value; button("格式化源码", form).click(); assert.equal(form.elements.content.value, submitted, "pending format mutated submitted source");
     fill(form, "content", '{"edited":"during save"}'); fill(form, "description", "Unsaved during save"); saveGate.resolve(); saveGate = null; await settled();
     check(form, "xray", '{"edited":"during save"}', true); assert.ok(form.textContent.includes("有未保存修改"), "queued draft is mislabeled as saved"); assert.equal(form.elements.description.value, "Unsaved during save"); button("重置源码", form).click(); check(form, "xray"); retainedClose(box);
+    executable=true;
+    for (const shared of [false,true]) {
+      agents=[{id:"archive-node",name:"首次安装节点",status:"online",can_manage:!shared,
+        ...(shared?{shared_allocation:{id:"share-archive",enabled:true,status:"accepted"}}:{}),
+        capabilities:engines,features:["independent-egress-v1","preset-auto-install-v2","shared-traffic-v1","shared-engines-v1","shared-core-instances-v1","shared-core-prepare-v1"],runtime:{}}];
+      await mount();
+      for(const engine of engines) for(const action of ["validate","deploy"]) {
+        const config=configs.find(item=>item.name===`Archive ${engine}`);
+        button("校验与部署",rowFor(config.name)).click();
+        const delivery=openDialog(`${config.name} · 校验与部署`),deliveryForm=formOf(delivery);
+        change(deliveryForm.elements.agent_id,"archive-node");change(deliveryForm.elements.action,action);
+        const before=records.tasks.length, beforeSaves=records.writes.length;
+        if(engine==="mihomo"&&action==="validate") {
+          agents[0].status="offline";deliveryForm.requestSubmit();await settled();
+          await waitFor(()=>deliveryForm.textContent.includes("离线"),"archive offline preflight lost reason");
+          assert.equal(records.tasks.length,before);assert.equal(deliveryForm.elements.agent_id.value,"archive-node");
+          agents[0].status="online";
+        }
+        deliveryForm.requestSubmit();
+        const title=action==="validate"?"安装并校验":"安装并部署";
+        const confirmation=await waitFor(()=>openDialog(title),"archive preparation lacks one explicit confirmation");
+        if(action==="validate")assert.ok(confirmation.textContent.includes("不部署或启动"),"validation confirmation promises deployment");
+        button(title,confirmation).click();await waitFor(()=>!delivery.open,"archive task did not settle");await settled();
+        assert.equal(records.tasks.length,before+1);assert.equal(records.writes.length,beforeSaves,"archive deployment duplicated a saved configuration");
+        const task=records.tasks.at(-1);
+        assert.equal(task.config_id,config.id);assert.equal(task.expected_config_version,config.version);assert.equal(task.action,action);
+        assert.equal(task.install_if_missing,true);assert.equal(task.expected_instance_id,shared?"share-archive":"");
+      }
+    }
+    executable=false;agents=[];
     writable = false; await mount();
     for (const engine of engines) {
       box = reopen(`Archive ${engine}`); form = formOf(box); check(form, engine);

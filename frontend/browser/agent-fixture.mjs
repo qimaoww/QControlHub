@@ -285,7 +285,7 @@ if (mode.startsWith("capabilities-settings")) {
   };
 }
 if (mode.startsWith("config-layout")) {
-  testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
+  testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1","independent-egress-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
   testAPI.layoutTasks = new Map();
   testAPI.layoutConfigs = new Map();
   location.hash = "#live-config";

@@ -14,7 +14,7 @@ func TestSharedCorePreparationRevocationAndIsolation(t *testing.T) {
 			t.Run(change+map[bool]string{false: "/queued", true: "/running"}[running], func(t *testing.T) {
 				db, ctx, _ := isolatedConfigScopeStore(t)
 				agent := sharedTestAgent(t, db, ctx)
-				if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v1","shared-core-instances-v1","shared-core-prepare-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+				if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v2","shared-core-instances-v1","shared-core-prepare-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 					t.Fatal(err)
 				}
 				user, account := sharedTestUser(t, db, ctx, "prepare-user")
@@ -84,7 +84,7 @@ func TestSharedCorePreparationRevocationAndIsolation(t *testing.T) {
 func TestSharedCorePreparationSerializesUsersAndKeepsSnapshots(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
-	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v1","shared-core-instances-v1","shared-core-prepare-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["preset-auto-install-v2","shared-core-instances-v1","shared-core-prepare-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	alice, aliceCtx := sharedTestUser(t, db, ctx, "prepare-alice")

@@ -53,8 +53,10 @@ export async function testCommonConfigRuntime(){
   }
   for(const options of [{missing:true},{missing:true,savedMissing:true},{offline:true}]){
     const test=await fixture('ss-rust',options);test.common();await pause();
-    if(options.missing&&!options.savedMissing)assert(!form(),'missing config permits common mutation');else{await waitFor(()=>form()&&!form().textContent.includes('正在读取配置项'),'unavailable core draft did not load');assert(form().querySelector('button[type=submit]').disabled,'unavailable core permits common write');}
-    assert(!test.writes.length,'common operation implicitly installed core');test.dispose();
+    if(options.missing&&!options.savedMissing)assert(!form(),'missing config permits common mutation');else{await waitFor(()=>form()&&!form().textContent.includes('正在读取配置项'),'unavailable core draft did not load');assert(form().querySelector('button[type=submit]').disabled===Boolean(options.offline),'core preparation or offline boundary changed');}
+    assert(!test.writes.length,'opening common editor implicitly installed core');
+    if(options.savedMissing){test.confirm=true;test.submit('deploy');await test.settle(1);assert(test.writes[0].install_if_missing,'saved configuration edit did not prepare missing core');}
+    test.dispose();
   }
   for(const options of [{noCommon:true},{allCommon:true}]){
     const test=await fixture('xray',options);await operation(test,options.noCommon?'delete':'add');assert(!form().elements.key.options.length&&form().querySelector('button[type=submit]').disabled,'empty choices expose accidental save target');test.dispose();

@@ -261,6 +261,10 @@ for engine in $selected_engines; do
     install_managed_unit "$script_dir/systemd/$managed_service" "/etc/systemd/system/$managed_service"
     install_managed_unit "$script_dir/systemd/qagent-$engine@.service" "/etc/systemd/system/qagent-$engine@.service"
   fi
+  if [ "${QCH_CONFIG_PREPARATION:-0}" = 1 ]; then
+    # Configuration execution enables the instance only after validation and deployment.
+    continue
+  fi
   if skip_core_service "$engine"; then
     skipped_engines="$skipped_engines $engine"
   else

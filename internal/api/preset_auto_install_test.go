@@ -80,7 +80,7 @@ func TestPresetAutoInstallAPI(t *testing.T) {
 				}
 				base := "/api/v1/agents/" + agent.ID + "/configs/" + string(engine) + "/server-inbounds"
 				for _, operation := range []string{"modify", "delete"} {
-					call(base, map[string]any{"operation": operation, "install_if_missing": true, "intent": "validate", "input": input}, http.StatusBadRequest)
+					call(base, map[string]any{"operation": operation, "install_if_missing": true, "intent": "validate", "input": input}, http.StatusConflict)
 				}
 				if _, err := db.AgentConfig(ctx, agent.ID, engine); !errors.Is(err, store.ErrNotFound) {
 					t.Fatalf("invalid operation created configuration: %v", err)
@@ -95,7 +95,7 @@ func TestPresetAutoInstallAPI(t *testing.T) {
 					t.Fatalf("save did not create one durable task: %+v %v", tasks, err)
 				}
 				// The generic task endpoint cannot smuggle an installation
-				// into an arbitrary config task; only atomic add opts in.
+				// into an arbitrary config task; only exact-revision configuration requests opt in.
 				call("/api/v1/tasks", map[string]any{"agent_id": agent.ID, "engine": engine, "action": "validate",
 					"config_id": result.Config.ID, "install_if_missing": true}, http.StatusBadRequest)
 				current, err := db.GetAgent(ctx, agent.ID)

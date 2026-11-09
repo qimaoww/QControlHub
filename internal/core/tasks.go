@@ -119,7 +119,7 @@ type TaskRequest struct {
 	ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 	// Reserved for atomic configuration submissions; never decoded from task JSON.
 	MutationTaskID string `json:"-"`
-	// Only the atomic inbound mutation and its retries may request installation.
+	// Only controlled configuration submissions and their retries may request installation.
 	InstallIfMissing      bool        `json:"-"`
 	ExpectedConfigVersion int         `json:"expected_config_version,omitempty"`
 	TCPSettings           TCPSettings `json:"tcp_settings,omitempty"`
