@@ -76,6 +76,7 @@ func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, cand
 	address, overridden := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]), false
 	if address != "" {
 		overridden = true
+		input.ClientAddress = ""
 	} else {
 		available := candidates
 		if domain := managedTLSClientDomain(input); domain != "" && strings.TrimSpace(labels["client_address"]) == "" {
@@ -83,7 +84,7 @@ func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, cand
 		}
 		address = clientProfileAddress(available, mode).address
 	}
-	if input.ClientAddress != "" {
+	if !overridden && input.ClientAddress != "" {
 		address, overridden = input.ClientAddress, true
 	}
 	name, nameOverridden := "", false
@@ -121,37 +122,36 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 				source: "入站证书域名", family: "hostname", tlsDomainOnly: true})
 		}
 	}
+	labels := map[string]string{}
 	if len(labelSets) > 0 {
-		for _, input := range inputs {
-			address := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)])
-			found := address == ""
-			for _, candidate := range candidates {
-				found = found || candidate.address == address
-			}
-			if !found {
-				candidates = append(candidates, clientAddressCandidate{address: address,
-					source: "入站手动设置", family: clientAddressFamily(address), profileOnly: true})
-			}
+		labels = labelSets[0]
+	}
+	for _, input := range inputs {
+		address := clientInputAddress(engine, input, labels)
+		found := address == ""
+		for _, candidate := range candidates {
+			found = found || candidate.address == address
+		}
+		if !found {
+			candidates = append(candidates, clientAddressCandidate{address: address, source: "入站手动设置", family: clientAddressFamily(address), profileOnly: true})
 		}
 	}
+
 	options := make([]clientAccessAddressOption, 0, len(candidates))
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
 		for _, input := range inputs {
-			manual := ""
-			if len(labelSets) > 0 {
-				manual = strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)])
-			}
+			manual := clientInputAddress(engine, input, labels)
 			if candidate.tlsDomainOnly && managedTLSClientDomain(input) != candidate.address && manual != candidate.address {
 				continue
 			}
-			if len(labelSets) > 0 {
-				// A port with a manual address is pinned to exactly one candidate;
-				// exposing it under another family would publish a second URI.
-				if value := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); (value != "" && value != candidate.address) || (candidate.profileOnly && value == "") {
-					continue
-				}
+			if manual != "" && manual != candidate.address || candidate.profileOnly && manual == "" {
+				continue
 			}
+			// The profile-specific address is the most local override; resolve it
+			// before exporting so displayed address and native client agree.
+			input.ClientAddress = ""
+
 			name, overridden := "", false
 			if len(labelSets) > 0 {
 				if value, exists := labelSets[0][core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
@@ -175,6 +175,13 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 		}
 	}
 	return options
+}
+
+func clientInputAddress(engine core.Engine, input serverconfig.Input, labels map[string]string) string {
+	if address := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); address != "" {
+		return address
+	}
+	return input.ClientAddress
 }
 
 func clientAddressFamily(address string) string {
