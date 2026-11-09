@@ -359,6 +359,7 @@ export async function taskDetail(ctx, taskID) {
   const stop = () => { clearTimeout(timer); controller.abort(); };
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
+  refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
   content.append(actions(refresh));
   async function read({ automatic = false } = {}) {
     if (reading || !active()) return;
