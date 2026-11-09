@@ -59,8 +59,14 @@ func validateManagedTLS(engine core.Engine, input Input) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
+	if xhttp {
+		if input.TLSALPN != "" && input.TLSALPN != "h2" && input.TLSALPN != "h2,http/1.1" && input.TLSALPN != "http/1.1,h2" {
+			return fmt.Errorf("XHTTP 反代 ALPN 请使用 h2,http/1.1 或 h2")
+		}
+		return nil
+	}
 	alpn := "http/1.1"
-	if input.Transport == "http" || xhttp {
+	if input.Transport == "http" {
 		alpn = "h2"
 	}
 	if input.TLSALPN != "" && input.TLSALPN != alpn {
