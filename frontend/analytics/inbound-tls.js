@@ -35,7 +35,7 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
     show("flow", kind !== "xhttp" || Boolean(protocol.uses_vless_encryption));
     const enabled = Boolean(protocol.requires_tls || tls?.checked);
     const realityName = input("reality_server_name");
-    if (realityName) realityName.required = Boolean(protocol.uses_reality || input("reality_enabled")?.checked);
+    if (realityName) realityName.required = input("reality_enabled")?.checked ?? Boolean(protocol.uses_reality);
     const managed = enabled && protocol.supports_managed_tls && ["caddy", "nginx", "external"].includes(mode?.value);
     const panelCertificate = Boolean(input("panel_certificate_id")?.value) || requireManagedCertificate && ["caddy", "nginx"].includes(mode?.value);
     show("tls_client_certificate", enabled && !panelCertificate && (!mode || mode.value === "native" || mode.value === "nginx" && !automaticNginx));

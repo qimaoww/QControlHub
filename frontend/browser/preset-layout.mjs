@@ -83,6 +83,11 @@ export async function testPresetFieldLayoutRuntime() {
       protocol.dispatchEvent(new Event("change", { bubbles: true }));
       await waitFor(() => document.querySelector('[name="reality_min_client_ver"]'), "Reality fields did not load");
       const form = document.querySelector("dialog[open] form:has([name=protocol])");
+      const reality = form.elements.namedItem("reality_enabled"), sni = form.elements.namedItem("reality_server_name");
+      reality.checked = false; reality.dispatchEvent(new Event("change", {bubbles:true}));
+      assert(!sni.required, "disabled Reality retained a required SNI");
+      reality.checked = true; reality.dispatchEvent(new Event("change", {bubbles:true}));
+      assert(sni.required && !sni.hasAttribute("list"), "enabled Reality must use required free-text SNI");
       form.elements.namedItem("reality_server_name").value = "reality.example.test";
       const minimum = form.elements.namedItem("reality_min_client_ver");
       const advanced = minimum.closest("details");
