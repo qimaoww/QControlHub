@@ -151,7 +151,7 @@ func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 	if err != nil && !HasData(first) {
 		t.Fatalf("first metrics collection: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	second, err := collector.Collect(context.Background())
 	if err != nil && !HasData(second) {
 		t.Fatalf("second metrics collection: %v", err)
@@ -164,5 +164,8 @@ func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 	}
 	if len(second.NetworkInterfaces) == 0 || len(second.NetworkInterfaces[0].Addresses) == 0 {
 		t.Fatalf("live default-route interface addresses are missing: %+v", second.NetworkInterfaces)
+	}
+	if second.NetworkRateAvailable != nil && *second.NetworkRateAvailable && (second.NetworkSampledAt.IsZero() || second.NetworkSampledAt.After(second.CollectedAt)) {
+		t.Fatalf("valid network rates need their own bounded sample time: %+v", second)
 	}
 }

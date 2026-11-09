@@ -24,7 +24,7 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 		"analytics/substore.js":      {`savedNodeOrder()`, `groupSubStoreProfiles`},
 		"analytics/tcp.js":           {`orderNodesBySavedOrder(list(agents), order?.ids)`},
 		"analytics/ip-quality.js":    {`orderNodesBySavedOrder(list(snapshot.agents), nodeOrder)`},
-		"analytics/operations.js":    {`orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids)`},
+		"analytics/dashboard.js":     {`orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids)`},
 	} {
 		content := frontendSources(t, path)
 		for _, marker := range markers {

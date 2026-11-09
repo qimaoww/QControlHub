@@ -59,11 +59,11 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// proportional raster logo containment in the existing brand mark, and
 	// unavailable public-IP placeholders aligned with normal address rows, and
 	// readable connection country/node columns within their scroll container.
-	const expected = "930dbe3dafd31fba0db8bab8ea14b2bafee0103ae9b45064c672c59c651d1a86"
+	const expected = "4b6b3fee517d7814f9f0b59da5b78164f8e318e31eb45f82bfceb2fad3515d01"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
-	for _, required := range []string{".a-dialog", ".a-dialog::backdrop", ".a-code", ".a-button", ".a-form-grid", "min-height: 44px", "overflow-wrap: anywhere"} {
+	for _, required := range []string{".a-dialog", ".a-dialog::backdrop", ".a-code", ".a-button", ".a-form-grid", ".a-dashboard-periods", ".a-dashboard-live", "min-height: 44px", "overflow-wrap: anywhere"} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("native console styles missing %q", required)
 		}
