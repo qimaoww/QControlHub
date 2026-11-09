@@ -75,7 +75,7 @@ func TestTrafficServesScopeChangesFromTheAccountSnapshot(t *testing.T) {
 			t.Errorf("traffic snapshot model missing %q", required)
 		}
 	}
-	for _, required := range []string{`if (writing) delete data.analyticsTrafficSnapshot`, `.finally(() => { if (writing) delete data.analyticsTrafficSnapshot; })`} {
+	for _, required := range []string{`reader.invalidate(readsAffectedByWrite(path)); delete data.analyticsTrafficSnapshot`, `if (writing) invalidate();`, `.finally(() => { if (writing) invalidate(); })`} {
 		if !strings.Contains(app, required) {
 			t.Errorf("writes must invalidate before and after completion, including uncertain failures: missing %q", required)
 		}

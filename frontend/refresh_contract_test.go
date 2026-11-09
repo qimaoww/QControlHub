@@ -10,7 +10,7 @@ import (
 func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 	contracts := map[string][]string{
 		"analytics/app.js": {
-			"const bound = state.session;",
+			"const bound = state.session, data = state.data, reader = sessionReads(bound);",
 			"isCurrent: () => state.session === bound && !lifetime.signal.aborted",
 			"routeAbort?.abort();",
 			"const signal = routeAbort.signal, epoch = ++routeEpoch;",
@@ -31,6 +31,17 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"box.addEventListener(\"close\", () => resolve(false)",
 			"lifetime.abort(); routeAbort?.abort(); watch.stop();",
 		},
+		"modules/poller.js": {
+			"if (work)", "return coalesce ? work : Promise.resolve()",
+			"if (!enabled || !isActive() || epoch !== generation) return",
+			"stop() { enabled = false; generation++; cancelTimer(); queued = false; }",
+			"if (enabled) schedule()",
+		},
+		"modules/read-coordinator.js": {
+			"readers: new Set()", "if (!entry.readers.size)",
+			"if (controller.signal.aborted) throw canceled()",
+			"readers.map(() => structuredClone(value))",
+		},
 		"modules/account-request.js": {
 			"headers[\"X-QControlHub-CSRF\"] = session.csrf_token",
 			"credentials: \"same-origin\", cache: \"no-store\"",
@@ -50,10 +61,10 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"current.moveBefore(child, current.childNodes[index] || null)",
 			"current.childNodes[index] !== child",
 			"export function poll(ctx, run, delay = 2000)",
-			"if (!ctx.current() || running) return;",
+			"isActive: () => ctx.current()",
 			"if (!document.hidden) await run();",
-			"if (ctx.current()) schedule()",
-			"ctx.signal.addEventListener('abort', stop",
+			"coalesce: false",
+			"ctx.signal.addEventListener('abort', poller.stop",
 		},
 		"analytics/nodes.js": {
 			"if (!ctx.current() || sequence !== loadSequence) return;",
@@ -81,7 +92,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		},
 		"analytics/operations.js": {
 			"patch(resourceGrid,", "patch(overviewGrid,", "patch(trafficTotals,",
-			"rowKey: row => row[5].dataset.taskId",
+			"rowKey: row => row.taskID",
 			"const sequence = ++readSequence",
 			"if (!ctx.current() || sequence !== readSequence) return;",
 			"if (!ctx.current() || requests.get(key) !== controller) return;",
