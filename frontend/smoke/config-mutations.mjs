@@ -88,6 +88,33 @@ export async function run() {
     await assert.rejects(correction.request(path,{method:"POST",body}),{status:400});
     await correction.request(path,{method:"POST",body:JSON.stringify({...JSON.parse(body),content:"corrected"})});
     assert.equal(correctionWrites,2,"business rejection blocked corrected content");
+    for (const mode of ["recovered","still-unknown","lost-retry","account-change","recovery-failed"]) {
+      let attempts=0, refreshes=0, receipt;
+      const target={data:{}};
+      const recovery=createConfigMutations({state:target,api:async (url,options={})=>{
+        if(options.method==="POST") {
+          attempts++;
+          if(receipt)assert.equal(options.headers["X-Config-Task-ID"],receipt,"status recovery changed the receipt");
+          receipt=options.headers["X-Config-Task-ID"];
+          assert.equal(options.body,body,"status recovery changed the candidate");
+          if(attempts===1 || mode==="still-unknown")throw Object.assign(Error("unknown instance"),{status:409,code:"port_conflict",recoveryEngine:"sing-box"});
+          if(mode==="lost-retry")throw TypeError("retry response lost after commit");
+          return {config:{id:"cfg",version:4},task:{id:receipt,config_version:4,status:"succeeded"}};
+        }
+        if(url.startsWith("/tasks/"))return {id:receipt,agent_id:"node",engine:"xray",action:"deploy",config_id:"cfg",config_version:4,status:"succeeded"};
+        return {id:"cfg",version:4};
+      }},{onTask:()=>{},waitForTerminal:()=>completion,recoverPortConflict:async error=>{
+        assert.equal(error.recoveryEngine,"sing-box");refreshes++;
+        if(mode==="account-change")target.data={};
+        if(mode==="recovery-failed")throw Error("status could not be confirmed");
+        return true;
+      }});
+      if(mode==="account-change")await assert.rejects(recovery.request(path,{method:"POST",body}),{name:"AbortError"});
+      else if(["still-unknown","recovery-failed"].includes(mode))await assert.rejects(recovery.request(path,{method:"POST",body}),error=>error.configSubmissionRejected===true);
+      else await recovery.request(path,{method:"POST",body});
+      assert.equal(refreshes,1,"status recovery repeated indefinitely");
+      assert.equal(attempts,["account-change","recovery-failed"].includes(mode)?1:2,"recovery repeated a committed or uncertain write");
+    }
     const superseded = createConfigMutations({state:{data:{}}, api:async (url, options = {})=>{
       if (options.method === "POST") {
         id = options.headers["X-Config-Task-ID"];
@@ -99,6 +126,18 @@ export async function run() {
     await assert.rejects(superseded.request(path,{method:"POST",body}), error=>
       error.status === 409 && error.code === "config_submission_superseded" && error.message.includes("任务已提交"),
     "reconciliation returned a later edit as the submitted task's configuration");
+    // Every task-producing editor uses the same read-only receipt recovery.
+    for (const [endpoint, method] of [["server-inbounds","POST"],["outbounds","POST"],["management","PUT"],["fields/route","POST"]]) {
+      let attempts=0, receiptID;
+      const editor=createConfigMutations({state:{data:{}},api:async (url,options={})=>{
+        if(options.method===method){attempts++;receiptID=options.headers["X-Config-Task-ID"];throw TypeError("committed response lost");}
+        if(url.startsWith("/tasks/"))return {id:receiptID,agent_id:"node",engine:"xray",action:"deploy",config_id:"cfg",config_version:4,status:"succeeded"};
+        return {id:"cfg",version:4};
+      }},{onTask:()=>{},waitForTerminal:()=>completion});
+      const recovered=await editor.request(`/agents/node/configs/xray/${endpoint}`,{method,body});
+      assert.equal(recovered.config.version,4);
+      assert.equal(attempts,1,`${endpoint} replayed a committed write`);
+    }
     release({status:"succeeded"});
     // A response arriving after an account change cannot reach task callbacks
     // or the caller's subsequent save/deploy handlers.

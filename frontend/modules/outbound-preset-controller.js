@@ -1,8 +1,8 @@
 import { formatConfigContent } from "./code-format.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
-import { outboundProtocols, outboundPreset, outboundPeers } from "./outbound-preset-model.js";
+import { outboundProtocols, outboundPreset, outboundPeers, readOutboundPreset, outboundPresetText } from "./outbound-preset-model.js";
 
-export function bindOutboundPresetController({ form, input, engine, agentId, api, canReadPeers, active, onChange, initialMode = "preset", host, visibility = (element, visible) => { if (element) element.hidden = !visible; }, feedback = (element, value) => { element.textContent = value; } }) {
+export function bindOutboundPresetController({ form, input, engine, agentId, api, canReadPeers, active, onChange, initialMode = "preset", initialObject, host, visibility = (element, visible) => { if (element) element.hidden = !visible; }, feedback = (element, value) => { element.textContent = value; } }) {
   form.prepend(host);
   const mode = host.querySelector("[data-outbound-mode]"), builder = host.querySelector("fieldset");
   const protocol = host.querySelector("[data-outbound-protocol]"), node = host.querySelector("[data-outbound-node-select]");
@@ -10,8 +10,17 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
   const value = key => host.querySelector(`[data-outbound-value="${key}"]`);
   const values = () => Object.fromEntries([...host.querySelectorAll("[data-outbound-value]")].map(element => [element.dataset.outboundValue, element.value]));
   outboundProtocols(engine).forEach(([key, label]) => protocol.add(new Option(label, key)));
-  value("tag").value = JSON.parse(input.value).tag;
+  let original;
+  try { original = initialObject || JSON.parse(input.value); } catch { /* Native YAML is projected by the API. */ }
+  const projection = readOutboundPreset(engine, original);
+  value("tag").value = original?.tag || original?.name || "new-exit";
+  if (projection) {
+    protocol.value = projection.protocol;
+    for (const [key,item] of Object.entries(projection.values)) if (value(key)) value(key).value = item;
+  }
+  if (initialMode === "auto") initialMode = projection ? "preset" : "json";
   mode.value = initialMode;
+  if (initialMode === "json" && input.closest("details")) input.closest("details").open = true;
   mode.querySelector('[value="node"]').disabled = !canReadPeers;
   if (!canReadPeers) mode.title = "选择节点入站需要客户端配置读取权限";
   let touched = false, busy = false, peers = [], loaded = false, loadRequest = 0, jsonDraft = initialMode === "json" ? input.value : null, previousMode = mode.value;
@@ -23,7 +32,7 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
   };
   const peerKey = selected => selected ? JSON.stringify([selected.agentId, selected.engine, selected.tag, selected.port]) : "";
   const generatedContent = (validate = true) => {
-    if (mode.value === "preset") return JSON.stringify(outboundPreset(engine, protocol.value, values(), validate), null, 2);
+    if (mode.value === "preset") return outboundPresetText(engine, outboundPreset(engine, protocol.value, values(), validate));
     const selected = chosenPeer();
     if (!selected?.outbound) {
       if (!validate) return "";
@@ -31,7 +40,7 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
     }
     const tag = value("tag").value.trim();
     if (validate && (!tag || /^qch-(trf-|stat-)/.test(tag))) throw Error("请填写有效的非系统出站标签");
-    return JSON.stringify({...selected.outbound, tag}, null, 2);
+    return outboundPresetText(engine, {...selected.outbound, [engine === "mihomo" ? "name" : "tag"]:tag});
   };
   const show = (selector, visible) => host.querySelectorAll(selector).forEach(element => { visibility(element, visible); });
   const sync = () => {
@@ -68,7 +77,7 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
     input.readOnly = mode.value !== "json";
     if (mode.value !== "json") {
       const content = generatedContent(false);
-      input.value = content ? formatConfigContent(content, "JSON") : "";
+      input.value = content ? engine === "mihomo" ? content : formatConfigContent(content, "JSON") : "";
       input.rows = Math.min(16, Math.max(6, input.value.split("\n").length + 1));
     }
   };
@@ -127,6 +136,7 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
     if (previousMode === "json") jsonDraft = input.value;
     if (mode.value === "json" && jsonDraft !== null) input.value = jsonDraft;
     previousMode = mode.value;
+    if (mode.value === "json" && input.closest("details")) input.closest("details").open = true;
     touched = true;
     sync(); onChange();
     if (mode.value === "node" && !loaded) void loadPeers();
@@ -149,11 +159,15 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
   peer.addEventListener("change", () => { touched = true; updatePeer(); });
   host.querySelector("[data-outbound-peer-reload]").addEventListener("click", () => { void loadPeers(); });
   sync();
+  const presetBase = projection ? generatedContent(false) : "";
   return {
+    baseline: () => initialObject && mode.value === "preset" ? presetBase : "",
     dirty: () => touched,
     verifiedContent: async () => {
       if (mode.value === "node") {
+        const previous = JSON.stringify(chosenPeer()?.outbound);
         await loadPeers();
+        if (chosenPeer()?.outbound && JSON.stringify(chosenPeer().outbound) !== previous) throw Error("目标连接参数已变化，请核对更新后的内容再提交");
         if (!active()) throw new DOMException("目标已切换", "AbortError");
         if (!chosenPeer()?.outbound) throw Error("目标入站已变化或不再获授权，请重新选择");
       }
@@ -164,6 +178,7 @@ export function bindOutboundPresetController({ form, input, engine, agentId, api
       return mode.value === "json" ? input.value : generatedContent();
     },
     busy: value => { busy = value; sync(); },
+    refresh: sync,
     focus: () => mode.focus({preventScroll:true}),
     dispose: () => controller.abort(),
   };

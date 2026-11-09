@@ -10,7 +10,18 @@ inputs:
 runs:
   using: composite
   steps:
+    # main publishes reusable objects. A PR restores those objects but avoids
+    # archiving hundreds of MB again after each source-only change.
+    - uses: actions/cache/restore@v6
+      if: github.event_name == 'pull_request'
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', '!.ci-cache/**') }}
+        restore-keys: |
+          ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-
+          ${{ inputs.identity }}-
     - uses: actions/cache@v6
+      if: github.event_name != 'pull_request'
       with:
         path: ${{ inputs.paths }}
         key: ${{ inputs.identity }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', '!.ci-cache/**') }}

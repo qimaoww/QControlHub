@@ -5,11 +5,30 @@ import (
 	"fmt"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"go.yaml.in/yaml/v4"
 )
 
 // BuildClientOutbound exports only client connection material from a deployed
 // inbound. Never serialize Input: it also contains server private keys.
 func BuildClientOutbound(engine core.Engine, input Input, address, serverName string) (json.RawMessage, error) {
+	if engine == core.EngineMihomo {
+		profile, err := BuildClientProfile(input, address, serverName)
+		if err != nil {
+			return nil, err
+		}
+		if profile.Mihomo == "" {
+			if profile.MihomoError != "" {
+				return nil, fmt.Errorf("%s", profile.MihomoError)
+			}
+			return nil, fmt.Errorf("此入站没有可用的 Mihomo 连接配置")
+		}
+		var object map[string]any
+		if err = yaml.Unmarshal([]byte(profile.Mihomo), &object); err != nil {
+			return nil, err
+		}
+		object["name"] = "peer"
+		return json.Marshal(object)
+	}
 	if engine == core.EngineXray && input.Transport == "xhttp" {
 		if isXHTTPGroup(input.Protocol) && input.XHTTPBackendPort > 0 {
 			if input.ClientAddress == "" {

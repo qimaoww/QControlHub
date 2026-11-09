@@ -20,4 +20,5 @@ export async function editInboundSource(ctx, {target, agent, engine, base, works
   });
   const box = ctx.dialog(`修改入站 · ${target.tag}`,form,{wide:true});
   track(form,box,true,()=>form.elements.fragment.value !== result.fragment);
+  return box;
 }

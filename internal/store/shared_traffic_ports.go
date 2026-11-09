@@ -134,14 +134,15 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	// to start a foreign listener which has no shared traffic monitor yet.
 	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,
+			(NOT $4::boolean AND (state.owner_id=$2 OR $6::boolean OR EXISTS(SELECT 1 FROM agents a WHERE a.id=$1 AND a.owner_id=$2)))
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR $4::boolean)))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain)
@@ -149,23 +150,23 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),attempt.config_id,attempt.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state LEFT JOIN tasks attempt ON attempt.id=state.last_task_id
 		LEFT JOIN configs config ON config.id=attempt.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=attempt.config_id AND revision.version=attempt.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain) AND attempt.action='deploy'
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT state.engine,'','',0,true,false,state.owner_id=$2
+		SELECT state.engine,'','',0,true,false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain)
 			AND (state.config_id='' OR state.config_uncertain)
 			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2,false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
-			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND (task.engine<>$3 OR task.shared_instance<>$4::boolean OR task.shared_instance AND task.shared_traffic_id<>$5)))`, agentID, userID, engine, sharedInstance, instanceID)
+			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND (task.engine<>$3 OR task.shared_instance<>$4::boolean OR task.shared_instance AND task.shared_traffic_id<>$5)))`, agentID, userID, engine, sharedInstance, instanceID, scopeForConfig(ctx).Admin)
 	if err != nil {
 		return err
 	}
@@ -176,11 +177,12 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		uncertain   bool
 		pending     bool
 		sameOwner   bool
+		recoverable bool
 	}
 	var deployments []deployment
 	for rows.Next() {
 		var d deployment
-		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner); err != nil {
+		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner, &d.recoverable); err != nil {
 			rows.Close()
 			return err
 		}
@@ -190,9 +192,50 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	if err = rows.Err(); err != nil {
 		return err
 	}
+	var observed, retainedPorts map[int]bool
+	var observationLoaded, observationSupported bool
 	for _, d := range deployments {
 		if d.uncertain {
-			return portConflict(ports[0], fmt.Errorf("%w: 无法确认实例的端口状态，请刷新节点状态后重试", ErrConflict))
+			if !observationLoaded {
+				observationLoaded = true
+				if err := tx.QueryRow(ctx, `SELECT features ? $2 FROM agents WHERE id=$1`, agentID, core.AgentFeatureHostPorts).Scan(&observationSupported); err != nil {
+					return err
+				}
+				if observationSupported {
+					candidateID := ""
+					if candidate != nil {
+						candidateID = candidate.ID
+					}
+					observed, err = observedHostPortsTx(ctx, tx, agentID, candidateID)
+					if err != nil {
+						return err
+					}
+					if observed != nil {
+						retainedPorts, err = s.retainedCandidatePortsTx(ctx, tx, candidate, userID)
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
+			if observed != nil {
+				for _, port := range ports {
+					if observed[port] && !retainedPorts[port] {
+						return portConflict(port, fmt.Errorf("%w: 端口 %d 正在被节点上的监听占用，请调整端口或核对对应服务", ErrConflict, port))
+					}
+				}
+				continue
+			}
+			conflict := &PortConflictError{Port: ports[0], Field: "port", Cause: fmt.Errorf("%w: 无法确认实例的端口状态，请核对实例状态后重试", ErrConflict)}
+			if !observationSupported && (d.id == "" || !d.sameOwner) {
+				conflict.Cause = fmt.Errorf("%w: 无法确认实例的端口状态，请升级 Agent 后核对节点监听端口", ErrConflict)
+			}
+			if observationSupported && candidate != nil {
+				conflict.RecoveryEngine = string(candidate.Engine)
+			} else if d.recoverable {
+				conflict.RecoveryEngine = string(d.engine)
+			}
+			return conflict
 		}
 		content, err := s.decryptContent(d.content)
 		if err != nil {
@@ -258,7 +301,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 // Unrestricted means no port allowlist, not unmetered execution. Reserve only
 // the real fixed listeners as part of the deployment transaction, retaining
 // old bindings until an explicit, settled release by the owner/administrator.
-func (s *Store) reserveSharedDeploymentPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, endpoints []core.PortTrafficEndpoint) error {
+func (s *Store) reserveSharedDeploymentPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, endpoints []core.PortTrafficEndpoint, tasks ...*core.Task) error {
 	var unrestricted bool
 	var ports []int
 	if err := tx.QueryRow(ctx, `SELECT ports_unrestricted,
@@ -280,7 +323,7 @@ func (s *Store) reserveSharedDeploymentPortsTx(ctx context.Context, tx pgx.Tx, s
 			ports = append(ports, endpoint.Port)
 		}
 	}
-	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, requested); err != nil {
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, requested, tasks...); err != nil {
 		return err
 	}
 	slices.Sort(ports)
@@ -352,7 +395,7 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 	return bindSharedTrafficPortsTx(ctx, tx, shareID, agentID, endpoints)
 }
 
-func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint) error {
+func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint, tasks ...*core.Task) error {
 	return prepareSharedTrafficPortsTx(ctx, tx, shareID, agentID, endpoints, true)
 }
 

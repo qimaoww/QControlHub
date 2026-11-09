@@ -1,3 +1,4 @@
+import { bindOutbound } from "../modules/config-outbound-model.js";
 import { startAnalytics } from "../analytics/app.js";
 import { generatedPlanFields } from "../modules/inbound-options-model.js";
 
@@ -86,7 +87,7 @@ export async function createConfigFixture(engine, options = {}) {
       task_status:[...tasks.values()].some(task=>task.action==='deploy'&&task.config_version===saved?.version) ? test.taskStatus : undefined},
     engine, inbounds:structuredClone(options.native ? [] : inbounds),
     management:{disabled:structuredClone(disabled)},
-    managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})),
+    managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})).concat((saved ? JSON.parse(saved.content).outbounds || [] : []).filter(item=>!item.tag.startsWith("qch-")).map(item=>({section:"outbounds",tag:item.tag,kind:item.protocol||item.type,inbound:false,enabled:!disabled.some(ref=>ref.tag===item.tag)}))),
     inbound_targets:inbounds.map(item=>({tag:item.tag, port:item.port, kind:options.native ? "socks" : item.protocol})),
     protocols:entries.map(entry => entry.protocol), reality_presets:["www.amazon.com"],
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},
@@ -152,6 +153,36 @@ export async function createConfigFixture(engine, options = {}) {
       return workspace();
     }
     if (path === `/agents/node/configs/${engine}` && (!request.method || request.method === 'GET')) return saved;
+    if(path.includes('/outbounds/') && (!request.method||request.method==='GET')) {
+      const tag=decodeURIComponent(path.split('/').at(-1)),entry=JSON.parse(saved.content).outbounds.find(item=>item.tag===tag);
+      if(!entry)throw Object.assign(new Error('出站不存在'),{status:400});
+      return {version:saved.version,fragment:JSON.stringify(entry,null,2),object:JSON.stringify(entry)};
+    }
+    if(path.endsWith('/outbounds')&&request.method==='POST') {
+      if(test.gate)await test.gate;
+      if(test.sourceFailure)throw Object.assign(new Error('测试出站保存失败'),test.sourceFailure);
+      assert(!body.preset_base || body.operation==='modify','preset baseline submitted for a non-edit operation');
+      assert(body.version===saved.version,'outbound save lost version check');
+      const doc=JSON.parse(saved.content), index=doc.outbounds.findIndex(item=>item.tag===body.tag);
+      const rewrite=(value)=>{
+        if(Array.isArray(value))return value.map(rewrite);
+        if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,['outboundTag','outbound','final','detour'].includes(key)&&item===body.tag?body.replacement_tag:rewrite(item)]));
+        return value;
+      };
+      if(body.operation==='add')doc.outbounds.push(JSON.parse(body.fragment));
+      else if(body.operation==='modify'){
+        const next=JSON.parse(body.fragment);doc.outbounds[index]=next;body.replacement_tag=next.tag;
+      }else if(body.operation==='delete'){
+        if(!body.replacement_tag)throw Object.assign(new Error('出站仍被引用，请选择替代出站'),{status:400});
+        doc.outbounds.splice(index,1);
+      }
+      let next=JSON.stringify(body.replacement_tag?rewrite(doc):doc);
+      if(body.inbound_tag)next=bindOutbound(next,engine,{tag:body.inbound_tag,port:body.inbound_port},body.operation==='bind'?body.tag:JSON.parse(body.fragment).tag);
+      test.writes.push({path,...body});
+      saved={...saved,content:next,version:saved.version+1,updated_at:savedDate(saved.version+1)};
+      const task={id:request.headers?.['X-Config-Task-ID']||`task-${saved.version}`,agent_id:agent.id,engine,shared_instance:Boolean(options.shared),shared_traffic_id:agent.shared_allocation?.id||'',config_id:saved.id,action:body.intent,config_version:saved.version,status:test.taskStatus};tasks.set(task.id,task);
+      return {config:saved,task};
+    }
     if (path.endsWith("/management") && request.method === "PUT") {
       if (test.gate) await test.gate;
       if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
@@ -217,6 +248,11 @@ export async function createConfigFixture(engine, options = {}) {
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
     if (path.startsWith('/tasks?') && (!request.method || request.method === 'GET')) return [...tasks.values()];
     if (request.method === "POST" && path === "/tasks") {
+      if (body.action === "status") {
+        (test.statusRequests ||= []).push(body);
+        if(test.clearPortConflictOnStatus) { test.portConflict='';test.sourceFailure=null; }
+        return {id:`status-${++test.serial}`,agent_id:agent.id,engine:body.engine,shared_instance:Boolean(options.shared),shared_traffic_id:agent.shared_allocation?.id || '',action:body.action,status:test.statusFailure?'failed':'succeeded',error:test.statusFailure};
+      }
       if (body.action === 'import-existing') {
         test.imports ||= [];test.imports.push(body);
         const task={id:`import-${++test.serial}`,agent_id:agent.id,engine,config_id:saved.id,config_version:saved.version,action:body.action,status:test.taskStatus};
@@ -244,7 +280,7 @@ export async function createConfigFixture(engine, options = {}) {
     }
     if (request.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.gate) await test.gate;
-      if (test.portConflict) throw Object.assign(new Error("测试端口已被占用"), {status:409, code:"port_conflict", field:test.portConflict});
+      if (test.portConflict) throw Object.assign(new Error("测试端口已被占用"), {status:409, code:"port_conflict", field:test.portConflict, recovery_engine:test.recoveryEngine});
       if (test.mutationFailure) throw Object.assign(new Error("测试保存响应中断"), test.mutationFailure);
       if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
       assert(body.expected_version === (saved?.version || 0), "mutation request lost optimistic version");
@@ -310,7 +346,7 @@ export async function createConfigFixture(engine, options = {}) {
     } catch(error) {
       if (error.name==='AbortError') throw error;
       if (!error.status || error.status===200) throw error;
-      return new Response(JSON.stringify({error:error.message,code:error.code,field:error.field}),{status:error.status,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({error:error.message,code:error.code,field:error.field,recovery_engine:error.recovery_engine}),{status:error.status,headers:{'Content-Type':'application/json'}});
     }
   };
   const styles = document.createElement('link');styles.rel='stylesheet';styles.href='/assets/analytics/theme.css';document.head.append(styles);

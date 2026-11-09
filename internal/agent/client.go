@@ -46,6 +46,7 @@ type credentials struct {
 }
 
 type completedTask struct {
+	HostPorts      *core.HostPortObservation  `json:"host_ports,omitempty"`
 	InstanceStatus *core.SharedInstanceStatus `json:"instance_status,omitempty"`
 	Success        bool                       `json:"success"`
 	Output         string                     `json:"output,omitempty"`

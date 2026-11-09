@@ -113,10 +113,16 @@ func rejectMutableRoutingAPI(engine core.Engine, root map[string]any) error {
 }
 
 func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
+	// The source editor and historical revisions use {} for an initial/reset
+	// configuration. It contains no listener or flow to attribute. Keep this
+	// exact case separate from partially specified or unknown ingress fields.
+	if len(root) == 0 {
+		return engine.Valid()
+	}
 	var listKey, allowed string
 	switch engine {
 	case core.EngineMihomo:
-		listKey, allowed = "listeners", "listeners rules proxies dns log-level ipv6 allow-lan bind-address mode tcp-concurrent unified-delay find-process-mode global-client-fingerprint profile geodata-mode geodata-loader geo-auto-update geo-update-interval geox-url sniffer hosts authentication skip-auth-prefixes lan-allowed-ips lan-disallowed-ips"
+		listKey, allowed = "listeners", "listeners rules proxies proxy-groups dns log-level ipv6 allow-lan bind-address mode tcp-concurrent unified-delay find-process-mode global-client-fingerprint profile geodata-mode geodata-loader geo-auto-update geo-update-interval geox-url sniffer hosts authentication skip-auth-prefixes lan-allowed-ips lan-disallowed-ips"
 		if dns := mapValue(root["dns"]); dns["listen"] != nil && dns["listen"] != "" {
 			return false
 		}

@@ -76,7 +76,7 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 		var conflict *PortConflictError
 		if errors.As(err, &conflict) {
 			field := fieldForPort(conflict.Port)
-			return &PortConflictError{Port: conflict.Port, Field: field, Cause: conflict.Cause}
+			return &PortConflictError{Port: conflict.Port, Field: field, Cause: conflict.Cause, RecoveryEngine: conflict.RecoveryEngine}
 		}
 		return err
 	}

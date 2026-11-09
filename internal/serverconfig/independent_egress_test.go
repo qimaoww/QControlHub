@@ -17,7 +17,6 @@ func TestSingBoxDefaultOutboundDiagnostics(t *testing.T) {
 		{"unknown-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"original"}],"route":{"final":"missing"}}`, "unknown default outbound"},
 		{"implicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}]}`, ""},
 		{"explicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}],"route":{"final":"second"}}`, ""},
-		{"empty-object", `{}`, "no configured outbounds"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			plan, err := PrepareIndependentEgress(core.EngineSingBox, test.content)
@@ -60,7 +59,7 @@ func TestIndependentEgressRejectsBypasses(t *testing.T) {
 	}{
 		{"mihomo-direct-mode", core.EngineMihomo, "mode: direct\nlisteners: [{name: a, type: http, port: 21001}]\n"},
 		{"mihomo-global-mode", core.EngineMihomo, "mode: global\nlisteners: [{name: a, type: http, port: 21001}]\n"},
-		{"mihomo-shared-group", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nproxy-groups: []\n"},
+		{"mihomo-shared-group", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nproxy-groups: [{name: dynamic, type: select, include-all: true}]\nrules: ['MATCH,dynamic']\n"},
 		{"mihomo-tun", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\ntun: {enable: true}\n"},
 		{"mihomo-tunnel", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\ntunnels: [{network: tcp, address: '0.0.0.0:21002', target: 'example.test:80', proxy: DIRECT}]\n"},
 		{"mihomo-mutable-api", core.EngineMihomo, "listeners: [{name: a, type: http, port: 21001}]\nexternal-controller: 127.0.0.1:9090\n"},
@@ -91,6 +90,15 @@ func TestIndependentEgressRejectsBypasses(t *testing.T) {
 }
 
 func TestIndependentEgressAllowsExplicitFinalInboundDeletion(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+		plan, err := PrepareIndependentEgress(engine, "{ }\n")
+		if err != nil || plan.Source != "disabled" || len(plan.Ports) != 0 || plan.Content != "{ }\n" {
+			t.Fatalf("%s reset configuration rejected: %+v %v", engine, plan, err)
+		}
+		if err := ValidateIndependentEgress(engine, `{"unknown_listener":{"port":21001}}`); err == nil {
+			t.Fatalf("%s unknown ingress was treated as a reset", engine)
+		}
+	}
 	for engine, content := range map[core.Engine]string{
 		core.EngineMihomo:          "listeners: []\nproxies: []\nrules: ['MATCH,DIRECT']\n",
 		core.EngineXray:            `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`,

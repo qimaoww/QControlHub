@@ -57,7 +57,7 @@ func TestAccountingRejectsAmbiguousConfigurations(t *testing.T) {
 	for engine, contents := range map[core.Engine][]string{
 		core.EngineXray:            {`{"inbounds":[{"tag":"a","port":"1000-2000"}],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`, `{"inbounds":[{"tag":"a","port":1080}],"outbounds":[{"tag":"direct","protocol":"freedom","mux":{}}]}`},
 		core.EngineShadowsocksRust: {`{"server_port":1080,"outbound_fwmark":123}`, `{"servers":[{"server_port":1080},{"server_port":1080}]}`},
-		core.EngineMihomo:          {"mixed-port: 1080\n", "listeners: [{name: a, port: 1080}]\nproxy-groups: []\n"},
+		core.EngineMihomo:          {"mixed-port: 1080\n", "listeners: [{name: a, port: 1080}]\nproxy-groups: [{name: dynamic, type: select, include-all: true}]\nrules: ['MATCH,dynamic']\n"},
 	} {
 		for _, content := range contents {
 			if _, err := PrepareAccounting(engine, content); err == nil {

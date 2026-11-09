@@ -76,6 +76,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": chineseErrorMessage(http.StatusConflict, err.Error()),
 			"code":  "port_conflict", "port": portConflict.Port, "field": portConflict.Field,
+			"recovery_engine": portConflict.RecoveryEngine,
 		})
 	case errors.Is(err, store.ErrConflict):
 		writeError(w, http.StatusConflict, err.Error())

@@ -31,6 +31,10 @@ func TestMain(tests *testing.M) {
 	}
 	code := tests.Run()
 	cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	if err := closeConfigScopeTemplate(cleanupContext); err != nil {
+		fmt.Fprintf(os.Stderr, "clean API fixture template: %v\n", err)
+		code = 1
+	}
 	if err := schema.Close(cleanupContext); err != nil {
 		fmt.Fprintf(os.Stderr, "clean isolated API test database: %v\n", err)
 		code = 1

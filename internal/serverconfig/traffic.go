@@ -91,7 +91,9 @@ func decodeTrafficConfiguration(engine core.Engine, content string) map[string]a
 		}
 		return root
 	}
-	if json.Unmarshal([]byte(content), &root) == nil {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.UseNumber()
+	if decoder.Decode(&root) == nil {
 		return root
 	}
 	// Xray accepts YAML sources when started with a configuration directory.

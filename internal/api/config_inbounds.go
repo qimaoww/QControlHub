@@ -85,6 +85,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input struct {
+		ExpectedInstanceID    *string            `json:"expected_instance_id,omitempty"`
 		Operation             string             `json:"operation"`
 		InstallIfMissing      bool               `json:"install_if_missing"`
 		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
@@ -153,7 +154,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				return
 			}
 		}
-		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent)
+		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID)
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {
@@ -250,6 +251,16 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 			content, err = serverconfig.MutateSSRustPort(current.Content, generated, input.OriginalTag, input.Operation)
 		} else {
+			if engine == core.EngineMihomo {
+				// Policies are applied to the merged document below. Copying
+				// providers from this generated scaffold while retaining the
+				// current rules would create apparently unowned resources.
+				generated, err = serverconfig.RemoveMainlandAccessPolicy(engine, generated, input.Input.Tag)
+				if err != nil {
+					mutationError(err.Error())
+					return
+				}
+			}
 			content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
 		}
 		if err != nil {
@@ -369,7 +380,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), core.Config{
 		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
 	}, input.ExpectedVersion, store.ConfigMutationOptions{
-		TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired,
+		ExpectedInstanceID: input.ExpectedInstanceID, TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired,
 		InstallIfMissing: input.InstallIfMissing && !agent.Runtime[engine].Installed,
 	})
 	if err != nil {

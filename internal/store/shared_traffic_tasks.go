@@ -121,7 +121,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 		}
 		if unrestricted {
 			if task.Action == core.ActionDeploy || task.Action == core.ActionStart || task.Action == core.ActionRestart {
-				if err := s.reserveSharedDeploymentPortsTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, endpoints); err != nil {
+				if err := s.reserveSharedDeploymentPortsTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, endpoints, task); err != nil {
 					return err
 				}
 			} else {

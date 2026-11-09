@@ -22,7 +22,7 @@ export function outboundPresetFields(engine) {
   const protocol = picker("协议预设", "outbound_protocol", "data-outbound-protocol");
   mark(protocol, "data-outbound-protocol-label");
   return node("div", { className: "a-stack" },
-    picker("出站来源", "outbound_mode", "data-outbound-mode", [["preset", "填写协议预设"], ["node", "选择其他节点入站"], ["json", "高级 JSON"]]),
+    picker("出站来源", "outbound_mode", "data-outbound-mode", [["preset", "填写协议预设"], ["node", "选择其他节点入站"], ["json", engine === "mihomo" ? "高级 YAML" : "高级 JSON"]]),
     node("fieldset", { className: "a-form-fields a-stack", "data-outbound-builder": "" },
       grid(input("出站标签", "tag", "", { maxlength: 100 }), protocol),
       mark(grid(
