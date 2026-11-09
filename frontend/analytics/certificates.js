@@ -91,12 +91,22 @@ export async function certificatesPage(ctx) {
     const body = node("div", { className: "a-stack" });
     const box = ctx.dialog(data.certificate.name, body, { wide: true });
     box.dataset.certificateId = id;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([ctx.signal, controller.signal]);
     async function read() {
       const sequence = ++modalRead;
-      const next = await ctx.api(`/certificates/${pathID(id)}`);
-      if (!ctx.current() || !box.open || sequence !== modalRead) return;
-      data = next;
-      drawDetail();
+      try {
+        const next = await ctx.api(`/certificates/${pathID(id)}`, { signal });
+        if (!ctx.current() || !box.open || sequence !== modalRead) return;
+        data = next;
+        drawDetail();
+      } catch (error) {
+        if (ctx.current() && box.open && [403, 404].includes(error.status)) {
+          box.close(); resource = { items: [] }; draw();
+          void reload().catch(failure => { if (ctx.current() && failure.name !== 'AbortError') ctx.announce(failure.message, 'error'); });
+        }
+        throw error;
+      }
     }
     function drawDetail() {
       const certificate = data.certificate;
@@ -192,13 +202,15 @@ export async function certificatesPage(ctx) {
       try {
         if (!document.hidden && document.querySelector("dialog[open]:last-of-type") === box && !document.querySelector("[aria-busy=true]")) await read();
       } catch (error) {
-        if (error.status === 404) { box.close(); await reload(); }
+        // A transient failure keeps the current detail until the next tick.
+        // Permission failures clear it inside read(), including manual reads.
       } finally { if (ctx.current() && box.open) timer = setTimeout(poll, 3000); }
     }
     // Grant forms remain stable; the refresh control also updates every order.
     timer = setTimeout(poll, 3000);
-    box.addEventListener("close", () => clearTimeout(timer), { once: true });
-    ctx.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+    const stop = () => { clearTimeout(timer); controller.abort(); };
+    box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, { once: true });
+    ctx.signal.addEventListener("abort", stop, { once: true });
   }
   async function accounts() {
     const request = ++modalRead;

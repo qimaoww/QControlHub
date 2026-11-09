@@ -1,3 +1,5 @@
+import { createPoller } from "../modules/poller.js";
+
 // Stable, keyed updates retain controls, native selection and scroll containers.
 // Handlers are rebound to the latest resource without replacing live elements.
 const events = new WeakMap();
@@ -48,19 +50,17 @@ export function patch(current, fresh) {
 }
 
 export function poll(ctx, run, delay = 2000) {
-  let timer, running = false;
-  const schedule = () => { timer = setTimeout(tick, typeof delay === 'function' ? delay() : delay); };
-  const stop = () => clearTimeout(timer);
-  async function tick() {
-    stop();
-    if (!ctx.current() || running) return;
-    running = true;
-    try { if (!document.hidden) await run(); }
-    catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.onRefreshError?.(error); }
-    finally { running = false; if (ctx.current()) schedule(); }
-  }
-  document.addEventListener('visibilitychange', tick, { signal: ctx.signal });
-  ctx.signal.addEventListener('abort', stop, { once: true });
-  schedule();
-  return tick;
+  const poller = createPoller({
+    isActive: () => ctx.current(),
+    coalesce: false,
+    delay: () => typeof delay === 'function' ? delay() : delay,
+    async run() {
+      try { if (!document.hidden) await run(); }
+      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.onRefreshError?.(error); }
+    },
+  });
+  document.addEventListener('visibilitychange', poller.trigger, { signal: ctx.signal });
+  ctx.signal.addEventListener('abort', poller.stop, { once: true });
+  poller.start();
+  return poller.trigger;
 }

@@ -6,12 +6,15 @@ import { bindSelectionSurface, node, button, actions, stack, section, table, bad
 import { date } from "./operations.js";
 
 export async function substorePage(ctx) {
-  let resource = await ctx.api("/substore-sync");
-  const agents = ctx.can("agents.read") ? list(await ctx.api("/agents")) : [];
+  const [initialResource, receivedAgents, preference] = await Promise.all([
+    ctx.api("/substore-sync"), ctx.can("agents.read") ? ctx.api("/agents") : [],
+    ctx.api("/preferences/node-order").catch(error => { if (error.name === "AbortError") throw error; return null; }),
+  ]);
+  let resource = initialResource;
+  const agents = list(receivedAgents);
   const regions = new Map(agents.map(agent => [agent.id, geoRegionDetails(agent.labels?.region_code || agent.region_code)]));
   const regionLoads = new Map();
-  let order = savedNodeOrder();
-  try { order = (await ctx.api("/preferences/node-order")).ids; } catch (error) { if (error.name === "AbortError") throw error; }
+  const order = preference?.ids || savedNodeOrder();
   const root = node("div", { className: "a-stack" });
   let serial = 0, dirty = false;
   const writable = ctx.can("settings.manage");

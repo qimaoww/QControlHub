@@ -26,8 +26,9 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       ["#agent-config?agent=charlie&engine=sing-box", "charlie", "sing-box"],
       ["#live-config?agent=alpha&engine=xray", "alpha", "xray"],
     ]) {
+      const previousTarget = target();
       location.hash = hash;
-      await waitFor(() => target()?.elements.agent.value === agent && target()?.elements.engine.value === engine && editor(), `旧链接目标未保留：${hash}`); await settled();
+      await waitFor(() => target() && target() !== previousTarget && target().elements.agent.value === agent && target().elements.engine.value === engine && editor(), `旧链接目标未保留：${hash}`); await settled();
       assert.equal(editor().value, testAPI.layoutConfigs.get(`${agent}-${engine}`).content, "源码与链接目标不符");
       if (testAPI.agents.find(item => item.id === agent).status === "offline") {
         assert.ok(root().textContent.includes("离线"), "离线节点无状态提示");

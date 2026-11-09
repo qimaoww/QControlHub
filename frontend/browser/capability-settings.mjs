@@ -103,15 +103,17 @@ async function testSiteBranding(testAPI) {
   const siteIcon=()=>document.querySelector('#qch-site-icon');
   const select=async(name,blob)=>{
     const transfer=new DataTransfer();transfer.items.add(new File([blob],name,{type:blob.type}));file.files=transfer.files;
-    file.dispatchEvent(new Event('change',{bubbles:true}));await delay(50);
+    file.dispatchEvent(new Event('change',{bubbles:true}));
+    await waitFor(()=>form.querySelector('[role=status]').textContent!=='正在读取图片…','Logo image read did not settle');
   };
   const canvas=document.createElement('canvas');canvas.width=180;canvas.height=36;
   const context=canvas.getContext('2d');context.fillStyle='#7c3aed';context.fillRect(0,0,180,36);
   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
   assert.ok(save.disabled&&!document.querySelector('.a-brand img'),'default brand unavailable');
   assert.ok(siteIcon()?.href.endsWith('/assets/favicon.svg'),'default browser icon missing');
-  await select('brand.png',blob);await waitFor(()=>!save.disabled,'Logo preview not ready');
-  assert.ok(form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'unsaved preview became public');
+  await select('brand.png',blob);
+  await waitFor(()=>!save.disabled&&form.querySelector('.a-mark img'),'Logo preview not ready');
+  assert.ok(!document.querySelector('.a-brand img'),'unsaved preview became public');
   assert.ok(siteIcon().href.endsWith('/assets/favicon.svg'),'unsaved preview changed browser icon');
   testAPI.brandingFailure=true;form.requestSubmit();await waitFor(()=>form.textContent.includes('保存失败'),'Logo failure missing');
   assert.ok(!save.disabled&&form.querySelector('.a-mark img')&&!document.querySelector('.a-brand img'),'Logo failure lost preview');

@@ -414,3 +414,32 @@ assert.equal(pollRuns, 2, "a departed route starts no new request");
 // Native route cancellation, pointer refresh deferral, modal ownership and
 // drag cleanup run on actual pages in browser/native-motion.mjs and
 // browser/native-ordering.mjs. The poller above remains an active shared model.
+
+// Stopping a still-active view during a request cannot resurrect its timer.
+let finishStopped;
+const stopped = createPoller({ run: () => new Promise(resolve => { finishStopped = resolve; }),
+  isActive: () => true, delay: () => 1000,
+  setTimer: callback => { const id = nextTimer++; timers.set(id, callback); return id; }, clearTimer: id => timers.delete(id),
+});
+const inFlight = stopped.trigger(); await Promise.resolve(); stopped.stop(); finishStopped(); await inFlight;
+assert.equal(timers.size, 0, 'stop during a request stays stopped');
+let failures = 0;
+const throws = createPoller({ run: () => { failures++; throw new Error('synchronous failure'); }, isActive: () => true, delay: () => 1000,
+  setTimer: callback => { const id = nextTimer++; timers.set(id, callback); return id; }, clearTimer: id => timers.delete(id),
+});
+await assert.rejects(throws.trigger(), /synchronous failure/);
+await assert.rejects(throws.trigger(), /synchronous failure/);
+assert.equal(failures, 2, 'synchronous failures cannot retain the running lock');
+throws.stop(); assert.equal(timers.size, 0);
+let bursts = 0, burstRelease;
+const burst = createPoller({ run: () => { bursts++; return new Promise(resolve => { burstRelease = resolve; }); }, isActive: () => true, delay: () => 1000,
+  setTimer: callback => { const id = nextTimer++; timers.set(id, callback); return id; }, clearTimer: id => timers.delete(id),
+});
+const busy = burst.trigger(); await Promise.resolve();
+for (let index = 0; index < 100; index++) burst.trigger();
+burstRelease(); await Promise.resolve();
+assert.equal(bursts, 2);
+for (let index = 0; index < 100; index++) burst.trigger();
+burstRelease(); await busy;
+assert.equal(bursts, 2, 'continuous triggers are bounded to one immediate follow-up');
+assert.equal(timers.size, 1); burst.stop();

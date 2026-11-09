@@ -15,6 +15,12 @@ function instrument(path, source) {
     source = source.replace(`export function ${name}(`, `function measured_${name}(`);
     source += `\nexport function ${name}(...args) { ${record(name, `measured_${name}(...args)`)} }\n`;
   }
+  if (path.endsWith("/analytics/observability.js")) {
+    // Accelerate only this fixture's log polling. Session revalidation and
+    // transport/body deadlines must keep their real production timing.
+    source = source.replace('createPoller({ run: load,', 'createPoller({ setTimer: (callback, delay) => setTimeout(callback, window.__logPollDelay ?? delay), run: load,');
+    source += '\nwindow.__logPollTimingFixture = true;\n';
+  }
   if (path.endsWith("/analytics/observability-table.js")) {
     source = source.replace("export function observationStream(", "function measured_observationStream(");
     source += `\nexport function observationStream(...args) {
