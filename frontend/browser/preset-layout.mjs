@@ -83,6 +83,7 @@ export async function testPresetFieldLayoutRuntime() {
       protocol.dispatchEvent(new Event("change", { bubbles: true }));
       await waitFor(() => document.querySelector('[name="reality_min_client_ver"]'), "Reality fields did not load");
       const form = document.querySelector("dialog[open] form:has([name=protocol])");
+      form.elements.namedItem("reality_server_name").value = "reality.example.test";
       const minimum = form.elements.namedItem("reality_min_client_ver");
       const advanced = minimum.closest("details");
       assert(advanced, "Reality fields have no containing section");

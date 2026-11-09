@@ -96,7 +96,7 @@ export async function createConfigFixture(engine, options = {}) {
     management:{disabled:structuredClone(disabled)},
     managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})).concat((saved ? JSON.parse(saved.content).outbounds || [] : []).filter(item=>!item.tag.startsWith("qch-")).map(item=>({section:"outbounds",tag:item.tag,kind:item.protocol||item.type,inbound:false,enabled:!disabled.some(ref=>ref.tag===item.tag)}))),
     inbound_targets:inbounds.map(item=>({tag:item.tag, port:item.port, kind:options.native ? "socks" : item.protocol})),
-    protocols:entries.map(entry => entry.protocol), reality_presets:["www.amazon.com"],
+    protocols:entries.map(entry => entry.protocol),
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},
     present_fields:Object.fromEntries(fields.map(field=>[field.key, Object.hasOwn(root(), field.key)]))});
   const api = async (path, request = {}) => {

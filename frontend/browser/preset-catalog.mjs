@@ -12,6 +12,10 @@ export async function testPresetCatalogRuntime(catalog) {
     covered.add(actual.engine);
     try {
       await open('add');
+      if(actual.plan.reality_enabled) {
+        assert(control('reality_server_name').value===''&&!control('reality_server_name').hasAttribute('list')&&control('reality_server_name').required,'new Reality SNI must be an empty required free-text field');
+        edit('reality_server_name','reality.example.test');
+      }
       if(actual.protocol.port_forward) { edit('target_address','127.0.0.1');edit('target_port',8080); }
       if(['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(actual.protocol.key)) { edit('tls_server_name','tls.example.test');edit('reality_server_name','reality.example.test');edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key'); }
       if(actual.protocol.supports_managed_tls) {

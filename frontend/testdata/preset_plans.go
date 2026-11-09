@@ -30,6 +30,13 @@ func main() {
 				panic(err)
 			}
 			fixture := entry{Engine: engine, Protocol: protocol, Plan: plan}
+			if plan.RealityEnabled {
+				plan.RealityServerName = "reality.example.test"
+				if protocol.Key != serverconfig.ProtocolXHTTPFive && protocol.Key != serverconfig.ProtocolXHTTPTLSReality && protocol.Key != serverconfig.ProtocolXHTTPRealityTLS {
+					saved := plan
+					fixture.SavedPlan = &saved
+				}
+			}
 			if protocol.SupportsRealityMLDSA {
 				regenerated, err := serverconfig.RegeneratePlan(protocol, plan)
 				if err != nil {

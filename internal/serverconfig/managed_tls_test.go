@@ -13,6 +13,9 @@ import (
 func nativeTLSFixturePlan(protocol Protocol) (Input, error) {
 	protocol.SupportsManagedTLS = false
 	input, err := NewPlan(protocol)
+	if input.RealityEnabled {
+		input.RealityServerName = "reality.example.test"
+	}
 	if protocol.PortForward {
 		input.TargetAddress, input.TargetPort = "127.0.0.1", 80
 	}

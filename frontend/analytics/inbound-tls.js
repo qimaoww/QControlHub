@@ -34,6 +34,8 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
     show("client_host", ["http", "websocket", "httpupgrade", "xhttp"].includes(kind));
     show("flow", kind !== "xhttp" || Boolean(protocol.uses_vless_encryption));
     const enabled = Boolean(protocol.requires_tls || tls?.checked);
+    const realityName = input("reality_server_name");
+    if (realityName) realityName.required = Boolean(protocol.uses_reality || input("reality_enabled")?.checked);
     const managed = enabled && protocol.supports_managed_tls && ["caddy", "nginx", "external"].includes(mode?.value);
     const panelCertificate = Boolean(input("panel_certificate_id")?.value) || requireManagedCertificate && ["caddy", "nginx"].includes(mode?.value);
     show("tls_client_certificate", enabled && !panelCertificate && (!mode || mode.value === "native" || mode.value === "nginx" && !automaticNginx));
@@ -68,7 +70,7 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
     }
     if (mode?.value === "native") wrap(mode).closest("details").open = true;
   }
-  for (const name of ["transport", "tls_enabled", "tls_mode", "tls_static_page", "panel_certificate_id"]) input(name)?.addEventListener("change", update);
+  for (const name of ["transport", "tls_enabled", "tls_mode", "tls_static_page", "panel_certificate_id", "reality_enabled"]) input(name)?.addEventListener("change", update);
   for (const name of ["port", "tls_public_port", "tls_server_name", "transport_path"]) input(name)?.addEventListener("input", update);
   if (["vless-xhttp-five", "vless-xhttp-tls-reality", "vless-xhttp-reality-tls"].includes(protocol.key)) {
     for (const name of ["tls_server_name", "reality_server_name", "certificate_path", "private_key_path"]) {

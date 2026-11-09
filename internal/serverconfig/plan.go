@@ -168,7 +168,6 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.RealityPrivateKey = base64.RawURLEncoding.EncodeToString(privateKey.Bytes())
 		input.RealityPublicKey = base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 		input.RealityShortID = hex.EncodeToString(shortID)
-		input.RealityServerName = DefaultRealityServerName
 		input.RealityMinClientVer = "0.0.0"
 	}
 	if protocol.UsesVLESSEncryption {
