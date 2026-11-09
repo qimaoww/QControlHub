@@ -5,7 +5,7 @@ import { node, empty } from "./ui.js";
 export function observationTable(columns, label) {
   const body = node("tbody"), placeholder = empty();
   const scroll = node("div", { className: "a-table-scroll", tabindex: "0", role: "region", "aria-label": label },
-    node("table", {}, node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col" }, title)))), body));
+    node("table", {}, node("thead", {}, node("tr", {}, columns.map(title => node("th", { scope: "col", "data-column": title }, title)))), body));
   const root = node("div", {}, scroll, placeholder);
   const rows = new Map();
   return {

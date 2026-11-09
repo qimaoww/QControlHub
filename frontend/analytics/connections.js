@@ -108,7 +108,7 @@ export async function connectionsPage(ctx) {
       const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
       const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
       const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", {}, nodeRegionFlag(ctx, agent), " ", agent.name),
+      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", { className: "a-probe-name" }, nodeRegionFlag(ctx, agent), node("span", {}, agent.name)),
         badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
     }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试", connectionKey);
     collection.update(reportSources.map(source => ({
