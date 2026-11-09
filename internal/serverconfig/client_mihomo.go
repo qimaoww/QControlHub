@@ -6,11 +6,9 @@ import "errors"
 // builder. Only client credentials are copied; server private keys and paths
 // must never enter a subscription. Keys follow Mihomo's adapter/outbound types.
 func buildMihomoClientYAML(input Input, address, serverName, name string) (string, error) {
-	// Mihomo's reality-opts has no mldsa65Verify field. Xray only appends the
-	// post-quantum signature to its temporary certificate and leaves clients
-	// that do not verify it working, so a node using mldsa65Seed is exported
-	// without the parameter instead of failing the whole Mihomo subscription.
-	// The URL format still carries it as pqv for clients that can verify it.
+	if input.RealityEnabled && (input.RealityMLDSA65Seed != "" || input.RealityMLDSA65Verify != "") {
+		return "", errors.New("当前 Mihomo 导出格式不支持 ML-DSA-65 验证，请使用 Xray 配置")
+	}
 	if proxiedTLS(input) && input.Transport != "xhttp" {
 		input.Port = input.TLSPublicPort
 	}

@@ -20,6 +20,10 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if err := validateClientConnection(input); err != nil {
+		return ClientProfile{}, err
+	}
+	input, address = clientConnectionInput(input, address)
 	if isXHTTPGroup(input.Protocol) && input.XHTTPBackendPort > 0 {
 		return buildXHTTPGroupProfile(input, address, serverName, nodeName)
 	}

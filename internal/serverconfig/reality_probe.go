@@ -14,25 +14,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
-const (
-	DefaultRealityServerName             = "www.amazon.com"
-	RealityMLDSAMinCertificateChainBytes = 3500
-)
-
-var realityServerNamePresets = []string{
-	DefaultRealityServerName,
-	"www.samsung.com",
-	"www.oracle.com",
-	"www.ibm.com",
-	"www.intel.com",
-}
-
-// RealityServerNamePresets returns a copy so callers cannot change the
-// application defaults. Reachability is a runtime property; this list does
-// not prove that a target is reachable from a particular Agent.
-func RealityServerNamePresets() []string {
-	return append([]string(nil), realityServerNamePresets...)
-}
+const RealityMLDSAMinCertificateChainBytes = 3500
 
 type RealityTarget struct {
 	ServerName            string

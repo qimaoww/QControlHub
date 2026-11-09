@@ -407,12 +407,16 @@ func singBoxEcho(t *testing.T, network string) int {
 }
 
 func singBoxEchoRoundTrip(network string, port int) error {
-	conn, err := net.DialTimeout(network, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 3*time.Second)
+	return singBoxEchoRoundTripTimeout(network, port, 3*time.Second)
+}
+
+func singBoxEchoRoundTripTimeout(network string, port int, timeout time.Duration) error {
+	conn, err := net.DialTimeout(network, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), timeout)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 	payload := []byte("qcontrolhub/native/" + network)
 	if _, err := conn.Write(payload); err != nil {
 		return err
@@ -433,7 +437,7 @@ func singBoxTestCertificate(t *testing.T) (string, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "native preset test"}, DNSNames: []string{"tls.example.test", DefaultRealityServerName}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IsCA: true, BasicConstraintsValid: true}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "native preset test"}, DNSNames: []string{"tls.example.test", "reality.example.test"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IsCA: true, BasicConstraintsValid: true}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)

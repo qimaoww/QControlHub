@@ -279,6 +279,152 @@ func TestXHTTPRegenerateKeepsDownloadAssociation(t *testing.T) {
 	}
 }
 
+func TestXHTTPRegenerateUpdatesDownloadMLDSA(t *testing.T) {
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input := newXHTTPTestPlan(t, protocol.Key)
+	input, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	download := xhttpEndpoint(input, false)
+	download["address"] = "203.0.113.8"
+	value, _ := json.Marshal(map[string]any{"downloadSettings": download})
+	input.XHTTPExtra = string(value)
+	plan, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra, _ := xhttpObject(plan.XHTTPExtra)
+	got := mapValue(mapValue(extra["downloadSettings"])["realitySettings"])
+	if got["mldsa65Verify"] != plan.RealityMLDSA65Verify || got["mldsa65Verify"] == input.RealityMLDSA65Verify {
+		t.Fatal("download retained the previous ML-DSA verification key")
+	}
+	if _, err := Generate(core.EngineXray, plan); err != nil {
+		t.Fatal(err)
+	}
+	got["mldsa65Verify"] = input.RealityMLDSA65Verify
+	value, _ = json.Marshal(extra)
+	plan.XHTTPExtra = string(value)
+	if _, err := Generate(core.EngineXray, plan); err == nil || !strings.Contains(err.Error(), "ML-DSA-65 Verify") {
+		t.Fatal("stale download ML-DSA key accepted", err)
+	}
+}
+
+func TestXHTTPSourceSeedOverridesDownloadMetadata(t *testing.T) {
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input := newXHTTPTestPlan(t, protocol.Key)
+	input, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	download := xhttpEndpoint(input, false)
+	download["address"] = "203.0.113.8"
+	value, _ := json.Marshal(map[string]any{"downloadSettings": download})
+	input.XHTTPExtra = strings.TrimSuffix(string(value), "}") + `,"futureOption":9007199254740993}`
+	metadata, err := MarshalClientMetadata(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range []string{rotated.RealityMLDSA65Seed, ""} {
+		current := input
+		current.RealityMLDSA65Seed, current.RealityMLDSA65Verify = seed, ""
+		current.XHTTPExtra = ""
+		source, err := Generate(core.EngineXray, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, ok := Parse(core.EngineXray, source)
+		if !ok {
+			t.Fatal("source not recognized")
+		}
+		if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+			t.Fatal(err)
+		}
+		var extra struct {
+			DownloadSettings struct {
+				Address         string
+				RealitySettings struct{ MLDSA65Verify string }
+			}
+			FutureOption json.Number
+		}
+		if err := json.Unmarshal([]byte(parsed.XHTTPExtra), &extra); err != nil {
+			t.Fatal(err)
+		}
+		if extra.DownloadSettings.RealitySettings.MLDSA65Verify != parsed.RealityMLDSA65Verify {
+			t.Fatal("stale metadata overrode the actual server's ML-DSA identity")
+		}
+		if extra.DownloadSettings.Address != "203.0.113.8" || extra.FutureOption != "9007199254740993" {
+			t.Fatal("source rotation lost endpoint overrides or an exact native option")
+		}
+		profile, err := BuildClientProfile(parsed, "unused.example.test", "")
+		if err != nil || !strings.Contains(profile.Xray, "9007199254740993") {
+			t.Fatal("client export changed an exact native option", err)
+		}
+	}
+}
+
+func TestXHTTPExportsNormalizeEveryAddress(t *testing.T) {
+	for _, key := range []string{ProtocolVLESSXHTTP, ProtocolXHTTPTLS, ProtocolXHTTPFive} {
+		t.Run(key, func(t *testing.T) {
+			input := newXHTTPTestPlan(t, key)
+			input.ClientAddress = " [2001:db8::10] "
+			input.XHTTPTLSAddress = " [2001:db8::11] "
+			if !isXHTTPGroup(key) {
+				download := xhttpEndpoint(input, input.TLSEnabled)
+				download["address"] = " [2001:db8::12] "
+				value, _ := json.Marshal(map[string]any{"downloadSettings": download})
+				input.XHTTPExtra = string(value)
+			}
+			profile, err := BuildClientProfile(input, "unused.example.test", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			profiles := []ClientProfile{profile}
+			for _, variant := range profile.Variants {
+				profiles = append(profiles, variant.Profile)
+			}
+			var inspect func(any)
+			inspect = func(value any) {
+				switch v := value.(type) {
+				case map[string]any:
+					for name, child := range v {
+						if name == "address" {
+							address := stringValue(child)
+							normalized, err := NormalizeClientAddress(address)
+							if err != nil || normalized != address {
+								t.Fatalf("native client address was not normalized: %q", address)
+							}
+						}
+						inspect(child)
+					}
+				case []any:
+					for _, child := range v {
+						inspect(child)
+					}
+				}
+			}
+			for _, item := range profiles {
+				var root any
+				if err := json.Unmarshal([]byte(item.Xray), &root); err != nil {
+					t.Fatal(err)
+				}
+				inspect(root)
+			}
+			outbound, err := BuildClientOutbound(core.EngineXray, input, "unused.example.test", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var root any
+			_ = json.Unmarshal(outbound, &root)
+			inspect(root)
+		})
+	}
+}
+
 func TestXHTTPGroupAccountingRejectsSharedUser(t *testing.T) {
 	input := newXHTTPTestPlan(t, ProtocolXHTTPFive)
 	content, _ := Generate(core.EngineXray, input)

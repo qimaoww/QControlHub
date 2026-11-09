@@ -112,6 +112,9 @@ func TestWorkspaceClientExportNativeFormatsAndEngineIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			input.Tag, input.Port = "same-tag", 21001
+			if input.RealityEnabled {
+				input.RealityServerName = "reality.example.test"
+			}
 			if test.protocol == serverconfig.ProtocolVLESSXHTTP {
 				input.XHTTPExtra = `{"xmux":{"maxConcurrency":8}}`
 			}

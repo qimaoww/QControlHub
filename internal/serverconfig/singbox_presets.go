@@ -109,6 +109,9 @@ func validateSingBoxInput(input Input, protocol Protocol) error {
 	if input.TLSEnabled && input.RealityEnabled {
 		return fmt.Errorf("TLS 证书与 Reality 不能同时启用")
 	}
+	if input.RealityEnabled && len(xhttpRealityNames(input)) > 1 {
+		return fmt.Errorf("sing-box 预设仅支持一个 Reality SNI，请使用完整源码编辑")
+	}
 	if !legacyVLESS && input.RealityEnabled != protocol.UsesReality {
 		return fmt.Errorf("此方案的 Reality 开关不匹配")
 	}
@@ -210,8 +213,8 @@ func validatedSingBoxALPN(value string) ([]string, error) {
 		if item == "" {
 			continue
 		}
-		if item != "h2" && item != "http/1.1" && item != "h3" {
-			return nil, fmt.Errorf("sing-box ALPN %q 无效；支持 h2、http/1.1、h3", item)
+		if len(item) > 255 || strings.IndexFunc(item, func(r rune) bool { return r < 33 || r > 126 }) >= 0 {
+			return nil, fmt.Errorf("ALPN 标识须为 1–255 字节的可见 ASCII 字符")
 		}
 		if !slices.Contains(result, item) {
 			result = append(result, item)
@@ -257,7 +260,7 @@ func singBoxPresetEditError(entry map[string]any) error {
 			return unsupported("Reality 多 Short ID")
 		}
 		handshake := mapValue(reality["handshake"])
-		if stringValue(handshake["server"]) != stringValue(tls["server_name"]) || intValue(handshake["server_port"]) != 443 || len(handshake) != 2 {
+		if stringValue(handshake["server"]) == "" || intValue(handshake["server_port"]) < 1 || intValue(handshake["server_port"]) > 65535 || len(handshake) != 2 {
 			return unsupported("Reality 自定义握手目标")
 		}
 	}

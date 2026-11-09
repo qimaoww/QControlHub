@@ -33,24 +33,6 @@ func (resolver staticRealityResolver) LookupNetIP(context.Context, string, strin
 	return resolver.addresses, resolver.lookupErr
 }
 
-func TestRealityPresetsExcludeMicrosoftAndCloudflare(t *testing.T) {
-	t.Parallel()
-	presets := RealityServerNamePresets()
-	if len(presets) < 3 || DefaultRealityServerName == "" {
-		t.Fatalf("Reality presets are unexpectedly empty: %v", presets)
-	}
-	for _, preset := range presets {
-		lower := strings.ToLower(preset)
-		if strings.Contains(lower, "microsoft") || isCloudflareName(lower) {
-			t.Fatalf("unsafe or retired Reality preset published: %q", preset)
-		}
-	}
-	presets[0] = "changed.example"
-	if RealityServerNamePresets()[0] == "changed.example" {
-		t.Fatal("RealityServerNamePresets returned mutable package state")
-	}
-}
-
 func TestNormalizeRealityServerName(t *testing.T) {
 	t.Parallel()
 	if got, err := normalizeRealityServerName("  WWW.Example.COM. "); err != nil || got != "www.example.com" {

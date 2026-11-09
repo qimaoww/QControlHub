@@ -46,7 +46,10 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", serverconfig.DefaultRealityServerName
+				if protocol.PortForward {
+					input.TargetAddress, input.TargetPort = "127.0.0.1", 80
+				}
+				input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", "reality.example.test"
 				input.CertificatePath, input.PrivateKeyPath = certificate, privateKey
 				content, err := serverconfig.Generate(engine, input)
 				if err != nil {
@@ -67,7 +70,7 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", serverconfig.DefaultRealityServerName
+					input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "fixture.example.test", "reality.example.test"
 					input.CertificatePath, input.PrivateKeyPath = certificate, privateKey
 					content, err := serverconfig.Generate(engine, input)
 					if err != nil {
@@ -111,6 +114,7 @@ func TestGeneratedMainlandAccessPoliciesWithLiveCores(t *testing.T) {
 				t.Fatalf("%s VLESS preset was not published", engine)
 			}
 			input, err := serverconfig.NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}

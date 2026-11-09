@@ -241,11 +241,7 @@ func TestMihomoClientTransportOptions(t *testing.T) {
 	}
 }
 
-// Mihomo's reality-opts has no mldsa65Verify field, and Xray only appends the
-// post-quantum signature to its temporary certificate, so clients that do not
-// verify it still connect. The Mihomo export therefore omits the parameter and
-// keeps the node usable, while the URL format still carries it as pqv.
-func TestMihomoOmitsRealityVerificationItCannotExpress(t *testing.T) {
+func TestMihomoRejectsRealityVerificationItCannotExpress(t *testing.T) {
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := nativeTLSFixturePlan(protocol)
 	if err != nil {
@@ -260,13 +256,13 @@ func TestMihomoOmitsRealityVerificationItCannotExpress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Mihomo == "" || profile.MihomoError != "" {
-		t.Fatalf("Mihomo export refused a Reality node: %q %s", profile.Mihomo, profile.MihomoError)
+	if profile.Mihomo != "" || !strings.Contains(profile.MihomoError, "ML-DSA-65") {
+		t.Fatal("Mihomo silently removed the requested Reality verification")
 	}
-	if strings.Contains(profile.Mihomo, "mldsa") || strings.Contains(profile.Mihomo, verify) {
-		t.Fatal("Mihomo export leaked a verification value it cannot express")
-	}
-	if !strings.Contains(profile.URI, "pqv=") {
+	if !strings.Contains(profile.URI, "pqv="+verify) {
 		t.Fatal("URL export dropped the Reality verification value")
+	}
+	if _, err := BuildClientOutbound(core.EngineMihomo, input, "edge.example.test", ""); err == nil {
+		t.Fatal("native outbound silently removed Reality verification")
 	}
 }

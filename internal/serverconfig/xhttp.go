@@ -93,6 +93,11 @@ func regenerateXHTTPReferences(plan *Input, current Input) error {
 		}
 		if r := mapValue(d["realitySettings"]); r != nil {
 			r["publicKey"], r["shortId"] = plan.RealityPublicKey, plan.RealityShortID
+			if verify := realityMLDSAVerify(*plan); verify != "" {
+				r["mldsa65Verify"] = verify
+			} else {
+				delete(r, "mldsa65Verify")
+			}
 		}
 		if intValue(d["port"]) == current.Port && (current.XHTTPCDN == "" || current.XHTTPCDN == "none") {
 			d["port"] = plan.Port
@@ -142,7 +147,9 @@ func xhttpObject(value string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var result map[string]any
-	if len(value) > 64<<10 || json.Unmarshal([]byte(value), &result) != nil || result == nil {
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	if len(value) > 64<<10 || !json.Valid([]byte(value)) || decoder.Decode(&result) != nil || result == nil {
 		return nil, fmt.Errorf("XHTTP extra 必须为 JSON 对象，最大 64 KiB")
 	}
 	return result, nil
