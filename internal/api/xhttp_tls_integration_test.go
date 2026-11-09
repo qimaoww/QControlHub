@@ -51,6 +51,7 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 					version := 0
 					for index, mode := range []string{"caddy", "nginx", "native", "caddy"} {
 						plan.TLSMode = mode
+						plan.XHTTPMode = []string{"stream-one", "packet-up", "stream-up", "auto"}[index]
 						plan.Listen = "127.0.0.1"
 						plan.CertificatePath, plan.PrivateKeyPath = "", ""
 						plan.TLSStaticHTML = "<!doctype html><p>owned page</p>"
@@ -98,11 +99,17 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 						var saved configMutationResult
 						actor.call("POST", base+"/server-inbounds", body, http.StatusOK, &saved)
 						version = saved.Config.Version
+						if parsed, ok := serverconfig.Parse(engine, saved.Config.Content); !ok || parsed.XHTTPMode != plan.XHTTPMode {
+							t.Fatal("saved server configuration ignored the selected XHTTP mode")
+						}
 						last = saved
 						actor.call("POST", base+"/server-inbounds", body, http.StatusConflict, nil)
 						claimed, err := db.ClaimTask(ctx, agent.ID)
 						if err != nil || claimed == nil || claimed.ConfigID != saved.Config.ID || claimed.ConfigVersion != version || claimed.SharedInstance != shared {
 							t.Fatalf("wrong execution snapshot: %+v %v", claimed, err)
+						}
+						if parsed, ok := serverconfig.Parse(engine, claimed.ConfigContent); !ok || parsed.XHTTPMode != plan.XHTTPMode {
+							t.Fatal("Agent execution snapshot ignored the selected XHTTP mode")
 						}
 						if panelCertificate && (len(claimed.Certificates) != 1 || claimed.Certificates[0].ID != certificate.ID) {
 							t.Fatal("missing authorized proxy certificate")
@@ -140,7 +147,7 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 						if panelCertificate && got.PanelCertificateID != certificate.ID {
 							t.Fatal("proxy panel certificate lost on reopen")
 						}
-						if (got.TLSMode != mode && !(mode == "native" && got.TLSMode == "")) || got.TLSStaticHTML != plan.TLSStaticHTML || got.TransportPath != plan.TransportPath || got.Credential != plan.Credential {
+						if (got.TLSMode != mode && !(mode == "native" && got.TLSMode == "")) || got.TLSStaticHTML != plan.TLSStaticHTML || got.TransportPath != plan.TransportPath || got.Credential != plan.Credential || got.XHTTPMode != plan.XHTTPMode {
 							t.Fatal("mode save/reload changed inputs")
 						}
 						var entries []clientAccessEntry

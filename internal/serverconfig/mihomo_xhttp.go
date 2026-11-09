@@ -12,7 +12,7 @@ var mihomoXHTTPFields = map[string]string{
 }
 
 func mihomoXHTTPConfig(input Input) (map[string]any, error) {
-	config := map[string]any{"path": input.TransportPath, "host": input.TransportHost, "mode": "auto"}
+	config := map[string]any{"path": input.TransportPath, "host": input.TransportHost, "mode": xhttpServerMode(input)}
 	extra, err := xhttpObject(input.XHTTPServerExtra)
 	if err != nil {
 		return nil, err

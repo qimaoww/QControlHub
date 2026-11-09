@@ -34,9 +34,17 @@ func testStandaloneXHTTPTLSLiveMatrix(t *testing.T, xray, mihomo, nginx string) 
 	if _, err := os.Stat(caddy); err != nil {
 		t.Skip("requires actual Caddy")
 	}
+	type selection struct{ tls, upload string }
+	var selections []selection
+	for _, mode := range []string{"native", "caddy", "nginx"} {
+		for _, upload := range []string{"auto", "packet-up", "stream-up", "stream-one"} {
+			selections = append(selections, selection{mode, upload})
+		}
+	}
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
-		for _, mode := range []string{"native", "caddy", "nginx"} {
-			t.Run(string(engine)+"/"+mode, func(t *testing.T) {
+		for _, selected := range selections {
+			mode, serverMode := selected.tls, selected.upload
+			t.Run(string(engine)+"/"+mode+"/"+serverMode, func(t *testing.T) {
 				dir := t.TempDir()
 				cert, key := xhttpTestCertificate(t, dir)
 				// Nginx workers drop privileges; expose fixture directories, never keys.
@@ -50,6 +58,7 @@ func testStandaloneXHTTPTLSLiveMatrix(t *testing.T, xray, mihomo, nginx string) 
 				if err != nil {
 					t.Fatal(err)
 				}
+				plan.XHTTPMode = serverMode
 				plan.TLSMode, plan.Listen, plan.Port, plan.TLSPublicPort = mode, "127.0.0.1", singBoxFreePort(t), singBoxFreePort(t)
 				plan.BlockMainlandDestination = false
 				plan.TLSServerName, plan.ClientAddress = "tls.example.test", "127.0.0.1"
@@ -71,8 +80,8 @@ func testStandaloneXHTTPTLSLiveMatrix(t *testing.T, xray, mihomo, nginx string) 
 					t.Fatal(err)
 				}
 				parsed, ok := serverconfig.Parse(engine, content)
-				if !ok {
-					t.Fatal("parse")
+				if !ok || parsed.XHTTPMode != serverMode {
+					t.Fatal("generated server did not preserve the selected mode")
 				}
 				if err = serverconfig.ApplyClientMetadata(&parsed, metadata); err != nil {
 					t.Fatal(err)
@@ -188,8 +197,13 @@ func testStandaloneXHTTPTLSLiveMatrix(t *testing.T, xray, mihomo, nginx string) 
 						t.Fatal("static root escaped")
 					}
 				}
-				// Force each native client mode against the generated server/backend.
-				for _, upload := range []string{"packet-up", "stream-up", "stream-one"} {
+				// An auto server accepts every upload mode; explicit modes must connect
+				// through the actual server configuration generated for that selection.
+				uploads := []string{serverMode}
+				if serverMode == "auto" {
+					uploads = []string{"packet-up", "stream-up", "stream-one"}
+				}
+				for _, upload := range uploads {
 					t.Run(upload, func(t *testing.T) {
 						input := parsed
 						input.XHTTPMode = upload
