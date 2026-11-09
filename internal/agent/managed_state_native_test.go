@@ -140,6 +140,20 @@ func TestManagedStateAgentNativeDeployments(t *testing.T) {
 					log, _ := os.ReadFile(filepath.Join(root, "core.log"))
 					t.Fatalf("native Agent deployment: %v\n%s\n%s", err, output, log)
 				}
+				before, err := os.ReadFile(spec.ConfigPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = os.Remove(sharedStatePath(spec)) // Bootstrap a pre-sidecar deployment.
+				retained := core.Task{ID: "tsk-native-status", Action: core.ActionStatus, Engine: engine, ConfigID: "cfg-native-retained", ConfigVersion: 1, ConfigContent: content}
+				if _, err := executor.Execute(ctx, retained); err != nil {
+					t.Fatalf("real deployed accounting could not be identified: %v", err)
+				}
+				observed := executor.deploymentStatus(ctx, engine, spec, "")
+				after, err := os.ReadFile(spec.ConfigPath)
+				if err != nil || string(before) != string(after) || observed.ConfigID != retained.ConfigID || observed.ConfigVersion != 1 {
+					t.Fatalf("status changed source or lost retained identity: %+v %v", observed, err)
+				}
 				// The next deployment must replace its own old listeners safely.
 				return func() {}
 			}
@@ -196,8 +210,8 @@ func TestManagedStateAgentNativeDeployments(t *testing.T) {
 			if engine == core.EngineSingBox {
 				// Reproduce an invalid attempt followed by a corrected complete
 				// managed snapshot, then run the real Agent deployment below.
-				if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionDeploy, Engine: engine, ConfigContent: `{}`}); err == nil {
-					t.Fatal("empty object reached the native deployment")
+				if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionDeploy, Engine: engine, ConfigContent: `{"inbounds":[{"type":"http","tag":"missing-exit","listen_port":21001}]}`}); err == nil {
+					t.Fatal("listener without an exit reached the native deployment")
 				}
 				plan, err := serverconfig.PrepareAccounting(engine, source)
 				if err != nil {
@@ -248,6 +262,12 @@ func TestManagedStateAgentNativeDeployments(t *testing.T) {
 			}
 			if status, err := executor.Services.status(context.Background(), spec.Service); err != nil || status != "inactive" {
 				t.Fatalf("empty deployment did not stop instance: %s %v", status, err)
+			}
+			if engine != core.EngineMihomo {
+				start("{}\n")
+			}
+			if listening(first) || listening(second) {
+				t.Fatal("reset configuration kept a listener")
 			}
 			start(source)
 			wait(first)

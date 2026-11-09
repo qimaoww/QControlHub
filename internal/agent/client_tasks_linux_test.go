@@ -57,7 +57,7 @@ func TestSharedFinalInboundDeletionExecutesWithoutOpeningIngress(t *testing.T) {
 	}{
 		{"delete-final", `{"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}`, "shr_0000000000000001", core.ActionDeploy, true, nil},
 		{"validate-empty", `{"inbounds":[]}`, "shr_0000000000000001", core.ActionValidate, true, nil},
-		{"missing-list", `{}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
+		{"reset-config", `{}`, "shr_0000000000000001", core.ActionDeploy, true, nil},
 		{"hidden-listener", `{"inbounds":[],"endpoints":[{"type":"tun"}]}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
 		{"management-api", `{"inbounds":[],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}`, "shr_0000000000000001", core.ActionDeploy, false, nil},
 		{"unapproved-port", `{"inbounds":[{"type":"http","listen_port":21001}]}`, "shr_0000000000000001", core.ActionDeploy, false, nil},

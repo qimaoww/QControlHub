@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 91
+const currentSchemaVersion = 92
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -554,6 +554,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_traffic_id text NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_instance boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS agent_host_port_observations (
+ agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+ task_id text NOT NULL,
+ observed_at timestamptz NOT NULL,
+ ports integer[] NOT NULL
+);
 CREATE TABLE IF NOT EXISTS agent_engine_ownership (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	engine varchar(20) NOT NULL,

@@ -85,6 +85,12 @@ func TestSharedTrafficSupportsGeneratedServerPresets(t *testing.T) {
 }
 
 func TestSharedTrafficFinalInboundDeletion(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+		endpoints, err := SharedTrafficEndpoints(engine, `{}`)
+		if err != nil || len(endpoints) != 0 {
+			t.Fatalf("empty reset exposed listeners: %s %+v %v", engine, endpoints, err)
+		}
+	}
 	for engine, content := range map[core.Engine]string{
 		core.EngineMihomo:          "listeners: []\nproxies: []\nrules: ['MATCH,DIRECT']\n",
 		core.EngineXray:            `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`,
@@ -106,7 +112,6 @@ func TestSharedTrafficFinalInboundDeletion(t *testing.T) {
 		engine  core.Engine
 		content string
 	}{
-		{core.EngineSingBox, `{}`},
 		{core.EngineSingBox, `{"inbounds":null}`},
 		{core.EngineSingBox, `{"inbounds":[],"Inbounds":[{"type":"http","listen_port":22}]}`},
 		{core.EngineSingBox, `{"inbounds":[],"endpoints":[{"type":"tun"}]}`},

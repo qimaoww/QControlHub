@@ -17,7 +17,6 @@ func TestSingBoxDefaultOutboundDiagnostics(t *testing.T) {
 		{"unknown-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"original"}],"route":{"final":"missing"}}`, "unknown default outbound"},
 		{"implicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}]}`, ""},
 		{"explicit-final", `{` + inbound + `,"outbounds":[{"type":"direct","tag":"first"},{"type":"direct","tag":"second"}],"route":{"final":"second"}}`, ""},
-		{"empty-object", `{}`, "no configured outbounds"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			plan, err := PrepareIndependentEgress(core.EngineSingBox, test.content)
@@ -91,6 +90,15 @@ func TestIndependentEgressRejectsBypasses(t *testing.T) {
 }
 
 func TestIndependentEgressAllowsExplicitFinalInboundDeletion(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+		plan, err := PrepareIndependentEgress(engine, "{ }\n")
+		if err != nil || plan.Source != "disabled" || len(plan.Ports) != 0 || plan.Content != "{ }\n" {
+			t.Fatalf("%s reset configuration rejected: %+v %v", engine, plan, err)
+		}
+		if err := ValidateIndependentEgress(engine, `{"unknown_listener":{"port":21001}}`); err == nil {
+			t.Fatalf("%s unknown ingress was treated as a reset", engine)
+		}
+	}
 	for engine, content := range map[core.Engine]string{
 		core.EngineMihomo:          "listeners: []\nproxies: []\nrules: ['MATCH,DIRECT']\n",
 		core.EngineXray:            `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`,

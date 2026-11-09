@@ -88,3 +88,6 @@ const AgentFeatureSharedCoreLifecycle = "shared-core-lifecycle-v1"
 // AgentFeatureInstanceStatus verifies retained main-instance identities during
 // status refreshes and reports them after failed lifecycle operations.
 const AgentFeatureInstanceStatus = "core-instance-status-v1"
+
+// AgentFeatureHostPorts reports complete host socket observations on status tasks.
+const AgentFeatureHostPorts = "host-port-observation-v1"

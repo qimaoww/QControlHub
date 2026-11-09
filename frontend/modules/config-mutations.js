@@ -3,7 +3,7 @@ import { accountStorage, storageAccount } from "./account-storage.js";
 // Store only task addresses, never configuration or credentials. The task ID
 // is allocated before sending so an interrupted response can be read back
 // without guessing which concurrent revision belongs to this submission.
-export function createConfigMutations({ api, state }, { onTask, waitForTerminal }) {
+export function createConfigMutations({ api, state }, { onTask, waitForTerminal, recoverPortConflict }) {
   const storageKey = "qch.config-submissions";
   const pending = new WeakMap();
   const entries = () => {
@@ -84,7 +84,25 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
     persist(records);
     let result;
     try {
-      result = await api(path, {...options, headers:{...options.headers, "X-Config-Task-ID":id}});
+      const submit = () => api(path, {...options, headers:{...options.headers, "X-Config-Task-ID":id}});
+      try { result = await submit(); }
+      catch (error) {
+        // A structured 409 guarantees that the atomic mutation was rejected.
+        // Refresh only the authorized instance, then retry the same bytes and
+        // receipt once. Lost/ambiguous responses always take the readback path.
+        if (error.status !== 409 || error.code !== "port_conflict" || !error.recoveryEngine || !recoverPortConflict)
+          throw error;
+        let recovered;
+        try { recovered = await recoverPortConflict(error); }
+        catch (recoveryError) {
+          if (recoveryError.name === "AbortError") throw recoveryError;
+          error.message = recoveryError.message;
+          throw error;
+        }
+        if (!recovered) throw error;
+        if (state.data !== owner) throw new DOMException("Aborted", "AbortError");
+        result = await submit();
+      }
     } catch (error) {
       if (state.data !== owner || error.name === "AbortError") throw error;
       if (error.status >= 400 && error.status < 500 && error.status !== 408) {

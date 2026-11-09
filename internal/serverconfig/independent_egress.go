@@ -113,6 +113,12 @@ func rejectMutableRoutingAPI(engine core.Engine, root map[string]any) error {
 }
 
 func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
+	// The source editor and historical revisions use {} for an initial/reset
+	// configuration. It contains no listener or flow to attribute. Keep this
+	// exact case separate from partially specified or unknown ingress fields.
+	if len(root) == 0 {
+		return engine.Valid()
+	}
 	var listKey, allowed string
 	switch engine {
 	case core.EngineMihomo:
