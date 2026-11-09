@@ -57,8 +57,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// Preserve the reviewed native surface, including the requested compact
 	// card-selection header, node network column, settings section selection
 	// proportional raster logo containment in the existing brand mark, and
-	// unavailable public-IP placeholders aligned with normal address rows.
-	const expected = "821f1d41c7638b685ed4278774027836796197e21d99bdd7840be4eed39bfe50"
+	// unavailable public-IP placeholders aligned with normal address rows, and
+	// readable connection country/node columns within their scroll container.
+	const expected = "930dbe3dafd31fba0db8bab8ea14b2bafee0103ae9b45064c672c59c651d1a86"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
