@@ -288,8 +288,16 @@ try {
   record(`${mode}: Escape closes a certificate form and invalidates its delayed real resource response`);
 
   // Node enrollment uses the existing source dialog and never edits a config.
+  const openSources = async () => {
+    await wait(a,"!document.querySelector('#app[aria-busy=true]')");
+    for (let remaining = 8; remaining > 0 && await evaluate(a,"!!document.querySelector('dialog.a-dialog[open]')"); remaining--)
+      await evaluate(a,"[...document.querySelectorAll('dialog.a-dialog[open]')].at(-1)?.querySelector('[aria-label=关闭]').click()");
+    assert.equal(await evaluate(a,"!!document.querySelector('dialog.a-dialog[open]')"),false,'source navigation retained a blocking dialog');
+    await click(a,'[data-certificate-sources-open]');
+    await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type h2')?.textContent==='节点证书来源'");
+  };
   const nativeBefore=await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo');
-  await click(a,'dialog[open]:last-of-type [aria-label=关闭]');await click(a,'[data-certificate-sources-open]');
+  await openSources();
   await wait(a,"!!document.querySelector("+JSON.stringify('[data-certificate-source="'+fixture.owner_source+'"][data-certificate-source-action="enroll"]')+")");
   const enrollSelector='[data-certificate-source="'+fixture.owner_source+'"][data-certificate-source-action="enroll"]';
   await click(a,enrollSelector);await wait(a,"!!document.querySelector('dialog.a-dialog[open]:last-of-type')");
@@ -302,11 +310,11 @@ try {
   await api(b,bob,'GET','/certificates/'+nativeCert.id,undefined,404);
   await api(b,bob,'PUT','/certificate-managed-sources/'+fixture.owner_source,{action:'enroll'},404);
   assert.deepEqual(await api(a,alice,'GET','/agents/'+fixture.native+'/configs/mihomo'),nativeBefore);
-  await click(a,'[data-certificate-sources-open]');await wait(a,"!!document.querySelector("+JSON.stringify('[data-certificate-detail="'+nativeCert.id+'"]')+")");
+  await openSources();await wait(a,"!!document.querySelector("+JSON.stringify('[data-certificate-detail="'+nativeCert.id+'"]')+")");
   await click(a,'[data-certificate-detail="'+nativeCert.id+'"]');await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type')?.textContent.includes('原有方式续期')");
   assert.equal(await evaluate(a,"document.querySelector('dialog.a-dialog[open]:last-of-type').textContent.includes('Caddy 自动续期')"),false);
   await screenshot(a,'node-certificate-detail');
-  await click(a,'[data-certificate-sources-open]');await wait(a,"document.querySelector('dialog.a-dialog[open]:last-of-type h2')?.textContent==='节点证书来源'");
+  await openSources();
   for(const [width,height] of [[1920,1080],[3840,2160],[1280,800],[1024,768],[768,1024],[390,844],[844,390],[320,568]]) {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768},a);
     await call('Emulation.setTouchEmulationEnabled',{enabled:width<768},a);
