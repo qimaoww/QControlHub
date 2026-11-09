@@ -370,7 +370,10 @@ export async function taskDetail(ctx, taskID) {
       if (automatic && terminal) {
         const state = await ctx.api(`/tasks/${pathID(taskID)}?view=status`, { signal });
         if (!active()) return;
-        if (['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) return;
+        if (['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) {
+          failure.textContent = diagnosticError(task.error || '');
+          return;
+        }
       }
       const latest = await ctx.api(`/tasks/${pathID(taskID)}`, { signal });
       if (!active()) return;
