@@ -61,6 +61,16 @@ func RenderFormatted(t Template, e Event, panel, zone string) (Rendered, error) 
 	if e.Port > 0 {
 		v["port"] = fmt.Sprint(e.Port)
 	}
+	if strings.HasPrefix(e.Type, "traffic.") {
+		if e.ShareID != "" {
+			v["traffic_scope"] = "共享分配"
+		} else if e.Port > 0 {
+			v["traffic_scope"] = "端口 " + v["port"]
+			if e.Engine != "" {
+				v["traffic_scope"] = e.Engine + ":" + v["port"]
+			}
+		}
+	}
 	if strings.HasPrefix(e.Type, "traffic.") || e.UsedBytes > 0 {
 		v["used_bytes"] = fmt.Sprint(e.UsedBytes)
 		v["used"] = humanBytes(e.UsedBytes)

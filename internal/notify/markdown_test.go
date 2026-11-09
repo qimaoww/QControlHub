@@ -109,7 +109,7 @@ func TestNotificationReadableRateKeepsRawUnitsAndRecoveryMeaning(t *testing.T) {
 	e := Sample("speed.recovered")
 	e.Current, e.Threshold = "5000000 B/s", "8000000 B/s"
 	r, err := RenderFormatted(DefaultTemplate(e.Type), e, "panel", "UTC")
-	if err != nil || !strings.HasPrefix(r.Body, "当前 5.00 MB/s") || !strings.Contains(r.Body, "恢复阈值　8.00 MB/s") {
+	if err != nil || !strings.Contains(r.Body, "当前：5.00 MB/s") || !strings.Contains(r.Body, "恢复阈值：8.00 MB/s") {
 		t.Fatal("recovery message lost key values", r, err)
 	}
 	_, raw, err := Render(Template{Title: "raw", Body: "{{current}} / {{threshold}}"}, e, "panel")
@@ -119,6 +119,26 @@ func TestNotificationReadableRateKeepsRawUnitsAndRecoveryMeaning(t *testing.T) {
 	for input, expected := range map[string]string{"0 B/s": "0 B/s", "500 B/s": "500 B/s", "1000 B/s": "1.00 KB/s", "1000000 B/s": "1.00 MB/s", "NaN B/s": "NaN B/s", "10 bit/s": "10 bit/s"} {
 		if got := humanRate(input); got != expected {
 			t.Fatal(input, got, expected)
+		}
+	}
+}
+
+func TestNotificationTrafficScopeUsesAuthorizedAllocationContext(t *testing.T) {
+	for _, tc := range []struct {
+		share, engine string
+		port          int
+		want          string
+	}{{"", "xray", 443, "xray:443"}, {"", "", 443, "端口 443"}, {"share_example", "", 0, "共享分配"}, {"", "", 0, "—"}} {
+		e := Sample(TypeTrafficQuota)
+		e.ShareID, e.Engine, e.Port = tc.share, tc.engine, tc.port
+		r, err := RenderFormatted(Template{Title: "title", Body: "{{traffic_scope}}"}, e, "panel", "UTC")
+		if err != nil || r.Body != tc.want {
+			t.Fatal("incorrect traffic context", tc, r, err)
+		}
+		e.LimitBytes = 0
+		r, err = RenderFormatted(DefaultTemplate(e.Type), e, "panel", "UTC")
+		if err != nil || strings.Contains(r.Body, "—:—") || strings.Contains(r.Body, "%") {
+			t.Fatal("missing scope or limit produced fabricated values", r, err)
 		}
 	}
 }
