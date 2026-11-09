@@ -158,6 +158,8 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 		} else {
 			key := strings.Join(interfaces, ",")
 			metrics.NetworkAvailable = true
+			rateAvailable := false
+			metrics.NetworkRateAvailable = &rateAvailable
 			metrics.NetworkRXBytes = rx
 			metrics.NetworkTXBytes = tx
 			if previous.networkValid && previous.networkKey == key && rx >= previous.networkRX && tx >= previous.networkTX {
@@ -166,6 +168,7 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 				// between the startup warm-up and the first heartbeat) would
 				// inflate byte-per-second rates; they report zero instead.
 				if seconds >= 0.5 {
+					rateAvailable = true
 					metrics.NetworkRXBPS = bytesPerSecond(rx-previous.networkRX, seconds)
 					metrics.NetworkTXBPS = bytesPerSecond(tx-previous.networkTX, seconds)
 				}

@@ -489,6 +489,13 @@ window.fetch = async (input, options = {}) => {
     return json(mode.startsWith("client-layout")
       ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
       : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
+  if (method === "GET" && path === "/settings/notifications") return json({
+    webhook_signing_configured: true,
+    configuration: { revision: 1, channels: [], rules: [], templates: {} },
+    events: { 'agent.offline': '节点离线' }, variables: ['agent'], variable_descriptions: { agent: '节点名称' },
+    defaults: { 'agent.offline': { title: '节点离线', body: '{{agent}}' } }, update: {},
+  });
+  if (method === "GET" && path === "/settings/notifications/deliveries") return json([]);
   if (path === "/branding") return json({logo: testAPI.branding?.logo || ""});
   if (path === "/settings/branding") {
     testAPI.branding ||= {logo:"",revision:1};

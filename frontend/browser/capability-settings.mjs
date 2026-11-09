@@ -24,6 +24,7 @@ export async function testCapabilitySettingsRuntime({ mode, testAPI }) {
   assert.ok(!document.querySelector('.a-main').textContent.includes('修订'), '设置泄露内部修订标识');
   const page = document.querySelector('.a-main');
   assert.match(page.textContent, /控制面发行版本/); assert.match(page.textContent, /QAgent 安装包版本/); assert.match(page.textContent, /可信代理/);
+  assert.ok(!/Webhook|通知渠道|通知规则|通知模板|投递记录/.test(page.textContent), '面板设置仍包含通知配置或状态');
   if (mode.endsWith('-readonly')) {
     assert.equal(document.querySelector('#site-branding-form'), null, '普通账号出现站点品牌入口');
     assert.ok(inputs.every(input => input.disabled), '只读用户可改内核'); assert.ok(acme.disabled, '只读用户可改邮箱'); assert.equal(save, null, '只读用户出现保存入口');

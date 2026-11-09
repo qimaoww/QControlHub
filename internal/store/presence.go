@@ -39,9 +39,15 @@ func (s *Store) AgentPresenceTransitions(ctx context.Context, now time.Time, off
 			      CASE WHEN `+online+` THEN 'online' ELSE 'offline' END
 			FOR UPDATE SKIP LOCKED
 		)
-		UPDATE agents AS agent SET presence_notification_state=changed.current
+		 , updated AS (UPDATE agents AS agent SET presence_notification_state=changed.current
 		FROM changed WHERE agent.id=changed.id
-		RETURNING agent.id,agent.name,agent.last_seen,changed.previous,changed.current`, now.UTC(), int(offlineAfter/time.Second))
+		RETURNING agent.id,agent.name,agent.last_seen,agent.owner_id,changed.previous,changed.current),
+ journal AS (INSERT INTO notification_events(source_key,owner_id,event)
+ SELECT 'presence:'||id||':'||current||':'||last_seen::text,owner_id,
+ jsonb_build_object('type','agent.'||CASE WHEN current='online' THEN 'online' ELSE 'offline' END,
+ 'time',now(),'agent_id',id,'agent',name,'message','节点 '||name||CASE WHEN current='online' THEN ' 已恢复在线' ELSE ' 已离线' END)
+ FROM updated CROSS JOIN (SELECT pg_advisory_xact_lock(91823411)) notification_journal_gate WHERE previous<>'unknown' ON CONFLICT DO NOTHING)
+ SELECT id,name,last_seen,previous,current FROM updated`, now.UTC(), int(offlineAfter/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("record agent presence transitions: %w", err)
 	}
@@ -73,10 +79,18 @@ func (s *Store) ClaimTrafficQuotaTransitions(ctx context.Context) ([]TrafficQuot
 				AND policy.quota_notification_generation < policy.reset_generation
 			FOR UPDATE OF policy SKIP LOCKED
 		)
-		UPDATE port_traffic_policies AS policy SET quota_notification_generation=policy.reset_generation
+		 , updated AS (UPDATE port_traffic_policies AS policy SET quota_notification_generation=policy.reset_generation
 		FROM claimed WHERE policy.id=claimed.id
 		RETURNING policy.id,policy.agent_id,claimed.agent_name,policy.name,policy.engine,policy.port,policy.protocol,
-			policy.used_bytes,policy.limit_bytes,policy.reset_generation`)
+			policy.used_bytes,policy.limit_bytes,policy.reset_generation),
+ journal AS (INSERT INTO notification_events(source_key,owner_id,event)
+ SELECT 'quota:'||u.id||':'||u.reset_generation::text,a.owner_id,
+ jsonb_build_object('type','traffic.quota','time',now(),'agent_id',u.agent_id,'agent',u.agent_name,
+ 'engine',u.engine,'port',u.port,'resource_id',u.id,'config_id',p.config_id,'config_version',p.config_version,'share_id',COALESCE(p.share_id,''),
+ 'period',COALESCE(p.period_start::text,'')||' / '||COALESCE(p.period_end::text,''),'direction','上传 + 下载（计费口径）','used_bytes',u.used_bytes,'limit_bytes',u.limit_bytes,
+ 'message','流量配额触发：端口 '||u.port::text||' 已阻断')
+ FROM updated u JOIN agents a ON a.id=u.agent_id JOIN port_traffic_policies p ON p.id=u.id CROSS JOIN (SELECT pg_advisory_xact_lock(91823411)) notification_journal_gate ON CONFLICT DO NOTHING)
+ SELECT id,agent_id,agent_name,name,engine,port,protocol,used_bytes,limit_bytes,reset_generation FROM updated`)
 	if err != nil {
 		return nil, err
 	}

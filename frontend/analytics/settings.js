@@ -21,7 +21,6 @@ const numericFields = [
   ["task_retention_days", "任务保留天数", [[0, "不清理"], 30, 90, 180]],
   ["config_revision_retention", "配置历史保留份数", [[0, "不清理"], 50, 100]],
 ];
-const toggles = [["notify_task_failed", "任务失败"], ["notify_agent_offline", "节点离线"], ["notify_agent_online", "节点上线"], ["notify_traffic_quota", "流量超额"]];
 const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 
 export async function settingsPage(ctx) {
@@ -55,22 +54,18 @@ export async function settingsPage(ctx) {
       input("acme_email", "ACME 邮箱", { type: "email" }),
       field("大陆 IPv4 数据源", "cnip_ipv4_url", settings.cnip_source?.ipv4_url || "", { type: "url", disabled: !writable }),
       field("大陆 IPv6 数据源", "cnip_ipv6_url", settings.cnip_source?.ipv6_url || "", { type: "url", disabled: !writable }))),
-    section("通知", node("div", { className: "a-card-body a-stack" },
-      input("webhook_url", "Webhook 地址", { type: "url", maxlength: 500 }),
-      actions(toggles.map(([name, label]) => input(name, label, { type: "checkbox" }))))),
     saveState,
   ];
   const form = ctx.form(content, "保存设置", async (values, element) => {
     if (!writable) return;
     const submitted = snapshot();
-    const body = { ...values, revision: settings.revision,
+    const body = { ...settings, ...values, revision: settings.revision,
       default_agent_engines: engineIDs.filter(engine => element.elements.namedItem(`engine:${engine}`).checked),
       cnip_source: { ipv4_url: values.cnip_ipv4_url, ipv6_url: values.cnip_ipv6_url, format: "auto" },
     };
     delete body.cnip_ipv4_url;
     delete body.cnip_ipv6_url;
     for (const engine of engineIDs) delete body[`engine:${engine}`];
-    for (const [name] of toggles) body[name] = element.elements.namedItem(name).checked;
     for (const name of [...numericFields.map(([key]) => key), "ui_font_scale", "client_connection_retention_days"]) body[name] = Number(body[name]);
     phase = "saving"; sync();
     try {
@@ -110,7 +105,7 @@ export async function settingsPage(ctx) {
   const refreshState = notice('');
   const branding = ctx.session.role === "admin" && writable ? await siteBrandingSettings(ctx, changed => { brandingDirty = changed; sync(); }) : null;
   let refreshSequence = 0;
-  ctx.onRefresh(async () => {
+  const refreshSettings = async () => {
     if (branding) await branding.refresh();
     const sequence = ++refreshSequence;
     const latest = await ctx.api('/settings');
@@ -129,7 +124,7 @@ export async function settingsPage(ctx) {
       else if (control.value !== String(value ?? '')) control.value = value ?? '';
     }
     baseline = snapshot(); phase = 'idle'; refreshState.textContent = ''; sync();
-  });
+  };
   sync();
   if (!writable) submit.remove();
   else {
@@ -153,7 +148,7 @@ export async function settingsPage(ctx) {
   }));
   const security = [
     ["控制面安全传输", deployment.secure_transport], ["数据库 TLS 校验", deployment.database_tls_verified],
-    ["配置加密", deployment.config_encryption_configured], ["Webhook 签名", deployment.webhook_signing_configured],
+    ["配置加密", deployment.config_encryption_configured],
   ];
   const extra = stack(section("部署状态", node("div", { className: "a-card-body" }, stack(
     table(["项目", "状态"], [...security.map(([name, enabled]) => [name, badge(enabled ? "已配置" : "未配置", enabled ? "ok" : "warn")]),
@@ -162,6 +157,7 @@ export async function settingsPage(ctx) {
       ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
     updateResult, actions(check)))));
   if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
+  ctx.onRefresh(refreshSettings);
   return stack(branding?.element, form, refreshState, extra);
 }
 
