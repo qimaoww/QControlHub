@@ -112,6 +112,8 @@ strong, b { font-weight: 600; }
 .a-table-scroll :is(th, td):first-child { padding-inline-start: var(--card-gutter); }
 .a-table-scroll :is(th, td):last-child { padding-inline-end: var(--card-gutter); }
 .a-table-scroll td { max-width: 480px; }
+.a-table-scroll[aria-label="客户端来源 IP 明细"] :is(th,td)[data-column="国家 / 地区"] { min-width: 160px; }
+.a-table-scroll[aria-label="客户端来源 IP 明细"] :is(th,td)[data-column="节点"] { min-width: 240px; }
 .a-table-scroll th { background: #fafafa; white-space: nowrap; font-size: var(--text-label); font-weight: 500; color: var(--soft-ink); }
 .a-table-scroll tr:last-child td { border-bottom: 1px solid var(--border); }
 .a-table-scroll tbody tr:hover { background: #fafafa; }

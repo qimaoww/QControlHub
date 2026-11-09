@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -187,7 +188,7 @@ func TestCoreLogAuthorizedWindowUsesInstanceIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	statement, args := scopedCoreLogWindowStatement(scope, CoreLogQuery{AgentID: agent, InstanceID: "main", Limit: 10}, []string{"xray"})
-	plan := explainJSONOnDedicatedConnection(t, db, statement, args...)
+	plan := explainJSON(t, db, statement, args...)
 	summary := planSummary(plan)
 	var indexes []string
 	if err := db.pool.QueryRow(ctx, `SELECT array_agg(child.relname) FROM pg_inherits i JOIN pg_class child ON child.oid=i.inhrelid WHERE i.inhparent='core_logs_instance_recent_idx'::regclass`).Scan(&indexes); err != nil {
@@ -203,6 +204,16 @@ func TestCoreLogAuthorizedWindowUsesInstanceIndex(t *testing.T) {
 		t.Fatalf("instance index absent: %s", summary)
 	}
 	t.Log(summary)
+	for _, query := range []CoreLogQuery{{Limit: 1000}, {AgentID: agent, Limit: 1000}, {AgentID: agent, InstanceID: "main", Limit: 1000}} {
+		for sample := range 5 {
+			started := time.Now()
+			logs, err := db.ListCoreLogs(scope, query)
+			if err != nil || len(logs) != 256 {
+				t.Fatalf("quiet authorized window: rows=%d err=%v", len(logs), err)
+			}
+			t.Logf("foreign_rows=50000 authorized_rows=256 sample=%d agent=%q instance=%q read_ms=%.2f", sample, query.AgentID, query.InstanceID, float64(time.Since(started).Microseconds())/1000)
+		}
+	}
 }
 
 func TestCoreLogUnverifiedHistoryNeverInheritsNodeOwner(t *testing.T) {
@@ -231,4 +242,53 @@ func TestCoreLogUnverifiedHistoryNeverInheritsNodeOwner(t *testing.T) {
 	if err != nil || len(logs) != 0 {
 		t.Fatalf("transfer guessed historical attribution: %+v %v", logs, err)
 	}
+}
+
+// Cancellation must reach PostgreSQL, including a query waiting on a lock.
+func TestCoreLogReadCancellationReleasesQuery(t *testing.T) {
+	db := openPerformanceStore(t)
+	ctx := context.Background()
+	user, scope := sharedTestUser(t, db, ctx, "log-cancel")
+	agent, _ := seedPerformanceAgent(t, db, 0)
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET owner_id=$2 WHERE id=$1`, agent, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	if _, err = lock.Exec(ctx, `LOCK TABLE core_logs IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithTimeout(scope, 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = db.ListCoreLogs(canceled, CoreLogQuery{Limit: 1000})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cancellation lost: %v", err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatal("query ignored deadline")
+	}
+	for deadline := time.Now().Add(time.Second); ; {
+		var waiting int
+		if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE relation='core_logs'::regclass AND NOT granted`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("canceled SQL remained in PostgreSQL's lock queue")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err = lock.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ListCoreLogs(scope, CoreLogQuery{Limit: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("locked authorized read canceled and retry recovered in %s", time.Since(started))
 }

@@ -1,11 +1,14 @@
-const prefix = "qcontrolhub:connections:v1:", indexKey = `${prefix}index`;
-export const connectionRetention = 300_000;
+const prefix = "qcontrolhub:connections:v2:", indexKey = `${prefix}index`;
+export const connectionCacheDay = at => {
+ const day = new Date(at);
+ return `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
+};
 export function connectionSessionStorage() {
   try { return globalThis.sessionStorage; } catch { return null; }
 }
 export function clearConnectionStorage(storage = connectionSessionStorage()) {
   try {
-    for (const key of Object.keys(storage || {})) if (key.startsWith(prefix)) storage.removeItem(key);
+    for (const key of Object.keys(storage || {})) if (key.startsWith("qcontrolhub:connections:")) storage.removeItem(key);
   } catch { /* Disabled storage must not prevent login or API reads. */ }
 }
 const validResult = result => result && Array.isArray(result.records) && Array.isArray(result.sources)
@@ -19,7 +22,7 @@ const validResult = result => result && Array.isArray(result.records) && Array.i
 
 // Persistence is tab/session scoped and can only be restored after a current
 // server scope check. Preference IDs and usernames never authorize IP history.
-export function createConnectionCache({ now = Date.now, ttl = 30_000, retention = connectionRetention, maxEntries = 24, maxBytes = 4 * 1024 * 1024, storage = null } = {}) {
+export function createConnectionCache({ now = Date.now, ttl = 30_000, maxEntries = 24, maxBytes = 4 * 1024 * 1024, storage = null } = {}) {
   const entries = new Map(), dirty = new Set(), deleted = new Set();
   let bytes = 0, scope = "", selection = null, timer, restoring = false;
   const remove = key => {
@@ -28,7 +31,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
     entries.delete(key); dirty.delete(key); deleted.add(key);
   };
   const prune = () => {
-    for (const [key, entry] of entries) if (now() < entry.at || now() - entry.at >= retention) remove(key);
+    for (const [key, entry] of entries) if (now() < entry.at || connectionCacheDay(now()) !== connectionCacheDay(entry.at)) remove(key);
   };
   function flush() {
     clearTimeout(timer); timer = null;
@@ -42,7 +45,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
         const entry = entries.get(key);
         if (entry) storage.setItem(prefix + key, JSON.stringify({ scope, at: entry.at, result: entry.result, locationsAttempted: entry.locationsAttempted }));
       }
-      storage.setItem(indexKey, JSON.stringify({ version: 1, scope, selection, keys: [...entries.keys()] }));
+      storage.setItem(indexKey, JSON.stringify({ version: 2, scope, selection, keys: [...entries.keys()] }));
     } catch {
       clearConnectionStorage(storage); storage = null;
     }
@@ -66,7 +69,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
         if (!raw) return;
         if (raw.length > 128 * 1024) throw new Error("cache index size");
         const index = JSON.parse(raw);
-        if (index.version !== 1 || index.scope !== scope || !Array.isArray(index.keys) || index.keys.length > maxEntries) throw new Error("cache index");
+        if (index.version !== 2 || index.scope !== scope || !Array.isArray(index.keys) || index.keys.length > maxEntries) throw new Error("cache index");
         let restoredBytes = 0;
         restoring = true;
         for (const key of index.keys) {
@@ -77,7 +80,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
           if (restoredBytes > maxBytes + maxEntries * 1024) throw new Error("cache size");
           const entry = JSON.parse(value);
           if (entry.scope !== scope || !Number.isFinite(entry.at) || entry.at > now() || typeof entry.locationsAttempted !== "boolean" || !validResult(entry.result)) throw new Error("cache entry");
-          if (now() - entry.at < retention) api.set(key, entry.result, entry.at, entry.locationsAttempted);
+          if (connectionCacheDay(now()) === connectionCacheDay(entry.at)) api.set(key, entry.result, entry.at, entry.locationsAttempted);
           else deleted.add(key);
         }
         const saved = index.selection;
@@ -106,7 +109,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
       remove(key);
       let size;
       try { size = JSON.stringify(result).length * 2 + key.length * 2; } catch { return; }
-      if (size > maxBytes || !Number.isFinite(at) || at > now() || now() - at >= retention) { schedule(); return; }
+      if (size > maxBytes || !Number.isFinite(at) || at > now() || connectionCacheDay(now()) !== connectionCacheDay(at)) { schedule(); return; }
       entries.set(key, { result, at, bytes: size, locationsAttempted });
       deleted.delete(key); if (!restoring) dirty.add(key); bytes += size;
       prune();

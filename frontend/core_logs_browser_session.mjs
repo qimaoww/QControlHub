@@ -88,8 +88,8 @@ try {
     const { targetId } = await call("Target.createTarget", { url: "about:blank", browserContextId });
     const { sessionId } = await call("Target.attachToTarget", { targetId, flatten: true });
     await call("Page.enable", {}, sessionId);
-    await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, sessionId);
-    if (mode === "mobile") await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
+    await call("Emulation.setDeviceMetricsOverride", { width: mode.endsWith("mobile") ? 390 : 1440, height: mode.endsWith("mobile") ? 844 : 1000, deviceScaleFactor: 1, mobile: mode.endsWith("mobile") }, sessionId);
+    if (mode.endsWith("mobile")) await call("Emulation.setTouchEmulationEnabled", { enabled: true }, sessionId);
     await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "light" }] }, sessionId);
     await call("Page.navigate", { url }, sessionId);
     await wait(sessionId, "!!document.querySelector('#login-form,.a-login form')");
@@ -99,7 +99,9 @@ try {
     await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='core logs evidence password'; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
-    await wait(page, "!!document.querySelector('.a-user')");
+    // The shell mounts before the login submission finishes its initial route.
+    // Navigation during that submission is correctly refused by the UI guard.
+    await wait(page, "!!document.querySelector('.a-user') && !document.querySelector('#app[aria-busy]') && !!document.querySelector('.a-main > .a-stack:not([aria-busy])')");
     return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
@@ -120,6 +122,10 @@ try {
   };
 
 
+  if (mode.startsWith("connections-")) {
+    const {runConnectionSessions}=await import('./client_connection_browser_session.mjs');
+    await runConnectionSessions({createPage,login,api,evaluate,wait,call,reload,fixture,record});
+  } else {
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
   const [alice, bob, admin] = await Promise.all([login(a, "alice"), login(b, "bob"), login(manager, "logs-admin")]);
   const host = fixture["logs-admin"], shareA = "shr_0123456789abcdef", shareB = "shr_1123456789abcdef";
@@ -192,7 +198,7 @@ try {
   record(`${mode}: fast A→B selection ignores the delayed A response`);
   // Exercise the actual production layout against the real long-log/source
   // fixtures, plus a failed/delayed transport while retaining those records.
-  const layoutWidths = mode === "mobile" ? [[390,844],[844,390]] : [[1920,1080],[3840,2160],[1280,900],[960,800]];
+  const layoutWidths = mode.endsWith("mobile") ? [[390,844],[844,390]] : [[1920,1080],[3840,2160],[1280,900],[960,800]];
   for (const [width,height] of layoutWidths) {
     await call("Emulation.setDeviceMetricsOverride", {width,height,deviceScaleFactor:1,mobile:mode==="mobile"}, manager);
     await evaluate(manager,"window.scrollTo(0,0)");
@@ -200,7 +206,7 @@ try {
     assert.ok(await evaluate(manager,"[...document.querySelectorAll('.a-log-message')].every(el=>el.getBoundingClientRect().right<=innerWidth+1)"),`${width}: the log message uses the visible reading width`);
     await screenshot(manager,`stream-long-${width}x${height}`);
   }
-  const [layoutWidth,layoutHeight] = mode === "mobile" ? [390,844] : [1920,1080];
+  const [layoutWidth,layoutHeight] = mode.endsWith("mobile") ? [390,844] : [1920,1080];
   await call("Emulation.setDeviceMetricsOverride", {width:layoutWidth,height:layoutHeight,deviceScaleFactor:1,mobile:mode==="mobile"}, manager);
   await evaluate(manager,"[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='暂停更新').click();window.scrollTo(0,0)");
   await screenshot(manager,"stream-paused");
@@ -248,6 +254,7 @@ try {
   assert.ok(await evaluate(a,`![...document.querySelectorAll('[data-log-filters] select[name=instance_id] option')].some(option=>option.value===${JSON.stringify(shareA)})`));
   record(`${mode}: live poll removes revoked A data/options/cache; disabled session denied; same-context account switch contains only B data`);
   if(artifacts) await writeFile(join(resolve(artifacts),`${mode}-record.txt`),report.join("\n")+"\n");
+  }
 } finally {
   clearTimeout(timer);
   socket?.close();

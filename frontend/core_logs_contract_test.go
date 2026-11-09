@@ -15,7 +15,7 @@ func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
 		}
 	}
 	view := frontendSources(t, "analytics/observability.js")
-	for _, required := range []string{`ctx.api("/core-log-sources"`, `coreLogSourceState(source)`, `state.title`} {
+	for _, required := range []string{`requestCoreLogJSON(ctx.api, "/core-log-sources"`, `coreLogSourceState(source)`, `state.title`} {
 		if !strings.Contains(view, required) {
 			t.Errorf("native source feature presentation missing %q", required)
 		}

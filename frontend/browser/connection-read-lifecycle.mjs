@@ -7,6 +7,7 @@ export async function testConnectionReadLifecycle() {
   const nativeFetch = globalThis.fetch, nativeNow = Date.now;
   let clockOffset = 0; Date.now = () => nativeNow() + clockOffset;
   let session = { role: 'admin', user_id: 'native-connection-cache' };
+  let revision = 1;
   const base = { agent_id: 'alpha', agent_name: '<script>Alpha</script>', engine: 'xray', client_ip: '8.8.8.8', first_seen: '2026-09-21T08:00:00Z', last_seen: '2026-09-21T09:00:00Z', endpoints: [{ local_port: 8443 }, { local_port: 443 }, { local_port: 8443 }], location: { country_code: 'CN', province: '广东' } };
   let records = [{ ...base, id: 1 }, { ...base, id: 2, agent_id: 'bravo', agent_name: 'Bravo', engine: 'sing-box', client_ip: '1.1.1.1' }];
   let failure = 0, historyGate, locationGate, geography = 'complete';
@@ -18,14 +19,16 @@ export async function testConnectionReadLifecycle() {
     if (path === '/api/v1/settings') return reply({});
     if (path === '/api/v1/preferences/node-order') return reply({ ids: ['bravo', 'alpha'], revision: 1 });
     if (path !== '/api/v1/client-connections') return nativeFetch(input, options);
-    if (url.searchParams.get('scope_only') === 'true') return reply({ scope: '' });
+    if (url.searchParams.get('scope_only') === 'true') return reply({ scope: session.user_id });
     const params = url.searchParams, locationOnly = params.get('locations') === 'only';
     calls.push({ params, signal: options.signal, locationOnly });
     const snapshot = structuredClone(records).filter(row => (!params.get('agent_id') || row.agent_id === params.get('agent_id')) && (!params.get('engine') || row.engine === params.get('engine')) && (!params.get('client_ip') || row.client_ip === params.get('client_ip')));
     const gate = locationOnly ? locationGate : historyGate;
     if (gate) await gate.promise; // Ignore abort deliberately; view ownership must reject late responses.
     if (!locationOnly && failure) return reply({ error: failure === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' }, failure);
-    return reply({ country_codes: geography === 'unknown' ? [] : ['CN'], records: snapshot.map(row => ({ ...row, location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1' });
+    const response = { country_codes: geography === 'unknown' ? [] : ['CN'], records: snapshot.map(row => ({ ...row, location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1', cache_scope: session.user_id, sync_token: String(revision) };
+    if (params.get('sync_token') === String(revision) && !locationOnly) { response.delta = true; response.record_keys = response.records.map(row => JSON.stringify([row.agent_id,row.engine,row.client_ip])); response.records = []; }
+    return reply(response);
   };
   const main = () => document.querySelector('.a-main');
   const form = () => main()?.querySelector('form');
@@ -52,16 +55,29 @@ export async function testConnectionReadLifecycle() {
     assert.equal(rows()[0].querySelector('[data-column="入站端口"]').textContent, '443 · 8443', 'native port set did not deduplicate and sort');
     assert.equal(calls.find(call => !call.locationOnly).params.getAll('node_order').join(','), 'bravo,alpha', 'history did not use authenticated node order');
     assert.equal(form().elements.agent_id.options[1].value, 'bravo', 'node choices ignored saved order');
+    rows()[0].dataset.retained = 'yes';
+    records[0] = {...records[0], id: 99, first_seen: '2026-09-20T08:00:00Z', last_seen: '2026-09-21T10:00:00Z', endpoints: [{local_port:443},{local_port:6443}]}; revision++;
+    refresh(); await waitFor(ready, 'existing group update did not finish');
+    assert.equal(rows()[0].dataset.retained, 'yes', 'business group update replaced the row after minimum ID changed');
+    assert.equal(rows()[0].querySelector('[data-column="入站端口"]').textContent, '443 · 6443');
+    refresh(); await waitFor(ready, 'duplicate confirmation did not finish');
+    assert.equal(rows().length, 2, 'duplicate update appended another group');
+    clockOffset = 361000; failure = 503; refresh();
+    await waitFor(() => main().textContent.includes('更新失败，保留上次结果'), 'old five-minute boundary discarded data');
+    assert.equal(rows().length, 2); assert.ok(!main().textContent.includes('结果已过期'));
+    failure = 0; clockOffset = 0; refresh(); await waitFor(ready, 'five-minute failure did not recover');
     historyGate = deferred(); const initialGate = historyGate;
     change('agent_id', 'alpha');
     assert.equal(rows().length, 1, 'narrow preview exposed another node');
     assert.ok(main().textContent.includes('结果待更新') && !main().textContent.includes('观测连接 10'), 'partial preview claimed complete totals');
     initialGate.resolve(); historyGate = null; await waitFor(ready, 'narrow result did not finish');
     const cached = historyReads(); change('agent_id', ''); change('agent_id', 'alpha');
-    assert.equal(historyReads(), cached, 'fresh node scopes did not reuse cache');
+    await waitFor(ready, 'cached node did not confirm changes');
+    assert.equal(rows().length, 1, 'cached target was not restored');
     button('下一页').click(); await waitFor(() => ready() && main().textContent.includes('第 2 页'), 'connection next page missing');
     const paged = historyReads(); button('上一页').click(); button('下一页').click();
-    assert.equal(historyReads(), paged, 'previous/next page did not retain independent cache');
+    await waitFor(ready, 'cached page did not confirm changes');
+    assert.ok(main().textContent.includes('第 2 页'), 'cached pagination changed');
     button('上一页').click();
     clockOffset = 31000;
     historyGate = deferred(); const staleGate = historyGate, beforeStale = historyReads(); change('agent_id', '');
@@ -74,7 +90,7 @@ export async function testConnectionReadLifecycle() {
     }
     const scopedReads = historyReads();
     change('client_ip', ''); change('engine', 'xray'); change('engine', 'sing-box'); change('engine', ''); change('client_ip', '8.8.8.8');
-    assert.equal(historyReads(), scopedReads, 'engine/IP scope caches were combined or lost');
+    await waitFor(ready, 'cached filter did not confirm changes');
     assert.ok(rows().every(row => row.textContent.includes('8.8.8.8') && !row.textContent.includes('1.1.1.1')), 'IP cache contains another client');
     failure = 503; refresh(); await waitFor(() => main().textContent.includes('更新失败，保留上次结果'), 'connection failure did not preserve history');
     assert.equal(rows().length, 1, 'connection failure cleared valid rows');
@@ -82,11 +98,11 @@ export async function testConnectionReadLifecycle() {
     assert.equal(rows().length, 0, 'connection denial retained protected history');
     assert.equal(form().elements.agent_id.options.length, 1, 'denied node choices remained selectable');
     failure = 0; const afterDenial = historyReads(); refresh(); await waitFor(() => historyReads() > afterDenial && ready(), 'denied cache was reused after recovery');
-    geography = 'unknown'; await boot(); await waitFor(() => locationReads() > 0, 'unknown geography did not start enrichment'); await delay(20);
+    geography = 'unknown'; revision++; await boot(); await waitFor(() => locationReads() > 0, 'unknown geography did not start enrichment'); await delay(20);
     const geoCount = locationReads(); change('agent_id', 'alpha'); await waitFor(ready, 'unknown geography narrower scope failed');
     change('agent_id', ''); await waitFor(ready, 'unknown geography cached scope failed');
     assert.equal(locationReads(), geoCount + 1, 'unknown geography was retried on every fresh cache hit');
-    geography = 'country'; locationGate = deferred(); await boot();
+    geography = 'country'; revision++; locationGate = deferred(); await boot();
     const heldLocation = locationGate; change('engine', 'sing-box'); await waitFor(ready, 'new scope blocked on old geography');
     heldLocation.resolve(); locationGate = null; await waitFor(() => rows()[0]?.textContent.includes('中国 · 江苏'), 'China province enrichment did not paint');
     assert.ok(rows().every(row => row.textContent.includes('sing-box') && !row.textContent.includes('Alpha')), 'late geography restored an older query');

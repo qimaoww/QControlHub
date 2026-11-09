@@ -168,7 +168,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   const beforePrevious = requests.length;
   button("上一页").click();
   await waitFor(() => pageText().includes("第 1 页") && settled(), "previous page missing");
-  assert.equal(requests.length, beforePrevious, "refresh must retain the other page's fresh snapshot");
+  assert.equal(requests.length, beforePrevious + 1, "cached page must check for changes");
   assert.ok(displayed().every(row => !row.textContent.includes("2026/9/20")), "previous page must not retain the refreshed cursor page");
   const beforeRecent = requests.length;
   button("今日").click();

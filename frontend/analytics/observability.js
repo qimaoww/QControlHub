@@ -5,7 +5,7 @@ import { savedNodeOrder, orderNodesBySavedOrder } from '../modules/node-order.js
 import { coreLogFilterLimits } from "../modules/core-log-preferences.js";
 import { createCoreLogSelection } from '../modules/core-log-selection.js';
 import { coreLogScopeKey, normalizeCoreLogScope, coreLogSourceAgents } from "../modules/core-log-scope.js";
-import { readCoreLogWindow } from "../modules/core-log-read.js";
+import { readCoreLogWindow, requestCoreLogJSON } from "../modules/core-log-read.js";
 import { createCoreLogCache } from "../modules/core-log-cache.js";
 import { filterCoreLogEntries, coreLogFilterCounts, levelName, coreLogStoragePolicy } from "../modules/core-log-model.js";
 import { coreLogInstanceName, coreLogSourceState, coreLogSourceStatus } from "../modules/core-log-source-status.js";
@@ -30,7 +30,7 @@ export async function logsPage(ctx) {
   let filters = { limit: 1000, ...data.coreLogFilters }, automatic = data.coreLogAutoRefresh !== false;
   let entries = [], sources = [], page = 0, anchor = null, serial = 0, controller, pendingRead, failures = 0, incomplete = false, readState = "loading";
   let signature = data.analyticsLogAccessSignature || "", scope = "", queryFrame, cache = data.analyticsLogCache ||= createCoreLogCache();
-  let nodeOrder = savedNodeOrder();
+  let nodeOrder = savedNodeOrder(), sourceUnavailable = false;
   const status = muted("正在读取日志…"); status.setAttribute("data-log-refresh-label", "");
   const error = notice("");
   const collection = sourceStatus(ctx, { marker: "data-log-sources", lastSeenLabel: "最近日志", lastSeenEmpty: "尚无日志" });
@@ -78,6 +78,7 @@ export async function logsPage(ctx) {
     options("instance_id", [["", "全部授权实例"], ...new Map(available.map(source => [source.instance_id, [source.instance_id, instanceLabel(source)]])).values()]);
     options("engine", [["", "全部内核"], ...engines.filter(engine => available.some(source => source.engine === engine && (!filters.instance_id || source.instance_id === filters.instance_id))).map(engine => [engine, engine])]);
     const relevant = available.filter(source => !filters.instance_id || source.instance_id === filters.instance_id).filter(source => !filters.engine || source.engine === filters.engine);
+    if (sourceUnavailable) { collection.unavailable(); return; }
     collection.update(relevant.map(source => {
       const state = coreLogSourceState(source);
       const attention = ["failed", "offline", "unsupported", "not-installed", "status-unavailable"].includes(source.status);
@@ -112,13 +113,13 @@ export async function logsPage(ctx) {
       const engine = engineName(record.engine);
       const heading = actions(
         node("p", {}, node("strong", {}, source?.name || record.agent_id)),
-        badge(`内核 · ${engine}`), node("p", { className: "a-muted" }, source ? instanceLabel(source) : record.instance_id || "主实例"),
+        badge(`内核 · ${engine}`), node("p", { className: "a-muted" }, source ? instanceLabel(source) : coreLogInstanceName(record)),
         badge(levelName(record.level), ["error", "critical"].includes(record.level) ? "bad" : record.level === "warning" ? "warn" : ""),
         node("time", { className: "a-muted", datetime: record.logged_at }, date(record.logged_at)));
       return [heading,
         node("pre", { className: "a-code a-log-message", tabindex: "0", "aria-label": `${source?.name || record.agent_id} · ${engine} · 日志正文` }, redactDiagnostic(record.message))];
     }, !entries.length && readState === "loading" ? "正在读取日志…" : !entries.length && readState === "failed" ? "日志读取失败" :
-      entries.length ? "没有匹配日志" : !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
+      entries.length ? "没有匹配日志" : sourceUnavailable ? "暂无日志" : !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
     count.textContent = `${visible.length} 条日志${visible.length !== entries.length ? ` · 已加载 ${entries.length} 条` : ""}${visible.length > 200 ? ` · 第 ${page + 1} / ${Math.ceil(visible.length / 200)} 页` : ""} · 信息 ${counts.level.info} · 警告 ${counts.level.warning} · 错误 ${counts.level.error}`;
     previous.disabled = page === 0; next.disabled = start + 200 >= visible.length; pageTools.hidden = visible.length <= 200;
   }
@@ -144,24 +145,104 @@ export async function logsPage(ctx) {
       void ctx.api('/preferences/node-order', { signal }).then(order => {
         if (current() && Array.isArray(order?.ids)) { nodeOrder = order.ids; sourceOptions(); }
       }).catch(() => {});
-      const receivedSources = await ctx.api("/core-log-sources", { signal });
-      if (!current()) return;
-      const access = JSON.stringify(receivedSources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
-      if (access !== signature) { cache = data.analyticsLogCache = createCoreLogCache(); entries = []; incomplete = false; draw(); }
-      data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
-      filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
-      const key = coreLogScopeKey(filters), changedScope = scope !== key;
-      if (changedScope) {
-        const cached = cache.preview(key);
-        scope = key; entries = cached?.entries || []; incomplete = cached ? !cached.complete : false; page = 0; anchor = null; draw();
-        if (entries.length) status.textContent = incomplete ? "已显示部分日志，正在补齐…" : "已显示缓存，正在刷新…";
+      const key = coreLogScopeKey(filters), candidate = cache.preview(key);
+      let fresh = false, directoryReady = false, sourceFailure, denied, verifyPreview;
+      const previewReady = !entries.length && candidate?.entries.length && filters.limit > 200
+        ? new Promise(resolve => { verifyPreview = resolve; }) : null;
+      const windowController = new AbortController();
+      const abortWindow = () => windowController.abort();
+      signal.addEventListener("abort", abortWindow, { once: true });
+      let grants;
+      const identity = record => JSON.stringify([record.agent_id, record.engine, record.instance_id || "main"]);
+      const authorized = value => {
+        if (!directoryReady) return value;
+        const allowed = record => grants.has(identity(record)) && (!record.owner_id || grants.get(identity(record)) === record.owner_id);
+        return value.every(allowed) ? value : value.filter(allowed);
+      };
+      const display = (value, partial) => {
+        if (!current() || denied || coreLogScopeKey(filters) !== key) return;
+        fresh = true; scope = key; entries = authorized(value); incomplete = partial; readState = partial ? "loading" : "ready";
+        error.textContent = ""; draw();
+        status.textContent = partial ? "已显示最新日志，正在补齐所选窗口…" : directoryReady
+          ? automatic ? "正在实时更新" : "自动更新已暂停" : "日志已加载，正在读取来源状态…";
+      };
+      const readWindow = () => {
+        const params = new URLSearchParams({ limit: String(filters.limit) });
+        for (const name of ["agent_id", "instance_id", "user_id"]) if (filters[name]) params.set(name, filters[name]);
+        return readCoreLogWindow(ctx.api, params, { signal: windowController.signal, previous: entries,
+          preview: !entries.length && !candidate?.entries.length && filters.limit > 200, previewReady, engines,
+          onPreview(value) {
+            if (entries.length >= value.length && entries.length) return;
+            display(value, true);
+            if (current() && directoryReady && !denied) cache.set(key, entries, { complete: false });
+          } });
+      };
+      // Network windows carry their own live server authorization. Only reuse
+      // memory snapshots after the directory verifies their current grants.
+      const windowRead = readWindow().then(value => { display(value, false); return value; }, failure => {
+        if (current() && [401, 403, 404].includes(failure.status)) {
+          entries = []; incomplete = false; cache = data.analyticsLogCache = createCoreLogCache(); draw();
+        }
+        throw failure;
+      });
+      const directoryRead = requestCoreLogJSON(ctx.api, "/core-log-sources", { signal, timeout: 8000 }).then(receivedSources => {
+        if (!current()) return;
+        const access = JSON.stringify(receivedSources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
+        if (access !== signature) {
+          cache = data.analyticsLogCache = createCoreLogCache();
+          if (!fresh) { entries = []; incomplete = false; }
+        }
+        data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
+        sourceUnavailable = false; grants = new Map(sources.map(source => [identity(source), source.owner_id])); directoryReady = true;
+        if (fresh) entries = authorized(entries);
+        filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
+        if (coreLogScopeKey(filters) !== key) { entries = []; incomplete = false; abortWindow(); }
+        else if (!fresh && scope !== key) {
+          const cached = cache.preview(key);
+          scope = key; entries = cached?.entries || []; incomplete = cached ? !cached.complete : false; page = 0; anchor = null;
+          if (entries.length) status.textContent = incomplete ? "已显示部分日志，正在补齐…" : "已显示缓存，正在刷新…";
+        }
+        draw();
+      }).catch(failure => {
+        if (!current()) return;
+        sourceFailure = failure; sourceUnavailable = true;
+        if ([401, 403, 404].includes(failure.status)) { denied = failure; abortWindow(); }
+        else collection.unavailable();
+      }).finally(() => verifyPreview?.(!entries.length));
+      let result;
+      try {
+        const [directory, window] = await Promise.allSettled([directoryRead, windowRead]);
+        if (!current()) return;
+        if (denied) throw denied;
+        if (directory.status === "rejected") throw directory.reason;
+        if (coreLogScopeKey(filters) !== key) {
+          // A deleted/revoked saved target normalizes to the remaining grants.
+          // Never accept the old target's late response or its validator.
+          scope = ""; entries = []; incomplete = false;
+          const params = new URLSearchParams({ limit: String(filters.limit) });
+          for (const name of ["agent_id", "instance_id", "user_id"]) if (filters[name]) params.set(name, filters[name]);
+          result = await readCoreLogWindow(ctx.api, params, { signal, preview: filters.limit > 200, engines,
+            onPreview(value) { if (current()) { entries = authorized(value); incomplete = true; cache.set(coreLogScopeKey(filters), entries, { complete: false }); error.textContent = ""; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
+        } else {
+          if (window.status === "rejected") {
+            if (fresh && incomplete && directoryReady) cache.set(key, entries, { complete: false });
+            throw window.reason;
+          }
+          result = window.value;
+        }
+      } finally {
+        signal.removeEventListener("abort", abortWindow);
+        abortWindow();
       }
-      const params = new URLSearchParams({ limit: String(filters.limit) });
-      for (const name of ["agent_id", "instance_id", "user_id"]) if (filters[name]) params.set(name, filters[name]);
-      const result = await readCoreLogWindow(ctx.api, params, { signal, previous: entries, preview: !entries.length && filters.limit > 200, engines,
-        onPreview(value) { if (current()) { entries = value; incomplete = true; cache.set(key, value, { complete: false }); error.textContent = ""; draw(); status.textContent = "已显示最新日志，正在补齐所选窗口…"; } } });
       if (!current()) return;
-      entries = result; incomplete = false; readState = "ready"; cache.set(key, result); failures = 0; error.textContent = ""; draw();
+      // A directory that finished after the network window may reflect a grant
+      // revoked during that read. Do not retain its protected rows in memory.
+      result = authorized(result);
+      entries = result; incomplete = false; readState = "ready";
+      scope = coreLogScopeKey(filters);
+      if (directoryReady) cache.set(scope, result);
+      failures = sourceFailure ? failures + 1 : 0;
+      error.textContent = sourceFailure ? "来源状态读取失败，请刷新重试。" : ""; draw();
       status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;

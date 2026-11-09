@@ -59,6 +59,10 @@ type ClientConnectionSource struct {
 }
 
 type ClientConnectionHistory struct {
+	SyncToken  string   `json:"sync_token,omitempty"`
+	Delta      bool     `json:"delta,omitempty"`
+	RecordKeys []string `json:"record_keys"`
+
 	Records      []ClientConnectionRecord `json:"records"`
 	Timeline     []ClientConnectionBucket `json:"timeline"`
 	Sources      []ClientConnectionSource `json:"sources"`
