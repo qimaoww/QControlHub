@@ -310,6 +310,63 @@ func TestXHTTPRegenerateUpdatesDownloadMLDSA(t *testing.T) {
 	}
 }
 
+func TestXHTTPSourceSeedOverridesDownloadMetadata(t *testing.T) {
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input := newXHTTPTestPlan(t, protocol.Key)
+	input, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	download := xhttpEndpoint(input, false)
+	download["address"] = "203.0.113.8"
+	value, _ := json.Marshal(map[string]any{"downloadSettings": download})
+	input.XHTTPExtra = strings.TrimSuffix(string(value), "}") + `,"futureOption":9007199254740993}`
+	metadata, err := MarshalClientMetadata(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := RegeneratePlan(protocol, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range []string{rotated.RealityMLDSA65Seed, ""} {
+		current := input
+		current.RealityMLDSA65Seed, current.RealityMLDSA65Verify = seed, ""
+		current.XHTTPExtra = ""
+		source, err := Generate(core.EngineXray, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, ok := Parse(core.EngineXray, source)
+		if !ok {
+			t.Fatal("source not recognized")
+		}
+		if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+			t.Fatal(err)
+		}
+		var extra struct {
+			DownloadSettings struct {
+				Address         string
+				RealitySettings struct{ MLDSA65Verify string }
+			}
+			FutureOption json.Number
+		}
+		if err := json.Unmarshal([]byte(parsed.XHTTPExtra), &extra); err != nil {
+			t.Fatal(err)
+		}
+		if extra.DownloadSettings.RealitySettings.MLDSA65Verify != parsed.RealityMLDSA65Verify {
+			t.Fatal("stale metadata overrode the actual server's ML-DSA identity")
+		}
+		if extra.DownloadSettings.Address != "203.0.113.8" || extra.FutureOption != "9007199254740993" {
+			t.Fatal("source rotation lost endpoint overrides or an exact native option")
+		}
+		profile, err := BuildClientProfile(parsed, "unused.example.test", "")
+		if err != nil || !strings.Contains(profile.Xray, "9007199254740993") {
+			t.Fatal("client export changed an exact native option", err)
+		}
+	}
+}
+
 func TestXHTTPExportsNormalizeEveryAddress(t *testing.T) {
 	for _, key := range []string{ProtocolVLESSXHTTP, ProtocolXHTTPTLS, ProtocolXHTTPFive} {
 		t.Run(key, func(t *testing.T) {

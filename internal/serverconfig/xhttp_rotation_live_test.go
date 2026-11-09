@@ -62,7 +62,7 @@ func TestXHTTPSplitMLDSARotationLive(t *testing.T) {
 	encoded, _ := json.Marshal(map[string]any{"downloadSettings": download})
 	input.XHTTPExtra = string(encoded)
 	previousVerify := input.RealityMLDSA65Verify
-	for _, phase := range []string{"initial", "rotated"} {
+	for _, phase := range []string{"initial", "rotated", "source-seed-only"} {
 		t.Run(phase, func(t *testing.T) {
 			if phase == "rotated" {
 				input, err = RegeneratePlan(protocol, input)
@@ -70,7 +70,17 @@ func TestXHTTPSplitMLDSARotationLive(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			source, err := Generate(core.EngineXray, input)
+			metadataInput := input
+			if phase == "source-seed-only" {
+				rotated, err := RegeneratePlan(protocol, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.RealityMLDSA65Seed, input.RealityMLDSA65Verify = rotated.RealityMLDSA65Seed, rotated.RealityMLDSA65Verify
+			}
+			serverInput := input
+			serverInput.XHTTPExtra = ""
+			source, err := Generate(core.EngineXray, serverInput)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,7 +88,7 @@ func TestXHTTPSplitMLDSARotationLive(t *testing.T) {
 			if !ok {
 				t.Fatal("generated server not recognized")
 			}
-			metadata, err := MarshalClientMetadata(input)
+			metadata, err := MarshalClientMetadata(metadataInput)
 			if err != nil {
 				t.Fatal(err)
 			}

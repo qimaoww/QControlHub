@@ -54,6 +54,22 @@ func applyXHTTPMetadata(input *Input, m clientMetadata) {
 		input.XHTTPMode = x.Mode
 	}
 	input.XHTTPExtra = x.Extra
+	// The download uses this same server identity. A source-only Seed edit
+	// must not revive a verification key from an older metadata revision.
+	if extra, err := xhttpObject(input.XHTTPExtra); input.RealityEnabled && err == nil {
+		download := mapValue(extra["downloadSettings"])
+		if r := mapValue(download["realitySettings"]); download["security"] == "reality" && r != nil {
+			if verify := realityMLDSAVerify(*input); stringValue(r["mldsa65Verify"]) != verify {
+				if verify == "" {
+					delete(r, "mldsa65Verify")
+				} else {
+					r["mldsa65Verify"] = verify
+				}
+				encoded, _ := json.Marshal(extra)
+				input.XHTTPExtra = string(encoded)
+			}
+		}
+	}
 	if input.TLSEnabled && !input.RealityEnabled && input.TLSServerName == "" {
 		input.TLSServerName = x.TLSName
 	}
