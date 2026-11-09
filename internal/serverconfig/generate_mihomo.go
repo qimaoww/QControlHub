@@ -13,7 +13,7 @@ import (
 
 func generateMihomo(input Input) (string, error) {
 	if input.Protocol == ProtocolXHTTPTLS && input.TLSALPN != "" && input.TLSALPN != "h2" && input.TLSALPN != "h2,http/1.1" && input.TLSALPN != "http/1.1,h2" {
-		return "", fmt.Errorf("Mihomo XHTTP 服务端固定支持 h2,http/1.1，请使用 h2")
+		return "", fmt.Errorf("Mihomo XHTTP 服务端固定支持 h2,http/1.1，请使用 h2,http/1.1 或 h2")
 	}
 	if input.Transport == "xhttp" {
 		if _, err := mihomoXHTTPConfig(input); err != nil {
@@ -290,6 +290,7 @@ func parseMihomo(content string) (Input, bool) {
 		input.Protocol = ProtocolVLESSXHTTP
 		if input.TLSEnabled {
 			input.Protocol = ProtocolXHTTPTLS
+			input.TLSALPN = "h2,http/1.1"
 		}
 	}
 	if input.Protocol == ProtocolTrojan {

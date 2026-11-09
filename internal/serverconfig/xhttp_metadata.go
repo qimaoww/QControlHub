@@ -9,11 +9,12 @@ import (
 	"strings"
 )
 
-// Only client values and managed certificate references belong here. Native
-// listener settings and server secrets are always recovered from Xray source.
+// Client values, certificate references and the last generated mode belong here.
+// The mode marker detects source edits; listener settings still come from source.
 type xhttpMetadata struct {
 	Binding         string `json:"binding"`
 	Mode            string `json:"mode"`
+	ServerMode      string `json:"server_mode,omitempty"`
 	Extra           string `json:"extra,omitempty"`
 	Address         string `json:"address,omitempty"`
 	Port            int    `json:"port,omitempty"`
@@ -39,7 +40,7 @@ func xhttpBinding(input Input) string {
 }
 
 func marshalXHTTPMetadata(input Input) *xhttpMetadata {
-	return &xhttpMetadata{Binding: xhttpBinding(input), Mode: input.XHTTPMode, Extra: input.XHTTPExtra, Address: input.ClientAddress, Port: input.ClientPort, Host: input.ClientHost, ALPN: input.TLSClientALPN, CDN: input.XHTTPCDN, TLSAddress: input.XHTTPTLSAddress, TLSPort: input.XHTTPTLSClientPort, TLSHost: input.XHTTPTLSHost, TLSName: input.TLSServerName, RealityName: input.RealityServerName, CertificatePath: input.CertificatePath, PrivateKeyPath: input.PrivateKeyPath}
+	return &xhttpMetadata{Binding: xhttpBinding(input), Mode: input.XHTTPMode, ServerMode: xhttpServerMode(input), Extra: input.XHTTPExtra, Address: input.ClientAddress, Port: input.ClientPort, Host: input.ClientHost, ALPN: input.TLSClientALPN, CDN: input.XHTTPCDN, TLSAddress: input.XHTTPTLSAddress, TLSPort: input.XHTTPTLSClientPort, TLSHost: input.XHTTPTLSHost, TLSName: input.TLSServerName, RealityName: input.RealityServerName, CertificatePath: input.CertificatePath, PrivateKeyPath: input.PrivateKeyPath}
 }
 
 func applyXHTTPMetadata(input *Input, m clientMetadata) {
@@ -47,7 +48,12 @@ func applyXHTTPMetadata(input *Input, m clientMetadata) {
 	if x == nil || x.Binding != xhttpBinding(*input) {
 		return
 	}
-	input.XHTTPMode, input.XHTTPExtra = x.Mode, x.Extra
+	// Preserve historical client-only modes. New source edits take precedence
+	// over metadata generated for a different server mode.
+	if x.ServerMode == "" || input.XHTTPMode == x.ServerMode {
+		input.XHTTPMode = x.Mode
+	}
+	input.XHTTPExtra = x.Extra
 	if input.TLSEnabled && !input.RealityEnabled && input.TLSServerName == "" {
 		input.TLSServerName = x.TLSName
 	}

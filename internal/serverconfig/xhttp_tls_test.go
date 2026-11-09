@@ -163,3 +163,70 @@ func TestMihomoXHTTPServerOptionsAreNativeAndRoundTrip(t *testing.T) {
 		t.Fatal("unsupported server field silently discarded")
 	}
 }
+
+func TestXHTTPTLSSelectedServerModeAndSourceEdits(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineMihomo} {
+		for _, tlsMode := range []string{"native", "nginx", "caddy"} {
+			for _, mode := range []string{"auto", "packet-up", "stream-up", "stream-one"} {
+				t.Run(string(engine)+"/"+tlsMode+"/"+mode, func(t *testing.T) {
+					protocol, _ := FindProtocol(engine, ProtocolXHTTPTLS)
+					plan, _ := NewPlan(protocol)
+					if plan.TLSALPN != "h2,http/1.1" || plan.TLSClientALPN != "h2" {
+						t.Fatal("server and client ALPN defaults must reflect their separate roles")
+					}
+					plan.TLSMode, plan.XHTTPMode, plan.TLSServerName = tlsMode, mode, "tls.example.test"
+					if tlsMode == "native" {
+						plan.Listen = "0.0.0.0"
+						plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/cert.pem", "/etc/qcontrolhub/tls/key.pem"
+					}
+					content, err := Generate(engine, plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					parsed, ok := Parse(engine, content)
+					if !ok || parsed.XHTTPMode != mode {
+						t.Fatal("server source ignored the selected mode", parsed.XHTTPMode)
+					}
+					metadata, err := MarshalClientMetadataWithPrevious(plan, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := ApplyClientMetadata(&parsed, metadata); err != nil || parsed.XHTTPMode != mode {
+						t.Fatal("mode lost on reopen", err)
+					}
+					// A subsequent native source edit must survive older form metadata.
+					plan.XHTTPMode = "packet-up"
+					edited, err := Generate(engine, plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					parsed, _ = Parse(engine, edited)
+					if err := ApplyClientMetadata(&parsed, metadata); err != nil || parsed.XHTTPMode != "packet-up" {
+						t.Fatal("metadata overwrote the current server mode", err)
+					}
+					if tlsMode != "native" {
+						if _, err := ManagedTLSFrontends(engine, edited, map[string]string{plan.Tag: metadata}); err != nil {
+							t.Fatal("mode edit detached the owned proxy", err)
+						}
+					}
+					// Existing versions had server auto and a separate client mode.
+					var legacy clientMetadata
+					if err := json.Unmarshal([]byte(metadata), &legacy); err != nil {
+						t.Fatal(err)
+					}
+					legacy.XHTTP.ServerMode, legacy.XHTTP.Mode = "", "stream-one"
+					old, _ := json.Marshal(legacy)
+					plan.XHTTPMode = "auto"
+					content, err = Generate(engine, plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					parsed, _ = Parse(engine, content)
+					if err := ApplyClientMetadata(&parsed, string(old)); err != nil || parsed.XHTTPMode != "stream-one" {
+						t.Fatal("historical client mode was lost", err)
+					}
+				})
+			}
+		}
+	}
+}
