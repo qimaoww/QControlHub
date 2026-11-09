@@ -161,6 +161,7 @@ export async function createConfigFixture(engine, options = {}) {
     if(path.endsWith('/outbounds')&&request.method==='POST') {
       if(test.gate)await test.gate;
       if(test.sourceFailure)throw Object.assign(new Error('测试出站保存失败'),test.sourceFailure);
+      assert(!body.preset_base || body.operation==='modify','preset baseline submitted for a non-edit operation');
       assert(body.version===saved.version,'outbound save lost version check');
       const doc=JSON.parse(saved.content), index=doc.outbounds.findIndex(item=>item.tag===body.tag);
       const rewrite=(value)=>{

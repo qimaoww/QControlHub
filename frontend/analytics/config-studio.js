@@ -434,7 +434,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const chosen=list(current.managed_objects).find(item=>!item.inbound&&item.tag===binding);
       if(['modify','delete'].includes(operation)&&!chosen)throw new Error('当前入站尚未绑定可编辑出站');
       loading.close();
-      await outboundObject(chosen,operation,inbound,true);
+      await outboundObject(['modify','delete'].includes(operation)?chosen:null,operation,inbound,true);
     }catch(error){if(!ctx.current()||error.name==='AbortError')return;if(loading.isConnected)loading.querySelector('.a-dialog-body').replaceChildren(notice(error.message));else ctx.announce(error.message,'error');}
   }
   function outboundBinding(inbound) {
@@ -468,7 +468,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         if(!selecting&&!deleting&&engine!=='mihomo'){try{JSON.parse(raw);}catch(error){throw new Error('出站 JSON 格式无效，请检查后重试。',{cause:error});}}
         if(object&&operation==='modify'&&!await ctx.confirm(`更新“${object.tag}”及其所有引用？`,'更新出站'))return;
         if(!await preparing(values.intent))return;
-        const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:current.snapshot_task_id,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
+        const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:current.snapshot_task_id,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:operation==='modify'&&activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
           ...(['add','bind'].includes(operation)&&inbound?{inbound_tag:inbound.tag,inbound_port:inbound.port}:{})},box);
         await committed(result,box);
       });
