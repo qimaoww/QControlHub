@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -24,6 +25,15 @@ func TestCoreLogsBrowserEvidence(t *testing.T) {
 		t.Skip("interactive browser evidence")
 	}
 	runCoreLogsBrowser(t, "")
+}
+
+func TestClientConnectionsBrowserSessions(t *testing.T) {
+	if os.Getenv("QCH_CORE_LOG_BROWSER") != "1" {
+		t.Skip("enable with QCH_CORE_LOG_BROWSER=1")
+	}
+	for _, mode := range []string{"connections-desktop", "connections-mobile"} {
+		t.Run(mode, func(t *testing.T) { runCoreLogsBrowser(t, mode) })
+	}
 }
 
 func TestCoreLogsBrowserSessions(t *testing.T) {
@@ -100,9 +110,29 @@ func runCoreLogsBrowser(t *testing.T, mode string) {
 				t.Fatal(err)
 			}
 			entries := []core.CoreLogEntry{{Engine: core.EngineMihomo, InstanceID: "main", Service: "qagent-mihomo.service", Level: "info", Message: name + " 主实例 · service started"}, {Engine: core.EngineXray, InstanceID: "main", Service: "qagent-xray.service", Level: "warning", Message: name + " 主实例 · upstream retry"}}
-			id, _ := core.NewID("log")
-			if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: id, Entries: entries}); err != nil {
-				t.Fatal(err)
+			if strings.HasPrefix(mode, "connections-") {
+				locations := []store.ClientConnectionLocation{}
+				for i := 1; i <= 240; i++ {
+					ip := fmt.Sprintf("8.8.%d.%d", i/250, i%250+1)
+					entries = append(entries, core.CoreLogEntry{Engine: core.EngineMihomo, Level: "info", Message: fmt.Sprintf("[TCP] %s:50123 --> 1.1.1.1:443 using DIRECT", ip)})
+					locations = append(locations, store.ClientConnectionLocation{IP: ip, ClientIPLocation: core.ClientIPLocation{CountryCode: "US", Country: "United States"}, RetryAfter: time.Now().Add(time.Hour)})
+					if len(locations) == 200 {
+						if err := db.SaveClientConnectionLocations(ctx, locations); err != nil {
+							t.Fatal(err)
+						}
+						locations = nil
+					}
+				}
+				if err := db.SaveClientConnectionLocations(ctx, locations); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for start := 0; start < len(entries); start += core.MaxCoreLogBatchEntries {
+				end := min(start+core.MaxCoreLogBatchEntries, len(entries))
+				id, _ := core.NewID("log")
+				if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: id, Entries: entries[start:end]}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if name == "logs-admin" {
 				for i, recipient := range []string{"alice", "bob"} {

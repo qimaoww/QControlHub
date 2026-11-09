@@ -84,10 +84,14 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 		}
 		scope, err := s.clientConnectionScope(request)
 		if err != nil {
-			writeStoreError(w, err)
+			writeCoreLogReadError(w, request, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"scope": scope})
+		return
+	}
+	if value := request.URL.Query().Get("sync"); value != "" && value != "true" || len(request.URL.Query().Get("sync_token")) > 128 {
+		writeError(w, http.StatusBadRequest, "请选择有效的连接同步参数。")
 		return
 	}
 	locationMode := request.URL.Query().Get("locations")
@@ -105,15 +109,24 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 	// revocation must not stamp old rows with the new, narrower authority.
 	scope, err := s.clientConnectionScope(request)
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, request, err)
 		return
 	}
-	history, err := s.store.ClientConnectionHistory(request.Context(), query)
+	var history core.ClientConnectionHistory
+	var synced bool
+	if request.URL.Query().Get("sync") == "true" {
+		history, synced, err = s.store.SyncClientConnections(request.Context(), query, scope, request.URL.Query().Get("sync_token"))
+	}
+	if !synced && err == nil {
+		history, err = s.store.ClientConnectionHistory(request.Context(), query)
+	}
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, request, err)
 		return
 	}
-	s.resolveClientConnectionLocations(request.Context(), history.Records, locationMode == "cached")
+	if !synced {
+		s.resolveClientConnectionLocations(request.Context(), history.Records, locationMode == "cached")
+	}
 	if query.CountryCode != "" {
 		// A deferred lookup may reclassify an IP for later queries. This response
 		// still describes the filtered database snapshot used for its totals.
@@ -133,7 +146,7 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 	}
 	latest, err := s.clientConnectionScope(request)
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, request, err)
 		return
 	}
 	if latest != scope {

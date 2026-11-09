@@ -10,12 +10,12 @@ export function observationTable(columns, label) {
   const rows = new Map();
   return {
     root,
-    update(records, project, emptyText = "暂无记录") {
-      const ids = new Set(records.map(record => String(record.id)));
+    update(records, project, emptyText = "暂无记录", key = record => record.id) {
+      const ids = new Set(records.map(record => String(key(record))));
       for (const [id, row] of rows) if (!ids.has(id)) { row.remove(); rows.delete(id); }
       let previous = null;
       for (const record of records) {
-        const id = String(record.id);
+        const id = String(key(record));
         let row = rows.get(id);
         if (!row) { row = node("tr", {}, columns.map(title => node("td", { "data-column": title }))); rows.set(id, row); }
         const values = project(record);

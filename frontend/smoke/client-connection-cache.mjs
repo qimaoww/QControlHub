@@ -16,7 +16,9 @@ export async function run() {
     cache.set("large", { text: "x".repeat(2000) });
     assert.equal(cache.get("large"), null, "oversized payload is not retained");
     now += 301_000;
-    assert.equal(cache.get("a"), null, "old snapshots expire");
+    assert.ok(cache.get("a"), "five-minute age does not expire same-day snapshots");
+    now += 86400_000;
+    assert.equal(cache.get("a"), null, "a new local day starts a new cache cycle");
     const scoped = createConnectionCache({ now: () => now });
     scoped.set(connectionQuery(filters).toString(), result);
     const countryQuery = connectionQuery({ ...filters, country_code: "CN" });
@@ -61,15 +63,16 @@ export async function run() {
     const other = createConnectionCache({ now: () => now, storage }); other.restore("another-login-scope");
     assert.equal(other.get("page"), null, "a changed login/authority cannot restore IP history");
     persisted.set("page", result); persisted.flush();
-    now += 300_000;
+    now += 86400_000;
     const expired = createConnectionCache({ now: () => now, storage }); expired.restore("verified-login-scope");
-    assert.equal(expired.get("page"), null, "retention is enforced on document restoration");
-    storage.setItem("qcontrolhub:connections:v1:index", '{"version":999}');
+    assert.equal(expired.get("page"), null, "a new natural day retires stored snapshots");
+    assert.equal(expired.selection.filters.date, filters.date, "a new cache day must not change the selected query date");
+    storage.setItem("qcontrolhub:connections:v2:index", '{"version":999}');
     expired.restore("verified-login-scope"); assert.equal(expired.hasStored(), false, "incompatible formats are discarded");
-    storage.setItem("qcontrolhub:connections:v1:index", '{');
+    storage.setItem("qcontrolhub:connections:v2:index", '{');
     expired.restore("verified-login-scope"); assert.equal(expired.hasStored(), false, "corrupt storage cannot break startup");
     const disabled = createConnectionCache({ storage: { getItem() { throw new Error("disabled"); }, setItem() { throw new Error("quota"); } } });
     assert.equal(disabled.hasStored(), false); disabled.bind("scope"); disabled.set("page", result); disabled.flush();
     assert.ok(disabled.get("page"), "storage failure keeps the memory/API fallback working");
-    console.log("Connection cache TTL, LRU, byte bounds and preview isolation passed");
+    console.log("Connection natural-day cache, freshness, LRU, byte bounds and preview isolation passed");
 }

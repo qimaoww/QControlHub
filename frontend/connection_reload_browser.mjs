@@ -105,8 +105,8 @@ try {
   assert.deepEqual(await evaluate(`[...document.querySelector('[name=country_code]').options].map(option=>option.value).sort()`), ['', 'CN', 'TW', 'US'], 'options must include countries on later pages and exclude unused catalog entries');
   assert.equal(await evaluate(`[...document.querySelector('[name=country_code]').childNodes].some(node=>node.nodeType===Node.TEXT_NODE && node.textContent.trim())`), false, 'literal boolean in country selector');
   await configure({empty:true}); await refresh(); await wait(ready);
-  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), '');
-  assert.equal(await evaluate(`document.querySelector('[name=country_code]').options.length`), 1);
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').value`), 'TW', 'background country changes must preserve the selected filter');
+  assert.equal(await evaluate(`document.querySelector('[name=country_code]').options.length`), 2, 'retain the selected country even when the result is empty');
   await screenshot('country-empty-1920x1080');
   await configure({empty:false}); await refresh(); await wait(ready);
   await evaluate(`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='清除筛选').click()`); await wait(ready);
@@ -140,9 +140,11 @@ try {
   await wait(`document.querySelector('.a-main')?.textContent.includes('上次结果')`);
   assert.equal(await evaluate(rows), 1, 'stale reload cleared usable rows'); await screenshot('updating-1920x1080');
   await wait(ready);
-  const updated = await counts(); assert.equal(updated.reads, filtered.reads + 1);
-  await configure({ failure: 503 }); await refresh();
+  const updated = await counts(); assert.equal(updated.reads, filtered.reads, 'stale cache confirmation repeated the full query');
+  await configure({ offset: 361_000, failure: 503 }); await refresh();
   await wait(`document.querySelector('.a-main').textContent.includes('更新失败，保留上次结果')`);
+  assert.equal(await evaluate(rows), 1, 'results disappeared beyond the former five-minute limit');
+  assert.ok(!await evaluate(`document.querySelector('.a-main').textContent.includes('结果已过期')`));
   assert.equal(await evaluate(rows), 1); await screenshot('failed-1920x1080');
   await configure({ failure: 0, empty: true }); await refresh(); await wait(ready);
   assert.equal(await evaluate(rows), 0); assert.ok(await evaluate(`document.querySelector('.a-main').textContent.includes('独立 IP 0')`));
@@ -157,9 +159,9 @@ try {
   await configure({ scope: 3, empty: false, offset: 332_000 }); await reload();
   assert.equal(await evaluate(rows), 0, 'expired snapshot was painted'); await wait(ready);
   for (const bad of ['{', '{"version":999}']) {
-    await evaluate(`sessionStorage.setItem('qcontrolhub:connections:v1:index',${JSON.stringify(bad)})`);
+    await evaluate(`sessionStorage.setItem('qcontrolhub:connections:v2:index',${JSON.stringify(bad)})`);
     // Corrupt before startup (pagehide intentionally flushes the live cache).
-    await call('Page.addScriptToEvaluateOnNewDocument', { source: `sessionStorage.setItem('qcontrolhub:connections:v1:index',${JSON.stringify(bad)});` }, page).then(async script => {
+    await call('Page.addScriptToEvaluateOnNewDocument', { source: `sessionStorage.setItem('qcontrolhub:connections:v2:index',${JSON.stringify(bad)});` }, page).then(async script => {
       const before = await counts(); await reload(); await wait(ready); assert.equal((await counts()).reads, before.reads + 1);
       await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: script.identifier }, page);
     });
@@ -174,7 +176,8 @@ try {
   await configure({ failure: 0 }); await refresh(); await wait(ready);
   await reload(); await wait(ready); // Re-enable session storage after the disabled-storage document.
   const beforeDouble = await counts(); await refresh(); await refresh(); await wait(ready);
-  assert.equal((await counts()).reads, beforeDouble.reads + 1, 'repeated force refresh duplicated an in-flight query');
+  assert.equal((await counts()).checks, beforeDouble.checks + 1, 'repeated force refresh duplicated a change check');
+  assert.equal((await counts()).reads, beforeDouble.reads, 'unchanged refresh repeated the full query');
   await evaluate(`document.querySelector('.a-main [name=client_ip]').value='unsubmitted-search';document.querySelector('.a-main [name=client_ip]').focus();document.activeElement.setSelectionRange(2,5);window.savedInput=document.activeElement;`);
   await refresh(); await wait(ready);
   assert.ok(await evaluate(`document.activeElement===savedInput && savedInput.value==='unsubmitted-search' && savedInput.selectionStart===2 && savedInput.selectionEnd===5`), 'refresh disturbed input focus, selection or unsubmitted edits');

@@ -1,3 +1,4 @@
+import { requestCoreLogJSON as boundedRead } from "../modules/core-log-read.js";
 import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
@@ -381,9 +382,9 @@ export function startAnalytics({ app, session }) {
       // Ordering is independent of the page module and appearance settings,
       // but must be known before the first connection query creates a cursor.
       if (route === "client-connections") {
-        context.connectionNodeOrder = context.api("/preferences/node-order");
+        context.connectionNodeOrder = boundedRead(context.api, "/preferences/node-order", { signal: context.signal });
         void context.connectionNodeOrder.catch(() => {});
-        context.connectionScope = context.api("/client-connections?scope_only=true");
+        context.connectionScope = boundedRead(context.api, "/client-connections?scope_only=true", { signal: context.signal });
         void context.connectionScope.catch(() => {});
       }
       const [module] = await Promise.all([

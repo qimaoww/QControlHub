@@ -15,7 +15,7 @@ export async function bootConnectionReloadFixture() {
   window.connectionFixture = {
     config, document: crypto.randomUUID(),
     configure(values) { Object.assign(config, values); save(); },
-    counts: () => ({ reads: config.reads, bytes: config.bytes }),
+    counts: () => ({ reads: config.reads, checks: config.checks || 0, bytes: config.bytes }),
   };
   window.fetch = async (input, options) => {
     const url = new URL(input instanceof Request ? input.url : input, location.href), path = url.pathname;
@@ -30,10 +30,19 @@ export async function bootConnectionReloadFixture() {
       if (url.searchParams.get('scope_only') === 'true') { status = config.scopeFailure || 200; value = status === 200 ? { scope: scope() } : { error: '访问范围暂不可用' }; }
       else {
         const params = url.searchParams, failure = config.failure;
-        config.reads++; save();
+
         const available = config.empty ? [] : records.filter(row => (config.user !== 'shared' || row.agent_id === 'bravo') && (!params.get('agent_id') || params.get('agent_id') === row.agent_id) && (!params.get('engine') || params.get('engine') === row.engine) && (!params.get('client_ip') || params.get('client_ip') === row.client_ip));
         const selected = available.filter(row => !params.get('country_code') || params.get('country_code') === row.location.country_code);
         const snapshot = { country_codes: [...new Set(available.map(row => row.location.country_code))].sort(), records: params.has('cursor') ? selected.slice(3) : selected.slice(0, 3), ips: selected.length, flows: selected.length * 10001, sources: [...new Set(selected.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: records.find(row => row.agent_id === agent_id).agent_name, status: 'ok', updated_at: records[0].last_seen })), timeline: [], next_cursor: !params.has('cursor') && selected.length > 3 ? 'page-2' : '', cache_scope: scope() };
+        const token = `fixture:${config.empty}:${config.scope}`;
+        snapshot.sync_token = token;
+        if (params.get('sync_token') === token) {
+          config.checks = (config.checks || 0) + 1;
+          snapshot.delta = true;
+          snapshot.record_keys = snapshot.records.map(row => JSON.stringify([row.agent_id,row.engine,row.client_ip]));
+          snapshot.records = [];
+        } else config.reads++;
+        save();
         await new Promise(resolve => setTimeout(resolve, config.delay)); // Deliberately ignore abort: the app must reject late results.
         status = failure || 200; value = status === 200 ? snapshot : { error: status === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' };
         config.bytes += JSON.stringify(value).length; save();

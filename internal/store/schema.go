@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 92
+const currentSchemaVersion = 93
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -960,6 +960,53 @@ CREATE TABLE IF NOT EXISTS client_connection_locations (
  province varchar(100) NOT NULL DEFAULT '',
  retry_after timestamptz NOT NULL
 );
+
+-- A committed counter and coalesced dirty keys, independent of observation IDs
+-- and event time. Statement triggers cover updates, late uploads and pruning.
+CREATE TABLE IF NOT EXISTS client_connection_revision (
+ id integer PRIMARY KEY CHECK(id=1), revision bigint NOT NULL
+);
+INSERT INTO client_connection_revision VALUES(1,1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS client_connection_changes (
+ agent_id text NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
+ revision bigint NOT NULL, changed_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(agent_id,engine,client_ip)
+);
+CREATE INDEX IF NOT EXISTS client_connection_changes_revision_idx ON client_connection_changes(revision);
+CREATE INDEX IF NOT EXISTS client_connections_group_time_idx ON client_connections(agent_id,engine,client_ip,bucket);
+CREATE OR REPLACE FUNCTION track_client_connection_changes() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE keys_sql text;
+BEGIN
+ IF TG_TABLE_NAME='client_connection_locations' THEN
+  IF TG_OP='UPDATE' THEN
+   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,n.client_ip FROM changed_new n JOIN changed_old o USING(client_ip) WHERE (n.country_code,n.country,n.province) IS DISTINCT FROM (o.country_code,o.country,o.province)';
+  ELSIF TG_OP='INSERT' THEN
+   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_new';
+  ELSE
+   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_old';
+  END IF;
+ ELSIF TG_OP='UPDATE' THEN
+  keys_sql := 'SELECT n.agent_id,n.engine,n.client_ip FROM changed_new n JOIN changed_old o USING(id) WHERE n IS DISTINCT FROM o UNION SELECT o.agent_id,o.engine,o.client_ip FROM changed_old o JOIN changed_new n USING(id) WHERE n IS DISTINCT FROM o';
+ ELSIF TG_OP='INSERT' THEN
+  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_new';
+ ELSE
+  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_old';
+ END IF;
+ EXECUTE 'WITH keys AS ('||keys_sql||'), bumped AS (UPDATE client_connection_revision SET revision=revision+1 WHERE id=1 AND EXISTS(SELECT 1 FROM keys) RETURNING revision) INSERT INTO client_connection_changes(agent_id,engine,client_ip,revision) SELECT DISTINCT agent_id,engine,client_ip,revision FROM keys CROSS JOIN bumped ON CONFLICT(agent_id,engine,client_ip) DO UPDATE SET revision=EXCLUDED.revision,changed_at=now()';
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS client_connection_insert_changes ON client_connections;
+CREATE TRIGGER client_connection_insert_changes AFTER INSERT ON client_connections REFERENCING NEW TABLE AS changed_new FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
+DROP TRIGGER IF EXISTS client_connection_update_changes ON client_connections;
+CREATE TRIGGER client_connection_update_changes AFTER UPDATE ON client_connections REFERENCING OLD TABLE AS changed_old NEW TABLE AS changed_new FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
+DROP TRIGGER IF EXISTS client_connection_delete_changes ON client_connections;
+CREATE TRIGGER client_connection_delete_changes AFTER DELETE ON client_connections REFERENCING OLD TABLE AS changed_old FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
+DROP TRIGGER IF EXISTS client_location_insert_changes ON client_connection_locations;
+CREATE TRIGGER client_location_insert_changes AFTER INSERT ON client_connection_locations REFERENCING NEW TABLE AS changed_new FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
+DROP TRIGGER IF EXISTS client_location_update_changes ON client_connection_locations;
+CREATE TRIGGER client_location_update_changes AFTER UPDATE ON client_connection_locations REFERENCING OLD TABLE AS changed_old NEW TABLE AS changed_new FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
+DROP TRIGGER IF EXISTS client_location_delete_changes ON client_connection_locations;
+CREATE TRIGGER client_location_delete_changes AFTER DELETE ON client_connection_locations REFERENCING OLD TABLE AS changed_old FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_changes();
 
 -- Certificate resources use strict ownership even for panel administrators.
 CREATE TABLE IF NOT EXISTS certificate_accounts (

@@ -120,6 +120,8 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		failures = append(failures, err)
 	}
 	if prune {
+		_, changesError := s.pool.Exec(ctx, `DELETE FROM client_connection_changes WHERE changed_at < now() - interval '2 days'`)
+		failures = append(failures, changesError)
 		failures = append(failures, s.PruneClientConnectionLocations(ctx))
 		cutoff := now.Add(-time.Duration(longestLogRetention) * 24 * time.Hour)
 		_, err = s.PruneCoreLogPartitions(ctx, cutoff)

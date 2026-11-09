@@ -16,6 +16,9 @@ import (
 )
 
 type Store struct {
+	connectionSyncMu sync.Mutex
+	connectionSync   map[string]*connectionSnapshot
+
 	certificateResolver *net.Resolver
 	certificateDNSHTTP  *http.Client
 	pool                *pgxpool.Pool
