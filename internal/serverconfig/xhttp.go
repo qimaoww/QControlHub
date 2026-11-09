@@ -38,7 +38,7 @@ func initializeXHTTPPlan(protocol Protocol, input *Input) error {
 	input.XHTTPMode = "auto"
 	if input.TLSEnabled {
 		input.TLSServerName = ""
-		input.TLSALPN, input.TLSClientALPN = "h2", "h2"
+		input.TLSALPN, input.TLSClientALPN = "h2,http/1.1", "h2"
 	}
 	if !isXHTTPGroup(protocol.Key) {
 		return nil
@@ -149,11 +149,19 @@ func xhttpObject(value string) (map[string]any, error) {
 }
 
 func xhttpServerSettings(input Input) map[string]any {
-	settings := map[string]any{"path": input.TransportPath, "host": input.TransportHost, "mode": "auto"}
+	settings := map[string]any{"path": input.TransportPath, "host": input.TransportHost, "mode": xhttpServerMode(input)}
 	if extra, _ := xhttpObject(input.XHTTPServerExtra); len(extra) > 0 {
 		settings["extra"] = extra
 	}
 	return settings
+}
+
+func xhttpServerMode(input Input) string {
+	// Preserve the shared and Reality backend behavior of existing presets.
+	if input.Protocol != ProtocolXHTTPTLS {
+		return "auto"
+	}
+	return xhttpMode(input.XHTTPMode)
 }
 
 func parseXHTTPSettings(input *Input, stream map[string]any) {

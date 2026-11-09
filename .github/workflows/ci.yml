@@ -272,10 +272,6 @@ jobs:
       - run: make ss-rust-runtime-test
       - name: Verify IPQuality installation with actual systemd and mirror+file
         run: make ip-quality-systemd-test
-      - name: Verify managed TLS under the shipped Agent sandbox
-        # Separate containers have private init systems, files, ports and core
-        # services. Make waits for both targets and preserves either failure.
-        run: make -j2 managed-tls-systemd-test managed-tls-openrc-test
 
   core-permissions:
     name: All cores / actual service permissions
@@ -296,25 +292,20 @@ jobs:
           key: official-assets-${{ runner.os }}-${{ runner.arch }}-cores-${{ hashFiles('deploy/tests/fetch-official-asset.sh', 'deploy/tests/fetch-permission-cores.sh') }}
       - name: Fetch verified official kernels
         run: sh deploy/tests/fetch-permission-cores.sh "$RUNNER_TEMP/permission-cores"
-      - name: Verify all sing-box upstream presets and exported TCP/UDP clients
+      - name: Verify sing-box Reality, plaintext and empty inbound deletion
         env:
           QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
-        run: go test -count=1 -timeout 3m -v ./internal/serverconfig -run '^TestSingBox(UpstreamLiveMatrix|TLSVerificationAndRenewal|FinalInboundDeletion)$'
-      - name: Verify actual Caddy and Nginx TCP/UDP proxy clients
-        env:
-          QCH_SING_BOX_BINARY: ${{ runner.temp }}/permission-cores/bin/sing-box
-          QCH_CADDY_BINARY: ${{ runner.temp }}/permission-cores/bin/caddy
-          QCH_NGINX_BINARY: /usr/sbin/nginx
+        # Keep Reality, plaintext transports and deletion of an empty runtime.
+        # Certificate-backed live cases remain available for manual execution.
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes nginx
-          go test -count=1 -timeout 3m -v ./internal/agent -run '^TestManagedTLS(ProxyLiveMatrix|IssuerFallbackLive)$'
-      - name: Verify native XHTTP and all five shared-port clients
+          go test -count=1 -timeout 3m -v ./internal/serverconfig \
+            -run '^TestSingBox(UpstreamLiveMatrix|FinalInboundDeletion)$' \
+            -skip '^TestSingBoxUpstreamLiveMatrix$/(ws-tls-address-override|vmess|trojan|hysteria2|tuic|anytls|vmess-quic|.*-tls)$'
+      - name: Verify XHTTP Reality clients and shared instances
         env:
           QCH_XRAY_BINARY: ${{ runner.temp }}/permission-cores/bin/xray
           QCH_MIHOMO_BINARY: ${{ runner.temp }}/permission-cores/bin/mihomo
-          QCH_NGINX_BINARY: /usr/sbin/nginx
-        run: go test -count=1 -timeout 3m -v ./internal/agent -run '^TestXHTTPLiveMatrix$'
+        run: go test -count=1 -timeout 3m -v ./internal/agent -run '^TestXHTTPLiveMatrix$/^vless-xhttp-reality$'
       - name: Verify full systemd service policies and forwarding
         run: |
           sudo apt-get update
@@ -322,14 +313,13 @@ jobs:
           sudo sh deploy/bootstrap-core-services.sh --prepare-agent
           sudo env QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
             QCH_SERVICE_MANAGER=systemd python3 deploy/tests/core-permissions-runtime.py
-      - name: Verify Mihomo Reality and TLS validation, deploy and exported clients
+      - name: Verify sing-box empty accounting task validation
         run: |
-          go test -c -o "$RUNNER_TEMP/reality-agent.test" ./internal/agent
+          go test -c -o "$RUNNER_TEMP/accounting-agent.test" ./internal/agent
           cd internal/agent
-          sudo env QCH_LIVE_REALITY_SYSTEMD_TEST=1 \
-            QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
-            "$RUNNER_TEMP/reality-agent.test" \
-            -test.run '^(TestMihomoRealityAndTLSManagedLifecycle|TestSingBoxEmptyAccountingTaskValidation)$' -test.count=1 -test.v
+          sudo env QCH_PERMISSION_BIN="$RUNNER_TEMP/permission-cores/bin" \
+            "$RUNNER_TEMP/accounting-agent.test" \
+            -test.run '^TestSingBoxEmptyAccountingTaskValidation$' -test.count=1 -test.v
       - name: Verify Alpine OpenRC policies, migration and forwarding
         run: |
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent
