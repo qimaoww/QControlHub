@@ -112,13 +112,9 @@ try {
   const screenshot = async (page, label) => {
     if (!artifacts) return;
     await mkdir(resolve(artifacts), { recursive: true });
-    const viewport = await evaluate(page,"({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio})");
-    const resize = viewport.width!==1920 || viewport.height!==1080 || viewport.deviceScaleFactor!==2;
-    if (resize) await call("Emulation.setDeviceMetricsOverride", {width:1920,height:1080,deviceScaleFactor:2,mobile:false},page);
     await evaluate(page,"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
     const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
     await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
-    if (resize) await call("Emulation.setDeviceMetricsOverride", {...viewport,mobile:mode==="mobile"},page);
   };
 
 
@@ -213,7 +209,9 @@ try {
   await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='unmatched layout fixture';q.dispatchEvent(new Event('input',{bubbles:true}))})()");
   await wait(manager,"!document.querySelector('[data-log-entry]')");
   await screenshot(manager,"stream-empty");
-  await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='';q.dispatchEvent(new Event('input',{bubbles:true}));window.__layoutFetch=window.fetch;window.fetch=(...args)=>String(args[0]).includes('/core-logs?')?Promise.resolve(new Response(JSON.stringify({error:'日志读取失败，请重试'}),{status:503,headers:{'Content-Type':'application/json'}})):window.__layoutFetch(...args);[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新').click()})()");
+  await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='';q.dispatchEvent(new Event('input',{bubbles:true}))})()");
+  await wait(manager,"document.querySelectorAll('[data-log-entry]').length>0");
+  await evaluate(manager,"window.__layoutFetch=window.fetch;window.fetch=(...args)=>String(args[0]).includes('/core-logs?')?Promise.resolve(new Response(JSON.stringify({error:'日志读取失败，请重试'}),{status:503,headers:{'Content-Type':'application/json'}})):window.__layoutFetch(...args);[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新').click()");
   await wait(manager,"document.querySelector('[data-log-refresh-label]').textContent.includes('刷新失败')");
   assert.ok(await evaluate(manager,"document.querySelectorAll('[data-log-entry]').length>0"));
   await screenshot(manager,"stream-error-retained");

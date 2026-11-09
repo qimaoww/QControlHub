@@ -153,14 +153,15 @@ assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below 
     onPreview: entries => { partial = entries.length; },
   });
   const rejected = assert.rejects(failedRead, failure);
-  delayedPreview.resolve(entries("alpha", 200));
   await rejected;
-  assert.equal(partial, 200, "a failed full read still permits a successful preview before reporting incompleteness");
+  delayedPreview.resolve(entries("alpha", 200));
+  await flush();
+  assert.equal(partial, 0, "a terminal full failure cancels its unfinished preview");
 }
 
 // Revocation in either racing request must finish immediately and cancel the
-// other read, including when the full failure preceded a denied preview.
-for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "full", "preview-after-full-failure"]) {
+// other read. A full failure also ends the round before a late preview.
+for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "full"]) {
   const preview = deferred(), full = deferred(), signals = [];
   const failure = Object.assign(new Error("access revoked"), { status });
   let shown = 0;
@@ -173,7 +174,6 @@ for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "ful
   const rejected = assert.rejects(read, error => error === failure);
   if (deniedStage === "full") full.reject(failure);
   else {
-    if (deniedStage === "preview-after-full-failure") { full.reject(Object.assign(new Error("gateway timeout"), { status: 504 })); await flush(); }
     preview.reject(failure);
   }
   await rejected;
@@ -222,4 +222,22 @@ for (const stage of ['headers', 'body']) {
   assert.equal(calls.length, 2);
   full.resolve(entries('alpha', 1000));
   assert.equal((await read).length, 1000);
+}
+
+// Full failures release the caller even when a preview or retained-grant
+// decision ignores cancellation; neither empty nor sparse late data is success.
+for (const count of [0, 12, 200]) {
+  const preview = deferred(), signals = [];
+  const failure = Object.assign(new Error('full window timed out'), { status: 504 });
+  let shown = 0;
+  const read = readCoreLogWindow((path, options) => {
+    signals.push(options.signal);
+    return path.endsWith('limit=200') ? preview.promise : Promise.reject(failure);
+  }, new URLSearchParams('limit=1000'), {
+    signal: new AbortController().signal, preview: true, engines: ['xray'], onPreview: () => shown++,
+  });
+  await assert.rejects(read, error => error === failure);
+  assert.ok(signals.every(signal => signal.aborted));
+  preview.resolve(entries('alpha', count)); await flush();
+  assert.equal(shown, 0);
 }

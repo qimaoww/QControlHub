@@ -131,14 +131,26 @@ export async function logsPage(ctx) {
     pendingRead = read;
     return read;
   }
+  function showReadFailure(failure) {
+    failures++; readState = "failed";
+    if ([401, 403, 404].includes(failure.status)) { entries = []; sources = []; incomplete = false; data.analyticsLogAccessSignature = signature = ""; data.analyticsLogCache = cache = createCoreLogCache(); sourceOptions(); }
+    error.textContent = redactDiagnostic(failure.message);
+    status.textContent = entries.length ? incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据" : "读取失败，请重试";
+    draw();
+  }
   async function readLogs() {
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, revision = ++serial;
     const current = () => ctx.current() && !signal.aborted && serial === revision;
     status.setAttribute("aria-busy", "true");
     readState = "loading";
+    error.textContent = "";
     status.textContent = entries.length ? incomplete ? "已显示部分日志，正在补齐…" : "正在刷新日志…" : "正在读取日志…";
     draw();
+    const directoryController = new AbortController();
+    const abortDirectory = () => directoryController.abort();
+    signal.addEventListener("abort", abortDirectory, { once: true });
+    let windowComplete = false;
     try {
       // Ordering is presentation metadata. Its latency or failure must never
       // gate an authorized log read, including on first entry and retry.
@@ -185,8 +197,11 @@ export async function logsPage(ctx) {
         }
         throw failure;
       });
-      const directoryRead = requestCoreLogJSON(ctx.api, "/core-log-sources", { signal, timeout: 8000 }).then(receivedSources => {
-        if (!current()) return;
+      // The directory verifies memory snapshots and supplies presentation
+      // metadata. A network window has independent server authorization and
+      // must be able to finish while this bounded request is still pending.
+      void requestCoreLogJSON(ctx.api, "/core-log-sources", { signal: directoryController.signal, timeout: 8000 }).then(receivedSources => {
+        if (!current() || directoryController.signal.aborted) return;
         const access = JSON.stringify(receivedSources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
         if (access !== signature) {
           cache = data.analyticsLogCache = createCoreLogCache();
@@ -196,25 +211,42 @@ export async function logsPage(ctx) {
         sourceUnavailable = false; grants = new Map(sources.map(source => [identity(source), source.owner_id])); directoryReady = true;
         if (fresh) entries = authorized(entries);
         filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
-        if (coreLogScopeKey(filters) !== key) { entries = []; incomplete = false; abortWindow(); }
+        if (coreLogScopeKey(filters) !== key) {
+          entries = []; incomplete = false; readState = "loading"; abortWindow();
+          if (windowComplete) void Promise.resolve(pendingRead).then(() => { if (current()) void load(); });
+        }
         else if (!fresh && scope !== key) {
           const cached = cache.preview(key);
           scope = key; entries = cached?.entries || []; incomplete = cached ? !cached.complete : false; page = 0; anchor = null;
           if (entries.length) status.textContent = incomplete ? "已显示部分日志，正在补齐…" : "已显示缓存，正在刷新…";
         }
+        if (windowComplete && coreLogScopeKey(filters) === key) {
+          cache.set(key, entries);
+          status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
+        }
         draw();
       }).catch(failure => {
-        if (!current()) return;
+        if (!current() || directoryController.signal.aborted) return;
         sourceFailure = failure; sourceUnavailable = true;
-        if ([401, 403, 404].includes(failure.status)) { denied = failure; abortWindow(); }
-        else collection.unavailable();
-      }).finally(() => verifyPreview?.(!entries.length));
+        if ([401, 403, 404].includes(failure.status)) {
+          denied = failure; abortWindow();
+          if (windowComplete) showReadFailure(failure);
+        } else {
+          collection.unavailable();
+          if (windowComplete) {
+            failures++; error.textContent = "来源状态读取失败，请刷新重试。";
+            status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
+          }
+        }
+      }).finally(() => {
+        signal.removeEventListener("abort", abortDirectory);
+        verifyPreview?.(!entries.length);
+      });
       let result;
       try {
-        const [directory, window] = await Promise.allSettled([directoryRead, windowRead]);
+        const window = await windowRead.then(value => ({ status: "fulfilled", value }), reason => ({ status: "rejected", reason }));
         if (!current()) return;
         if (denied) throw denied;
-        if (directory.status === "rejected") throw directory.reason;
         if (coreLogScopeKey(filters) !== key) {
           // A deleted/revoked saved target normalizes to the remaining grants.
           // Never accept the old target's late response or its validator.
@@ -235,6 +267,7 @@ export async function logsPage(ctx) {
         abortWindow();
       }
       if (!current()) return;
+      windowComplete = true;
       // A directory that finished after the network window may reflect a grant
       // revoked during that read. Do not retain its protected rows in memory.
       result = authorized(result);
@@ -243,15 +276,14 @@ export async function logsPage(ctx) {
       if (directoryReady) cache.set(scope, result);
       failures = sourceFailure ? failures + 1 : 0;
       error.textContent = sourceFailure ? "来源状态读取失败，请刷新重试。" : ""; draw();
-      status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
+      status.textContent = directoryReady || sourceFailure ? automatic ? "正在实时更新" : "自动更新已暂停" : "日志已加载，正在读取来源状态…";
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;
-      failures++; readState = "failed";
-      if ([401, 403, 404].includes(failure.status)) { entries = []; sources = []; incomplete = false; data.analyticsLogAccessSignature = signature = ""; data.analyticsLogCache = cache = createCoreLogCache(); draw(); sourceOptions(); }
-      error.textContent = redactDiagnostic(failure.message);
-      status.textContent = entries.length ? incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据" : "读取失败，请重试";
-      draw();
-    } finally { if (current()) status.removeAttribute("aria-busy"); }
+      showReadFailure(failure);
+    } finally {
+      if (!windowComplete) abortDirectory();
+      if (current()) status.removeAttribute("aria-busy");
+    }
   }
   const poller = createPoller({ run: load, isActive: () => ctx.current() && automatic && !document.hidden, delay: () => Math.min(60000, 10000 * 2 ** failures) });
   ctx.onRefresh(() => automatic ? poller.trigger() : load(), { local: true });

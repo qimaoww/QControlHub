@@ -88,18 +88,15 @@ export async function readCoreLogWindow(api, params, { signal, preview, previewR
       if ([401, 403, 404].includes(result.error?.status)) throw result.error;
     };
     checkAccess(result);
-    let failed = null;
-    if (result.stage === "full-failed") {
-      failed = result.error;
-      result = await first;
-      checkAccess(result);
-    }
+    // A failed full window is terminal. Waiting for an outstanding preview
+    // delays recovery and can turn a late, sparse preview into false success.
+    if (result.stage === "full-failed") throw result.error;
     if (result.stage === "preview" && !signal.aborted) {
       const counts = coreLogFilterCounts(result.entries, engines);
       if (Object.values(counts.engine).every(count => count < 200)) return result.entries;
       onPreview(result.entries);
     }
-    const complete = failed ? { stage: "full-failed", error: failed } : await full;
+    const complete = await full;
     if (complete.stage === "full-failed") throw complete.error;
     return complete.entries;
   } finally {
