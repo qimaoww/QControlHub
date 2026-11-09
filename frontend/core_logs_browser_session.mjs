@@ -99,7 +99,9 @@ try {
     await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='core logs evidence password'; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
-    await wait(page, "!!document.querySelector('.a-user')");
+    // The shell mounts before the login submission finishes its initial route.
+    // Navigation during that submission is correctly refused by the UI guard.
+    await wait(page, "!!document.querySelector('.a-user') && !document.querySelector('#app[aria-busy]') && !!document.querySelector('.a-main > .a-stack:not([aria-busy])')");
     return identity;
   };
   const api = async (page, session, method, path, body, status = 200) => {
