@@ -78,8 +78,38 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal,
     const input = JSON.parse(options.body);
     const record = {agentId:decodeURIComponent(match[1]), engine:decodeURIComponent(match[2]),
       intent:input.intent, version:Number(input.expected_version ?? input.version) + 1, instanceId:input.expected_instance_id};
+    const operation = {...input};
+    delete operation.version; delete operation.expected_version; delete operation.install_if_missing;
+    if (globalThis.crypto.subtle) {
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(operation)));
+      record.fingerprint = [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,"0")).join("");
+    }
+    if (state.data !== owner) throw new DOMException("目标已变化", "AbortError");
+    // A refresh or an interrupted response must not allocate another operation
+    // for the same instance while the durable receipt is still unresolved.
+    let reusableID;
+    for (const [existingID, existing] of Object.entries(records)) {
+      if (!existing || existing.agentId !== record.agentId || existing.engine !== record.engine ||
+          (existing.instanceId || "") !== (record.instanceId || "") ||
+          existing.fingerprint && existing.fingerprint !== record.fingerprint) continue;
+      let receipt;
+      try { receipt = await readReceipt(existingID, existing); }
+      catch (error) {
+        // A request that never reached the server can reuse its receipt and
+        // original CAS. A late first commit then rejects/rolls back this retry.
+        if (error.status === 404 && existing.fingerprint && existing.fingerprint === record.fingerprint && existing.version === record.version) {
+          reusableID = existingID;
+          break;
+        }
+        throw Object.assign(new Error("上次提交结果尚未确认，草稿已保留，请在任务页核对后重试。"), {deployPreflight:true});
+      }
+      if (state.data !== owner) throw new DOMException("目标已变化", "AbortError");
+      if (!["succeeded", "failed", "canceled"].includes(receipt.task.status))
+        throw Object.assign(new Error("当前实例已有配置任务正在执行，草稿已保留，请等待结果后重试。"), {deployPreflight:true});
+      delete records[existingID]; persist(records);
+    }
     const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
-    const id = `tsk_${[...bytes].map(value => value.toString(16).padStart(2,"0")).join("")}`;
+    const id = reusableID || `tsk_${[...bytes].map(value => value.toString(16).padStart(2,"0")).join("")}`;
     records[id] = record;
     persist(records);
     let result;
@@ -105,6 +135,10 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal,
       }
     } catch (error) {
       if (state.data !== owner || error.name === "AbortError") throw error;
+      if (error.status === 409 && reusableID) {
+        try { return finishRequest(await readReceipt(id, record), record, owner, records, id); }
+        catch (receiptError) { if (receiptError.name === "AbortError") throw receiptError; }
+      }
       if (error.status >= 400 && error.status < 500 && error.status !== 408) {
         delete records[id];
         persist(records);

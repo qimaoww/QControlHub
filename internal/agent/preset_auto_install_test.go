@@ -90,6 +90,10 @@ func TestPresetAutoInstallStableAndKeepInstalledVersion(t *testing.T) {
 				if string(config) != want {
 					t.Fatalf("wrong configuration effect for %s: %s", action, config)
 				}
+				calls, _ := os.ReadFile(logPath)
+				if action == core.ActionValidate && (strings.Contains(string(calls), "restart") || strings.Contains(string(calls), "start") || strings.Contains(string(calls), "enable")) {
+					t.Fatalf("validation activated a service: %s", calls)
+				}
 				// A retry after installation must not download, replace the
 				// binary or restart an installation a second time.
 				before := requests

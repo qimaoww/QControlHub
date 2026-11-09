@@ -189,3 +189,43 @@ func (s *Server) restoreConfigRevision(w http.ResponseWriter, request *http.Requ
 	s.recordAudit(request, "config.restored", restored.ID, "v"+strconv.Itoa(version)+" -> v"+strconv.Itoa(restored.Version))
 	writeJSON(w, http.StatusOK, restored)
 }
+
+// Saved archives opt into preparation through a configuration-scoped endpoint.
+// General task JSON continues to reject install_if_missing. The Store repeats
+// ownership, exact revision, target allocation and installation authorization.
+func (s *Server) createConfigExecutionTask(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		AgentID               string      `json:"agent_id"`
+		Action                core.Action `json:"action"`
+		ExpectedConfigVersion int         `json:"expected_config_version"`
+		ExpectedInstanceID    *string     `json:"expected_instance_id"`
+		InstallIfMissing      bool        `json:"install_if_missing"`
+	}
+	if err := decodeJSON(w, r, &input, 64<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if (input.Action != core.ActionValidate && input.Action != core.ActionDeploy) || input.ExpectedConfigVersion < 1 || input.ExpectedInstanceID == nil {
+		writeError(w, http.StatusBadRequest, "请选择校验或部署，并指定已保存配置及目标实例。")
+		return
+	}
+	config, err := s.store.ConfigRevision(r.Context(), r.PathValue("id"), input.ExpectedConfigVersion)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	task, err := s.store.CreateTask(r.Context(), core.TaskRequest{AgentID: input.AgentID, Engine: config.Engine, ConfigID: config.ID, ExpectedConfigVersion: input.ExpectedConfigVersion, Action: input.Action, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	task.ConfigContent = ""
+	if !task.Reused {
+		s.recordAudit(r, "config.task_created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
+	}
+	status := http.StatusCreated
+	if task.Reused {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, task)
+}

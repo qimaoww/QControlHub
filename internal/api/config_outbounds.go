@@ -60,6 +60,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		InboundPort        int         `json:"inbound_port"`
 		ReplacementTag     string      `json:"replacement_tag"`
 		PresetBase         string      `json:"preset_base"`
+		InstallIfMissing   bool        `json:"install_if_missing"`
 		ExpectedInstanceID *string     `json:"expected_instance_id,omitempty"`
 		Version            int         `json:"version"`
 		Intent             core.Action `json:"intent"`
@@ -184,7 +185,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 		config.Content = plan.Content
 	}
-	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{TaskID: r.Header.Get("X-Config-Task-ID"), ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state})
+	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state})
 	if err != nil {
 		writeStoreError(w, err)
 		return

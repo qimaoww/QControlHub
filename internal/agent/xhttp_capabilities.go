@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"go.yaml.in/yaml/v4"
 	"net"
 	"os"
 	"regexp"
@@ -53,26 +54,73 @@ func checkXHTTPListenerPorts(spec EngineSpec, content string) error {
 	return checkXrayListenerPorts(spec, content, false)
 }
 
-func checkMihomoXHTTPTLSListenerPorts(spec EngineSpec, content string) error {
-	previous := map[string]bool{}
-	if data, err := os.ReadFile(spec.ConfigPath); err == nil {
-		for _, input := range serverconfig.ParseAll(core.EngineMihomo, string(data)) {
-			previous[net.JoinHostPort(input.Listen, strconv.Itoa(input.Port))] = true
+// Mihomo can remain active after a listener fails. Probe every new listener,
+// including UDP and native/global ports, before accepting a deployment.
+func checkMihomoListenerPorts(spec EngineSpec, content string, retainActive bool) error {
+	type listener struct {
+		address  string
+		protocol core.TrafficProtocol
+	}
+	listeners := func(source string) []listener {
+		var root map[string]any
+		if yaml.Unmarshal([]byte(source), &root) != nil {
+			return nil
+		}
+		transports := map[int]core.TrafficProtocol{}
+		for _, endpoint := range serverconfig.DiscoverTrafficPorts(core.EngineMihomo, source) {
+			transports[endpoint.Port] = endpoint.Protocol
+		}
+		var result []listener
+		add := func(host string, raw any) {
+			if host == "*" {
+				host = ""
+			}
+			port, _ := strconv.Atoi(fmt.Sprint(raw))
+			if port > 0 && port <= 65535 {
+				result = append(result, listener{net.JoinHostPort(host, strconv.Itoa(port)), transports[port]})
+			}
+		}
+		entries, _ := root["listeners"].([]any)
+		for _, raw := range entries {
+			entry, _ := raw.(map[string]any)
+			host, _ := entry["listen"].(string)
+			add(host, entry["port"])
+		}
+		host, _ := root["bind-address"].(string)
+		if host == "*" {
+			host = ""
+		}
+		for _, key := range []string{"port", "socks-port", "mixed-port", "redir-port", "tproxy-port"} {
+			add(host, root[key])
+		}
+		return result
+	}
+	previous := map[listener]bool{}
+	if retainActive {
+		if data, err := os.ReadFile(spec.ConfigPath); err == nil {
+			for _, entry := range listeners(string(data)) {
+				previous[entry] = true
+			}
 		}
 	}
-	for _, input := range serverconfig.ParseAll(core.EngineMihomo, content) {
-		if input.Transport != "xhttp" || input.RealityEnabled || input.VLESSDecryption != "" {
+	for _, entry := range listeners(content) {
+		if previous[entry] {
 			continue
 		}
-		address := net.JoinHostPort(input.Listen, strconv.Itoa(input.Port))
-		if previous[address] {
-			continue
+		if entry.protocol != core.TrafficProtocolUDP {
+			probe, err := net.Listen("tcp", entry.address)
+			if err != nil {
+				return fmt.Errorf("Mihomo TCP 监听预检 %s：%w；请检查地址及端口占用", entry.address, err)
+			}
+			probe.Close()
 		}
-		listener, err := net.Listen("tcp", address)
-		if err != nil {
-			return fmt.Errorf("Mihomo XHTTP 监听预检 %s：%w；请检查地址及端口占用", address, err)
+		if entry.protocol == core.TrafficProtocolUDP || entry.protocol == core.TrafficProtocolBoth {
+			probe, err := net.ListenPacket("udp", entry.address)
+			if err != nil {
+				return fmt.Errorf("Mihomo UDP 监听预检 %s：%w；请检查地址及端口占用", entry.address, err)
+			}
+			probe.Close()
 		}
-		listener.Close()
 	}
 	return nil
 }

@@ -37,6 +37,8 @@ export async function run() {
     assert.equal(seen.length, 1, "another instance recovered this task");
     await make().recover("node", "xray");
     assert.equal(seen.length, 2, "accepted task was lost on reopen");
+    await assert.rejects(make().request(path,{method:"POST",body}), /已有配置任务正在执行/);
+    assert.equal(writes,1,"refresh repeated an in-flight deployment");
     setStorageAccount({user_id:"mutation-bob"});
     state.data = {};
     await make().recover("node", "xray");
@@ -78,6 +80,21 @@ export async function run() {
     await unknownInstance.recoverConfigSubmission();
     assert.equal(instanceCallbacks,1);
     assert.equal(instanceWrites,1,"instance reconciliation replayed a write");
+    storage.clear();
+    let noReceiptID, notSentWrites = 0;
+    const notSent = createConfigMutations({state:{data:{}},api:async (url,options={})=>{
+      if (options.method === "POST") {
+        notSentWrites++;
+        if (!noReceiptID) { noReceiptID=options.headers["X-Config-Task-ID"]; throw TypeError("request never reached server"); }
+        assert.equal(options.headers["X-Config-Task-ID"],noReceiptID,"unknown request allocated another receipt");
+        return {config:{id:"cfg",version:4},task:{id:noReceiptID,config_version:4,status:"succeeded"}};
+      }
+      throw Object.assign(Error("no receipt"),{status:404});
+    }},{onTask:()=>{},waitForTerminal:()=>completion});
+    await assert.rejects(notSent.request(path,{method:"POST",body}));
+    await notSent.request(path,{method:"POST",body});
+    assert.equal(notSentWrites,2,"unaccepted request could not be retried");
+    storage.clear(); // Independent operation scenario.
     let correctionWrites = 0;
     const correction = createConfigMutations({state:{data:{}}, api:async (_url, options)=>{
       correctionWrites++;
@@ -89,6 +106,7 @@ export async function run() {
     await correction.request(path,{method:"POST",body:JSON.stringify({...JSON.parse(body),content:"corrected"})});
     assert.equal(correctionWrites,2,"business rejection blocked corrected content");
     for (const mode of ["recovered","still-unknown","lost-retry","account-change","recovery-failed"]) {
+    storage.clear(); // Independent operation scenario.
       let attempts=0, refreshes=0, receipt;
       const target={data:{}};
       const recovery=createConfigMutations({state:target,api:async (url,options={})=>{
@@ -115,6 +133,7 @@ export async function run() {
       assert.equal(refreshes,1,"status recovery repeated indefinitely");
       assert.equal(attempts,["account-change","recovery-failed"].includes(mode)?1:2,"recovery repeated a committed or uncertain write");
     }
+    storage.clear(); // Independent operation scenario.
     const superseded = createConfigMutations({state:{data:{}}, api:async (url, options = {})=>{
       if (options.method === "POST") {
         id = options.headers["X-Config-Task-ID"];
@@ -128,6 +147,7 @@ export async function run() {
     "reconciliation returned a later edit as the submitted task's configuration");
     // Every task-producing editor uses the same read-only receipt recovery.
     for (const [endpoint, method] of [["server-inbounds","POST"],["outbounds","POST"],["management","PUT"],["fields/route","POST"]]) {
+    storage.clear(); // Independent operation scenario.
       let attempts=0, receiptID;
       const editor=createConfigMutations({state:{data:{}},api:async (url,options={})=>{
         if(options.method===method){attempts++;receiptID=options.headers["X-Config-Task-ID"];throw TypeError("committed response lost");}
@@ -138,6 +158,7 @@ export async function run() {
       assert.equal(recovered.config.version,4);
       assert.equal(attempts,1,`${endpoint} replayed a committed write`);
     }
+    storage.clear(); // Independent operation scenario.
     release({status:"succeeded"});
     // A response arriving after an account change cannot reach task callbacks
     // or the caller's subsequent save/deploy handlers.

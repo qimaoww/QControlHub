@@ -117,16 +117,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		mutationError("intent must be validate or deploy")
 		return
 	}
-	if input.InstallIfMissing && input.Operation != "add" {
-		mutationError("automatic installation is only supported when adding an inbound")
-		return
-	}
 	if input.Operation == "add" && input.OriginalTag != "" {
 		mutationError("新增入站不能携带原入站标识")
 		return
 	}
 	if input.Fragment != nil {
-		if input.Operation != "modify" || input.InstallIfMissing || input.DisableMutableAPI || input.OriginalTag == "" {
+		if input.Operation != "modify" || input.DisableMutableAPI || input.OriginalTag == "" {
 			mutationError("原生入站编辑仅支持修改当前入站")
 			return
 		}
@@ -154,7 +150,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				return
 			}
 		}
-		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID)
+		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID, input.InstallIfMissing)
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {

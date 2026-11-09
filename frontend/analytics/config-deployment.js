@@ -4,7 +4,7 @@ import { node, actions, badge, button, muted, notice, stack, code, pathID } from
 
 // The workspace resolves ownership, exact saved revision and actual deployment
 // receipts on every visit; polling only paints these small, persistent nodes.
-export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()=>false, agent, engine }) {
+export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()=>false, agent, engine, onWorkspace }) {
   const state = badge(""), service = badge(""), feedback = notice("");
   const configState = actions(muted("配置部署"), state);
   const element = node("div", {className:"a-actions", "data-deployment-status":""},
@@ -70,6 +70,7 @@ export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()
           feedback.hidden = false;
           return;
         }
+        onWorkspace?.(fresh);
         paint(fresh.deployment);
         if (feedback.textContent) feedback.textContent = "";
         feedback.hidden = true;

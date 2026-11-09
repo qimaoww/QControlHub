@@ -83,9 +83,9 @@ async function run() {
   const deploy = plan.querySelector('[type=submit]');
   assert.equal(deploy.textContent, "保存并部署");
   assert.equal(deploy.disabled, false, "first install blocked deployment");
-  plan.requestSubmit(); await confirmation("部署并重启");
+  plan.requestSubmit();
   const prepare = await waitFor(() => dialog("安装并部署"), "automatic preparation confirmation missing");
-  assert.ok(prepare.textContent.includes("此内核尚未安装") && prepare.textContent.includes("稳定版"), "automatic first-install intent is not visible");
+  assert.ok(prepare.textContent.includes("缺失内核时安装") && prepare.textContent.includes("稳定版"), "automatic first-install intent is not visible");
   button("安装并部署", prepare).click();
   await waitFor(() => dialog("任务详情")?.textContent.includes("成功"), "automatic preparation did not continue exact-revision deployment");
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "page overflows viewport");

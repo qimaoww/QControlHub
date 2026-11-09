@@ -58,8 +58,9 @@ const AgentFeatureConfigFiles = "config-files-v1"
 const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
 
 // AgentFeaturePresetAutoInstall negotiates install-if-missing configuration
-// tasks. Older Agents would silently ignore the flag and must not receive one.
-const AgentFeaturePresetAutoInstall = "preset-auto-install-v1"
+// tasks without activation before validation. v1 could start the default main
+// configuration during preparation and must not receive these tasks.
+const AgentFeaturePresetAutoInstall = "preset-auto-install-v2"
 
 // AgentFeatureCoreUninstall ensures old Agents cannot silently reject or
 // misinterpret a task that removes a managed core binary.

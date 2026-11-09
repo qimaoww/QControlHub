@@ -23,7 +23,7 @@ export async function createConfigFixture(engine, options = {}) {
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, ...(options.shared ? {shared_allocation:{id:"share",enabled:true,status:"accepted"}} : {}), capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1", "shared-core-instances-v1", "shared-core-lifecycle-v1",
-      ...(options.legacy ? [] : ["preset-auto-install-v1"])],
+      ...(options.legacy ? [] : ["preset-auto-install-v2"])],
     runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, service_status:options.serviceStatus || "active", version:"test-development", existing_config_available:Boolean(options.import)}}};
   const test = {writes:[], calls:[], readRequests:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending",deploymentState:options.deploymentState};
   let inbounds = options.missing || options.emptyInbounds ? [] : (options.tags || ["first", "second"]).map((tag, index) => ({...basePlan, tag, port:21001+index}));
@@ -149,7 +149,7 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.workspaceResponses?.length) return test.workspaceResponses.shift();
       if (test.workspaceGate) await test.workspaceGate;
       if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
-      if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
+      if (test.failRefresh && test.writes.length >= (typeof test.failRefresh === "number" ? test.failRefresh : 1)) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
       return workspace();
     }
     if (path === `/agents/node/configs/${engine}` && (!request.method || request.method === 'GET')) return saved;

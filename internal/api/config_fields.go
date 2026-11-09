@@ -39,6 +39,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
+		InstallIfMissing   bool    `json:"install_if_missing"`
 		ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 		Mutation           string  `json:"mutation"`
 		Fragment           string  `json:"fragment"`
@@ -140,7 +141,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.ExpectedVersion,
-		store.ConfigMutationOptions{ExpectedInstanceID: input.ExpectedInstanceID, TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: desired})
+		store.ConfigMutationOptions{InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: desired})
 	if err != nil {
 		writeStoreError(w, err)
 		return

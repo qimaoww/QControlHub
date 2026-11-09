@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createPermissionChecker } from "./modules/permissions.js";
-import { coreInstallBlockReason } from "./modules/core-install-state.js";
+import { coreInstallBlockReason, configDeployBlockReason, configDeployConfirmation, prepareConfigDeployment } from "./modules/core-install-state.js";
 const state = {session: {role: "user", permissions: ["tasks.execute"]}};
 const can = createPermissionChecker(state);
-const owner = {can_manage: true, status: "online", capabilities: ["mihomo"], supported_capabilities: ["mihomo", "xray"], features: ["preset-auto-install-v1","independent-egress-v1"], runtime: {}};
+const owner = {can_manage: true, status: "online", capabilities: ["mihomo"], supported_capabilities: ["mihomo", "xray"], features: ["preset-auto-install-v2","independent-egress-v1"], runtime: {}};
 assert.equal(coreInstallBlockReason(owner, "mihomo", can), "", "tasks.read and agents.manage are separate operations");
 assert.match(coreInstallBlockReason(owner, "mihomo", can, {pending:true}), /正在执行/);
 assert.match(coreInstallBlockReason(owner, "xray", can), /未启用/);
@@ -20,3 +20,19 @@ assert.match(coreInstallBlockReason(owner, "mihomo", can), /tasks.execute/);
 state.session = {role:"admin"};
 assert.equal(coreInstallBlockReason(owner, "mihomo", can), "");
 console.log("Core install operation permissions and state reasons passed");
+
+state.session={role:"admin"};
+assert.equal(configDeployBlockReason(owner,"mihomo",can),"");
+assert.match(configDeployConfirmation(owner,"mihomo").message,/稳定版.*复用当前版本.*校验通过/);
+assert.equal(configDeployConfirmation({...owner,runtime:{mihomo:{installed:true}}},"mihomo").title,"部署并重启");
+assert.match(configDeployBlockReason({...owner,features:["preset-auto-install-v1","independent-egress-v1"]},"mihomo",can),/升级 Agent/);
+assert.match(configDeployBlockReason({...owner,status:"offline"},"mihomo",can),/草稿已保留/);
+let confirms=0;
+const context={can,current:()=>true,api:async()=>({agent:{...owner,id:"node"}}),confirm:async()=>{confirms++;return true;}};
+assert.equal(await prepareConfigDeployment(context,"/fixture",{...owner,id:"node"},"mihomo"),true);
+assert.equal(confirms,1,"first deployment must have exactly one confirmation");
+await assert.rejects(prepareConfigDeployment({...context,current:()=>false},"/fixture",{...owner,id:"node"},"mihomo"),{name:"AbortError"});
+await assert.rejects(prepareConfigDeployment(context,"/fixture",{...owner,id:"node",shared_allocation:{id:"old-share"}},"mihomo"),/目标实例已变化/);
+
+assert.equal(configDeployConfirmation(owner,"mihomo","validate").title,"安装并校验");
+assert.match(configDeployConfirmation(owner,"mihomo","validate").message,/仅校验.*不部署或启动/);

@@ -148,6 +148,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		lock.Lock()
 		defer lock.Unlock()
 	}
+	return e.execute(parent, task)
+}
+
+// Recursive preparation keeps the outer instance lock for the entire operation.
+func (e *Executor) execute(parent context.Context, task core.Task) (output string, resultErr error) {
 	if task.Action == core.ActionValidate || task.Action == core.ActionDeploy || task.Action == core.ActionImportExisting {
 		redact := coreDiagnosticRedactor(task.Engine, task.ConfigContent)
 		defer func() {
@@ -247,21 +252,28 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 		defer cancel()
 		output := "core already installed; keeping the current version"
 		if _, err := exec.LookPath(spec.Binary); err != nil {
+			output = "[阶段:内核准备] 内核尚未安装，准备稳定版"
 			if _, statErr := os.Lstat(spec.Binary); !errors.Is(statErr, os.ErrNotExist) {
 				return output, fmt.Errorf("existing core binary is not executable; owner intervention is required: %w", err)
 			}
-			var installErr error
-			if task.SharedInstance {
-				updater := e.Updater
-				if updater == nil {
-					updater = NewCoreUpdater()
+			if task.Engine == core.EngineMihomo && task.Action == core.ActionDeploy {
+				if err := checkMihomoListenerPorts(spec, task.ConfigContent, false); err != nil {
+					return output, tlsPhaseError("依赖和环境检查", err)
 				}
-				output, installErr = updater.install(ctx, task.Engine, spec, core.CoreVersionStable, "", e.serviceManager(), false)
-			} else {
-				output, installErr = e.Execute(ctx, core.Task{
-					Action: core.ActionInstall, Engine: task.Engine, CoreVersion: core.CoreVersionStable,
-				})
 			}
+			// Prepare without activation. The manual install path starts a default
+			// configuration and must never be used by validate/deploy preparation.
+			if !task.SharedInstance {
+				if err := e.prepareConfigCore(ctx, task.Engine, spec); err != nil {
+					return output, fmt.Errorf("[阶段:内核准备] %w", err)
+				}
+			}
+			updater := e.Updater
+			if updater == nil {
+				updater = NewCoreUpdater()
+			}
+			var installErr error
+			output, installErr = updater.install(ctx, task.Engine, spec, core.CoreVersionStable, "", e.serviceManager(), false)
 			if installErr != nil {
 				return output, fmt.Errorf("stable core installation failed; configuration was not executed: %w", installErr)
 			}
@@ -282,9 +294,40 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			result, err := e.validate(ctx, task.Engine, spec, prepared)
 			return output + "\n" + result, err
 		}
+		output = "[阶段:内核准备完成]\n" + output
 		task.InstallIfMissing = false
-		result, err := e.Execute(ctx, task)
+		result, err := e.execute(ctx, task)
+		if err == nil && task.Action == core.ActionDeploy && !task.SharedInstance {
+			err = setServiceEnabled(ctx, spec.Service, true, e.serviceManager())
+		}
 		return output + "\n" + result, err
+	}
+	// A private first-use preparation can leave a shared binary installed
+	// without a main service. Ordinary main deployment must safely prepare
+	// its own unit too, without downloading or activating default content.
+	if !task.SharedInstance && (task.Action == core.ActionDeploy || task.Action == core.ActionValidate) && spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
+		if _, binaryErr := exec.LookPath(spec.Binary); binaryErr == nil {
+			unitRoot := existingDiscoveryManagedUnitRoot
+			if e.serviceManager().Kind() == ServiceManagerOpenRC {
+				unitRoot = openRCInitRoot
+			}
+			_, unitErr := os.Lstat(filepath.Join(unitRoot, spec.Service))
+			if unitErr != nil && !errors.Is(unitErr, os.ErrNotExist) {
+				return "", unitErr
+			}
+			if errors.Is(unitErr, os.ErrNotExist) {
+				if err := e.prepareConfigCore(parent, task.Engine, spec); err != nil {
+					return "", tlsPhaseError("内核准备", err)
+				}
+				if task.Action == core.ActionDeploy {
+					defer func() {
+						if resultErr == nil {
+							resultErr = setServiceEnabled(parent, spec.Service, true, e.serviceManager())
+						}
+					}()
+				}
+			}
+		}
 	}
 	if err := preparePanelCertificates(spec, &task); err != nil {
 		return "", err
@@ -445,7 +488,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (output strin
 			resultErr = errors.Join(resultErr, e.executeTLSFrontendOperation(recovery, spec, task, false, false, operation))
 		}()
 		if task.Engine == core.EngineMihomo {
-			if err := checkMihomoXHTTPTLSListenerPorts(spec, task.ConfigContent); err != nil {
+			if err := checkMihomoListenerPorts(spec, task.ConfigContent, previousStatus == "active"); err != nil {
 				return validation, errors.Join(err, restoreIdentity())
 			}
 		}
