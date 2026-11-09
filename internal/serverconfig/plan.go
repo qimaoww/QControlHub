@@ -66,7 +66,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix[:8], Listen: "0.0.0.0",
 		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
-		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
+		TLSEnabled: protocol.DefaultTLS,
 	}
 	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP || protocol.Key == ProtocolXHTTPTLS || isXHTTPGroup(protocol.Key) {
 		input.BlockMainlandDestination = true
@@ -82,8 +82,6 @@ func NewPlan(protocol Protocol) (Input, error) {
 	}
 	if protocol.PortForward {
 		input.Username = ""
-		input.TargetAddress = "127.0.0.1"
-		input.TargetPort = 80
 		input.Network = "tcp"
 	}
 	if protocol.Key == ProtocolTUIC {

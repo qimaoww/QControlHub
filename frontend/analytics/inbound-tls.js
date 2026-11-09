@@ -17,6 +17,11 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
   if (input("tls_acme_email")) input("tls_acme_email").type = "email";
   if (input("port")) input("port").min = "1";
   if (publicPort) publicPort.min = "1";
+  if (protocol.port_forward) {
+    input("target_address").required = true;
+    input("target_port").required = true;
+    input("target_port").min = "1";
+  }
   if (tls && protocol.requires_tls) { tls.checked = true; tls.disabled = true; }
   const hint = muted(""), route = node("p", {className:"a-muted"});
   if (mode) wrap(mode).closest(".a-form-grid").after(stack(hint, route));
@@ -26,6 +31,7 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
     show("transport_path", !["raw", "quic"].includes(kind), true);
     show("transport_host", ["http", "websocket", "httpupgrade", "xhttp"].includes(kind));
     show("transport_http_method", kind === "http");
+    show("client_host", ["http", "websocket", "httpupgrade", "xhttp"].includes(kind));
     show("flow", kind !== "xhttp" || Boolean(protocol.uses_vless_encryption));
     const enabled = Boolean(protocol.requires_tls || tls?.checked);
     const managed = enabled && protocol.supports_managed_tls && ["caddy", "nginx", "external"].includes(mode?.value);
@@ -58,6 +64,7 @@ export function bindInboundTransport(form, protocol, { requireManagedCertificate
       const selected = Boolean(input("panel_certificate_id")?.value);
       control.disabled = managed || !enabled && !protocol.key.startsWith("vless-xhttp-");
       wrap(control).hidden = control.disabled || selected;
+      control.required = !control.disabled && !selected;
     }
     if (mode?.value === "native") wrap(mode).closest("details").open = true;
   }

@@ -46,6 +46,9 @@ func TestCatalogNativeListenerLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				input.Tag, input.Port = "selected", port()
+				if protocol.PortForward {
+					input.TargetAddress, input.TargetPort = "127.0.0.1", 80
+				}
 				input.CertificatePath, input.PrivateKeyPath = certificate, key
 				input.TLSMode, input.TLSServerName, input.RealityServerName = "native", "tls.example.test", DefaultRealityServerName
 				input.XHTTPTLSPort, input.XHTTPBackendPort = port(), port()

@@ -53,29 +53,10 @@ func validateXHTTPInput(input *Input) error {
 	if _, err := validatedSingBoxALPN(input.TLSClientALPN); input.TLSClientALPN != "" && err != nil {
 		return err
 	}
-	if input.RealityEnabled {
-		if len(xhttpRealityNames(*input)) > 16 {
-			return fmt.Errorf("Reality 允许的 SNI 最多 16 个")
-		}
-		for _, name := range xhttpRealityNames(*input) {
-			if _, err := normalizeRealityServerName(name); err != nil {
-				return err
-			}
-		}
-		if !slices.Contains(xhttpRealityNames(*input), input.RealityServerName) {
-			return fmt.Errorf("客户端 Reality SNI 必须在允许的 serverNames 中")
-		}
-		if input.RealityTarget != "" {
-			host, port, err := net.SplitHostPort(input.RealityTarget)
-			n, _ := strconv.Atoi(port)
-			if err != nil || n < 1 || n > 65535 {
-				return fmt.Errorf("独立 Reality target 必须为公网域名:有效端口；组合的本地目标由面板管理")
-			}
-			if _, err := normalizeRealityServerName(host); err != nil {
-				return err
-			}
-		}
+	if err := validateRealityOptions(*input); err != nil {
+		return err
 	}
+
 	group := isXHTTPGroup(input.Protocol)
 	if group {
 		if len(input.Tag) > 61 {
@@ -281,6 +262,33 @@ func validateXHTTPDownload(input Input, raw any) error {
 			return fmt.Errorf("下载参数不支持递归 downloadSettings")
 		}
 		return validateXHTTPExtra(e, false)
+	}
+	return nil
+}
+
+func validateRealityOptions(input Input) error {
+	if input.RealityEnabled {
+		if len(xhttpRealityNames(input)) > 16 {
+			return fmt.Errorf("Reality 允许的 SNI 最多 16 个")
+		}
+		for _, name := range xhttpRealityNames(input) {
+			if _, err := normalizeRealityServerName(name); err != nil {
+				return err
+			}
+		}
+		if !slices.Contains(xhttpRealityNames(input), input.RealityServerName) {
+			return fmt.Errorf("客户端 Reality SNI 必须在允许的 serverNames 中")
+		}
+		if input.RealityTarget != "" {
+			host, port, err := net.SplitHostPort(input.RealityTarget)
+			n, _ := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("独立 Reality target 必须为公网域名:有效端口；组合的本地目标由面板管理")
+			}
+			if _, err := normalizeRealityServerName(host); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

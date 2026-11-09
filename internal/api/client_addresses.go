@@ -83,6 +83,9 @@ func buildClientAccessProfile(engine core.Engine, input serverconfig.Input, cand
 		}
 		address = clientProfileAddress(available, mode).address
 	}
+	if input.ClientAddress != "" {
+		address, overridden = input.ClientAddress, true
+	}
 	name, nameOverridden := "", false
 	if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
 		name, nameOverridden = value, true

@@ -66,7 +66,7 @@ func TestPortForwardPlanDefaultsRegenerateAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.TargetAddress != "127.0.0.1" || plan.TargetPort != 80 || plan.Network != "tcp" || plan.Credential != "" {
+	if plan.TargetAddress != "" || plan.TargetPort != 0 || plan.Network != "tcp" || plan.Credential != "" {
 		t.Fatalf("port-forward defaults = %+v", plan)
 	}
 	current := plan

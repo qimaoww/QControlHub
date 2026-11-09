@@ -12,8 +12,11 @@ import (
 )
 
 func generateMihomo(input Input) (string, error) {
-	if input.Protocol == ProtocolXHTTPTLS && input.TLSALPN != "" && input.TLSALPN != "h2" && input.TLSALPN != "h2,http/1.1" && input.TLSALPN != "http/1.1,h2" {
-		return "", fmt.Errorf("Mihomo XHTTP 服务端固定支持 h2,http/1.1，请使用 h2,http/1.1 或 h2")
+	if input.Protocol == ProtocolXHTTPTLS && !proxiedTLS(input) && input.TLSALPN != "" && input.TLSALPN != "h2,http/1.1" {
+		return "", fmt.Errorf("Mihomo XHTTP 服务端固定使用 h2,http/1.1；客户端协商请设置客户端 ALPN")
+	}
+	if input.TLSEnabled && !proxiedTLS(input) && input.Protocol != ProtocolXHTTPTLS && input.Protocol != ProtocolHy2 && input.Protocol != ProtocolTUIC && input.TLSALPN != "" {
+		return "", fmt.Errorf("此 Mihomo 服务端不支持自定义 ALPN；客户端协商请设置客户端 ALPN")
 	}
 	if input.Transport == "xhttp" {
 		if _, err := mihomoXHTTPConfig(input); err != nil {
@@ -123,11 +126,14 @@ func generateMihomo(input Input) (string, error) {
 	if input.TLSEnabled && !proxiedTLS(input) {
 		listener["certificate"] = input.CertificatePath
 		listener["private-key"] = input.PrivateKeyPath
+		if (input.Protocol == ProtocolHy2 || input.Protocol == ProtocolTUIC) && input.TLSALPN != "" {
+			listener["alpn"], _ = validatedSingBoxALPN(input.TLSALPN)
+		}
 	}
 	if input.RealityEnabled {
 		listener["reality-config"] = map[string]any{
-			"dest": input.RealityServerName + ":443", "private-key": input.RealityPrivateKey,
-			"short-id": []string{input.RealityShortID}, "server-names": []string{input.RealityServerName},
+			"dest": xhttpRealityTarget(input), "private-key": input.RealityPrivateKey,
+			"short-id": []string{input.RealityShortID}, "server-names": xhttpRealityNames(input),
 		}
 	}
 	root := map[string]any{
@@ -249,11 +255,16 @@ func parseMihomo(content string) (Input, bool) {
 		input.TargetAddress, input.TargetPort, _ = splitForwardTarget(stringValue(listener["target"]))
 	}
 	input.TLSEnabled = input.CertificatePath != "" && input.PrivateKeyPath != ""
+	if input.Protocol == ProtocolHy2 || input.Protocol == ProtocolTUIC {
+		input.TLSALPN = strings.Join(stringSliceValue(listener["alpn"]), ",")
+	}
 	if reality := mapValue(listener["reality-config"]); reality != nil {
 		input.RealityEnabled = true
 		input.RealityPrivateKey = stringValue(reality["private-key"])
 		input.RealityShortID = firstString(reality["short-id"])
 		input.RealityServerName = firstString(reality["server-names"])
+		input.RealityServerNames = strings.Join(stringSliceValue(reality["server-names"]), ",")
+		input.RealityTarget = stringValue(reality["dest"])
 		input.RealityPublicKey = realityPublicKey(input.RealityPrivateKey)
 	}
 	if value := stringValue(listener["ws-path"]); value != "" {

@@ -28,6 +28,9 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")
 	}
+	if err := validateClientConnection(input); err != nil {
+		return "", err
+	}
 	if engine == core.EngineXray || input.Protocol == ProtocolXHTTPTLS {
 		if err := validateXHTTPInput(&input); err != nil {
 			return "", err
@@ -128,6 +131,9 @@ func Generate(engine core.Engine, input Input) (string, error) {
 		}
 	}
 	if input.RealityEnabled {
+		if err := validateRealityOptions(input); err != nil {
+			return "", err
+		}
 		vision := input.Protocol == ProtocolVLESS && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
 		xhttp := (input.Protocol == ProtocolVLESSXHTTP || isXHTTPGroup(input.Protocol)) && input.Transport == "xhttp" && input.Flow == ""
 		encTCP := input.Protocol == ProtocolVLESSEncTCP && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"

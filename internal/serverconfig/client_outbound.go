@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"go.yaml.in/yaml/v4"
@@ -11,6 +12,10 @@ import (
 // BuildClientOutbound exports only client connection material from a deployed
 // inbound. Never serialize Input: it also contains server private keys.
 func BuildClientOutbound(engine core.Engine, input Input, address, serverName string) (json.RawMessage, error) {
+	if err := validateClientConnection(input); err != nil {
+		return nil, err
+	}
+	input, address = clientConnectionInput(input, address)
 	if engine == core.EngineMihomo {
 		profile, err := BuildClientProfile(input, address, serverName)
 		if err != nil {
@@ -156,6 +161,15 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 
 func singBoxClientOutbound(input Input, address, serverName string) (map[string]any, error) {
 	protocol := nativeProtocol(input.Protocol)
+	if protocol == ProtocolHy2 && input.TLSALPN != "" {
+		alpn, err := validatedSingBoxALPN(input.TLSALPN)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(alpn, "h3") {
+			return nil, fmt.Errorf("sing-box Hysteria 2 客户端的 ALPN 必须包含 h3")
+		}
+	}
 	switch input.Transport {
 	case "", "raw", "websocket", "grpc", "http", "httpupgrade", "quic":
 	default:

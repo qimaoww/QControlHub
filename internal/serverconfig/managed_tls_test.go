@@ -13,6 +13,12 @@ import (
 func nativeTLSFixturePlan(protocol Protocol) (Input, error) {
 	protocol.SupportsManagedTLS = false
 	input, err := NewPlan(protocol)
+	if protocol.PortForward {
+		input.TargetAddress, input.TargetPort = "127.0.0.1", 80
+	}
+	if input.TLSEnabled {
+		input.CertificatePath, input.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
+	}
 	if input.Transport == "xhttp" {
 		input.TLSServerName = "tls.example.test"
 		input.CertificatePath, input.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"

@@ -12,6 +12,7 @@ export async function testPresetCatalogRuntime(catalog) {
     covered.add(actual.engine);
     try {
       await open('add');
+      if(actual.protocol.port_forward) { edit('target_address','127.0.0.1');edit('target_port',8080); }
       if(['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(actual.protocol.key)) { edit('tls_server_name','tls.example.test');edit('reality_server_name','reality.example.test');edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key'); }
       if(actual.protocol.supports_managed_tls) {
         assert(control('tls_mode').value==='caddy'&&control('tls_public_port').value==='443','managed TLS defaults lost');
@@ -53,7 +54,15 @@ export async function testPresetCatalogRuntime(catalog) {
         if(actual.engine==='xray')edit('tls_alpn','http/1.1');
         assert(control('transport_host').labels.length&&control('tls_server_name').labels.length,'WS routing fields need labels');
       }
+      if(control('certificate_path')?.required)edit('certificate_path','/etc/qcontrolhub/tls/server.crt');
+      if(control('private_key_path')?.required)edit('private_key_path','/etc/qcontrolhub/tls/server.key');
+      if(actual.plan.transport!=='xhttp') {
+        edit('client_address','edge.example.test');edit('client_port',34443);
+        if(control('client_host')&&!control('client_host').disabled)edit('client_host',control('transport_host')?.value||'host.example.test');
+        if(control('tls_client_alpn')&&!control('tls_client_alpn').disabled)edit('tls_client_alpn','http/1.1');
+      }
       const saved=await save();
+      if(actual.plan.transport!=='xhttp')assert(saved.client_address==='edge.example.test'&&saved.client_port===34443&&control('client_address').value==='edge.example.test'&&control('client_port').value==='34443','client dial options lost on save/reopen');
       assert(saved.protocol===actual.protocol.key,'catalog submitted a different protocol');
       if(crossCoreWS) {
         assert(saved.transport==='websocket'&&saved.transport_path==='/custom-ws'&&saved.tls_server_name==='tls.example.test'&&saved.transport_host==='host.example.test','WS save conflated independent routing');

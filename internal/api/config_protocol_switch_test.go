@@ -25,6 +25,9 @@ func TestInboundProtocolSwitchKeepsAccountInstanceAndOtherInbounds(t *testing.T)
 					var input serverconfig.Input
 					client.call("POST", base+"/plans", map[string]string{"protocol": protocol}, http.StatusCreated, &input)
 					input.Tag, input.Port = tag, port
+					if input.TLSEnabled && input.TLSMode == "" {
+						input.CertificatePath, input.PrivateKeyPath = "/tmp/qch-fixture.crt", "/tmp/qch-fixture.key"
+					}
 					return input
 				}
 				add := func(target configScopeAPIClient, input serverconfig.Input, version int) configMutationResult {

@@ -52,6 +52,11 @@ export async function testManagedTLSRuntime() {
       assert(!control("panel_certificate_id").disabled && !control("panel_certificate_id").closest(".a-field").hidden,"Nginx lost panel certificate selection");
       saved=await save("deploy");
       assert(saved.tls_mode === "nginx" && saved.panel_certificate_id === certificate.id && !saved.certificate_path && !saved.private_key_path,"native certificate overrode Nginx selection");
+      const identity = Object.fromEntries(['tag','port','username','transport_path','tls_server_name','tls_public_port'].map(key=>[key,control(key).value]));
+      const oldCredential = control('credential').value;
+      test.clickButton('重新生成凭据',form());
+      await waitFor(()=>control('credential').value!==oldCredential&&!test.root.hasAttribute('aria-busy'),'credential rotation did not finish');
+      for(const [key,value] of Object.entries(identity))assert(control(key).value===value,`credential rotation changed ${key}`);
       let release;
       test.planGate=new Promise(resolve=>{release=resolve;});
       const before=test.calls.filter(call=>call.path.endsWith('/plans')).length, credential=control('credential').value, writes=test.writes.length;

@@ -206,6 +206,8 @@ export async function testInboundProtocolChanges() {
     assert(form.isConnected&&selector.value===target&&!test.writes.length,'opening native source discarded protocol draft');
     close(test);await pause();
     assert(editor()===form&&form.elements.credential.value===password,'returning from source discarded protocol input');
+    for (const [name,value] of [['certificate_path','/tmp/fixture.crt'],['private_key_path','/tmp/fixture.key']])
+      if (form.elements[name] && !form.elements[name].disabled && !form.elements[name].value) form.elements[name].value=value;
     test.confirm=true;test.submit('deploy');await test.settle(1);
     const saved=test.writes[0];assert(saved.operation==='modify'&&saved.original_tag==='second'&&saved.expected_version===1&&!saved.install_if_missing&&saved.input.protocol===target&&saved.input.tag==='retained-tag'&&saved.input.port===23459&&saved.input.credential===password,'protocol mutation lost target, version or draft');
     test.dispose();

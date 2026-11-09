@@ -75,6 +75,7 @@ func xhttpClientVariant(input Input, kind string) Input {
 	if kind == ProtocolVLESS {
 		input.Transport, input.Flow, input.XHTTPExtra = "raw", "xtls-rprx-vision", ""
 		input.TransportPath, input.TransportHost = "", ""
+		input.ClientHost = ""
 		return input
 	}
 	input.Transport = "xhttp"

@@ -2,6 +2,8 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -66,10 +68,12 @@ func generateSingBox(input Input) (string, error) {
 		}
 	}
 	if input.RealityEnabled {
+		host, port, _ := net.SplitHostPort(xhttpRealityTarget(input))
+		number, _ := strconv.Atoi(port)
 		inbound["tls"] = map[string]any{
 			"enabled": true, "server_name": input.RealityServerName,
 			"reality": map[string]any{
-				"enabled": true, "handshake": map[string]any{"server": input.RealityServerName, "server_port": 443},
+				"enabled": true, "handshake": map[string]any{"server": host, "server_port": number},
 				"private_key": input.RealityPrivateKey, "short_id": []string{input.RealityShortID},
 			},
 		}
@@ -212,6 +216,8 @@ func parseSingBox(content string) (Input, bool) {
 		input.RealityPublicKey = realityPublicKey(input.RealityPrivateKey)
 		input.RealityShortID = firstString(reality["short_id"])
 		input.RealityServerName = stringValue(tls["server_name"])
+		handshake := mapValue(reality["handshake"])
+		input.RealityTarget = net.JoinHostPort(stringValue(handshake["server"]), strconv.Itoa(intValue(handshake["server_port"])))
 	}
 	classifySingBoxPreset(&input)
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandSingBoxFlags(root, input.Tag)

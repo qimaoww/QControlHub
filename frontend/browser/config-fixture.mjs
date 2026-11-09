@@ -20,6 +20,13 @@ export async function createConfigFixture(engine, options = {}) {
   const entries = catalog.filter(entry => entry.engine === engine);
   const preset = entries.find(entry => entry.protocol.key === options.protocol) || entries[0];
   const basePlan = {...structuredClone(preset.saved_plan || preset.plan), ...options.plan};
+  if (preset.protocol.port_forward) { basePlan.target_address ||= '127.0.0.1'; basePlan.target_port ||= 80; }
+  // A saved native TLS fixture represents prepared node certificate files.
+  // Fresh /plans responses retain the production empty prerequisites.
+  if (basePlan.tls_enabled && !['caddy','nginx','external'].includes(basePlan.tls_mode)) {
+    basePlan.certificate_path ||= '/etc/qcontrolhub/tls/server.crt';
+    basePlan.private_key_path ||= '/etc/qcontrolhub/tls/server.key';
+  }
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, ...(options.shared ? {shared_allocation:{id:"share",enabled:true,status:"accepted"}} : {}), capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1", "shared-core-instances-v1", "shared-core-lifecycle-v1",
@@ -203,7 +210,8 @@ export async function createConfigFixture(engine, options = {}) {
       const entry = entries.find(item => item.protocol.key === body.protocol);
       return {...structuredClone(entry.plan), ...body.input,
         ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(entry.plan,key)).map(key=>[key,entry.plan[key]])),
-        tag:`new-${++test.serial}`, port:22000+test.serial};
+        tag:`new-${++test.serial}`, port:22000+test.serial,
+        ...(body.input && ['vmess','vless-ws-tls'].includes(body.protocol) ? {credential:crypto.randomUUID()} : {})};
     }
     if (path.endsWith("/restore")) {
       if (test.restoreGate) await test.restoreGate;

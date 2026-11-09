@@ -227,7 +227,10 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         const generated=await ctx.api(`${base}/plans`,{method:'POST',body:{protocol:protocol.key,input}});
         if(ctx.current()&&box.isConnected&&selected===protocol){
           if(requestedRevision!==revision||draft!==JSON.stringify(read()))throw new Error('参数已修改，未应用过期生成结果');
-          render(generated);ctx.setDirty(true);
+          const updated = read();
+          for (const key of ['credential','secondary_credential','reality_private_key','reality_public_key','reality_short_id','reality_mldsa65_seed','reality_mldsa65_verify','wireguard_server_private_key','wireguard_server_public_key','wireguard_client_private_key','wireguard_client_public_key','wireguard_preshared_key','vless_decryption','vless_encryption','sudoku_client_key','snell_shadow_tls_password'])
+            if (Object.hasOwn(generated,key)) updated[key] = generated[key];
+          render(updated);ctx.setDirty(true);
         }
       });
     });
