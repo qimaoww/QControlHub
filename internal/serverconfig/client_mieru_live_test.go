@@ -66,3 +66,49 @@ func TestMieruTransportAndPayloadNetworksLive(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoSpecialPresetUDPLive(t *testing.T) {
+	binary := nativeWSTestBinary(t, core.EngineMihomo)
+	for _, key := range []string{ProtocolSnell, ProtocolSudoku} {
+		protocol, _ := FindProtocol(core.EngineMihomo, key)
+		methods := protocol.Methods
+		if len(methods) == 0 {
+			methods = []string{""}
+		}
+		for _, method := range methods {
+			t.Run(key+"/"+method, func(t *testing.T) {
+				input, err := NewPlan(protocol)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Listen, input.Port = "127.0.0.1", singBoxFreePort(t)
+				if method != "" {
+					input.Method = method
+				}
+				source, err := Generate(core.EngineMihomo, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				serverLog := nativeWSOriginRun(t, core.EngineMihomo, binary, source, input.Port, "")
+				profile, err := BuildClientProfile(input, "127.0.0.1", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var proxy map[string]any
+				if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
+					t.Fatal(err)
+				}
+				proxy["name"] = "peer"
+				echo, port := singBoxEcho(t, "udp"), singBoxFreePort(t)
+				client, err := yaml.Marshal(map[string]any{"listeners": []any{map[string]any{"type": "tunnel", "name": "payload", "listen": "127.0.0.1", "port": port, "network": []string{"tcp", "udp"}, "target": fmt.Sprintf("127.0.0.1:%d", echo)}}, "proxies": []any{proxy}, "rules": []string{"MATCH,peer"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				clientLog := nativeWSOriginRun(t, core.EngineMihomo, binary, string(client), port, "")
+				if err := catalogEchoRoundTrip("udp", port); err != nil {
+					t.Fatalf("%v\nserver: %s\nclient: %s", err, serverLog(), clientLog())
+				}
+			})
+		}
+	}
+}
