@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 94
+const currentSchemaVersion = 95
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -146,6 +146,9 @@ ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT ''
 ALTER TABLE core_logs ADD COLUMN IF NOT EXISTS node_owner_id text NOT NULL DEFAULT 'unverified';
 CREATE INDEX IF NOT EXISTS core_logs_instance_recent_idx ON core_logs(agent_id,engine,instance_id,node_owner_id,owner_id,id DESC)
  INCLUDE(level,message,logged_at,received_at,service);
+-- Empty shared streams must not scan a busy main instance's covering index.
+CREATE INDEX IF NOT EXISTS core_logs_shared_recent_idx ON core_logs(agent_id,engine,instance_id,node_owner_id,owner_id,id DESC)
+ INCLUDE(level,message,logged_at,received_at,service) WHERE instance_id NOT IN ('main','');
 CREATE TABLE IF NOT EXISTS core_log_source_states (
  agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
  engine text NOT NULL, instance_id text NOT NULL, status text NOT NULL, error text NOT NULL DEFAULT '',

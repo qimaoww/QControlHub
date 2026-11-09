@@ -151,6 +151,45 @@ export async function testLogReadOwnership() {
     await waitFor(() => ready() && main().textContent.includes('日志权限已撤销'), 'initial source denial did not show a distinct failure');
     assert.equal(rows().length, 0, 'initial permission denial retained history');
 
+    // A terminal full failure cancels both the hung preview and directory.
+    // Neither late response may turn the failed round back into loading.
+    denied = false; session = { ...session, user_id: 'full-first-failure' };
+    sources = [source('alpha')]; directory = deferred(); windows.set('alpha:200', deferred());
+    const failedDirectory = directory, failedPreview = windows.get('alpha:200');
+    windowFailure = 504; failedWindows.add('alpha:1000');
+    const beforeFullFailure = calls.length;
+    boot('#core-logs', { agent_id: '', limit: 1000 });
+    await waitFor(() => ready() && main().textContent.includes('读取超时，请重试。'), 'full failure waited for a hung sibling');
+    assert.ok(calls.slice(beforeFullFailure).every(call => call.signal.aborted), 'terminal failure retained a pending sibling');
+    failedDirectory.resolve(); failedPreview.resolve([]); await delay(30);
+    assert.ok(ready() && main().textContent.includes('日志读取失败'), 'late empty preview masked a full failure');
+    directory = null; windows.clear(); failedWindows.clear(); refresh();
+    await waitFor(() => ready() && main().textContent.includes('1000 条日志'), 'full-first timeout did not release manual retry');
+
+    // A successful network window owns its authorization. Slow metadata must
+    // release loading/manual refresh, while a late denial still clears data.
+    session = { ...session, user_id: 'window-before-directory' };
+    sources = [source('alpha')]; directory = deferred();
+    const slowDirectory = directory;
+    boot('#core-logs', { agent_id: '', limit: 1000 });
+    await waitFor(() => ready() && main().textContent.includes('1000 条日志'), 'successful window waited for source metadata');
+    const beforeMetadataRetry = calls.length; refresh();
+    await waitFor(() => calls.length > beforeMetadataRetry && ready(), 'metadata retained pending ownership after window success');
+    denied = true; slowDirectory.resolve(); directory = null;
+    await waitFor(() => ready() && main().textContent.includes('日志权限已撤销'), 'late directory denial did not invalidate completed data');
+    assert.equal(rows().length, 0);
+    denied = false;
+
+    // A late grant result can normalize a completed target to a fresh scope.
+    session = { ...session, user_id: 'late-target-revocation' };
+    sources = [source('beta')]; directory = deferred();
+    const revokedDirectory = directory;
+    boot('#core-logs', { agent_id: 'alpha', limit: 1000 });
+    await waitFor(() => ready() && rows().length === 200, 'late-revocation window did not finish independently');
+    directory = null; revokedDirectory.resolve();
+    await waitFor(() => ready() && [...rows()].every(row => row.textContent.includes('beta authorized log')) && rows().length === 200, 'late target normalization did not start a replacement read');
+    assert.equal(document.querySelector('[name=agent_id]').value, '');
+
     // Reproduce entry -> 504 -> retry -> preview -> full recovery. Retries
     // must keep the 200/engine first paint even after scope was initialized.
     denied = false; windowFailure = 504; orderFailure = 504;
