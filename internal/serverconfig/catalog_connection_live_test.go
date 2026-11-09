@@ -193,12 +193,13 @@ func TestPortForwardCatalogConnectionsLive(t *testing.T) {
 // A bound Mihomo UDP socket can precede routing readiness. UDP has no delivery
 // guarantee; require an actual reply within the bounded startup window.
 func catalogEchoRoundTrip(network string, port int) error {
-	if network != "udp" {
-		return singBoxEchoRoundTripTimeout(network, port, 12*time.Second)
+	timeout := 500 * time.Millisecond
+	if network == "tcp" {
+		timeout = 12 * time.Second
 	}
 	var err error
 	for deadline := time.Now().Add(12 * time.Second); time.Now().Before(deadline); {
-		if err = singBoxEchoRoundTripTimeout(network, port, 500*time.Millisecond); err == nil {
+		if err = singBoxEchoRoundTripTimeout(network, port, timeout); err == nil {
 			return nil
 		}
 	}

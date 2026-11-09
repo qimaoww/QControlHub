@@ -260,7 +260,7 @@ func singBoxPresetEditError(entry map[string]any) error {
 			return unsupported("Reality 多 Short ID")
 		}
 		handshake := mapValue(reality["handshake"])
-		if stringValue(handshake["server"]) != stringValue(tls["server_name"]) || intValue(handshake["server_port"]) != 443 || len(handshake) != 2 {
+		if stringValue(handshake["server"]) == "" || intValue(handshake["server_port"]) < 1 || intValue(handshake["server_port"]) > 65535 || len(handshake) != 2 {
 			return unsupported("Reality 自定义握手目标")
 		}
 	}
