@@ -48,6 +48,19 @@ export async function testOutboundPresetsRuntime() {
     outboundForm().requestSubmit();
     await test.settle(1);
     assert(test.saved().content.includes("host.example") && test.saved().content.includes("sni.example"), "saved source lost independent routing");
+    const previousExit = JSON.parse(test.saved().content).outbounds.find(item=>item.tag === "exit-21001");
+    await open(test);
+    assert(field("tag").value === "exit-21001" && document.querySelector("[data-outbound-protocol]").value === "direct",
+      "add-and-bind reused the previously bound outbound's form");
+    change(field("tag"), "second-exit");
+    outboundForm().requestSubmit();
+    await test.settle(2);
+    const secondSave = JSON.parse(test.saved().content), secondRoute = engine === "xray" ? secondSave.routing : secondSave.route;
+    assert(!test.writes[1].preset_base && !test.writes[1].tag, "add-and-bind retained an edit identity or baseline");
+    assert(JSON.stringify(secondSave.outbounds.find(item=>item.tag === "exit-21001")) === JSON.stringify(previousExit) &&
+      secondSave.outbounds.some(item=>item.tag === "second-exit") &&
+      secondRoute.rules.some(rule=>(rule.outboundTag || rule.outbound) === "second-exit"),
+      "second add-and-bind changed the old exit or failed to bind the new exit");
     test.writes.length = 0;
     await open(test);
     input = document.querySelector('textarea[aria-label="出站配置 JSON"]');

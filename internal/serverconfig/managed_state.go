@@ -70,6 +70,9 @@ func managedSections(engine core.Engine) map[string]bool {
 // Fail closed when an outbound is still selected anywhere. Removing a route or
 // a default selector would silently change its traffic to another exit.
 func managedReferences(value any, target string) bool {
+	return managedReferencesAt(value, target, "")
+}
+func managedReferencesAt(value any, target, parent string) bool {
 	switch value := value.(type) {
 	case map[string]any:
 		for key, item := range value {
@@ -101,18 +104,26 @@ func managedReferences(value any, target string) bool {
 					}
 				}
 			}
-			if managedReferences(item, target) {
+			childKey := key
+			if parent == "sub-rules" {
+				childKey = parent
+			}
+			if managedReferencesAt(item, target, childKey) {
 				return true
 			}
 		}
 	case []any:
 		for _, item := range value {
-			if managedReferences(item, target) {
+			if managedReferencesAt(item, target, parent) {
 				return true
 			}
 		}
 	case string:
-		// Mihomo rule/sub-rule strings select an outbound in their last component.
+		// Only routing strings select a target. Credential and label text can
+		// contain commas and must never create a dependency.
+		if parent != "rules" && parent != "sub-rules" {
+			return false
+		}
 		parts := strings.Split(value, ",")
 		if len(parts) > 1 && (strings.TrimSpace(parts[len(parts)-1]) == target || len(parts) > 2 && strings.TrimSpace(parts[len(parts)-1]) == "no-resolve" && strings.TrimSpace(parts[len(parts)-2]) == target) {
 			return true
@@ -209,21 +220,6 @@ func CompileManagedConfig(engine core.Engine, source string, state ManagedState)
 			return "", fmt.Errorf("停用对象 %s 的标识已变化或不唯一", ref.Tag)
 		}
 	}
-	// Strip only incoming objects first, then reconcile their selectors without
-	// widening any rule to traffic from other incoming listeners.
-	for _, ref := range state.Disabled {
-		if !sections[ref.Section] {
-			continue
-		}
-		values := root[ref.Section].([]any)
-		kept := make([]any, 0, len(values))
-		for _, value := range values {
-			if managedTag(engine, value) != ref.Tag {
-				kept = append(kept, value)
-			}
-		}
-		root[ref.Section] = kept
-	}
 	marshal := func() (string, error) {
 		if engine == core.EngineMihomo {
 			value, err := yaml.Marshal(root)
@@ -240,15 +236,49 @@ func CompileManagedConfig(engine core.Engine, source string, state ManagedState)
 		if err != nil {
 			return "", err
 		}
-		value, err = ReconcilePresetInboundReferences(engine, value, ref.Tag, "")
+		if engine != core.EngineShadowsocksRust {
+			value, err = RemoveMainlandAccessPolicy(engine, value, ref.Tag)
+			if err != nil {
+				return "", err
+			}
+		}
+		root, err = managedDocument(engine, value)
 		if err != nil {
 			return "", err
+		}
+		tags := map[string]bool{ref.Tag: true}
+		if engine == core.EngineXray && ref.Section == "inbounds" {
+			for _, item := range root[ref.Section].([]any) {
+				if managedTag(engine, item) == ref.Tag {
+					if backend, _ := xhttpGroup(root, mapValue(item)); backend != nil {
+						tags[stringValue(backend["tag"])] = true
+					}
+				}
+			}
+		}
+		kept := []any{}
+		for _, item := range root[ref.Section].([]any) {
+			if !tags[managedTag(engine, item)] {
+				kept = append(kept, item)
+			}
+		}
+		root[ref.Section] = kept
+		value, err = marshal()
+		if err != nil {
+			return "", err
+		}
+		for tag := range tags {
+			value, err = ReconcilePresetInboundReferences(engine, value, tag, "")
+			if err != nil {
+				return "", err
+			}
 		}
 		root, err = managedDocument(engine, value)
 		if err != nil {
 			return "", err
 		}
 	}
+
 	for _, ref := range state.Disabled {
 		if sections[ref.Section] {
 			continue
@@ -329,7 +359,7 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 			if tag == "" || strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") {
 				continue
 			}
-			if engine == core.EngineXray && inbound && xrayInternalAPIInbound(root, object) {
+			if engine == core.EngineXray && inbound && (xrayInternalAPIInbound(root, object) || xhttpGroupOwner(root, tag) != "") {
 				continue
 			}
 			kind, listen, port, network := stringValue(object["type"]), stringValue(object["listen"]), trafficPortNumber(object["listen_port"]), ""

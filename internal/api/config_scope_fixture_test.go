@@ -25,7 +25,12 @@ const configScopeFixtureAdminToken = "config-scope-administrator-fixture"
 const configScopeFixturePassword = "config scope password fixture"
 
 func configScopeFixtureConfig() Config {
-	return Config{AdminToken: configScopeFixtureAdminToken, OperatorTokens: []string{"legacy-alice-fixture", "legacy-bob-fixture"}}
+	return Config{AdminToken: configScopeFixtureAdminToken, OperatorTokens: []string{"legacy-alice-fixture", "legacy-bob-fixture"},
+		// Scope checks must not depend on an external geolocation provider.
+		GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+			return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+		})},
+	}
 }
 
 func configScopeFixtureUser(name string) core.UserRequest {

@@ -20,6 +20,16 @@ export async function testConfigInboundsRuntime(preview = false) {
   await testSourceCorrection();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
   await testInboundProtocolChanges();
+  for (const engine of ['xray','sing-box','mihomo','ss-rust']) for (const shared of [false,true]) {
+    const test=await fixture(engine,{shared});test.click('modify');await ready();
+    const form=editor();form.elements.port.value='23459';test.portConflict='port';test.recoveryEngine=engine;test.confirm=true;test.submit('deploy');
+    await waitFor(()=>form.querySelector('[data-port-recovery] button')&&!form.hasAttribute('aria-busy'),'instance recovery unavailable');
+    form.querySelector('[data-port-recovery] button').click();
+    await waitFor(()=>form.textContent.includes('状态已核对，可继续提交'),'instance status did not return to the draft');
+    assert(test.statusRequests.length===1&&test.statusRequests[0].engine===engine&&test.statusRequests[0].expected_instance_id===(test.agent.shared_allocation?.id||''),'status read targeted another instance');
+    assert(!test.writes.length&&form.elements.port.value==='23459'&&!form.querySelector('[type=submit]').disabled,'status recovery retried the mutation or lost input');
+    test.portConflict='';test.submit('deploy');await test.settle(1);test.dispose();
+  }
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {
     const test = await fixture(engine); test.click('modify'); await ready();
     const form = editor(), source = form.elements.credential?.value;
@@ -36,6 +46,8 @@ export async function testConfigInboundsRuntime(preview = false) {
     const test = await fixture(engine, {protocol}); test.click('modify'); await ready();
     const form = editor(), target = form.elements[field]; assert(target, `${protocol} lacks ${field}`);
     if (form.elements.tls_server_name && !form.elements.tls_server_name.value) form.elements.tls_server_name.value = 'tls.example.test';
+    for (const [name,value] of [['certificate_path','/tmp/fixture.crt'],['private_key_path','/tmp/fixture.key'],['reality_server_name','www.amazon.com']])
+      if (form.elements[name] && !form.elements[name].value) form.elements[name].value = value;
     const panel = target.closest('details'); if (panel) panel.open = false;
     test.portConflict = field; test.confirm=true; test.submit('deploy');
     await waitFor(() => form.textContent.includes('草稿已保留') && !form.querySelector('[type=submit]').disabled, `${field} conflict blocked correction`);
@@ -76,8 +88,13 @@ export async function testConfigInboundsRuntime(preview = false) {
     test.confirm=false;test.click('add');await pause();assert(!editor()&&input.value===baseline+'\n ','opening editor silently replaced source draft');
     input.value=baseline;input.dispatchEvent(new Event('input',{bubbles:true}));
     test.click('add');await ready();form=editor();form.elements.tag.value='keep-my-draft';test.fail=true;test.confirm=true;test.submit('deploy');
-    await waitFor(()=>form.textContent.includes('保存结果需重新核对'),'conflict recovery state missing');
-    assert(form.elements.tag.value==='keep-my-draft'&&form.querySelector('button[type=submit]').disabled,'conflict lost draft or permits stale resubmission');
+    await waitFor(()=>form.textContent.includes('尚未保存，当前草稿已保留'),'conflict recovery state missing');
+    assert(form.elements.tag.value==='keep-my-draft'&&form.querySelector('button[type=submit]').disabled,'conflict did not preserve draft while awaiting rebase');
+    [...form.querySelectorAll('button')].find(item=>item.textContent==='核对最新配置').click();
+    await waitFor(()=>!form.querySelector('[data-conflict-recovery] button:last-child').disabled,'latest config recovery unavailable');
+    [...form.querySelectorAll('button')].find(item=>item.textContent==='在最新配置上继续编辑').click();
+    assert(form.elements.tag.value==='keep-my-draft'&&test.writes.length===5&&!form.querySelector('button[type=submit]').disabled,'conflict readback mutated, locked or lost input');
+    test.fail=false;test.submit('deploy');await test.settle(6);
     test.dispose();assert(!document.querySelector('dialog[open]'),'session disposal left an orphan editor');
   }
   for (const status of [200,408]) for (const kind of ['modify','delete']) {
@@ -175,8 +192,11 @@ export async function testInboundProtocolChanges() {
     form.elements.credential.value=password;form.elements.credential.dispatchEvent(new Event('input',{bubbles:true}));
     choose(original);await loaded(original);assert(form.elements.credential.value===credential,'original protocol draft lost its credential');
     choose(target);await loaded(target);assert(form.elements.credential.value===password,'new protocol draft was regenerated on return');
-    test.confirm=false;test.clickButton('完整入站配置',test.topDialog());await pause();
-    assert(editor()===form&&selector.value===target&&!test.writes.length,'canceling edit-mode switch discarded protocol draft');
+    test.confirm=false;test.clickButton('完整入站配置',test.topDialog());
+    await waitFor(()=>editor()?.elements.fragment,'native editor did not open');
+    assert(form.isConnected&&selector.value===target&&!test.writes.length,'opening native source discarded protocol draft');
+    close(test);await pause();
+    assert(editor()===form&&form.elements.credential.value===password,'returning from source discarded protocol input');
     test.confirm=true;test.submit('deploy');await test.settle(1);
     const saved=test.writes[0];assert(saved.operation==='modify'&&saved.original_tag==='second'&&saved.expected_version===1&&!saved.install_if_missing&&saved.input.protocol===target&&saved.input.tag==='retained-tag'&&saved.input.port===23459&&saved.input.credential===password,'protocol mutation lost target, version or draft');
     test.dispose();

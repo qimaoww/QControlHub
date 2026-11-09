@@ -134,14 +134,14 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	// to start a foreign listener which has no shared traffic monitor yet.
 	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,NOT $4::boolean
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR $4::boolean)))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain)
@@ -149,21 +149,21 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),attempt.config_id,attempt.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2
+				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state LEFT JOIN tasks attempt ON attempt.id=state.last_task_id
 		LEFT JOIN configs config ON config.id=attempt.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=attempt.config_id AND revision.version=attempt.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain) AND attempt.action='deploy'
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT state.engine,'','',0,true,false,state.owner_id=$2
+		SELECT state.engine,'','',0,true,false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
 		FROM agent_shared_instance_ownership state
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain)
 			AND (state.config_id='' OR state.config_uncertain)
 			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2 FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2,false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
 			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND (task.engine<>$3 OR task.shared_instance<>$4::boolean OR task.shared_instance AND task.shared_traffic_id<>$5)))`, agentID, userID, engine, sharedInstance, instanceID)
 	if err != nil {
@@ -176,11 +176,12 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		uncertain   bool
 		pending     bool
 		sameOwner   bool
+		recoverable bool
 	}
 	var deployments []deployment
 	for rows.Next() {
 		var d deployment
-		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner); err != nil {
+		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner, &d.recoverable); err != nil {
 			rows.Close()
 			return err
 		}
@@ -192,7 +193,11 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	}
 	for _, d := range deployments {
 		if d.uncertain {
-			return portConflict(ports[0], fmt.Errorf("%w: 无法确认实例的端口状态，请刷新节点状态后重试", ErrConflict))
+			conflict := &PortConflictError{Port: ports[0], Field: "port", Cause: fmt.Errorf("%w: 无法确认实例的端口状态，请核对实例状态后重试", ErrConflict)}
+			if d.sameOwner && d.recoverable {
+				conflict.RecoveryEngine = string(d.engine)
+			}
+			return conflict
 		}
 		content, err := s.decryptContent(d.content)
 		if err != nil {

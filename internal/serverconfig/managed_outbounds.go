@@ -31,7 +31,7 @@ func ManagedOutboundFragment(engine core.Engine, source, section, tag string) (s
 			found = i
 		}
 	}
-	if found < 0 || strings.HasPrefix(tag, "qch-") {
+	if found < 0 || managedInternalTag(tag) {
 		return "", errors.New("出站不存在或由系统管理")
 	}
 	fragment, _, err := configschema.Fragment(engine, source, section)
@@ -82,7 +82,7 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 			index = i
 		}
 	}
-	if operation != "add" && (index < 0 || strings.HasPrefix(original, "qch-")) {
+	if operation != "add" && (index < 0 || managedInternalTag(original)) {
 		return fail(errors.New("出站已变化，请重新读取"))
 	}
 	var next map[string]any
@@ -93,7 +93,7 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 			return fail(err)
 		}
 		nextTag = managedTag(engine, next)
-		if nextTag == "" || nextTag != strings.TrimSpace(nextTag) || strings.HasPrefix(nextTag, "qch-") {
+		if nextTag == "" || nextTag != strings.TrimSpace(nextTag) || managedInternalTag(nextTag) {
 			return fail(errors.New("请填写唯一出站名称，不能使用系统名称"))
 		}
 		for _, key := range []string{"outbounds", "proxies", "proxy-groups"} {
@@ -105,9 +105,8 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 			}
 		}
 	}
-	if operation != "add" && (operation == "delete" || nextTag != original) {
-		// Resolve references and implicit default before removal/rename. Renaming
-		// an actively referenced exit requires an explicit coordinated source edit.
+	if operation == "delete" {
+		// Deletion must retain an explicit replacement path for every consumer.
 		if _, err = CompileManagedConfig(engine, source, ManagedState{Disabled: []ManagedResource{{section, original}}}); err != nil {
 			return fail(err)
 		}
@@ -181,6 +180,12 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 	if err != nil {
 		return fail(err)
 	}
+	if operation == "modify" && nextTag != original {
+		result, err = RewriteOutboundReferences(engine, result, original, nextTag)
+		if err != nil {
+			return fail(err)
+		}
+	}
 	remapped := ManagedState{Disabled: []ManagedResource{}}
 	for _, ref := range state.Disabled {
 		if ref.Section == section && ref.Tag == original && operation != "add" {
@@ -195,4 +200,8 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 		return fail(fmt.Errorf("出站状态校验失败: %w", err))
 	}
 	return result, remapped, nil
+}
+
+func managedInternalTag(tag string) bool {
+	return strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-")
 }

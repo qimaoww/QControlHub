@@ -72,8 +72,8 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
     }
   }
   async function request(path, options = {}) {
-    const match = path.match(/^\/agents\/([^/]+)\/configs\/([^/]+)\/(?:source|server-inbounds|fields\/[^?]+)(?:\?.*)?$/);
-    if (options.method !== "POST" || !match) return api(path, options);
+    const match = path.match(/^\/agents\/([^/]+)\/configs\/([^/]+)\/(?:source|server-inbounds|outbounds|management|fields\/[^?]+)(?:\?.*)?$/);
+    if (!["POST", "PUT"].includes(options.method) || !match) return api(path, options);
     const owner = state.data, records = entries();
     const input = JSON.parse(options.body);
     const record = {agentId:decodeURIComponent(match[1]), engine:decodeURIComponent(match[2]),
@@ -90,6 +90,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal 
       if (error.status >= 400 && error.status < 500 && error.status !== 408) {
         delete records[id];
         persist(records);
+        error.configSubmissionRejected = true;
         throw error;
       }
       // A bounded readback handles a lost response, including a transaction

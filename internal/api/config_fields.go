@@ -39,12 +39,13 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Mutation        string `json:"mutation"`
-		Fragment        string `json:"fragment"`
-		ExpectedVersion int    `json:"expected_version"`
-		Name            string `json:"name"`
-		Description     string `json:"description"`
-		Intent          string `json:"intent"`
+		ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
+		Mutation           string  `json:"mutation"`
+		Fragment           string  `json:"fragment"`
+		ExpectedVersion    int     `json:"expected_version"`
+		Name               string  `json:"name"`
+		Description        string  `json:"description"`
+		Intent             string  `json:"intent"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -139,7 +140,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.ExpectedVersion,
-		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: desired})
+		store.ConfigMutationOptions{ExpectedInstanceID: input.ExpectedInstanceID, TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: desired})
 	if err != nil {
 		writeStoreError(w, err)
 		return

@@ -105,16 +105,18 @@ func parseXHTTPGroup(root map[string]any, primary map[string]any) (Input, bool) 
 }
 
 func mutateXHTTPGroup(current, generated, tag, operation string) (string, bool, error) {
-	var old, next map[string]any
-	if json.Unmarshal([]byte(current), &old) != nil || json.Unmarshal([]byte(generated), &next) != nil {
+	old, oldErr := managedDocument(core.EngineXray, current)
+	next, nextErr := managedDocument(core.EngineXray, generated)
+	if oldErr != nil || nextErr != nil {
 		return "", false, nil
 	}
 	oldItems, _ := old["inbounds"].([]any)
 	newPrimary := firstMap(next["inbounds"])
-	var oldBackend map[string]any
+	var oldPrimary, oldBackend map[string]any
 	for _, raw := range oldItems {
 		p := mapValue(raw)
 		if p["tag"] == tag {
+			oldPrimary = p
 			oldBackend, _ = xhttpGroup(old, p)
 		}
 	}
@@ -124,6 +126,29 @@ func mutateXHTTPGroup(current, generated, tag, operation string) (string, bool, 
 	}
 	if oldBackend == nil && newBackend == nil {
 		return "", false, nil
+	}
+	if operation == "modify" && oldBackend != nil && newBackend != nil {
+		before, beforeOK := parseXHTTPGroup(old, oldPrimary)
+		after, afterOK := parseXHTTPGroup(next, newPrimary)
+		if beforeOK && afterOK && before.Protocol == after.Protocol {
+			// Both native children belong to one editable object. Apply the same
+			// represented delta to each child without rebuilding custom options.
+			canonical, err := generateXray(before)
+			if err != nil {
+				return "", true, err
+			}
+			baseline, err := managedDocument(core.EngineXray, canonical)
+			if err != nil {
+				return "", true, err
+			}
+			primary := firstMap(baseline["inbounds"])
+			backend, _ := xhttpGroup(baseline, primary)
+			if backend == nil {
+				return "", true, fmt.Errorf("无法还原组合入站，请使用完整源码编辑")
+			}
+			newPrimary = mapValue(presetDelta(cloneAccountingObject(oldPrimary), primary, newPrimary))
+			newBackend = mapValue(presetDelta(cloneAccountingObject(oldBackend), backend, newBackend))
+		}
 	}
 	if oldBackend != nil {
 		if err := applyMainlandXray(old, stringValue(oldBackend["tag"]), false, false, nil); err != nil {
@@ -156,8 +181,10 @@ func mutateXHTTPGroup(current, generated, tag, operation string) (string, bool, 
 		}
 	}
 	if operation != "delete" && newBackend != nil {
-		var root map[string]any
-		_ = json.Unmarshal([]byte(merged), &root)
+		root, readErr := managedDocument(core.EngineXray, merged)
+		if readErr != nil {
+			return "", true, readErr
+		}
 		entries, _ := root["inbounds"].([]any)
 		paired := []any{}
 		for _, raw := range entries {

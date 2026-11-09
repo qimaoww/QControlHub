@@ -53,8 +53,8 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
     const id = select.value, active = Boolean(id), cert = items.find(item => item.id === id);
     const sni = input('tls_server_name');
     if (event && active && cert) {
-      const names = list(cert.domains).filter(name => !name.startsWith('*.'));
-      if (sni && !sni.value && (group || names.length === 1)) sni.value = names[0] || '';
+      const domains = list(cert.domains), names = domains.filter(name => !name.startsWith('*.'));
+      if (sni && !sni.value && (group || domains.length === 1 && names.length === 1)) sni.value = names[0] || '';
       const reality = input('reality_server_name');
       if (group && reality && !reality.value) reality.value = names.find(name => name !== sni?.value) || '';
     }

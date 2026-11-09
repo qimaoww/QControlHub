@@ -44,10 +44,22 @@ func TestXrayGeneratedAuthenticationRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			content = allowXrayFixtureTarget(t, content, target.URL)
 			startWireGuardTestCore(t, core.EngineXray, binary, content)
 			outbound, err := BuildClientOutbound(core.EngineXray, input, "127.0.0.1", input.TLSServerName)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if input.TLSEnabled {
+				var object map[string]any
+				if err = json.Unmarshal(outbound, &object); err != nil {
+					t.Fatal(err)
+				}
+				mapValue(mapValue(object["streamSettings"])["tlsSettings"])["useSystemCA"] = true
+				outbound, err = json.Marshal(object)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			port := xrayAuthenticationTestPort(t)
 			client, _ := json.Marshal(map[string]any{
@@ -130,4 +142,36 @@ func TestLegacyXrayUsersPresetCanBeRepairedWithoutLosingOtherInbounds(t *testing
 			t.Fatal("repair lost another inbound or custom root option")
 		}
 	}
+}
+
+// Recent Xray releases block private echo targets by default. Permit only
+// this test's exact host and port; retain the default policy everywhere else.
+func allowXrayFixtureTarget(t *testing.T, source, target string) string {
+	t.Helper()
+	endpoint, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := managedDocument(core.EngineXray, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbounds, _ := root["outbounds"].([]any)
+	for _, raw := range outbounds {
+		out := mapValue(raw)
+		if out["protocol"] != "freedom" {
+			continue
+		}
+		settings := mapValue(out["settings"])
+		if settings == nil {
+			settings = map[string]any{}
+			out["settings"] = settings
+		}
+		settings["finalRules"] = []any{map[string]any{"action": "allow", "ip": []string{endpoint.Hostname()}, "port": endpoint.Port()}}
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }

@@ -62,6 +62,11 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 }
 
 func mutateGenerated(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
+	if operation == "modify" {
+		if result, handled, err := mutatePresetFields(engine, currentContent, generatedContent, matchValue); handled {
+			return result, err
+		}
+	}
 	if engine == core.EngineXray {
 		if merged, handled, err := mutateXHTTPGroup(currentContent, generatedContent, matchValue, operation); handled {
 			return merged, err
@@ -152,8 +157,8 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 	if strings.TrimSpace(merged) == "" {
 		merged = "{}"
 	}
-	var currentRoot map[string]any
-	if err := json.Unmarshal([]byte(merged), &currentRoot); err != nil || currentRoot == nil {
+	currentRoot, err := managedDocument(core.EngineShadowsocksRust, merged)
+	if err != nil {
 		return "", fmt.Errorf("ss-rust 当前配置必须是 JSON 对象")
 	}
 	if listKey, entries, extended := shadowsocksRustExtendedEntries(currentRoot); extended {

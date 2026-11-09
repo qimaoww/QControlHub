@@ -99,6 +99,18 @@ export async function run() {
     await assert.rejects(superseded.request(path,{method:"POST",body}), error=>
       error.status === 409 && error.code === "config_submission_superseded" && error.message.includes("任务已提交"),
     "reconciliation returned a later edit as the submitted task's configuration");
+    // Every task-producing editor uses the same read-only receipt recovery.
+    for (const [endpoint, method] of [["server-inbounds","POST"],["outbounds","POST"],["management","PUT"],["fields/route","POST"]]) {
+      let attempts=0, receiptID;
+      const editor=createConfigMutations({state:{data:{}},api:async (url,options={})=>{
+        if(options.method===method){attempts++;receiptID=options.headers["X-Config-Task-ID"];throw TypeError("committed response lost");}
+        if(url.startsWith("/tasks/"))return {id:receiptID,agent_id:"node",engine:"xray",action:"deploy",config_id:"cfg",config_version:4,status:"succeeded"};
+        return {id:"cfg",version:4};
+      }},{onTask:()=>{},waitForTerminal:()=>completion});
+      const recovered=await editor.request(`/agents/node/configs/xray/${endpoint}`,{method,body});
+      assert.equal(recovered.config.version,4);
+      assert.equal(attempts,1,`${endpoint} replayed a committed write`);
+    }
     release({status:"succeeded"});
     // A response arriving after an account change cannot reach task callbacks
     // or the caller's subsequent save/deploy handlers.
