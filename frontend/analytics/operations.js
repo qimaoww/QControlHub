@@ -194,6 +194,15 @@ export async function dashboardPage(ctx) {
       node("div", { className: "a-chart-meta" }, muted('实线 接收 · 虚线 发送'), trafficPeriod)))),
     node('div', { className: 'a-card-body' }, stack(trafficTrends,
       node('div', { className: 'a-filterbar' }, node('h3', {}, '用量最高的节点'), trafficState), trafficRanking))));
+  let businessPaint;
+  const queueBusiness = () => {
+    if (businessPaint != null) return;
+    businessPaint = requestAnimationFrame(() => {
+      businessPaint = null;
+      if (ctx.current()) { paintBusiness(); paintRanking(); }
+    });
+  };
+  ctx.signal.addEventListener('abort', () => cancelAnimationFrame(businessPaint), { once: true });
   function paintBusiness() {
     const overview = readings.get("overview") || {};
     const agents = orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
@@ -247,7 +256,15 @@ export async function dashboardPage(ctx) {
         node('div', { className: 'a-probe-meter-label' }, node('a', { href: `#traffic?agent=${pathID(entry.agentID)}` }, agents.find(agent => agent.id === entry.agentID)?.name || '关联节点'), node('strong', {}, bytes(entry.used))),
         metricTrack(total ? entry.used / total * 100 : 0, true, false))) : muted('尚无按节点归集的流量记录')));
   }
-  async function read(key, path, force = false) {
+  const reading = new Map();
+  function read(key, path, force = false) {
+    if (reading.has(key) && !force) return reading.get(key);
+    const work = readResource(key, path, force);
+    reading.set(key, work);
+    void work.finally(() => { if (reading.get(key) === work) reading.delete(key); }).catch(() => {});
+    return work;
+  }
+  async function readResource(key, path, force = false) {
     if (!ctx.current() || requests.has(key) && !force) return;
     requests.get(key)?.abort();
     const controller = new AbortController();
@@ -271,7 +288,7 @@ export async function dashboardPage(ctx) {
         requests.delete(key);
         if (key === "metrics") paintMetrics();
         else if (key === "traffic") paintTraffic();
-        else { paintBusiness(); if (key === 'agents') paintRanking(); }
+        else queueBusiness();
       }
     }
   }
@@ -287,7 +304,7 @@ export async function dashboardPage(ctx) {
   ctx.signal.addEventListener("abort", () => { requests.forEach(controller => controller.abort()); trafficDialog?.close(); }, { once: true });
   paintMetrics(); paintTraffic(); paintBusiness();
   void refresh();
-  poll(ctx, () => { void refresh(); }, 5000);
+  poll(ctx, refresh, 5000);
   return stack(overviewCard, host, trafficCard, nodes);
 }
 
@@ -333,7 +350,9 @@ export async function taskDetail(ctx, taskID) {
   const box = ctx.dialog("任务详情", content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
-  const stop = () => clearTimeout(timer);
+  const controller = new AbortController();
+  const signal = AbortSignal.any([ctx.signal, controller.signal]);
+  const stop = () => { clearTimeout(timer); controller.abort(); };
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
   content.append(actions(refresh));
@@ -341,7 +360,7 @@ export async function taskDetail(ctx, taskID) {
     if (reading || !active()) return;
     reading = true;
     try {
-      const latest = await ctx.api(`/tasks/${pathID(taskID)}`);
+      const latest = await ctx.api(`/tasks/${pathID(taskID)}`, { signal });
       if (!active()) return;
       task = latest;
       timing.textContent = taskTiming(task);
@@ -364,7 +383,7 @@ export async function taskDetail(ctx, taskID) {
         if(follow)output.scrollTop=output.scrollHeight;
       }
     } catch (error) {
-      if (active() && error.status === 403) {
+      if (active() && [403, 404].includes(error.status)) {
         output.textContent = ''; output.hidden = true; state.textContent = '无权读取';
         timing.textContent = '';
         context.replaceChildren();
@@ -379,11 +398,11 @@ export async function taskDetail(ctx, taskID) {
   async function poll() {
     try { if (!document.hidden && active()) await read(); }
     catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
-    finally { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); }
+    finally { if (active() && ['pending', 'running'].includes(task.status)) timer=setTimeout(poll,2000); }
   }
-  box.addEventListener("close", stop, {once:true});
+  box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
-  timer=setTimeout(poll,2000);
+  if (['pending', 'running'].includes(task.status)) timer=setTimeout(poll,2000);
 }
 
 export async function tasksPage(ctx) {
@@ -425,7 +444,7 @@ export async function tasksPage(ctx) {
     } finally { if (sequence === readSequence) filtering = false; }
   }, { status: "", agent_id: "", action: "", limit: "100" });
   const results = node("div");
-  const taskTable = table(["操作", "节点", "执行对象", "状态", "创建时间", "操作"], [], { label: "任务", rowKey: row => row[5].dataset.taskId });
+  const taskTable = table(["操作", "节点", "执行对象", "状态", "创建时间", "操作"], [], { label: "任务", rowKey: row => row.taskID });
   results.append(taskTable);
   const refreshState = muted('正在实时更新'); refreshState.setAttribute('role', 'status');
   async function editRetry(task) {
@@ -456,7 +475,7 @@ export async function tasksPage(ctx) {
   }
   function draw(tasks) {
     lastTasks = list(tasks); syncAgents();
-    taskTable.updateRows(lastTasks.map(task => {
+    taskTable.updateRows(lastTasks.map(task => Object.assign(() => {
       const retryState = taskRetryState(task);
       return [
         actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id, taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
@@ -482,15 +501,15 @@ export async function tasksPage(ctx) {
             });
           }, { tone: "danger" })),
       ];
-    }));
+    }, { taskID: task.id })));
   }
   async function refresh() {
     if (filtering) return;
     const sequence = ++readSequence;
     try {
-      if (!ctx.can('agents.read')) {
-        agents = []; delete ctx.state.data.taskAgents;
-      } else if (Date.now() - agentsLoadedAt >= 30000) {
+      const updateAgents = async () => {
+        if (!ctx.can('agents.read')) { agents = []; delete ctx.state.data.taskAgents; return; }
+        if (Date.now() - agentsLoadedAt < 30000) return;
         try {
           const latest = await readOrderedNodes(ctx.api);
           if (!ctx.current() || sequence !== readSequence) return;
@@ -501,14 +520,16 @@ export async function tasksPage(ctx) {
           if (error.status === 403) { agents = []; delete ctx.state.data.taskAgents; }
         }
         agentsLoadedAt = Date.now();
-      }
-      if (ctx.can('settings.read') && Date.now() - settingsLoadedAt >= 30000) {
+      };
+      const updateSettings = async () => {
+        if (!ctx.can('settings.read') || Date.now() - settingsLoadedAt < 30000) return;
         try { await ctx.api('/settings'); }
         catch (error) { if (error.name === 'AbortError') throw error; }
-        if (!ctx.current() || sequence !== readSequence) return;
-        settingsLoadedAt = Date.now();
-      }
-      const tasks = await ctx.api(query('/tasks', ctx.state.data.taskFilters || filters));
+        if (ctx.current() && sequence === readSequence) settingsLoadedAt = Date.now();
+      };
+      const [tasks] = await Promise.all([
+        ctx.api(query('/tasks', ctx.state.data.taskFilters || filters)), updateAgents(), updateSettings(),
+      ]);
       if (!ctx.current() || sequence !== readSequence) return;
       draw(tasks); refreshState.textContent = '正在实时更新';
     } catch (error) {

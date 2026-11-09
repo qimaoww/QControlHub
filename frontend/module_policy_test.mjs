@@ -54,7 +54,7 @@ const sharedLogic = new Set([
   "card-move-scroll.js",
   "core-log-preferences.js", "core-log-scope.js", "core-log-read.js", "core-log-cache.js", "core-log-model.js", "core-log-projection.js", "core-log-source-status.js", "client-connection-model.js", "client-connection-cache.js",
   "inbound-options-model.js", "archive-draft-model.js", "config-defaults.js", "config-mutations.js",
-  "account-request.js", "account-storage.js", "agent-service-state.js",
+  "read-coordinator.js", "account-request.js", "account-storage.js", "agent-service-state.js",
   "agent-address-model.js", "agent-time-zone-model.js", "agent-batch.js", "region-model.js",
   "core-install-state.js", "core-install-source.js", "xray-api.js", "enrollment-command.js",
   "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "outbound-preset-controller.js",

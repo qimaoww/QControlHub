@@ -80,7 +80,7 @@ try {
     fail = true; await tick();
     assert.deepEqual(errors, ['temporary native poll failure'], 'native polling does not report a transient failure');
     assert.equal(timers.size, 1, 'failed native polling cannot retry');
-    fail = false; const retry = tick();
+    fail = false; const retry = tick(); await Promise.resolve();
     assert.equal(calls, 3, 'native polling does not retry after failure');
     release(); await retry;
     globalThis.document.hidden = true; await tick();
@@ -91,7 +91,7 @@ try {
     assert.equal(calls, 3, 'departed native route requests old fleet');
     assert.equal(timers.size, 0, 'departed native route retains a timer');
     current = true;
-    const pending = tick(); current = false; controller.abort(); release(); await pending;
+    const pending = tick(); await Promise.resolve(); current = false; controller.abort(); release(); await pending;
     assert.equal(timers.size, 0, 'disposing an in-flight native poll retains a timer');
   } finally {
     current = false; controller.abort();

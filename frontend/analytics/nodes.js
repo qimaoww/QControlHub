@@ -24,7 +24,8 @@ const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
 const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.status);
 const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels || {}, agent.features || []);
 export async function nodesPage(ctx) {
-  const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view')]);
+  const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
+  const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view'), ordering.load()]);
   let agents = list(receivedAgents), preference = savedView;
   let liveTable, loadSequence = 0, renderSignature;
   const dialogUpdates = new Set();
@@ -33,8 +34,7 @@ export async function nodesPage(ctx) {
   const coreKey = (agent, engine) => `${agent.id}:${engine}`;
   const refreshState = muted('正在实时更新');
   refreshState.setAttribute('role', 'status');
-  const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
-  await ordering.load();
+
   const canManage = agent => ctx.can('agents.manage', agent) && agent.can_manage !== false;
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
@@ -544,7 +544,9 @@ export async function nodesPage(ctx) {
     box.addEventListener('close', () => { if (ctx.current()) ctx.setDirty(false); }, { once: true });
     dialogUpdates.add(update);
     box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
-    ctx.signal.addEventListener('abort', () => { dialogUpdates.delete(update); box.close(); }, { once: true });
+    const dispose = () => { dialogUpdates.delete(update); box.close(); };
+    ctx.signal.addEventListener('abort', dispose, { once: true });
+    box.addEventListener('close', () => ctx.signal.removeEventListener('abort', dispose), { once: true });
   }
   function installCore(agent, engine) {
     const shared = agent.can_manage === false;

@@ -78,7 +78,10 @@ export async function quotaInvitations(ctx) {
       const received = await ctx.api('/agent-access');
       if (!current() || serial !== model.serial || model.pending) return;
       model.access = received; feedback.textContent = '';
-    } catch (error) { if (current() && error.name !== 'AbortError') feedback.textContent = error.message; }
+    } catch (error) {
+      if (current() && [403, 404].includes(error.status)) { model.access = null; model.openID = null; box?.close(); }
+      if (current() && error.name !== 'AbortError') feedback.textContent = error.message;
+    }
     finally {
       loading = false;
       if (current()) { drawCards(); redraw?.(); }

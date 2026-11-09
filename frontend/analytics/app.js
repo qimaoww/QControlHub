@@ -1,3 +1,4 @@
+import { createReadCoordinator, readsAffectedByWrite } from "../modules/read-coordinator.js";
 import { requestCoreLogJSON as boundedRead } from "../modules/core-log-read.js";
 import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
@@ -80,16 +81,30 @@ export function startAnalytics({ app, session }) {
   app.replaceChildren(layout);
   applyAppearance();
 
+  let readSession, reads;
+  const sessionReads = bound => {
+    if (!reads || readSession !== bound) {
+      reads?.clear();
+      readSession = bound;
+      reads = createReadCoordinator((path, options) => accountRequest(path, {
+        ...options, session: bound,
+        isCurrent: () => state.session === bound && !lifetime.signal.aborted,
+        onUnauthorized: message => login(message),
+      }));
+    }
+    return reads;
+  };
   const api = async (path, options = {}) => {
-    const bound = state.session;
-    const data = state.data;
+    const bound = state.session, data = state.data, reader = sessionReads(bound);
     const writing = !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method || 'GET').toUpperCase());
-    if (writing) delete data.analyticsTrafficSnapshot;
-    const result = await accountRequest(path, {
+    const invalidate = () => { reader.invalidate(readsAffectedByWrite(path)); delete data.analyticsTrafficSnapshot; };
+    if (writing) invalidate();
+    const result = await (writing ? accountRequest(path, {
       ...options, session: bound, signal: options.signal || lifetime.signal,
       isCurrent: () => state.session === bound && !lifetime.signal.aborted,
       onUnauthorized: message => login(message),
-    }).finally(() => { if (writing) delete data.analyticsTrafficSnapshot; });
+    }) : reader.read(path, { ...options, signal: options.signal || lifetime.signal }))
+      .finally(() => { if (writing) invalidate(); });
     if (path === "/settings" && state.session === bound && !lifetime.signal.aborted) {
       state.data.settings = result;
       applyAppearance(result);
@@ -98,6 +113,7 @@ export function startAnalytics({ app, session }) {
   };
   const watch = createSessionWatch({ api, state, onAccessChanged: () => {
     routeAbort?.abort();
+    reads?.clear();
     state.data.analyticsConnectionCache?.clear();
     clearConnectionStorage();
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
@@ -291,6 +307,7 @@ export function startAnalytics({ app, session }) {
   function login(message = "") {
     void refreshSiteBranding();
     routeAbort?.abort();
+    reads?.clear();
     state.data.analyticsConnectionCache?.clear();
     clearConnectionStorage();
     watch.stop();
@@ -392,7 +409,7 @@ export function startAnalytics({ app, session }) {
       }
       const [module] = await Promise.all([
         routeModules.load(descriptor[0]),
-        can('settings.read') && !state.data.settings ? context.api('/settings') : null,
+        route !== 'settings' && can('settings.read') && !state.data.settings ? context.api('/settings') : null,
       ]);
       if (!context.current()) return;
       const page = module[descriptor[1]];
@@ -430,7 +447,7 @@ export function startAnalytics({ app, session }) {
     event.preventDefault();
     event.returnValue = "";
   }, { signal: lifetime.signal });
-  window.addEventListener("pagehide", () => { state.data.analyticsConnectionCache?.flush(); lifetime.abort(); routeAbort?.abort(); watch.stop(); }, { once: true });
+  window.addEventListener("pagehide", () => { state.data.analyticsConnectionCache?.flush(); reads?.clear(); lifetime.abort(); routeAbort?.abort(); watch.stop(); }, { once: true });
   window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
   document.addEventListener("visibilitychange", () => document.hidden ? watch.stop() : void watch.trigger(), { signal: lifetime.signal });
   window.addEventListener("focus", () => void watch.trigger(), { signal: lifetime.signal });

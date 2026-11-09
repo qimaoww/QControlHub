@@ -25,6 +25,7 @@ import "./panel_metrics_smoke.mjs";
 // Await each domain suite: many install temporary DOM globals, and their
 // setup/restore order is part of the regression contract.
 const fixtures = {};
+await (await import("./smoke/read-coordinator.mjs")).run();
 await (await import("./smoke/inbound-options.mjs")).run();
 await (await import("./smoke/config-mutations.mjs")).run();
 await (await import("./smoke/motion.mjs")).run();
