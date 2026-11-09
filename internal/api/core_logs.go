@@ -1,16 +1,36 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
+
+// Include authentication, pool acquisition and row reads in the same deadline.
+// The browser's longer deadline also bounds transfer and JSON parsing.
+func coreLogReadDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func writeCoreLogReadError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() == context.DeadlineExceeded {
+		writeError(w, http.StatusGatewayTimeout, "core log read timed out")
+		return
+	}
+	writeStoreError(w, err)
+}
 
 func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 	values := request.URL.Query()
@@ -57,7 +77,7 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 	}
 	entries, err := s.store.ListCoreLogs(request.Context(), query)
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, request, err)
 		return
 	}
 	// Hash the actual representation after permission filtering and sanitizing.
@@ -104,7 +124,7 @@ func coreLogETagMatches(condition, etag string) bool {
 func (s *Server) listCoreLogSources(w http.ResponseWriter, r *http.Request) {
 	sources, err := s.store.ListCoreLogSources(r.Context())
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, r, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

@@ -51,9 +51,11 @@ export async function testLogReadOwnership() {
   };
   try {
     windows.set('alpha:200', deferred()); windows.set('alpha:2000', deferred());
-    boot(); await waitFor(() => calls.length === 1, 'authorization directory did not gate initial read');
+    boot(); await waitFor(() => calls.filter(call => call.kind === 'directory').length === 1 && calls.filter(call => call.kind === 'window').length === 2, 'independently authorized reads did not start with the directory');
     assert.equal(rows().length, 0, 'unvalidated cached logs appeared');
-    assert.equal(calls.filter(call => call.kind === 'window').length, 0, 'logs were requested before authorization');
+    assert.equal(calls.filter(call => call.kind === 'window').length, 2, 'source metadata blocked server-authorized windows');
+    windows.get('alpha:200').resolve(entries('alpha', 200));
+    await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'slow source metadata blocked independently authorized preview');
     directory.resolve(); directory = null;
     await waitFor(() => calls.filter(call => call.kind === 'window').length === 2, 'preview and full windows did not start concurrently');
     order.resolve(); order = null;
@@ -75,10 +77,12 @@ export async function testLogReadOwnership() {
     // Leaving and returning may reuse an account cache only after fresh grants.
     accountStorage.setItem('qcontrolhub:core-log-preferences', JSON.stringify({ limit: 100, auto_refresh: true }));
     location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'route departure failed');
+    windows.set('alpha:2000', deferred());
     directory = deferred(); const beforeReturn = calls.length; location.hash = '#core-logs';
     await waitFor(() => calls.length > beforeReturn, 'return did not verify authorization');
     assert.equal(rows().length, 0, 'cached logs bypassed authorization on return');
-    directory.resolve(); directory = null; await waitFor(() => ready() && rows().length === 200, 'authorized cached scope did not recover');
+    directory.resolve(); directory = null; await waitFor(() => rows().length === 200, 'authorized cached scope did not recover');
+    windows.get('alpha:2000').resolve(entries('alpha', 2000)); windows.clear(); await waitFor(ready, 'cached refresh did not settle');
     assert.equal(document.querySelector('[name=limit]').value, '2000', 'stored preferences replaced the current session window');
     assert.equal(document.querySelector('[name=agent_id]').value, 'alpha', 'stored preferences replaced the current node');
     assert.ok([...document.querySelectorAll('[data-log-filters] button')].some(button => button.textContent === '自动更新'), 'stored preferences resumed a paused session');
@@ -98,7 +102,7 @@ export async function testLogReadOwnership() {
     location.hash = '#core-logs';
     await waitFor(() => calls.filter(call => call.kind === 'window').length > beforeGrantReturn, 'grant-change reentry did not start fresh window');
     assert.equal(rows().length, 0, 'return reused a cached window from an older grant revision');
-    await waitFor(() => calls.filter(call => call.kind === 'window').length === beforeGrantReturn + 2, 'grant-change reentry skipped fresh preview');
+    await waitFor(() => calls.filter(call => call.kind === 'window').length === beforeGrantReturn + 2, 'changed grants did not start a fresh preview');
     windows.get('alpha:200').resolve(entries('alpha', 200)); windows.get('alpha:2000').resolve(entries('alpha', 2000));
     await waitFor(() => ready() && rows().length === 200, 'new grant window did not recover'); windows.clear();
     // A newer target cancels the old read, even if its transport answers late.
@@ -138,7 +142,7 @@ export async function testLogReadOwnership() {
     boot(`#core-logs?agent=${linkedAgent}&instance=${linkedInstance}&engine=xray`);
     await waitFor(() => ready() && main().textContent.includes('没有获授权的日志实例'), 'revoked shared link did not clear scope');
     assert.equal(rows().length, 0, 'revoked shared link retained history');
-    assert.ok(calls.slice(beforeDeniedLink).filter(call => call.kind === 'window').every(call => call.agent !== linkedAgent && call.instance !== linkedInstance), 'revoked shared link bypassed source authorization');
+    assert.ok(calls.slice(beforeDeniedLink).some(call => call.kind === 'window' && call.instance !== linkedInstance), 'revoked target was not replaced by the verified scope');
     session = { role: 'user', user_id: 'logs-only', permissions: ['core-logs.read'] };
     sources = [source('alpha')]; boot();
     await waitFor(() => ready() && rows().length === 200, 'log-only user lost authorized history without agents.read');
@@ -163,20 +167,20 @@ export async function testLogReadOwnership() {
     const retry = calls.slice(beforeRetry);
     assert.equal(retry.filter(call => call.kind === 'directory').length, 1, 'consecutive refreshes restarted authorization');
     assert.equal(retry.filter(call => call.kind === 'window').length, 2, 'consecutive refreshes stacked log reads');
-    assert.ok(retry.every(call => !call.signal.aborted), 'consecutive refreshes canceled useful pending reads');
+    assert.ok(retry.filter(call => call.kind === 'window' && call.limit === 1000).every(call => !call.signal.aborted), 'consecutive refreshes canceled useful pending reads');
     assert.ok(!main().textContent.includes('读取超时'), 'successful preview retained an obsolete read error');
     windows.get('alpha:1000').resolve(entries('alpha', 1000));
     await waitFor(() => ready() && main().textContent.includes('1000 条日志'), 'timeout retry did not finish the selected window');
     assert.equal(document.querySelector('[data-log-refresh-label]').textContent, '自动更新已暂停');
     windows.clear(); sourceFailure = 504; refresh();
-    await waitFor(() => ready() && main().textContent.includes('刷新失败，保留上次数据'), 'source failure discarded readable history');
+    await waitFor(() => ready() && main().textContent.includes('来源状态读取失败'), 'source failure was not reported separately from readable history');
     assert.equal(rows().length, 200);
     sourceFailure = 0; refresh();
     await waitFor(() => ready() && !main().textContent.includes('读取超时'), 'source retry failed to clear its old error');
     session = { ...session, user_id: 'source-timeout' }; sourceFailure = 504;
     boot('#core-logs', { agent_id: '', limit: 1000 });
-    await waitFor(() => ready() && main().textContent.includes('读取超时'), 'initial source timeout did not settle');
-    assert.equal(document.querySelector('[aria-label=内核日志]').nextElementSibling.textContent, '日志读取失败');
+    await waitFor(() => ready() && main().textContent.includes('来源状态读取失败'), 'initial source timeout did not settle');
+    assert.equal(rows().length, 200, 'source failure blocked independently authorized historical logs');
     sourceFailure = 0; refresh();
     await waitFor(() => ready() && rows().length === 200, 'initial source failure did not recover');
     location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'timeout route departure failed');

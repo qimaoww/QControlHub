@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createCoreLogCache } from "./modules/core-log-cache.js";
-import { readCoreLogWindow } from "./modules/core-log-read.js";
+import { readCoreLogWindow, requestCoreLogJSON } from "./modules/core-log-read.js";
 import { reuseCoreLogEntries } from "./modules/core-log-projection.js";
 import { coreLogSourceState, coreLogSourceStatus } from './modules/core-log-source-status.js';
 import { coreLogStoragePolicy } from './modules/core-log-model.js';
@@ -183,3 +183,43 @@ for (const status of [401, 403, 404]) for (const deniedStage of ["preview", "ful
 }
 
 console.log("Core log staged loading/cache smoke passed");
+
+// Deadlines cover an unending fetch and a 200 response whose body never ends.
+// Neither one may hold the caller or its next manual retry indefinitely.
+for (const stage of ['headers', 'body']) {
+  let signal;
+  const api = async (_path, options) => {
+    signal = options.signal;
+    if (stage === 'headers') return new Promise(() => {});
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('[')); } })).json();
+  };
+  await assert.rejects(requestCoreLogJSON(api, '/core-logs', { timeout: 25 }), /读取超时/);
+  assert.equal(signal.aborted, true, `${stage} timeout cancels the transport`);
+  assert.deepEqual(await requestCoreLogJSON(async () => [], '/core-logs', { timeout: 100 }), [], 'next read recovers');
+}
+{
+  const parent = new AbortController();
+  const pending = requestCoreLogJSON(() => new Promise(() => {}), '/core-log-sources', { signal: parent.signal });
+  parent.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+}
+
+// A retained window is only a candidate until fresh grants arrive. If those
+// grants hang, a new authorized preview must still run beside the full read.
+{
+  const full = deferred();
+  let shown = 0;
+  const calls = [];
+  const read = readCoreLogWindow(path => {
+    calls.push(path);
+    return path.endsWith('limit=200') ? Promise.resolve(entries('alpha', 200)) : full.promise;
+  }, new URLSearchParams('limit=1000'), {
+    signal: new AbortController().signal, preview: false, previewReady: new Promise(() => {}), engines: ['xray'],
+    onPreview: value => { shown = value.length; },
+  });
+  await new Promise(resolve => setTimeout(resolve, 130));
+  assert.equal(shown, 200, 'unverified retained data cannot block the fresh preview');
+  assert.equal(calls.length, 2);
+  full.resolve(entries('alpha', 1000));
+  assert.equal((await read).length, 1000);
+}

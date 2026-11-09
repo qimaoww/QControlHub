@@ -8,7 +8,7 @@ import (
 
 func TestBrowserReadsStayBoundToTheirSessionAfterCookieReplacement(t *testing.T) {
 	_, _, admin, alice, bob := newConfigScopeAPIFixture(t)
-	for _, path := range []string{"/overview", "/auth/session", "/agent-access", "/core-log-sources", "/preferences/node-order"} {
+	for _, path := range []string{"/overview", "/auth/session", "/agent-access", "/core-log-sources", "/core-logs", "/preferences/node-order"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1"+path, nil)
 		request.AddCookie(bob.cookie)              // Another tab has signed in as B.
 		request.Header.Set(csrfHeader, alice.csrf) // This page still belongs to A.

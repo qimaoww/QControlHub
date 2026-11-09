@@ -125,7 +125,7 @@ async function testStableLogRuntime({ testAPI }) {
   const originalTimer = window.setTimeout;
   const delays = [];
   window.setTimeout = (callback, delay, ...args) => {
-    if (delay >= 10_000 && delay <= 60_000) {
+    if ([10_000, 20_000, 40_000, 60_000].includes(delay)) {
       delays.push(delay);
       return originalTimer(callback, 40, ...args);
     }
