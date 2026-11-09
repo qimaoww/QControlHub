@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 )
 
@@ -67,11 +68,23 @@ func (s *Server) notificationDeliveryWorker(ctx context.Context, sender *notify.
 			return
 		case <-ticker.C:
 			op, cancel := context.WithTimeout(ctx, 20*time.Second)
-			_, err := s.store.DeliverNotification(op, sender, s.notifier.Secret)
+			_, err := s.store.DeliverNotification(op, sender, s.notifier.Secret, s.notificationRegion)
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("process notification delivery", "error", err)
 			}
 		}
 	}
+}
+
+func (s *Server) notificationRegion(ctx context.Context, agent core.Agent) string {
+	address := agentGeoIP(agent)
+	if !address.IsValid() {
+		return ""
+	}
+	region, err := s.geoip.LookupCountry(ctx, address)
+	if err != nil {
+		return ""
+	}
+	return region.ISOCode
 }

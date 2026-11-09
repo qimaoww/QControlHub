@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 )
 
 // DeliverNotification claims one bounded lease. Crashed workers retry after expiry.
 // Remote acceptance followed by a lost response can result in a duplicate on retry.
-func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, legacySecret string) (bool, error) {
+func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, legacySecret string, regions ...NotificationRegionResolver) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -91,15 +92,22 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	if !ok {
 		template = notify.DefaultTemplate(d.Event.Type)
 	}
+	var regionAgent *core.Agent
+	var resolveRegion NotificationRegionResolver
+	if len(regions) > 0 {
+		resolveRegion = regions[0]
+	}
 	if d.Event.Test && d.Event.Type == "test" {
 		d.Event.Title = "QControlHub 测试通知"
 		d.Event.Message = "这是使用已保存渠道配置发送的测试消息。"
 	} else if !d.Event.Test {
-		rendered, er := notify.RenderFormatted(template, d.Event, settings.PanelName, settings.TimeZone)
-		if er != nil {
-			return false, er
+		if err = notify.ValidateTemplate(template); err != nil {
+			return false, err
 		}
-		d.Event.Title, d.Event.Message, d.Event.Entities = rendered.Title, rendered.Body, rendered.Entities
+		d.Event.RegionCode, regionAgent, err = s.notificationAgentRegion(ctx, tx, d.Owner, d.Event, resolveRegion != nil)
+		if err != nil {
+			return false, err
+		}
 	}
 	if _, configured := channel.Secrets["secret"]; channel.ID == "legacy-webhook" && !configured {
 		if channel.Secrets == nil {
@@ -114,6 +122,18 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return false, err
+	}
+	if regionAgent != nil {
+		regionCtx, cancel := context.WithTimeout(ctx, time.Second)
+		code := resolveRegion(regionCtx, *regionAgent)
+		cancel()
+		d.Event.RegionCode = AgentRegionCode(core.Agent{Labels: map[string]string{"region_code": code}})
+	}
+	if !d.Event.Test {
+		// The saved template was validated before claiming. Region data never
+		// changes the syntax, and interpolation remains literal.
+		rendered, _ := notify.RenderFormatted(template, d.Event, settings.PanelName, settings.TimeZone)
+		d.Event.Title, d.Event.Message, d.Event.Entities = rendered.Title, rendered.Body, rendered.Entities
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	sendErr := sender.Send(sendCtx, *channel, d.Event)

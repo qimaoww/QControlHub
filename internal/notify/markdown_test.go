@@ -122,3 +122,41 @@ func TestNotificationReadableRateKeepsRawUnitsAndRecoveryMeaning(t *testing.T) {
 		}
 	}
 }
+
+func TestNotificationNodeFlagsPreserveRawNameAndEntityOffsets(t *testing.T) {
+	for _, tc := range []struct{ code, flag string }{{" sg ", "🇸🇬"}, {"US", "🇺🇸"}, {"HK", "🇭🇰"}, {"TW", "🇨🇳"}, {"ZZ", ""}, {"", ""}} {
+		e := Sample(TypeTaskFailed)
+		e.Agent, e.RegionCode = "节点😀 **literal**", tc.code
+		r, err := RenderFormatted(Template{Title: "标题", Body: "**{{agent_display}}**\n{{agent}}\n{{agent_flag}} / {{region_code}}", Format: "markdown"}, e, "panel", "UTC")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := e.Agent
+		if tc.flag != "" {
+			want = tc.flag + " " + want
+		}
+		all := utf16.Encode([]rune(r.Title + "\n\n" + r.Body))
+		span := r.Entities[1]
+		if got := string(utf16.Decode(all[span.Offset : span.Offset+span.Length])); got != want || !strings.Contains(r.Body, "\n"+e.Agent+"\n") {
+			t.Fatal("flag changed the raw name or entity boundaries", tc, r)
+		}
+		if tc.flag == "" && strings.Contains(r.Body, tc.code+" / ") && tc.code != "" {
+			t.Fatal("invalid country leaked into display", r)
+		}
+		e.Agent = tc.flag + " 节点"
+		r, err = RenderFormatted(Template{Title: "title", Body: "{{agent_display}}"}, e, "panel", "UTC")
+		if err != nil || tc.flag != "" && strings.Count(r.Body, tc.flag) != 1 {
+			t.Fatal("duplicate flag", r, err)
+		}
+	}
+	for event := range EventNames {
+		r, err := RenderFormatted(DefaultTemplate(event), Sample(event), "panel", "UTC")
+		want := 1
+		if event == "panel.update" {
+			want = 0
+		}
+		if err != nil || strings.Count(r.Body, "🇸🇬") != want {
+			t.Fatal("default node flag missing or unrelated flag added", event, r, err)
+		}
+	}
+}

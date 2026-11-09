@@ -48,6 +48,7 @@ type Event struct {
 	Time          time.Time       `json:"time"`
 	AgentID       string          `json:"agent_id,omitempty"`
 	Agent         string          `json:"agent,omitempty"`
+	RegionCode    string          `json:"region_code,omitempty"`
 	Engine        string          `json:"engine,omitempty"`
 	TaskID        string          `json:"task_id,omitempty"`
 	Action        string          `json:"action,omitempty"`

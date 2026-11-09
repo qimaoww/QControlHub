@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/geoip"
 )
 
 var secretText = regexp.MustCompile(`(?i)(?:bearer\s+\S+|(?:token|password|passwd|secret|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+|https?://[^\s<>]+|\b[0-9]{6,}:[A-Za-z0-9_-]{20,})`)
@@ -42,6 +43,15 @@ func RenderFormatted(t Template, e Event, panel, zone string) (Rendered, error) 
 		return Rendered{}, err
 	}
 	v := map[string]string{"panel": panel, "type": e.Type, "time": e.Time.Format(time.RFC3339), "agent_id": e.AgentID, "agent": e.Agent, "engine": e.Engine, "task_id": e.TaskID, "action": e.Action, "error": Redact(e.Error), "version": e.Version, "message": Redact(e.Message), "period": e.Period, "direction": e.Direction, "status": e.Status, "current": e.Current, "threshold": e.Threshold}
+	code := strings.ToUpper(strings.TrimSpace(e.RegionCode))
+	if geoip.ValidRegionCode(code) && e.Agent != "" {
+		v["region_code"] = code
+		v["agent_flag"] = regionFlag(code)
+	}
+	v["agent_display"] = e.Agent
+	if flag := v["agent_flag"]; flag != "" && !strings.HasPrefix(strings.TrimSpace(e.Agent), flag) {
+		v["agent_display"] = flag + " " + e.Agent
+	}
 	location, err := time.LoadLocation(zone)
 	if err != nil || zone == "" || zone == "browser" {
 		location = time.UTC
@@ -89,6 +99,14 @@ func RenderFormatted(t Template, e Event, panel, zone string) (Rendered, error) 
 	return Rendered{Title: title, Body: body, Entities: entities}, nil
 }
 
+func regionFlag(code string) string {
+	// Match the existing panel flag display policy.
+	if code == "TW" {
+		code = "CN"
+	}
+	return string([]rune{0x1F1E6 + rune(code[0]-'A'), 0x1F1E6 + rune(code[1]-'A')})
+}
+
 func humanBytes(value uint64) string {
 	if value < 1024 {
 		return fmt.Sprintf("%d B", value)
@@ -126,6 +144,7 @@ func Sample(event string) Event {
 	e := Event{Type: event, Time: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), Message: "脱敏示例：" + EventNames[event]}
 	if event != "panel.update" {
 		e.AgentID, e.Agent = "agt_example", "示例节点"
+		e.RegionCode = "SG"
 	}
 	switch event {
 	case TypeTaskFailed:

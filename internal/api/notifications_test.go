@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,9 +9,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
+
+func TestNotificationRegionUsesExistingCountryCache(t *testing.T) {
+	calls := 0
+	server := New(nil, Config{GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return regionTestResponse(http.StatusOK, `{"country_code":"SG","country":"Singapore"}`), nil
+	})}})
+	agent := core.Agent{Metrics: core.HostMetrics{PublicIPv4: "8.8.8.8"}}
+	for range 2 {
+		if code := server.notificationRegion(context.Background(), agent); code != "SG" {
+			t.Fatal("existing GeoIP country result lost", code)
+		}
+	}
+	if calls != 1 {
+		t.Fatal("notification region did not reuse GeoIP cache", calls)
+	}
+	agent.Metrics.PublicIPv4 = "192.168.1.1"
+	if code := server.notificationRegion(context.Background(), agent); code != "" || calls != 1 {
+		t.Fatal("private address generated a fake flag or external lookup", code, calls)
+	}
+}
 
 func TestNotificationAPIConfigurationOwnershipPreviewAndTests(t *testing.T) {
 	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
@@ -107,6 +130,9 @@ func TestNotificationAPISavedTemplateTest(t *testing.T) {
 		alice.call("POST", "/settings/notifications/preview", map[string]any{"event": event, "template": notify.DefaultTemplate(event)}, 200, &preview)
 		if preview.Title == "" || preview.Body == "" || strings.Contains(preview.Body, "{{") {
 			t.Fatal("invalid preview", event, preview)
+		}
+		if event != "panel.update" && !strings.Contains(preview.Body, "🇸🇬 示例节点") {
+			t.Fatal("node flag missing from API preview", event, preview)
 		}
 	}
 	alice.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "hook", "revision": c.Revision, "event": "unknown"}, 400, nil)

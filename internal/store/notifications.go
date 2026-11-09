@@ -435,9 +435,6 @@ func (s *Store) NotificationDeliveries(ctx context.Context) ([]NotificationDeliv
 }
 
 func (s *Store) notificationCanEvent(ctx context.Context, x storeExecutor, owner, event string) bool {
-	if owner == "" {
-		return true
-	}
 	permission := "agents.read"
 	switch {
 	case event == "test" || event == "panel.update":
@@ -449,8 +446,15 @@ func (s *Store) notificationCanEvent(ctx context.Context, x storeExecutor, owner
 	case strings.HasPrefix(event, "traffic."):
 		permission = "traffic.read"
 	}
+	return s.notificationCanPermission(ctx, x, owner, core.Permission(permission))
+}
+
+func (s *Store) notificationCanPermission(ctx context.Context, x storeExecutor, owner string, permission core.Permission) bool {
+	if owner == "" {
+		return true
+	}
 	if strings.HasPrefix(owner, "token_") {
-		return s.notificationTokenPermission(owner, core.Permission(permission)) && s.notificationTokenPermission(owner, core.PermissionSettingsRead)
+		return s.notificationTokenPermission(owner, permission) && s.notificationTokenPermission(owner, core.PermissionSettingsRead)
 	}
 	var ok bool
 	_ = x.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM panel_users WHERE id=$1 AND NOT disabled AND (role='admin' OR (permissions ? $2 AND permissions ? 'settings.read')))`, owner, permission).Scan(&ok)
