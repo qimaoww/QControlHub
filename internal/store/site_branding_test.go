@@ -14,7 +14,7 @@ func TestSiteBrandingUpgradeReopenAndCAS(t *testing.T) {
 	db, ctx, databaseURL := isolatedConfigScopeStore(t)
 	settings, _ := db.PanelSettings(ctx)
 	// Recreate an installation at the previous schema with no branding table.
-	if _, err := db.pool.Exec(ctx, `DROP TABLE site_branding; DELETE FROM qcontrolhub_schema_migrations WHERE version=91; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(90) ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := db.pool.Exec(ctx, `DROP TABLE site_branding; DELETE FROM qcontrolhub_schema_migrations WHERE version>=91; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(90) ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
 	migrated, err := Open(ctx, databaseURL, true)

@@ -45,9 +45,9 @@ func TestSourceSubmissionRepairsArchivedAlternateSingBoxBackend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Reject both an empty draft and an altered reserved clone without
+			// Reject a listener without an outlet and an altered reserved clone without
 			// advancing the archive or leaving a task behind.
-			for _, content := range []string{`{}`, strings.Replace(stale, `"routing_mark":`, `"unexpected": true, "routing_mark":`, 1)} {
+			for _, content := range []string{`{"inbounds":[{"type":"http","listen_port":22001}]}`, strings.Replace(stale, `"routing_mark":`, `"unexpected": true, "routing_mark":`, 1)} {
 				client.call("POST", base+"/source", map[string]any{"name": "legacy", "version": saved.Version, "intent": "deploy", "content": content}, http.StatusBadRequest, nil)
 			}
 			var revisions []core.Config

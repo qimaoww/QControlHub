@@ -13,6 +13,12 @@ type HeartbeatRequest struct {
 	Features        []string                `json:"features,omitempty"`
 }
 
+// HostPortObservation contains socket metadata only; it never transfers configuration ownership.
+type HostPortObservation struct {
+	ObservedAt time.Time `json:"observed_at"`
+	Ports      []int     `json:"ports"`
+}
+
 type SharedInstanceStatus struct {
 	ConfigID      string    `json:"config_id,omitempty"`
 	ConfigVersion int       `json:"config_version,omitempty"`

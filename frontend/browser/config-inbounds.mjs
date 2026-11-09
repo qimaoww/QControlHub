@@ -26,9 +26,17 @@ export async function testConfigInboundsRuntime(preview = false) {
     await waitFor(()=>form.querySelector('[data-port-recovery] button')&&!form.hasAttribute('aria-busy'),'instance recovery unavailable');
     form.querySelector('[data-port-recovery] button').click();
     await waitFor(()=>form.textContent.includes('状态已核对，可继续提交'),'instance status did not return to the draft');
-    assert(test.statusRequests.length===1&&test.statusRequests[0].engine===engine&&test.statusRequests[0].expected_instance_id===(test.agent.shared_allocation?.id||''),'status read targeted another instance');
+    assert(test.statusRequests.length===2&&test.statusRequests.every(request=>request.engine===engine&&request.expected_instance_id===(test.agent.shared_allocation?.id||'')),'automatic/manual status read targeted another instance');
     assert(!test.writes.length&&form.elements.port.value==='23459'&&!form.querySelector('[type=submit]').disabled,'status recovery retried the mutation or lost input');
     test.portConflict='';test.submit('deploy');await test.settle(1);test.dispose();
+  }
+  for (const engine of ['xray','sing-box','mihomo','ss-rust']) for (const shared of [false,true]) {
+    const test=await fixture(engine,{shared});test.click('modify');await ready();
+    const form=editor();form.elements.port.value='23459';test.portConflict='port';test.recoveryEngine=engine;test.clearPortConflictOnStatus=true;test.confirm=true;test.submit('deploy');
+    await test.settle(1);
+    assert(test.statusRequests?.length===1&&test.writes.length===1&&test.writes[0].input.port===23459,'automatic status recovery did not commit the exact draft once');
+    assert(test.confirmations.filter(value=>value.message.includes('部署到')).length===1,'status recovery repeated deployment confirmation');
+    test.dispose();
   }
   for (const engine of ['xray','sing-box','mihomo','ss-rust']) {
     const test = await fixture(engine); test.click('modify'); await ready();
@@ -154,6 +162,7 @@ async function testSourceCorrection() {
     const edit = value => { input.value=value; input.dispatchEvent(new Event('input',{bubbles:true})); };
     test.confirm=true;
     test.sourceFailure={status:400}; edit('{}'); form.requestSubmit();
+    assert(form.querySelector('.a-save-state').textContent==='有未保存的修改','source draft still claims saved');
     await waitFor(()=>form.textContent.includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'source rejection did not settle');
     assert(input.value==='{}'&&!form.querySelector('[type=submit]').disabled&&!test.writes.length,'validation failure discarded or permanently blocked draft');
     const valid=JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
@@ -209,13 +218,18 @@ export async function testInboundProtocolChanges() {
 
 async function testNodeConfigHistory(){
   for(const engine of ['xray','sing-box','mihomo','ss-rust']){
-    const test=await fixture(engine,{history:true,shared:true});test.click('history');await waitFor(()=>test.topDialog()?.querySelector('tbody tr'),'history missing');
+    const test=await fixture(engine,{history:true,shared:true});
+    const source=test.root.querySelector('form:has([name=content])');
+    test.confirm=true;test.sourceFailure={status:409};source.elements.content.value='{}';source.elements.content.dispatchEvent(new Event('input',{bubbles:true}));source.requestSubmit();
+    await waitFor(()=>source.querySelector('[type=submit]').disabled&&!source.hasAttribute('aria-busy'),'source conflict did not block pending recovery');test.sourceFailure=null;test.confirm=false;
+    test.click('history');await waitFor(()=>test.topDialog()?.querySelector('tbody tr'),'history missing');
     const rows=[...test.topDialog().querySelectorAll('tbody tr')];test.clickButton('预览',rows.at(-1));await waitFor(()=>test.topDialog()?.querySelector('pre'),'history preview missing');
     assert(!test.topDialog().querySelector('textarea'),'historical preview is editable');test.clickButton('恢复此档案',test.topDialog());await pause();assert(!test.restores.length,'canceled restore wrote data');
     test.confirm=true;test.restoreError=409;test.clickButton('恢复此档案',test.topDialog());await waitFor(()=>[...document.querySelectorAll('.a-toast[role=alert]')].some(message=>message.textContent.includes('冲突')),'restore conflict hidden');assert(test.saved().version===2,'conflict changed saved source');
     test.restoreError=403;test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.saved().version===2,'authorization failure changed config');
     test.restoreError=null;let release;test.restoreGate=new Promise(resolve=>{release=resolve;});test.clickButton('恢复此档案',test.topDialog());test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.topDialog()?.open,'pending restore closed early');release();await waitFor(()=>test.saved().version===3&&!test.topDialog(),'restore failed');
     assert(test.restores.length===1&&test.restores[0].expected_version===2&&test.revisions.size===3,'restore replaced history or used historical CAS');assert(!test.calls.some(call=>call.path==='/tasks'),'restore implicitly deployed');
+    assert(!source.querySelector('[type=submit]').disabled&&!source.textContent.includes('测试源码保存失败')&&source.elements.content.value===test.saved().content&&source.querySelector('.a-save-state').textContent.includes('已保存'),'successful restore retained the old source conflict or draft');
     test.click('history');await waitFor(()=>test.topDialog()?.querySelector('tbody tr'),'restored history missing');test.clickButton('预览',test.topDialog().querySelector('tbody tr'));await waitFor(()=>test.topDialog()?.querySelector('pre'),'current archive preview missing');assert(![...test.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'current revision permits duplicate restore');test.dispose();
   }
   const readonly=await fixture('xray',{history:true,readonly:true});readonly.click('history');await waitFor(()=>readonly.topDialog()?.querySelector('tbody tr'),'readonly history missing');readonly.clickButton('预览',[...readonly.topDialog().querySelectorAll('tbody tr')].at(-1));await waitFor(()=>readonly.topDialog()?.querySelector('pre'),'readonly preview missing');assert(![...readonly.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'readonly restore exposed');readonly.dispose();

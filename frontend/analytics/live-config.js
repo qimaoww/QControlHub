@@ -32,9 +32,10 @@ async function waitTask(ctx, id) {
 
 export async function liveConfigPage(ctx) {
   const request = ctx.api;
+  let recoverPortConflict;
   const mutations = createConfigMutations({state:ctx.state, api:(path, options={})=>request(path, {
     ...options, body:options.body === undefined ? undefined : JSON.parse(options.body),
-  })}, {onTask:()=>{}, waitForTerminal:id=>waitTask(ctx,id)});
+  })}, {onTask:()=>{}, waitForTerminal:id=>waitTask(ctx,id), recoverPortConflict:error=>recoverPortConflict?.(error)});
   ctx = {...ctx, api:(path, options={})=>mutations.request(path, {
     ...options, body:options.body === undefined ? undefined : JSON.stringify(options.body),
   })};
@@ -145,12 +146,8 @@ export async function liveConfigPage(ctx) {
         },
         onSavedConfig(config) {
           if (!ctx.current()) return;
-          saved = config;
+          acceptSavedSource(config);
           inbounds.acceptConfig(config);
-          element.elements.content.value = element.elements.content.defaultValue = config.content;
-          if (readHistory) readHistory.disabled = false;
-          ctx.setDirty(false);
-          liveNotice.textContent = `已保存 · ${date(config.updated_at)}`;
         },
         onDeployTask() { source = null; },
       }).then(result => { pendingTask ||= result.task; });
@@ -217,7 +214,35 @@ export async function liveConfigPage(ctx) {
       })));
   }
   const dirty = () => form.elements.content.value !== form.elements.content.defaultValue || form.elements.name.value !== (saved?.name || `${agent.name} ${engine}`) || form.elements.description.value !== (saved?.description || "");
-  const syncDraft = () => { ctx.setDirty(dirty()); if (reset) reset.disabled = !dirty(); };
+  const syncDraft = () => {
+    const changed = dirty();
+    ctx.setDirty(changed);
+    if (reset) reset.disabled = !changed;
+    liveNotice.textContent = changed ? "有未保存的修改" : source ? `已读取 · ${date(source.readAt)}` : saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存";
+  };
+  function acceptSavedSource(config) {
+    saved = config; workspace.config = config; source = null;
+    form.elements.name.value = config.name;
+    form.elements.description.value = config.description || "";
+    form.elements.content.value = form.elements.content.defaultValue = config.content;
+    sourceBlocked = false; recovery.replaceChildren();
+    const feedback = form.querySelector(':scope > .a-notice');
+    if (feedback) feedback.textContent = "";
+    form.querySelector('[type=submit]').disabled = !importSource && !canDeploy;
+    if (readHistory) readHistory.disabled = false;
+    syncDraft();
+  }
+  recoverPortConflict = async error => {
+    if (!execute || !ctx.can("tasks.read") || !ctx.current()) return false;
+    const draft = JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]);
+    liveNotice.textContent = "正在核对实例状态…";
+    try { await recoverConfigInstance(ctx,agent,error.recoveryEngine); }
+    finally { if (ctx.current()) syncDraft(); }
+    if (!ctx.current()) throw new DOMException("目标已切换", "AbortError");
+    if (draft !== JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]))
+      throw new Error("核对期间配置已修改，已保留当前草稿，请再次提交。");
+    return true;
+  };
   const reset = editable && !importSource && button("重置修改", () => {
     if (form.getAttribute("aria-busy") === "true") return;
     form.elements.name.value = saved?.name || `${agent.name} ${engine}`;
@@ -285,15 +310,11 @@ export async function liveConfigPage(ctx) {
           await ctx.mutate(control, async () => {
             const restored = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${revision.version}/restore`, { method: "POST", body: { expected_version: saved.version } });
             if (!ctx.current()) return;
-            saved = restored;
+            acceptSavedSource(restored);
             inbounds.acceptConfig(restored);
-            await inbounds.reload();
-            form.elements.name.value = restored.name;
-            form.elements.description.value = restored.description || "";
-            form.elements.content.value = form.elements.content.defaultValue = restored.content;
-            ctx.setDirty(false); historyBox.close();
-            syncDraft();
-            liveNotice.textContent = `已保存 · ${date(restored.updated_at)}`;
+            try { await inbounds.reload(); }
+            catch (error) { blockSource(error, restored); throw error; }
+            historyBox.close();
             ctx.announce("配置已恢复，节点部署保持原状");
           });
         }, { tone: "primary" })));
@@ -307,13 +328,7 @@ export async function liveConfigPage(ctx) {
     agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
     dirty,
     accept(config) {
-      saved = config; workspace.config = config;
-      if (readHistory) readHistory.disabled = false;
-      form.elements.name.value = config.name;
-      form.elements.description.value = config.description || "";
-      form.elements.content.value = form.elements.content.defaultValue = config.content;
-      liveNotice.textContent = `已保存 · ${date(config.updated_at)}`;
-      syncDraft();
+      acceptSavedSource(config);
     },
     beforeDeploy,
   });
