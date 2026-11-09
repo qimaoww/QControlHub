@@ -313,4 +313,67 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
   record(`${mode}: automatic query filters, removed confirmation controls, delayed response isolation and navigation with pending debounce passed`);
 
+  await evaluate(page,"location.hash='#settings'");
+  await wait(page,"!!document.querySelector('#panel-settings-form') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(!await evaluate(page,"[...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道')"),'panel settings do not contain notifications');
+  assert.ok(!await evaluate(page,"/Webhook|通知渠道|通知规则|通知模板|投递记录/.test(document.querySelector('.a-main').textContent)"),'panel settings contain no notification configuration or status');
+  await evaluate(page,"location.hash='#notifications'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='通知' && [...document.querySelectorAll('button')].some(b=>b.textContent==='添加渠道') && !document.querySelector('[aria-busy=true]')");
+  assert.ok(await evaluate(page,"document.querySelector('.a-main').textContent.includes('原有 Webhook 默认签名')"),'notification signing status belongs to the notification page');
+  await click('添加渠道','.a-main');
+  await wait(page,"!!document.querySelector('dialog[open] select[name=type]')");
+  for (const [type, field] of [['telegram','chat_id'],['smtp','host'],['bark','device_key'],['ntfy','topic'],['gotify','token'],['webhook','url']]) {
+    await evaluate(page,`(()=>{const d=document.querySelector('dialog[open]'),t=d.querySelector('select[name=type]');t.value=${JSON.stringify(type)};t.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    assert.ok(await evaluate(page,`!!document.querySelector('dialog[open] [name=${field}]')`),`${type} fields are available`);
+    assert.ok(!await evaluate(page,"document.querySelector('dialog[open]').textContent.includes('null')"),'hidden fields do not render null');
+  }
+  const notificationName=`Notification fixture ${mode}`;
+  await evaluate(page,`(()=>{const f=document.querySelector('dialog[open] form');f.elements.name.value=${JSON.stringify(notificationName)};f.elements.enabled.checked=false;f.elements.url.value='https://example.invalid/isolated-notification';f.requestSubmit();})()`);
+  await wait(page,`!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-main td')].some(c=>c.textContent===${JSON.stringify(notificationName)})`);
+  const notificationConfig=(await api(page,identity,'GET','/settings/notifications')).configuration;
+  const notificationChannel=notificationConfig.channels.find(c=>c.name===notificationName);
+  assert.equal(notificationChannel.enabled,false);
+  assert.ok(notificationChannel.configured.includes('url')&&!notificationChannel.secrets,'API retains target without exposing it');
+  await evaluate(page,"[...document.querySelectorAll('summary')].find(s=>s.textContent==='编辑事件模板').click()");
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='节点：{{agent}}\\n中文 <>& Unicode';b.dispatchEvent(new Event('input',{bubbles:true}));b.focus();b.setSelectionRange(2,5);})()");
+  await click('刷新记录','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]')");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').selectionStart"),2);
+  assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"));
+  await click('测试已保存模板','.a-main');
+  await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请先保存模板，再测试。')");
+  await click('渲染预览','.a-main');
+  await wait(page,"[...document.querySelectorAll('[role=status]')].some(p=>p.textContent.includes('脱敏示例')&&p.textContent.includes('示例节点'))");
+  await click('保存模板','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]')");
+  assert.ok(Object.values((await api(page,identity,'GET','/settings/notifications')).configuration.templates).some(t=>t.body.includes('Unicode')),'template saved through API');
+  assert.equal(await evaluate(page,"document.querySelector('select[name=template_test_channel]').options.length"),1,'disabled channels are not offered for template tests');
+  await click('测试已保存模板','.a-main');
+  await wait(page,"document.querySelector('.a-toast-region').textContent.includes('请选择测试渠道。')");
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='**长文本**\\n'+'abcdefghij'.repeat(200)+'\\n`'+'0123456789'.repeat(100)+'`';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await click('渲染预览','.a-main');
+  await wait(page,"[...document.querySelectorAll('.a-main [role=status]')].some(p=>p.textContent.includes('abcdefghij'))");
+  assert.ok(await evaluate(page,"[...document.querySelectorAll('.a-main [role=status]')].filter(p=>p.textContent.includes('abcdefghij')).every(p=>p.scrollWidth<=p.clientWidth+1)"),'long Markdown preview stays readable without clipping');
+  await evaluate(page,"(()=>{const b=document.querySelector('textarea[name=body]');b.value='未保存的并发草稿';b.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  const remoteNotifications=(await api(page,identity,'GET','/settings/notifications')).configuration;
+  remoteNotifications.channels.find(c=>c.id===notificationChannel.id).name=notificationName+' refreshed';
+  await api(page,identity,'PUT','/settings/notifications',remoteNotifications);
+  await click('保存模板','.a-main');
+  await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('通知配置已变化')");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').value"),'未保存的并发草稿','conflict preserves the draft');
+  await click('刷新','.a-top');
+  await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
+  await click('取消');
+  await wait(page,"!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-top button')].some(b=>b.textContent==='刷新' && !b.disabled)");
+  assert.equal(await evaluate(page,"document.querySelector('textarea[name=body]').value"),'未保存的并发草稿','refresh cancellation preserves the draft');
+  await click('刷新','.a-top');
+  await wait(page,"[...document.querySelectorAll('dialog[open]')].some(d=>d.textContent.includes('载入最新配置'))");
+  await click('刷新通知配置');
+  await wait(page,`!document.querySelector('dialog[open]') && [...document.querySelectorAll('.a-main td')].some(c=>c.textContent===${JSON.stringify(notificationName+' refreshed')})`);
+  assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"),'explicit refresh loads the saved template and current channels');
+  await screenshot(page,'analytics-notification-templates');
+  record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save, stale-save conflict and explicit refresh draft preservation passed`);
+  await evaluate(page,"location.hash='#archive-config'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
+
 }

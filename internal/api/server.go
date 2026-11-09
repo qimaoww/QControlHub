@@ -58,6 +58,15 @@ func New(dataStore *store.Store, config Config) *Server {
 			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyReadonlyPermissions()}
 		}
 	}
+	notificationTokens := map[string][]core.Permission{}
+	for _, principal := range roleTokens {
+		if principal.ConfigOwnerID != "" {
+			notificationTokens[principal.ConfigOwnerID] = append([]core.Permission{}, principal.Permissions...)
+		}
+	}
+	if dataStore != nil {
+		dataStore.SetNotificationTokenPermissions(notificationTokens)
+	}
 	geoipClient := geoip.New(config.GeoIPHTTPClient)
 	return &Server{
 		store:                      dataStore,
