@@ -26,7 +26,7 @@ func coreLogReadDeadline(next http.Handler) http.Handler {
 
 func writeCoreLogReadError(w http.ResponseWriter, r *http.Request, err error) {
 	if r.Context().Err() == context.DeadlineExceeded {
-		writeError(w, http.StatusGatewayTimeout, "core log read timed out")
+		writeError(w, http.StatusGatewayTimeout, "读取超时，请重试。")
 		return
 	}
 	writeStoreError(w, err)

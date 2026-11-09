@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,5 +35,16 @@ func TestCoreLogReadDeadline(t *testing.T) {
 		if !called {
 			t.Fatal("handler not called")
 		}
+	}
+}
+
+func TestCoreLogReadDeadlineResponse(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	request := httptest.NewRequest("GET", "/api/v1/core-logs", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	writeCoreLogReadError(response, request, context.DeadlineExceeded)
+	if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), "读取超时，请重试。") {
+		t.Fatalf("deadline response: %d %s", response.Code, response.Body.String())
 	}
 }
