@@ -121,7 +121,7 @@ try {
 
 
   if (mode.startsWith("connections-")) {
-    const {runConnectionSessions}=await import('./browser/connection-sessions.mjs');
+    const {runConnectionSessions}=await import('./client_connection_browser_session.mjs');
     await runConnectionSessions({createPage,login,api,evaluate,wait,call,reload,fixture,record});
   } else {
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
