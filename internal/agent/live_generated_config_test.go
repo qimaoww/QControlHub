@@ -114,6 +114,7 @@ func TestGeneratedMainlandAccessPoliciesWithLiveCores(t *testing.T) {
 				t.Fatalf("%s VLESS preset was not published", engine)
 			}
 			input, err := serverconfig.NewPlan(protocol)
+			input.RealityServerName = "reality.example.test"
 			if err != nil {
 				t.Fatal(err)
 			}
