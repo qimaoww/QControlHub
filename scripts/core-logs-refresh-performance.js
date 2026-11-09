@@ -69,9 +69,8 @@ async page => {
     // Accelerate only the production polling/backoff timers; request delay and
     // streamed bodies remain real wall-clock HTTP transfers in the fixture.
     await page.evaluate(() => {
-      window.__nativeTimeout = window.setTimeout;
-      window.setTimeout = (callback, delay, ...args) => window.__nativeTimeout(callback,
-        delay >= 10000 && delay <= 60000 ? 100 : delay, ...args);
+      if (!window.__logPollTimingFixture) throw new Error('Enable QCH_PERF_TIMING=1 for scoped log poll instrumentation');
+      window.__logPollDelay = 100;
       const search = document.querySelector('input[name=q]');
       search.focus(); search.setSelectionRange(0, 0);
       window.__streamMutations = 0;
@@ -136,7 +135,7 @@ async page => {
     await page.evaluate(() => [...document.querySelectorAll('.a-main button')].find(button => ['暂停更新', '自动更新'].includes(button.textContent)).click());
     await settle();
     result.recovery = await stats();
-    await page.evaluate(() => { window.setTimeout = window.__nativeTimeout; });
+    await page.evaluate(() => { delete window.__logPollDelay; });
 
     // Each immediate selection must clear/reuse only its own scope, even while
     // old preview/full requests are still streaming on a slow connection.
@@ -160,7 +159,7 @@ async page => {
   } finally {
     await page.evaluate(() => {
       window.__streamObserver?.disconnect();
-      if (window.__nativeTimeout) { window.setTimeout = window.__nativeTimeout; delete window.__nativeTimeout; }
+      delete window.__logPollDelay;
       [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '暂停更新')?.click();
     });
   }

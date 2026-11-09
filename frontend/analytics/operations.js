@@ -195,14 +195,18 @@ export async function dashboardPage(ctx) {
     node('div', { className: 'a-card-body' }, stack(trafficTrends,
       node('div', { className: 'a-filterbar' }, node('h3', {}, '用量最高的节点'), trafficState), trafficRanking))));
   let businessPaint;
+  let businessReady, finishBusiness;
   const queueBusiness = () => {
-    if (businessPaint != null) return;
+    if (businessPaint != null) return businessReady;
+    businessReady = new Promise(resolve => { finishBusiness = resolve; });
     businessPaint = requestAnimationFrame(() => {
       businessPaint = null;
-      if (ctx.current()) { paintBusiness(); paintRanking(); }
+      try { if (ctx.current()) { paintBusiness(); paintRanking(); } }
+      finally { finishBusiness(); }
     });
+    return businessReady;
   };
-  ctx.signal.addEventListener('abort', () => cancelAnimationFrame(businessPaint), { once: true });
+  ctx.signal.addEventListener('abort', () => { cancelAnimationFrame(businessPaint); finishBusiness?.(); }, { once: true });
   function paintBusiness() {
     const overview = readings.get("overview") || {};
     const agents = orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
@@ -288,7 +292,7 @@ export async function dashboardPage(ctx) {
         requests.delete(key);
         if (key === "metrics") paintMetrics();
         else if (key === "traffic") paintTraffic();
-        else queueBusiness();
+        else await queueBusiness();
       }
     }
   }
@@ -356,10 +360,18 @@ export async function taskDetail(ctx, taskID) {
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
   content.append(actions(refresh));
-  async function read() {
+  async function read({ automatic = false } = {}) {
     if (reading || !active()) return;
     reading = true;
     try {
+      // Completed output is immutable until its task metadata changes. Keep
+      // independently authorizing this resource without transferring its log.
+      const terminal = ['succeeded', 'failed', 'canceled'].includes(task.status);
+      if (automatic && terminal) {
+        const state = await ctx.api(`/tasks/${pathID(taskID)}?view=status`, { signal });
+        if (!active()) return;
+        if (['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) return;
+      }
       const latest = await ctx.api(`/tasks/${pathID(taskID)}`, { signal });
       if (!active()) return;
       task = latest;
@@ -389,20 +401,20 @@ export async function taskDetail(ctx, taskID) {
         context.replaceChildren();
         heading.replaceChildren(state);
         failure.textContent = '无权读取此任务。';
-        task = { ...task, status: 'denied' }; stop();
+        task = { status: 'denied' }; refresh.disabled = true; stop();
         paintDiagnosis();
       }
       throw error;
     } finally { reading = false; }
   }
   async function poll() {
-    try { if (!document.hidden && active()) await read(); }
+    try { if (!document.hidden && active()) await read({ automatic: true }); }
     catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
-    finally { if (active() && ['pending', 'running'].includes(task.status)) timer=setTimeout(poll,2000); }
+    finally { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); }
   }
   box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
-  if (['pending', 'running'].includes(task.status)) timer=setTimeout(poll,2000);
+  timer=setTimeout(poll,2000);
 }
 
 export async function tasksPage(ctx) {

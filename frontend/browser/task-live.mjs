@@ -8,6 +8,7 @@ export async function testLiveTaskRuntime(preview = false) {
   const session = { role: 'user', user_id: 'task-reader', permissions: ['tasks.read'], csrf_token: 'tasks-live-fixture' };
   const task = index => ({ id: `live-${index}`, agent_id: index === 25 ? 'beta' : 'alpha', engine: 'mihomo', action: index === 0 ? 'install' : 'validate', attempt: 2, core_version: 'development', core_source: 'mirror', ...(index === 13 ? { config_id: 'config-alpha', config_version: 3, install_if_missing: true } : {}), status: 'running', created_at: '2026-11-06T10:00:00Z', started_at: new Date(nativeNow()-65000).toISOString(), output: Array.from({length:160}, (_,line)=>`任务输出 ${line} · ${'诊断文本'.repeat(8)}`).join('\n') });
   let tasks = Array.from({length:26}, (_, index)=>task(index));
+  let detailReads = 0, statusReads = 0;
   let failed = false, denied = false, detailDenied = false, hold = false, release, reads = 0;
   let settings = { task_page_size: 50, task_poll_interval_ms: 5000 }, settingsReads = 0, settingsFailed = false;
   let agents = [{ id: 'alpha', name: '节点 Alpha' }, { id: 'beta', name: '节点 Beta' }], agentReads = 0, orderReads = 0, agentsStatus = 200, cancels = 0;
@@ -34,7 +35,9 @@ export async function testLiveTaskRuntime(preview = false) {
         cancels++;tasks.find(task=>task.id===path.split('/')[2]).status='canceled';return reply({});
       }
       if (detailDenied) return reply({error:'任务详情访问已撤销'},403);
-      return reply(tasks.find(task=>task.id===path.split('/')[2]));
+      const task = tasks.find(task=>task.id===path.split('/')[2]);
+      if (parsed.searchParams.get('view') === 'status') { statusReads++; return reply({ ...task, output: '' }); }
+      detailReads++; return reply(task);
     }
     throw new Error(`Unexpected task live API ${path}`);
   };
@@ -90,7 +93,10 @@ export async function testLiveTaskRuntime(preview = false) {
     assert.equal(box.querySelector('pre'),output,'任务输出重建');assert.equal(document.activeElement,output,'任务输出刷新丢失焦点');
     assert.equal(getSelection().toString(),outputSelected,'任务输出更新丢失文本选择');assert.equal(output.scrollTop,outputScroll,'任务输出强制跟随');
     if (preview) { document.documentElement.dataset.taskLivePreview = 'ready'; await new Promise(()=>{}); }
-    const beforePoll=reads; await delay(2200);
+    const beforePoll=reads, beforeDetails=detailReads, beforeStatus=statusReads; await delay(2200);
+    assert.equal(detailReads,beforeDetails,'终态自动刷新重复读取完整任务输出');
+    assert.ok(statusReads>beforeStatus,'终态任务未继续核验资源权限');
+    assert.ok(output.textContent.endsWith('新的输出'),'状态响应清空了已完成的任务输出');
     assert.ok(reads>beforePoll,'任务列表未持续刷新');assert.ok(box.open&&row('live-13')===current,'轮询打断任务详情');
     detailDenied=true;
     await waitFor(()=>output.hidden&&box.textContent.includes('无权读取'),'已结束任务权限撤销后未自动清除旧输出');
@@ -123,7 +129,7 @@ export async function testLiveTaskRuntime(preview = false) {
     session.permissions.push('settings.read','agents.read','tasks.execute');
     const delays=[];
     window.setTimeout=(callback, timeout, ...args)=>{
-      if(callback.name!=='tick')return nativeTimeout(callback,timeout,...args);
+      if(callback.name!=='trigger'||timeout>5000)return nativeTimeout(callback,timeout,...args);
       delays.push(timeout);
       const id=nativeTimeout(()=>{pollTimers.delete(id);callback(...args);},timeout);
       pollTimers.add(id);return id;

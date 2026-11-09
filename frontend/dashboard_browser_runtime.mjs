@@ -118,7 +118,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(cpu().textContent==="23.6%","CPU usage differs from panel API");
   assert(metric("内存使用率").textContent==="43.5%"&&metric("根目录磁盘").textContent==="33.0%","capacity percentages differ from the panel API");
   const summary = card('运行概况');
-  assert(summary?.querySelector('[data-refresh-key="运行内核"] strong')?.textContent === '3', 'offline runtime counted as live or scoped installed cores lost');
+  await waitFor(() => summary?.querySelector('[data-refresh-key="运行内核"] strong')?.textContent === '3', 'offline runtime counted as live or scoped installed cores lost');
   assert(summary?.querySelector('[data-refresh-key="节点速率合计"] strong')?.textContent !== '—', 'valid fleet rates missing');
   await waitFor(() => traffic()?.querySelectorAll('path[data-series]').length === 2, 'receive and send series are not independently plotted');
   const series = [...traffic().querySelectorAll('path[data-series]')];
