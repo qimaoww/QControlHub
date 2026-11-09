@@ -3,6 +3,7 @@ export async function runConnectionSessions({createPage,login,api,evaluate,wait,
  const [a,b,manager]=await Promise.all([createPage(),createPage(),createPage()]);
  const [alice,bob,admin]=await Promise.all([login(a,'alice'),login(b,'bob'),login(manager,'logs-admin')]);
  const ready=`document.querySelector('.a-main')?.textContent.includes('已读取') && document.querySelector('[aria-label="客户端来源 IP 明细"] tbody tr')`;
+ const settled=`document.querySelector('.a-main')?.textContent.includes('已读取') && !document.querySelector('[aria-busy=true]')`;
  const rows=`[...document.querySelectorAll('[aria-label="客户端来源 IP 明细"] tbody tr')]`;
  for(const page of [a,b,manager]){await evaluate(page,"location.hash='#client-connections'");await wait(page,ready)}
  for(const [page,own]of [[a,'alice'],[b,'bob'],[manager,'logs-admin']]) {
@@ -12,6 +13,12 @@ export async function runConnectionSessions({createPage,login,api,evaluate,wait,
  await evaluate(a,`${rows}[0].dataset.identity='retained';document.querySelector('[name=client_ip]').focus();document.querySelector('[name=client_ip]').value='unsubmitted';`);
  await evaluate(a,`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()`);await wait(a,ready);
  assert.ok(await evaluate(a,`${rows}[0].dataset.identity==='retained' && document.activeElement.name==='client_ip' && document.activeElement.value==='unsubmitted'`),'delta confirmation rebuilt rows or disturbed draft');
+ await evaluate(a,`(()=>{const input=document.querySelector('[name=client_ip]');input.value='203.0.113.255';input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+ await wait(a,`(${settled}) && document.querySelector('.a-main').textContent.includes('独立 IP 0')`);
+ await evaluate(a,`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()`);
+ await wait(a,settled);
+ assert.ok(await evaluate(a,"!document.querySelector('.a-notice')?.textContent && document.querySelector('.a-main').textContent.includes('独立 IP 0')"),'empty delta confirmation became a failed read');
+ await evaluate(a,`(()=>{const input=document.querySelector('[name=client_ip]');input.value='';input.dispatchEvent(new Event('change',{bubbles:true}))})()`);await wait(a,ready);
  await evaluate(a,`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='下一页').click()`);await wait(a,`(${ready}) && document.querySelector('.a-main').textContent.includes('第 2 页')`);
  const pageIPs=await evaluate(a,`${rows}.map(row=>row.querySelector('code').textContent)`);
  await reload(a);await wait(a,ready);
