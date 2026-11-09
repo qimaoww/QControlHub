@@ -232,6 +232,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
+	if status == core.TaskSucceeded && action == core.ActionStatus && containsFeature(features, core.AgentFeatureHostPorts) && result.HostPorts != nil {
+		if err := recordHostPortsTx(ctx, tx, agentID, taskID, *result.HostPorts); err != nil {
+			return err
+		}
+	}
 	if status == core.TaskSucceeded && (action == core.ActionDeploy || action == core.ActionImportExisting) {
 		if err := s.finishDeployedTrafficTx(ctx, tx, agentID, engine, shareID, configID, configVersion, result.TrafficSettled); err != nil {
 			return err

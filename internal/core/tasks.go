@@ -132,6 +132,7 @@ type TaskRequest struct {
 }
 
 type TaskResultRequest struct {
+	HostPorts      *HostPortObservation  `json:"host_ports,omitempty"`
 	InstanceStatus *SharedInstanceStatus `json:"instance_status,omitempty"`
 	LeaseID        string                `json:"lease_id"`
 	Success        bool                  `json:"success"`

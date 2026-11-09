@@ -143,6 +143,9 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureIPQuality,
 		core.AgentFeatureInstanceStatus,
 	}
+	if hostPortObservationSupported() {
+		features = append(features, core.AgentFeatureHostPorts)
+	}
 	if sharedCoreTemplatesSupported(c.executor.Specs, c.executor.serviceManager()) {
 		features = append(features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle)
 	}

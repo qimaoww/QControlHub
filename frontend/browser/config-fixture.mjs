@@ -250,7 +250,8 @@ export async function createConfigFixture(engine, options = {}) {
     if (request.method === "POST" && path === "/tasks") {
       if (body.action === "status") {
         (test.statusRequests ||= []).push(body);
-        return {id:`status-${++test.serial}`,action:body.action,status:"succeeded"};
+        if(test.clearPortConflictOnStatus) { test.portConflict='';test.sourceFailure=null; }
+        return {id:`status-${++test.serial}`,agent_id:agent.id,engine:body.engine,shared_instance:Boolean(options.shared),shared_traffic_id:agent.shared_allocation?.id || '',action:body.action,status:test.statusFailure?'failed':'succeeded',error:test.statusFailure};
       }
       if (body.action === 'import-existing') {
         test.imports ||= [];test.imports.push(body);

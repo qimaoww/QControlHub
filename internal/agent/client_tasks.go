@@ -238,6 +238,14 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			result.InstanceStatus = &instance
 		}
 	}
+	if task.Action == core.ActionStatus && executionErr == nil {
+		var observationErr error
+		result.HostPorts, observationErr = observeHostPorts()
+		if hostPortObservationSupported() && observationErr != nil {
+			executionErr = fmt.Errorf("无法核对节点监听端口，请检查 Agent 的网络状态读取权限: %w", observationErr)
+			result.Success = false
+		}
+	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
 		slog.Warn("task failed", "task_id", task.ID, "error", executionErr)
@@ -326,7 +334,7 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 	}
 	return core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error,
-		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus,
+		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus, HostPorts: cached.HostPorts,
 	}, true
 }
 
@@ -349,7 +357,7 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 	c.creds.CompletedTasks[taskID] = completedTask{
 		Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
-		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus,
+		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus, HostPorts: result.HostPorts,
 	}
 	if err := c.boundCompletedTaskCache(taskID); err != nil {
 		return err

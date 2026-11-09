@@ -8,7 +8,77 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
+
+func TestStatusSnapshotUsesRetainedManagementState(t *testing.T) {
+	for _, input := range sharedEngineConfigs() {
+		for _, shared := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/shared=%v", input.Engine, shared), func(t *testing.T) {
+				db, ctx, _ := isolatedConfigScopeStore(t)
+				_, owner := sharedTestUser(t, db, ctx, "retained-state-owner")
+				user, recipient := sharedTestUser(t, db, ctx, "retained-state-recipient")
+				node := allEnginesSharedTestAgent(t, db, owner)
+				scope := owner
+				if shared {
+					access, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{AgentID: node.ID, Engines: core.AllEngines(), Ports: []int{0}}}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					acceptSharedTestInvitations(t, db, ctx, user.ID, access)
+					scope = recipient
+				}
+				input.AgentID = node.ID
+				config, err := db.SaveAgentConfig(scope, input, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				objects, err := serverconfig.ManagedObjects(input.Engine, input.Content, serverconfig.ManagedState{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				state := serverconfig.ManagedState{}
+				for _, object := range objects {
+					if object.Inbound {
+						state.Disabled = append(state.Disabled, serverconfig.ManagedResource{Section: object.Section, Tag: object.Tag})
+					}
+				}
+				if len(state.Disabled) == 0 {
+					t.Fatal("fixture has no inbound")
+				}
+				retained, deploy, err := db.SaveAgentConfigManagement(scope, config, config.Version, state, core.ActionDeploy)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lease, err := db.ClaimTask(ctx, node.ID)
+				if err != nil || lease == nil || lease.ID != deploy.ID {
+					t.Fatalf("claim retained: %v", err)
+				}
+				deployedContent := lease.ConfigContent
+				if plan, err := serverconfig.PrepareIndependentEgress(input.Engine, deployedContent); err != nil || plan.Source != "disabled" {
+					t.Fatalf("retained runtime is not empty: %v", err)
+				}
+				if err := completeSharedTestTask(db, ctx, node.ID, lease.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.SaveAgentConfig(scope, retained, retained.Version); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCoreLifecycle, core.AgentFeatureInstanceStatus}}); err != nil {
+					t.Fatal(err)
+				}
+				refresh, err := db.CreateTask(scope, core.TaskRequest{AgentID: node.ID, Engine: input.Engine, Action: core.ActionStatus})
+				if err != nil {
+					t.Fatal(err)
+				}
+				lease, err = db.ClaimTask(ctx, node.ID)
+				if err != nil || lease == nil || lease.ID != refresh.ID || lease.ConfigID != retained.ID || lease.ConfigVersion != retained.Version || lease.ConfigContent != deployedContent {
+					t.Fatalf("status did not reproduce retained compiled snapshot: %+v %v", lease, err)
+				}
+			})
+		}
+	}
+}
 
 // Reproduce legacy failed deployments through the actual transactional task
 // lifecycle. Refresh must identify the retained deployment, not the saved draft.

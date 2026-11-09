@@ -5,12 +5,94 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
+
+func TestEmptySourceRestoreDeploymentAcrossEnginesAndInstances(t *testing.T) {
+	for _, engine := range core.AllEngines() {
+		for _, shared := range []bool{false, true} {
+			name := string(engine) + "/owner"
+			if shared {
+				name = string(engine) + "/shared"
+			}
+			t.Run(name, func(t *testing.T) {
+				db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
+				node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "reset-restore", engine)
+				if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: node.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true, ServiceStatus: "active"}}}); err != nil {
+					t.Fatal(err)
+				}
+				client := owner
+				instance := ""
+				if shared {
+					grantConfigScopeAPIAgent(t, ctx, db, node, recipient, 21001)
+					client = recipient
+					access, err := db.UserAgentAccess(ctx, client.userID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					instance = access.Shares[0].ID
+				}
+				protocol, _ := serverconfig.FindProtocol(engine, serverconfig.ProtocolSS2022)
+				plan, err := serverconfig.NewPlan(protocol)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan.Port = 21001
+				original, err := serverconfig.Generate(engine, plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				base := "/agents/" + node.ID + "/configs/" + string(engine)
+				var first, saved core.Config
+				client.call("PUT", base, core.Config{Name: "original", Content: original}, http.StatusOK, &first)
+				empty := "{}\n"
+				if engine == core.EngineMihomo {
+					empty = "listeners: []\nrules: ['MATCH,DIRECT']\n"
+				}
+				client.call("PUT", base, core.Config{Name: "empty reset", Content: empty, Version: first.Version}, http.StatusOK, &saved)
+				deploy := func(content string, version int, disabled bool) configMutationResult {
+					t.Helper()
+					var result configMutationResult
+					client.call("POST", base+"/source", map[string]any{"name": "restorable source", "content": content, "version": version, "intent": "deploy", "expected_instance_id": instance}, http.StatusOK, &result)
+					lease, err := db.ClaimTask(ctx, node.ID)
+					if err != nil || lease == nil || lease.ID != result.Task.ID || lease.ConfigVersion != result.Config.Version || lease.SharedInstance != shared {
+						t.Fatalf("deployment snapshot mismatch: %+v %v", lease, err)
+					}
+					compiled, err := serverconfig.PrepareIndependentEgress(engine, lease.ConfigContent)
+					if err != nil || (compiled.Source == "disabled") != disabled {
+						t.Fatalf("incorrect empty/live plan: %+v %v", compiled, err)
+					}
+					if err := db.CompleteTask(ctx, node.ID, lease.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, TrafficSettled: true}); err != nil {
+						t.Fatal(err)
+					}
+					return result
+				}
+				reset := deploy(empty, saved.Version, true)
+				var restored core.Config
+				client.call("POST", "/configs/"+first.ID+"/revisions/1/restore", map[string]any{"expected_version": reset.Config.Version}, http.StatusOK, &restored)
+				if restored.Content != original || restored.Version != reset.Config.Version+1 {
+					t.Fatal("restore lost original source or failed to create a revision")
+				}
+				live := deploy(restored.Content, restored.Version, false)
+				var current core.Config
+				client.call("GET", base, nil, http.StatusOK, &current)
+				if current.Content != live.Config.Content || current.Version != live.Config.Version || !reflect.DeepEqual(serverconfig.ParseAll(engine, current.Content), serverconfig.ParseAll(engine, original)) {
+					t.Fatal("restored deployment changed saved source")
+				}
+				var archive core.Config
+				client.call("GET", "/configs/"+first.ID+"/revisions/1", nil, http.StatusOK, &archive)
+				if archive.Content != original {
+					t.Fatal("restore overwrote original archive")
+				}
+			})
+		}
+	}
+}
 
 func TestSourceSubmissionRepairsBrokenSavedAccounting(t *testing.T) {
 	for _, shared := range []bool{false, true} {
@@ -47,7 +129,7 @@ func TestSourceSubmissionRepairsBrokenSavedAccounting(t *testing.T) {
 				client.call("POST", base+"/source", map[string]any{"name": "source repair", "content": content, "version": version, "intent": "deploy", "expected_instance_id": instanceID}, status, &result)
 				return result
 			}
-			submit(`{}`, saved.Version, http.StatusBadRequest)
+			submit(`{"inbounds":[{"type":"http","tag":"missing-exit","listen_port":21001}]}`, saved.Version, http.StatusBadRequest)
 			var current core.Config
 			client.call("GET", base, nil, http.StatusOK, &current)
 			if current.Version != saved.Version || current.Content != saved.Content {
