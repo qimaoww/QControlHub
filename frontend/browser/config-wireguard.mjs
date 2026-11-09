@@ -7,10 +7,13 @@ function layout(form,engine){
   assert(dialog.scrollWidth<=dialog.clientWidth+1,`${engine}: WireGuard dialog overflows`);
   for(const name of ['wireguard_server_private_key','wireguard_server_public_key','wireguard_client_private_key','wireguard_client_public_key','wireguard_preshared_key']){
     const field=form.elements[name],group=field.closest('.a-field');
-    assert(field.checkVisibility()&&group.querySelector('button'),`${engine}: ${name} control is unavailable`);
+    const generationField=form.elements[name.replace('_public_key','_private_key')].closest('.a-field');
+    assert(field.checkVisibility()&&generationField.querySelector('button[aria-label^="生成 WireGuard "]'),`${engine}: ${name} control is unavailable`);
     assert(group.scrollWidth<=group.clientWidth+1,`${engine}: ${name} actions overflow`);
     const rect=field.getBoundingClientRect();assert(rect.left>=bounds.left&&rect.right<=bounds.right,`${engine}: ${name} exceeds dialog`);
   }
+  for(const label of ['生成 WireGuard 服务端密钥对','生成 WireGuard 客户端密钥对','生成 WireGuard 预共享密钥'])
+    assert(form.querySelectorAll(`[aria-label="${label}"]`).length===1,`${engine}: duplicated or missing ${label}`);
 }
 export async function testWireGuardConfigRuntime(){
   for(const engine of ['xray','sing-box']){
