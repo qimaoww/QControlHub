@@ -3,9 +3,10 @@ import { loadingTable } from "./loading.js";
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
+import { patch } from "./live-dom.js";
 
 function apiKeysPanel(ctx) {
-  let resource = { items: [], read_permissions: [], permissions: [] }, sequence = 0;
+  let resource = { items: [], read_permissions: [], permissions: [] }, sequence = 0, scopeView = null;
   const results = node("div", {}, loadingTable(["名称 / 创建时间", "前缀", "状态", "授权范围", "到期时间", "最近使用", "操作"], "API Key"));
   const feedback = notice("正在读取 API Key…", "");
   const create = button("创建 Key", () => edit(), { tone: "primary", disabled: true });
@@ -28,11 +29,25 @@ function apiKeysPanel(ctx) {
       if (!ctx.current() || request !== sequence || error.name === "AbortError") return;
       feedback.textContent = `无法读取 API Key：${error.message}`; recovery.hidden = false;
       results.firstElementChild?.setReadError?.();
-      if (error.status === 401 || error.status === 403) { results.replaceChildren(); results.hidden = true; resource = { items: [], read_permissions: [], permissions: [] }; create.disabled = true; }
+      if (error.status === 401 || error.status === 403) { scopeView?.box.close(); results.replaceChildren(); results.hidden = true; resource = { items: [], read_permissions: [], permissions: [] }; create.disabled = true; }
     } finally { if (request === sequence) results.removeAttribute("aria-busy"); }
   }
   const body = key => ({ name: key.name, permissions: key.permissions, ip_allowlist: key.ip_allowlist,
     mode: key.mode || "read_only", expires_at: key.expires_at, revision: key.revision, disabled: key.disabled });
+  function scopeContent(key) {
+    return stack(node("p", {}, node("strong", {}, key.name)),
+      section("业务权限", node("div", { className: "a-card-body" },
+        list(key.permissions).length ? actions(...key.permissions.map(permission => labels[permission] ? badge(labels[permission]) : node("p", { className: "a-muted" }, permission))) : muted("未授予业务权限"))),
+      section("来源 IP / CIDR", node("div", { className: "a-card-body a-stack" },
+        list(key.ip_allowlist).length ? key.ip_allowlist.map(address => muted(address)) : muted("不限制"))));
+  }
+  function showScope(id) {
+    const key = list(resource.items).find(item => item.id === id);
+    if (!ctx.current() || !key) return;
+    const content = scopeContent(key), box = ctx.dialog("授权范围", content);
+    scopeView = { id, content, box };
+    box.addEventListener("close", () => { if (scopeView?.box === box) scopeView = null; }, { once: true });
+  }
   function edit(key = null) {
     const available = list(resource.permissions?.length ? resource.permissions : resource.read_permissions);
     const controls = available.map(permission => field(labels[permission] || permission, `permission:${permission}`,
@@ -78,9 +93,11 @@ function apiKeysPanel(ctx) {
   }
   function draw() {
     results.hidden = false;
-    results.replaceChildren(table(["名称 / 创建时间", "前缀", "状态", "授权范围", "到期时间", "最近使用", "操作"], list(resource.items).map(key => [
+    const items = list(resource.items);
+    const fresh = table(["名称 / 创建时间", "前缀", "状态", "授权范围", "到期时间", "最近使用", "操作"], items.map(key => [
       stack(key.name, muted(date(key.created_at))), `${key.prefix}…`, stack(badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status), badge(key.mode === "read_write" ? "读写" : "只读")),
-      stack(list(key.ip_allowlist).length ? list(key.ip_allowlist).map(address => muted(address)) : "来源 IP 不限制", ...list(key.permissions).map(permission => muted(labels[permission] || permission))),
+      stack(button(`${list(key.permissions).length} 项权限`, () => showScope(key.id), { "aria-haspopup": "dialog" }),
+        muted(list(key.ip_allowlist).length ? `${key.ip_allowlist.length} 个来源` : "来源 IP 不限制")),
       key.expires_at ? date(key.expires_at) : "永不过期", date(key.last_used_at),
       !key.revoked_at && actions(button("编辑授权", () => edit(key)),
         button(key.disabled ? "启用" : "停用", event => void ctx.mutate(event.currentTarget, async () => {
@@ -95,7 +112,13 @@ function apiKeysPanel(ctx) {
             await load();
           });
         }, { tone: "danger" })),
-    ]), { label: "API Key" }));
+    ]), { label: "API Key", rowKey: (_, index) => items[index].id });
+    if (!results.firstElementChild?.reconcileTable?.(fresh)) results.replaceChildren(fresh);
+    if (scopeView) {
+      const key = items.find(item => item.id === scopeView.id);
+      if (key) patch(scopeView.content, scopeContent(key));
+      else scopeView.box.close();
+    }
   }
   void load();
   ctx.onRefresh(load);

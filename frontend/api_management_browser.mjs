@@ -11,7 +11,7 @@ export async function runAPIManagementBrowser({ base, mode, createPage, login, c
   await screenshot(page, 'api-empty');
   await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='创建 Key').click()");
   await wait(page, "!!document.querySelector('dialog[open] form')");
-  await evaluate(page, `(() => {const form=document.querySelector('dialog[open] form'); form.elements.name.value='集成测试 API 管理'; form.elements.mode.value='read_write'; form.elements.mode.dispatchEvent(new Event('change',{bubbles:true}));for(const permission of ['configs.read','configs.write'])form.elements.namedItem('permission:'+permission).checked=true;})()`);
+  await evaluate(page, `(() => {const form=document.querySelector('dialog[open] form'); form.elements.name.value='集成测试 API 管理'; form.elements.mode.value='read_write'; form.elements.mode.dispatchEvent(new Event('change',{bubbles:true}));form.elements.ip_allowlist.value='127.0.0.1\\n2001:db8:1234::/48';for(const control of form.elements)if(control.name?.startsWith('permission:'))control.checked=(control.name.endsWith('.read')&&control.name!=='permission:secrets.read')||['permission:overview.read','permission:configs.write'].includes(control.name);})()`);
   await screenshot(page, 'api-create');
   await evaluate(page, "document.querySelector('dialog[open] form').requestSubmit()");
   await wait(page, "!!document.querySelector('dialog[open] [data-sensitive]')");
@@ -33,6 +33,28 @@ export async function runAPIManagementBrowser({ base, mode, createPage, login, c
   await screenshot(page, 'api-ready');
   const keyList = await api(page, identity, 'GET', '/settings/api-keys');
   assert.equal(keyList.items.length, 1);
+  const permissionCount = keyList.items[0].permissions.length;
+  assert.ok(permissionCount > 15, 'scope layout fixture lacks a large permission set');
+  assert.equal(await evaluate(page, "document.querySelector('.a-main tbody tr').cells[3].textContent"), `${permissionCount} 项权限2 个来源`);
+  const viewports = mode === 'desktop' ? [[1920,1080],[3840,2160],[1280,900],[820,900]] : [[390,844],[844,390]];
+  for (const [width,height] of viewports) {
+    await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:mode !== 'desktop' }, page);
+    assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `API keys overflow ${width}`);
+    assert.ok(await evaluate(page, "document.querySelector('.a-main tbody tr').cells[3].getBoundingClientRect().height<130"), `scope stretches key row ${width}`);
+    if (mode !== 'desktop') await evaluate(page, "document.querySelector('.a-main tbody tr').cells[3].scrollIntoView({block:'nearest',inline:'center'})");
+    await screenshot(page, `api-keys-${width}`);
+    await evaluate(page, "window.__scopeTrigger=document.querySelector('.a-main tbody tr').cells[3].querySelector('button');window.__scopeTrigger.focus();window.__scopeTrigger.click()");
+    await wait(page, "document.querySelector('dialog[open] h2')?.textContent==='授权范围'");
+    assert.equal(await evaluate(page, "document.querySelector('dialog[open] .a-card-body .a-actions').children.length"), permissionCount);
+    assert.ok(await evaluate(page, "document.querySelector('dialog[open]').textContent.includes('127.0.0.1')&&document.querySelector('dialog[open]').textContent.includes('2001:db8:1234::/48')"));
+    assert.ok(await evaluate(page, "[...document.querySelectorAll('dialog[open],dialog[open] .a-card')].every(e=>e.scrollWidth<=e.clientWidth+1)"), `scope dialog overflows ${width}`);
+    await screenshot(page, `api-scope-${width}`);
+    await call('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}, page);
+    await call('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}, page);
+    await wait(page, "!document.querySelector('dialog[open]')");
+    assert.ok(await evaluate(page, "document.activeElement===window.__scopeTrigger"), 'scope dialog lost keyboard focus');
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width:mode === 'desktop'?1440:390,height:mode === 'desktop'?1000:844,deviceScaleFactor:1,mobile:mode !== 'desktop' }, page);
   await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='编辑授权').click()");
   await wait(page, "!!document.querySelector('dialog[open] form')");
   assert.equal(await evaluate(page, "document.querySelector('dialog[open] form').elements.mode.value"), 'read_write');
@@ -59,5 +81,5 @@ export async function runAPIManagementBrowser({ base, mode, createPage, login, c
   }
   await api(page, identity, 'DELETE', `/settings/api-keys/${keyList.items[0].id}`);
   assert.equal(await evaluate(page, "fetch('/api/v1/configs',{headers:{Authorization:'Bearer '+window.__managementKey}}).then(r=>r.status)"), 401);
-  await evaluate(page, "delete window.__managementKey;delete window.__managementConfig");
+  await evaluate(page, "delete window.__managementKey;delete window.__managementConfig;delete window.__scopeTrigger");
 }
