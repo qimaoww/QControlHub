@@ -29,13 +29,15 @@ export async function testInboundDeploymentRuntime() {
       assert(test.topDialog().scrollWidth <= test.topDialog().clientWidth + 1, "failure details overflow the viewport");
       test.topDialog().querySelector('[aria-label="关闭"]').click(); await pause();
       test.taskReadFailure = 403; failureButton(test).click();
-      await waitFor(()=>!test.root.hasAttribute("aria-busy"), "revoked task read did not finish");
-      assert(!test.topDialog() && !failureButton(test).hidden, "revoked task read disclosed details or cleared the known failure");
+      await waitFor(()=>test.topDialog()?.querySelector('[role=alert]')?.textContent && !test.topDialog().querySelector('[aria-busy=true]'), "revoked task read did not finish");
+      assert(!test.topDialog().textContent.includes(test.taskError) && !test.topDialog().textContent.includes(test.taskOutput) && !failureButton(test).hidden, "revoked task read disclosed details or cleared the known failure");
+      test.topDialog().querySelector('[aria-label="关闭"]').click(); await pause();
       test.taskReadFailure = null;
       for (const taskOverride of [{config_version:99}, {engine:"another-core"}, {shared_instance:!shared}, {agent_id:"another-node"}]) {
         test.taskOverride = taskOverride; failureButton(test).click();
-        await waitFor(()=>!test.root.hasAttribute("aria-busy"), "mismatched task response did not finish");
-        assert(!test.topDialog(), "another target's task entered the failure dialog");
+        await waitFor(()=>test.topDialog()?.querySelector('[role=alert]')?.textContent && !test.topDialog().querySelector('[aria-busy=true]'), "mismatched task response did not finish");
+        assert(!test.topDialog().textContent.includes(test.taskError) && !test.topDialog().textContent.includes(test.taskOutput), "another target's task entered the failure dialog");
+        test.topDialog().querySelector('[aria-label="关闭"]').click(); await pause();
       }
       assert(test.writes.length === 1 && test.writes[0].intent === "deploy", "reading failure details repeated or changed the deployment");
       if (engine === "xray") {

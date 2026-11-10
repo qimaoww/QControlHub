@@ -55,6 +55,26 @@ export async function runStructureLoadingBrowser({ base, mode, createPage, login
     assert.ok(await evaluate(page, `![...document.querySelectorAll('.a-main [role=alert]')].some(el => el.textContent.trim())`), `${route}: real reads finish without errors`);
     record(`${mode}: ${route}: cold structure visible with real reads pending; API data completed in place`);
   }
+  for (const [aliases,title] of [
+    [['summary','panel-host','traffic-usage','fleet','activity'],'仪表盘'],
+    [['enrollment','settings-node'],'节点'],
+    [['settings-engines','settings-basic','settings-runtime','settings-data','settings-cnip','settings-certificates','settings-deployment','settings-api-keys','settings-unknown'],'面板设置'],
+    [['settings-notify'],'通知'], [['preset-node','agents','agent-config','access-control','access-control-all'],'实时配置'],
+    [['new-config','templates','archive'],'配置档案'], [['traffic-new','traffic-all'],'流量'],
+  ]) for (const alias of aliases) {
+    await evaluate(page, `location.hash=${JSON.stringify('#'+alias)}`);
+    await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(title)} && !!document.querySelector('.a-main .a-card') && !document.querySelector('[aria-busy=true]')`);
+    assert.ok(await evaluate(page, `![...document.querySelectorAll('.a-main [role=alert]')].some(el=>el.textContent.trim())`), `${alias}: legacy entry completes`);
+  }
+  await evaluate(page, `location.hash='#tasks'`);
+  await wait(page, `document.querySelector('.a-top h1')?.textContent==='任务' && !document.querySelector('[aria-busy=true]')`);
+  await evaluate(page, `location.hash='#themes'`);
+  await wait(page, `document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')`);
+  await evaluate(page, 'history.back()');
+  await wait(page, `document.querySelector('.a-top h1')?.textContent==='任务' && !!document.querySelector('.a-main th')`);
+  await evaluate(page, 'history.forward()');
+  await wait(page, `document.querySelector('.a-top h1')?.textContent==='主题' && !!document.querySelector('.a-main .a-preview')`);
+  record(`${mode}: legacy aliases, settings fallback, backward and forward navigation complete with their real page structure`);
   await call('Page.navigate', {url:`${base}/?structure=independent#node-settings`}, page);
   await wait(page, `window.__held?.some(read=>read.path.endsWith('/agents')) && !!document.querySelector('.a-main input[name=search]')`);
   await evaluate(page, `window.__releaseReads('/agents')`);
