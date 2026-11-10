@@ -261,6 +261,7 @@ func TestHostJournalFailureKeepsNamespaceSourceActive(t *testing.T) {
 	})
 	collector.serviceState = staticCoreLogServiceState("active")
 	runCoreLogCollector(t, collector)
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournal, core.CoreLogStatusActive)
 	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournalHost, core.CoreLogStatusFailed)
 	status := collector.Status()[core.EngineSingBox]
 	if status.Status != core.CoreLogStatusActive || status.Source != core.CoreLogSourceJournal || status.LastAt == nil {
