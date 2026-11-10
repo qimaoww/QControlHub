@@ -130,9 +130,6 @@ func (e *Executor) validateSSRustStartupCandidate(ctx context.Context, spec Engi
 	if err != nil || !strings.Contains(output, ssRustUpdateProbeReady) {
 		redact := coreDiagnosticRedactor(core.EngineShadowsocksRust, content)
 		output = redact(output)
-		if len(output) > 2048 {
-			output = strings.ToValidUTF8(output[len(output)-2048:], "�")
-		}
 		return fmt.Errorf("target ss-rust did not pass the isolated service startup check (requires private-network support and ss): %v; %s", err, output)
 	}
 	return nil
