@@ -149,14 +149,14 @@ export async function dashboardPage(ctx) {
   businessState.setAttribute("role", "status");
   const overviewCard = section("运行概况", node("div", { className: "a-dashboard-overview" },
     liveGrid, can("traffic.read") && periodGrid, can("traffic.read") && periodState), businessState,
-    "节点实时状态与获授权监控端口流量 · 累计统计按 UTC 计算");
+    "");
   overviewCard.classList.add("a-dashboard-hero");
 
   const resourceGrid = node("div", { className: "a-dashboard-resources" });
   const sampling = muted("正在读取资源采样");
   sampling.setAttribute("role", "status");
   const host = can("panel-metrics.read") && section("面板运行资源", node("div", { className: "a-card-body" }, resourceGrid), sampling,
-    "控制面实际运行环境；容器部署仅反映容器可见资源");
+    "");
 
   const plot = responsiveChart([], ctx.signal);
   const trendSummary = node("div", { className: "a-dashboard-trend-summary" });
@@ -174,14 +174,14 @@ export async function dashboardPage(ctx) {
   });
   const trafficCard = can("traffic.read") && section("流量趋势", node("div", { className: "a-card-body a-dashboard-trend" },
     node("div", { className: "a-dashboard-chart-head" }, trendSummary, trafficPeriod), plot,
-    node("div", { className: "a-chart-meta" }, muted("实线 接收 · 虚线 发送 · 断点 无有效采集"), trafficState)),
-    actions(monthField, detailsButton), "选择历史月份不会改变首屏的当前日、周、月周期");
+    node("div", { className: "a-chart-meta" }, muted("实线 接收 · 虚线 发送 · 断点 无记录"), trafficState)),
+    actions(monthField, detailsButton), "");
 
   const trafficRanking = node("div", { className: "a-dashboard-ranking", "aria-label": "节点流量排行" });
   const rankingState = muted("正在读取节点排行");
   rankingState.setAttribute("role", "status");
   const rankingCard = can("traffic.read") && section("节点累计排行", node("div", { className: "a-card-body" }, trafficRanking), rankingState,
-    "按所选月份的接收与发送合计降序排列");
+    "");
 
   const nodeSummary = actions();
   const nodeTable = table(["节点", "运行内核"], [], { label: "节点运行状态", columnWidths: ["72%", "28%"], emptyText: "尚未添加可访问的节点", paginate: 5, rowKey: row => row[0].querySelector("a").getAttribute("href") });
@@ -200,7 +200,7 @@ export async function dashboardPage(ctx) {
         return periodCard(key, title, range, value, state);
       })));
     const state = states.get("traffic");
-    periodState.textContent = state === "denied" ? "流量查看权限已变化，累计数据已清除" : state === "failed" ? (traffic ? "累计刷新失败 · 保留仍处当前周期的记录" : "累计读取失败 · 自动重试中") : state === "loading" && !traffic ? "正在读取持久统计" : !traffic?.current_period ? "当前累计聚合不可用" : "当前周期按 UTC 计算 · 每 30 秒核对持久记录";
+    periodState.textContent = state === "denied" ? "流量查看权限已变化，累计数据已清除" : state === "failed" ? (traffic ? "累计刷新失败 · 保留仍处当前周期的记录" : "累计读取失败 · 自动重试中") : state === "loading" && !traffic ? "正在读取持久统计" : !traffic?.current_period ? "当前累计聚合不可用" : "UTC · 30 秒刷新";
   }
 
   function paintMetrics() {
@@ -217,13 +217,13 @@ export async function dashboardPage(ctx) {
       node("div", { className: "a-dashboard-resource-head" }, node("h3", {}, title), node("strong", {}, percent(kind))),
       metricTrack(parseFloat(percent(kind)), valid(kind)), muted(detail));
     patch(resourceGrid, node("div", { className: resourceGrid.className },
-      meter("CPU 使用率", "cpu", valid("cpu") ? "全部可见逻辑核心平均值" : !fresh && collected ? "上次采样已过期" : "本次采样不可用"),
+      meter("CPU 使用率", "cpu", valid("cpu") ? "全部逻辑核心" : !fresh && collected ? "上次采样已过期" : "本次采样不可用"),
       meter("内存使用率", "memory", capacity("memory")), meter("根目录磁盘", "disk", capacity("disk")),
       node("div", { className: "a-dashboard-panel-network" },
         node("div", { "data-refresh-key": "网络接收速率" }, muted("网络接收"), node("strong", {}, network ? `${bytes(metrics.network_rx_bps)}/s` : "—")),
         node("div", { "data-refresh-key": "网络发送速率" }, muted("网络发送"), node("strong", {}, network ? `${bytes(metrics.network_tx_bps)}/s` : "—")))));
     const state = states.get("metrics"), stale = collected && !fresh;
-    sampling.textContent = state === "denied" ? "资源查看权限已变化，采样数据已清除" : state === "failed" ? (fresh ? "刷新失败 · 保留最近有效采样" : "资源读取失败 · 自动重试中") : !collected ? "尚无有效采样" : stale ? `采样已过期 · ${date(metrics.collected_at)}` : `最近采样 ${date(metrics.collected_at)} · 后台统一采集`;
+    sampling.textContent = state === "denied" ? "资源查看权限已变化，采样数据已清除" : state === "failed" ? (fresh ? "刷新失败 · 保留最近有效采样" : "资源读取失败 · 自动重试中") : !collected ? "尚无有效采样" : stale ? `采样已过期 · ${date(metrics.collected_at)}` : `采样 ${date(metrics.collected_at)}`;
   }
 
   let businessPaint, businessReady, finishBusiness;
@@ -253,14 +253,14 @@ export async function dashboardPage(ctx) {
         node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "节点在线状态"), badge(count == null ? "读取中" : count === 0 ? "暂无节点" : online === count ? "全部在线" : online === 0 ? "全部离线" : "部分离线", healthTone)),
         node("div", { className: "a-dashboard-node-count" }, node("strong", {}, online == null ? "—" : String(online)), muted(`/ ${count == null ? "—" : count} 个节点`)),
         metricTrack(count ? online / count * 100 : 0, count > 0 && online != null, false),
-        muted(offline == null ? "正在读取授权节点" : count === 0 ? "当前没有获授权节点" : `离线 ${offline} · 在线与离线按现有心跳判定`)),
+        muted(offline == null ? "正在读取授权节点" : count === 0 ? "当前没有获授权节点" : `离线 ${offline}`)),
       rateAllowed && node("article", { className: "a-dashboard-live-stat", "data-refresh-key": "节点速率合计" },
         node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "节点速率合计"), badge(readings.has("agents") ? `${fleet.sampled} 个有效采样` : "读取中")),
         node("strong", { className: "a-dashboard-rate" }, readings.has("agents") && fleet.sampled ? `${bytes(fleet.receiveBPS + fleet.sendBPS)}/s` : "—"),
         directionValues(readings.has("agents") && fleet.sampled ? fleet.receiveBPS : null, readings.has("agents") && fleet.sampled ? fleet.sendBPS : null, "/s"),
-        muted(!readings.has("agents") ? "正在读取实时速率" : fleet.sampled ? `在线节点 ${online ?? "—"} · 仅计入 15 秒内的有效网络采样` : "暂无有效的在线节点采样；离线、过期和异常采样不计入"))));
+        muted(!readings.has("agents") ? "正在读取实时速率" : fleet.sampled ? `在线 ${online ?? "—"} · 15 秒采样窗口` : "离线、过期或异常采样不计入"))));
     const failed = [...states].filter(([key, state]) => ["overview", "agents", "order"].includes(key) && ["failed", "denied"].includes(state));
-    businessState.textContent = failed.length ? "部分节点状态不可用 · 自动重试中" : knownNodes ? "节点状态每 5 秒更新" : "正在读取节点状态";
+    businessState.textContent = failed.length ? "部分节点状态不可用 · 自动重试中" : knownNodes ? "5 秒刷新" : "正在读取节点状态";
     patch(nodeSummary, actions(...fleet.engines.map(item => badge(`${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS Rust" })[item.engine] || item.engine} ${item.running}/${item.installed}`)),
       !fleet.engines.length && muted("暂无内核运行记录")));
     if (readings.has("agents") || states.get("agents") === "denied") nodeTable.updateRows(agents.map(agent => [
@@ -277,8 +277,8 @@ export async function dashboardPage(ctx) {
       const allDays = aggregateDashboardTrafficDays(traffic.days, traffic.month);
       const days = allDays.filter(day => traffic.month < today.slice(0, 7) || day.day <= today);
       const summary = summarizeDashboardTrend(days, traffic.month);
-      trafficPeriod.textContent = `${traffic.month} · UTC · 已按日聚合`;
-      detailPeriod.textContent = `${traffic.month} · UTC · 仅含获授权监控端口`;
+      trafficPeriod.textContent = `${traffic.month} · UTC`;
+      detailPeriod.textContent = `${traffic.month} · UTC · 获授权监控端口`;
       recordedDays = summary.recordedDays;
       incomplete = days.some(day => day.recorded !== false && !(day.sample_count > 0));
       const hasRecords = summary.sampledDays > 0;
@@ -296,7 +296,7 @@ export async function dashboardPage(ctx) {
     }
     detailsButton.disabled = !traffic;
     const state = states.get("traffic");
-    trafficState.textContent = state === "denied" ? "流量查看权限已变化" : state === "loading" ? "正在读取所选月份" : state === "failed" ? (traffic ? `月份刷新失败 · 仍显示 ${traffic.month}` : "流量读取失败 · 自动重试中") : traffic ? (incomplete ? "部分日期采集数据不完整" : recordedDays ? "每日记录已更新 · 无记录日期保持断点" : "所选月份暂无采集记录") : "尚无流量记录";
+    trafficState.textContent = state === "denied" ? "流量查看权限已变化" : state === "loading" ? "正在读取所选月份" : state === "failed" ? (traffic ? `月份刷新失败 · 仍显示 ${traffic.month}` : "流量读取失败 · 自动重试中") : traffic ? (incomplete ? "部分日期数据不完整" : recordedDays ? "每日记录已更新" : "暂无采集记录") : "尚无流量记录";
     paintPeriods();
     paintRanking();
   }
@@ -320,9 +320,9 @@ export async function dashboardPage(ctx) {
           node("span", { className: "a-dashboard-rank-position", "aria-label": `第 ${index + 1} 名` }, String(index + 1).padStart(2, "0")),
           node("a", { href: `#traffic?agent=${pathID(entry.agent_id)}` }, entry.name), node("strong", {}, bytes(entry.total_bytes))),
         metricTrack(max ? entry.total_bytes / max * 100 : 0, true, false),
-        node("div", { className: "a-dashboard-rank-meta" }, muted(`接收 ${bytes(entry.received_bytes)} · 发送 ${bytes(entry.sent_bytes)}`), entry.sample_count > 0 ? muted(`${entry.sample_count} 次采样`) : muted("采集数据不完整")))) : muted("所选月份暂无按节点归集的采集记录")));
+        node("div", { className: "a-dashboard-rank-meta" }, muted(`接收 ${bytes(entry.received_bytes)} · 发送 ${bytes(entry.sent_bytes)}`), entry.sample_count > 0 ? muted(`${entry.sample_count} 次采样`) : muted("采集数据不完整")))) : muted("暂无节点流量记录")));
     const state = states.get("traffic");
-    rankingState.textContent = state === "failed" ? `刷新失败 · 保留 ${traffic.month} 排行` : invalid ? "部分排行记录格式无效，未纳入展示" : ranked.length > 8 ? `${traffic.month} · 共 ${ranked.length} 个节点，显示前 8 个` : `${traffic.month} · ${ranked.length} 个有采集记录的节点`;
+    rankingState.textContent = state === "failed" ? `刷新失败 · 保留 ${traffic.month} 排行` : invalid ? "部分排行记录格式无效，未纳入展示" : ranked.length > 8 ? `${traffic.month} · 前 8 / 共 ${ranked.length} 个节点` : `${traffic.month} · ${ranked.length} 个节点`;
   }
 
   function read(key, path, force = false) {

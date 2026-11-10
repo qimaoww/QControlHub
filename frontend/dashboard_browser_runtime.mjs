@@ -254,7 +254,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   fixture.metrics.network_rx_bps="<img src=x onerror=alert(1)>";await refresh();
   assert(metric("网络接收速率").textContent === "—" && !panel().querySelector("img"), "untrusted metric became HTML or a real sample");
   fixture.metrics.network_rx_bps=2048;fixture.metrics.network_tx_bps=512;await refresh();
-  assert(compact(metric("网络接收速率").textContent) === "2KB/s" && panel().textContent.includes("容器可见"), "network recovery or container scope lost");
+  assert(compact(metric("网络接收速率").textContent) === "2KB/s" && !panel().querySelector(".a-card-head p"), "network recovery or redundant panel description remained");
   const onlineAgents = agents.filter(agent => agent.status === "online");
   for (const state of ["false", "missing", "stale", "missing-time"]) {
     for (const agent of onlineAgents) {
