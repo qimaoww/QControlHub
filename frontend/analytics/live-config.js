@@ -164,13 +164,17 @@ export async function liveConfigPage(ctx) {
   });
   const dependencyPreview = node("details", {}, node("summary", {}, "依赖资源"));
   dependencyPreview.hidden = true;
+  const sourcePaths = importSource && selectedSource && table(["来源", "路径"], [
+    selectedSource.config_path && ["配置文件", selectedSource.config_path],
+    selectedSource.config_directory && ["配置目录", selectedSource.config_directory],
+  ].filter(Boolean), {paginate: 0, label: "系统服务配置来源"});
   let sourceBlocked = importSource && !canImport;
   const recovery = stack();
   const form = ctx.form([
     node("div", { className: "a-grid" },
       field("名称", "name", saved?.name || `${agent.name} ${engine}`, { required: true, maxlength: 100, readonly: !editable }),
       field("说明", "description", saved?.description || "", { maxlength: 300, readonly: !editable }), intent),
-    node("div", { className: "a-editor" }, content), dependencyPreview, liveNotice, recovery,
+    sourcePaths, node("div", { className: "a-editor" }, content), dependencyPreview, liveNotice, recovery,
   ], importSource ? "导入并迁移" : "保存并部署", async (values, element) => {
     if (!editable || sourceBlocked) return;
     if (!importSource && !canDeploy) throw new Error("没有配置部署权限，草稿已保留。");
@@ -332,7 +336,9 @@ export async function liveConfigPage(ctx) {
         dependencyPreview.hidden = !importSource || !source.dependencies?.length;
         if (!dependencyPreview.hidden) dependencyPreview.replaceChildren(
           node("summary", {}, `依赖资源 · ${source.dependencies.length}`),
-          table(["配置字段", "原资源", "托管去向"], source.dependencies.map(item => [item.field, item.source, item.destination])),
+          table(["配置字段", "路径映射"], source.dependencies.map(item => [item.field,
+            stack(muted("原资源"), node("span", {}, item.source), muted("托管去向"), node("span", {}, item.destination)),
+          ])),
         );
         form.elements.content.value = source.content;
         form.elements.content.defaultValue = source.content;
