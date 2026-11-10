@@ -240,7 +240,7 @@ export function query(path, params) {
 export const list = value => Array.isArray(value) ? value : [];
 
 export async function copyText(value, isCurrent = () => true) {
-  const check = () => { if (!isCurrent()) throw new DOMException('复制目标已变化', 'AbortError'); };
+  const check = () => { if (!isCurrent()) throw Object.assign(new DOMException('复制目标已变化', 'AbortError'), {intentionalCancellation:true}); };
   check();
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(String(value)); return; }

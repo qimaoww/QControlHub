@@ -204,6 +204,7 @@ export function startAnalytics({ app, session }) {
     if (pending) { announce("操作正在提交，请等待结果。", "warn"); return; }
     if (control?.disabled) return;
     const disabled = control?.disabled;
+    const operationSession = state.session, operationEpoch = routeEpoch;
     if (control) { control.disabled = true; control.setAttribute("aria-busy", "true"); }
     pending++;
     // A write may replace its form or table cell before its readback finishes.
@@ -211,7 +212,7 @@ export function startAnalytics({ app, session }) {
     app.setAttribute("aria-busy", "true");
     try { return await run(); }
     catch (error) {
-      if (error.name !== "AbortError") { await recordFailure(error,control?.textContent || `页面 ${route}`,"panel_action"); showFailure(error); }
+      if (!error.intentionalCancellation && state.session === operationSession && routeEpoch === operationEpoch) { error = await recordFailure(error,control?.textContent || `页面 ${route}`,"panel_action"); showFailure(error); }
     } finally {
       pending--;
       if (!pending) app.removeAttribute("aria-busy");
@@ -219,6 +220,7 @@ export function startAnalytics({ app, session }) {
     }
   }
   function form(fields, label, save) {
+    const formSession = state.session, formEpoch = routeEpoch;
     const feedback = notice("");
     const submit = node("button", { type: "submit", className: "a-button primary" }, label);
     const controls = node("fieldset", { className: "a-form-fields a-stack" }, fields);
@@ -246,8 +248,8 @@ export function startAnalytics({ app, session }) {
         let invalid;
         try { await save(values, element); }
         catch (error) {
-          if (error.name === "AbortError") return;
-          await recordFailure(error,label,"form_submission");
+          if (error.intentionalCancellation || state.session !== formSession || routeEpoch !== formEpoch) return;
+          error = await recordFailure(error,label,"form_submission");
           feedback.replaceChildren(node("span",{},failureSummary(error)),node("br"),button("查看详情",()=>void openFailure(error).catch(showFailure)));
           invalid = error.field && element.elements.namedItem(error.field);
         } finally {

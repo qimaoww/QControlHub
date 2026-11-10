@@ -106,7 +106,10 @@ func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, man
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在配置核验期间发生变化：%s", engine, core.DiagnosticText(err.Error()))
 	}
 	managedStatusAfter, err := validateManagedServiceTarget(ctx, engine, managed, manager)
-	if err != nil || managedStatusAfter != managedStatus {
+	if err != nil {
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务在配置核验期间读取失败：%s", engine, core.DiagnosticText(err.Error()))
+	}
+	if managedStatusAfter != managedStatus {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务在配置核验期间发生变化", engine)
 	}
 	return spec, true, ""

@@ -73,6 +73,25 @@ async function run() {
   assert.ok(failed.scrollWidth <= failed.clientWidth+1, "long diagnostic overflows dialog");
   assert.equal((await api(`${base}/workspace`)).config.content, saved.content, "failed import replaced saved configuration");
   assert.equal((await api(`/configs/${saved.id}/revisions`)).length, history.length, "failed import wrote history");
+  const writeText = navigator.clipboard.writeText, execCommand = document.execCommand;
+  const notices = new Set(document.querySelectorAll('.a-toast-region .a-toast'));
+  try {
+    navigator.clipboard.writeText = async () => { throw new DOMException("fixture unexpected clipboard interruption", "AbortError"); };
+    document.execCommand = () => { throw new DOMException("fixture unexpected fallback interruption", "AbortError"); };
+    button("复制诊断", failed).click();
+    await waitFor(() => [...document.querySelectorAll('.a-toast-region .a-toast')].some(card => !notices.has(card) && card.dataset.tone === 'error') && !document.querySelector('#app[aria-busy=true]'), "unexpected native AbortError was swallowed or left controls busy");
+    const records = await api('/tasks?action=panel-failure&limit=100');
+    let retained = false;
+    for (const task of records) {
+      if (!task.error.includes("fixture unexpected fallback interruption")) continue;
+      const detail = await api(`/tasks/${task.id}/diagnostics`);
+      retained ||= detail.error.includes("fixture unexpected fallback interruption");
+    }
+    assert.ok(retained, "unexpected native AbortError was not retained in task diagnostics");
+  } finally {
+    navigator.clipboard.writeText = writeText;
+    document.execCommand = execCommand;
+  }
   const status = document.createElement("pre"); status.id = "browser-smoke-result";
   status.textContent = `Native session, external-source failure/manual deployment, preview/cancel/migration failure, immutable history, long diagnostic tails and stable scroll: passed; CSS viewport ${innerWidth}x${innerHeight}, DPR ${devicePixelRatio}`;
   document.body.append(status); document.documentElement.dataset.browserSmoke = "passed";

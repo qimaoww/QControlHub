@@ -192,9 +192,17 @@ try {
  globalThis.fetch=async()=>{retainedAborts++;return new Response('{"id":"tsk_abort_fixture"}',{status:201})};
  const recorder=createFailureRecorder({session:{csrf_token:"fixture"}});
  const unexpected=new DOMException("unexpected socket interruption","AbortError");
- await recorder(unexpected,"后台连接","transport");
- assert.equal(unexpected.failureTaskID,"tsk_abort_fixture");
+ const retained=await recorder(unexpected,"后台连接","transport");
+ assert.equal(retained.failureTaskID,"tsk_abort_fixture");
+ assert.equal(retained.cause,unexpected,"immutable native error remains in the cause chain");
+ assert.equal(await recorder(unexpected,"后台连接","transport"),retained,"propagated native failure reuses its retained identity");
  const canceled=Object.assign(new DOMException("navigation","AbortError"),{intentionalCancellation:true});
  await recorder(canceled,"导航","transport");
  assert.equal(retainedAborts,1,"unexpected abort must be retained while explicit cancellation stays silent");
+ globalThis.fetch=async()=>{throw new Error("fixture retention transport unavailable")};
+ const failed=await recorder(new DOMException("native failure with read-only message","AbortError"),"复制","browser_action");
+ assert.equal(failed.failureSaved,false);
+ assert.match(failed.message,/native failure with read-only message/);
+ assert.match(failed.message,/未能保存到任务/);
+ assert.match(failed.message,/fixture retention transport unavailable/);
 } finally {globalThis.fetch=originalFetch}

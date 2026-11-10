@@ -1,11 +1,25 @@
 import { errorDiagnostic, redactDiagnostic, requestJSON } from "./errors.js";
 
+const mutableFailures = new WeakMap();
+function mutableFailure(error) {
+  if (typeof error !== "object" && typeof error !== "function") return new Error(String(error));
+  if (Object.getOwnPropertyDescriptor(error, "message")?.writable) return error;
+  if (!mutableFailures.has(error)) {
+    const wrapped = new Error(error.message || String(error), {cause:error});
+    for (const key of ["name","status","requestID","code","field","stage","agentID","engine","resource","failureTaskID","failureSaved","retentionError","outcomeUnknown"])
+      if (error[key] !== undefined) wrapped[key] = error[key];
+    mutableFailures.set(error, wrapped);
+  }
+  return mutableFailures.get(error);
+}
+
 // A recorder is bound to its initiating session. It has no recursive API path
 // and no automatic retry; normal application requests own recovery.
 export function createFailureRecorder({ session, isCurrent = () => true } = {}) {
   const pending = new Map(), recent = new Map();
   return async function record(error, operation = "面板操作", stage = "panel") {
     if (!error || error.intentionalCancellation === true || !isCurrent()) return error;
+    error = mutableFailure(error);
     if (error.cause?.failureTaskID) {error.failureTaskID=error.cause.failureTaskID;error.failureSaved=true;}
     const prior=recent.get(error.message);
     if(stage==="panel_feedback" && prior && Date.now()-prior.at<5000) {error.failureTaskID=prior.id;error.failureSaved=true;}
@@ -31,7 +45,7 @@ export function createFailureRecorder({ session, isCurrent = () => true } = {}) 
           body: JSON.stringify({ operation: redactDiagnostic(operation), stage: error.stage || stage,
             resource: redactDiagnostic(error.resource || operation), agent_id:error.agentID || "", engine:error.engine || "",
             summary: redactDiagnostic(error.message).slice(0,4096), detail, occurred_at: new Date().toISOString(),
-            http_status: error.status || 0, request_id: error.requestID || "", code: error.code || "", field: error.field || "" }),
+            http_status: error.status || 0, request_id: error.requestID || "", code: error.code == null ? "" : String(error.code), field: error.field || "" }),
         }, { isCurrent });
         if (!result?.id) throw new Error("留存接口未返回任务标识");
         return result.id;
