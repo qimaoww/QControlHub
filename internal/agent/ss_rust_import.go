@@ -111,7 +111,7 @@ func prepareSSRustImport(existing EngineSpec, content string, targets ...EngineS
 			}
 			path = filepath.Join(base, path)
 		}
-		data, resolved, err := readImportSource(path, ouSBResourceLimit)
+		data, resolved, err := readExternalImportSource(path, ouSBResourceLimit)
 		if err != nil {
 			return plan, fmt.Errorf("SS Rust acl (%s): %w", path, err)
 		}

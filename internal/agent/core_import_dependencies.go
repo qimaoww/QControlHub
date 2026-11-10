@@ -198,7 +198,7 @@ func prepareFileDependencyImport(engine core.Engine, existing, managed EngineSpe
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(base, path)
 		}
-		data, resolved, err := readImportSource(path, maxReleaseAssetSize)
+		data, resolved, err := readExternalImportSource(path, maxReleaseAssetSize)
 		if err != nil {
 			return plan, fmt.Errorf("%s (%s): %w", ref.field, path, err)
 		}

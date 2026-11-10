@@ -157,7 +157,7 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 		if !strings.Contains(content, dependency.Destination) {
 			continue
 		}
-		data, _, err := readImportSource(dependency.Source, 4<<20)
+		data, _, err := readExternalImportSource(dependency.Source, 4<<20)
 		if err != nil {
 			return fmt.Errorf("refresh %s: %w", dependency.Field, err)
 		}
@@ -203,7 +203,7 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 				break
 			}
 		}
-		data, resolved, err := readImportSource(source, resource.Limit)
+		data, resolved, err := readExternalImportSource(source, resource.Limit)
 		if err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 		if !ok {
 			continue
 		}
-		actual, _, err := readImportSource(dependency.Source, 4<<20)
+		actual, _, err := readExternalImportSource(dependency.Source, 4<<20)
 		if err != nil {
 			return err
 		}

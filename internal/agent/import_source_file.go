@@ -49,9 +49,27 @@ func resolveImportSource(path string) (string, error) {
 }
 
 func readImportSource(path string, limit int64) ([]byte, string, error) {
+	return readImportSourceWithAuthorization(path, limit, false)
+}
+
+func readExternalImportSource(path string, limit int64) ([]byte, string, error) {
+	return readImportSourceWithAuthorization(path, limit, true)
+}
+
+func readImportSourceWithAuthorization(path string, limit int64, external bool) ([]byte, string, error) {
+	if external {
+		if err := validateImportResourceAuthorization(path, path); err != nil {
+			return nil, "", err
+		}
+	}
 	resolved, err := resolveImportSource(path)
 	if err != nil {
 		return nil, "", err
+	}
+	if external {
+		if err := validateImportResourceAuthorization(path, resolved); err != nil {
+			return nil, "", err
+		}
 	}
 	info, err := os.Lstat(resolved)
 	if err != nil {
@@ -85,7 +103,7 @@ func readImportSource(path string, limit int64) ([]byte, string, error) {
 }
 
 func readImportConfigurationFile(path string) (string, error) {
-	data, resolved, err := readImportSource(path, core.MaxConfigBytes)
+	data, resolved, err := readExternalImportSource(path, core.MaxConfigBytes)
 	if err != nil {
 		return "", err
 	}

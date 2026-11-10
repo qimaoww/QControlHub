@@ -133,7 +133,7 @@ func prepareMihomoDependencyImport(existing, managed EngineSpec, content string)
 			}
 			path = filepath.Join(base, path)
 		}
-		data, _, err := readImportSource(path, ouSBResourceLimit)
+		data, _, err := readExternalImportSource(path, ouSBResourceLimit)
 		if err != nil {
 			return coreImportPlan{}, fmt.Errorf("%s: %w", ref.field, err)
 		}

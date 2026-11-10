@@ -15,6 +15,14 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestExternalImportRejectsManagedPathsBeforeOpening(t *testing.T) {
+	for _, path := range []string{"/etc/qagent/not-an-external-source.json", "/etc/qcontrolhub/tls/not-an-external-key.pem", "/etc/qcontrolhub/panel-certificates/not-an-external-certificate.pem"} {
+		if _, _, err := readExternalImportSource(path, 4096); err == nil || !strings.Contains(err.Error(), "requires its existing ownership mapping") {
+			t.Fatalf("external reader did not reject protected ownership before opening %s: %v", path, err)
+		}
+	}
+}
+
 func TestImportDependencyIdentityAndPathMapping(t *testing.T) {
 	requireAgentRoot(t)
 	root := t.TempDir()

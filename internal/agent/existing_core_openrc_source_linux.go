@@ -16,7 +16,7 @@ import (
 
 func inspectOpenRCCoreSource(ctx context.Context, service string, manager *ServiceManager) (core.Engine, EngineSpec, error) {
 	path := filepath.Join(openRCInitRoot, service)
-	data, _, err := readImportSource(path, 256<<10)
+	data, _, err := readExternalImportSource(path, 256<<10)
 	if err != nil {
 		return "", EngineSpec{}, err
 	}
@@ -59,7 +59,7 @@ func inspectOpenRCCoreSource(ctx context.Context, service string, manager *Servi
 	conf := filepath.Join(filepath.Dir(openRCInitRoot), "conf.d", service)
 	var confData []byte
 	if _, err := os.Lstat(conf); err == nil {
-		confData, _, err = readImportSource(conf, 256<<10)
+		confData, _, err = readExternalImportSource(conf, 256<<10)
 		if err != nil {
 			return "", EngineSpec{}, err
 		}

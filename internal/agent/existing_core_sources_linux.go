@@ -205,7 +205,7 @@ func inspectSystemdCoreSource(ctx context.Context, service string) (core.Engine,
 		}
 		path := files[index]
 		optional := files[index+1] == "(ignore_errors=yes)"
-		data, resolved, err := readImportSource(path, 256<<10)
+		data, resolved, err := readExternalImportSource(path, 256<<10)
 		if errors.Is(err, os.ErrNotExist) && optional {
 			continue
 		}

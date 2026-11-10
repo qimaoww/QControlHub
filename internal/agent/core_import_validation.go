@@ -34,7 +34,7 @@ func (plan coreImportPlan) verifySources() error {
 				return errors.Join(err, fmt.Errorf("import resource %s identity changed after snapshot planning", resource.source))
 			}
 		}
-		data, _, err := readImportSource(resource.source, importResourceLimit(resource))
+		data, _, err := readExternalImportSource(resource.source, importResourceLimit(resource))
 		if err != nil {
 			return fmt.Errorf("recheck import resource %s: %w", resource.source, err)
 		}
