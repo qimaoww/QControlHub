@@ -148,6 +148,10 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 	if err != nil {
 		return err
 	}
+	referenced, err := referencedImportResourcePaths(engine, spec, content)
+	if err != nil {
+		return fmt.Errorf("resolve current import resource references: %w", err)
+	}
 	next := make(map[string][]byte)
 	refs := []importFileReference{}
 	material := map[string][]byte{}
@@ -159,7 +163,7 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 	for _, dependency := range state.Dependencies {
 		// Configuration edits can retire an imported resource. Never rewrite it
 		// after the instance no longer references it.
-		if !strings.Contains(content, dependency.Destination) {
+		if !referenced[dependency.Destination] {
 			continue
 		}
 		limit, ok := limits[dependency.Destination]

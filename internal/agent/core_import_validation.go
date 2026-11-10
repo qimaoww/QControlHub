@@ -45,6 +45,63 @@ func (plan coreImportPlan) verifySources() error {
 	return nil
 }
 
+// Read decoded input fields, including Xray's relative asset selectors. A
+// serialized substring can miss escaped paths or match unrelated string data.
+func referencedImportResourcePaths(engine core.Engine, spec EngineSpec, content string) (map[string]bool, error) {
+	var refs []importFileReference
+	if engine == core.EngineMihomo {
+		var document yaml.Node
+		if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+			return nil, err
+		}
+		var err error
+		refs, err = importYAMLReferences(&document)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		root, err := importJSONDocument(content)
+		if err != nil {
+			return nil, err
+		}
+		refs, err = importJSONReferences(engine, root)
+		if err != nil {
+			return nil, err
+		}
+		if engine == core.EngineXray {
+			assets, err := importXrayAssetReferences(root, spec, spec)
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, assets...)
+		}
+		if engine == core.EngineShadowsocksRust {
+			entries := []any{root}
+			for _, key := range []string{"servers", "shadowsocks"} {
+				if servers, ok := root[key].([]any); ok {
+					entries = append(entries, servers...)
+				}
+			}
+			for _, entry := range entries {
+				if node, ok := entry.(map[string]any); ok {
+					path, err := ssRustImportACL(node)
+					if err != nil {
+						return nil, err
+					}
+					if path != "" {
+						refs = append(refs, importFileReference{path: path})
+					}
+				}
+			}
+		}
+	}
+	paths := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		paths[ref.path] = true
+	}
+	return paths, nil
+}
+
 func rewriteImportResourcePaths(engine core.Engine, content string, paths map[string]string) (string, error) {
 	if engine == core.EngineMihomo {
 		var document yaml.Node

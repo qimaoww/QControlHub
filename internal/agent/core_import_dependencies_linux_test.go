@@ -23,6 +23,36 @@ func TestExternalImportRejectsManagedPathsBeforeOpening(t *testing.T) {
 	}
 }
 
+func TestImportedResourceReferenceSemantics(t *testing.T) {
+	root := t.TempDir()
+	spec := EngineSpec{Binary: filepath.Join(root, "core"), ConfigPath: filepath.Join(root, "config.json")}
+	resource := filepath.Join(root, "imports", "instance", "file.p&em")
+	retired := filepath.Join(root, "retired.pem")
+	quoted, _ := json.Marshal(resource)
+	ordinary, _ := json.Marshal(retired)
+	for _, test := range []struct {
+		name    string
+		engine  core.Engine
+		content string
+	}{
+		{"sing-box certificate", core.EngineSingBox, `{"inbounds":[{"tls":{"certificate_path":` + string(quoted) + `},"tag":` + string(ordinary) + `}]}`},
+		{"Xray certificate", core.EngineXray, `{"inbounds":[{"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":` + string(quoted) + `}]}},"tag":` + string(ordinary) + `}]}`},
+		{"Xray relative geodata", core.EngineXray, `{"routing":{"rules":[{"domain":["ext:imports/instance/file.p\u0026em:private"],"outboundTag":` + string(ordinary) + `}]}}`},
+		{"SS Rust ACL", core.EngineShadowsocksRust, `{"servers":[{"acl":` + string(quoted) + `,"password":` + string(ordinary) + `}]}`},
+		{"Mihomo certificate", core.EngineMihomo, "listeners:\n  - certificate: " + string(quoted) + "\n    name: " + string(ordinary) + "\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			paths, err := referencedImportResourcePaths(test.engine, spec, test.content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !paths[resource] || paths[retired] || len(paths) != 1 {
+				t.Fatalf("active input or unrelated string was misclassified: %v", paths)
+			}
+		})
+	}
+}
+
 func TestImportDependencyIdentityAndPathMapping(t *testing.T) {
 	requireAgentRoot(t)
 	root := t.TempDir()
@@ -206,12 +236,12 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, data := range map[string]string{"chain1.pem": first.Certificate, "key1.pem": first.PrivateKey, "chain2.pem": second.Certificate, "key2.pem": second.PrivateKey} {
+	for name, data := range map[string]string{"chain1.p&em": first.Certificate, "key1.p&em": first.PrivateKey, "chain2.p&em": second.Certificate, "key2.p&em": second.PrivateKey} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for name, target := range map[string]string{"chain.pem": "chain1.pem", "key.pem": "key1.pem"} {
+	for name, target := range map[string]string{"chain.p&em": "chain1.p&em", "key.p&em": "key1.p&em"} {
 		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
 			t.Fatal(err)
 		}
@@ -227,7 +257,7 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if err := os.WriteFile(filepath.Join(root, "rules.json"), []byte(rules), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	source := `{"inbounds":[{"type":"trojan","tls":{"certificate_path":"chain.pem","key_path":"key.pem"}}],"outbounds":[{"type":"direct"}],"route":{"rule_set":[{"type":"local","tag":"fixture","format":"source","path":"rules.json"}]}}`
+	source := `{"inbounds":[{"type":"trojan","tls":{"certificate_path":"chain.p&em","key_path":"key.p&em"}}],"outbounds":[{"type":"direct"}],"route":{"rule_set":[{"type":"local","tag":"fixture","format":"source","path":"rules.json"}]}}`
 	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +305,23 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if err := writeImportResourceState(fixture.markerPrefix, core.EngineSingBox, state); err != nil {
 		t.Fatal(err)
 	}
+	// Keeping a retired path as a tag does not keep its file dependency alive.
+	managedContent, err := readConfigurationFile(fixture.managed.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managedDocument, err := importJSONDocument(managedContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managedDocument["outbounds"].([]any)[0].(map[string]any)["tag"] = retired
+	managedData, err := json.Marshal(managedDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture.managed.ConfigPath, managedData, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	rotate := func(name, target string) {
 		t.Helper()
 		temporary := filepath.Join(root, name+".next")
@@ -285,7 +332,7 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 			t.Fatal(err)
 		}
 	}
-	rotate("chain.pem", "chain2.pem")
+	rotate("chain.p&em", "chain2.p&em")
 	before, _ := os.ReadFile(filepath.Join(fixture.stateDirectory, "commands.log"))
 	if err := fixture.executor.RefreshImportedResources(context.Background()); err == nil {
 		t.Fatal("mismatched renewal pair accepted")
@@ -294,7 +341,7 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if strings.Count(string(before), "stop ") != strings.Count(string(after), "stop ") {
 		t.Fatal("invalid renewal stopped service")
 	}
-	rotate("key.pem", "key2.pem")
+	rotate("key.p&em", "key2.p&em")
 	if err := fixture.executor.RefreshImportedResources(context.Background()); err != nil {
 		t.Fatal(err)
 	}
