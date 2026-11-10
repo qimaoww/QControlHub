@@ -288,7 +288,7 @@ func configureSSRustImportPreflight(t *testing.T, fixture existingCoreMigrationF
 	launcher := filepath.Join(fixture.stateDirectory, "probe-launcher")
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", filepath.Join(fixture.stateDirectory, "probe-arguments"))
 	if fail {
-		script += "echo 'fixture startup dependency rejected' >&2\nexit 17\n"
+		script += "echo 'fixture startup dependency rejected' >&2\necho test-password >&2\ni=0\nwhile [ \"$i\" -lt 100 ]; do echo 'fixture nested startup diagnostic repeated detail for complete collection'; i=$((i+1)); done\necho fixture-probe-end\nexit 17\n"
 	} else {
 		script += "echo QCH_UPDATE_LISTENERS_READY\n"
 	}
@@ -316,6 +316,9 @@ func TestSSRustImportPreflightFailurePreservesOriginalService(t *testing.T) {
 	_, err := fixture.executor.Execute(context.Background(), core.Task{Engine: core.EngineShadowsocksRust, Action: core.ActionImportExisting, ConfigContent: content})
 	if err == nil || !strings.Contains(err.Error(), "fixture startup dependency rejected") {
 		t.Fatalf("startup preflight was not required: %v", err)
+	}
+	if !strings.Contains(err.Error(), "fixture-probe-end") || strings.Contains(err.Error(), "test-password") {
+		t.Fatal("startup diagnostics lost their end or disclosed the password")
 	}
 	fixture.assertServiceState(t, fixture.existing.Service, "active", "enabled")
 	fixture.assertServiceState(t, fixture.managed.Service, "inactive", "disabled")
