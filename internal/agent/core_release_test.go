@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,42 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestSSRustReleaseLibcAndSameVersionFallback(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		for _, libc := range []string{"gnu", "musl"} {
+			t.Run(arch+"/"+libc, func(t *testing.T) {
+				release := githubRelease{TagName: "v1.25.0"}
+				for _, target := range []string{"x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl"} {
+					name := "shadowsocks-v1.25.0." + target + ".tar.xz"
+					release.Assets = append(release.Assets, githubReleaseAsset{Name: name, Size: 2 << 20, Digest: "sha256:" + strings.Repeat("a", 64),
+						BrowserDownloadURL: "https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/" + name})
+				}
+				body, _ := json.Marshal(release)
+				updater := NewCoreUpdater()
+				updater.goarch, updater.libc = arch, libc
+				updater.client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: request}, nil
+				})}
+				resolved, err := updater.resolveRelease(context.Background(), core.EngineShadowsocksRust, "stable", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				target := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+				if !strings.Contains(resolved.Asset.Name, "."+target+"-unknown-linux-"+libc+".") {
+					t.Fatalf("wrong primary: %+v", resolved)
+				}
+				if libc == "gnu" {
+					if resolved.FallbackAsset.Name != "shadowsocks-v1.25.0."+target+"-unknown-linux-musl.tar.xz" {
+						t.Fatalf("wrong fallback: %+v", resolved)
+					}
+				} else if resolved.FallbackAsset.Name != "" {
+					t.Fatal("musl install acquired a fallback")
+				}
+			})
+		}
+	}
+}
 
 func TestSelectCoreReleaseAssetUsesGenericOfficialBuilds(t *testing.T) {
 	t.Parallel()

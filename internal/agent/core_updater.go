@@ -149,17 +149,25 @@ func (updater *CoreUpdater) installWithTransaction(ctx context.Context, engine c
 	selectedAsset := release.Asset
 	tempName, xrayAssets, versionOutput, verificationFailed, err := updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
 	fallbackReason := ""
-	if err != nil && verificationFailed && release.FallbackAsset.Name != "" {
+	fallbackDiagnostic := ""
+	var glibcErr ssRustGLIBCError
+	canFallback := engine == core.EngineMihomo || engine == core.EngineShadowsocksRust && updater.libc == "gnu" && errors.As(err, &glibcErr)
+	if err != nil && ctx.Err() == nil && verificationFailed && canFallback && release.FallbackAsset.Name != "" {
 		primaryErr := err
+		primaryOutput := versionOutput
+		fallbackDiagnostic = primaryOutput
+		fallbackReason = "default Mihomo binary failed version verification; installed compatible CPU fallback"
+		if engine == core.EngineShadowsocksRust {
+			fallbackReason = "GNU ss-rust requires unavailable GLIBC versions; installed same-release musl asset"
+		}
 		selectedAsset = release.FallbackAsset
 		tempName, xrayAssets, versionOutput, _, err = updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
 		if err != nil {
-			return "", fmt.Errorf("default Mihomo binary failed version verification (%v); compatible fallback also failed: %w", primaryErr, err)
+			return joinCoreUpdateOutput(primaryOutput, versionOutput), fmt.Errorf("compatible fallback also failed: %w", errors.Join(primaryErr, err))
 		}
-		fallbackReason = "default Mihomo binary failed version verification; installed compatible CPU fallback"
 	}
 	if err != nil {
-		return "", err
+		return versionOutput, err
 	}
 	defer root.Remove(tempName)
 	for _, tempAsset := range xrayAssets {
@@ -228,9 +236,9 @@ func (updater *CoreUpdater) installWithTransaction(ctx context.Context, engine c
 			restartOutput, restartErr = serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
 		}
 	}
-	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Digest, spec.Binary)
+	output := fmt.Sprintf("installed %s release %s\nasset: %s (linux/%s, libc=%s)\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Name, updater.goarch, updater.libc, selectedAsset.Digest, spec.Binary)
 	if fallbackReason != "" {
-		output += "\nfallback: " + fallbackReason
+		output += "\nfallback: " + fallbackReason + "\n" + fallbackDiagnostic
 	}
 	if label := coreSourceLabel(engine, selector, source); label != "" {
 		output += "\nsource: " + label
@@ -293,30 +301,42 @@ func (updater *CoreUpdater) installWithTransaction(ctx context.Context, engine c
 }
 
 func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.Engine, root *os.Root, directory string, release resolvedCoreRelease, asset githubReleaseAsset) (tempName string, xrayAssets map[string]string, versionOutput string, verificationFailed bool, err error) {
+	phase := "download and integrity"
+	defer func() {
+		if err != nil {
+			diagnosticContext := coreInstallDiagnostic(fmt.Sprintf("%s release %s; asset=%s; linux/%s; host libc=%s; stage=%s", engine, release.Tag, asset.Name, updater.goarch, updater.libc, phase))
+			versionOutput = diagnosticContext + "\n" + coreInstallDiagnostic(versionOutput)
+			err = redactedCoreError{err: err, message: diagnosticContext + ": " + coreInstallDiagnostic(err.Error())}
+		}
+	}()
 	downloadPath, err := updater.downloadAsset(ctx, asset)
 	if err != nil {
 		return "", nil, "", false, fmt.Errorf("download %s from %s: %w", asset.Name, release.Repository, err)
 	}
 	defer os.Remove(downloadPath)
+	phase = "candidate creation"
 
 	tempName, err = randomCoreTempName(root)
 	if err != nil {
 		return "", nil, "", false, err
 	}
-	succeeded := false
-	defer func() {
-		if !succeeded {
-			_ = root.Remove(tempName)
-		}
-	}()
 	temp, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
 	if err != nil {
 		return "", nil, "", false, fmt.Errorf("create core install candidate: %w", err)
 	}
+	succeeded := false
+	candidateName := tempName
+	defer func() {
+		if !succeeded {
+			_ = root.Remove(candidateName)
+		}
+	}()
+	phase = "extraction"
 	if err := extractCoreBinary(engine, asset.Name, downloadPath, temp); err != nil {
 		temp.Close()
 		return "", nil, "", false, err
 	}
+	phase = "candidate sync"
 	if err := temp.Sync(); err != nil {
 		temp.Close()
 		return "", nil, "", false, err
@@ -325,20 +345,27 @@ func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.
 		return "", nil, "", false, err
 	}
 	if engine == core.EngineXray {
+		phase = "Xray resource extraction"
 		xrayAssets, err = stageXrayReleaseAssets(root, asset.Name, downloadPath)
 		if err != nil {
 			return "", nil, "", false, err
 		}
+		stagedAssets := xrayAssets
 		defer func() {
 			if !succeeded {
-				for _, name := range xrayAssets {
+				for _, name := range stagedAssets {
 					_ = root.Remove(name)
 				}
 			}
 		}()
 	}
-	versionOutput, err = verifyCoreCandidate(ctx, engine, filepath.Join(directory, tempName), release.Tag)
+	phase = "version probe"
+	candidate := filepath.Join(directory, tempName)
+	versionOutput, err = verifyCoreCandidate(ctx, engine, candidate, release.Tag)
 	if err != nil {
+		if engine == core.EngineShadowsocksRust && updater.libc == "gnu" && ctx.Err() == nil && ssRustNeedsMusl(candidate, versionOutput, err) {
+			err = ssRustGLIBCError{err}
+		}
 		return "", nil, versionOutput, true, err
 	}
 	succeeded = true
