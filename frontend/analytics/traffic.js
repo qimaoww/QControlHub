@@ -91,7 +91,8 @@ export async function trafficPage(ctx) {
         addQuota && (addQuota.disabled = !policiesReady || !agentsReady || !eligibleAgents(agents).some(agent => ctx.can('traffic.manage', agent)));
         updateAgentFilter();
         const available = policies.length > 0 || endpoints.length > 0 || policiesReady && endpointsReady;
-        firstRegion.hidden = available; results.root.hidden = !available; if (available) draw();
+        firstRegion.hidden = available; results.root.hidden = !available;
+        if (available) { firstRegion.remove(); draw(); }
       };
       const optional = read => { void read.then(() => { if (ctx.current() && expected === readSequence) { updateAgentFilter(); draw(); } }).catch(() => {}); };
       optional(ordering.load()); optional(portOrdering.load());
