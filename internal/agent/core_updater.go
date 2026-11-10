@@ -236,7 +236,7 @@ func (updater *CoreUpdater) installWithTransaction(ctx context.Context, engine c
 			restartOutput, restartErr = serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
 		}
 	}
-	output := fmt.Sprintf("installed %s release %s\nasset: %s (linux/%s, libc=%s)\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Name, updater.goarch, updater.libc, selectedAsset.Digest, spec.Binary)
+	output := fmt.Sprintf("installed %s release %s\nasset: %s (linux/%s, host libc=%s)\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Name, updater.goarch, updater.libc, selectedAsset.Digest, spec.Binary)
 	if fallbackReason != "" {
 		output += "\nfallback: " + fallbackReason + "\n" + fallbackDiagnostic
 	}
