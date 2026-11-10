@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -20,7 +21,7 @@ type Store struct {
 	connectionSyncMu sync.Mutex
 	connectionSync   map[string]*connectionSnapshot
 
-	certificateResolver *net.Resolver
+	certificateResolver certificates.DNSResolver
 	certificateDNSHTTP  *http.Client
 	pool                *pgxpool.Pool
 	cryptor             *configCryptor
