@@ -62,6 +62,16 @@ func decodeJSON(w http.ResponseWriter, request *http.Request, destination any, l
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("request body must contain a single JSON value")
 	}
+	if _, key := requestAPIKey(request); key {
+		raw, _ := json.Marshal(destination)
+		if strings.Contains(string(raw), "[redacted") {
+			switch destination.(type) {
+			case *core.Config, *configEditInput, *configRetryInput:
+			default:
+				return errors.New("脱敏占位符不能作为新值保存；请省略未修改的敏感字段或明确替换")
+			}
+		}
+	}
 	return nil
 }
 

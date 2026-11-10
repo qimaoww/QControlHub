@@ -82,9 +82,7 @@ func (s *Server) putIPQualitySchedule(w http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) authorizeIPQuality(w http.ResponseWriter, request *http.Request) bool {
-	role, _ := s.sessionRole(request)
-	permissions, _ := s.sessionPermissions(request)
-	if !role.Allows(core.PermissionAgentsManage) && !core.HasPermission(permissions, core.PermissionAgentsManage) {
+	if !s.sessionAllows(request, core.PermissionAgentsManage) {
 		writeError(w, http.StatusForbidden, "IPQuality requires agents.manage and tasks.execute")
 		return false
 	}

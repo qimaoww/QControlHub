@@ -60,6 +60,14 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 	}
 	for _, c := range due {
 		ownerCtx := certificateOwnerContext(ctx, c.OwnerID)
+		if delegated, keyErr := s.apiKeyWorkContext(ownerCtx, "certificate-auto-renew", c.ID); keyErr != nil {
+			if _, err = s.pool.Exec(ctx, `UPDATE panel_certificates SET next_attempt=now()+interval '1 day' WHERE id=$1`, c.ID); err != nil {
+				return err
+			}
+			continue
+		} else {
+			ownerCtx = delegated
+		}
 		if c.NotAfter != nil && time.Until(*c.NotAfter) < 30*24*time.Hour && c.Method != "dns-manual" && c.Source == "acme" {
 			if err = certificateUserActive(ownerCtx, s.pool, c.OwnerID); err == nil {
 				_ = s.RenewCertificate(ownerCtx, c.ID)
@@ -119,7 +127,21 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 				return
 			}
 			item.ID, item.OwnerID = job.cert, owner
+			if allowed, authErr := apiKeyWorkAllowed(ctx, s.pool, "certificate-order", job.id); authErr != nil {
+				return
+			} else if !allowed && status != "succeeded" && status != "failed" && status != "canceled" {
+				_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceling',stage='cleanup',error='API Key 授权已失效',updated_at=now() WHERE id=$1`, job.id)
+				status = "canceling"
+			}
 			ownerCtx := certificateOwnerContext(ctx, owner)
+			if status != "canceling" && status != "succeeded" && status != "failed" && status != "canceled" {
+				delegated, e := s.apiKeyWorkContext(ownerCtx, "certificate-order", job.id)
+				if e != nil {
+					return
+				}
+				ownerCtx = delegated
+			}
+
 			runCtx, cancel := context.WithTimeout(ownerCtx, 90*time.Second)
 			defer cancel()
 			if status == "succeeded" || status == "failed" || status == "canceled" {

@@ -7,10 +7,18 @@ import (
 	"time"
 )
 
+type APIKeyMode string
+
+const (
+	APIKeyReadOnly  APIKeyMode = "read_only"
+	APIKeyReadWrite APIKeyMode = "read_write"
+)
+
 // APIKey exposes metadata only. The verification digest never leaves the store.
 type APIKey struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`
+	Mode        APIKeyMode   `json:"mode"`
 	Prefix      string       `json:"prefix"`
 	CreatorID   string       `json:"-"`
 	CreatorType string       `json:"-"`
@@ -28,11 +36,32 @@ type APIKey struct {
 
 type APIKeyInput struct {
 	Name        string       `json:"name"`
+	Mode        APIKeyMode   `json:"mode"`
 	Permissions []Permission `json:"permissions"`
 	IPAllowlist []string     `json:"ip_allowlist"`
 	ExpiresAt   *time.Time   `json:"expires_at"`
 	Disabled    bool         `json:"disabled"`
 	Revision    int64        `json:"revision"`
+}
+
+// APIKeyPermissions excludes credential minting. Those operations require a session.
+func APIKeyPermissions() []Permission {
+	result := []Permission{}
+	for _, p := range AllPermissions() {
+		if p != PermissionEnrollmentManage {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+func ReadOnlyAPIKeyPermission(p Permission) bool {
+	for _, candidate := range append(DiagnosticPermissions(), PermissionClientAccessRead, PermissionCertificatesRead, PermissionPreferencesRead, PermissionAgentAccessRead, PermissionSecretsRead) {
+		if p == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func DiagnosticPermissions() []Permission {

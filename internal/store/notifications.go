@@ -79,6 +79,9 @@ func (s *Store) SaveNotificationConfiguration(ctx context.Context, c notify.Conf
 	if err != nil {
 		return c, err
 	}
+	if err = recordAPIKeyWork(ctx, tx, "notification-configuration", notificationOwner(ctx)); err != nil {
+		return c, err
+	}
 	return saved, tx.Commit(ctx)
 }
 func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c notify.Configuration) (notify.Configuration, error) {

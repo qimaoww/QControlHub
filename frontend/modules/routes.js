@@ -18,6 +18,7 @@ export const routeModuleNames = Object.freeze({
   "system-bbr": "system-bbr",
   notifications: "notifications",
   settings: "settings",
+  api: "api-management",
   users: "users",
   "my-quota": "users",
 });
@@ -38,7 +39,8 @@ const routeAliases = Object.freeze({
   "settings-cnip": "settings",
   "settings-certificates": "settings",
   "settings-deployment": "settings",
-  "settings-api-keys": "settings",
+  "settings-api-keys": "api",
+  "api-docs": "api",
   "preset-node": "live-config",
   "settings-node": "node-settings",
   "new-config": "archive-config",

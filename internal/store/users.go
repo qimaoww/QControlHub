@@ -119,6 +119,20 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	} else if err != nil {
 		return core.User{}, err
 	}
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		if current.User.Role == core.RoleAdmin || id == scopeForConfig(ctx).OwnerID || update.Role != nil || update.Password != nil || passwordHash != "" {
+			return core.User{}, ErrForbidden
+		}
+		requested := current.User.Permissions
+		if update.Permissions != nil {
+			requested = *update.Permissions
+		}
+		for _, p := range requested {
+			if !core.HasPermission(key.Effective, p) {
+				return core.User{}, ErrForbidden
+			}
+		}
+	}
 	role := current.User.Role
 	disabled := current.User.Disabled
 	displayName := current.User.DisplayName

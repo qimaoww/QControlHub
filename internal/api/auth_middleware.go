@@ -35,6 +35,7 @@ func (s *Server) requireAnyPermission(permissions []core.Permission, next http.H
 func (s *Server) requirePermissions(permissions []core.Permission, anyPermission bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var valid bool
+		mutationCompleted := false
 		request, valid = s.validateSession(w, request)
 		if !valid {
 			return
@@ -44,28 +45,49 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			// The Key receives a redacted representation without those validators.
 			request = request.Clone(request.Context())
 			request.Header.Del("If-None-Match")
-			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request)}
+			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
 			w = response
 			defer func() {
 				status := response.finish()
-				s.recordAudit(request, "api_key.request", k.ID, fmt.Sprintf("%s %s status=%d request_id=%s", request.Method, request.Pattern, status, w.Header().Get("X-Request-ID")))
+				auditRequest := request.WithContext(store.WithoutRequestTransaction(request.Context()))
+				s.recordAudit(auditRequest, "api_key.request", k.ID, fmt.Sprintf("%s %s status=%d request_id=%s", request.Method, request.Pattern, status, w.Header().Get("X-Request-ID")))
 				if status >= 200 && status < 300 {
-					ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), 2*time.Second)
+					ctx, cancel := context.WithTimeout(context.WithoutCancel(auditRequest.Context()), 2*time.Second)
 					defer cancel()
 					_ = s.store.TouchAPIKey(ctx, k.ID)
 				}
 			}()
-			required, allowed := diagnosticRoutes[request.Pattern]
-			if !allowed {
-				writeError(w, 403, "API Key 不允许访问此接口")
+			policy, allowed := apiKeyPolicies[request.Pattern]
+			effective, _ := s.sessionPermissions(request)
+			if !allowed || !policy.allows(k.Mode, effective) {
+				writeError(w, 403, "API Key 模式或权限不允许此操作")
 				return
 			}
-			for _, permission := range required {
-				if !s.sessionAllows(request, permission) {
-					writeError(w, 403, "API Key 未获此读取权限")
-					return
+			// Persist every capability needed for this route, including an any-of
+			// route's actual granted alternative. Body-dependent task permissions
+			// are appended by the store before queuing.
+			required := []core.Permission{}
+			for _, p := range policy.Permissions {
+				if core.HasPermission(effective, p) {
+					required = append(required, p)
 				}
 			}
+			if policy.Write {
+				ctx, finish, err := s.store.BeginAPIKeyMutation(request.Context(), k, required)
+				if err != nil {
+					writeStoreError(w, err)
+					return
+				}
+				request = request.WithContext(ctx)
+				defer func() {
+					if err := finish(mutationCompleted && (response.status == 0 || response.status < 400)); err != nil {
+						response.body.Reset()
+						response.status = 0
+						writeStoreError(response, err)
+					}
+				}()
+			}
+			request = request.WithContext(store.WithAPIKeyAuth(request.Context(), k.ID, required, effective))
 		}
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
@@ -120,6 +142,7 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			return
 		}
 		next.ServeHTTP(w, request)
+		mutationCompleted = true
 	})
 }
 

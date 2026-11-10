@@ -49,27 +49,23 @@ export async function testSettingsAPIKeysRuntime() {
   async function mount(next = session) {
     window.dispatchEvent(new Event('pagehide'));
     document.querySelectorAll('dialog').forEach(box => box.close());
-    document.querySelector('#app').replaceChildren(); history.replaceState(null, '', '#settings');
+    document.querySelector('#app').replaceChildren(); history.replaceState(null, '', '#api');
     startAnalytics({ app: document.querySelector('#app'), session: next });
-    await waitFor(() => document.querySelector('#panel-settings-form'), 'API Key error discarded panel settings');
+    await waitFor(() => next.permissions?.includes('settings.manage') || next.role === 'admin' ? section() : document.querySelector('.a-main'), 'API page structure missing');
   }
   try {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { copied = value; } } });
     await mount();
     assert.ok(section().textContent.includes('无法读取 API Key') && button('创建 Key', section()).disabled, 'initial key failure has no scoped recovery');
-    const settings = document.querySelector('#panel-settings-form');
-    settings.elements.panel_description.value = '不可丢失的面板草稿'; settings.dispatchEvent(new Event('input', { bubbles: true }));
     readError = 0; button('重新读取', section()).click(); await waitFor(() => row('first'), 'API Key retry failed'); await settled();
-    assert.equal(document.querySelector('#panel-settings-form'), settings, 'API Key retry replaced settings form');
-    assert.equal(settings.elements.panel_description.value, '不可丢失的面板草稿', 'API Key retry discarded settings draft');
-    button('检查更新').click(); await waitFor(() => document.querySelector('a[href="https://github.com/qimaoww/QControlHub/releases"]'), 'update check lost release link'); await settled();
-    assert.ok(document.querySelector('.a-main').textContent.includes('发现更新：v-next'), 'update check lost release state');
-    assert.ok(row('first').textContent.includes('2001:db8:1234::/48') && row('first').textContent.includes('192.0.2.10') && row('first').textContent.includes('1 项读取权限'), 'API Key omits source/permission scope');
+    assert.equal(document.querySelector('#panel-settings-form'), null, 'API page duplicated panel settings');
+    assert.ok(row('first').textContent.includes('2001:db8:1234::/48') && row('first').textContent.includes('192.0.2.10') && row('first').textContent.includes('只读'), 'API Key omits source/permission scope');
     assert.ok(row('first').cells[0].textContent.includes('2026') && row('expired').textContent.includes('已过期') && row('disabled').textContent.includes('已停用'), 'key dates/statuses lost');
     assert.equal(row('revoked').querySelector('button'), null, 'revoked key retains mutation controls');
     button('创建 Key', section()).click(); await waitFor(() => form(), 'API Key create form missing');
     input('name', '新建密钥'); input('ip_allowlist', '192.0.2.11\n2001:db8::/32');
     form().elements.namedItem('permission:tasks.read').checked = false;
+    form().elements.namedItem('permission:agents.read').checked = true;
     writeError = true; form().requestSubmit(); await waitFor(() => form()?.textContent.includes('数据已发生变化'), 'key save failure not visible'); await settled();
     assert.equal(form().elements.name.value, '新建密钥', 'key failure discarded draft');
     writeError = false; gate = new Promise(resolve => { release = resolve; });
@@ -104,7 +100,7 @@ export async function testSettingsAPIKeysRuntime() {
     readError = 403; button('重新读取', section()).click(); await waitFor(() => button('创建 Key', section()).disabled, 'denied key read did not disable creation'); await settled();
     assert.equal(section().querySelector('tbody'), null, 'denied key read retained metadata');
     readError = 0; const beforeUser = reads;
-    await mount({ ...session, user_id: 'shared-user', role: 'user', permissions: ['settings.read', 'settings.manage'] });
+    await mount({ ...session, user_id: 'shared-user', role: 'user', permissions: ['settings.read'] });
     assert.equal(section(), undefined, 'ordinary/shared user received administrator keys'); assert.equal(reads, beforeUser, 'ordinary/shared user requested administrator keys');
     gate = new Promise(resolve => { release = resolve; }); const old = reads;
     const mounting = mount(); await waitFor(() => reads > old, 'old account key read did not start');

@@ -66,6 +66,17 @@ func New(dataStore *store.Store, config Config) *Server {
 	}
 	if dataStore != nil {
 		dataStore.SetNotificationTokenPermissions(notificationTokens)
+		creators := []string{}
+		for digest, p := range roleTokens {
+			if p.Role == core.RoleAdmin {
+				creators = append(creators, environmentCreatorID(digest))
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := dataStore.SetAPIKeyEnvironmentCreators(ctx, creators); err != nil {
+			slog.Error("register current API Key creators", "error", err)
+		}
+		cancel()
 	}
 	geoipClient := geoip.New(config.GeoIPHTTPClient)
 	return &Server{

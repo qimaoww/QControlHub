@@ -59,7 +59,8 @@ export async function runStructureLoadingBrowser({ base, mode, fixture, createPa
   for (const [aliases,title] of [
     [['summary','panel-host','traffic-usage','fleet','activity'],'仪表盘'],
     [['enrollment','settings-node'],'节点'],
-    [['settings-engines','settings-basic','settings-runtime','settings-data','settings-cnip','settings-certificates','settings-deployment','settings-api-keys','settings-unknown'],'面板设置'],
+    [['settings-api-keys'],'API'],
+    [['settings-engines','settings-basic','settings-runtime','settings-data','settings-cnip','settings-certificates','settings-deployment','settings-unknown'],'面板设置'],
     [['settings-notify'],'通知'], [['preset-node','agents','agent-config','access-control','access-control-all'],'实时配置'],
     [['new-config','templates','archive'],'配置档案'], [['traffic-new','traffic-all'],'流量'],
   ]) for (const alias of aliases) {

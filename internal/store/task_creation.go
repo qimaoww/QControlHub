@@ -32,7 +32,7 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 		return core.Task{}, err
 	}
 	if !task.Reused {
-		s.signalTaskReady(task.AgentID)
+		s.signalTaskReadyAfterCommit(ctx, task.AgentID)
 	}
 	return task, nil
 }
@@ -463,7 +463,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		            THEN 'official' ELSE COALESCE($7,'') END)
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
-		  AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
+		  AND api_key_id=$12 AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
 		  AND shared_traffic_id=$10 AND shared_instance=$11
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
@@ -471,7 +471,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }()), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
@@ -514,10 +514,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err != nil {
 		return core.Task{}, err
 	}
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		key.Permissions = core.NormalizePermissions(append(key.Permissions, taskAPIKeyPermissions(request.Action, false)...))
+		ctx = context.WithValue(ctx, apiKeyAuthContextKey{}, key)
+	}
+	apiKeyID, apiKeyPermissions := apiKeyTaskIdentity(ctx)
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing,shared_instance)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing,shared_instance,api_key_id,api_key_permissions)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance, apiKeyID, apiKeyPermissions)
 	if err != nil {
 		return core.Task{}, taskInsertError(err, task)
 	}

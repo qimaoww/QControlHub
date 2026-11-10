@@ -50,7 +50,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 	return err
 }
 
-const unauthorizedTaskPrincipalSQL = `(t.owner_id<>'' AND NOT starts_with(t.owner_id,'token_')
+const unauthorizedTaskPrincipalSQL = unauthorizedTaskAPIKeySQL + ` OR (t.owner_id<>'' AND NOT starts_with(t.owner_id,'token_')
 	AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=t.owner_id))
 	OR EXISTS(SELECT 1 FROM configs c WHERE c.id=t.config_id AND c.owner_id<>''
 		AND NOT starts_with(c.owner_id,'token_') AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=c.owner_id))

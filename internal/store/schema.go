@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 95
+const currentSchemaVersion = 96
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1108,6 +1108,20 @@ CREATE TABLE IF NOT EXISTS admin_api_keys (
  revoked_at timestamptz,
  revision bigint NOT NULL DEFAULT 1
 );
+ALTER TABLE admin_api_keys ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'read_only'
+ CHECK(mode IN ('read_only','read_write'));
+CREATE TABLE IF NOT EXISTS api_key_environment_creators (id text PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS api_key_work (
+ kind text NOT NULL,
+ work_id text NOT NULL,
+ api_key_id text NOT NULL REFERENCES admin_api_keys(id) ON DELETE CASCADE,
+ permissions jsonb NOT NULL,
+ PRIMARY KEY(kind,work_id)
+);
+CREATE INDEX IF NOT EXISTS api_key_work_target_idx ON api_key_work(work_id,kind);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS api_key_id text NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS api_key_permissions jsonb NOT NULL DEFAULT '[]'::jsonb;
+
 CREATE INDEX IF NOT EXISTS admin_api_keys_creator_idx ON admin_api_keys(creator_type,creator_id,created_at DESC);
 
 CREATE OR REPLACE FUNCTION revoke_admin_api_keys_for_user() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -1117,7 +1131,7 @@ BEGIN
    WHERE creator_type='user' AND creator_id=OLD.id AND revoked_at IS NULL;
   RETURN OLD;
  END IF;
- IF NEW.disabled OR NEW.role<>'admin' THEN
+ IF NEW.disabled OR NEW.role<>OLD.role OR NEW.auth_revision<>OLD.auth_revision THEN
   UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
    WHERE creator_type='user' AND creator_id=NEW.id AND revoked_at IS NULL;
  END IF;

@@ -11,6 +11,13 @@ import (
 // Check durable permissions while holding the user lock. API middleware alone
 // cannot authorize work that may execute after a role or permission change.
 func requireTaskPermission(ctx context.Context, executor storeExecutor, action core.Action, transition bool) error {
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		for _, p := range taskAPIKeyPermissions(action, transition) {
+			if !core.HasPermission(key.Effective, p) {
+				return fmt.Errorf("%w: API Key 缺少任务权限 %s", ErrForbidden, p)
+			}
+		}
+	}
 	if scopeForConfig(ctx).Admin {
 		return nil
 	}
@@ -85,8 +92,22 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 // serialize this check with deployment ownership changes.
 const unauthorizedHostConfigTaskSQL = `NOT t.shared_instance AND (t.action IN ('read-config','read-managed-config')
 		OR (t.action='import-existing' AND t.status='pending'))
-	AND EXISTS(SELECT 1 FROM panel_users reader WHERE reader.id=t.owner_id AND reader.role<>'admin')
+	AND (t.api_key_id<>'' OR EXISTS(SELECT 1 FROM panel_users reader WHERE reader.id=t.owner_id AND reader.role<>'admin'))
 	AND (NOT EXISTS(SELECT 1 FROM agents a WHERE a.id=t.agent_id AND a.owner_id=t.owner_id)
 		OR EXISTS(SELECT 1 FROM agent_engine_ownership state
 			WHERE state.agent_id=t.agent_id AND state.engine=t.engine
 				AND (state.config_uncertain OR (state.owner_id<>t.owner_id AND state.config_id<>''))))`
+
+func taskAPIKeyPermissions(action core.Action, transition bool) []core.Permission {
+	result := []core.Permission{core.PermissionTasksExecute}
+	if transition || action.AgentLevel() || action == core.ActionInstall || action == core.ActionUninstall || action == core.ActionStart || action == core.ActionStop || action == core.ActionRestart {
+		result = append(result, core.PermissionAgentsManage)
+	}
+	if action == core.ActionReadConfig || action == core.ActionReadManagedConfig {
+		result = append(result, core.PermissionAgentConfigRead)
+	}
+	if action == core.ActionDeploy || action == core.ActionImportExisting {
+		result = append(result, core.PermissionAgentConfigWrite)
+	}
+	return result
+}

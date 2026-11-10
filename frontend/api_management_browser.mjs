@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+
+// Uses the existing native Chromium driver and real password/CSRF/PostgreSQL fixture.
+export async function runAPIManagementBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api }) {
+  const page = await createPage();
+  const identity = await login(page, 'browser-admin');
+  await call('Page.navigate', { url: `${base}/#settings-api-keys` }, page);
+  await wait(page, "document.querySelector('.a-top h1')?.textContent==='API' && [...document.querySelectorAll('.a-main button')].some(b=>b.textContent==='创建 Key'&&!b.disabled)");
+  assert.equal(await evaluate(page, "document.querySelectorAll('#panel-settings-form').length"), 0);
+  assert.ok(await evaluate(page, "!!document.querySelector('.a-nav-link[href=\"#api\"]')"));
+  await screenshot(page, 'api-empty');
+  await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='创建 Key').click()");
+  await wait(page, "!!document.querySelector('dialog[open] form')");
+  await evaluate(page, `(() => {const form=document.querySelector('dialog[open] form'); form.elements.name.value='集成测试 API 管理'; form.elements.mode.value='read_write'; form.elements.mode.dispatchEvent(new Event('change',{bubbles:true}));for(const permission of ['configs.read','configs.write'])form.elements.namedItem('permission:'+permission).checked=true;})()`);
+  await screenshot(page, 'api-create');
+  await evaluate(page, "document.querySelector('dialog[open] form').requestSubmit()");
+  await wait(page, "!!document.querySelector('dialog[open] [data-sensitive]')");
+  await evaluate(page, "window.__managementKey=document.querySelector('dialog[open] [data-sensitive]').textContent;document.querySelector('dialog[open] [aria-label=关闭]').click()");
+  await wait(page, "!document.querySelector('dialog[open]') && document.querySelector('.a-main tbody')?.textContent.includes('集成测试 API 管理')");
+  const result = await evaluate(page, `(async()=>{
+    const key=window.__managementKey;
+    const invoke=async(method,path,body)=>{const response=await fetch('/api/v1'+path,{method,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return {status:response.status,body:await response.json()};};
+    const own=await invoke('GET','/api-key');
+    const created=await invoke('POST','/configs',{name:'浏览器 API 档案',engine:'mihomo',content:'mixed-port: 21451\\nsecret: isolated-test-secret\\n'});
+    const saved=await invoke('PUT','/configs/'+created.body.id,{...created.body,name:'浏览器 API 已保存',content:created.body.content.replace('21451','21452')});
+    const listing=await invoke('GET','/configs');
+    const denied=await invoke('POST','/users',{});
+    window.__managementConfig=saved.body.id;
+    return {mode:own.body.mode,created:created.status,saved:saved.status,denied:denied.status,readback:listing.body.some(c=>c.name==='浏览器 API 已保存'&&c.content.includes('21452')&&!c.content.includes('isolated-test-secret'))};
+  })()`);
+  assert.deepEqual(result, { mode: 'read_write', created: 201, saved: 200, denied: 403, readback: true });
+  await evaluate(page, "document.querySelectorAll('.a-toast-close').forEach(b=>b.click())");
+  await screenshot(page, 'api-ready');
+  const keyList = await api(page, identity, 'GET', '/settings/api-keys');
+  assert.equal(keyList.items.length, 1);
+  await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='编辑授权').click()");
+  await wait(page, "!!document.querySelector('dialog[open] form')");
+  assert.equal(await evaluate(page, "document.querySelector('dialog[open] form').elements.mode.value"), 'read_write');
+  await screenshot(page, 'api-edit');
+  await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
+  await call('Page.navigate', { url: `${base}/#api-docs` }, page);
+  await wait(page, "document.querySelector('.a-top h1')?.textContent==='API' && document.querySelectorAll('[data-operation]').length>100");
+  assert.equal(await evaluate(page, `document.querySelectorAll('.a-nav-link[href="#api-docs"]').length`), 0);
+  assert.equal(await evaluate(page, `document.querySelector('.a-nav-link[href="#api"]').getAttribute("aria-current")`), 'page');
+  await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='密钥').click()");
+  assert.ok(await evaluate(page, "[...document.querySelectorAll('.a-main button')].some(b=>b.textContent==='创建 Key')"));
+  await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(b=>b.textContent==='接口规范').click()");
+  await screenshot(page, 'api-docs-list');
+  await evaluate(page, "document.querySelector('[name=api-filter]').value='/configs';document.querySelector('[name=api-filter]').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.a-main details').open=true");
+  await screenshot(page, 'api-docs');
+  assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), 'API docs overflow');
+  if (mode === 'desktop') {
+    for (const [width,height] of [[1920,1080],[3840,2160],[1280,900],[820,900]]) {
+      await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:false }, page);
+      await screenshot(page, `api-docs-${width}`);
+      assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `API docs overflow ${width}`);
+    }
+    await call('Emulation.setDeviceMetricsOverride', { width:1440,height:1000,deviceScaleFactor:1,mobile:false }, page);
+  }
+  await api(page, identity, 'DELETE', `/settings/api-keys/${keyList.items[0].id}`);
+  assert.equal(await evaluate(page, "fetch('/api/v1/configs',{headers:{Authorization:'Bearer '+window.__managementKey}}).then(r=>r.status)"), 401);
+  await evaluate(page, "delete window.__managementKey;delete window.__managementConfig");
+}

@@ -253,6 +253,27 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 }
 
 func (s *Store) openTaskExecutionTx(ctx context.Context, tx pgx.Tx, task *core.Task, features []string, claiming bool) error {
+	// A creator update revokes keys before committing. Holding the credential row
+	// serializes dispatch with revocation without reversing user/Agent row locks.
+	rows, err := tx.Query(ctx, `SELECT k.id FROM admin_api_keys k WHERE k.id IN(SELECT t.api_key_id FROM tasks t WHERE t.id=$1
+ UNION SELECT w.api_key_id FROM api_key_work w WHERE w.work_id=$1 AND starts_with(w.kind,'certificate-sync-task:')) ORDER BY k.id FOR SHARE OF k`, task.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	var denied bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1 AND (`+unauthorizedTaskAPIKeySQL+`))`, task.ID).Scan(&denied); err != nil {
+		return err
+	}
+	if denied {
+		return ErrForbidden
+	}
 	if err := s.openCertificateExecution(ctx, tx, task, features, claiming); err != nil {
 		return err
 	}

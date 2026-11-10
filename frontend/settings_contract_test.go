@@ -32,7 +32,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	for _, required := range []string{
 		`["settings", "面板设置", "settings", "settings.read"]`,
 		`"settings-engines": "settings"`, `"settings-data": "settings"`,
-		`"settings-certificates": "settings"`, `"settings-api-keys": "settings"`,
+		`"settings-certificates": "settings"`, `"settings-api-keys": "api"`,
 		`applyAppearance(result)`, `document.documentElement.style.fontSize`,
 	} {
 		if !strings.Contains(appContent, required) {
@@ -40,7 +40,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		}
 	}
 	settingsContent := string(mustReadFrontendFile(t, "analytics/settings.js"))
-	for _, group := range []string{"基础设置", "默认内核能力", "节点上报", "任务", "日志", "数据清理", "证书与地址库", "部署状态", "API Key"} {
+	for _, group := range []string{"基础设置", "默认内核能力", "节点上报", "任务", "日志", "数据清理", "证书与地址库", "部署状态", "API"} {
 		if !strings.Contains(settingsContent, `section("`+group+`"`) {
 			t.Errorf("native settings omits group %q", group)
 		}
