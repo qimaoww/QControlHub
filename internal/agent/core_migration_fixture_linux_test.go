@@ -196,7 +196,12 @@ case "$command" in
     exit 1
     ;;
   show)
-    cat "$state/$service.exec-start"
+    case "$*" in
+      *--property=LoadState*)
+        if [ -f "$active_file" ]; then printf 'loaded\n'; else printf 'not-found\n'; fi
+        ;;
+      *) cat "$state/$service.exec-start" ;;
+    esac
     ;;
   stop)
     if [ "$service" = qagent-shadowsocks-rust.service ] && [ -f "$state/fail-ssrust-rollback-stop" ]; then

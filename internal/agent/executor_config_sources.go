@@ -124,6 +124,10 @@ func (e *Executor) readExistingConfigPlan(ctx context.Context, engine core.Engin
 		}
 	}
 	plan.managedContent = contentIfEmpty(plan.managedContent, content)
+	plan.auxiliary, err = inspectImportAuxiliary(ctx, e.serviceManager(), engine, existing, plan)
+	if err != nil {
+		return coreImportPlan{}, fmt.Errorf("inspect existing auxiliary service: %w", err)
+	}
 	if err := e.validateImportPlanSnapshot(ctx, engine, validationSpec, plan); err != nil {
 		return coreImportPlan{}, fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
 	}

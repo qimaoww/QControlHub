@@ -219,12 +219,32 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	}
 	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed}
 	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing}
-	snapshot, err := fixture.executor.readExistingConfig(context.Background(), core.EngineSingBox, fixture.managed, fixture.existing)
+	previousConfig, previousCertificates := ouSBConfigPath, ouSBCertificateRoot
+	ouSBConfigPath, ouSBCertificateRoot = fixture.existing.ConfigPath, root
+	t.Cleanup(func() { ouSBConfigPath, ouSBCertificateRoot = previousConfig, previousCertificates })
+	helper := "ou-sb-firewall.service"
+	writeMigrationServiceState(t, fixture.stateDirectory, helper, "active", "enabled")
+	plan, err := fixture.executor.readExistingConfigPlan(context.Background(), core.EngineSingBox, fixture.managed, fixture.existing)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.executor.Execute(context.Background(), core.Task{Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: snapshot}); err != nil {
+	if plan.auxiliary.name != helper {
+		t.Fatal("generic certificate import omitted the existing OU-SB helper relationship")
+	}
+	writeMigrationServiceState(t, fixture.stateDirectory, helper, "inactive", "enabled")
+	request := core.Task{Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: plan.managedContent, ImportSourceDigest: plan.snapshotDigest}
+	if _, err := fixture.executor.Execute(context.Background(), request); err == nil {
+		t.Fatal("changed helper state reused the earlier import snapshot")
+	}
+	writeMigrationServiceState(t, fixture.stateDirectory, helper, "active", "enabled")
+	if _, err := fixture.executor.Execute(context.Background(), request); err != nil {
 		t.Fatal(err)
+	}
+	for suffix, expected := range map[string]string{".active": "inactive", ".persistent": "0", ".runtime": "0"} {
+		value, err := os.ReadFile(filepath.Join(fixture.stateDirectory, helper+suffix))
+		if err != nil || strings.TrimSpace(string(value)) != expected {
+			t.Fatalf("helper %s did not migrate: %s %v", suffix, value, err)
+		}
 	}
 	state, err := readImportResourceState(fixture.markerPrefix, core.EngineSingBox, fixture.managed)
 	if err != nil {

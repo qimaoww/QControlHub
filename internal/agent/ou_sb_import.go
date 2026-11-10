@@ -86,6 +86,22 @@ func prepareOUSBSingBoxImport(ctx context.Context, manager *ServiceManager, exis
 	return plan, nil
 }
 
+// Keep the established OU-SB helper relationship when the generic resource
+// planner replaces its former fixed certificate-name mapping. A different
+// service using the same certificate does not acquire control of this helper.
+func inspectImportAuxiliary(ctx context.Context, manager *ServiceManager, engine core.Engine, existing EngineSpec, plan coreImportPlan) (coreMigrationAuxiliaryService, error) {
+	if engine != core.EngineSingBox || filepath.Clean(existing.ConfigPath) != filepath.Clean(ouSBConfigPath) ||
+		(existing.Service != "sing-box.service" && existing.Service != "sing-box") {
+		return coreMigrationAuxiliaryService{}, nil
+	}
+	for _, dependency := range plan.dependencies {
+		if pathWithin(dependency.Source, ouSBCertificateRoot) || pathWithin(dependency.Resolved, ouSBCertificateRoot) {
+			return inspectOUSBAuxiliaryService(ctx, manager)
+		}
+	}
+	return coreMigrationAuxiliaryService{}, nil
+}
+
 func rewriteOUSBSingBoxResources(content string, replacements map[string]string) (string, map[string]bool, error) {
 	decoder := json.NewDecoder(strings.NewReader(content))
 	decoder.UseNumber()

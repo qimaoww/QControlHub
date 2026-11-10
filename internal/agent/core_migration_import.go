@@ -87,6 +87,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			AuxiliaryService: resourcePlan.auxiliary.name, AuxiliaryEnableState: resourcePlan.auxiliary.enableState,
 			AuxiliaryInitialState: resourcePlan.auxiliary.initialState,
 		},
+		true,
 	)
 	if err != nil {
 		return "", fmt.Errorf("persist migration intent before staging managed files: %w", err)

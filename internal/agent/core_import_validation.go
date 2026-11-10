@@ -177,6 +177,7 @@ func (e *Executor) validateImportPlanSnapshot(ctx context.Context, engine core.E
 func importPlanFingerprint(plan coreImportPlan) string {
 	var value strings.Builder
 	value.WriteString(plan.managedContent)
+	value.WriteString("\x00" + plan.auxiliary.name + "\x00" + plan.auxiliary.enableState + "\x00" + plan.auxiliary.initialState)
 	for _, resource := range plan.resources {
 		value.WriteString("\x00" + resource.source + "\x00" + resource.digest + "\x00" + resource.identity)
 	}
