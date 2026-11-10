@@ -43,6 +43,9 @@ func prepareSSRustImport(existing EngineSpec, content string, targets ...EngineS
 	if err != nil {
 		return coreImportPlan{}, err
 	}
+	if value, present := root["manager_address"]; present && value != nil && value != "" {
+		return coreImportPlan{}, errors.New("SS Rust manager_address requires a verified auxiliary manager and socket mapping")
+	}
 	global, err := ssRustImportACL(root)
 	if err != nil {
 		return coreImportPlan{}, err

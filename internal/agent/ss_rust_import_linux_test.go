@@ -93,7 +93,7 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	if err := plan.cleanup(); err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []string{`{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`, `{"servers":[],"shadowsocks":[]}`, `{"server_port":20001,"servers":[]}`, `{"servers":null}`, `{"servers":{}}`, `{"shadowsocks":false}`, `{"servers":[]}`, `{"server":"::","servers":[{}]}`} {
+	for _, invalid := range []string{`{"manager_address":"/run/external-manager.sock"}`, `{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`, `{"servers":[],"shadowsocks":[]}`, `{"server_port":20001,"servers":[]}`, `{"servers":null}`, `{"servers":{}}`, `{"shadowsocks":false}`, `{"servers":[]}`, `{"server":"::","servers":[{}]}`} {
 		if _, err := prepareSSRustImport(spec, invalid); err == nil {
 			t.Fatalf("unsupported import accepted: %s", invalid)
 		}
