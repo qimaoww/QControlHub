@@ -66,7 +66,7 @@ func taskConstraintSet(t *testing.T, db *Store, ctx context.Context) []string {
 
 func assertTaskConstraintSet(t *testing.T, db *Store, ctx context.Context) {
 	t.Helper()
-	want := []string{"tasks_action_check", "tasks_engine_check", "tasks_install_if_missing_check", "tasks_status_check"}
+	want := []string{"tasks_action_check", "tasks_engine_check", "tasks_install_if_missing_check", "tasks_panel_failure_check", "tasks_status_check"}
 	if got := taskConstraintSet(t, db, ctx); !reflect.DeepEqual(got, want) {
 		t.Fatalf("task constraints=%v, want %v", got, want)
 	}
@@ -237,7 +237,7 @@ func TestTaskConstraintsMigrationRollbackAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	names = taskConstraintSet(t, db, ctx)
-	want := []string{"tasks_action_check", "tasks_custom_guard", "tasks_engine_check", "tasks_install_if_missing_check", "tasks_status_check"}
+	want := []string{"tasks_action_check", "tasks_custom_guard", "tasks_engine_check", "tasks_install_if_missing_check", "tasks_panel_failure_check", "tasks_status_check"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("constraints after retry = %v, want %v", names, want)
 	}
@@ -344,6 +344,8 @@ func TestTaskConstraintsNodeTaskLifecycleAndRejections(t *testing.T) {
 	}
 	for _, test := range []struct{ name, action, engine, extra, constraint string }{
 		{"kernel_requires_engine", "status", "", "", "tasks_engine_check"},
+		{"panel_failure_cannot_dispatch", "panel-failure", "", "", "tasks_panel_failure_check"},
+		{"missing_real_agent", "status", "mihomo", ",agent_id=NULL", "tasks_panel_failure_check"},
 		{"unknown_action", "unknown", "mihomo", "", "tasks_action_check"},
 		{"unknown_engine", "status", "unknown", "", "tasks_engine_check"},
 		{"invalid_status", "status", "mihomo", ",status='unknown'", "tasks_status_check"},

@@ -60,7 +60,7 @@ func TestWorkspaceClientExportUsesCurrentWorkspaceAndOwner(t *testing.T) {
 	bob.call("GET", workspaceExportPath(base, current), nil, 409, nil)
 	latest, _ := db.AgentConfig(store.WithConfigScope(ctx, alice.userID, false), agent.ID, core.EngineMihomo)
 	afterTasks, _ := db.ListTasks(ctx, "", 100)
-	if latest.Version != saved.Version || latest.Content != saved.Content || len(tasks) != len(afterTasks) {
+	if latest.Version != saved.Version || latest.Content != saved.Content || len(executionTasks(t, tasks)) != len(executionTasks(t, afterTasks)) {
 		t.Fatal("read export mutated configuration or created tasks")
 	}
 	// Drop all write and execution permissions while retaining this exact owner.

@@ -10,14 +10,14 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
+func TestManagedSafetyIssueBlocksEveryCoreAction(t *testing.T) {
 	t.Parallel()
 	reason := "multiple active sing-box services were detected"
 	executor := &Executor{
 		Specs: map[core.Engine]EngineSpec{
 			core.EngineSingBox: {Binary: "/unused/sing-box", ConfigPath: "/unused/config.json", Service: "qagent-sing-box.service"},
 		},
-		ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: reason},
+		ManagedSafetyIssues: map[core.Engine]string{core.EngineSingBox: reason},
 	}
 	for _, action := range []core.Action{
 		core.ActionValidate, core.ActionDeploy, core.ActionStart, core.ActionStop,
@@ -28,7 +28,7 @@ func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
 			_, err := executor.Execute(context.Background(), core.Task{
 				Action: action, Engine: core.EngineSingBox, ConfigContent: `{"inbounds":[]}`,
 			})
-			if err == nil || !strings.Contains(err.Error(), "core tasks are disabled") || !strings.Contains(err.Error(), reason) {
+			if err == nil || !strings.Contains(err.Error(), "target is unsafe") || !strings.Contains(err.Error(), reason) {
 				t.Fatalf("Execute(%s) error = %v", action, err)
 			}
 		})

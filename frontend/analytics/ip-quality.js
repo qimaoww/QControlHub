@@ -88,6 +88,7 @@ export function ipQualityPage(ctx) {
       const link = `/api/v1/ip-quality/${pathID(report.task_id)}/archives/${archive.family}`;
       const preview = `${link}?layout=aligned`;
       const update = (image, failed) => {
+        if (failed && !state.failed) void ctx.recordFailure?.(Object.assign(new Error(`报告图片加载失败：${agent.name} · IPv${archive.family} · ${report.task_id}；浏览器未提供具体网络或图片解码原因。`),{agentID:agent.id,resource:preview}), "IP 质量报告图片", "image_loading");
         state.failed = failed;
         if (!failed && image.naturalWidth && image.naturalHeight) {
           state.width = image.naturalWidth; state.height = image.naturalHeight;

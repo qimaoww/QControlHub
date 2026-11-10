@@ -77,7 +77,7 @@ exec tail -n 0 -f "$QCH_TEST_JOURNAL_FEED"
 			}()
 
 			content := `{"log":{"level":"info","timestamp":true}}`
-			if err := collector.PrepareImportedSingBoxSource(context.Background(), nil, content); err != nil {
+			if err := collector.PrepareManagedSingBoxSource(context.Background(), nil, content); err != nil {
 				t.Fatal(err)
 			}
 			line := `{"MESSAGE":"startup after ready","_SYSTEMD_UNIT":"qagent-sing-box.service","PRIORITY":"6","__CURSOR":"fixture-entry-cursor"}` + "\n"

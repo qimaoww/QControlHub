@@ -21,7 +21,7 @@ export async function testNativeUsersRuntime() {
     {id:'other-admin',username:'other-admin',role:'admin'},
   ];
   const writes=[];
-  let failure='',held=false,release;
+  let failure='',held=false,release,retainedFailures=0;
   const reply=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
   globalThis.fetch=async(url,options={})=>{
     if(!String(url).startsWith('/api/v1'))return nativeFetch(url,options);
@@ -29,6 +29,10 @@ export async function testNativeUsersRuntime() {
     if(path==='/auth/session')return reply(session);
     if(path==='/settings')return reply({});
     if(path==='/users'&&method==='GET')return reply(users);
+    if(path==='/tasks/failures'&&method==='POST'){
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'),session.csrf_token,'失败留存缺少 CSRF');
+      return reply({id:`fixture-failure-${++retainedFailures}`});
+    }
     if(method==='POST'||method==='PUT'){
       assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'),session.csrf_token,'账号写入缺少 CSRF');
       const body=JSON.parse(options.body||'{}');writes.push({path,method,body});

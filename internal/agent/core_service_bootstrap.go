@@ -40,7 +40,7 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 	if !ok || spec != defaultSpec {
 		return nil
 	}
-	status, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+	status, err := validateManagedServiceTarget(ctx, engine, spec, manager)
 	if err != nil {
 		return fmt.Errorf("refusing to replace an unrecognized managed %s service: %w", engine, err)
 	}
@@ -67,7 +67,7 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 			}
 			return err
 		}
-		status, err = validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+		status, err = validateManagedServiceTarget(ctx, engine, spec, manager)
 		if err != nil || status == "not-found" {
 			if err == nil {
 				err = errors.New("service remains unavailable after bootstrap")
@@ -270,14 +270,14 @@ func runCoreBootstrapCommand(ctx context.Context, executable string, arguments, 
 	command := exec.CommandContext(ctx, executable, arguments...)
 	command.Env = append([]string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}, environment...)
 	configureCommand(command)
-	output := &boundedOutput{limit: 64 << 10}
+	output := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2}
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {
 		message := strings.TrimSpace(strings.ToValidUTF8(output.String(), "�"))
 		if message == "" {
 			message = err.Error()
 		}
-		return fmt.Errorf("install managed core service: %s", message)
+		return fmt.Errorf("install managed core service: %w; %s", err, message)
 	}
 	return nil
 }

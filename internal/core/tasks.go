@@ -132,12 +132,14 @@ type TaskRequest struct {
 }
 
 type TaskResultRequest struct {
-	HostPorts      *HostPortObservation  `json:"host_ports,omitempty"`
-	InstanceStatus *SharedInstanceStatus `json:"instance_status,omitempty"`
-	LeaseID        string                `json:"lease_id"`
-	Success        bool                  `json:"success"`
-	Output         string                `json:"output,omitempty"`
-	Error          string                `json:"error,omitempty"`
-	TrafficSettled bool                  `json:"traffic_settled,omitempty"`
-	IPQuality      *IPQualityResult      `json:"ip_quality,omitempty"`
+	ExecutedAttempt  int                   `json:"executed_attempt,omitempty"`
+	DiagnosticDigest string                `json:"diagnostic_digest,omitempty"`
+	HostPorts        *HostPortObservation  `json:"host_ports,omitempty"`
+	InstanceStatus   *SharedInstanceStatus `json:"instance_status,omitempty"`
+	LeaseID          string                `json:"lease_id"`
+	Success          bool                  `json:"success"`
+	Output           string                `json:"output,omitempty"`
+	Error            string                `json:"error,omitempty"`
+	TrafficSettled   bool                  `json:"traffic_settled,omitempty"`
+	IPQuality        *IPQualityResult      `json:"ip_quality,omitempty"`
 }

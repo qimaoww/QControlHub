@@ -31,18 +31,57 @@ const legacyMessages = {
 
 export function errorMessage(value, status = 0) {
   const message = typeof value === "string" ? redactDiagnostic(value.trim()) : "";
-  if (Object.hasOwn(legacyMessages, message)) return legacyMessages[message];
+  if (Object.hasOwn(legacyMessages, message)) return `${legacyMessages[message]}\n原始错误：${message}`;
   if (/\p{Script=Han}/u.test(message)) return message;
-  return statusMessages[status] || "操作失败，请稍后重试；若持续失败，请查看任务详情或联系管理员。";
+  const summary = statusMessages[status] || "操作未完成，请查看诊断详情。";
+  return message ? `${summary}\n原始错误：${message}` : `${summary}\n来源未返回具体原因。`;
+}
+
+export function errorDiagnostic(error, seen = new Set()) {
+  if (error == null || seen.has(error)) return "";
+  if (typeof error !== "object") return redactDiagnostic(error);
+  seen.add(error);
+  return redactDiagnostic([error.message || String(error), error.stack?.replace(`${error.name || "Error"}: ${error.message}`, "").trim(),
+    error.cause && `原因：${errorDiagnostic(error.cause, seen)}`,
+    ...(Array.isArray(error.errors) ? error.errors.map(item => errorDiagnostic(item, seen)) : []),
+  ].filter(Boolean).join("\n"));
 }
 
 // Preserve failure stages and field locations while masking secret material,
 // including historical output returned by Agents predating the fix.
 export function redactDiagnostic(value) {
-  return String(value ?? "")
+  return redactCredentialContainers(String(value ?? ""))
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[redacted private PEM]")
+    .replace(/\bBearer\s+[a-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/((?:["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)/gim, "$1[redacted]")
     .replace(/((?:["']?(?:pass|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|psk|decryption|secret|token|credential|api[-_]?key|webhook[-_]?url|authorization|cookie|uuid|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:\[redacted(?: private PEM)?\]|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\]]+)/gi, "$1[redacted]")
+    .replace(/\bBearer\s+[a-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/qch_key_[A-Za-z0-9_-]{43}/g, "[redacted]")
+    .replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^\s/@]+@/g, "$1[redacted]@")
+    .replace(/([?&](?:token|key|api_key|secret|password|access_token)=)[^\s&#"']+/gi, "$1[redacted]")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "�")
     .replace(/(read certificate\/key \/var\/lib\/qcontrolhub-mihomo(?:-shr_[a-f0-9]+)?\/)[A-Za-z0-9_-]{43}(?=["'\s]|$)/g, "$1[redacted]");
+}
+
+function redactCredentialContainers(value) {
+  const matches = [...value.matchAll(/["']?(?:passwords?|private[-_]?keys?|secrets?|tokens?|credentials?|short[-_]?ids?)["']?\s*[:=]\s*([\[{])/gim)];
+  for (const match of matches.reverse()) {
+    const start = match.index + match[0].length - 1;
+    if (value.slice(start).startsWith("[redacted")) continue;
+    let depth = 0, quote = false, escaped = false, end = start;
+    for (; end < value.length; end++) {
+      const character = value[end];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quote = false;
+      } else if (character === '"') quote = true;
+      else if (character === '[' || character === '{') depth++;
+      else if ((character === ']' || character === '}') && --depth === 0) { end++; break; }
+    }
+    value = value.slice(0,start) + '"[redacted]"' + value.slice(end);
+  }
+  return value;
 }
 
 export function diagnosticError(value) {
@@ -58,7 +97,7 @@ export function diagnosticError(value) {
     [/GitHub API.*rate limit.*(?:exhausted|exceeded)/i, "GitHub API 请求额度已耗尽，请按下方提示的重置时间重试；加速服务可能共享上游额度。"],
     [/(?:GitHub API metadata|release download) returned HTTP 404/i, "GitHub Release 或下载资源不存在，请检查所选核心、版本及发布来源。"],
     [/downloaded release asset (?:SHA-256|size) does not match/i, "下载资源校验失败，安装已中止。请检查发布资源完整性与下载通道后重试。"],
-    [/context canceled/i, "操作已取消。"],
+    [/context canceled/i, "操作被中断；请根据下方记录核对原因与最终结果。"],
     [/GitHub download network failure/i, "GitHub 下载网络故障。请根据下方直连与加速结果检查 DNS 和 HTTPS 出站；若两边解析均失败，先修复节点 DNS。"],
     [/stable core installation failed/i, "稳定版内核安装失败，未继续校验或部署配置。请检查安装错误后重试；已有内核不会自动切换版本。"],
     [/preset-auto-install-v2/i, "Agent 版本不支持自动安装，请到节点设置升级 Agent 后重新提交。断线前的执行结果可能需要核对。"],
@@ -96,10 +135,9 @@ export async function requestJSON(url, options, {
   onUnauthorized = () => {},
 } = {}) {
   const assertCurrent = () => {
-    if (!isCurrent()) throw new DOMException("Account changed", "AbortError");
+    if (!isCurrent()) throw Object.assign(new DOMException("Account changed", "AbortError"), {intentionalCancellation:true});
   };
-  const canceled = (cause) => cause?.name !== "TimeoutError"
-    && (cause?.name === "AbortError" || options?.signal?.aborted);
+  const canceled = () => options?.signal?.aborted && options.signal.reason?.name !== "TimeoutError";
   let response;
   // Validators are opt-in and belong to an exact in-memory representation.
   // Never let a bodyless 304 stand in for a value the caller no longer owns.
@@ -112,14 +150,14 @@ export async function requestJSON(url, options, {
   } catch (cause) {
     assertCurrent();
     // Navigation cancellation must remain silent and retain its identity.
-    if (canceled(cause)) throw cause;
+    if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
     const message = readOnly ? cause?.name === "TimeoutError"
       ? "读取超时，请检查网络后重试。"
       : "无法读取数据，请检查网络和面板地址后重试。"
       : cause?.name === "TimeoutError"
       ? "请求超时，请检查网络；若刚提交了操作，请刷新确认结果，避免重复提交。"
       : "无法连接服务器，请检查网络和面板地址；若刚提交了操作，请刷新确认结果，避免重复提交。";
-    throw new Error(message, { cause });
+    throw Object.assign(new Error(`${message}\n原始错误：${errorDiagnostic(cause)}`, { cause }), { stage: "transport", outcomeUnknown: !readOnly });
   }
   assertCurrent();
   if (response.status === 304 && validator) {
@@ -127,30 +165,33 @@ export async function requestJSON(url, options, {
     return validator.value;
   }
   if (!response.ok) {
-    // Rendering login aborts the route signal. Do not read the response body
-    // afterward: that would replace the authentication failure with AbortError.
-    if (response.status === 401) {
-      const error = new Error(isLogin ? errorMessage("invalid admin token") : statusMessages[401]);
-      error.status = response.status;
-      if (!isLogin) onUnauthorized(error.message);
-      throw error;
-    }
-    let body;
+    let body, raw = "", parseError;
     try {
-      body = await response.json();
+      if (response.text) {
+        raw = await responseDiagnosticText(response);
+        try { body = JSON.parse(raw); } catch (cause) { parseError = cause; }
+      } else if(response.status!==401) body = await response.json();
     } catch (cause) {
       assertCurrent();
-      if (canceled(cause)) throw cause;
-      // A proxy may return HTML instead of JSON.
+      if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
+      parseError=cause;
     }
     assertCurrent();
-    let message = errorMessage(body?.error, response.status);
-    if (readOnly && message === statusMessages[504]) message = "读取超时，请重试。";
+    let message = response.status === 401 && !isLogin ? `${statusMessages[401]}\n${errorMessage(body?.error,response.status)}` : errorMessage(body?.error, response.status);
+    const detail = body?.detail || (!body ? raw : "");
+    if (detail && !message.includes(detail)) message += `\n诊断详情：\n${redactDiagnostic(detail)}`;
+    if (parseError) message += `\n响应格式：${response.headers?.get?.("Content-Type") || "未提供 Content-Type"}\n${errorDiagnostic(parseError)}`;
+    if (readOnly && response.status===504) message = message.replace(statusMessages[504],"读取超时，请重试。");
     const requestID = body?.request_id || response.headers?.get?.("X-Request-ID");
     const safeRequestID = typeof requestID === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(requestID) ? requestID : "";
     const error = new Error(`${message}${safeRequestID ? `（请求 ID：${safeRequestID}）` : ""}`);
     error.status = response.status;
     error.requestID = safeRequestID;
+    error.code = body?.code;
+    error.stage = body?.stage || "api_request";
+    error.failureTaskID = body?.failure_task_id;
+    error.failureSaved = body?.failure_saved;
+    error.retentionError = body?.retention_error;
     if (body?.code === "task_schema_incompatible" && body?.stage === "task_creation" && response.status === 500) {
       error.code = body.code;
       error.stage = body.stage;
@@ -160,20 +201,44 @@ export async function requestJSON(url, options, {
       error.code = body.code;
       error.field = ["port", "tls_public_port", "xhttp_backend_port", "xhttp_tls_port"].includes(body.field) ? body.field : "";
     }
+    if (response.status === 401 && !isLogin) onUnauthorized(error.message);
     throw error;
   }
   if (response.status === 204) return null;
+  let raw;
   try {
-    const body = await response.json();
+    raw=response.text ? await responseDiagnosticText(response) : undefined;
+    const body = raw===undefined ? await response.json() : JSON.parse(raw);
     assertCurrent();
     onResponse?.(response);
     return body;
   } catch (cause) {
     assertCurrent();
-    if (canceled(cause)) throw cause;
-    const error = new Error(readOnly ? "服务器响应不完整或格式无效，请重试。"
-      : "服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。", { cause });
+    if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
+    const error = new Error(`${readOnly ? "服务器响应不完整或格式无效，请重试。"
+      : "服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。"}\n原始错误：${errorDiagnostic(cause)}`, { cause });
     error.status = response.status;
+    error.stage="response_decoding";
+    if(raw)error.message+=`\n响应正文：\n${redactDiagnostic(raw)}`;
     throw error;
   }
+}
+
+async function responseDiagnosticText(response) {
+  const limit=response.ok ? 64<<20 : 8<<20;
+  if(!response.body?.getReader) {
+    const value=await response.text();
+    return value.length<=limit ? value : value.slice(0,limit)+"\n[响应达到采集上限，此诊断不完整]";
+  }
+  const reader=response.body.getReader(), decoder=new TextDecoder();
+  let size=0, text="";
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done)return text+decoder.decode();
+      const remaining=limit-size;
+      text+=decoder.decode(value.subarray(0,remaining),{stream:true});size+=value.byteLength;
+      if(size>limit){await reader.cancel();return text+decoder.decode()+"\n[响应达到采集上限，此诊断不完整]";}
+    }
+  } finally {reader.releaseLock();}
 }

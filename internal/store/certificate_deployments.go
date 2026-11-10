@@ -150,7 +150,12 @@ func (s *Store) prepareCertificateExecutionTx(ctx context.Context, tx pgx.Tx, ta
 		return errors.New("Agent 不再支持证书中心，请升级后重新部署")
 	}
 	var owner string
-	if err = tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`, task.ConfigID).Scan(&owner); err != nil {
+	if task.Action == core.ActionImportExisting {
+		err = tx.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1 AND action='import-existing'`, task.ID).Scan(&owner)
+	} else {
+		err = tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`, task.ConfigID).Scan(&owner)
+	}
+	if err != nil {
 		return err
 	}
 	for _, id := range ids {
@@ -310,8 +315,11 @@ func (s *Store) syncCertificateBindings(ctx context.Context) error {
 			_ = tx.Rollback(ctx)
 		}
 		if e != nil {
-			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(e.Error(), 1000))
+			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(SafeFailureDiagnostic(e), 1000))
 			if err != nil {
+				return err
+			}
+			if err = s.retainBackgroundFailure(ctx, b.owner, "证书部署任务创建", b.config, "task_creation", e); err != nil {
 				return err
 			}
 		} else if !task.Reused {

@@ -15,7 +15,7 @@ func (s *Store) importNotificationTasks(ctx context.Context) error {
 	}
 	defer tx.Rollback(ctx)
 	rows, err := tx.Query(ctx, `SELECT t.id,t.attempt,t.owner_id,t.agent_id,a.owner_id,a.name,t.engine,t.action,t.error,t.finished_at,COALESCE(t.config_id,''),t.config_version,t.shared_traffic_id
- FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.status='failed' AND t.finished_at>GREATEST(now()-interval '30 days',(SELECT min(created_at) FROM notification_configs))
+ FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.action<>'panel-failure' AND t.status='failed' AND t.finished_at>GREATEST(now()-interval '30 days',(SELECT min(created_at) FROM notification_configs))
  AND t.notification_failure_attempt<t.attempt ORDER BY t.finished_at FOR UPDATE OF t SKIP LOCKED LIMIT 100`)
 	if err != nil {
 		return err

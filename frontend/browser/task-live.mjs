@@ -29,6 +29,7 @@ export async function testLiveTaskRuntime(preview = false) {
       if (failed) return reply({error:'临时任务读取失败'},503);
       return reply(result);
     }
+    if (path==='/tasks/failures' && options.method==='POST') return reply({id:'fixture-failure'});
     if (path.startsWith('/tasks/')) {
       if (options.method === 'DELETE') {
         assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'),'tasks-live-fixture','取消任务缺少 CSRF');
@@ -36,6 +37,7 @@ export async function testLiveTaskRuntime(preview = false) {
       }
       if (detailDenied) return reply({error:'任务详情访问已撤销'},detailDenied);
       const task = tasks.find(task=>task.id===path.split('/')[2]);
+      if (path.endsWith('/diagnostics')) return reply({source:'fixture',output:parsed.searchParams.get('attempt')==='2' ? '先前执行的私有诊断' : task?.output || '',error:task?.error || '',attempts:task?.attempt===3 ? [{attempt:2,source:'fixture'},{attempt:3,source:'fixture'}] : []});
       if (parsed.searchParams.get('view') === 'status') { statusReads++; return reply({ ...task, output: '' }); }
       detailReads++; return reply(task);
     }
@@ -98,8 +100,12 @@ export async function testLiveTaskRuntime(preview = false) {
     assert.ok(statusReads>beforeStatus,'终态任务未继续核验资源权限');
     assert.ok(output.textContent.endsWith('新的输出'),'状态响应清空了已完成的任务输出');
     assert.ok(reads>beforePoll,'任务列表未持续刷新');assert.ok(box.open&&row('live-13')===current,'轮询打断任务详情');
+    button('查看第 2 次记录',box).click();
+    const historyBox=await waitFor(()=>[...document.querySelectorAll('dialog[open]')].find(item=>item.querySelector('h2')?.textContent==='任务记录 · 第 2 次'),'先前执行详情未打开');
+    assert.ok(historyBox.textContent.includes('先前执行的私有诊断'),'先前执行详情内容缺失');
     detailDenied=403;
     await waitFor(()=>output.hidden&&box.textContent.includes('无权读取'),'已结束任务权限撤销后未自动清除旧输出');
+    assert.ok(!historyBox.open&&!button('查看第 2 次记录',box),'权限撤销后仍显示先前执行详情');
     assert.ok(!box.textContent.includes('第 3 次执行')&&!box.textContent.includes('缺少时安装稳定版'),'任务权限撤销仍显示上下文');
     box.querySelector('[aria-label=关闭]').click();detailDenied=0;
     for (const deniedStatus of [403, 404]) {

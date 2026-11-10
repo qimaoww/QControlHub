@@ -90,10 +90,10 @@ func TestExistingCoreDiscoveryKeepsCompletedMappingForRestartSafetyGate(t *testi
 	if _, pending := executor.ExistingSpecs[core.EngineSingBox]; !pending {
 		t.Fatal("unsafe automatic discovery mapping was suppressed")
 	}
-	if issue := executor.ExistingDiscoveryIssues[core.EngineSingBox]; !strings.Contains(issue, "迁移状态不再安全") {
+	if issue := executor.ManagedSafetyIssues[core.EngineSingBox]; !strings.Contains(issue, "迁移状态不再安全") {
 		t.Fatalf("automatic restart safety issue = %q", issue)
 	}
-	if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionStart, Engine: core.EngineSingBox}); err == nil || !strings.Contains(err.Error(), "core tasks are disabled") {
+	if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionStart, Engine: core.EngineSingBox}); err == nil || !strings.Contains(err.Error(), "target is unsafe") {
 		t.Fatalf("automatic restart start-task error = %v", err)
 	}
 }

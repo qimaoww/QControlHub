@@ -9,11 +9,15 @@ export async function testAgentSharingRuntime() {
   const agent = { id: 'own', name: 'Alice 自有节点', can_manage: true, status: 'online', capabilities: ['mihomo', 'xray'], features: ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1'] };
   let sharing = { revision: 2, shares: [{ id: 'shr_bob', username: 'bob', user_id: 'bob-id', status: 'accepted', invitation_revision: 2, engines: ['mihomo'], ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
   const writes = [], reads = [];
-  let hold = false, release, rejectRead = false;
+  let hold = false, release, rejectRead = false, retainedFailures = 0;
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith('/api/v1')) return nativeFetch(url, options);
     const path = String(url).slice('/api/v1'.length), method = options.method || 'GET';
+    if (path === '/tasks/failures' && method === 'POST') {
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), session.csrf_token, '失败留存缺少 CSRF');
+      return reply({id:`fixture-failure-${++retainedFailures}`});
+    }
     reads.push({path,method});
     if (path === '/auth/session') return reply(session);
     if (path === '/settings') return reply({});
@@ -94,7 +98,7 @@ export async function testAgentSharingRuntime() {
     assert.equal(field('ports').value,'21003 - 21005, 22000');
     await reload(false);assert.equal(field('ports').value,'21003 - 21005, 22000','取消读取丢失草稿');
     rejectRead=true;await reload(true);assert.equal(field('ports').value,'21003 - 21005, 22000','读取失败丢失草稿');assert.ok(errors().includes('共享读取失败'));rejectRead=false;
-    await reload(true);assert.equal(field('ports').value,'21003');assert.ok(!errors().includes('已变更'),'成功重新读取仍显示旧冲突');assert.ok(!form().querySelector('[name=engines][value=xray]').checked);
+    await reload(true);assert.equal(field('ports').value,'21003');assert.ok(!dialog().querySelector('.a-dialog-body').textContent.includes('已变更'),'成功重新读取仍显示旧冲突');assert.ok(!form().querySelector('[name=engines][value=xray]').checked);
     assert.ok(form().querySelector('[type=submit]').disabled,'重新读取仍要求保存');
     input(field('ports'),'21000 - 21100，22000');input(field('limit_gib'),'2.5');input(field('http_domains'),'auth.example.test\napi.example.test');hold=true;
     submit();submit();await waitFor(()=>release,'保存未开始');

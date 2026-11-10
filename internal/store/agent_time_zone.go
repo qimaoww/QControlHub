@@ -75,6 +75,9 @@ func (s *Store) UpdateAgentTimeZoneResolution(ctx context.Context, agentID strin
 			return s.GetAgentTimeZone(ctx, agentID)
 		}
 		state.Status, state.Error, state.AutoAddressHash = "failed", detail, addressHash
+		if err := s.retainAgentFailure(ctx, agentID, "Agent 时区检测", "time_zone_resolution", lookupErr); err != nil {
+			return state, err
+		}
 		return state, nil
 	}
 	if !core.ValidTimeZone(zone) {
@@ -141,8 +144,11 @@ func (s *Store) GetAgentTimeZoneSource(ctx context.Context, agentID string) (cor
 }
 
 func (s *Store) SetAgentTimeZoneStatus(ctx context.Context, agentID string, revision int64, status, detail string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE agents SET time_zone_status=$3,time_zone_error=$4
+	tag, err := s.pool.Exec(ctx, `UPDATE agents SET time_zone_status=$3,time_zone_error=$4
 		WHERE id=$1 AND time_zone_revision=$2 AND ($3 <> 'failed' OR time_zone_status='applying')`, agentID, revision, status, truncateTimeZoneError(detail))
+	if err == nil && tag.RowsAffected() > 0 && status == "failed" {
+		err = s.retainAgentFailure(ctx, agentID, "Agent 时区应用", "time_zone_application", errors.New(detail))
+	}
 	return err
 }
 
@@ -160,6 +166,9 @@ func (s *Store) AcknowledgeAgentTimeZone(ctx context.Context, agentID string, re
 		}
 		tag, err := s.pool.Exec(ctx, `UPDATE agents SET time_zone_status='failed',time_zone_error=$3
 			WHERE id=$1 AND time_zone_revision=$2 AND time_zone_status='applying'`, agentID, result.Revision, detail)
+		if err == nil && tag.RowsAffected() > 0 {
+			err = s.retainAgentFailure(ctx, agentID, "Agent 时区应用", "time_zone_application", errors.New(result.Error))
+		}
 		return err == nil && tag.RowsAffected() == 1, err
 	}
 	command, err := s.GetAgentTimeZone(ctx, agentID)
@@ -175,9 +184,9 @@ func (s *Store) AcknowledgeAgentTimeZone(ctx context.Context, agentID string, re
 }
 
 func truncateTimeZoneError(detail string) string {
-	detail = strings.TrimSpace(detail)
+	detail = strings.TrimSpace(core.DiagnosticText(detail))
 	if len(detail) > 200 {
-		return detail[:200]
+		return strings.ToValidUTF8(detail[:200], "�")
 	}
 	return detail
 }

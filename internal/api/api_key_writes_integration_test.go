@@ -9,11 +9,125 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/notify"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 type apiKeyCreation struct {
 	Key    core.APIKey `json:"key"`
 	Secret string      `json:"secret"`
+}
+
+func TestAPIKeyImportAndDiagnosticIntegration(t *testing.T) {
+	db, ctx, _, owner, other := newConfigScopeAPIFixture(t)
+	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "key import", core.EngineXray)
+	features := append(node.Features, core.AgentFeatureImportIsolation)
+	if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ExistingConfigAvailable: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	permissions := []core.Permission{core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionTasksRead, core.PermissionTasksExecute}
+	key, created := testCreateBusinessKey(t, owner, permissions)
+	readOnly := apiKeyCreation{}
+	owner.call("POST", "/settings/api-keys", core.APIKeyInput{Name: "read only diagnostics", Permissions: []core.Permission{core.PermissionTasksRead}}, 201, &readOnly)
+	reader := configScopeAPIClient{t: t, handler: owner.handler, token: readOnly.Secret}
+	var read core.Task
+	key.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineXray, Action: core.ActionReadConfig}, 201, &read)
+	claim, err := db.ClaimTask(ctx, node.ID)
+	if err != nil || claim == nil || claim.ID != read.ID {
+		t.Fatalf("read task was not claimable: %v", err)
+	}
+	if err := db.CompleteTask(ctx, node.ID, read.ID, core.TaskResultRequest{LeaseID: claim.LeaseID, Success: true, Output: `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/agents/" + node.ID + "/configs/xray/import"
+	input := store.ConfigImportRequest{SnapshotTaskID: read.ID, Name: "key imported"}
+	reader.call("POST", path, input, 403, nil)
+	var imported core.Task
+	key.call("POST", path, input, 201, &imported)
+	// A rejected business write rolls back, while its separate failure record
+	// remains queryable by the same workspace and isolated from other users.
+	var failure struct {
+		Saved bool   `json:"failure_saved"`
+		ID    string `json:"failure_task_id"`
+	}
+	key.call("POST", "/configs", map[string]any{}, 403, &failure)
+	// Policy rejection precedes workspace resolution and does not invent a record.
+	key.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineXray, Action: "unknown"}, 400, &failure)
+	if !failure.Saved || failure.ID == "" {
+		t.Fatal("rejected write lost its durable diagnostic")
+	}
+	key.call("GET", "/tasks/"+failure.ID+"/diagnostics", nil, 200, nil)
+	other.call("GET", "/tasks/"+failure.ID+"/diagnostics", nil, 404, nil)
+	reader.call("POST", "/tasks/failures", core.PanelFailure{}, 403, nil)
+	// Dispatch must use the Key that accepted the import, including its latest
+	// revocation state. A background identity cannot continue this queued work.
+	owner.call("DELETE", "/settings/api-keys/"+created.Key.ID, nil, 200, nil)
+	claim, err = db.ClaimTask(ctx, node.ID)
+	if err != nil || claim != nil {
+		t.Fatalf("revoked import dispatched: %v", err)
+	}
+	var final core.Task
+	owner.call("GET", "/tasks/"+imported.ID, nil, 200, &final)
+	if final.Status != core.TaskCanceled && final.Status != core.TaskFailed {
+		t.Fatalf("revoked import remained %s", final.Status)
+	}
+	// A newly authorized Key can accept the same intent and confirm the actual
+	// imported configuration after execution, without reviving the old task.
+	replacement, _ := testCreateBusinessKey(t, owner, permissions)
+	replacement.call("POST", path, input, 201, &imported)
+	claim, err = db.ClaimTask(ctx, node.ID)
+	if err != nil || claim == nil || claim.ID != imported.ID {
+		owner.call("GET", "/tasks/"+imported.ID, nil, 200, &final)
+		t.Fatalf("authorized import not claimable: %v status=%s error=%s", err, final.Status, final.Error)
+	}
+	if err := db.CompleteTask(ctx, node.ID, claim.ID, core.TaskResultRequest{LeaseID: claim.LeaseID, Success: true, Output: "imported", InstanceStatus: &core.SharedInstanceStatus{Engine: claim.Engine, TaskID: claim.ID, ConfigID: claim.ConfigID, ConfigVersion: claim.ConfigVersion, Status: "active"}}); err != nil {
+		t.Fatal(err)
+	}
+	replacement.call("GET", "/tasks/"+imported.ID, nil, 200, &final)
+	if final.Status != core.TaskSucceeded {
+		t.Fatalf("import did not finish: %s", final.Status)
+	}
+	cfg, err := db.AgentConfig(store.WithConfigScope(ctx, owner.userID, false), node.ID, core.EngineXray)
+	if err != nil || cfg.Name != input.Name || cfg.Version != 1 {
+		t.Fatal("completed import did not save its real result")
+	}
+}
+
+func TestAPIKeyCannotRedirectRetainedNotificationCredentials(t *testing.T) {
+	db, ctx, admin, _, _ := newConfigScopeAPIFixture(t)
+	key, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionSettingsRead, core.PermissionSettingsManage})
+	var current struct {
+		Configuration notify.Configuration `json:"configuration"`
+	}
+	admin.call("GET", "/settings/notifications", nil, 200, &current)
+	configuration := current.Configuration
+	configuration.Channels = []notify.Channel{
+		{ID: "mail", Name: "mail", Type: "smtp", Enabled: true, Values: map[string]string{"host": "smtp.example.com", "port": "465", "tls": "tls", "username": "fixture", "from": "fixture@example.com", "to": "recipient@example.com"}, Secrets: map[string]string{"password": "fixture-mail-password"}},
+		{ID: "hook", Name: "hook", Type: "webhook", Enabled: true, Values: map[string]string{}, Secrets: map[string]string{"url": "https://example.com/hook", "authorization": "fixture-hook-authorization"}},
+	}
+	admin.call("PUT", "/settings/notifications", configuration, 200, &configuration)
+	key.call("GET", "/settings/notifications", nil, 200, &current)
+	configuration = current.Configuration
+	configuration.Channels[0].Values["host"] = "other.example.com"
+	key.call("PUT", "/settings/notifications", configuration, 403, nil)
+	configuration.Channels[0].Values["host"] = "smtp.example.com"
+	configuration.Channels[1].Secrets = map[string]string{"url": "https://other.example.com/hook"}
+	key.call("PUT", "/settings/notifications", configuration, 403, nil)
+	saved, err := db.NotificationConfiguration(store.WithConfigScope(ctx, created.Key.OwnerID, true))
+	if err != nil || saved.Revision != configuration.Revision || saved.Channels[0].Get("host") != "smtp.example.com" || saved.Channels[1].Get("url") != "https://example.com/hook" {
+		t.Fatal("rejected redirect changed stored settings")
+	}
+	configuration.Channels[1].Secrets = nil
+	configuration.Channels[0].Name = "renamed safely"
+	key.call("PUT", "/settings/notifications", configuration, 200, &configuration)
+	saved, err = db.NotificationConfiguration(store.WithConfigScope(ctx, created.Key.OwnerID, true))
+	if err != nil || saved.Channels[0].Get("password") != "fixture-mail-password" || saved.Channels[1].Get("authorization") != "fixture-hook-authorization" {
+		t.Fatal("safe edit lost retained credentials")
+	}
+	configuration.Channels[0].Values["host"] = "other.example.com"
+	configuration.Channels[0].Secrets = map[string]string{"password": "replacement-fixture-password"}
+	configuration.Channels[1].Secrets = map[string]string{"url": "https://other.example.com/hook", "authorization": "replacement-fixture-authorization"}
+	key.call("PUT", "/settings/notifications", configuration, 200, nil)
 }
 
 func testCreateBusinessKey(t *testing.T, creator configScopeAPIClient, permissions []core.Permission) (configScopeAPIClient, apiKeyCreation) {

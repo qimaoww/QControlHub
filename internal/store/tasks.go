@@ -34,10 +34,10 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 		}
 	}
 	where += ownerClause(ctx, "owner_id", &args)
-	where += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
+	where += taskAccessClause(ctx, &args)
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
+		SELECT id,COALESCE(agent_id,''),action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks
 		WHERE `+where+fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d`, len(args)), args...)
@@ -73,9 +73,9 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
-	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
+	ownerWhere += taskAccessClause(ctx, &args)
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
+		SELECT id,COALESCE(agent_id,''),action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
 		FROM tasks WHERE id=$1`+ownerWhere, args...)
 	task, err := scanTask(row, false)

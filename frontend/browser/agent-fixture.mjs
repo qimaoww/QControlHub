@@ -333,6 +333,11 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (path === '/tasks/failures' && method === 'POST') {
+    testAPI.failureRecords ||= new Map();
+    if (!testAPI.failureRecords.has(options.body)) testAPI.failureRecords.set(options.body,`tsk_${testAPI.failureRecords.size.toString(16).padStart(16,'0')}`);
+    return json({id:testAPI.failureRecords.get(options.body)},201);
+  }
   if (path === '/preferences/node-view') {
     testAPI.nodeView ||= { view: 'cards', revision: 1 };
     if (method === 'PUT') {

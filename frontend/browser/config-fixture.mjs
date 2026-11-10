@@ -30,7 +30,7 @@ export async function createConfigFixture(engine, options = {}) {
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, ...(options.shared ? {shared_allocation:{id:"share",enabled:true,status:"accepted"}} : {}), capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1", "shared-core-instances-v1", "shared-core-lifecycle-v1",
-      ...(options.legacy ? [] : ["preset-auto-install-v2"])],
+      ...(options.legacy ? [] : ["preset-auto-install-v2","import-isolation-v1"])],
     runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, service_status:options.serviceStatus || "active", version:"test-development", existing_config_available:Boolean(options.import)}}};
   const test = {writes:[], calls:[], readRequests:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending",deploymentState:options.deploymentState};
   let inbounds = options.missing || options.emptyInbounds ? [] : (options.tags || ["first", "second"]).map((tag, index) => ({...basePlan, tag, port:21001+index}));
@@ -256,6 +256,13 @@ export async function createConfigFixture(engine, options = {}) {
     }
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
     if (path.startsWith('/tasks?') && (!request.method || request.method === 'GET')) return [...tasks.values()];
+    if(request.method==="POST" && path==="/tasks/failures")return {id:`failure-${++test.serial}`};
+    if(request.method==="POST" && path===`/agents/node/configs/${engine}/import`) {
+      assert(body.snapshot_task_id && !Object.hasOwn(body,"content"),"import must use an independent read snapshot");
+      test.imports ||= [];test.imports.push(body);
+      const task={id:`import-${++test.serial}`,agent_id:agent.id,engine,action:"import-existing",status:test.taskStatus};
+      tasks.set(task.id,task);return task;
+    }
     if (request.method === "POST" && path === "/tasks") {
       if (body.action === "status") {
         (test.statusRequests ||= []).push(body);
@@ -332,6 +339,7 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.taskReadFailure) throw Object.assign(new Error('测试任务详情读取失败'), {status:test.taskReadFailure});
       if (test.receiptUnavailable) throw Object.assign(new Error('测试任务暂不可读'),{status:503});
       const task = tasks.get(path.split("/")[2].split("?")[0]);
+      if(path.endsWith("/diagnostics"))return {output:test.taskOutput || "",error:test.taskError || "",source:"agent-diagnostic-v1"};
       if (path.endsWith("/config-snapshot")) {
         test.snapshotReads = (test.snapshotReads || 0) + 1;
         if (test.snapshotGate) await test.snapshotGate;

@@ -38,6 +38,7 @@ type apiKeyResponseWriter struct {
 	status        int
 	secret        string
 	revealSecrets bool
+	failure       func(int, any) any
 }
 
 func (w *apiKeyResponseWriter) WriteHeader(status int) {
@@ -64,6 +65,9 @@ func (w *apiKeyResponseWriter) finish() int {
 			safe := core.RedactDiagnosticValue(value)
 			if w.revealSecrets {
 				safe = value
+			}
+			if w.failure != nil && w.status >= 400 {
+				safe = w.failure(w.status, safe)
 			}
 			redacted, err := json.Marshal(safe)
 			if err == nil {

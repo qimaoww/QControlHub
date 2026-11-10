@@ -1,14 +1,14 @@
 // Source selection, snapshot freshness and atomic configuration submission.
 
 export function liveConfigEditorState({
-  existingAvailable,
+  sourceMode = "personal",
   canOperate,
   sourceContent,
   formContent,
 }) {
   return {
-    readOnly: Boolean(existingAvailable) || !canOperate,
-    content: existingAvailable ? String(sourceContent || "") : String(formContent || ""),
+    readOnly: sourceMode === "import" || !canOperate,
+    content: sourceMode === "import" ? String(sourceContent || "") : String(formContent || ""),
   };
 }
 
@@ -47,87 +47,21 @@ export async function submitLiveConfigChange({
   onDeployTask,
   onSavedConfig,
 }) {
-  const editor = liveConfigEditorState({
-    existingAvailable,
-    canOperate: true,
-    sourceContent: source?.content,
-    formContent: form.get("content"),
-  });
-  if (intent === "import" && !editor.content)
-    throw new Error("待迁移的原始节点快照已失效，请重新读取");
+  if (intent !== "deploy" && intent !== "validate" && intent !== "save") throw new Error("普通配置入口不支持导入操作。");
+  const content = String(form.get("content") || "");
   if (intent === "deploy") await beforeDeploy?.();
-  if (!existingAvailable && ["deploy", "validate"].includes(intent)) {
-    const result = await api(
-      `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/source`,
-      { method: "POST", body: JSON.stringify({
-        engine, name: form.get("name"), description: form.get("description"),
-        content: editor.content, version: Number(form.get("version")), intent,
-        expected_instance_id: agent.shared_allocation?.id || "",
-        ...(intent === "deploy" && !agent.runtime?.[engine]?.installed ? {install_if_missing:true} : {}),
-      }) },
-    );
-    if (!result.config?.id || !result.task?.id) throw new Error("未能确认保存与任务结果，请重新读取后核对。");
-    onSavedConfig?.(result.config);
-    if (intent === "deploy") onDeployTask?.(result.task.id);
-    return { saved: result.config, content: result.config.content, task: result.task };
-  }
-  let saved = savedConfig;
-  if (
-    !existingAvailable ||
-    !saved ||
-    String(saved.content || "") !== editor.content
-  ) {
-    saved = await api(
-      `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}`,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          agent_id: agent.id,
-          engine,
-          name: form.get("name"),
-          description: form.get("description"),
-          content: editor.content,
-          version: Number(form.get("version")),
-        }),
-      },
-    );
-    onSavedConfig?.(saved);
-  }
-  if (intent === "save") return { saved, content: editor.content };
-  if (intent === "deploy" || intent === "validate") {
-    if (intent === "validate") {
-      await submitTask({
-        agent_id: agent.id,
-        engine,
-        action: "validate",
-        config_id: saved.id,
-        expected_config_version: saved.version,
-      });
-      return { saved, content: editor.content };
-    }
-    const task = await submitTask({
-      agent_id: agent.id,
-      engine,
-      action: "deploy",
-      config_id: saved.id,
-      expected_config_version: saved.version,
-    });
-    if (!task?.id) throw new Error("部署任务未创建");
-    onDeployTask?.(task.id);
-    return { saved, content: editor.content, task };
-  }
-  const task = await api("/tasks", {
-    method: "POST",
-    body: JSON.stringify({
-      agent_id: agent.id,
-      engine,
-      action: "import-existing",
-      config_id: saved.id,
-      expected_config_version: saved.version,
+  const result = await api(`/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}${intent === "save" ? "" : "/source"}`, {
+    method: intent === "save" ? "PUT" : "POST", body: JSON.stringify({
+      engine,name:form.get("name"),description:form.get("description"),content,version:Number(form.get("version")),
+      ...(intent === "save" ? {} : {intent,expected_instance_id:agent.shared_allocation?.id || "",
+        ...(intent === "deploy" && !agent.runtime?.[engine]?.installed ? {install_if_missing:true} : {})}),
     }),
   });
-  if (!task?.id) throw new Error("迁移任务未创建");
-  return { saved, content: editor.content, task };
+  const saved = intent === "save" ? result : result.config;
+  if (!saved?.id || intent !== "save" && !result.task?.id) throw new Error("未能确认保存与任务结果，请核对任务后再操作。");
+  onSavedConfig?.(saved);
+  if (intent === "deploy") onDeployTask?.(result.task.id);
+  return {saved,content:saved.content,task:result.task};
 }
 
 const liveConfigSnapshotCacheTTL = 600 * 1000;

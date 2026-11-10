@@ -129,8 +129,12 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("GET %s status=%d body=%s", target, response.Code, response.Body.String())
 		}
-		var failure map[string]string
-		if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil || failure["error"] == "" {
+		var failure struct {
+			Error, Code, Stage string
+			RequestID          string `json:"request_id"`
+			FailureSaved       bool   `json:"failure_saved"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil || failure.Error == "" {
 			t.Fatalf("GET %s invalid error response %q: %v", target, response.Body.String(), err)
 		}
 	}

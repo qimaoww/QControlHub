@@ -128,7 +128,7 @@ func TestDeployTaskOwnsSingBoxLogTransitionExactlyOnce(t *testing.T) {
 			// host journalctl process; the file reader remains the real runtime.
 			collector.sources = nil
 			collector.setSourceStatus(core.EngineSingBox, "journal", "active", "")
-			if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+			if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())

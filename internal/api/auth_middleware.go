@@ -46,6 +46,12 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			request = request.Clone(request.Context())
 			request.Header.Del("If-None-Match")
 			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
+			// Retain a failure only after the rejected business transaction has
+			// rolled back, so its returned diagnostic ID remains queryable.
+			response.failure = func(status int, value any) any {
+				failure := &failureResponseWriter{ResponseWriter: response.ResponseWriter, server: s, request: request.WithContext(store.WithoutRequestTransaction(request.Context()))}
+				return failure.failure(status, value)
+			}
 			w = response
 			defer func() {
 				status := response.finish()
@@ -103,6 +109,12 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			return
 		}
 		s.adminLimiter.Success(key)
+		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		value, _ := s.sessionForRequest(request)
+		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))
+		if _, isKey := requestAPIKey(request); !isKey {
+			w = &failureResponseWriter{ResponseWriter: w, server: s, request: request}
+		}
 		_, permissionsOK := s.sessionPermissions(request)
 		if !permissionsOK {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
@@ -133,8 +145,6 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
-		value, _ := s.sessionForRequest(request)
-		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))
 		if role == core.RoleAdmin {
 			request = request.WithContext(store.WithUserManagementAuth(request.Context(), s.sessionUserID(request), value.AuthRevision, s.tokenAdministratorAvailable()))
 		}

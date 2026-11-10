@@ -114,12 +114,18 @@ func (g *generator) annotate(op object, handler, method, path string) {
 			required = []string{"channel_id", "revision", "event"}
 		case "previewNotification":
 			required = []string{"event", "template"}
+		case "importAgentConfig":
+			required = []string{"snapshot_task_id", "name"}
 		}
 		if len(required) > 0 {
 			copySchema["required"] = required
 		}
 	}
 	switch handler {
+	case "putNotifications":
+		op["description"] = "省略 secrets 字段保留已存凭据，显式空值清空。保留未读取凭据时，修改认证目标（SMTP 主机/端口/TLS/用户名或 Webhook 地址）须具备 secrets.read；也可显式替换相关凭据。"
+	case "importAgentConfig":
+		op["description"] = "仅节点所有者可导入本人已完成 read-config 任务的快照；expected_version 为当前配置并发标识（尚无配置为 0）。受理不会保存配置；查询任务实际完成后才新增配置与历史。后台执行保留原始 Key 并复核授权。"
 	case "editRetryTask", "taskRetryEditor":
 		op["description"] = "另须配置读写权限：节点配置 agent-config.read + agent-config.write；档案 configs.read + configs.write。实际配置由原任务确定，不能替换资源。编辑后重试按新的 Key 授权重新受理。"
 	case "runSubStoreSync":

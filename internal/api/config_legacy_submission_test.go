@@ -54,7 +54,7 @@ func TestSourceSubmissionRepairsArchivedAlternateSingBoxBackend(t *testing.T) {
 			client.call("GET", "/configs/"+saved.ID+"/revisions", nil, http.StatusOK, &revisions)
 			var tasks []core.Task
 			client.call("GET", "/tasks?agent_id="+agent.ID, nil, http.StatusOK, &tasks)
-			if len(revisions) != 2 || len(tasks) != 0 {
+			if len(revisions) != 2 || len(executionTasks(t, tasks)) != 0 {
 				t.Fatal("rejected source committed a revision or task")
 			}
 			var result configMutationResult

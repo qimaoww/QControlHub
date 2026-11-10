@@ -26,7 +26,7 @@ func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 	path := filepath.Join(logRoot, "runtime.log")
 	executor := newImportedSingBoxLogExecutor(t, `{"log":{"output":"runtime.log"}}`)
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	collector.mu.Lock()
@@ -98,7 +98,7 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	content := `{"log":{"output":"runtime.log"}}`
 	executor := newImportedSingBoxLogExecutor(t, content)
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+	if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(t.TempDir(), "outside.log")
@@ -109,7 +109,7 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	if err := os.Link(outside, path); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+	if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -139,10 +139,10 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	}
 	executor = newImportedSingBoxLogExecutor(t, content)
 	collector = NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+	if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+	if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel = context.WithCancel(context.Background())
@@ -207,10 +207,10 @@ func TestImportedSingBoxArmedSourceRejectsHardLinkBeforePublish(t *testing.T) {
 				t.Fatal(err)
 			}
 			collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-			if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+			if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 				t.Fatal(err)
 			}
-			if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+			if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 				t.Fatal(err)
 			}
 

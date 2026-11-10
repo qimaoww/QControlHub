@@ -103,6 +103,9 @@ func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c 
 		}
 		for _, old := range previous.Channels {
 			if old.ID == ch.ID && old.Type == ch.Type {
+				if err := validateAPIKeyNotificationDestination(ctx, old, ch); err != nil {
+					return c, err
+				}
 				for k, v := range old.Secrets {
 					if _, provided := ch.Secrets[k]; !provided {
 						ch.Secrets[k] = v
@@ -196,6 +199,34 @@ func (s *Store) saveNotificationConfiguration(ctx context.Context, tx pgx.Tx, c 
 	}
 	c.Revision++
 	return c, nil
+}
+
+// A writer may keep an unread credential in place, but cannot redirect it to a
+// new authentication destination. Explicitly supplied replacements do not use
+// the stored credential and remain editable without secrets.read.
+func validateAPIKeyNotificationDestination(ctx context.Context, old, next notify.Channel) error {
+	key, isKey := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth)
+	if !isKey || core.HasPermission(key.Effective, core.PermissionSecretsRead) {
+		return nil
+	}
+	retained := func(name string) bool {
+		_, replaced := next.Secrets[name]
+		return !replaced && old.Secrets[name] != ""
+	}
+	changed := false
+	if next.Type == "smtp" && retained("password") {
+		for _, name := range []string{"host", "port", "tls", "username"} {
+			changed = changed || old.Get(name) != next.Get(name)
+		}
+	} else if retained("authorization") || retained("secret") || retained("token") || retained("device_key") {
+		if target, provided := next.Secrets["url"]; provided {
+			changed = old.Get("url") != target
+		}
+	}
+	if changed {
+		return fmt.Errorf("%w: 修改通知认证目标须替换凭据或具备 secrets.read", ErrForbidden)
+	}
+	return nil
 }
 
 // Labels and recipient ordering do not change detection or revoke queued work.

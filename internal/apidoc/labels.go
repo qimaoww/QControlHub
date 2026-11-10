@@ -1,6 +1,7 @@
 package apidoc
 
 var operationNames = map[string]string{
+	"recordPanelFailure": "保存失败记录", "getTaskDiagnostic": "任务完整诊断", "uploadTaskDiagnostic": "上传任务诊断", "importAgentConfig": "导入现有配置",
 	"": "系统 TCP 参数", "agentConfigState": "配置状态", "agentConfigWorkspace": "配置工作区", "agentConnect": "Agent 连接", "batchPortTraffic": "批量管理流量策略", "certificateAutoRenew": "设置自动续期", "certificatePublicChain": "证书公开链", "configCatalog": "配置目录", "downloadManagementSkill": "下载管理 Skill", "editRetryTask": "编辑配置并重试任务", "enrollAgent": "注册 Agent", "health": "存活检查", "importSubStoreRemoteTarget": "导入 Sub-Store 目标", "ipQualityHistory": "IP 质量历史", "latestSystemTCPTasks": "TCP 任务状态", "linkSubStoreRemoteTarget": "关联 Sub-Store 目标", "login": "登录", "logout": "退出登录", "metricSamples": "监控采样", "newServerPlan": "生成服务端方案", "overview": "概览", "purgeUser": "清理用户资源", "readiness": "就绪检查", "resetPortTrafficPolicy": "重置流量统计", "serveAgentBinary": "下载 Agent", "serveAgentBinaryForAgent": "Agent 升级下载", "serveAgentInstaller": "下载安装脚本", "session": "当前会话", "siteBranding": "面板名称与图标", "taskRetryEditor": "准备编辑后重试",
 }
 var resourceNames = map[string]string{

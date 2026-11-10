@@ -1,3 +1,4 @@
+import { managedCoreBlockReason } from "../modules/managed-core-state.js";
 import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { accountStorage } from "../modules/account-storage.js";
@@ -108,7 +109,7 @@ export async function nodesPage(ctx) {
       if (code) agent.labels.region_code = code; else { delete agent.labels.region_code; agent.region_code = ''; }
       draw();
       try { await load(); }
-      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.announce('国家／地区已保存，节点刷新失败，请刷新重试。', 'error'); }
+      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.announce(`国家／地区已保存，节点刷新失败。\n${error.message}`, 'error'); }
     });
   }
   function addresses(agent) {
@@ -346,7 +347,7 @@ export async function nodesPage(ctx) {
         if (!available()) return;
         ctx.announce('节点设置已保存');
         try { await load(); }
-        catch (error) { if (available() && error.name !== 'AbortError') ctx.announce('节点设置已保存，刷新失败，请刷新重试。', 'error'); }
+        catch (error) { if (available() && error.name !== 'AbortError') ctx.announce(`节点设置已保存，刷新失败。\n${error.message}`, 'error'); }
       } catch (error) {
         if (savedCount && available()) throw new Error(`部分设置已保存，其余更改尚未保存：${error.message}`);
         throw error;
@@ -407,7 +408,7 @@ export async function nodesPage(ctx) {
           const busy = actionBusy.has(coreKey(agent, engine));
           const uninstallReason = () => !agents.includes(agent) || agent.can_manage === false || !ctx.can('host.manage', agent) || !ctx.can('tasks.execute') ||
             !agent.features?.includes('core-uninstall-v1') || agent.status !== 'online' || !agent.runtime?.[engine]?.installed ||
-            Boolean(agent.runtime?.[engine]?.existing_config_unsupported_reason) || Boolean(uninstallTasks[coreKey(agent, engine)]);
+            Boolean(managedCoreBlockReason(agent, engine)) || Boolean(uninstallTasks[coreKey(agent, engine)]);
           const reason = coreInstallBlockReason(agent, engine, ctx.can);
           const controls = actions(['status', 'start', 'stop', 'restart'].map(action => button(actionName(action), async event => {
             const control = event.currentTarget;

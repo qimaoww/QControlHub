@@ -29,7 +29,7 @@ func (s *Store) Overview(ctx context.Context) (core.Overview, error) {
 			SELECT count(*) FILTER (WHERE status='pending') AS queued,
 			       count(*) FILTER (WHERE status='running') AS running,
 			       count(*) FILTER (WHERE status='failed') AS failed
-			FROM tasks WHERE status IN ('pending','running','failed')`+taskWhere+`
+			FROM tasks WHERE action<>'panel-failure' AND status IN ('pending','running','failed')`+taskWhere+`
 		) tasks`, args...).Scan(
 		&result.Agents, &result.AgentsOnline, &result.Configs, &result.NodeConfigs,
 		&result.TasksPending, &result.TasksQueued, &result.TasksRunning, &result.TasksFailed)

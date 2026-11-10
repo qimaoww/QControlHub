@@ -28,7 +28,7 @@ func (e *Executor) uninstallCore(ctx context.Context, engine core.Engine, spec E
 	serviceState := ""
 	var err error
 	if spec == defaultSpec {
-		serviceState, err = validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+		serviceState, err = validateManagedServiceTarget(ctx, engine, spec, manager)
 	} else {
 		serviceState, err = serviceStatusWithManager(ctx, manager, spec.Service)
 	}

@@ -1,3 +1,4 @@
+import { managedCoreBlockReason } from "./managed-core-state.js";
 // Eligibility and selection state shared by batch-operation controls.
 
 export function batchAgentEligibility(agent, action, engine) {
@@ -18,8 +19,8 @@ export function batchAgentEligibility(agent, action, engine) {
       eligible: false,
       reason: `未安装 ${engine || "所选内核"}，不能执行当前动作`,
     };
-  if (action === "install" && agent.runtime[engine].existing_config_unsupported_reason)
-    return { eligible: false, reason: agent.runtime[engine].existing_config_unsupported_reason };
+  if (managedCoreBlockReason(agent, engine))
+    return { eligible: false, reason: managedCoreBlockReason(agent, engine) };
   return { eligible: true, reason: "在线 · 已安装所选内核" };
 }
 

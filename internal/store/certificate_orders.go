@@ -858,7 +858,7 @@ func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Cer
 	defer cancel()
 	state.CleanupError = ""
 	if cleanupErr != nil {
-		state.CleanupError = truncate(cleanupErr.Error(), 1000)
+		state.CleanupError = truncate(core.DiagnosticText(cleanupErr.Error()), 1000)
 	}
 	sealed, err := s.sealCertificate(state)
 	if err != nil {
@@ -866,6 +866,9 @@ func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Cer
 	}
 	if cleanupErr != nil {
 		_, updateErr := s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1`, id, sealed)
+		if updateErr == nil {
+			updateErr = s.retainBackgroundFailure(persistCtx, item.OwnerID, "证书清理", id, "cleanup", cleanupErr)
+		}
 		return updateErr
 	}
 	_, err = s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,status=CASE WHEN status='canceling' THEN 'canceled' ELSE status END,stage='complete',error=CASE WHEN status='failed' THEN error ELSE '' END,updated_at=now() WHERE id=$1`, id, sealed)

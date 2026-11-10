@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {submitConfigImport} from "../modules/config-import.js";
 
 import { liveConfigEngineEligible, liveConfigEditorState, liveConfigReadAction, liveConfigSnapshotReusable, submitLiveConfigChange } from "../modules/live-config-state.js";
 
@@ -8,7 +9,7 @@ const pendingMigrationSource = {
   content: '{"inbounds":[{"tag":"original"}]}',
   taskId: "tsk_snapshot",
 };
-const migrationEditor = liveConfigEditorState({
+const migrationEditor = liveConfigEditorState({ sourceMode:"import",
   existingAvailable: true,
   canOperate: true,
   sourceContent: pendingMigrationSource.content,
@@ -26,53 +27,20 @@ const migrationForm = new Map([
   ["content", '{"inbounds":[{"tag":"edited"}]}'],
   ["version", "0"],
 ]);
-let savedMigrationConfig;
-let migrationTaskAttempts = 0;
-await assert.rejects(
-  submitLiveConfigChange({
-    api: async (path, options) => {
-      if (path === "/tasks") {
-        migrationTaskAttempts += 1;
-        throw new Error("temporary task failure");
-      }
-      const input = JSON.parse(options.body);
-      savedMigrationConfig = { id: "cfg_snapshot", ...input };
-      return savedMigrationConfig;
-    },
-    submitTask: noop,
-    agent: { id: "agt_snapshot" },
-    engine: "sing-box",
-    intent: "import",
-    form: migrationForm,
-    source: pendingMigrationSource,
-    existingAvailable: true,
-    savedConfig: null,
-  }),
-  /temporary task failure/,
-);
-assert.equal(savedMigrationConfig.content, pendingMigrationSource.content);
-assert.deepEqual(
-  pendingMigrationSource,
-  { content: '{"inbounds":[{"tag":"original"}]}', taskId: "tsk_snapshot" },
-  "failed import does not replace the pending migration source",
-);
-await submitLiveConfigChange({
-  api: async (path, options) => {
-    if (path !== "/tasks") throw new Error("retry unexpectedly rewrote snapshot");
-    assert.equal(JSON.parse(options.body).expected_config_version, savedMigrationConfig.version, "import retry must pin the saved snapshot version");
-    migrationTaskAttempts += 1;
-    return { id: "tsk_retry" };
-  },
-  submitTask: noop,
-  agent: { id: "agt_snapshot" },
-  engine: "sing-box",
-  intent: "import",
-  form: migrationForm,
-  source: pendingMigrationSource,
-  existingAvailable: true,
-  savedConfig: savedMigrationConfig,
-});
-assert.equal(migrationTaskAttempts, 2, "failed import remains retryable without another revision");
+let migrationTaskAttempts=0;
+const original = JSON.stringify(pendingMigrationSource);
+await assert.rejects(submitConfigImport({api:async(path,options)=>{
+ assert.equal(path,"/agents/agt_snapshot/configs/sing-box/import");
+ const body=JSON.parse(options.body);
+ assert.equal(body.snapshot_task_id,"tsk_snapshot");
+ assert.equal(body.content,undefined,"import only accepts the authorized snapshot identity");
+ migrationTaskAttempts++;throw new Error("temporary task failure");
+},agent:{id:"agt_snapshot"},engine:"sing-box",source:pendingMigrationSource,form:migrationForm}),/temporary task failure/);
+assert.equal(JSON.stringify(pendingMigrationSource),original,"failure preserves the source snapshot");
+const result=await submitConfigImport({api:async()=>({id:"tsk_retry"}),agent:{id:"agt_snapshot"},engine:"sing-box",source:pendingMigrationSource,form:migrationForm});
+assert.equal(result.task.id,"tsk_retry");
+assert.equal(result.saved,undefined,"preparing migration must not save the imported configuration");
+await assert.rejects(submitLiveConfigChange({intent:"import"}),/不支持导入/);
 
 assert.equal(liveConfigEngineEligible({ installed: true }), true);
 assert.equal(
@@ -150,3 +118,6 @@ for (const intent of ["validate", "deploy"]) {
 }
 assert.equal(requests.length, 2);
 }
+
+assert.equal(liveConfigEditorState({existingAvailable:true,canOperate:true,formContent:"manual",sourceContent:"external"}).content,"manual");
+assert.equal(liveConfigEditorState({existingAvailable:true,canOperate:true,formContent:"manual"}).readOnly,false);

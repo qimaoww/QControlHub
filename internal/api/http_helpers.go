@@ -86,7 +86,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": chineseErrorMessage(http.StatusConflict, err.Error()),
 			"code":  "port_conflict", "port": portConflict.Port, "field": portConflict.Field,
-			"recovery_engine": portConflict.RecoveryEngine,
+			"recovery_engine": portConflict.RecoveryEngine, "detail": core.RedactDiagnostic(err.Error()),
 		})
 	case errors.Is(err, store.ErrConflict):
 		writeError(w, http.StatusConflict, err.Error())
@@ -117,9 +117,9 @@ func writeInternalError(w http.ResponseWriter, err error) {
 			// excluding the database message, which can quote input values.
 			"error", strings.ReplaceAll(err.Error(), pgError.Error(), "PostgreSQL error"))
 	} else {
-		fields = append(fields, "error", err)
+		fields = append(fields, "error", core.RedactDiagnostic(err.Error()))
 	}
-	body := map[string]string{"error": chineseErrorMessage(http.StatusInternalServerError, "internal server error"), "request_id": requestID}
+	body := map[string]string{"error": chineseErrorMessage(http.StatusInternalServerError, "internal server error"), "request_id": requestID, "detail": safeInternalDiagnostic(err)}
 	var schemaError *store.TaskSchemaError
 	if errors.As(err, &schemaError) {
 		fields = append(fields, "stage", "task_creation", "agent_id", schemaError.AgentID, "action", schemaError.Action)
@@ -132,13 +132,22 @@ func writeInternalError(w http.ResponseWriter, err error) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": chineseErrorMessage(status, message)})
+	writeJSON(w, status, map[string]string{"error": chineseErrorMessage(status, core.RedactDiagnostic(message)), "detail": core.RedactDiagnostic(message)})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	if failure, ok := w.(*failureResponseWriter); ok {
+		value = failure.failure(status, value)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		slog.Error("encode HTTP response", "error", err)
 	}
+}
+
+// PgError can contain an entire failed row in Detail, and values in Message.
+// Keep the causal wrappers and stable database identifiers, never row data.
+func safeInternalDiagnostic(err error) string {
+	return store.SafeFailureDiagnostic(err)
 }

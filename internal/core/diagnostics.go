@@ -1,9 +1,26 @@
 package core
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
+
+// DiagnosticText is safe for PostgreSQL text and inert text rendering. It
+// keeps line breaks, tabs and causal context, including malformed Agent output.
+func DiagnosticText(value string) string {
+	value = strings.ToValidUTF8(value, "�")
+	value = strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' || r == 127 {
+			return '�'
+		}
+		return r
+	}, value)
+	return RedactDiagnostic(value)
+}
 
 var diagnosticPrivatePEM = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)`)
-var diagnosticKeyAssignment = regexp.MustCompile(`(?i)((?:["']?(?:private[-_]?key|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
+var diagnosticHeaders = regexp.MustCompile(`(?im)((?:["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)`)
+var diagnosticKeyAssignment = regexp.MustCompile(`(?i)((?:["']?(?:private[-_]?key|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:\[redacted(?: private PEM)?\]|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
 
 // Older Agents appended a raw Reality X25519 key to the Mihomo state path.
 // This is a display-only compatibility guard, never a file-field classifier.
@@ -12,9 +29,11 @@ var diagnosticLegacyRealityPath = regexp.MustCompile(`(read certificate/key /var
 // RedactDiagnostic handles labelled keys and inline private PEM even when the
 // configuration is unavailable (journal output or diagnostics from old Agents).
 func RedactDiagnostic(value string) string {
+	value = redactDiagnosticContainers(value)
 	value = replaceDiagnostic(value, diagnosticPrivatePEM, "[redacted private PEM]")
-	value = replaceDiagnostic(value, diagnosticAssignments, "${1}[redacted]")
 	value = replaceDiagnostic(value, diagnosticBearer, "Bearer [redacted]")
+	value = replaceDiagnostic(value, diagnosticHeaders, "${1}[redacted]")
+	value = replaceDiagnostic(value, diagnosticAssignments, "${1}[redacted]")
 	value = replaceDiagnostic(value, diagnosticAPIKey, "[redacted]")
 	value = replaceDiagnostic(value, diagnosticUUID, "[redacted UUID]")
 	value = replaceDiagnostic(value, diagnosticURLCredentials, "${1}[redacted]@")

@@ -49,7 +49,7 @@ func TestExistingCoreDiscoveryRejectsNonRootEtcSingBoxBinary(t *testing.T) {
 	if runtime.ExistingConfigAvailable || runtime.ExistingConfigUnsupportedReason != reason {
 		t.Fatalf("non-root /etc-style runtime = %+v", runtime)
 	}
-	if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionReadConfig, Engine: core.EngineSingBox}); err == nil || !strings.Contains(err.Error(), "core tasks are disabled") {
+	if _, err := executor.Execute(context.Background(), core.Task{Action: core.ActionReadConfig, Engine: core.EngineSingBox}); err == nil || !strings.Contains(err.Error(), "existing configuration source is unavailable") {
 		t.Fatalf("non-root /etc-style read-config error = %v", err)
 	}
 	if info, err := os.Lstat(serviceBinary); err != nil {

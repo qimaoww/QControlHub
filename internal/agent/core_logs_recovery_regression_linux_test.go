@@ -117,7 +117,7 @@ func TestConsoleRefreshPreservesWorkingFallback(t *testing.T) {
 				collector.markCoreLogDelivery(core.EngineSingBox, kind)
 				before := collector.Status()[core.EngineSingBox]
 				if action == "refresh" {
-					if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+					if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -158,7 +158,7 @@ func TestLostManagedConfigurationReportsFailure(t *testing.T) {
 	if err := os.Remove(configPath); err != nil {
 		t.Fatal(err)
 	}
-	err := collector.RefreshImportedSingBoxSource(executor)
+	err := collector.RefreshManagedSingBoxSource(executor)
 	state := collector.Status()[core.EngineSingBox]
 	t.Logf("running service lost previously observed config: status=%+v refresh_error=%v", state, err)
 	if state.Status != "failed" || err == nil {

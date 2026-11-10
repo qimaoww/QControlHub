@@ -803,6 +803,7 @@
           "import-existing",
           "install",
           "ip-quality",
+          "panel-failure",
           "read-config",
           "read-managed-config",
           "restart",
@@ -2041,6 +2042,27 @@
         },
         "type": "object"
       },
+      "core_DiagnosticAttempt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "executed_attempt": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_Engine": {
         "enum": [
           "mihomo",
@@ -2659,6 +2681,52 @@
         },
         "type": "object"
       },
+      "core_PanelFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "field": {
+            "type": "string"
+          },
+          "http_status": {
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_PanelSettings": {
         "additionalProperties": false,
         "properties": {
@@ -3181,6 +3249,12 @@
               }
             ]
           },
+          "managed_host_blocked_reason": {
+            "type": "string"
+          },
+          "managed_operation_blocked_reason": {
+            "type": "string"
+          },
           "service_status": {
             "type": "string"
           },
@@ -3696,6 +3770,66 @@
               "$ref": "#/components/schemas/core_TLSFrontend"
             },
             "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "core_TaskDiagnostic": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/core_DiagnosticAttempt"
+            },
+            "type": "array"
+          },
+          "error": {
+            "type": "string"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrences": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "retry_of": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_TaskDiagnosticChunk": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "完整配置。Key 编辑时省略/null保留；字符串替换，空字符串仍需通过内核校验。原位脱敏占位符只能保留原值；须带当前并发标识。",
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer"
+          },
+          "lease_id": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -4962,6 +5096,29 @@
         },
         "type": "object"
       },
+      "store_ConfigImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "expected_instance_id": {
+            "description": "必须提供实际目标实例；配置任务主实例用空字符串，共享实例用实际 shr_… ID；不自动选择。",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "snapshot_task_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "store_CoreLogSource": {
         "additionalProperties": false,
         "properties": {
@@ -5376,6 +5533,96 @@
           "permissions": []
         },
         "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
+      }
+    },
+    "/agent/v1/tasks/{id}/diagnostics": {
+      "post": {
+        "operationId": "uploadTaskDiagnostic_agent_v1_tasks_{id}_diagnostics",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "content": "mixed-port: 21001",
+                "count": 1,
+                "digest": "example",
+                "index": 1,
+                "lease_id": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "description": "完整配置。Key 编辑时省略/null保留；字符串替换，空字符串仍需通过内核校验。原位脱敏占位符只能保留原值；须带当前并发标识。",
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "index": {
+                    "type": "integer"
+                  },
+                  "lease_id": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "agentSignature": []
+          }
+        ],
+        "summary": "上传任务诊断",
+        "x-api-key": false,
+        "x-authentication": "agent_signature",
+        "x-effect": "write",
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
       }
     },
     "/api/v1/access-controls": {
@@ -7579,6 +7826,218 @@
           "any": false,
           "permissions": [
             "agent-config.write"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/configs/{engine}/import": {
+      "post": {
+        "description": "仅节点所有者可导入本人已完成 read-config 任务的快照；expected_version 为当前配置并发标识（尚无配置为 0）。受理不会保存配置；查询任务实际完成后才新增配置与历史。后台执行保留原始 Key 并复核授权。",
+        "operationId": "importAgentConfig_api_v1_agents_{id}_configs_{engine}_import",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "description": "example",
+                "expected_instance_id": "example",
+                "expected_version": 1,
+                "name": "example",
+                "snapshot_task_id": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "expected_instance_id": {
+                    "description": "必须提供实际目标实例；配置任务主实例用空字符串，共享实例用实际 shr_… ID；不自动选择。",
+                    "type": "string"
+                  },
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "snapshot_task_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "snapshot_task_id",
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "action": "configure-tcp",
+                  "agent_id": "example",
+                  "attempt": 1,
+                  "certificates": [
+                    {
+                      "certificate": "example",
+                      "id": "resource_example",
+                      "private_key": "example",
+                      "version": 1
+                    }
+                  ],
+                  "cnip_source": {
+                    "format": "example",
+                    "ipv4_url": "example",
+                    "ipv6_url": "example"
+                  },
+                  "config_content": "example",
+                  "config_id": "example",
+                  "config_version": 1,
+                  "core_source": "example",
+                  "core_version": "example",
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "engine": "mihomo",
+                  "error": "example",
+                  "finished_at": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "install_if_missing": false,
+                  "lease_id": "example",
+                  "mainland_access_policies": [
+                    {
+                      "agent_id": "example",
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "cnip_prefixes": [
+                        "example"
+                      ],
+                      "config_version": 1,
+                      "engine": "mihomo",
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "output": "example",
+                  "reused": false,
+                  "shared_instance": false,
+                  "shared_traffic_id": "example",
+                  "started_at": "2026-11-10T12:00:00Z",
+                  "status": "pending",
+                  "tcp_settings": {},
+                  "tls_frontends": [
+                    {
+                      "acme_email": "example",
+                      "automatic_certificate": false,
+                      "backend_port": 1,
+                      "certificate": "example",
+                      "certificate_path": "example",
+                      "domain": "example",
+                      "host": "example",
+                      "local_only": false,
+                      "method": "example",
+                      "mode": "example",
+                      "path": "example",
+                      "private_key": "example",
+                      "private_key_path": "example",
+                      "public_port": 1,
+                      "reality_name": "example",
+                      "reality_names": [
+                        "example"
+                      ],
+                      "static_html": "example",
+                      "tag": "example",
+                      "transport": "example"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_Task"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "导入现有配置",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.write",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.write",
+            "tasks.read",
+            "tasks.execute"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
@@ -19113,6 +19572,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "put": {
+        "description": "省略 secrets 字段保留已存凭据，显式空值清空。保留未读取凭据时，修改认证目标（SMTP 主机/端口/TLS/用户名或 Webhook 地址）须具备 secrets.read；也可显式替换相关凭据。",
         "operationId": "putNotifications_api_v1_settings_notifications",
         "requestBody": {
           "content": {
@@ -21562,6 +22022,147 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/tasks/failures": {
+      "post": {
+        "operationId": "recordPanelFailure_api_v1_tasks_failures",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "agent_id": "example",
+                "code": "example",
+                "detail": "example",
+                "engine": "mihomo",
+                "field": "example",
+                "http_status": 1,
+                "instance_id": "example",
+                "occurred_at": "2026-11-10T12:00:00Z",
+                "operation": "example",
+                "request_id": "example",
+                "resource": "example",
+                "stage": "example",
+                "summary": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "engine": {
+                    "$ref": "#/components/schemas/core_Engine"
+                  },
+                  "field": {
+                    "type": "string"
+                  },
+                  "http_status": {
+                    "type": "integer"
+                  },
+                  "instance_id": {
+                    "type": "string"
+                  },
+                  "occurred_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "operation": {
+                    "type": "string"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "resource": {
+                    "type": "string"
+                  },
+                  "stage": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": "resource_example"
+                },
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "保存失败记录",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/tasks/{id}": {
       "delete": {
         "operationId": "cancelTask_api_v1_tasks_{id}",
@@ -21881,6 +22482,111 @@
           "permissions": [
             "tasks.read",
             "agent-config.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/tasks/{id}/diagnostics": {
+      "get": {
+        "operationId": "getTaskDiagnostic_api_v1_tasks_{id}_diagnostics",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "attempt",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "attempts": [
+                    {
+                      "attempt": 1,
+                      "error": "example",
+                      "executed_attempt": 1,
+                      "output": "example",
+                      "source": "example"
+                    }
+                  ],
+                  "error": "example",
+                  "last_failure_at": "2026-11-10T12:00:00Z",
+                  "occurrences": 1,
+                  "output": "example",
+                  "retry_of": "example",
+                  "source": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_TaskDiagnostic"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "任务完整诊断",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "tasks.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "tasks.read"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"

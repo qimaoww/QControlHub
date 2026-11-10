@@ -32,7 +32,9 @@ export function readRegion(ctx, label, read, apply, { active = () => true, clear
       apply(value); ready = true; element.hidden = true; message.textContent = ''; message.removeAttribute('role'); message.remove();
       return value;
     } catch (error) {
-      if (!current(expected) || signal.aborted || error.name === 'AbortError') return;
+      if (!current(expected) || signal.aborted || error.intentionalCancellation === true) return;
+      await ctx.recordFailure?.(error, label, "region_loading");
+      if (!current(expected)) return;
       if ([401, 403, 404].includes(error.status)) { ready = false; clear(); }
       if (!ready && view) {
         const root = typeof view === 'function' ? view() : view;
