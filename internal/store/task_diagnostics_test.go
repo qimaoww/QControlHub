@@ -52,6 +52,30 @@ func TestSafeFailureDiagnosticNeverExposesDatabaseRows(t *testing.T) {
 	}
 }
 
+func TestRefreshFailureDeduplicatesRequestLabelsWithoutLosingNewCauses(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_refresh-owner", false)
+	input := core.PanelFailure{Operation: "任务读取", Resource: "/tasks", Stage: "api_request", HTTPStatus: 502, Summary: "代理响应失败", RequestID: "proxy-first", Detail: "upstream unavailable\n（请求 ID：proxy-first）"}
+	first, err := db.RecordPanelFailure(owner, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.RequestID, input.Detail = "proxy-second", "upstream unavailable\n（请求 ID：proxy-second）"
+	second, err := db.RecordPanelFailure(owner, input)
+	if err != nil || first != second {
+		t.Fatalf("request label created another task: %s %s %v", first, second, err)
+	}
+	diagnostic, err := db.TaskDiagnostic(owner, first)
+	if err != nil || diagnostic.Error != "upstream unavailable\n（请求 ID：proxy-first）" || diagnostic.Occurrences != 2 || !strings.Contains(diagnostic.Output, "proxy-first") {
+		t.Fatalf("original request or occurrence lost: %+v %v", diagnostic, err)
+	}
+	input.Detail = "upstream certificate expired\n（请求 ID：proxy-second）"
+	changed, err := db.RecordPanelFailure(owner, input)
+	if err != nil || changed == first {
+		t.Fatalf("new cause was merged into old failure: %s %v", changed, err)
+	}
+}
+
 func TestLeaseRecoveryPreservesEachDiagnosticAttempt(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent, _ := enrollTaskTestAgent(t, ctx, db)

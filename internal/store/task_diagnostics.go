@@ -99,7 +99,14 @@ func (s *Store) RecordPanelFailure(ctx context.Context, input core.PanelFailure)
 	if input.OccurredAt.IsZero() {
 		input.OccurredAt = time.Now().UTC()
 	}
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s", input.Operation+input.Resource, input.Stage, input.Detail, input.HTTPStatus, input.AgentID, input.Engine, input.InstanceID)))
+	// The browser appends this request label to the preserved raw error.
+	// A fresh request identifier must not turn an identical refresh failure
+	// into a new task. Keep the original text in the immutable diagnostic.
+	fingerprintDetail := input.Detail
+	if input.RequestID != "" {
+		fingerprintDetail = strings.ReplaceAll(fingerprintDetail, "（请求 ID："+input.RequestID+"）", "（请求 ID：[request_id]）")
+	}
+	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s", input.Operation+input.Resource, input.Stage, fingerprintDetail, input.HTTPStatus, input.AgentID, input.Engine, input.InstanceID)))
 	key := hex.EncodeToString(fingerprint[:])
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, scope.OwnerID+key); err != nil {
 		return "", err
