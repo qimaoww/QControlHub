@@ -99,14 +99,14 @@ func apiKeyTaskIdentity(ctx context.Context) (string, []byte) {
 const unauthorizedTaskAPIKeySQL = unauthorizedDirectTaskAPIKeySQL + ` OR EXISTS(
  SELECT 1 FROM api_key_work w WHERE w.work_id=t.id AND starts_with(w.kind,'certificate-sync-task:')
  AND NOT EXISTS(SELECT 1 FROM admin_api_keys k WHERE k.id=w.api_key_id AND NOT k.disabled AND k.revoked_at IS NULL
- AND (k.expires_at IS NULL OR k.expires_at>now()) AND k.mode='read_write' AND k.permissions @> w.permissions
+ AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()) AND k.mode='read_write' AND k.permissions @> w.permissions
  AND ((k.creator_type='environment' AND EXISTS(SELECT 1 FROM api_key_environment_creators e WHERE e.id=k.creator_id))
  OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=k.creator_id AND NOT u.disabled AND (u.role='admin' OR
  u.permissions @> (w.permissions - ARRAY['certificates.read','certificates.manage','certificates.grant','preferences.read','preferences.write','agent-access.read','agent-access.write']::text[]))))))`
 
 const unauthorizedDirectTaskAPIKeySQL = `(t.api_key_id<>'' AND NOT EXISTS(
  SELECT 1 FROM admin_api_keys key WHERE key.id=t.api_key_id AND NOT key.disabled
- AND key.revoked_at IS NULL AND (key.expires_at IS NULL OR key.expires_at>now())
+ AND key.revoked_at IS NULL AND (key.expires_at IS NULL OR key.expires_at>clock_timestamp())
  AND key.mode='read_write' AND key.permissions @> t.api_key_permissions
  AND ((key.creator_type='environment' AND EXISTS(SELECT 1 FROM api_key_environment_creators e WHERE e.id=key.creator_id)) OR EXISTS(SELECT 1 FROM panel_users creator
  WHERE creator.id=key.creator_id AND NOT creator.disabled
@@ -137,7 +137,7 @@ func (s *Store) LockAPIKeyExternalEffect(ctx context.Context) error {
 		return err
 	}
 	var valid bool
-	err = tx.QueryRow(ctx, `SELECT NOT disabled AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+	err = tx.QueryRow(ctx, `SELECT NOT disabled AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
  AND mode='read_write' AND permissions @> $2::jsonb AND ((creator_type='environment' AND EXISTS(SELECT 1 FROM api_key_environment_creators e WHERE e.id=creator_id)) OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=creator_id AND NOT u.disabled AND (u.role='admin' OR u.permissions @> ($2::jsonb - ARRAY['certificates.read','certificates.manage','certificates.grant','preferences.read','preferences.write','agent-access.read','agent-access.write']::text[])))) FROM admin_api_keys WHERE id=$1 FOR SHARE`, auth.ID, mustJSONPermissions(auth.Permissions)).Scan(&valid)
 	if err != nil {
 		return mapError(err)

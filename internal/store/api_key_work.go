@@ -22,7 +22,7 @@ func apiKeyWorkAllowed(ctx context.Context, executor storeExecutor, kind, id str
 	var denied bool
 	err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM api_key_work w WHERE w.kind=$1 AND w.work_id=$2
  AND NOT EXISTS(SELECT 1 FROM admin_api_keys k WHERE k.id=w.api_key_id AND NOT k.disabled AND k.revoked_at IS NULL
- AND (k.expires_at IS NULL OR k.expires_at>now()) AND k.mode='read_write' AND k.permissions @> w.permissions
+ AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()) AND k.mode='read_write' AND k.permissions @> w.permissions
  AND ((k.creator_type='environment' AND EXISTS(SELECT 1 FROM api_key_environment_creators e WHERE e.id=k.creator_id)) OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=k.creator_id AND NOT u.disabled
  AND (u.role='admin' OR u.permissions @> (w.permissions - ARRAY['certificates.read','certificates.manage','certificates.grant','preferences.read','preferences.write','agent-access.read','agent-access.write']::text[]))))))`, kind, id).Scan(&denied)
 	return !denied, err
