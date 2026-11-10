@@ -159,6 +159,7 @@ export async function clientAccessPage(ctx) {
   }
   function draw() {
     if (!loaded) return;
+    updateOptions(agentFilter, agentOptions());
     // Export-only accounts group the authorized response without /agents.
     const available = groupClientAccessEntries(entries, agents).map(group => ({ id: group.agent_id }));
     const filters = normalizeClientAccessFilters(entries, available, {
