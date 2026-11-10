@@ -378,6 +378,10 @@ func (s *Server) recordAudit(request *http.Request, action, target, detail strin
 		return
 	}
 	entry := s.auditEntry(request, action, target, detail)
+	if store.HasRequestTransaction(request.Context()) {
+		_ = s.writeAudit(request.Context(), entry)
+		return
+	}
 	// Preserve the authenticated account even after its HTTP request ends.
 	auditContext := context.WithoutCancel(request.Context())
 	go func() {
@@ -399,6 +403,7 @@ func (s *Server) auditEntry(request *http.Request, action, target, detail string
 	remoteIP := authn.ClientIP(request, s.trustedProxies)
 	if k, ok := requestAPIKey(request); ok {
 		actor = "key:" + k.ID
+		detail = "creator=" + k.CreatorType + ":" + k.CreatorID + " " + detail
 	}
 	return core.AuditLogEntry{Actor: actor, Action: action, Target: target, Detail: detail, RemoteIP: remoteIP}
 }

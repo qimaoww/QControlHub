@@ -125,7 +125,7 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		if err := tx.Commit(ctx); err != nil {
 			return change, err
 		}
-		s.signalTaskReady(id)
+		s.signalTaskReadyAfterCommit(ctx, id)
 		return change, nil
 	}
 	if err := setEngineCapability(ctx, tx, id, engine, enabled, selected); err != nil {

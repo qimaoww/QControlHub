@@ -86,6 +86,11 @@ func subStoreEndpointHint(endpoint string) string {
 }
 
 func (s *Server) subStoreRequest(ctx context.Context, endpoint, method, route string, payload any, destination any) (int, error) {
+	if s.store != nil {
+		if err := s.store.LockAPIKeyExternalEffect(ctx); err != nil {
+			return 0, err
+		}
+	}
 	base, err := url.Parse(endpoint)
 	if err != nil {
 		return 0, errors.New("Sub-Store 地址无效")

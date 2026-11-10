@@ -10,6 +10,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 // An empty region_code tells list clients to wait for a later list read instead
@@ -99,7 +100,9 @@ func (s *Server) deleteAgent(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(agentID)
+	if !store.AfterRequestCommit(request.Context(), func() { s.DisconnectAgent(agentID) }) {
+		s.DisconnectAgent(agentID)
+	}
 	s.recordAudit(request, "agent.deleted", agentID, "")
 	w.WriteHeader(http.StatusNoContent)
 }

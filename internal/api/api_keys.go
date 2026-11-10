@@ -75,7 +75,7 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 	if k.Status != "active" {
 		return invalidKnownKey()
 	}
-	v := apiSession{Role: core.RoleAdmin, ConfigOwnerID: k.OwnerID, Permissions: k.Permissions, ExpiresAt: now.Add(time.Minute)}
+	v := apiSession{Role: core.RoleUser, ConfigOwnerID: k.OwnerID, Permissions: k.Permissions, ExpiresAt: now.Add(time.Minute)}
 	current := []core.Permission(nil)
 	if k.CreatorType == "user" {
 		user, err := s.store.UserForSession(r.Context(), k.CreatorID)
@@ -86,21 +86,20 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 			writeInternalError(w, err)
 			return r, false
 		}
-		if user.Role != core.RoleAdmin {
-			return invalidKnownKey()
-		}
+		v.Role = user.Role
 		v.UserID = user.ID
 		v.Username = user.Username
 		v.AuthRevision = user.AuthRevision
 		current = user.Permissions
 		for _, p := range core.AllPermissions() {
-			if user.Role.Allows(p) && !core.HasPermission(current, p) {
+			if (user.Role.Allows(p) || core.PersonalPermission(p)) && !core.HasPermission(current, p) {
 				current = append(current, p)
 			}
 		}
 	} else {
 		for digest, p := range s.roleTokens {
 			if p.Role == core.RoleAdmin && environmentCreatorID(digest) == k.CreatorID {
+				v.Role = p.Role
 				current = p.Permissions
 				v.EnvironmentID = k.CreatorID
 				break
@@ -139,11 +138,6 @@ func (s *Server) apiKeyRoutes(mux *http.ServeMux) {
 				writeError(w, 403, "API Key 无法管理凭据")
 				return
 			}
-			role, _ := s.sessionRole(r)
-			if role != core.RoleAdmin {
-				writeError(w, 403, "仅管理员可管理 API Key")
-				return
-			}
 			next(w, r)
 		}))
 	}
@@ -160,12 +154,15 @@ func (s *Server) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "read_permissions": core.DiagnosticPermissions()})
+	writeJSON(w, 200, map[string]any{"items": items, "read_permissions": s.grantableAPIKeyPermissions(r, true), "permissions": s.grantableAPIKeyPermissions(r, false)})
 }
 func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 	var input core.APIKeyInput
 	if err := decodeJSON(w, r, &input, 32<<10); err != nil {
 		writeError(w, 400, "API Key 请求格式无效")
+		return
+	}
+	if !s.validateAPIKeyGrants(w, r, input) {
 		return
 	}
 	typ, id := s.apiKeyCreator(r)
@@ -184,6 +181,9 @@ func (s *Server) updateAPIKey(w http.ResponseWriter, r *http.Request) {
 	var input core.APIKeyInput
 	if err := decodeJSON(w, r, &input, 32<<10); err != nil {
 		writeError(w, 400, "API Key 请求格式无效")
+		return
+	}
+	if !s.validateAPIKeyGrants(w, r, input) {
 		return
 	}
 	s.saveAPIKey(w, r, input, false)
@@ -207,7 +207,7 @@ func (s *Server) getAPIKeyAuthorization(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	permissions, _ := s.sessionPermissions(r)
-	endpoints := diagnosticRouteList(permissions)
+	endpoints := apiKeyRouteList(k.Mode, permissions)
 	sort.Strings(endpoints)
 	ip := authn.ClientIP(r, s.trustedProxies)
 	if addr, err := netip.ParseAddr(ip); err == nil {
@@ -215,5 +215,28 @@ func (s *Server) getAPIKeyAuthorization(w http.ResponseWriter, r *http.Request) 
 	} else {
 		ip = ""
 	}
-	writeJSON(w, 200, map[string]any{"id": k.ID, "name": k.Name, "prefix": k.Prefix, "permissions": permissions, "ip_allowlist": k.IPAllowlist, "expires_at": k.ExpiresAt, "workspace_id": k.OwnerID, "user_id": s.sessionUserID(r), "source_ip": ip, "endpoints": endpoints})
+	writeJSON(w, 200, map[string]any{"id": k.ID, "name": k.Name, "mode": k.Mode, "prefix": k.Prefix, "permissions": permissions, "ip_allowlist": k.IPAllowlist, "expires_at": k.ExpiresAt, "workspace_id": k.OwnerID, "user_id": s.sessionUserID(r), "source_ip": ip, "endpoints": endpoints})
+}
+
+func (s *Server) grantableAPIKeyPermissions(r *http.Request, readOnly bool) []core.Permission {
+	result := []core.Permission{}
+	for _, p := range core.APIKeyPermissions() {
+		if s.sessionAllows(r, p) && (!readOnly || core.ReadOnlyAPIKeyPermission(p)) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+func (s *Server) validateAPIKeyGrants(w http.ResponseWriter, r *http.Request, input core.APIKeyInput) bool {
+	for _, p := range input.Permissions {
+		if !core.HasPermission(core.APIKeyPermissions(), p) {
+			writeError(w, 400, "未知或不可委托的 API Key 权限")
+			return false
+		}
+		if !core.HasPermission(s.grantableAPIKeyPermissions(r, false), p) {
+			writeError(w, 403, "无法授予超出当前授权的权限")
+			return false
+		}
+	}
+	return true
 }

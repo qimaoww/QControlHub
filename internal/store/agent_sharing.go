@@ -99,6 +99,11 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 	if err := requireAgentAdministration(ctx, tx, agentID); err != nil {
 		return core.AgentSharing{}, err
 	}
+	if _, key := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); key {
+		if err := requireNodeOwner(ctx, tx, agentID); err != nil {
+			return core.AgentSharing{}, err
+		}
+	}
 	var revision int64
 	var owner string
 	var features []string

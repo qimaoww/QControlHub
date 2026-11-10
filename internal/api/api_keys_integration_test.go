@@ -113,8 +113,8 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 		}
 	})
 	t.Run("read_scope_and_behavior_boundaries", func(t *testing.T) {
-		for _, path := range []string{"/regions", "/region-flags/US"} {
-			call(secret, "GET", path, nil, "", "", 403)
+		for _, path := range []string{"/regions"} {
+			call(secret, "GET", path, nil, "", "", 200)
 		}
 		for _, path := range []string{"/overview", "/agents", "/deployments", "/configs", "/tasks", "/core-log-sources", "/core-logs", "/audit", "/settings/deployment"} {
 			call(secret, "GET", path, nil, "", "", 200)

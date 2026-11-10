@@ -107,7 +107,7 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		return core.Task{}, err
 	}
 	if !task.Reused {
-		s.signalTaskReady(task.AgentID)
+		s.signalTaskReadyAfterCommit(ctx, task.AgentID)
 	}
 	return task, nil
 }

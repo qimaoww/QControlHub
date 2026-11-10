@@ -65,6 +65,6 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, core.Task{}, err
 	}
-	s.signalTaskReady(saved.AgentID)
+	s.signalTaskReadyAfterCommit(ctx, saved.AgentID)
 	return saved, task, nil
 }

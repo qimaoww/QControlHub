@@ -152,7 +152,9 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	}
 	status = waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting after configuration appeared",
 		func(status CoreLogSourceStatus) bool {
-			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog
+			// The host fallback can arm before the namespace follower. Wait
+			// for the exact source whose readiness is asserted below.
+			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == core.CoreLogSourceJournal
 		})
 	if status.Source != core.CoreLogSourceJournal || status.LastAt != nil {
 		t.Fatalf("armed status after configuration appeared = %+v", status)
@@ -210,7 +212,7 @@ func TestJournalSourceReportsWaitingUntilFirstDeliveredLine(t *testing.T) {
 	runCoreLogCollector(t, collector)
 	status := waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting before the first line",
 		func(status CoreLogSourceStatus) bool {
-			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog
+			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == core.CoreLogSourceJournal
 		})
 	if status.Source != core.CoreLogSourceJournal || status.LastAt != nil {
 		t.Fatalf("armed journal status = %+v", status)
@@ -259,6 +261,7 @@ func TestHostJournalFailureKeepsNamespaceSourceActive(t *testing.T) {
 	})
 	collector.serviceState = staticCoreLogServiceState("active")
 	runCoreLogCollector(t, collector)
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournal, core.CoreLogStatusActive)
 	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournalHost, core.CoreLogStatusFailed)
 	status := collector.Status()[core.EngineSingBox]
 	if status.Status != core.CoreLogStatusActive || status.Source != core.CoreLogSourceJournal || status.LastAt == nil {

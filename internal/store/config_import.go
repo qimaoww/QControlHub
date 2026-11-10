@@ -136,7 +136,12 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if err != nil {
 		return core.Task{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,owner_id,config_content) VALUES($1,$2,$3,'import-existing','pending',$4,$5,$6)`, task.ID, agentID, engine, task.CreatedAt, scopeForConfig(ctx).OwnerID, stored)
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		key.Permissions = core.NormalizePermissions(append(key.Permissions, taskAPIKeyPermissions(core.ActionImportExisting, false)...))
+		ctx = context.WithValue(ctx, apiKeyAuthContextKey{}, key)
+	}
+	apiKeyID, apiKeyPermissions := apiKeyTaskIdentity(ctx)
+	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,owner_id,config_content,api_key_id,api_key_permissions) VALUES($1,$2,$3,'import-existing','pending',$4,$5,$6,$7,$8)`, task.ID, agentID, engine, task.CreatedAt, scopeForConfig(ctx).OwnerID, stored, apiKeyID, apiKeyPermissions)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -160,7 +165,7 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if err = tx.Commit(ctx); err != nil {
 		return core.Task{}, err
 	}
-	s.signalTaskReady(agentID)
+	s.signalTaskReadyAfterCommit(ctx, agentID)
 	task.ConfigContent = ""
 	return task, nil
 }
