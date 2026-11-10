@@ -1,16 +1,21 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
+	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
 
 func TestImportPreparationKeepsManualConfigurationAndHistory(t *testing.T) {
@@ -199,4 +204,62 @@ func executionTasks(t *testing.T, tasks []core.Task) []core.Task {
 		}
 	}
 	return result
+}
+
+func TestFailureRetentionDatabaseFaultPreservesOriginalResponse(t *testing.T) {
+	base := os.Getenv("QCH_TEST_DATABASE_URL")
+	if base == "" {
+		t.Skip("requires PostgreSQL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schema.Close(context.Background())
+	db, err := store.Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	connection, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close(context.Background())
+	_, err = connection.Exec(ctx, `CREATE FUNCTION refuse_diagnostic() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='panel-failure' THEN RAISE EXCEPTION 'fixture retention unavailable'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER refuse_diagnostic BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION refuse_diagnostic()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.Repeat("f", 48)
+	handler := New(db, Config{AdminToken: token}).Handler()
+	check := func() {
+		t.Helper()
+		request := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(`{"unknown_field":true}`))
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body struct {
+			Error, Detail string
+			Saved         bool   `json:"failure_saved"`
+			Retention     string `json:"retention_error"`
+			TaskID        string `json:"failure_task_id"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 400 || !strings.Contains(body.Detail, "unknown_field") || body.Saved || body.TaskID != "" || !strings.Contains(body.Retention, "未能保存到任务") {
+			t.Fatalf("original failure replaced or false retention: %s", response.Body.String())
+		}
+	}
+	check()
+	var count int
+	if err = connection.QueryRow(ctx, `SELECT count(*) FROM tasks`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("retention recursively scheduled: %d %v", count, err)
+	}
+	db.Close()
+	check()
 }
