@@ -77,15 +77,15 @@ export function diagnoseTask(task) {
       const reason = raw.match(/\[原因:([^\]]+)\]\s*([^；\n]+)/);
       const rollbackFailed = /rollback failed|反代恢复失败|回滚失败/i.test(raw);
       const restored = /已恢复原反代状态|previous configuration was restored|newly created configuration was removed/i.test(raw);
-      const advice = phase === "配置生成及校验" ? "展开节点结果定位配置字段，可使用“编辑后重试”修正后提交。" : phase === "服务应用" ? "展开节点结果检查服务启动错误及最终状态，修复后重试。" : "检查域名 A/AAAA、节点到 ACME 的网络、公网 TCP 80 和受管目录权限；可在高级设置选择已有证书或外部反代。";
+      const advice = phase === "配置生成及校验" ? "展开节点结果定位配置字段，可使用“编辑后重试”修正后提交。" : phase === "服务应用" ? "展开节点结果检查服务启动错误及最终状态，修复后重试。" : phase === "证书准备" ? "检查域名 A/AAAA、节点到 ACME 的网络、公网 TCP 80 和受管目录权限；可在高级设置选择已有证书或外部反代。" : "根据完整诊断定位此阶段的实际原因，修正后重试。";
       return {title:`部署失败 · ${phase}`, advice:reason ? `${reason[1]}：${reason[2]}` : advice,
-        rollback:rollbackFailed ? "回滚失败：需检查节点最终服务与路由状态" : restored ? "已恢复此前反代路由；业务配置和服务状态见节点结果" : "请查看任务结果核对配置、服务和路由的最终状态"};
+        rollback:rollbackFailed ? "回滚失败：需检查节点最终服务与路由状态" : restored ? "已恢复此前配置或资源；最终服务状态见节点结果" : "请查看任务结果核对配置、服务和路由的最终状态"};
     }
     if (task.action === "ip-quality")
       return { title: "IP 质量检测未完成", advice: "查看节点依赖、网络或报告格式错误；缺失结果不会记为低风险。修复后可重新检测。" };
     if (task.install_if_missing && error.includes("stable core installation failed"))
       return {title:"稳定版安装失败，未继续执行配置", advice:"检查下载、校验或服务启动错误后重试；切换版本请到节点设置。"};
-    if (error.includes("rolled back"))
+    if (error.includes("rolled back") && !/(?:not|never|failed to)[^\n;]*rolled back/.test(error))
       return {
         title: "变更失败，已自动回滚",
         advice: "旧配置或旧二进制已经恢复；先查询服务状态后再重试。",

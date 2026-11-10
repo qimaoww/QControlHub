@@ -34,6 +34,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 	}
 	// Rekeying failure is visible to the caller; do not block independent jobs.
 	rekeyErr := s.rewrapCertificateSecrets(ctx)
+	var retentionErr error
 	// A certificate with no active order becomes due 30 days before expiry.
 	rows, err := s.pool.Query(ctx, `SELECT id,owner_id,metadata FROM panel_certificates c WHERE auto_renew AND next_attempt<=now() AND NOT EXISTS(SELECT 1 FROM certificate_orders o WHERE o.certificate_id=c.id AND o.status IN ('queued','running','waiting_dns','validating','canceling')) LIMIT 20`)
 	if err != nil {
@@ -115,8 +116,13 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			}
 			var item core.Certificate
 			var state certificateOrderState
-			if json.Unmarshal(raw, &item) != nil || s.openCertificate(secret, &state) != nil {
+			decodeErr := json.Unmarshal(raw, &item)
+			if decodeErr == nil {
+				decodeErr = s.openCertificate(secret, &state)
+			}
+			if decodeErr != nil {
 				_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET error='订单无法解密；请恢复当前及旧加密密钥后重试',next_attempt=now()+interval '10 minutes' WHERE id=$1`, job.id)
+				retentionErr = errors.Join(retentionErr, s.retainBackgroundFailure(ctx, owner, "证书订单读取", job.id, "order_decoding", decodeErr))
 				return
 			}
 			item.ID, item.OwnerID = job.cert, owner
@@ -124,7 +130,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			runCtx, cancel := context.WithTimeout(ownerCtx, 90*time.Second)
 			defer cancel()
 			if status == "succeeded" || status == "failed" || status == "canceled" {
-				_ = s.finishCertificateOrderCleanup(runCtx, item, job.id, &state)
+				retentionErr = errors.Join(retentionErr, s.finishCertificateOrderCleanup(runCtx, item, job.id, &state))
 				return
 			}
 			// Keep the starting status for manual continuation. Cleanup is not
@@ -137,7 +143,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 			}
 			err = s.processCertificateOrder(runCtx, item, job.id, status, state)
 			if err != nil {
-				_ = s.recordCertificateOrderFailure(context.WithoutCancel(ctx), job.id, item.Method, status, attempt, err)
+				retentionErr = errors.Join(retentionErr, s.recordCertificateOrderFailure(context.WithoutCancel(ctx), job.id, item.Method, status, attempt, err))
 				// A queued retry may still be under CA validation. Keep its
 				// bounded challenge routes until terminal/cancellation cleanup;
 				// Agent reads independently enforce status and current grants.
@@ -147,7 +153,7 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 	if err := s.syncCertificateBindings(ctx); err != nil {
 		return err
 	}
-	return rekeyErr
+	return errors.Join(rekeyErr, retentionErr)
 }
 
 func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, startedStatus string, attempt int, cause error) error {
@@ -183,6 +189,12 @@ func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, s
 	_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET secret=$8,status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=CASE WHEN status='canceling' THEN 'cleanup' ELSE $3 END,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(SafeFailureDiagnostic(cause), 1000), intervalString(retry), startedStatus, terminal, secret)
 	if err == nil {
 		err = s.retainBackgroundFailure(ctx, owner, "证书签发", id, fmt.Sprintf("%s/attempt_%d", failedStage, attempt+1), cause)
+		if err != nil {
+			persist, done := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer done()
+			_, markerErr := s.pool.Exec(persist, `UPDATE certificate_orders SET error=$2 WHERE id=$1`, id, truncate(SafeFailureDiagnostic(cause), 750)+"\n未能保存到任务："+truncate(SafeFailureDiagnostic(err), 200))
+			err = errors.Join(err, markerErr)
+		}
 	}
 	return err
 }

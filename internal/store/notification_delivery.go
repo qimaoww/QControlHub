@@ -170,6 +170,10 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 			detail += "\n" + delivery.Diagnostic
 		}
 		err = s.retainBackgroundFailure(finishCtx, d.Owner, "通知投递", fmt.Sprintf("delivery:%d/channel:%s", d.ID, d.ChannelID), fmt.Sprintf("delivery_attempt_%d", d.Attempts+1), errors.New(detail))
+		if err != nil {
+			_, markerErr := s.pool.Exec(finishCtx, `UPDATE notification_deliveries SET error=$2 WHERE id=$1`, d.ID, truncate(message, 750)+"\n未能保存到任务："+truncate(SafeFailureDiagnostic(err), 200))
+			err = errors.Join(err, markerErr)
+		}
 	}
 	return true, err
 }

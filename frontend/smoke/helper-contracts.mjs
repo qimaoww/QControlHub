@@ -43,3 +43,7 @@ await import("../session_api_smoke.mjs");
 await import("../shell_modules_smoke.mjs");
 
 }
+
+const unrelatedPhase=diagnoseTask({status:"failed",action:"validate",error:"[阶段:真实内核校验] permission denied"});
+assert.doesNotMatch(unrelatedPhase.advice,/ACME|TCP 80/);
+assert.match(unrelatedPhase.advice,/实际原因/);

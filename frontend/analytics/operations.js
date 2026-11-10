@@ -354,6 +354,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
   const context = taskContext(ctx, task);
   const engineLabel = badge(taskEngine(task)), actionLabel = badge(actionName(task.action));
   const heading = actions(state, engineLabel, actionLabel);
+  const errorSummary = () => {const text=diagnosticError(task.error || "").split("\n")[0]; return text.slice(0,300)+(text.length>300 ? "…" : "");};
   const content = stack(heading,
     context, timing, failure, diagnosis, output, previousAttempts);
   const box = ctx.dialog(title, content, { wide: true });
@@ -380,7 +381,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
         const state = await ctx.api(`/tasks/${pathID(taskID)}?view=status`, { signal });
         if (!active()) return;
         if (diagnosticSignature && ['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) {
-          failure.textContent = diagnosticError(task.error || '');
+          failure.textContent = errorSummary();
           return;
         }
       }
@@ -394,7 +395,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
       paintDiagnosis();
       const next = status(task.status);
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
-      const error = diagnosticError(task.error || "");
+      const error = errorSummary();
       if (failure.textContent !== error) failure.textContent = error;
       let text = redactDiagnostic(task.output);
       const signature = JSON.stringify([task.status,task.attempt,task.finished_at]);
