@@ -1,6 +1,7 @@
 // Real Chromium contexts against isolated PostgreSQL and password/CSRF sessions.
 // Follow the repository's dependency-free native CDP browser convention.
 import assert from "node:assert/strict";
+import { runStructureLoadingBrowser } from './structure_loading_browser.mjs';
 import { runAnalyticsBrowser } from "./analytics_browser_session.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -16,7 +17,7 @@ const child = spawn(process.env.QCH_CHROME_BIN || "chromium", ["--headless=new",
 const report = [];
 const record = message => { report.push(message); console.log(message); };
 let socket;
-const timer = setTimeout(() => child.kill("SIGKILL"), 60000);
+const timer = setTimeout(() => child.kill("SIGKILL"), 120000);
 try {
   let stderr = "";
   const endpoint = await new Promise((resolve, reject) => {
@@ -106,6 +107,10 @@ try {
     await call("Page.navigate", { url }, sessionId);
     if (checkStartup) {
       await wait(sessionId, "!!window.__releaseStartup && !!document.querySelector('#qch-startup-style')?.sheet");
+      await wait(sessionId, `(() => {
+        const screen = document.querySelector('.qch-startup'), box = screen?.getBoundingClientRect();
+        return box && getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight && !document.getAnimations().length;
+      })()`);
       assert.ok(await evaluate(sessionId, `(() => {
         const screen = document.querySelector('.qch-startup'), box = screen.getBoundingClientRect();
         return getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight
@@ -142,8 +147,23 @@ try {
   const screenshot = async (page, label) => {
     if (!artifacts) return;
     await mkdir(resolve(artifacts), { recursive: true });
-    const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
-    await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
+    // Redact generated fixture credentials only for evidence, without input
+    // events or changes to the draft/baseline used by the behavioral checks.
+    const redact = () => {
+      window.__evidenceFields = [];
+      for (const field of document.querySelectorAll('textarea,input')) {
+        const value = field.value;
+        const clean = value.replace(/((?:["']?(?:password|private_key|token|credential|secret)["']?)\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,}]+)/gi, '$1[测试凭据已隐藏]');
+        if (clean !== value) { window.__evidenceFields.push([field,value]); field.value = clean; }
+      }
+    };
+    await evaluate(page, `(${redact.toString()})()`);
+    try {
+      const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
+      await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
+    } finally {
+      await evaluate(page, `window.__evidenceFields.forEach(([field,value])=>{field.value=value});delete window.__evidenceFields`);
+    }
   };
 
   // No preference row: use the production entry without a preview hint.
@@ -195,6 +215,8 @@ try {
   record(`${mode}: styled startup, reduced motion, animation cleanup, resource failure and keyboard retry`);
   record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
 
+  await runStructureLoadingBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, record });
+
   await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });
 
   const [a, b, manager] = await Promise.all([createPage(), createPage(), createPage()]);
@@ -229,7 +251,7 @@ try {
     await evaluate(page, "location.hash='#certificates'");
     await wait(page, "[...document.querySelectorAll('.a-main button')].some(el=>el.textContent==='账号与认证授权') && !document.querySelector('[aria-busy=true]')");
     await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(el=>el.textContent==='账号与认证授权').click()");
-    await wait(page, "!!document.querySelector('dialog[open] select[name=agent_id]')");
+    await wait(page, "!!document.querySelector('dialog[open] select[name=agent_id]') && !document.querySelector('dialog[open] [aria-busy=true]')");
     const nodes = await evaluate(page, "[...document.querySelectorAll('dialog[open] select[name=agent_id] option')].map(option=>option.value).filter(Boolean)");
     assert.deepEqual(nodes, [fixture.owned[user]], "certificate HTTP authorization must use the owned-node scope without agents.read");
     await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");

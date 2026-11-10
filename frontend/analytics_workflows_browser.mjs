@@ -168,7 +168,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('theme-inbound')");
   const workspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);assert.ok(workspace.inbounds.some(input=>input.tag==='theme-inbound'&&input.port===23477));assert.ok(workspace.config?.version);await close();
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
-  await click('展开源码','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");await screenshot(page,'analytics-config-files');
+  await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('dialog[open] [aria-busy=true]')");await screenshot(page,'analytics-config-files');
   await api(page,identity,'PUT',`/agents/${agentID}/configs/mihomo`,{name:workspace.config.name,description:workspace.config.description,content:workspace.config.content,version:workspace.config.version});
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
   await confirmDeploy(false);

@@ -31,6 +31,7 @@ export async function testCertificateOrderPresentation() {
     assert.equal(document.querySelector('.a-main img'), null, 'certificate name became executable markup');
     document.querySelector('[data-certificate-detail]').click();
     const box = await waitFor(() => document.querySelector('dialog[open][data-certificate-id]'), 'native certificate detail did not open');
+    await waitFor(() => !box.querySelector('[aria-busy=true]') && box.textContent.includes(formatDate(scheduled)), 'native certificate detail data did not complete');
     const text = box.textContent;
     assert.ok(!/v1234|1234|5678|第 0 次|版本历史/.test(text), 'internal revisions or invented attempts leaked into native detail');
     assert.ok(text.includes(formatDate(scheduled)), 'certificate record lost its actual saved/scheduled date');

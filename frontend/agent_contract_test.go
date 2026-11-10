@@ -14,12 +14,12 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 	}
 	// Native pages own selectors and cards instead of duplicate shell sidebars.
 	for path, markers := range map[string][]string{
-		"analytics/live-config.js":   {`await readOrderedNodes(ctx.api)`},
+		"analytics/live-config.js":   {`orderNodesBySavedOrder(list(await ctx.api('/agents')), savedNodeOrder())`},
 		"analytics/configs.js":       {`readOrderedNodes(ctx.api)`},
 		"analytics/nodes.js":         {`orderNodesBySavedOrder(agents, ordering.ids())`, `bindNodeOrdering`},
 		"analytics/observability.js": {`orderNodesBySavedOrder(coreLogSourceAgents(sources), nodeOrder)`},
 		"analytics/traffic.js":       {`orderNodesBySavedOrder(agents, ordering.ids())`},
-		"analytics/client-access.js": {`orderNodesBySavedOrder(list(agents), ordering.ids())`},
+		"analytics/client-access.js": {`orderNodesBySavedOrder(agents, ordering.ids())`},
 		"analytics/connections.js":   {`orderNodesBySavedOrder(sources.map`, `connectionQuery(filters, target, nodeOrder)`},
 		"analytics/substore.js":      {`savedNodeOrder()`, `groupSubStoreProfiles`},
 		"analytics/tcp.js":           {`orderNodesBySavedOrder(list(agents), order?.ids)`},
@@ -39,7 +39,7 @@ func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 	agents := frontendSources(t, "analytics/nodes.js", "analytics/node-batch.js")
 	styles := string(mustReadFrontendFile(t, "analytics/theme.css"))
 	for _, required := range []string{
-		`let view = preference.view === 'list' ? 'list' : 'cards';`,
+		`view = value.view === 'list' ? 'list' : 'cards';`,
 		`const batchToggle = ctx.can('tasks.execute')`, `batchBox?.isConnected`,
 		`openNodeBatch(ctx, (value = agents) => orderNodesBySavedOrder(value, ordering.ids()))`,
 		`openedScopes.get(agent.id)?.get(options.engine)`, `if (!ctx.can('tasks.execute'))`,
