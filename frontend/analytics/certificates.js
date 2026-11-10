@@ -3,7 +3,7 @@ import { certificateOrderPresentation, certificateOrderDiagnostic } from "../mod
 import { filterbar, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
-const certStatus = value => badge(({ ready: "可用", pending: "等待签发", issuing: "签发中", failed: "失败", expired: "已过期", revoked: "已撤销",
+const certStatus = value => badge(({ ready: "可用", issued: "已签发", queued: "排队中", running: "签发中", validating: "验证中", canceling: "取消中", retrying: "等待重试", pending: "等待签发", issuing: "签发中", failed: "失败", expired: "已过期", revoked: "已撤销",
   waiting_dns: "等待 DNS", succeeded: "成功", canceled: "已取消", active: "有效", processing: "处理中" })[value] || value || "未知");
 const sourceName = value => ({ acme: "ACME", import: "导入", "self-signed": "自签", caddy: "Caddy", node: "节点证书" })[value] || value;
 
@@ -43,12 +43,16 @@ export async function certificatesPage(ctx) {
     const method = field("认证方式", "method", "dns-api", { options: [["dns-api", "DNS API"], ["dns-manual", "手工 DNS"], ["http-01", "HTTP-01"]] });
     const dns = field("DNS 账号", "dns_account_id", "", { options: [["", "选择 DNS 账号"], ...accounts.filter(account => account.kind === "dns").map(account => [account.id, account.name])] });
     const host = field("认证节点", "agent_id", "", { options: [["", "选择节点"], ...nodes.map(agent => [agent.id, `${agent.name}${agent.available ? "" : " · 暂不可用"}`])] });
+    const autoRenew = field("自动续期", "auto_renew", false, { type: "checkbox" });
     const methodInput = method.querySelector("select");
     const updateMethod = () => {
       ctx.visible(dns, methodInput.value === "dns-api");
       ctx.visible(host, methodInput.value === "http-01");
       dns.querySelector("select").required = methodInput.value === "dns-api";
       host.querySelector("select").required = methodInput.value === "http-01";
+      const manual = methodInput.value === "dns-manual";
+      autoRenew.querySelector("input").disabled = manual;
+      if (manual) autoRenew.querySelector("input").checked = false;
     };
     methodInput.addEventListener("change", updateMethod);
     updateMethod();
@@ -59,7 +63,7 @@ export async function certificatesPage(ctx) {
         field("密钥类型", "key_type", "ecdsa256", { options: [["ecdsa256", "ECDSA P-256"], ["ecdsa384", "ECDSA P-384"], ["rsa2048", "RSA 2048"], ["rsa4096", "RSA 4096"]] }),
         source === "self-signed" ? field("有效天数", "days", 365, { type: "number", min: 1, max: 3650, required: true }) : [
           field("ACME 账号", "account_id", "", { required: true, options: [["", "选择 ACME 账号"], ...accounts.filter(account => account.kind === "acme").map(account => [account.id, account.name])] }),
-          method, dns, host, field("自动续期", "auto_renew", false, { type: "checkbox" }),
+          method, dns, host, autoRenew,
         ],
       ],
     ], source === "acme" ? "申请证书" : "保存证书", async (values, element) => {
@@ -133,7 +137,7 @@ export async function certificatesPage(ctx) {
       const tools = actions(
         button("刷新", event => void readOnly(event.currentTarget, read), { "data-certificate-refresh": id }),
         owned && certificate.source === "acme" && control("立即续期", "/renew", "POST", undefined, "提交证书续期申请？"),
-        owned && certificate.source === "acme" && control(certificate.auto_renew ? "关闭自动续期" : "启用自动续期", "/auto-renew", "PUT", { enabled: !certificate.auto_renew }),
+        owned && certificate.source === "acme" && certificate.method !== "dns-manual" && control(certificate.auto_renew ? "关闭自动续期" : "启用自动续期", "/auto-renew", "PUT", { enabled: !certificate.auto_renew }),
         owned && button("替换证书", () => {
           const form = ctx.form(pairFields(), "保存替换", async values => {
             await ctx.api(`/certificates/${pathID(id)}/replace`, { method: "POST", body: values });
@@ -144,7 +148,7 @@ export async function certificatesPage(ctx) {
           });
           const replace = ctx.dialog("替换证书", form, { wide: true });
         }),
-        certificate.version && node("a", {
+        certificate.version > 0 && node("a", {
           className: "a-button", href: `/api/v1/certificates/${pathID(id)}/public-chain`, download: "",
         }, "下载公开证书链"),
         owned && control("删除证书", "", "DELETE", undefined, "删除此证书及其历史记录？正在使用的证书可能无法删除。"));
@@ -224,7 +228,7 @@ export async function certificatesPage(ctx) {
     box.dataset.certificateAccounts = "";
     body.append(
       section("证书账号", table(["名称", "类型", "CA / DNS 服务商", "操作"], list(items).map(account => [
-        account.name, account.kind === "acme" ? "ACME" : "DNS", account.ca || account.provider,
+        account.name, account.kind === "acme" ? "ACME" : "DNS", ({ cloudflare: "Cloudflare", alidns: "阿里云 DNS", dnspod: "DNSPod", letsencrypt: "Let's Encrypt", "letsencrypt-staging": "Let's Encrypt 测试环境", zerossl: "ZeroSSL" })[account.ca || account.provider] || account.ca || account.provider,
         actions(account.kind === "dns" && button("检查连接", event => void run(event.currentTarget, async () => {
           await ctx.api(`/certificate-accounts/${pathID(account.id)}/check`, { method: "POST" });
           ctx.announce("DNS 读取连接正常");
@@ -273,6 +277,7 @@ export async function certificatesPage(ctx) {
         const relevant = selected === "cloudflare" ? name === "token" : selected === "alidns" ? name.startsWith("access_key") : name.startsWith("secret_");
         ctx.visible(control, relevant);
         control.querySelector("input").required = relevant;
+        control.querySelector("input").disabled = !relevant;
       });
     };
     provider.querySelector("select").addEventListener("change", sync);
@@ -285,17 +290,28 @@ export async function certificatesPage(ctx) {
         field("EAB ID", "eab_id", "", { autocomplete: "off" }),
         field("EAB Key", "eab_key", "", { type: "password", autocomplete: "new-password" }),
         field("同意所选 CA 的服务条款", "accept_terms", false, { type: "checkbox", required: true }),
-      ] : [provider, field("Zone", "zone", "", { required: true }), credentials],
+      ] : [provider, credentials],
     ], "保存账号", async (values, element) => {
       const payload = { name: values.name, kind,
         ...(kind === "acme" ? { ca: values.ca, email: values.email, eab_id: values.eab_id, eab_key: values.eab_key, accept_terms: element.elements.accept_terms.checked } :
-          { provider: account?.provider || values.provider, credentials: Object.fromEntries(["zone", "token", "access_key_id", "access_key_secret", "secret_id", "secret_key"].filter(key => values[key]).map(key => [key, values[key]])) }),
+          { provider: account?.provider || values.provider, credentials: Object.fromEntries(["token", "access_key_id", "access_key_secret", "secret_id", "secret_key"].filter(key => values[key]).map(key => [key, values[key]])) }),
       };
       await ctx.api(account ? `/certificate-accounts/${pathID(account.id)}/credentials` : "/certificate-accounts", { method: account ? "PUT" : "POST", body: account ? { name: payload.name, credentials: payload.credentials } : payload });
       box.close();
       ctx.announce("证书账号已保存");
       await accounts();
     });
+    if (kind === "acme") {
+      const syncEAB = () => {
+        const required = form.elements.ca.value === "zerossl" || Boolean(form.elements.eab_id.value || form.elements.eab_key.value);
+        form.elements.eab_id.required = required;
+        form.elements.eab_key.required = required;
+      };
+      form.elements.ca.addEventListener("change", syncEAB);
+      form.elements.eab_id.addEventListener("input", syncEAB);
+      form.elements.eab_key.addEventListener("input", syncEAB);
+      syncEAB();
+    }
     form.dataset.certificateAccount = kind;
     const box = ctx.dialog(account ? "更新 DNS 凭据" : `添加 ${kind === "acme" ? "ACME" : "DNS"} 账号`, form);
   }

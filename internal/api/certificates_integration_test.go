@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"github.com/qimaoww/qcontrolhub/internal/store"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,4 +183,82 @@ func TestCertificateACMEAccountSelectionAndWorkerScopes(t *testing.T) {
 	alice.call("GET", "/certificates/"+issued[1].ID, nil, 200, &details)
 	bob.call("POST", "/certificates/"+issued[1].ID+"/orders/"+details.Orders[0].ID+"/continue", nil, 403, nil)
 	bob.call("POST", "/certificates/"+issued[1].ID+"/grants", map[string]string{"username": "alice"}, 404, nil)
+}
+
+// Actual authenticated API and encrypted PostgreSQL, with only the outbound
+// provider reads replaced. No public provider credential or DNS write is used.
+func TestCertificateDNSAccountsSaveRotateAndCheckWithoutZone(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	reads := map[string]int{}
+	http.DefaultTransport = certificateAccountReadTransport(func(r *http.Request) (*http.Response, error) {
+		body := ""
+		switch r.URL.Host {
+		case "api.cloudflare.com":
+			if r.URL.Query().Get("name") != "" || r.URL.Query().Get("per_page") != "1" {
+				t.Fatal("domain-dependent account check")
+			}
+			reads["cloudflare"]++
+			body = `{"success":true,"result":[]}`
+		case "alidns.aliyuncs.com":
+			if r.URL.Query().Get("Action") != "DescribeDomains" || r.URL.Query().Get("DomainName") != "" {
+				t.Fatal("domain-dependent Alibaba check")
+			}
+			reads["alidns"]++
+			body = `{"Domains":{"Domain":[]},"TotalCount":0}`
+		case "dnspod.tencentcloudapi.com":
+			if r.Header.Get("X-TC-Action") != "DescribeDomainList" {
+				t.Fatal("domain-dependent DNSPod check")
+			}
+			reads["dnspod"]++
+			body = `{"Response":{"DomainList":[],"DomainCountInfo":{"AllTotal":0}}}`
+		default:
+			return original.RoundTrip(r)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	for _, provider := range []string{"cloudflare", "alidns", "dnspod"} {
+		credentials := map[string]string{}
+		switch provider {
+		case "cloudflare":
+			credentials["token"] = "fixture-token"
+		case "alidns":
+			credentials["access_key_id"] = "fixture-id"
+			credentials["access_key_secret"] = "fixture-secret"
+		default:
+			credentials["secret_id"] = "fixture-id"
+			credentials["secret_key"] = "fixture-secret"
+		}
+		var account core.CertificateAccount
+		alice.call("POST", "/certificate-accounts", map[string]any{"name": provider, "kind": "dns", "provider": provider, "credentials": credentials}, 201, &account)
+		var stored certificates.DNSCredentials
+		if _, err := db.CertificateAccountSecret(store.WithConfigScope(ctx, alice.userID, false), account.ID, "dns", &stored); err != nil || stored.Zone != "" {
+			t.Fatalf("zone-free storage: %+v %v", stored, err)
+		}
+		alice.call("POST", "/certificate-accounts/"+account.ID+"/check", nil, 200, nil)
+		for _, client := range []configScopeAPIClient{admin, bob} {
+			client.call("POST", "/certificate-accounts/"+account.ID+"/check", nil, 404, nil)
+			client.call("PUT", "/certificate-accounts/"+account.ID+"/credentials", map[string]any{"name": "foreign", "credentials": credentials}, 404, nil)
+		}
+		var updated core.CertificateAccount
+		for key := range credentials {
+			credentials[key] = "rotated-fixture"
+		}
+		alice.call("PUT", "/certificate-accounts/"+account.ID+"/credentials", map[string]any{"name": "rotated " + provider, "credentials": credentials}, 200, &updated)
+		if updated.ID != account.ID {
+			t.Fatal("credential rotation broke account references")
+		}
+		alice.call("POST", "/certificate-accounts/"+account.ID+"/check", nil, 200, nil)
+		if reads[provider] != 2 {
+			t.Fatalf("provider check not executed: %s %d", provider, reads[provider])
+		}
+	}
+	t.Log("All three providers saved, rotated, read-checked without domains; foreign users and administrator denied")
+}
+
+type certificateAccountReadTransport func(*http.Request) (*http.Response, error)
+
+func (f certificateAccountReadTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

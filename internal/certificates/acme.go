@@ -44,8 +44,14 @@ func Register(ctx context.Context, ca, email string, account ACMEAccount) (ACMEA
 		return account, err
 	}
 	input := &acme.Account{Contact: []string{"mailto:" + email}}
+	if (account.EABID == "") != (account.EABKey == "") {
+		return account, errors.New("EAB Key ID 与 HMAC Key 必须同时填写")
+	}
 	if account.EABID != "" {
 		key, err := base64.RawURLEncoding.DecodeString(account.EABKey)
+		if err != nil {
+			key, err = base64.URLEncoding.DecodeString(account.EABKey)
+		}
 		if err != nil {
 			return account, errors.New("EAB HMAC 密钥必须是 base64url")
 		}
@@ -70,31 +76,10 @@ func CSR(domains []string, kind string) ([]byte, string, error) {
 	return csr, keyPEM, err
 }
 
-type orderLocationTransport struct {
-	next            http.RoundTripper
-	finalize, order string
-}
-
-func (t orderLocationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.next.RoundTrip(req)
-	if err == nil && req.URL.String() == t.finalize && resp.Header.Get("Location") == "" {
-		resp.Header.Set("Location", t.order)
-	}
-	return resp, err
-}
 func Finalize(ctx context.Context, client *acme.Client, order *acme.Order, csr []byte, key string) (Pair, error) {
-	// RFC 8555 does not require Location on a finalize response. x/crypto/acme
-	// v0.41 nevertheless uses it to poll. Supply the persisted order URI only
-	// for this response, keeping account/client/transport state order-local.
-	httpClient := *client.HTTPClient
-	transport := httpClient.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-	httpClient.Transport = orderLocationTransport{transport, order.FinalizeURL, order.URI}
-	client.HTTPClient = &httpClient
-
-	chain, _, err := client.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
+	// The installed x/crypto version accepts the durable order URI directly,
+	// including CA finalize responses without a Location header.
+	chain, _, err := client.CreateCertFromOrder(ctx, order, csr, true)
 	if err != nil {
 		return Pair{}, errors.New("ACME 签发或证书下载失败，请检查 CA 订单后重试")
 	}
