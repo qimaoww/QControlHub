@@ -44,6 +44,12 @@ func (g *generator) resolve(s object) object {
 	return s
 }
 func (g *generator) annotate(op object, handler, method, path string) {
+	if op["x-authentication"] == "public" {
+		op["x-resource-scope"] = "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
+	}
+	if op["x-authentication"] == "agent_signature" {
+		op["x-resource-scope"] = "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
+	}
 	switch path {
 	case "/api/v1/auth/session", "/api/v1/auth/logout":
 		op["x-authentication"] = "session"

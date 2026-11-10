@@ -31,6 +31,14 @@ func TestAPIContractMatchesSourceAndEveryKeyPolicy(t *testing.T) {
 				Any         bool              `json:"any"`
 				Permissions []core.Permission `json:"permissions"`
 			} `json:"x-key-policy"`
+			Parameters []struct {
+				Name   string `json:"name"`
+				In     string `json:"in"`
+				Schema struct {
+					Type    string `json:"type"`
+					Maximum int    `json:"maximum"`
+				} `json:"schema"`
+			} `json:"parameters"`
 		} `json:"paths"`
 	}
 	if err = json.Unmarshal(shipped, &document); err != nil {
@@ -69,6 +77,28 @@ func TestAPIContractMatchesSourceAndEveryKeyPolicy(t *testing.T) {
 	for pattern := range apiKeyPolicies {
 		if !seen[pattern] {
 			t.Fatalf("unregistered or undocumented Key route: %s", pattern)
+		}
+	}
+	// Aliased url.Values, range-based filters and repeated query parameters
+	// must survive generation, so clients can call the documented read APIs.
+	for path, names := range map[string][]string{
+		"/api/v1/core-logs":          {"agent_id", "instance_id", "engine", "level", "q", "before", "limit"},
+		"/api/v1/client-connections": {"since", "until", "port", "limit", "node_order", "cursor", "include_non_public"},
+	} {
+		parameters := document.Paths[path]["get"].Parameters
+		for _, name := range names {
+			found := false
+			for _, parameter := range parameters {
+				if parameter.Name == name && parameter.In == "query" {
+					found = true
+					if name == "limit" && (parameter.Schema.Type != "integer" || parameter.Schema.Maximum == 0) {
+						t.Fatalf("unbounded limit in %s", path)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("missing query %s in %s", name, path)
+			}
 		}
 	}
 	for _, pattern := range []string{"POST /api/v1/users", "DELETE /api/v1/users/{id}", "POST /api/v1/enrollment-tokens", "POST /api/v1/settings/api-keys", "PUT /api/v1/certificate-accounts/{id}/credentials"} {

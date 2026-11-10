@@ -5229,7 +5229,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
       }
     },
     "/agent/v1/connect": {
@@ -5274,7 +5274,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
       }
     },
     "/agent/v1/enroll": {
@@ -5375,7 +5375,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/access-controls": {
@@ -5920,7 +5920,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/agent-directory": {
@@ -6051,7 +6051,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/agents": {
@@ -6851,7 +6851,9 @@
             "name": "port",
             "required": false,
             "schema": {
-              "type": "string"
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -6987,6 +6989,15 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "inbound",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7097,6 +7108,15 @@
             "required": true,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "inbound",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           }
@@ -11161,7 +11181,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/auth/logout": {
@@ -11206,7 +11226,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/auth/session": {
@@ -11260,7 +11280,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/branding": {
@@ -11317,7 +11337,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/api/v1/certificate-accounts": {
@@ -13864,16 +13884,22 @@
             "name": "scope_only",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                true
+              ],
+              "type": "boolean"
             }
           },
           {
-            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "description": "显式 true 请求现有同步流程；即使 GET 仍按管理行为授权。",
             "in": "query",
             "name": "sync",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                true
+              ],
+              "type": "boolean"
             }
           },
           {
@@ -13891,6 +13917,207 @@
             "name": "locations",
             "required": false,
             "schema": {
+              "enum": [
+                "cached",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "enum": [
+                "mihomo",
+                "xray",
+                "sing-box",
+                "ss-rust"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "protocol",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "inbound",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "transport",
+            "required": false,
+            "schema": {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "client_ip",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "country_code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ip"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "仅 group_by=ip 可用；使用响应 next_cursor 并保留筛选、目标和排序。",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "重复 node_order 参数传入真实节点 ID 数组；仅影响同一授权范围内的排序。",
+            "in": "query",
+            "name": "node_order",
+            "required": false,
+            "schema": {
+              "items": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 500,
+              "type": "array"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "include_non_public",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "timeline",
+            "required": false,
+            "schema": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "RFC3339；默认最近 24 小时；until 必须晚于 since，窗口最多 32 天。",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "RFC3339；默认当前时间；与 since 的窗口最多 32 天。",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "port",
+            "required": false,
+            "schema": {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "结果数量；各接口按约束限制，非页码。",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "普通记录按正整数 ID 向前分页；group_by=ip 使用 cursor，不能带 before。",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "hour",
+              "enum": [
+                "minute",
+                "hour",
+                "day"
+              ],
               "type": "string"
             }
           }
@@ -14674,6 +14901,8 @@
             "name": "limit",
             "required": false,
             "schema": {
+              "default": 20,
+              "maximum": 100,
               "minimum": 1,
               "type": "integer"
             }
@@ -15377,6 +15606,97 @@
     "/api/v1/core-logs": {
       "get": {
         "operationId": "listCoreLogs_api_v1_core-logs",
+        "parameters": [
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "main 或实际 shr_... 实例；不得猜测或混用用户实例。",
+            "in": "query",
+            "name": "instance_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "enum": [
+                "debug",
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "enum": [
+                "mihomo",
+                "xray",
+                "sing-box",
+                "ss-rust"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "按响应游标翻页，保持原筛选和资源目标。",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "结果数量；各接口按约束限制，非页码。",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 2000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/error400"
@@ -16305,6 +16625,8 @@
             "name": "limit",
             "required": false,
             "schema": {
+              "default": 1500,
+              "maximum": 5000,
               "minimum": 1,
               "type": "integer"
             }
@@ -24697,7 +25019,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     },
     "/readyz": {
@@ -24768,7 +25090,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "公开服务状态或独立的身份接入流程；不赋予业务资源访问权。"
       }
     }
   },

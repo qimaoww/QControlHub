@@ -237,6 +237,15 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 		}
 	}
 	response := op["responses"].(object)
+	addQuery := func(key string) {
+		for _, parameter := range params {
+			p := parameter.(object)
+			if p["in"] == "query" && p["name"] == key {
+				return
+			}
+		}
+		params = append(params, object{"name": key, "in": "query", "required": false, "schema": querySchema(path, key), "description": queryDescription(path, key)})
+	}
 	// Resolve request bodies and direct query reads from the real handler chain.
 	seen := map[string]bool{}
 	var inspect func(string, int)
@@ -250,6 +259,17 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 			return
 		}
 		vars := map[string]model{}
+		queryVariables := map[string]bool{}
+		if fn.decl.Type.Params != nil {
+			for _, parameter := range fn.decl.Type.Params.List {
+				if source(parameter.Type) == "url.Values" {
+					for _, name := range parameter.Names {
+						queryVariables[name.Name] = true
+					}
+				}
+			}
+		}
+		isQuery := func(value string) bool { return strings.Contains(value, "Query()") || queryVariables[value] }
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.ValueSpec:
@@ -257,6 +277,11 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 					vars[name.Name] = model{n.Type, "api"}
 				}
 			case *ast.AssignStmt:
+				if len(n.Rhs) == 1 && strings.HasSuffix(source(n.Rhs[0]), ".Query()") {
+					for _, lhs := range n.Lhs {
+						queryVariables[source(lhs)] = true
+					}
+				}
 				if len(n.Rhs) == 1 {
 					if call, ok := n.Rhs[0].(*ast.CallExpr); ok {
 						name := source(call.Fun)
@@ -276,6 +301,34 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 						}
 					}
 				}
+			case *ast.IndexExpr:
+				if isQuery(source(n.X)) {
+					if key, ok := literal(n.Index); ok {
+						addQuery(key)
+					}
+				}
+			case *ast.RangeStmt:
+				if n.Key == nil {
+					break
+				}
+				usesQuery := false
+				ast.Inspect(n.Body, func(child ast.Node) bool {
+					if call, ok := child.(*ast.CallExpr); ok && len(call.Args) == 1 && source(call.Args[0]) == source(n.Key) {
+						if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Get" && isQuery(source(selector.X)) {
+							usesQuery = true
+						}
+					}
+					return true
+				})
+				if values, ok := n.X.(*ast.CompositeLit); ok && usesQuery {
+					for _, element := range values.Elts {
+						if pair, ok := element.(*ast.KeyValueExpr); ok {
+							if key, ok := literal(pair.Key); ok {
+								addQuery(key)
+							}
+						}
+					}
+				}
 			case *ast.CallExpr:
 				call := source(n.Fun)
 				if call == "decodeJSON" && len(n.Args) > 2 {
@@ -285,18 +338,9 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 						}
 					}
 				}
-				if strings.HasSuffix(call, ".Get") && len(n.Args) == 1 && (strings.Contains(call, "Query()") || strings.HasPrefix(call, "query.") || strings.HasPrefix(call, "q.")) {
+				if selector, ok := n.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Get" && len(n.Args) == 1 && isQuery(source(selector.X)) {
 					if key, ok := literal(n.Args[0]); ok {
-						exists := false
-						for _, p := range params {
-							m := p.(object)
-							if m["in"] == "query" && m["name"] == key {
-								exists = true
-							}
-						}
-						if !exists {
-							params = append(params, object{"name": key, "in": "query", "required": false, "schema": querySchema(path, key), "description": queryDescription(path, key)})
-						}
+						addQuery(key)
 					}
 				}
 				if call == "writeJSON" && len(n.Args) == 3 {
@@ -393,6 +437,45 @@ func querySchema(path, key string) object {
 			s["default"] = 50
 			s["maximum"] = 200
 		}
+		if path == "/api/v1/core-logs" {
+			s["default"], s["maximum"] = 1000, 2000
+		}
+		if path == "/api/v1/client-connections" {
+			s["default"], s["maximum"] = 100, 200
+		}
+		if strings.HasPrefix(path, "/api/v1/metrics/") {
+			s["default"], s["maximum"] = 1500, 5000
+		}
+		if strings.HasSuffix(path, "/revisions") {
+			s["default"], s["maximum"] = 20, 100
+		}
+	case "before":
+		s = object{"type": "integer", "minimum": 1}
+	case "port":
+		s = object{"type": "integer", "minimum": 1, "maximum": 65535}
+	case "node_order":
+		s = object{"type": "array", "items": object{"type": "string", "minLength": 1, "maxLength": 100}, "maxItems": 500}
+	case "scope_only", "sync", "include_non_public", "timeline":
+		s = object{"type": "boolean"}
+		if key == "scope_only" || key == "sync" {
+			s["enum"] = []bool{true}
+		}
+		if key == "include_non_public" {
+			s["default"] = false
+		}
+		if key == "timeline" {
+			s["default"] = true
+		}
+	case "locations":
+		s["enum"] = []string{"cached", "only"}
+	case "group_by":
+		s["enum"] = []string{"ip"}
+	case "bucket":
+		s["enum"], s["default"] = []string{"minute", "hour", "day"}, "hour"
+	case "transport":
+		s["enum"] = []string{"tcp", "udp"}
+	case "level":
+		s["enum"] = []string{"debug", "info", "warning", "error", "critical"}
 	case "status":
 		s["enum"] = []string{"pending", "running", "succeeded", "failed", "canceled"}
 	case "engine":
@@ -403,6 +486,22 @@ func querySchema(path, key string) object {
 	return s
 }
 func queryDescription(path, key string) string {
+	if path == "/api/v1/client-connections" {
+		switch key {
+		case "since":
+			return "RFC3339；默认最近 24 小时；until 必须晚于 since，窗口最多 32 天。"
+		case "until":
+			return "RFC3339；默认当前时间；与 since 的窗口最多 32 天。"
+		case "node_order":
+			return "重复 node_order 参数传入真实节点 ID 数组；仅影响同一授权范围内的排序。"
+		case "cursor":
+			return "仅 group_by=ip 可用；使用响应 next_cursor 并保留筛选、目标和排序。"
+		case "before":
+			return "普通记录按正整数 ID 向前分页；group_by=ip 使用 cursor，不能带 before。"
+		case "sync":
+			return "显式 true 请求现有同步流程；即使 GET 仍按管理行为授权。"
+		}
+	}
 	if key == "instance_id" {
 		return "main 或实际 shr_... 实例；不得猜测或混用用户实例。"
 	}
