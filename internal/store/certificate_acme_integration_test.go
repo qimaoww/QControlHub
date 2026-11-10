@@ -1091,7 +1091,7 @@ func TestCertificateHTTPRetryRetainsRoutesAndOfflineIsTemporary(t *testing.T) {
 }
 
 func TestCertificateResumesCAOutcomeWithoutRepublishingOrRefinalizing(t *testing.T) {
-	for _, scenario := range []string{"processing", "missing certificate URL", "download response lost"} {
+	for _, scenario := range []string{"processing", "missing certificate URL", "download response lost", "CA temporarily unavailable", "CA rate limited", "invalid order"} {
 		t.Run(scenario, func(t *testing.T) {
 			db, ctx, _ := isolatedConfigScopeStore(t)
 			owner := WithConfigScope(ctx, "token_ca_recovery", false)
@@ -1111,8 +1111,24 @@ func TestCertificateResumesCAOutcomeWithoutRepublishingOrRefinalizing(t *testing
 					w.WriteHeader(200)
 				case "/order":
 					orderReads++
+					if orderReads == 1 && (scenario == "CA temporarily unavailable" || scenario == "CA rate limited") {
+						status := http.StatusServiceUnavailable
+						problem := "serverInternal"
+						if scenario == "CA rate limited" {
+							status = http.StatusTooManyRequests
+							problem = "rateLimited"
+						}
+						w.Header().Set("Retry-After", "1")
+						w.WriteHeader(status)
+						fmt.Fprintf(w, `{"type":"urn:ietf:params:acme:error:%s","detail":"local fixture retry"}`, problem)
+						return
+					}
 					status := "valid"
 					link := `,"certificate":"` + caURL + `/cert"`
+					if scenario == "invalid order" {
+						status = "invalid"
+						link = ""
+					}
 					if scenario == "processing" && orderReads == 1 {
 						status = "processing"
 						link = ""
@@ -1169,7 +1185,11 @@ func TestCertificateResumesCAOutcomeWithoutRepublishingOrRefinalizing(t *testing
 				return nil, errors.New("unexpected DNS call")
 			})}
 			err = db.processCertificateOrder(owner, item, id, "queued", state)
-			if scenario == "missing certificate URL" {
+			if scenario == "invalid order" {
+				if !errors.Is(err, errCertificateOrderInvalid) || downloads != 0 {
+					t.Fatalf("invalid order did not stop safely: %v downloads=%d", err, downloads)
+				}
+			} else if scenario == "missing certificate URL" {
 				if err == nil {
 					t.Fatal("missing link claimed success")
 				}
