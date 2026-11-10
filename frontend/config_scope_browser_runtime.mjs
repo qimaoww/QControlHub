@@ -38,6 +38,7 @@ async function configFixture({ writable = true, executable = false, installed = 
     records.calls.push(path);
     if (path === "/agents") return [agent];
     if (path === "/preferences/node-order") return {ids:[agent.id],revision:1};
+    if (path === "/agent-access") return {shares:[],isolated:true,revision:1};
     if (path.endsWith("/workspace")) return { agent, config: workspace, deployment:{state:"pending",service_status:"unknown"} };
     if (path === "/configs") return archives;
     if (path.includes("/revisions")) return [];
