@@ -63,7 +63,7 @@ export async function liveConfigPage(ctx) {
     engineField.querySelector('select').value = selectedEngineID;
     modeField.querySelector('select').value = selectedMode;
     sourceField.querySelector('select').value = selectedSourceID;
-  } }, targetField, engineField, modeField, sourceField);
+  } }, targetField, engineField, modeField);
   select.addEventListener('change', () => select.requestSubmit());
   const flagsHost = actions();
   const studioHost = stack(section('入站配置', loadingTable(['端口', '监听', '协议', '状态', '操作'], '入站配置')),
@@ -127,6 +127,8 @@ export async function liveConfigPage(ctx) {
   const selectedSource = sources.find(source => source.id === params.get('source_id')) || (sources.length === 1 ? sources[0] : null);
   selectedSourceID = selectedSource?.id || '';
   sourceField.hidden = !importSource || !sources.length;
+  if (sourceField.hidden) sourceField.remove();
+  else select.append(sourceField);
   const serviceStates = { active: '运行中', inactive: '已停止', unknown: '未知', failed: '失败' };
   setOptions(sourceField, [['', '请选择服务'], ...sources.map(source => [source.id, `${source.service} · ${serviceStates[source.status] || '未知'}`])], selectedSourceID, !importSource);
 
