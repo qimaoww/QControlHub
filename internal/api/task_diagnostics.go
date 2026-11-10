@@ -45,6 +45,7 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 		detail = message
 	}
 	code, _ := body["code"].(string)
+	field, _ := body["field"].(string)
 	stage, _ := body["stage"].(string)
 	if stage == "" {
 		stage = "api_request"
@@ -67,10 +68,10 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 		}
 	}
 	id, saveErr := w.server.store.RecordPanelFailure(ctx, core.PanelFailure{
-		Operation: w.request.Pattern, Resource: w.request.URL.EscapedPath(), AgentID: target.AgentID, Engine: target.Engine, Stage: stage, Summary: message, Detail: detail, RequestID: requestID, HTTPStatus: status, Code: code,
+		Operation: w.request.Pattern, Resource: w.request.URL.EscapedPath(), AgentID: target.AgentID, Engine: target.Engine, Stage: stage, Summary: message, Detail: detail, RequestID: requestID, HTTPStatus: status, Code: code, Field: field,
 	})
 	if errors.Is(saveErr, store.ErrForbidden) || errors.Is(saveErr, store.ErrNotFound) {
-		id, saveErr = w.server.store.RecordPanelFailure(ctx, core.PanelFailure{Operation: w.request.Pattern, Resource: w.request.URL.EscapedPath(), Stage: stage, Summary: message, Detail: detail, RequestID: requestID, HTTPStatus: status, Code: code})
+		id, saveErr = w.server.store.RecordPanelFailure(ctx, core.PanelFailure{Operation: w.request.Pattern, Resource: w.request.URL.EscapedPath(), Stage: stage, Summary: message, Detail: detail, RequestID: requestID, HTTPStatus: status, Code: code, Field: field})
 	}
 	if saveErr != nil {
 		body["failure_saved"] = false

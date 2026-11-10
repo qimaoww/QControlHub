@@ -158,12 +158,19 @@ func TestSharedXHTTPRequiresEveryAllocatedListener(t *testing.T) {
 			plan.CertificatePath, plan.PrivateKeyPath = "/etc/qcontrolhub/tls/test.crt", "/etc/qcontrolhub/tls/test.key"
 			plan.Port, plan.ClientPort, plan.XHTTPBackendPort, plan.XHTTPTLSPort = 24443, 24443, 35001, 35002
 			var conflict struct {
-				Code, Field string
-				Port        int
+				Code, Field   string
+				Port          int
+				FailureTaskID string `json:"failure_task_id"`
+				RequestID     string `json:"request_id"`
 			}
 			recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusConflict, &conflict)
 			if conflict.Code != "port_conflict" || conflict.Port != portsByField[field] || conflict.Field != field {
 				t.Fatalf("wrong unallocated listener diagnostic: %+v", conflict)
+			}
+			var diagnostic core.TaskDiagnostic
+			recipient.call("GET", "/tasks/"+conflict.FailureTaskID+"/diagnostics", nil, http.StatusOK, &diagnostic)
+			if conflict.RequestID == "" || !strings.Contains(diagnostic.Output, `"field": "`+field+`"`) || !strings.Contains(diagnostic.Output, conflict.RequestID) || !strings.Contains(diagnostic.Output, `"http_status": 409`) || !strings.Contains(diagnostic.Output, `"code": "port_conflict"`) {
+				t.Fatal("retained conflict lost field, status, code or request association")
 			}
 			var workspace struct{ Config *core.Config }
 			recipient.call("GET", base+"/workspace", nil, http.StatusOK, &workspace)
