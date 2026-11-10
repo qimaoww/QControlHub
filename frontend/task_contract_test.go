@@ -12,7 +12,7 @@ func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 		`taskTable.updateRows`,
 		`syncAgents()`,
 		`taskTiming(task)`,
-		`patch(context, taskContext(ctx, task))`,
+		`patch(context, taskContext(ctx, task, targetAgent))`,
 		`selection.setBaseAndExtent`,
 		`if(follow)output.scrollTop=output.scrollHeight`,
 		`poll(ctx, refresh, pollDelay)`,

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -44,14 +45,14 @@ func runTLSCommand(ctx context.Context, directory string, environment []string, 
 	command.Env = append(commandEnvironment(""), environment...)
 	configureCommand(command)
 	configureCommandIdentity(command, identity)
-	output := &boundedOutput{limit: 64 << 10}
+	output := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2}
 	command.Stdout, command.Stderr = output, output
 	err := command.Run()
 	if ctx.Err() != nil {
-		err = ctx.Err()
+		err = errors.Join(err, ctx.Err())
 	}
 	if output.Truncated() {
-		err = fmt.Errorf("TLS helper output exceeded 64 KiB")
+		err = errors.Join(err, errors.New("TLS helper diagnostic exceeded 4 MiB; later content was not collected"))
 	}
 	return strings.TrimSpace(output.String()), err
 }

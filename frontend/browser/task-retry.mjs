@@ -3,7 +3,7 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 
 export async function testEditedRetryDialog(preview = false) {
   const nativeFetch = globalThis.fetch;
-  const task = { id: "failed", agent_id: "node", engine: "sing-box", action: "deploy", config_id: "cfg", config_version: 2, status: "failed", error: "模拟部署失败\n" + "诊断内容，保留草稿后可重新校验。".repeat(80), created_at: "2026-11-04T10:00:00Z" };
+  const task = { id: "failed", agent_id: "node", engine: "sing-box", action: "deploy", config_id: "cfg", config_version: 2, status: "failed", attempt:1, error: "模拟部署失败\n" + "诊断内容，保留草稿后可重新校验。".repeat(80), created_at: "2026-11-04T10:00:00Z" };
   const originalTask = structuredClone(task);
   const config = { id: "cfg", name: "重试测试配置", agent_id: "node", engine: "sing-box", version: 5, content: '{"inbounds":[]}', updated_at: "2026-11-04T11:00:00Z" };
   const gate = {};
@@ -12,10 +12,12 @@ export async function testEditedRetryDialog(preview = false) {
   const ordinaryRetries = [];
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith("/api/v1")) return nativeFetch(url, options);
-    const path = String(url).slice(7), method = options.method || "GET";
+    const path = new URL(String(url),location.href).pathname.slice(7), method = options.method || "GET";
     let value;
     if (path === "/auth/session") value = session;
-    else if (path.startsWith("/tasks?")) { reads++; value = [task]; }
+    else if (path === "/tasks") { reads++; value = [task]; }
+    else if (path === "/tasks/failures" && method === "POST") value = {id:"fixture-failure"};
+    else if (path.endsWith("/diagnostics")) value = {source:"fixture",output:path.includes("/retry/") ? "部署完成" : "",error:path.includes("/retry/") ? "" : task.error};
     else if (path === "/tasks/failed") value = task;
     else if (path === "/tasks/failed/retry" && method === 'POST') {
       assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), 'retry-fixture', 'ordinary retry missing CSRF');

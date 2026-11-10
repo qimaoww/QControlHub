@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {createFailureRecorder} from "./modules/failure-records.js";
 import { diagnosticError, errorMessage, redactDiagnostic, requestJSON } from "./modules/errors.js";
 
 for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 422, 429, 500, 502, 503, 504, 599]) {
@@ -85,7 +86,7 @@ await assert.rejects(requestJSON("/api/v1/agents", { signal: expiredRoute.signal
 await assert.rejects(send(new Response("<html>Bad Gateway</html>", { status: 502 })), (error) => {
   assert.equal(error.status, 502);
   assert.match(error.message, /后端服务/);
-  assert.doesNotMatch(error.message, /html/);
+  assert.match(error.message, /<html>Bad Gateway<\/html>/, "proxy response remains available as inert diagnostic text");
   return true;
 });
 await assert.rejects(send(new Response('{"error":{"bad":"shape"}}', { status: 403 })), /请求被拒绝/);
@@ -134,9 +135,9 @@ for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {
     });
   }
 }
-await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error === abort);
-await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error === abort);
-await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error === abort);
+await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error !== abort && error.cause === abort && error.name === "Error");
+await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error.cause === abort);
+await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error.status === 503);
 for (const status of [200, 401, 403, 500]) {
   let current = true;
   await assert.rejects(send(null, {
@@ -172,7 +173,7 @@ assert.match(diagnosticError("GitHub download network failure: acceleration: con
 assert.match(diagnosticError("GitHub API metadata rate limit exhausted (HTTP 403); retry after reset"), /请求额度已耗尽/);
 assert.match(diagnosticError("GitHub API metadata returned HTTP 404"), /资源不存在/);
 assert.match(diagnosticError("downloaded release asset SHA-256 does not match GitHub metadata"), /校验失败/);
-assert.match(diagnosticError("context canceled"), /操作已取消/);
+assert.match(diagnosticError("context canceled"), /操作被中断/);
 
 const schemaMessage = '任务创建失败，尚未进入 Agent 执行。请检查控制面升级及数据库迁移状态。';
 await assert.rejects(send(new Response(JSON.stringify({ error: schemaMessage, code: 'task_schema_incompatible', stage: 'task_creation', request_id: 'req_fixture123' }), { status: 500 })), error => {
@@ -185,3 +186,23 @@ await assert.rejects(send(new Response(JSON.stringify({ error: schemaMessage, co
 });
 await assert.rejects(send(new Response('{"error":"internal server error"}', {status:500,headers:{'X-Request-ID':'req_header'}})), error => error.requestID === 'req_header' && !error.code);
 await assert.rejects(send(new Response(JSON.stringify({error:schemaMessage,request_id:'<script>bad</script>'}),{status:500})), error => !error.requestID && !error.message.includes('<script>'));
+
+const originalFetch=globalThis.fetch; let retainedAborts=0;
+try {
+ globalThis.fetch=async()=>{retainedAborts++;return new Response('{"id":"tsk_abort_fixture"}',{status:201})};
+ const recorder=createFailureRecorder({session:{csrf_token:"fixture"}});
+ const unexpected=new DOMException("unexpected socket interruption","AbortError");
+ const retained=await recorder(unexpected,"后台连接","transport");
+ assert.equal(retained.failureTaskID,"tsk_abort_fixture");
+ assert.equal(retained.cause,unexpected,"immutable native error remains in the cause chain");
+ assert.equal(await recorder(unexpected,"后台连接","transport"),retained,"propagated native failure reuses its retained identity");
+ const canceled=Object.assign(new DOMException("navigation","AbortError"),{intentionalCancellation:true});
+ await recorder(canceled,"导航","transport");
+ assert.equal(retainedAborts,1,"unexpected abort must be retained while explicit cancellation stays silent");
+ globalThis.fetch=async()=>{throw new Error("fixture retention transport unavailable")};
+ const failed=await recorder(new DOMException("native failure with read-only message","AbortError"),"复制","browser_action");
+ assert.equal(failed.failureSaved,false);
+ assert.match(failed.message,/native failure with read-only message/);
+ assert.match(failed.message,/未能保存到任务/);
+ assert.match(failed.message,/fixture retention transport unavailable/);
+} finally {globalThis.fetch=originalFetch}

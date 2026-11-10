@@ -19,6 +19,11 @@ func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<
 
 func (c *Client) executeTaskForSession(executionContext, deliveryContext context.Context, task core.Task, outgoing chan<- core.WireMessage) {
 	result := c.resultForTask(executionContext, task)
+	uploadContext, uploadCancel := context.WithTimeout(deliveryContext, 60*time.Second)
+	if err := c.uploadDiagnostic(uploadContext, task.ID, result); err != nil {
+		slog.Warn("task diagnostic delivery is pending; result remains cached", "task_id", task.ID, "error", core.RedactDiagnostic(err.Error()))
+	}
+	uploadCancel()
 	message := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{TaskID: task.ID, Result: result}}
 	if c.traffic != nil {
 		message.TrafficUsage, message.Result.Result.TrafficSettled = c.traffic.settledSnapshot(executionContext, task)
@@ -51,7 +56,7 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskResultRequest {
 	if cached, ok := c.cachedTaskResult(task); ok {
 		if c.logs != nil && cached.Success && task.Action == core.ActionImportExisting && task.Engine == core.EngineSingBox {
-			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+			if err := c.logs.RefreshManagedSingBoxSource(c.executor); err != nil {
 				slog.Warn("refresh cached imported sing-box log source", "error", err)
 			}
 		}
@@ -89,6 +94,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	slog.Info("executing task", "task_id", task.ID, "action", task.Action, "engine", task.Engine)
 	execute := c.executeFunc
 	var output string
+	var sideEffects []string
 	var executionErr error
 	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
@@ -175,8 +181,9 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		}
 		if executionErr == nil && c.logs != nil && !task.SharedInstance && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
-			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
+			if err := c.logs.PrepareManagedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
 				slog.Warn("prepare managed sing-box log capture window", "error", err)
+				sideEffects = append(sideEffects, "prepare managed sing-box log capture window: "+core.DiagnosticText(err.Error()))
 			} else {
 				preparedLogTransition = true
 			}
@@ -184,6 +191,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
 			if err := c.logs.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
 				slog.Warn("wait for managed sing-box console log source", "error", err)
+				sideEffects = append(sideEffects, "wait for managed sing-box console log source: "+core.DiagnosticText(err.Error()))
 			}
 		}
 		if executionErr == nil {
@@ -198,8 +206,9 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			}
 		}
 		if preparedLogTransition {
-			if err := c.logs.CompleteImportedSingBoxSource(c.executor, executionErr == nil); err != nil {
+			if err := c.logs.CompleteManagedSingBoxSource(c.executor, executionErr == nil); err != nil {
 				slog.Warn("complete managed sing-box log source transition", "error", err)
+				sideEffects = append(sideEffects, "complete managed sing-box log source transition: "+core.DiagnosticText(err.Error()))
 			}
 		}
 	}
@@ -207,13 +216,18 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		collectorTransitionComplete := preparedLogTransition &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy)
 		if !collectorTransitionComplete {
-			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+			if err := c.logs.RefreshManagedSingBoxSource(c.executor); err != nil {
 				slog.Warn("refresh managed sing-box log source", "error", err)
+				sideEffects = append(sideEffects, "refresh managed sing-box log source: "+core.DiagnosticText(err.Error()))
 			}
 		}
 	}
+	if len(sideEffects) > 0 {
+		output += "\n附属步骤失败（主操作结果见任务状态）：\n" + strings.Join(sideEffects, "\n")
+	}
 	result := core.TaskResultRequest{
-		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
+		ExecutedAttempt: task.Attempt,
+		LeaseID:         task.LeaseID, Success: executionErr == nil, Output: output,
 		IPQuality: ipQuality,
 	}
 	if task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus) {
@@ -231,7 +245,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		}
 		result.InstanceStatus = &instance
 	}
-	if !task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus) {
+	if !task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus || task.Action == core.ActionImportExisting) {
 		if spec, ok := c.executor.Specs[task.Engine]; ok {
 			instance := c.executor.deploymentStatus(ctx, task.Engine, spec, "")
 			instance.TaskID = task.ID
@@ -248,13 +262,22 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
-		slog.Warn("task failed", "task_id", task.ID, "error", executionErr)
+		slog.Warn("task failed", "task_id", task.ID, "error", core.DiagnosticText(executionErr.Error()))
 	} else {
 		slog.Info("task completed", "task_id", task.ID)
 	}
-	if task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig {
+	if task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig || !result.Success {
+		fullOutput, fullError := result.Output, result.Error
+		if result.IPQuality == nil {
+			if err := c.persistDiagnostic(task.ID, &result); err != nil {
+				result.Output = limitStateValue(core.DiagnosticText(result.Output), 64<<10)
+				result.Error = limitStateValue(core.DiagnosticText(result.Error), 8<<10) + "\n未能在 Agent 留存完整诊断（此记录可能不完整）：" + core.DiagnosticText(err.Error())
+			}
+		}
 		if err := c.rememberTaskResult(task.ID, result); err != nil {
-			slog.Warn("persist completed task result", "task_id", task.ID, "error", err)
+			slog.Warn("persist completed task result", "task_id", task.ID, "error", core.DiagnosticText(err.Error()))
+			result.Output = fullOutput + "\n未能持久保存 Agent 结果缓存；断线或重启后的结果留存不确定：" + core.DiagnosticText(err.Error())
+			result.Error = fullError
 			if task.Action == core.ActionUpgradeAgent && result.Success && c.upgradeCommitted != nil {
 				rollbackErr := c.upgradeCommitted.rollback()
 				result.Success = false
@@ -267,6 +290,16 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				c.executionsMu.Unlock()
 				c.upgradePending = rollbackErr != nil
 			}
+			if result.IPQuality == nil {
+				if persistErr := c.persistDiagnostic(task.ID, &result); persistErr != nil {
+					result.DiagnosticDigest = ""
+					result.Output = limitStateValue(core.DiagnosticText(result.Output), 64<<10)
+					result.Error = limitStateValue(core.DiagnosticText(result.Error), 8<<10) + "\n完整诊断缓存也未能保存：" + core.DiagnosticText(persistErr.Error())
+				}
+			}
+			// One bounded retry updates the in-memory delivery result even if
+			// the protected credential file is still unavailable.
+			_ = c.rememberTaskResult(task.ID, result)
 		}
 	}
 	c.executionsMu.Lock()
@@ -333,7 +366,8 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 		return core.TaskResultRequest{}, false
 	}
 	return core.TaskResultRequest{
-		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error,
+		ExecutedAttempt: cached.ExecutedAttempt,
+		LeaseID:         task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error, DiagnosticDigest: cached.DiagnosticDigest,
 		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus, HostPorts: cached.HostPorts,
 	}, true
 }
@@ -353,9 +387,11 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 			}
 		}
 		delete(c.creds.CompletedTasks, oldestID)
+		c.removeDiagnostic(oldestID)
 	}
 	c.creds.CompletedTasks[taskID] = completedTask{
-		Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
+		ExecutedAttempt:  result.ExecutedAttempt,
+		DiagnosticDigest: result.DiagnosticDigest, Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
 		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus, HostPorts: result.HostPorts,
 	}
@@ -370,7 +406,7 @@ func limitStateValue(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
-	return strings.ToValidUTF8(value[:limit], "�") + "\n… cached output truncated"
+	return strings.ToValidUTF8(value[:limit], "�") + "\n… 摘要已省略；完整诊断按所属任务读取（旧 Agent 未提供时无法恢复）"
 }
 
 func (c *Client) validTask(task core.Task) bool {

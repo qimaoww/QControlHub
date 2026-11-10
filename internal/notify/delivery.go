@@ -24,14 +24,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
-// DeliveryError exposes only fixed diagnostics, never remote bodies or target URLs.
+// Error keeps the concise summary. Diagnostic carries safely redacted causes
+// and remote responses for the owner's durable task record.
 type DeliveryError struct {
-	Reason string
-	Retry  bool
-	After  time.Duration
+	Reason     string
+	Retry      bool
+	After      time.Duration
+	Diagnostic string
 }
 
 func (e *DeliveryError) Error() string { return e.Reason }
@@ -73,7 +76,19 @@ func NewSender() *Sender {
 	}
 	return &Sender{Dial: dial, HTTP: &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("通知禁止重定向") }, Transport: &http.Transport{Proxy: nil, DialContext: dial, MaxConnsPerHost: 4, MaxIdleConns: 16, MaxIdleConnsPerHost: 2, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 8 * time.Second, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}}
 }
-func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
+func (s *Sender) Send(ctx context.Context, c Channel, e Event) (failure error) {
+	defer func() {
+		var delivery *DeliveryError
+		if !errors.As(failure, &delivery) {
+			return
+		}
+		for _, secret := range c.Secrets {
+			if secret != "" {
+				delivery.Diagnostic = strings.ReplaceAll(delivery.Diagnostic, secret, "[redacted]")
+			}
+		}
+		delivery.Diagnostic = core.DiagnosticText(delivery.Diagnostic)
+	}()
 	if c.Type == "smtp" {
 		return s.sendMail(ctx, c, e)
 	}
@@ -139,16 +154,17 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 	}
 	resp, err := s.HTTP.Do(req)
 	if err != nil {
-		return &DeliveryError{Reason: "通知连接失败或超时", Retry: true}
+		return &DeliveryError{Reason: "通知连接失败或超时", Retry: true, Diagnostic: err.Error()}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
 	if err != nil {
-		return &DeliveryError{Reason: "通知响应读取失败", Retry: true}
+		return &DeliveryError{Reason: "通知响应读取失败", Retry: true, Diagnostic: err.Error() + "\n已收到正文：" + string(data)}
 	}
 	if len(data) > 65536 {
-		return &DeliveryError{Reason: "通知响应过大"}
+		return &DeliveryError{Reason: "通知响应过大", Diagnostic: "响应采集达到 64 KiB 协议上限，后续内容未采集；诊断不完整。\n" + string(data)}
 	}
+	responseDiagnostic := fmt.Sprintf("HTTP %d; Content-Type: %s\n%s", resp.StatusCode, resp.Header.Get("Content-Type"), core.RedactDiagnosticValue(string(data)))
 	after := time.Duration(0)
 	if n, _ := strconv.Atoi(resp.Header.Get("Retry-After")); n > 0 {
 		after = time.Duration(n) * time.Second
@@ -169,7 +185,7 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &DeliveryError{Reason: fmt.Sprintf("平台 HTTP %d", resp.StatusCode), Retry: resp.StatusCode == 429 || resp.StatusCode >= 500, After: after}
+		return &DeliveryError{Reason: fmt.Sprintf("平台 HTTP %d", resp.StatusCode), Retry: resp.StatusCode == 429 || resp.StatusCode >= 500, After: after, Diagnostic: responseDiagnostic}
 	}
 	if c.Type == "webhook" {
 		return nil
@@ -185,8 +201,8 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 			RetryAfter int `json:"retry_after"`
 		} `json:"parameters"`
 	}
-	if json.Unmarshal(data, &result) != nil {
-		return &DeliveryError{Reason: "平台响应无效"}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return &DeliveryError{Reason: "平台响应无效", Diagnostic: err.Error() + "\n" + responseDiagnostic}
 	}
 	success := false
 	code := 0
@@ -206,7 +222,7 @@ func (s *Sender) Send(ctx context.Context, c Channel, e Event) error {
 		success = result.Event == "message" && len(result.ID) > 0
 	}
 	if !success {
-		return &DeliveryError{Reason: fmt.Sprintf("平台拒绝消息（%d）", code), Retry: code == 429 || code >= 500 && code <= 599, After: after}
+		return &DeliveryError{Reason: fmt.Sprintf("平台拒绝消息（%d）", code), Retry: code == 429 || code >= 500 && code <= 599, After: after, Diagnostic: responseDiagnostic}
 	}
 	return nil
 }
@@ -218,7 +234,7 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 	}
 	conn, err := s.Dial(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
-		return &DeliveryError{Reason: "SMTP 连接失败", Retry: true}
+		return &DeliveryError{Reason: "SMTP 连接失败", Retry: true, Diagnostic: err.Error()}
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(12 * time.Second)
@@ -232,23 +248,23 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 	if c.Get("tls") == "tls" {
 		secure := tls.Client(conn, cfg)
 		if err := secure.HandshakeContext(ctx); err != nil {
-			return &DeliveryError{Reason: "SMTP TLS 失败", Retry: transientSMTP(err)}
+			return &DeliveryError{Reason: "SMTP TLS 失败", Retry: transientSMTP(err), Diagnostic: err.Error()}
 		}
 		conn = secure
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return &DeliveryError{Reason: "SMTP 握手失败", Retry: true}
+		return &DeliveryError{Reason: "SMTP 握手失败", Retry: true, Diagnostic: err.Error()}
 	}
 	defer client.Close()
 	if c.Get("tls") == "starttls" {
 		if err := client.StartTLS(cfg); err != nil {
-			return &DeliveryError{Reason: "SMTP STARTTLS 失败", Retry: transientSMTP(err)}
+			return &DeliveryError{Reason: "SMTP STARTTLS 失败", Retry: transientSMTP(err), Diagnostic: err.Error()}
 		}
 	}
 	if user := c.Get("username"); user != "" {
 		if err := client.Auth(smtp.PlainAuth("", user, c.Get("password"), host)); err != nil {
-			return &DeliveryError{Reason: "SMTP 认证失败", Retry: transientSMTP(err)}
+			return &DeliveryError{Reason: "SMTP 认证失败", Retry: transientSMTP(err), Diagnostic: err.Error()}
 		}
 	}
 	if err := client.Mail(c.Get("from")); err != nil {
@@ -279,7 +295,7 @@ func (s *Sender) sendMail(ctx context.Context, c Channel, e Event) error {
 }
 func smtpFailure(err error) error {
 	retry := !strings.HasPrefix(err.Error(), "5")
-	return &DeliveryError{Reason: "SMTP 未接受消息", Retry: retry}
+	return &DeliveryError{Reason: "SMTP 未接受消息", Retry: retry, Diagnostic: err.Error()}
 }
 
 func transientSMTP(err error) bool {

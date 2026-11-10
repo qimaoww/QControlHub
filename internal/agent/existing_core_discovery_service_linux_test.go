@@ -127,7 +127,7 @@ func TestExistingCoreDiscoveryReportsAmbiguousAndUnsupportedServices(t *testing.
 			Specs:                   fixture.managedSpecs,
 			ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: reason},
 		}).Runtime(context.Background())[core.EngineSingBox]
-		if runtime.Installed || runtime.ServiceStatus != "active" || runtime.ExistingConfigUnsupportedReason != reason || runtime.ExistingConfigAvailable {
+		if runtime.Installed || runtime.ServiceStatus != "inactive" || runtime.ManagedOperationBlockedReason != "" || runtime.ExistingConfigUnsupportedReason != reason || runtime.ExistingConfigAvailable {
 			t.Fatalf("unsupported-wrapper runtime = %+v", runtime)
 		}
 	})

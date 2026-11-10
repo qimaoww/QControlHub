@@ -58,7 +58,7 @@ export async function testNativeMotion(fixture,preview){
   login.elements.username.value='motion-test';login.elements.token.value='中文密码';assert.ok(login.checkValidity(),'登录新增了字符长度限制');
   login.elements.token.value='fixture-password-123';
   window.fetch=async(input,options)=>String(input).endsWith('/auth/login')?new Response(JSON.stringify({error:'账号或密码不正确'}),{status:401,headers:{'Content-Type':'application/json'}}):originalFetch(input,options);
-  try{login.requestSubmit();await waitFor(()=>login.textContent.includes('用户名、密码或管理员令牌不正确'),'登录失败未反馈');
+  try{login.requestSubmit();await waitFor(()=>login.textContent.includes('账号或密码不正确'),'登录失败未反馈');
     assert.equal(document.querySelector('form[aria-label=登录控制台]'),login);assert.equal(login.elements.username.value,'motion-test');assert.equal(login.elements.token.value,'fixture-password-123');
     await waitFor(()=>!login.querySelector('button[type=submit]').disabled,'登录失败未解锁');
   }finally{window.fetch=originalFetch;}

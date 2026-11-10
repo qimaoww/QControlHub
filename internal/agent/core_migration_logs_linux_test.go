@@ -93,7 +93,7 @@ func TestExistingSingBoxOfficialFileLogMigrationUsesPanelStream(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("deploy imported file-to-console log configuration: %v", err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(restarted); err != nil {
 		t.Fatalf("switch restarted import to console source: %v", err)
 	}
 	collector.mu.Lock()

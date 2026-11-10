@@ -46,12 +46,12 @@ export async function testAgentDeleteActions({ testAPI, onlineAgent }) {
   releaseRead(); testAPI.agentsGate = null; await idle(); assert.equal(writes(), before + 3);
   settings = await open('bravo');
   const control = remove(), timeout = AbortSignal.timeout;
-  let duration; testAPI.deleteHang = true;
-  AbortSignal.timeout = milliseconds => { duration = milliseconds; return timeout.call(AbortSignal, 50); };
+  const durations = []; testAPI.deleteHang = true;
+  AbortSignal.timeout = milliseconds => { durations.push(milliseconds); return timeout.call(AbortSignal, 50); };
   try {
     button('删除节点', await confirm()).click();
     await waitFor(() => document.querySelector('.a-toast.error')?.textContent.includes('请求超时') && !control.disabled, '无响应删除未超时或解锁');
-    assert.ok(duration > 30000 && duration < 60000, '删除期限未协调服务端与连接期限');
+    assert.ok(durations.some(duration => duration > 30000 && duration < 60000), '删除期限未协调服务端与连接期限');
     assert.ok(document.querySelector('.a-toast.error').textContent.includes('刷新确认结果'), '超时未提示核实结果');
     assert.ok(testAPI.agents.some(agent => agent.id === 'bravo'), '超时被当作成功');
   } finally { AbortSignal.timeout = timeout; testAPI.deleteHang = false; }

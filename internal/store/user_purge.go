@@ -193,6 +193,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 		// overwriting the administrator's existing command.
 		`UPDATE enrollment_tokens SET owner_id='',admin_hidden=false,reusable=false,
 			revoked_at=COALESCE(revoked_at,now()),token_ciphertext=NULL WHERE owner_id=$1`,
+		`DELETE FROM tasks WHERE owner_id=$1 AND action='panel-failure'`,
 		`UPDATE tasks SET owner_id='' WHERE owner_id=$1`,
 		`UPDATE agent_engine_ownership SET owner_id='' WHERE owner_id=$1`,
 	} {

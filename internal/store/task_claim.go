@@ -122,8 +122,11 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		return nil, nil
 	}
 	if err := s.openTaskExecutionTx(ctx, tx, &task, features, false); err != nil {
+		if saveErr := saveDispatchFailureTx(ctx, tx, task, err); saveErr != nil {
+			return nil, saveErr
+		}
 		if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
-			config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(err.Error(), 8<<10)); updateErr != nil {
+			config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(core.DiagnosticText(err.Error()), 8<<10)); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, tx.Commit(ctx)
@@ -192,8 +195,11 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	task, err := scanTask(row, true)
 	if err == nil {
 		if configErr := s.openTaskExecutionTx(ctx, tx, &task, features, true); configErr != nil {
+			if saveErr := saveDispatchFailureTx(ctx, tx, task, configErr); saveErr != nil {
+				return nil, saveErr
+			}
 			if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
-				config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(configErr.Error(), 8<<10)); updateErr != nil {
+				config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(core.DiagnosticText(configErr.Error()), 8<<10)); updateErr != nil {
 				return nil, updateErr
 			}
 			return nil, tx.Commit(ctx)
@@ -233,28 +239,51 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout)}
 	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
-		UPDATE tasks SET
+ WITH stale AS (SELECT id,attempt FROM tasks
+ WHERE status='running' AND started_at < now() - CASE
+ WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
+ WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
+ WHEN action='install' OR install_if_missing THEN $2::interval
+ WHEN engine IN ('sing-box','xray') AND action IN ('validate','deploy','start','restart')
+ AND EXISTS(SELECT 1 FROM agents a WHERE a.id=tasks.agent_id AND a.features ? 'managed-tls-v1')
+ THEN GREATEST($1::interval,$5::interval) ELSE $1::interval END`+where+` FOR UPDATE),
+ retained AS (INSERT INTO task_diagnostics(task_id,attempt,output,error,source)
+ SELECT id,attempt,'','执行租约已过期，尚未收到 Agent 结果；上次执行结果不确定。','lease-expired' FROM stale ON CONFLICT DO NOTHING)
+ UPDATE tasks SET
 			status=CASE WHEN attempt >= $3 THEN 'failed' ELSE 'pending' END,
 			error=CASE WHEN attempt >= $3 THEN 'agent did not report a result before the execution lease expired' ELSE error END,
 			finished_at=CASE WHEN attempt >= $3 THEN now() ELSE NULL END,
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE
-			WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
-			WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
-			WHEN action='install' OR install_if_missing THEN $2::interval
-			WHEN engine IN ('sing-box','xray') AND action IN ('validate','deploy','start','restart')
-				AND EXISTS(SELECT 1 FROM agents a WHERE a.id=tasks.agent_id AND a.features ? 'managed-tls-v1')
-				THEN GREATEST($1::interval,$5::interval)
-			ELSE $1::interval END`+where,
-		args...)
+ WHERE id IN (SELECT id FROM stale)`, args...)
+
 	return err
 }
 
 func (s *Store) openTaskExecutionTx(ctx context.Context, tx pgx.Tx, task *core.Task, features []string, claiming bool) error {
+	if !task.Action.AgentLevel() {
+		var runtime map[core.Engine]core.RuntimeState
+		if err := tx.QueryRow(ctx, `SELECT runtime FROM agents WHERE id=$1`, task.AgentID).Scan(&runtime); err != nil {
+			return err
+		}
+		if reason := runtime[task.Engine].ManagedBlockReason(features, task.SharedInstance); reason != "" {
+			return fmt.Errorf("%w: %s", ErrConflict, reason)
+		}
+	}
+	if task.Action == core.ActionImportExisting {
+		err := tx.QueryRow(ctx, `SELECT target_config_id,expected_version+1 FROM task_imports WHERE task_id=$1`, task.ID).Scan(&task.ConfigID, &task.ConfigVersion)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
 	if err := s.openCertificateExecution(ctx, tx, task, features, claiming); err != nil {
 		return err
 	}
 	return s.checkTaskPortUseTx(ctx, tx, task, true)
+}
+
+func saveDispatchFailureTx(ctx context.Context, tx pgx.Tx, task core.Task, cause error) error {
+	_, err := tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source) VALUES($1,$2,$3,$4,'dispatch') ON CONFLICT DO NOTHING`, task.ID, task.Attempt, "任务分派核对失败；本次未进入 Agent 执行", core.DiagnosticText(cause.Error()))
+	return err
 }

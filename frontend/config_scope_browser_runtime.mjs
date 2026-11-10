@@ -167,6 +167,10 @@ async function subStoreFixture(manage = true) {
   const nativeFetch=globalThis.fetch;
   globalThis.fetch=async(url,request={})=>{
     if(!String(url).startsWith("/api/v1"))return nativeFetch(url,request);
+    if(String(url)==="/api/v1/tasks/failures"&&request.method==="POST") {
+      assert(new Headers(request.headers).get("X-QControlHub-CSRF")===session.csrf_token,"failure retention missing CSRF");
+      return new Response(JSON.stringify({id:"fixture-failure"}),{headers:{"Content-Type":"application/json"}});
+    }
     try {
       const value=await api(String(url).slice("/api/v1".length),request);
       return new Response(JSON.stringify(value),{status:200,headers:{"Content-Type":"application/json"}});

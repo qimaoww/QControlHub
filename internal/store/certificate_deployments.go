@@ -281,8 +281,11 @@ func (s *Store) syncCertificateBindings(ctx context.Context) error {
 			_ = tx.Rollback(ctx)
 		}
 		if e != nil {
-			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(e.Error(), 1000))
+			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(SafeFailureDiagnostic(e), 1000))
 			if err != nil {
+				return err
+			}
+			if err = s.retainBackgroundFailure(ctx, b.owner, "证书部署任务创建", b.config, "task_creation", e); err != nil {
 				return err
 			}
 		} else if !task.Reused {

@@ -105,14 +105,14 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	content := frontendSources(t, "analytics/live-config.js", "modules/live-config-state.js", "modules/config-snapshot.js")
 	for _, required := range []string{
 		`importSource ? "导入并迁移" : "保存并部署"`,
-		`action: "import-existing"`, `existing_config_unsupported_reason`,
+		`submitConfigImport`, `existing_config_unsupported_reason`,
 		`['managed', 'QAgent 托管配置']`, `['import', '可导入的系统服务配置']`,
 		`readonly: importSource || !editable`, `系统配置快照`,
 		`read-managed-config`, `prefer_cached: true`, `snapshot = async (preferCached = false)`,
 		`const result = await snapshot()`, `requestConfigSnapshot`, `liveConfigSnapshotReusable`,
 		`beforeDeploy`, `submitLiveConfigChange`, `if (!source?.content)`,
 		`source, existingAvailable: importSource`, `beforeDeploy,`,
-		`const errorText = runtime.existing_config_unsupported_reason`, `errorText ? [notice(errorText)]`,
+		`const errorText = runtime.existing_config_unsupported_reason`, `系统配置导入不可用`, `notice(errorText)`,
 		`canDeploy = !configDeployBlockReason(agent, engine, ctx.can)`,
 		`setOptions(engineField, engines.map(id => [id, id]), engine)`,
 		`const engines = target.capabilities`, `if (values.agent !== selectedAgentID)`,

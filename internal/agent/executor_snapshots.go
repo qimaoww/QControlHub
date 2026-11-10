@@ -109,6 +109,10 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 	e.specsMu.RLock()
 	specs := make(map[core.Engine]EngineSpec, len(e.Specs))
 	existingSpecs := make(map[core.Engine]EngineSpec, len(e.ExistingSpecs))
+	managedIssues := make(map[core.Engine]string, len(e.ManagedSafetyIssues))
+	for engine, issue := range e.ManagedSafetyIssues {
+		managedIssues[engine] = issue
+	}
 	discoveryIssues := make(map[core.Engine]string, len(e.ExistingDiscoveryIssues))
 	for engine, spec := range e.Specs {
 		specs[engine] = spec
@@ -122,14 +126,16 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 	e.specsMu.RUnlock()
 	result := make(map[core.Engine]core.RuntimeState, len(specs))
 	for engine, spec := range specs {
-		state := core.RuntimeState{}
-		if issue := discoveryIssues[engine]; issue != "" {
-			state.ServiceStatus = "active"
-			state.ExistingConfigUnsupportedReason = issue
-			result[engine] = state
-			continue
+		state := core.RuntimeState{ManagedOperationBlockedReason: managedIssues[engine]}
+		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
+			if _, err := validateManagedServiceTarget(ctx, engine, spec, e.serviceManager()); err != nil {
+				state.ManagedHostBlockedReason = fmt.Sprintf("verify managed %s service target: %v", engine, err)
+			}
 		}
-		if _, ok := existingSpecs[engine]; ok {
+		if issue := discoveryIssues[engine]; issue != "" {
+			state.ExistingConfigUnsupportedReason = issue
+		}
+		if _, ok := existingSpecs[engine]; ok && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
 			state.ExistingConfigAvailable = true
 		}
 		if path, err := exec.LookPath(spec.Binary); err == nil {

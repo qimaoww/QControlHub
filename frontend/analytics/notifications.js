@@ -17,7 +17,7 @@ export function createNotifications(scope) {
     if(!entries.size)try{region.hidePopover();}catch{/* Native fallback. */}
   }
   function clear() { for(const card of [...entries.keys()])dismiss(card); }
-  function show(message,tone='ok') {
+  function show(message,tone='ok',onDetails) {
     if(!scope.current()||!message)return;
     if(tone==='ok')for(const card of [...entries.keys()])if(card.dataset.tone==='ok')dismiss(card);
     const previous=[...entries.keys()].find(card=>card.dataset.message===String(message)&&card.dataset.tone===tone);
@@ -25,6 +25,7 @@ export function createNotifications(scope) {
     while(entries.size>=2)dismiss(entries.keys().next().value);
     const card=node('div',{className:`a-notice a-toast ${tone}`,role:tone==='error'?'alert':'status','data-tone':tone,'data-message':String(message)},
       node('span',{className:'a-toast-message'},message));
+    if(onDetails)card.querySelector('.a-toast-message').append(node('br'),button('查看详情',onDetails));
     card.append(button('',()=>dismiss(card,true),{glyph:'close',title:'关闭通知','aria-label':'关闭通知',className:'a-icon-button a-toast-close'}));
     const entry={timer:null};entries.set(card,entry);region.append(card);position();
     const arm=()=>{
@@ -35,6 +36,7 @@ export function createNotifications(scope) {
     card.addEventListener('pointerenter',pause);card.addEventListener('pointerleave',arm);
     card.addEventListener('focusin',pause);card.addEventListener('focusout',()=>queueMicrotask(()=>{if(entries.has(card)&&scope.current())arm();}));
     arm();
+    return card;
   }
   scope.own(()=>{clear();region.remove();});
   return {show,clear,position};

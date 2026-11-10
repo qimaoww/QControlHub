@@ -298,9 +298,11 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"window.__oldQueryReady");
   await evaluate(page,"const select=document.querySelector('.a-auto-filter [name=status]');select.value='failed';select.dispatchEvent(new Event('change',{bubbles:true}))");
   await wait(page,"window.__queryCalls.some(url=>url.includes('status=failed')) && !document.querySelector('[aria-busy=true]')");
-  const filtered=await evaluate(page,"document.querySelector('.a-main section').textContent");
+  const resultIdentity="[...document.querySelectorAll('.a-main section tbody tr')].map(row=>({id:row.dataset.refreshKey,status:row.querySelector('[data-column=状态] .a-badge')?.textContent}))";
+  const filtered=await evaluate(page,resultIdentity);
+  assert.ok(filtered.length && filtered.every(row=>row.id && row.status==='失败'),'current filter shows identified failed task records');
   await wait(page,"window.__oldQueryFinished");
-  assert.equal(await evaluate(page,"document.querySelector('.a-main section').textContent"),filtered,'old query cannot replace current results');
+  assert.deepEqual(await evaluate(page,resultIdentity),filtered,'old query cannot replace current task identities or status');
   await evaluate(page,"window.fetch=window.__queryFetch;delete window.__queryFetch;delete window.__queryCalls;delete window.__oldQueryFinished;delete window.__oldQueryReady");
   await evaluate(page,"[...document.querySelectorAll('.a-auto-filter button')].find(button=>button.textContent==='重置').click()");
   await wait(page,"document.querySelector('.a-auto-filter [name=status]').value==='' && !document.querySelector('[aria-busy=true]')");

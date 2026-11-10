@@ -91,7 +91,8 @@ func TestPresetAutoInstallAPI(t *testing.T) {
 					t.Fatalf("incorrect compound operation: %+v", result.Task)
 				}
 				tasks, err := db.ListTasks(ctx, agent.ID, 100)
-				if err != nil || len(tasks) != 1 || tasks[0].ID != result.Task.ID || tasks[0].InstallIfMissing != !installed {
+				tasks = executionTasks(t, tasks)
+				if err != nil || len(executionTasks(t, tasks)) != 1 || tasks[0].ID != result.Task.ID || tasks[0].InstallIfMissing != !installed {
 					t.Fatalf("save did not create one durable task: %+v %v", tasks, err)
 				}
 				// The generic task endpoint cannot smuggle an installation

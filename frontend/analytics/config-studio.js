@@ -1,3 +1,4 @@
+import { managedCoreBlockReason } from "../modules/managed-core-state.js";
 import { preparedDialog, loadingForm } from "./loading.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
 import { labels, numeric, booleans, multiline } from "./inbound-fields.js";
@@ -55,7 +56,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   };
   const editable = !readOnly && ctx.can('agent-config.write');
   let execute = !configDeployBlockReason(agent, engine, ctx.can);
-  const writable = editable && ctx.can('tasks.execute') && !agent.runtime?.[engine]?.existing_config_unsupported_reason;
+  const writable = editable && ctx.can('tasks.execute') && !managedCoreBlockReason(agent, engine);
   async function latest(readCtx = ctx) {
     if (dirty() && !await ctx.confirm('打开编辑工具会替换尚未保存的源码修改，确定继续？','打开编辑工具')) return false;
     const draft = getDraft(), previous = current.config;

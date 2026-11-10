@@ -41,7 +41,7 @@ export async function testConfigMigrationRuntime(preview=false){
       imported.clickButton('读取系统配置');await waitFor(()=>imported.snapshotReads===1&&!imported.root.hasAttribute('aria-busy'),'system source read did not finish');
       form.requestSubmit();await pause();assert(!imported.imports?.length,'canceled external migration submitted');
       imported.confirm=true;form.requestSubmit();await waitFor(()=>imported.imports?.length===1&&!imported.root.hasAttribute('aria-busy'),'explicit source migration failed');
-      assert(imported.imports[0].action==='import-existing'&&imported.imports[0].expected_config_version===imported.saved().version&&imported.imports[0].engine===engine,'migration lost exact saved target');
+      assert(imported.imports[0].snapshot_task_id&&imported.imports[0].expected_version===imported.saved().version&&!imported.writes.length,'migration lost exact saved target');
       assert(imported.sawTaskDetails,'migration did not show task result');
     }finally{imported.dispose()}
   }
@@ -93,7 +93,7 @@ async function testRuntimeAndSourceSelection(){
       assert(test.calls.filter(call=>call.path==='/agents').length===reads+1,'explicit refresh duplicated runtime reads');
       assert(target().elements.engine.value==='sing-box'&&target().elements.engine.options.length===1,'unsupported runtime removed selected engine');
       assert(test.root.textContent.includes(reason),'fresh unsupported runtime reason missing');
-      assert(sourceForm().querySelector('[type=submit]').disabled,'unsupported runtime permits deployment');
+      assert(!sourceForm().querySelector('[type=submit]').disabled&&!sourceForm().elements.content.readOnly,'unrelated import failure disabled manual deployment');
       assert(![...target().elements.source.options].some(option=>option.value==='import'),'unsupported runtime permits system migration');
       if(reason.startsWith('standard'))assert(!test.root.textContent.includes('complex wrapper is unsupported'),'runtime refresh retained stale unsupported reason');
     }

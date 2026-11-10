@@ -84,7 +84,7 @@ frontend-module-check:
 	node frontend/module_smoke.mjs
 
 core-install-browser-check:
-	QCH_CORE_INSTALL_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^TestCoreFirstInstallBrowserSessions$$' -v
+	QCH_CORE_INSTALL_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(CoreFirstInstallBrowserSessions|ImportDiagnosticsBrowserSessions)$$' -v
 
 .PHONY: multi-user-browser-check
 multi-user-browser-check:

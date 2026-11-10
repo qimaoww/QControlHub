@@ -35,6 +35,7 @@ type Executor struct {
 	Specs                    map[core.Engine]EngineSpec
 	ExistingSpecs            map[core.Engine]EngineSpec
 	ExistingDiscoveryIssues  map[core.Engine]string
+	ManagedSafetyIssues      map[core.Engine]string
 	MigrationMarkerPrefix    string
 	Updater                  *CoreUpdater
 	Services                 *ServiceManager
@@ -88,6 +89,18 @@ func (e *Executor) serviceManager() *ServiceManager {
 }
 
 func (e *Executor) Validate() error {
+	if err := e.validateManagedTargets(); err != nil {
+		return err
+	}
+	for engine, spec := range e.ExistingSpecs {
+		if err := e.validateImportMapping(engine, spec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Executor) validateManagedTargets() error {
 	if e == nil {
 		return errors.New("agent executor is required")
 	}
@@ -96,9 +109,6 @@ func (e *Executor) Validate() error {
 	}
 	if err := e.serviceManager().validate(); err != nil {
 		return err
-	}
-	if len(e.ExistingSpecs) > 0 && strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
-		return errors.New("existing core mappings require a migration state path")
 	}
 	for engine, spec := range e.Specs {
 		if !engine.Valid() {
@@ -119,25 +129,30 @@ func (e *Executor) Validate() error {
 			}
 		}
 	}
-	for engine, spec := range e.ExistingSpecs {
-		if _, enabled := e.Specs[engine]; !enabled {
-			return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
-		}
-		if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
-			return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
-		}
-		if err := validateExistingSpecPaths(engine, spec); err != nil {
-			return err
-		}
-		if err := validateExistingCoreExecutable(spec.Binary); err != nil {
-			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
-		}
-		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
-			return fmt.Errorf("unsafe existing %s binary parent chain: %w", engine, err)
-		}
-		if err := validateExistingServiceExecutable(spec); err != nil {
-			return fmt.Errorf("unsafe existing %s service executable: %w", engine, err)
-		}
+	return nil
+}
+
+func (e *Executor) validateImportMapping(engine core.Engine, spec EngineSpec) error {
+	if strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
+		return errors.New("existing core mappings require a migration state path")
+	}
+	if _, enabled := e.Specs[engine]; !enabled {
+		return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
+	}
+	if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
+		return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
+	}
+	if err := validateExistingSpecPaths(engine, spec); err != nil {
+		return err
+	}
+	if err := validateExistingCoreExecutable(spec.Binary); err != nil {
+		return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+		return fmt.Errorf("unsafe existing %s binary parent chain: %w", engine, err)
+	}
+	if err := validateExistingServiceExecutable(spec); err != nil {
+		return fmt.Errorf("unsafe existing %s service executable: %w", engine, err)
 	}
 	return nil
 }
@@ -169,12 +184,16 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 	spec, ok := e.Specs[task.Engine]
 	existing, hasExisting := e.ExistingSpecs[task.Engine]
 	discoveryIssue := strings.TrimSpace(e.ExistingDiscoveryIssues[task.Engine])
+	managedIssue := strings.TrimSpace(e.ManagedSafetyIssues[task.Engine])
 	e.specsMu.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("engine %s is not enabled on this agent", task.Engine)
 	}
-	if discoveryIssue != "" {
-		return "", fmt.Errorf("%s core tasks are disabled because an existing service could not be mapped safely: %s", task.Engine, discoveryIssue)
+	if managedIssue != "" {
+		return "", fmt.Errorf("managed %s target is unsafe: %s", task.Engine, managedIssue)
+	}
+	if !task.SharedInstance && discoveryIssue != "" && (task.Action == core.ActionImportExisting || task.Action == core.ActionReadConfig) {
+		return "", fmt.Errorf("%s existing configuration source is unavailable: %s", task.Engine, discoveryIssue)
 	}
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
@@ -184,6 +203,11 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 			task.ConfigVersion < 1 || task.ConfigContent == "" || (task.SharedTrafficID != "" && !task.SharedInstance) ||
 			task.CoreVersion != "" || task.CoreSource != "" {
 			return "", errors.New("invalid automatic core installation task")
+		}
+	}
+	if !task.SharedInstance && spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
+		if _, err := validateManagedServiceTarget(parent, task.Engine, spec, e.serviceManager()); err != nil {
+			return "", fmt.Errorf("verify managed %s service target: %w", task.Engine, err)
 		}
 	}
 	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {
@@ -356,6 +380,19 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 		}
 		return e.readCurrentConfig(ctx, task.Engine, spec)
 	case core.ActionImportExisting:
+		defer func() {
+			if resultErr == nil && task.ConfigID != "" && task.ConfigVersion > 0 {
+				actual, err := readConfigurationFile(spec.ConfigPath)
+				if err == nil {
+					identity := task
+					identity.ConfigContent = actual
+					err = e.commitSharedDeployment(spec, identity)
+				}
+				if err != nil {
+					resultErr = fmt.Errorf("迁移完成，但托管配置关联未能留存，请核对服务后重试：%w", err)
+				}
+			}
+		}()
 		if !hasExisting {
 			completed, err := completedCoreMigrationMatches(e.MigrationMarkerPrefix, task.Engine, task.ConfigContent)
 			if err != nil {

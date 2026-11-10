@@ -46,13 +46,15 @@ type credentials struct {
 }
 
 type completedTask struct {
-	HostPorts      *core.HostPortObservation  `json:"host_ports,omitempty"`
-	InstanceStatus *core.SharedInstanceStatus `json:"instance_status,omitempty"`
-	Success        bool                       `json:"success"`
-	Output         string                     `json:"output,omitempty"`
-	Error          string                     `json:"error,omitempty"`
-	CompletedAt    time.Time                  `json:"completed_at"`
-	IPQuality      *core.IPQualityResult      `json:"ip_quality,omitempty"`
+	ExecutedAttempt  int                        `json:"executed_attempt,omitempty"`
+	DiagnosticDigest string                     `json:"diagnostic_digest,omitempty"`
+	HostPorts        *core.HostPortObservation  `json:"host_ports,omitempty"`
+	InstanceStatus   *core.SharedInstanceStatus `json:"instance_status,omitempty"`
+	Success          bool                       `json:"success"`
+	Output           string                     `json:"output,omitempty"`
+	Error            string                     `json:"error,omitempty"`
+	CompletedAt      time.Time                  `json:"completed_at"`
+	IPQuality        *core.IPQualityResult      `json:"ip_quality,omitempty"`
 }
 
 type Client struct {
@@ -118,16 +120,24 @@ const (
 )
 
 func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
-	if err := executor.LoadCoreMigrationState(); err != nil {
-		return nil, fmt.Errorf("load existing core migration state: %w", err)
-	}
-	if err := executor.Validate(); err != nil {
+	if err := executor.validateManagedTargets(); err != nil {
 		return nil, err
+	}
+	for engine, spec := range executor.ExistingSpecs {
+		if err := executor.validateImportMapping(engine, spec); err != nil {
+			if executor.ExistingDiscoveryIssues == nil {
+				executor.ExistingDiscoveryIssues = make(map[core.Engine]string)
+			}
+			executor.ExistingDiscoveryIssues[engine] = core.DiagnosticText(err.Error())
+		}
+	}
+	if err := executor.LoadCoreMigrationState(); err != nil {
+		slog.Warn("migration safety needs attention; affected targets remain blocked", "error", core.DiagnosticText(err.Error()))
 	}
 	reconcileContext, reconcileCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	if err := executor.ReconcileExistingCoreServices(reconcileContext); err != nil {
 		reconcileCancel()
-		return nil, fmt.Errorf("reconcile existing core migration: %w", err)
+		slog.Warn("migration recovery needs attention; affected targets remain blocked", "error", core.DiagnosticText(err.Error()))
 	}
 	reconcileCancel()
 	logUpgradeContext, logUpgradeCancel := context.WithTimeout(context.Background(), 45*time.Second)

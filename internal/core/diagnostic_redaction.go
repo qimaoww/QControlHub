@@ -17,7 +17,33 @@ var diagnosticAPIKey = regexp.MustCompile(`qch_key_[A-Za-z0-9_-]{43}`)
 var diagnosticUUID = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 var diagnosticURLCredentials = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/@]+@`)
 var diagnosticURLSecret = regexp.MustCompile(`(?i)([?&](?:token|key|api_key|secret|password|access_token)=)[^\s&#"']+`)
-var diagnosticAssignments = regexp.MustCompile(`(?im)((?:["']?(?:pass|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|psk|key|decryption|secret|token|api[-_]?key|webhook[-_]?url|authorization|cookie|uuid|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
+var diagnosticAssignments = regexp.MustCompile(`(?im)((?:["']?(?:pass|password|passwd|passphrase|private[-_]?key|pre[-_]?shared[-_]?key|psk|key|decryption|secret|token|api[-_]?key|webhook[-_]?url|authorization|cookie|uuid|mldsa65[-_]?seed)["']?)\s*[:=]\s*)(?:\[redacted(?: private PEM)?\]|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\}\]]+)`)
+var diagnosticCredentialContainers = regexp.MustCompile(`(?im)["']?(?:passwords?|private[-_]?keys?|secrets?|tokens?|credentials?|short[-_]?ids?)["']?\s*[:=]\s*([\[{])`)
+
+// A text diagnostic can contain a credential array even when the whole log
+// is not a JSON document. Mask the value without dropping surrounding causes.
+func redactDiagnosticContainers(value string) string {
+	indices := diagnosticCredentialContainers.FindAllStringSubmatchIndex(value, -1)
+	for i := len(indices) - 1; i >= 0; i-- {
+		start := indices[i][2]
+		if strings.HasPrefix(value[start:], "[redacted") {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(value[start:]))
+		decoder.UseNumber()
+		var container any
+		if decoder.Decode(&container) != nil {
+			// An incomplete credential container has no safe ending to infer.
+			value = value[:start] + "[redacted: incomplete credential container]"
+			continue
+		}
+		safe, err := json.Marshal(redactCredentialShape(container, 0))
+		if err == nil {
+			value = value[:start] + string(safe) + value[start+int(decoder.InputOffset()):]
+		}
+	}
+	return value
+}
 
 // RedactDiagnosticValue preserves resource IDs, versions, structure and error
 // context. Serialized configuration/fragment/file strings are parsed as JSON

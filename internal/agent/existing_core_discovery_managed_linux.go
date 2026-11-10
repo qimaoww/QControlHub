@@ -265,7 +265,7 @@ func supportedManagedExecStart(engine core.Engine, managed EngineSpec, executabl
 func systemdUnitProperty(ctx context.Context, service, property string) (string, error) {
 	output, err := run(ctx, systemctlPath, "show", service, "--property="+property, "--value")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read service %s property %s: %w\n%s", service, property, err, core.DiagnosticText(output))
 	}
 	return strings.TrimSpace(output), nil
 }

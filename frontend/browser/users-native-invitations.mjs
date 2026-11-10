@@ -10,12 +10,16 @@ export async function testNativeInvitations() {
     { id: 'revoked', agent_id: 'revoked', agent_name: '已撤销节点', enabled: false, status: 'pending', invitation_revision: 8, engines: [], ports: [], limit_bytes: 0, used_bytes: 0 },
   ] };
   const writes = [];
-  let hold = false, release, failRead = false, conflict = false, holdRead = false, releaseRead;
+  let hold = false, release, failRead = false, conflict = false, holdRead = false, releaseRead, retainedFailures = 0;
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith('/api/v1')) return nativeFetch(url, options);
     const path = String(url).slice(7), method = options.method || 'GET';
     if (path === '/auth/session') return reply(session);
+    if (path === '/tasks/failures' && method === 'POST') {
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), session.csrf_token, '失败留存缺少 CSRF');
+      return reply({id:`fixture-failure-${++retainedFailures}`});
+    }
     if (path === '/agent-access') {
       if (failRead) return reply({ error: '邀请读取失败' }, 503);
       const value = structuredClone(access);

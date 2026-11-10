@@ -125,7 +125,7 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	}
 }
 
-func TestUnsupportedExistingServiceTasksFailClosedInWebSocketResults(t *testing.T) {
+func TestUnsafeManagedTargetTasksFailClosedInWebSocketResults(t *testing.T) {
 	t.Parallel()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestUnsupportedExistingServiceTasksFailClosedInWebSocketResults(t *testing.
 			Specs: map[core.Engine]EngineSpec{
 				core.EngineSingBox: {Binary: "/unused/sing-box", ConfigPath: "/unused/config.json", Service: "qagent-sing-box.service"},
 			},
-			ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: "unsupported executable wrapper"},
+			ManagedSafetyIssues: map[core.Engine]string{core.EngineSingBox: "unsafe managed service mapping"},
 		},
 	}
 	for index, action := range []core.Action{
@@ -163,7 +163,7 @@ func TestUnsupportedExistingServiceTasksFailClosedInWebSocketResults(t *testing.
 			}
 			client.executeTaskForSession(context.Background(), context.Background(), task, outgoing)
 			message := <-outgoing
-			if message.Result == nil || message.Result.Result.Success || !strings.Contains(message.Result.Result.Error, "core tasks are disabled") {
+			if message.Result == nil || message.Result.Result.Success || !strings.Contains(message.Result.Result.Error, "target is unsafe") {
 				t.Fatalf("websocket result for %s = %+v", action, message)
 			}
 		})
