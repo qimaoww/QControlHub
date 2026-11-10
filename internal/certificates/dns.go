@@ -65,7 +65,7 @@ func (e *DNSAPIError) Error() string {
 		reason = "请求受限，请稍后重试"
 	case e.Status == 401 || strings.Contains(e.Code, "AuthFailure") || strings.Contains(e.Code, "InvalidAccessKey") || strings.Contains(e.Code, "Signature") || e.Code == "9109":
 		reason = "凭据无效，请更新凭据"
-	case e.Status == 403 || strings.Contains(e.Code, "Unauthorized") || strings.Contains(e.Code, "Forbidden"):
+	case e.Status == 403 || strings.Contains(e.Code, "Unauthorized") || strings.Contains(e.Code, "Forbidden") || strings.HasPrefix(e.Code, "OperationDenied."):
 		reason = "权限不足，请核对区域读取和 DNS 写入权限"
 	case dnsZoneMissing(e):
 		reason = "托管区域不存在"
@@ -451,6 +451,57 @@ func (d DNSClient) Delete(ctx context.Context, record DNSRecord) error {
 		return err
 	}
 	return errors.New("DNS 服务商不支持")
+}
+
+// Matches verifies a saved receipt without rediscovering its zone. DNSPod's
+// record-list index can lag a successful create, so query acknowledged IDs
+// directly instead of treating a missing search result as a deleted record.
+func (d DNSClient) Matches(ctx context.Context, record DNSRecord, name, value string) (bool, error) {
+	if record.ID == "" || record.Zone == "" {
+		return false, errors.New("DNS 回执缺少记录或托管区域，已停止核验")
+	}
+	if d.Provider != "dnspod" {
+		records, err := d.FindInZone(ctx, record.Zone, name, value)
+		if err != nil {
+			return false, err
+		}
+		for _, existing := range records {
+			if existing == record {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	id, err := strconv.ParseUint(record.ID, 10, 64)
+	if err != nil || id == 0 {
+		return false, errors.New("DNSPod 回执记录 ID 无效")
+	}
+	name = strings.TrimSuffix(strings.ToLower(name), ".")
+	if name != record.Zone && !strings.HasSuffix(name, "."+record.Zone) {
+		return false, errors.New("DNS 验证目标不属于回执托管区域")
+	}
+	raw, err := d.tencent(ctx, "DescribeRecord", map[string]any{"Domain": record.Zone, "RecordId": id})
+	if err != nil {
+		var apiErr *DNSAPIError
+		if errors.As(err, &apiErr) && apiErr.Code == "InvalidParameter.RecordIdInvalid" {
+			return false, nil
+		}
+		return false, err
+	}
+	var info struct {
+		ID         uint64 `json:"Id"`
+		SubDomain  string
+		RecordType string
+		Value      string
+	}
+	if json.Unmarshal(raw["RecordInfo"], &info) != nil || info.ID == 0 {
+		return false, errors.New("DNSPod 记录响应无效，已保留回执")
+	}
+	rr := strings.TrimSuffix(name, "."+record.Zone)
+	if name == record.Zone {
+		rr = "@"
+	}
+	return info.ID == id && strings.EqualFold(info.SubDomain, rr) && info.RecordType == "TXT" && info.Value == value, nil
 }
 
 // Find locates exact values for crash recovery. Callers persist the pre-create

@@ -31,6 +31,49 @@ func providerCredentials(provider string) DNSCredentials {
 	}
 }
 
+func TestDNSPodReceiptVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		match, failure bool
+	}{
+		{"present", `{"RecordInfo":{"Id":42,"SubDomain":"_acme-challenge","RecordType":"TXT","Value":"proof"}}`, true, false},
+		{"absent", `{"Error":{"Code":"InvalidParameter.RecordIdInvalid"}}`, false, false},
+		{"changed value", `{"RecordInfo":{"Id":42,"SubDomain":"_acme-challenge","RecordType":"TXT","Value":"peer"}}`, false, false},
+		{"changed name", `{"RecordInfo":{"Id":42,"SubDomain":"peer","RecordType":"TXT","Value":"proof"}}`, false, false},
+		{"changed type", `{"RecordInfo":{"Id":42,"SubDomain":"_acme-challenge","RecordType":"CNAME","Value":"proof"}}`, false, false},
+		{"changed id", `{"RecordInfo":{"Id":43,"SubDomain":"_acme-challenge","RecordType":"TXT","Value":"proof"}}`, false, false},
+		{"permission", `{"Error":{"Code":"OperationDenied.NoPermissionToOperateDomain"}}`, false, true},
+		{"zone unavailable", `{"Error":{"Code":"InvalidParameterValue.DomainNotExists"}}`, false, true},
+		{"rate limit", `{"Error":{"Code":"RequestLimitExceeded.RequestLimitExceeded"}}`, false, true},
+		{"missing response", `{}`, false, true},
+		{"null response", `{"RecordInfo":null}`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := DNSClient{Provider: "dnspod", Credentials: providerCredentials("dnspod")}
+			client.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var input struct {
+					Domain   string
+					RecordID uint64 `json:"RecordId"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Fatal(err)
+				}
+				if r.Header.Get("X-TC-Action") != "DescribeRecord" || input.Domain != "example.test" || input.RecordID != 42 {
+					t.Fatal("receipt verification relied on delayed listing or another zone/record")
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"Response":` + tc.response + `}`))}, nil
+			})}
+			match, err := client.Matches(context.Background(), DNSRecord{"42", "example.test"}, "_acme-challenge.example.test.", "proof")
+			if match != tc.match || (err != nil) != tc.failure {
+				t.Fatalf("match=%v err=%v", match, err)
+			}
+			if tc.name == "permission" && !strings.Contains(err.Error(), "权限不足") {
+				t.Fatalf("permission diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestDNSProvidersWithoutAccountZone(t *testing.T) {
 	for _, provider := range []string{"cloudflare", "alidns", "dnspod"} {
 		t.Run(provider, func(t *testing.T) {

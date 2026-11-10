@@ -26,6 +26,7 @@ type certificateChallengeState struct {
 	Borrowed      bool                      `json:"borrowed,omitempty"`
 	BeforeIDs     []string                  `json:"before_ids,omitempty"`
 	CreatePending bool                      `json:"create_pending,omitempty"`
+	CreateStarted *time.Time                `json:"create_started,omitempty"`
 	Public        core.CertificateChallenge `json:"public"`
 	URL           string                    `json:"url"`
 	AuthURL       string                    `json:"auth_url,omitempty"`
@@ -367,15 +368,13 @@ func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certifica
 			if r.ID != "" && !state.Challenges[i].Borrowed {
 				// A prior cleanup may have deleted the record just before a
 				// crash. Exact lookup makes retry safe without touching peers.
-				records, findErr := client.FindInZone(ctx, r.Zone, state.Challenges[i].dnsName(), state.Challenges[i].Public.Value)
+				found, findErr := client.Matches(ctx, r, state.Challenges[i].dnsName(), state.Challenges[i].Public.Value)
 				if findErr != nil {
 					return findErr
 				}
-				for _, existing := range records {
-					if existing.ID == r.ID {
-						if err = client.Delete(ctx, r); err != nil {
-							return err
-						}
+				if found {
+					if err = client.Delete(ctx, r); err != nil {
+						return err
 					}
 				}
 				state.Challenges[i].Record = certificates.DNSRecord{}
@@ -620,13 +619,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 				// A restart/retry can retain a receipt after the TXT record has
 				// disappeared. Recreate only after an exact successful lookup;
 				// lookup failures must never trigger another provider write.
-				records, findErr := dns.FindInZone(ctx, c.Record.Zone, c.dnsName(), c.Public.Value)
+				found, findErr := dns.Matches(ctx, c.Record, c.dnsName(), c.Public.Value)
 				if findErr != nil {
 					return findErr
-				}
-				found := false
-				for _, record := range records {
-					found = found || record == c.Record
 				}
 				if !found {
 					c.Record = certificates.DNSRecord{}
@@ -662,6 +657,8 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 				}
 				c.BeforeIDs = nil
 				c.CreatePending = true
+				started := time.Now().UTC()
+				c.CreateStarted = &started
 				if err = s.saveCertificateOrderState(ctx, id, state, "dns_create_intent"); err != nil {
 					return err
 				}
@@ -670,6 +667,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 					return err
 				}
 				c.CreatePending = false
+				c.CreateStarted = nil
 				if err = s.saveCertificateOrderState(ctx, id, state, "dns_created"); err != nil {
 					cleanup, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 					defer done()
@@ -860,6 +858,12 @@ func (s *Store) certificateTXTResolver() certificates.DNSResolver {
 }
 
 func (s *Store) recoverDNSCreate(ctx context.Context, client certificates.DNSClient, c *certificateChallengeState) error {
+	// DNSPod documents a short index delay and recommends retrying record
+	// searches after 30 seconds. A cancellation may arrive sooner than the
+	// normal worker backoff; retain the intent until that search is meaningful.
+	if client.Provider == "dnspod" && c.CreateStarted != nil && time.Since(*c.CreateStarted) < 30*time.Second {
+		return errors.New("DNSPod 创建结果尚在索引中，请稍后重试")
+	}
 	// Legacy intents predate zone snapshots. Resolve their saved zone only;
 	// never use a newly selected zone for an uncertain historical write.
 	zone := c.Zone.ID
@@ -898,6 +902,7 @@ func (s *Store) recoverDNSCreate(ctx context.Context, client certificates.DNSCli
 		c.Record = created[0]
 	}
 	c.CreatePending = false
+	c.CreateStarted = nil
 	return nil
 }
 

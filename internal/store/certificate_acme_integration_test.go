@@ -942,6 +942,93 @@ func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
 	}
 }
 
+func TestCertificateDNSPodCleanupWithDelayedRecordIndex(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_dnspod_cleanup", false)
+	acct, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor", Kind: "dns", Provider: "dnspod"}, certificates.DNSCredentials{SecretID: "local", SecretKey: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "delayed index", Domains: []string{"example.test"}, Method: "dns-api", AccountID: acct.ID, DNSAccountID: dns.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	db.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+		var input struct {
+			Domain   string
+			RecordID uint64 `json:"RecordId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Domain != "example.test" {
+			t.Fatal("cleanup did not use the saved zone")
+		}
+		body := `{"Response":{"Error":{"Code":"ResourceNotFound.NoDataOfRecord"}}}`
+		switch r.Header.Get("X-TC-Action") {
+		case "DescribeRecordList": // DNSPod's new-record search index is delayed.
+		case "DescribeRecord":
+			if input.RecordID != 42 {
+				t.Fatal("cleanup did not query the saved record")
+			}
+			body = `{"Response":{"RecordInfo":{"Id":42,"SubDomain":"_acme-challenge","RecordType":"TXT","Value":"proof"}}}`
+		case "DeleteRecord":
+			if input.RecordID != 42 {
+				t.Fatal("cleanup selected another record")
+			}
+			deleted = true
+			body = `{"Response":{}}`
+		default:
+			t.Fatalf("unexpected action: %s", r.Header.Get("X-TC-Action"))
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	state := certificateOrderState{Challenges: []certificateChallengeState{{
+		Public: core.CertificateChallenge{Name: "_acme-challenge.example.test", Value: "proof"},
+		Record: certificates.DNSRecord{ID: "42", Zone: "example.test"},
+	}}}
+	if err = db.cleanupCertificateOrder(owner, item, orders[0].ID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted || !state.Cleanup || state.Challenges[0].Record.ID != "" {
+		t.Fatalf("acknowledged record lost during delayed indexing: deleted=%v state=%+v", deleted, state)
+	}
+}
+
+func TestCertificateDNSPodUncertainCreateWaitsForIndex(t *testing.T) {
+	started := time.Now().UTC()
+	state := certificateChallengeState{CreatePending: true, CreateStarted: &started,
+		Zone:   certificates.DNSZone{ID: "example.test", Name: "example.test"},
+		Public: core.CertificateChallenge{Name: "_acme-challenge.example.test", Value: "proof"}}
+	requests := 0
+	client := certificates.DNSClient{Provider: "dnspod", Credentials: certificates.DNSCredentials{SecretID: "local", SecretKey: "local"},
+		HTTP: &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if r.Header.Get("X-TC-Action") != "DescribeRecordList" {
+				t.Fatal("recovery queried another zone or wrote records")
+			}
+			body := `{"Response":{"RecordList":[{"RecordId":42,"Name":"_acme-challenge","Type":"TXT","Value":"proof"}]}}`
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		})}}
+	db := &Store{}
+	if err := db.recoverDNSCreate(context.Background(), client, &state); err == nil || !state.CreatePending || requests != 0 {
+		t.Fatalf("premature recovery: state=%+v requests=%d err=%v", state, requests, err)
+	}
+	started = started.Add(-31 * time.Second)
+	if err := db.recoverDNSCreate(context.Background(), client, &state); err != nil || state.CreatePending || state.CreateStarted != nil || state.Record.ID != "42" || requests != 1 {
+		t.Fatalf("delayed recovery: state=%+v requests=%d err=%v", state, requests, err)
+	}
+}
+
 func TestCertificateHTTPRetryRetainsRoutesAndOfflineIsTemporary(t *testing.T) {
 	for _, offline := range []bool{false, true} {
 		name := "CA request failure"
