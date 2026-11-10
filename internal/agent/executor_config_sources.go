@@ -63,7 +63,7 @@ func (e *Executor) readExistingConfigPlan(ctx context.Context, engine core.Engin
 	if err != nil || !present {
 		return coreImportPlan{}, fmt.Errorf("fingerprint existing %s binary: %w", engine, errors.Join(err, errors.New("binary unavailable")))
 	}
-	binaryIdentity, err := importFileIdentity(existing.Binary)
+	binaryIdentity, err := importFileIdentity(existing.Binary, true)
 	if err != nil {
 		return coreImportPlan{}, err
 	}
@@ -143,7 +143,7 @@ func (e *Executor) readExistingConfigPlan(ctx context.Context, engine core.Engin
 		return coreImportPlan{}, fmt.Errorf("recheck existing %s configuration sources: %w", engine, err)
 	}
 	currentBinary, present, err := protectedExistingCoreMigrationFileDigest(existing.Binary, maxReleaseAssetSize)
-	currentBinaryIdentity, identityErr := importFileIdentity(existing.Binary)
+	currentBinaryIdentity, identityErr := importFileIdentity(existing.Binary, true)
 	if err != nil || identityErr != nil || !present || currentBinary != binaryDigest || currentBinaryIdentity != binaryIdentity {
 		return coreImportPlan{}, errors.New("existing core binary changed while the snapshot was validated")
 	}

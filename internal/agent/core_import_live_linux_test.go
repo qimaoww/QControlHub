@@ -35,6 +35,9 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 	requireAgentRoot(t)
 	identity, err := lookupCommandIdentity("nobody", "nogroup")
 	if err != nil {
+		identity, err = lookupCommandIdentity("nobody", "nobody")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
@@ -140,8 +143,8 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 				command.Env = append(os.Environ(), "SAFE_PATHS="+target)
 				configureCommand(command)
 				configureCommandIdentity(command, &identity)
-				var output bytes.Buffer
-				command.Stdout, command.Stderr = &output, &output
+				output := &boundedOutput{limit: 65536}
+				command.Stdout, command.Stderr = output, output
 				if err := command.Start(); err != nil {
 					cancel()
 					t.Fatal(err)
@@ -157,11 +160,12 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 					}
 					defer backend.Close()
 					go func() {
-						c, err := backend.Accept()
-						if err == nil {
-							defer c.Close()
-							_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-							_, _ = io.Copy(c, c)
+						for {
+							c, err := backend.Accept()
+							if err != nil {
+								return
+							}
+							go func() { defer c.Close(); _ = c.SetDeadline(time.Now().Add(5 * time.Second)); _, _ = io.Copy(c, c) }()
 						}
 					}()
 					var connection net.Conn
@@ -186,20 +190,16 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 							t.Fatal(err)
 						}
 					} else {
-						roots := x509.NewCertPool()
-						roots.AppendCertsFromPEM([]byte(pair.Certificate))
-						connection, err = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", fmt.Sprintf("127.0.0.1:%d", port), &tls.Config{ServerName: "import.example.test", RootCAs: roots, MinVersion: tls.VersionTLS12})
-						if err != nil {
-							t.Fatal(err)
-						}
-						sum := sha256.Sum224([]byte("fixture-password"))
-						header := []byte(hex.EncodeToString(sum[:]) + "\r\n")
-						header = append(header, 1, 1, 127, 0, 0, 1)
-						address := backend.Addr().(*net.TCPAddr)
-						header = binary.BigEndian.AppendUint16(header, uint16(address.Port))
-						header = append(header, '\r', '\n')
-						if _, err := connection.Write(header); err != nil {
-							t.Fatal(err)
+						deadline := time.Now().Add(5 * time.Second)
+						for {
+							err := importLiveTrojanRoundTrip(port, backend.Addr().(*net.TCPAddr).Port, pair.Certificate)
+							if err == nil {
+								return
+							}
+							if time.Now().After(deadline) {
+								t.Fatalf("native TLS forwarding: %v\n%s", err, output.String())
+							}
+							time.Sleep(20 * time.Millisecond)
 						}
 					}
 					defer connection.Close()
@@ -238,4 +238,32 @@ func importLiveWait(port int, duration time.Duration) bool {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return false
+}
+
+func importLiveTrojanRoundTrip(port, backend int, certificate string) error {
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM([]byte(certificate))
+	connection, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", fmt.Sprintf("127.0.0.1:%d", port), &tls.Config{ServerName: "import.example.test", RootCAs: roots, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(time.Second))
+	sum := sha256.Sum224([]byte("fixture-password"))
+	header := []byte(hex.EncodeToString(sum[:]) + "\r\n")
+	header = append(header, 1, 1, 127, 0, 0, 1)
+	header = binary.BigEndian.AppendUint16(header, uint16(backend))
+	header = append(header, '\r', '\n')
+	payload := []byte("import dependency round trip")
+	if _, err := connection.Write(append(header, payload...)); err != nil {
+		return err
+	}
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(connection, got); err != nil {
+		return err
+	}
+	if !bytes.Equal(payload, got) {
+		return fmt.Errorf("unexpected forwarding payload")
+	}
+	return nil
 }

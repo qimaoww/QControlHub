@@ -113,8 +113,14 @@ func validateImportDirectory(path string) error {
 	return nil
 }
 
-func importFileIdentity(path string) (string, error) {
+func importFileIdentity(path string, installerBinary ...bool) (string, error) {
 	resolved, err := resolveImportSource(path)
+	if len(installerBinary) > 0 && installerBinary[0] && installerCoreAllowsOrphanOwner(path) {
+		// Preserve the existing, separately verified orphan-owner compatibility
+		// policy for installer binaries. It never applies to configuration data.
+		err = validateExistingCoreExecutable(path)
+		resolved = path
+	}
 	if err != nil {
 		return "", err
 	}
