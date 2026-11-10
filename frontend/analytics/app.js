@@ -136,8 +136,9 @@ export function startAnalytics({ app, session }) {
     return accountFailureRecorder(bound,()=>state.session===bound && !lifetime.signal.aborted)(error,operation,stage);
   };
   const captureRuntimeFailure=event=> {
-    const error=event.reason || event.error || new Error(event.message || "页面运行失败，浏览器未提供具体原因。");
-    void recordFailure(error,`页面 ${route}`,"browser_runtime");
+    const cause=event.reason ?? event.error;
+    const error=cause instanceof Error ? cause : new Error(typeof cause === "string" ? cause : event.message || "页面运行失败，浏览器未提供具体原因。", {cause});
+    if (!error.intentionalCancellation) void recordFailure(error,`页面 ${route}`,"browser_runtime").then(()=>showFailure(error));
   };
   window.addEventListener("unhandledrejection",captureRuntimeFailure,{signal:lifetime.signal});
   window.addEventListener("error",captureRuntimeFailure,{signal:lifetime.signal});

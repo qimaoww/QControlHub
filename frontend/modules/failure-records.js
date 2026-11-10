@@ -5,7 +5,7 @@ import { errorDiagnostic, redactDiagnostic, requestJSON } from "./errors.js";
 export function createFailureRecorder({ session, isCurrent = () => true } = {}) {
   const pending = new Map(), recent = new Map();
   return async function record(error, operation = "面板操作", stage = "panel") {
-    if (!error || error.name === "AbortError" || !isCurrent()) return error;
+    if (!error || error.intentionalCancellation === true || !isCurrent()) return error;
     if (error.cause?.failureTaskID) {error.failureTaskID=error.cause.failureTaskID;error.failureSaved=true;}
     const prior=recent.get(error.message);
     if(stage==="panel_feedback" && prior && Date.now()-prior.at<5000) {error.failureTaskID=prior.id;error.failureSaved=true;}

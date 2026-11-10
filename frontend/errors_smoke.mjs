@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {createFailureRecorder} from "./modules/failure-records.js";
 import { diagnosticError, errorMessage, redactDiagnostic, requestJSON } from "./modules/errors.js";
 
 for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 422, 429, 500, 502, 503, 504, 599]) {
@@ -185,3 +186,15 @@ await assert.rejects(send(new Response(JSON.stringify({ error: schemaMessage, co
 });
 await assert.rejects(send(new Response('{"error":"internal server error"}', {status:500,headers:{'X-Request-ID':'req_header'}})), error => error.requestID === 'req_header' && !error.code);
 await assert.rejects(send(new Response(JSON.stringify({error:schemaMessage,request_id:'<script>bad</script>'}),{status:500})), error => !error.requestID && !error.message.includes('<script>'));
+
+const originalFetch=globalThis.fetch; let retainedAborts=0;
+try {
+ globalThis.fetch=async()=>{retainedAborts++;return new Response('{"id":"tsk_abort_fixture"}',{status:201})};
+ const recorder=createFailureRecorder({session:{csrf_token:"fixture"}});
+ const unexpected=new DOMException("unexpected socket interruption","AbortError");
+ await recorder(unexpected,"后台连接","transport");
+ assert.equal(unexpected.failureTaskID,"tsk_abort_fixture");
+ const canceled=Object.assign(new DOMException("navigation","AbortError"),{intentionalCancellation:true});
+ await recorder(canceled,"导航","transport");
+ assert.equal(retainedAborts,1,"unexpected abort must be retained while explicit cancellation stays silent");
+} finally {globalThis.fetch=originalFetch}

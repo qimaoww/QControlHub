@@ -135,7 +135,7 @@ export async function requestJSON(url, options, {
   onUnauthorized = () => {},
 } = {}) {
   const assertCurrent = () => {
-    if (!isCurrent()) throw new DOMException("Account changed", "AbortError");
+    if (!isCurrent()) throw Object.assign(new DOMException("Account changed", "AbortError"), {intentionalCancellation:true});
   };
   const canceled = () => options?.signal?.aborted && options.signal.reason?.name !== "TimeoutError";
   let response;
@@ -150,7 +150,7 @@ export async function requestJSON(url, options, {
   } catch (cause) {
     assertCurrent();
     // Navigation cancellation must remain silent and retain its identity.
-    if (canceled(cause)) throw cause;
+    if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
     const message = readOnly ? cause?.name === "TimeoutError"
       ? "读取超时，请检查网络后重试。"
       : "无法读取数据，请检查网络和面板地址后重试。"
@@ -173,7 +173,7 @@ export async function requestJSON(url, options, {
       } else if(response.status!==401) body = await response.json();
     } catch (cause) {
       assertCurrent();
-      if (canceled(cause)) throw cause;
+      if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
       parseError=cause;
     }
     assertCurrent();
@@ -214,7 +214,7 @@ export async function requestJSON(url, options, {
     return body;
   } catch (cause) {
     assertCurrent();
-    if (canceled(cause)) throw cause;
+    if (canceled(cause)) { cause.intentionalCancellation=true; throw cause; }
     const error = new Error(`${readOnly ? "服务器响应不完整或格式无效，请重试。"
       : "服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。"}\n原始错误：${errorDiagnostic(cause)}`, { cause });
     error.status = response.status;
