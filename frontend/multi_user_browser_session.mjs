@@ -107,6 +107,10 @@ try {
     await call("Page.navigate", { url }, sessionId);
     if (checkStartup) {
       await wait(sessionId, "!!window.__releaseStartup && !!document.querySelector('#qch-startup-style')?.sheet");
+      await wait(sessionId, `(() => {
+        const screen = document.querySelector('.qch-startup'), box = screen?.getBoundingClientRect();
+        return box && getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight && !document.getAnimations().length;
+      })()`);
       assert.ok(await evaluate(sessionId, `(() => {
         const screen = document.querySelector('.qch-startup'), box = screen.getBoundingClientRect();
         return getComputedStyle(screen).position === 'fixed' && box.width === innerWidth && box.height === innerHeight
@@ -143,8 +147,23 @@ try {
   const screenshot = async (page, label) => {
     if (!artifacts) return;
     await mkdir(resolve(artifacts), { recursive: true });
-    const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
-    await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
+    // Redact generated fixture credentials only for evidence, without input
+    // events or changes to the draft/baseline used by the behavioral checks.
+    const redact = () => {
+      window.__evidenceFields = [];
+      for (const field of document.querySelectorAll('textarea,input')) {
+        const value = field.value;
+        const clean = value.replace(/((?:["']?(?:password|private_key|token|credential|secret)["']?)\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,}]+)/gi, '$1[测试凭据已隐藏]');
+        if (clean !== value) { window.__evidenceFields.push([field,value]); field.value = clean; }
+      }
+    };
+    await evaluate(page, `(${redact.toString()})()`);
+    try {
+      const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, page);
+      await writeFile(join(resolve(artifacts), `${mode}-${label}.png`), Buffer.from(data, "base64"));
+    } finally {
+      await evaluate(page, `window.__evidenceFields.forEach(([field,value])=>{field.value=value});delete window.__evidenceFields`);
+    }
   };
 
   // No preference row: use the production entry without a preview hint.

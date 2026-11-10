@@ -133,7 +133,7 @@ export async function trafficPage(ctx) {
         details?.box.close(); draw();
       }
       if (!quiet) throw error;
-      refreshStatus.textContent = [401, 403, 404].includes(error.status) ? '流量访问权限已变化' : policiesReady || endpointsReady ? '刷新失败，保留已读取的数据' : '流量读取失败，请重试'; refreshStatus.title = error.message;
+      refreshStatus.textContent = [401, 403, 404].includes(error.status) ? '流量访问权限已变化' : policiesReady && endpointsReady ? '刷新失败，保留上次数据' : policiesReady || endpointsReady ? '部分数据读取失败，保留已读取的数据' : '流量读取失败，请重试'; refreshStatus.title = error.message;
       if (!lastError) ctx.announce(error.message, 'error');
       lastError = true; return false;
     }
