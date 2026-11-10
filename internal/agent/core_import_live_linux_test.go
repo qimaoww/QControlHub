@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,71 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"golang.org/x/net/proxy"
 )
+
+func TestSSRustImportIsolatedStartupWithRealCore(t *testing.T) {
+	if os.Getenv("QCH_IMPORT_STARTUP_SANDBOX") != "1" || os.Getenv("QCH_PERMISSION_BIN") == "" {
+		t.Skip("requires verified core binaries and unprivileged read-only network namespaces")
+	}
+	requireAgentRoot(t)
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for _, directory := range []string{filepath.Dir(root), root} {
+		if err := os.Chmod(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configDirectory, state := filepath.Join(root, "config"), filepath.Join(root, "state")
+	for _, directory := range []string{configDirectory, state} {
+		if err := os.Mkdir(directory, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(directory, 0, int(identity.gid)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chown(state, int(identity.uid), int(identity.gid)); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "ssserver")
+	data, err := os.ReadFile(filepath.Join(os.Getenv("QCH_PERMISSION_BIN"), "ssserver"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	acl := filepath.Join(configDirectory, "实际 规则.acl")
+	if err := os.WriteFile(acl, []byte("[reject_list]\n192.0.2.0/24\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(acl, 0, int(identity.gid)); err != nil {
+		t.Fatal(err)
+	}
+	spec := EngineSpec{Binary: binary, ConfigPath: filepath.Join(configDirectory, "config.json"), WorkingDirectory: state}
+	executor := &Executor{Services: &ServiceManager{kind: ServiceManagerOpenRC}}
+	// The probe deliberately uses this port inside its private network. Holding
+	// it on the host proves the successful check did not use host listeners.
+	hostListener, err := net.Listen("tcp", "127.0.0.1:24001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostListener.Close()
+	content := fmt.Sprintf(`{"servers":[{"server":"127.0.0.1","server_port":21000,"method":"aes-256-gcm","password":"fixture-password","acl":%q,"mode":"tcp_and_udp"}]}`, acl)
+	if _, err := executor.validateImportedSnapshot(context.Background(), core.EngineShadowsocksRust, spec, content); err != nil {
+		t.Fatal(err)
+	}
+	invalid := strings.Replace(content, "aes-256-gcm", "invalid-fixture-cipher", 1)
+	if _, err := executor.validateImportedSnapshot(context.Background(), core.EngineShadowsocksRust, spec, invalid); err == nil {
+		t.Fatal("native startup accepted a cipher rejected by the real core")
+	}
+	entries, err := os.ReadDir(configDirectory)
+	if err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(acl) {
+		t.Fatalf("probe artifacts remain: %v, %v", entries, err)
+	}
+}
 
 // Uses the verified binaries from the existing permission fixture. No public
 // listener, production service, host configuration or Internet is involved.

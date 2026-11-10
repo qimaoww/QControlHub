@@ -3,12 +3,42 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
-	return e.validate(ctx, engine, spec, content)
+	if engine != core.EngineShadowsocksRust {
+		return e.validate(ctx, engine, spec, content)
+	}
+	if err := core.ValidateConfig(engine, content); err != nil {
+		return "", err
+	}
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		return "", err
+	}
+	if err := ensureManagedCoreBinaryAccess(engine, spec, e.serviceManager()); err != nil {
+		return "", err
+	}
+	root := filepath.Dir(spec.ConfigPath)
+	if pathWithin(spec.ConfigPath, managedCoreConfigurationRoot) {
+		root = managedCoreConfigurationRoot
+	}
+	metadata, err := prepareManagedConfigurationAccessWithGID(root, spec.ConfigPath, int(identity.gid))
+	if err != nil {
+		return "", err
+	}
+	if wantEngine, want, ok := managedSpecForService(spec.Service, e.serviceManager().Kind()); ok && wantEngine == engine && want == spec {
+		if err := e.prepareCoreUpdateStateDirectory(ctx, engine, spec); err != nil {
+			return "", err
+		}
+	}
+	if err := e.validateSSRustStartupCandidate(ctx, spec, content, spec.Binary, "", identity, metadata); err != nil {
+		return "", err
+	}
+	return "ss-rust isolated service startup validated", nil
 }
 
 func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {
