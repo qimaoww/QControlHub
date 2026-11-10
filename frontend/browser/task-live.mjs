@@ -29,6 +29,7 @@ export async function testLiveTaskRuntime(preview = false) {
       if (failed) return reply({error:'临时任务读取失败'},503);
       return reply(result);
     }
+    if (path==='/tasks/failures' && options.method==='POST') return reply({id:'fixture-failure'});
     if (path.startsWith('/tasks/')) {
       if (options.method === 'DELETE') {
         assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'),'tasks-live-fixture','取消任务缺少 CSRF');
@@ -36,6 +37,7 @@ export async function testLiveTaskRuntime(preview = false) {
       }
       if (detailDenied) return reply({error:'任务详情访问已撤销'},detailDenied);
       const task = tasks.find(task=>task.id===path.split('/')[2]);
+      if (path.endsWith('/diagnostics')) return reply({source:'fixture',output:task?.output || '',error:task?.error || ''});
       if (parsed.searchParams.get('view') === 'status') { statusReads++; return reply({ ...task, output: '' }); }
       detailReads++; return reply(task);
     }

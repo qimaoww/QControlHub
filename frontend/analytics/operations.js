@@ -358,7 +358,7 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
   const heading = actions(state, engineLabel, actionLabel);
   const errorSummary = () => {const text=diagnosticError(task.error || "").split("\n")[0]; return text.slice(0,300)+(text.length>300 ? "…" : "");};
   const content = stack(heading,
-    context, timing, failure, diagnosis, output, previousAttempts);
+    context, timing, failure, diagnosis, previousAttempts, output);
   const box = ctx.dialog(title, content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
@@ -368,10 +368,10 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", () => void initialRead.load());
   refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
-  content.append(actions(refresh,button("复制诊断",event=>void ctx.mutate(event.currentTarget,async()=>{
+  content.insertBefore(actions(refresh,button("复制诊断",event=>void ctx.mutate(event.currentTarget,async()=>{
     await copyText([taskID, failure.textContent, output.textContent].filter(Boolean).join("\n\n"));
     ctx.announce("诊断已复制");
-  }))));
+  }))), output);
   async function read({ automatic = false } = {}) {
     if (reading || !active()) return;
     reading = true;
@@ -427,9 +427,12 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
         const selection = getSelection(), previous = output.firstChild;
         const selected = previous?.nodeType === Node.TEXT_NODE && selection?.anchorNode === previous && selection.focusNode === previous
           ? [selection.anchorOffset, selection.focusOffset] : null;
+        // A completed receipt adds diagnostic context before the live output.
+        // Keep the selected output text selected when that prefix is inserted.
+        const selectionShift = selected && previous.data ? Math.max(0, text.indexOf(previous.data)) : 0;
         if (previous?.nodeType === Node.TEXT_NODE) previous.data = text;
         else output.textContent = text;
-        if (selected && output.firstChild) selection.setBaseAndExtent(output.firstChild, Math.min(selected[0], text.length), output.firstChild, Math.min(selected[1], text.length));
+        if (selected && output.firstChild) selection.setBaseAndExtent(output.firstChild, Math.min(selected[0] + selectionShift, text.length), output.firstChild, Math.min(selected[1] + selectionShift, text.length));
         output.hidden = !text;
         if(follow)output.scrollTop=output.scrollHeight;
       }
