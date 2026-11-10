@@ -221,7 +221,13 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	writeMigrationServiceState(t, fixture.stateDirectory, fixture.existing.Service, "active", "enabled")
 	writeMigrationServiceState(t, fixture.stateDirectory, fixture.managed.Service, "inactive", "disabled")
 	writeMigrationExecStart(t, fixture.stateDirectory, fixture.existing.Service, systemdExecStart(fixture.existing.Binary, fixture.existing.Binary+" run -c "+fixture.existing.ConfigPath))
-	source := `{"inbounds":[{"type":"trojan","tls":{"certificate_path":"chain.pem","key_path":"key.pem"}}],"outbounds":[{"type":"direct"}]}`
+	// A valid unchanged input larger than the refresh before-image limit must
+	// not prevent a small certificate renewal in the same import transaction.
+	rules := `{"version":3,"rules":[]}` + strings.Repeat(" ", 5<<20)
+	if err := os.WriteFile(filepath.Join(root, "rules.json"), []byte(rules), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := `{"inbounds":[{"type":"trojan","tls":{"certificate_path":"chain.pem","key_path":"key.pem"}}],"outbounds":[{"type":"direct"}],"route":{"rule_set":[{"type":"local","tag":"fixture","format":"source","path":"rules.json"}]}}`
 	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +264,16 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Dependencies) != 2 {
+	if len(state.Dependencies) != 3 {
 		t.Fatal("renewal source mapping was not retained")
+	}
+	// An edited configuration can retire a resource whose original and managed
+	// files have already disappeared. It must not block another resource update.
+	retired := filepath.Join(state.Root, "retired-rule.json")
+	state.Resources = append(state.Resources, durableImportResource{Path: retired, Digest: "retired", Limit: 4096})
+	state.Dependencies = append(state.Dependencies, core.ImportDependency{Field: "retired", Source: filepath.Join(root, "removed-source.json"), Destination: retired})
+	if err := writeImportResourceState(fixture.markerPrefix, core.EngineSingBox, state); err != nil {
+		t.Fatal(err)
 	}
 	rotate := func(name, target string) {
 		t.Helper()
@@ -289,6 +303,9 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 		t.Fatal(err)
 	}
 	for _, dependency := range updated.Dependencies {
+		if dependency.Field == "retired" {
+			continue
+		}
 		content, err := os.ReadFile(dependency.Destination)
 		if err != nil {
 			t.Fatal(err)
@@ -296,6 +313,9 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 		expected := second.Certificate
 		if strings.HasSuffix(dependency.Field, "key_path") {
 			expected = second.PrivateKey
+		}
+		if dependency.Field == "route.rule_set[0].path" {
+			expected = rules
 		}
 		if string(content) != expected {
 			t.Fatal("renewed source did not reach managed resource")

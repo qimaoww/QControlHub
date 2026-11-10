@@ -151,15 +151,28 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 	next := make(map[string][]byte)
 	refs := []importFileReference{}
 	material := map[string][]byte{}
+	limits := map[string]int64{}
+	for _, resource := range state.Resources {
+		limits[resource.Path] = resource.Limit
+	}
+	total := 0
 	for _, dependency := range state.Dependencies {
 		// Configuration edits can retire an imported resource. Never rewrite it
 		// after the instance no longer references it.
 		if !strings.Contains(content, dependency.Destination) {
 			continue
 		}
-		data, _, err := readExternalImportSource(dependency.Source, 4<<20)
+		limit, ok := limits[dependency.Destination]
+		if !ok {
+			return fmt.Errorf("%s: resource ownership mapping is missing", dependency.Field)
+		}
+		data, _, err := readExternalImportSource(dependency.Source, limit)
 		if err != nil {
 			return fmt.Errorf("refresh %s: %w", dependency.Field, err)
+		}
+		total += len(data)
+		if total > 256<<20 {
+			return errors.New("import resource refresh exceeds the combined 256 MiB limit")
 		}
 		material[dependency.Source] = data
 		refs = append(refs, importFileReference{path: dependency.Source, field: dependency.Field})
@@ -196,6 +209,9 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 	// Validate against disposable copies before stopping the managed service.
 	preview := coreImportPlan{managedContent: content, stateRoot: filepath.Dir(spec.ConfigPath), resourceRoot: state.Root}
 	for _, resource := range state.Resources {
+		if _, referenced := next[resource.Path]; !referenced {
+			continue
+		}
 		source := resource.Path
 		for _, dependency := range state.Dependencies {
 			if dependency.Destination == resource.Path {
@@ -217,7 +233,7 @@ func (e *Executor) refreshImportedResources(ctx context.Context, engine core.Eng
 		if !ok {
 			continue
 		}
-		actual, _, err := readExternalImportSource(dependency.Source, 4<<20)
+		actual, _, err := readExternalImportSource(dependency.Source, limits[dependency.Destination])
 		if err != nil {
 			return err
 		}
