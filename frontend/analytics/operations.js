@@ -357,7 +357,10 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
   const context = stack(table(['项目', '内容'], [['节点', '正在读取…'], ['执行对象', '正在读取…'], ['创建时间', '正在读取…']], { label: '任务信息', paginate: 0 }));
   const engineLabel = badge(taskEngine(task)), actionLabel = badge(actionName(task.action));
   const heading = actions(state, engineLabel, actionLabel);
-  const errorSummary = () => {const text=diagnosticError(task.error || "").split("\n")[0]; return text.slice(0,300)+(text.length>300 ? "…" : "");};
+  const errorSummary = () => {
+    const text=(task.action === "panel-failure" ? `面板操作失败：${redactDiagnostic(task.error || "来源未返回具体原因")}` : diagnosticError(task.error || "")).split("\n")[0];
+    return text.slice(0,300)+(text.length>300 ? "…" : "");
+  };
   const content = stack(heading,
     context, timing, failure, diagnosis, previousAttempts, output);
   const box = ctx.dialog(title, content, { wide: true });

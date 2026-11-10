@@ -79,7 +79,10 @@ async function run() {
     navigator.clipboard.writeText = async () => { throw new DOMException("fixture unexpected clipboard interruption", "AbortError"); };
     document.execCommand = () => { throw new DOMException("fixture unexpected fallback interruption", "AbortError"); };
     button("复制诊断", failed).click();
-    await waitFor(() => [...document.querySelectorAll('.a-toast-region .a-toast')].some(card => !notices.has(card) && card.dataset.tone === 'error') && !document.querySelector('#app[aria-busy=true]'), "unexpected native AbortError was swallowed or left controls busy");
+    const notification = await waitFor(() => {
+      if (document.querySelector('#app[aria-busy=true]')) return;
+      return [...document.querySelectorAll('.a-toast-region .a-toast')].find(card => !notices.has(card) && card.dataset.tone === 'error');
+    }, "unexpected native AbortError was swallowed or left controls busy");
     const records = await api('/tasks?action=panel-failure&limit=100');
     let retained = false;
     for (const task of records) {
@@ -88,6 +91,12 @@ async function run() {
       retained ||= detail.error.includes("fixture unexpected fallback interruption");
     }
     assert.ok(retained, "unexpected native AbortError was not retained in task diagnostics");
+    button("查看详情", notification).click();
+    const detail = await waitFor(() => {
+      const box = [...document.querySelectorAll('dialog[open]')].at(-1);
+      return box?.querySelector('pre')?.textContent.includes("fixture unexpected fallback interruption") && box;
+    }, "native failure task detail did not open");
+    assert.ok(detail.querySelector('.a-notice.error')?.textContent.startsWith("面板操作失败："), "panel failure was mislabeled as a node operation");
   } finally {
     navigator.clipboard.writeText = writeText;
     document.execCommand = execCommand;
