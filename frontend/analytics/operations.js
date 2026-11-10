@@ -1,3 +1,4 @@
+import { readRegion, loadingTable, dialogContext, preparedDialog } from "./loading.js";
 import { quotaInvitations } from "./invitations.js";
 import { listen, patch, poll } from "./live-dom.js";
 import { currentTheme } from '../modules/theme-lifecycle.js';
@@ -320,22 +321,23 @@ function taskEngine(task) {
   return task.engine;
 }
 
-function taskContext(ctx, task) {
+function taskContext(ctx, task, targetAgent) {
   if (task.action === "panel-failure") return stack(muted(`面板操作 · ${date(task.created_at)}`),muted("未进入 Agent 执行"));
-  const agent = ctx.can('agents.read') && ctx.state.data.taskAgents?.find(agent => agent.id === task.agent_id);
+  const agent = targetAgent?.id === task.agent_id ? targetAgent : ctx.can('agents.read') && ctx.state.data.taskAgents?.find(agent => agent.id === task.agent_id);
   const source = coreSourceLabel(task.engine, task.core_version, task.core_source);
   return stack(muted(`节点 ${agent?.name || task.agent_id} · ${date(task.created_at)}`),
     muted(task.attempt ? `第 ${task.attempt} 次执行` : '尚未开始'),
+    muted(`${task.engine || '来源未返回内核'} · ${task.shared_instance ? `共享实例 ${task.shared_traffic_id || '来源未返回实例标识'}` : '主实例'}`),
     !task.config_id && task.core_version && muted(`内核版本 ${task.core_version}${source ? ` · ${source}` : ''}`),
     task.install_if_missing && muted('缺少时安装稳定版；已有内核保持版本'));
 }
 
-export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
+export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = {}) {
   if (!ctx.can("tasks.read")) return;
   let task = {id:taskID,status:"loading",error:"",output:""};
   let diagnosticSignature = "";
   if (!ctx.current()) return;
-  const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
+  const state = muted("正在读取任务…"), failure = notice(diagnosticError(task.error || ""));
   const output = code("");
   output.hidden = !output.textContent;
   const diagnosis = stack();
@@ -351,7 +353,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
   }
   paintDiagnosis();
   const timing = muted(taskTiming(task));
-  const context = taskContext(ctx, task);
+  const context = stack(table(['项目', '内容'], [['节点', '正在读取…'], ['执行对象', '正在读取…'], ['创建时间', '正在读取…']], { label: '任务信息', paginate: 0 }));
   const engineLabel = badge(taskEngine(task)), actionLabel = badge(actionName(task.action));
   const heading = actions(state, engineLabel, actionLabel);
   const errorSummary = () => {const text=diagnosticError(task.error || "").split("\n")[0]; return text.slice(0,300)+(text.length>300 ? "…" : "");};
@@ -364,7 +366,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
   const signal = AbortSignal.any([ctx.signal, controller.signal]);
   const stop = () => { clearTimeout(timer); controller.abort(); };
   const active = () => ctx.current() && box.open;
-  const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
+  const refresh = button("刷新结果", () => void initialRead.load());
   refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
   content.append(actions(refresh,button("复制诊断",event=>void ctx.mutate(event.currentTarget,async()=>{
     await copyText([taskID, failure.textContent, output.textContent].filter(Boolean).join("\n\n"));
@@ -391,7 +393,7 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
       engineLabel.textContent = taskEngine(task);
       actionLabel.textContent = actionName(task.action);
       timing.textContent = taskTiming(task);
-      patch(context, taskContext(ctx, task));
+      patch(context, taskContext(ctx, task, targetAgent));
       paintDiagnosis();
       const next = status(task.status);
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
@@ -451,21 +453,22 @@ export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
   }
   box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
-  try { await read(); }
-  catch(error) { if(active() && error.name!=="AbortError") failure.textContent=error.message; }
-  timer=setTimeout(poll,2000);
+  const initialRead = readRegion(dialogContext(ctx, box), '任务详情', () => read(), () => {});
+  content.prepend(initialRead.element);
+  void initialRead.load().finally(() => { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); });
 }
 
 export async function tasksPage(ctx) {
   const pageSize = ctx.state.data.settings?.task_page_size;
   const filters = ctx.state.data.taskFilters || { limit: String([50, 100, 500].includes(pageSize) ? pageSize : 100) };
-  let settingsLoadedAt = Date.now();
+  let settingsLoadedAt = ctx.state.data.settings ? Date.now() : -Infinity;
+  let preferencesAdopted = Boolean(ctx.state.data.settings || ctx.state.data.taskFilters), queryTouched = false;
   const pollDelay = () => {
     const value = ctx.state.data.settings?.task_poll_interval_ms;
     return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
   };
-  let readSequence = 0, filtering = false;
-  let agents = ctx.can('agents.read') ? ctx.state.data.taskAgents || [] : [], agentsLoadedAt = -Infinity, lastTasks = [];
+  let readSequence = 0, filtering = false, tasksLoaded = false;
+  let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending;
   const agentField = field('节点', 'agent_id', filters.agent_id || '', { options: [['', '全部节点'], ...(filters.agent_id ? [[filters.agent_id, filters.agent_id]] : [])] });
   const agentPicker = agentField.querySelector('select');
   let agentSignature;
@@ -494,11 +497,16 @@ export async function tasksPage(ctx) {
       ctx.state.data.taskFilters = values; draw(tasks);
     } finally { if (sequence === readSequence) filtering = false; }
   }, { status: "", agent_id: "", action: "", limit: "100" });
+  filter.addEventListener('input', () => { queryTouched = true; });
+  filter.addEventListener('change', () => { queryTouched = true; });
   const results = node("div");
   const taskTable = table(["操作", "节点", "执行对象", "状态", "创建时间", "操作"], [], { label: "任务", rowKey: row => row.taskID });
   results.append(taskTable);
   const refreshState = muted('正在实时更新'); refreshState.setAttribute('role', 'status');
-  async function editRetry(task) {
+  function editRetry(task) {
+    return preparedDialog(ctx, '编辑后重试', ['当前配置'], local => editRetryLoaded(local, task, ctx), { submit: '保存并重试' });
+  }
+  async function editRetryLoaded(ctx, task, parentContext) {
     const resource = await ctx.api(`/tasks/${pathID(task.id)}/retry-editor`);
     if (!ctx.current()) return;
     const { config } = resource;
@@ -512,7 +520,7 @@ export async function tasksPage(ctx) {
       const result = await ctx.api(`/tasks/${pathID(task.id)}/edit-retry`, { method: "POST", body: { content: values.content, expected_version: config.version } });
       if (!ctx.current()) return;
       ctx.setDirty(false); box.close(); ctx.announce("配置已保存，重试任务已提交");
-      await taskDetail(ctx, result.task.id);
+      await taskDetail(parentContext, result.task.id);
     });
     const syncDraft = () => ctx.setDirty(form.elements.content.value !== config.content);
     form.addEventListener("input", syncDraft);
@@ -541,7 +549,7 @@ export async function tasksPage(ctx) {
             });
           }, { "data-retry": task.id }),
           ctx.can("tasks.execute") && retryState.canEditRetry &&
-            (ctx.can("agent-config.write") || ctx.can("configs.write")) && button("编辑后重试", event => void ctx.mutate(event.currentTarget, () => editRetry(task))),
+            (ctx.can("agent-config.write") || ctx.can("configs.write")) && button("编辑后重试", () => editRetry(task)),
           ctx.can("tasks.execute") && ["pending", "running"].includes(task.status) && button("取消", async event => {
             const control = event.currentTarget;
             if (!await ctx.confirm("取消此任务？已在节点执行的操作可能仍需核实结果。", "取消任务") || !ctx.current()) return;
@@ -561,45 +569,60 @@ export async function tasksPage(ctx) {
       const updateAgents = async () => {
         if (!ctx.can('agents.read')) { agents = []; delete ctx.state.data.taskAgents; return; }
         if (Date.now() - agentsLoadedAt < 30000) return;
+        if (agentsPending) return agentsPending;
+        agentsPending = (async () => {
         try {
           const latest = await readOrderedNodes(ctx.api);
-          if (!ctx.current() || sequence !== readSequence) return;
-          agents = latest; ctx.state.data.taskAgents = agents;
+          if (!ctx.current()) return;
+          agents = latest; ctx.state.data.taskAgents = agents; syncAgents(); if (lastTasks.length) draw(lastTasks);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
-          if (!ctx.current() || sequence !== readSequence) return;
+          if (!ctx.current()) return;
           if (error.status === 403) { agents = []; delete ctx.state.data.taskAgents; }
         }
         agentsLoadedAt = Date.now();
+        })().finally(() => { agentsPending = null; });
+        return agentsPending;
       };
       const updateSettings = async () => {
         if (!ctx.can('settings.read') || Date.now() - settingsLoadedAt < 30000) return;
-        try { await ctx.api('/settings'); }
+        try {
+          const settings = await ctx.api('/settings');
+          if (!ctx.current()) return;
+          if (!preferencesAdopted) {
+            preferencesAdopted = true;
+            if (!queryTouched && !ctx.state.data.taskFilters && [50, 100, 500].includes(settings.task_page_size)) {
+              filters.limit = filter.elements.limit.value = String(settings.task_page_size);
+              filter.requestSubmit();
+            }
+          }
+        }
         catch (error) { if (error.name === 'AbortError') throw error; }
-        if (ctx.current() && sequence === readSequence) settingsLoadedAt = Date.now();
+        if (ctx.current()) settingsLoadedAt = Date.now();
       };
-      const [tasks] = await Promise.all([
-        ctx.api(query('/tasks', ctx.state.data.taskFilters || filters)), updateAgents(), updateSettings(),
-      ]);
+      void updateAgents().catch(() => {});
+      void updateSettings().catch(() => {});
+      const tasks = await ctx.api(query('/tasks', ctx.state.data.taskFilters || filters));
       if (!ctx.current() || sequence !== readSequence) return;
-      draw(tasks); refreshState.textContent = '正在实时更新';
+      draw(tasks); tasksLoaded = true; refreshState.textContent = '正在实时更新';
     } catch (error) {
       if (ctx.current() && sequence === readSequence) {
         if (error.status === 403) { draw([]); refreshState.textContent = '任务访问权限已变化'; }
-        else refreshState.textContent = '更新失败，保留上次数据';
+        else refreshState.textContent = tasksLoaded ? '更新失败，保留上次数据' : '任务读取失败，请重试';
       }
       throw error;
     }
   }
-  await refresh();
-  ctx.onRefresh(refresh);
+  taskTable.setLoading(true);
+  const initialRead = readRegion(ctx, '任务', refresh, () => {}, {view:taskTable});
+  void initialRead.load();
+  ctx.onRefresh(initialRead.load);
   poll(ctx, refresh, pollDelay);
-  return stack(filterbar(filter), refreshState, section(null, results));
+  return stack(filterbar(filter), initialRead.element, refreshState, section(null, results));
 }
 
 export async function quotaPage(ctx) {
-  const invitations = await quotaInvitations(ctx);
-  if (!ctx.current()) return invitations;
+  const invitations = quotaInvitations(ctx);
   const managedTable = table(["节点", "状态", "操作"], [], { label: "可管理的共享 Agent", rowKey: row => row[2].dataset.sharingAgent });
   const management = section("共享 Agent 设置", managedTable);
   let sequence = 0;
@@ -608,10 +631,12 @@ export async function quotaPage(ctx) {
     const managed = ctx.can("agents.read") ? (await readOrderedNodes(ctx.api)).filter(agent => agent.can_manage !== false && ctx.can("agents.manage", agent)) : [];
     if (!ctx.current() || sequence !== expected) return;
     managedTable.updateRows(managed.map(agent => [node("strong", {}, agent.name), status(agent.status),
-      button("共享设置", event => void ctx.mutate(event.currentTarget, () => editAgentSharing(ctx, agent)), { "data-sharing-agent": agent.id })]));
+      button("共享设置", () => editAgentSharing(ctx, agent), { "data-sharing-agent": agent.id })]));
     management.hidden = !managed.length;
   }
-  await readManaged();
-  ctx.onRefresh(() => Promise.all([invitations.refresh(), readManaged()]));
-  return stack(management, invitations);
+  managedTable.setLoading(true);
+  const managedRead = readRegion(ctx, '可管理的共享节点', readManaged, () => {}, {view:managedTable});
+  void managedRead.load();
+  ctx.onRefresh(() => Promise.all([invitations.refresh(), managedRead.load()]));
+  return stack(managedRead.element, management, invitations);
 }

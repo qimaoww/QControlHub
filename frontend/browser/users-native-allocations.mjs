@@ -65,8 +65,9 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     assert.equal(form().elements.limit.value, '2.5', '重开丢失小数额度草稿');
     assert.ok(form().querySelector('[name=engines][value=xray]').checked, '重开丢失内核草稿');
     await close(); failBobRead = true; await idle(); button('共享资源', row('bob')).click();
-    await waitFor(() => !document.querySelector('#native-users-test[aria-busy=true]') && [...document.querySelectorAll('.a-toast.error')].some(item => item.textContent.includes('另一用户读取失败')), '另一用户读取失败没有反馈');
-    assert.ok(!dialog(), '读取失败保留错误用户的编辑器');
+    await waitFor(() => !document.querySelector('#native-users-test[aria-busy=true]') && [...document.querySelectorAll('dialog[open] [role=alert]')].some(item => item.textContent.includes('另一用户读取失败')), '另一用户读取失败没有反馈');
+    assert.ok(dialog()?.querySelector('h2').textContent.includes('bob') && !dialog().querySelector('[name=ports]'), '读取失败显示了其他用户的编辑器');
+    await close();
     failBobRead = false; await open();
     assert.equal(form().elements.ports.value, '31007, invalid', '另一用户读取失败清除当前草稿');
     await close(); await idle(); button('共享资源', row('bob')).click();

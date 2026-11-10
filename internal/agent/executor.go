@@ -198,16 +198,16 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
 	}
-	if !task.SharedInstance && spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
-		if _, err := validateManagedServiceTarget(parent, task.Engine, spec, e.serviceManager()); err != nil {
-			return "", fmt.Errorf("verify managed %s service target: %w", task.Engine, err)
-		}
-	}
 	if task.InstallIfMissing {
 		if (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
 			task.ConfigVersion < 1 || task.ConfigContent == "" || (task.SharedTrafficID != "" && !task.SharedInstance) ||
 			task.CoreVersion != "" || task.CoreSource != "" {
 			return "", errors.New("invalid automatic core installation task")
+		}
+	}
+	if !task.SharedInstance && spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
+		if _, err := validateManagedServiceTarget(parent, task.Engine, spec, e.serviceManager()); err != nil {
+			return "", fmt.Errorf("verify managed %s service target: %w", task.Engine, err)
 		}
 	}
 	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {

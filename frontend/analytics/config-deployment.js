@@ -1,3 +1,4 @@
+import { preparedDialog } from "./loading.js";
 import { createPoller } from "../modules/poller.js";
 import { taskDetail } from "./operations.js";
 import { node, actions, badge, button, muted, notice, stack, code, pathID } from "./ui.js";
@@ -23,7 +24,10 @@ export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()
     normal.className = `a-badge${current && latest.state === "applied" ? "" : " warn"}`;
     configState.hidden = ports.size > 0 || latest.state === "applied";
   }
-  async function failure(port) {
+  function failure(port) {
+    return preparedDialog(ctx, `端口 ${port || '无固定端口'} · 部署失败`, ['节点', '内核', '错误', '执行输出'], local => failureLoaded(local, port));
+  }
+  async function failureLoaded(ctx, port) {
     const config = getConfig(), taskID = latest.task_id;
     if (!taskID || !ctx.can("tasks.read")) return;
     const task = await ctx.api(`/tasks/${pathID(taskID)}`);
@@ -33,7 +37,7 @@ export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()
         task.config_id !== config?.id || task.config_version !== config?.version ||
         Boolean(task.shared_instance) !== Boolean(agent.shared_allocation))
       throw new Error("部署状态已变化，请重新核对当前端口的结果。");
-    await taskDetail(ctx, taskID, {title:`端口 ${port || "无固定端口"} · 部署失败`});
+    await taskDetail(ctx, taskID, {title:`端口 ${port || "无固定端口"} · 部署失败`,targetAgent:agent});
   }
   function paint(value = {}) {
     if (isPreview()) value = {...value,state:"pending",task_id:undefined,task_status:undefined};
@@ -84,7 +88,7 @@ export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()
     inboundState(port, enabled) {
       const normal = badge("");
       const control = ctx.can("tasks.read")
-        ? button("部署失败", event => void ctx.mutate(event.currentTarget, () => failure(port)), {tone:"danger", "aria-label":`端口 ${port || "无固定端口"}部署失败，查看原因`})
+        ? button("部署失败", () => failure(port), {tone:"danger", "aria-label":`端口 ${port || "无固定端口"}部署失败，查看原因`})
         : badge("部署失败", "bad");
       control.className = "a-badge bad";
       const entry = {control, normal, enabled};

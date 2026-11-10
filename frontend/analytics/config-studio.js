@@ -1,4 +1,5 @@
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
+import { preparedDialog, loadingForm } from "./loading.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
 import { labels, numeric, booleans, multiline } from "./inbound-fields.js";
 import { bindAnalyticsCertificateSelector } from "./certificate-selector.js";
@@ -56,12 +57,12 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   const editable = !readOnly && ctx.can('agent-config.write');
   let execute = !configDeployBlockReason(agent, engine, ctx.can);
   const writable = editable && ctx.can('tasks.execute') && !managedCoreBlockReason(agent, engine);
-  async function latest() {
+  async function latest(readCtx = ctx) {
     if (dirty() && !await ctx.confirm('打开编辑工具会替换尚未保存的源码修改，确定继续？','打开编辑工具')) return false;
     const draft = getDraft(), previous = current.config;
-    const fresh = await ctx.api(workspacePath());
+    const fresh = await readCtx.api(workspacePath());
     if (draft !== getDraft()) throw new Error('源码已修改，请保存后重新打开编辑工具');
-    if (!ctx.current()) return false;
+    if (!readCtx.current()) return false;
     if (current.config !== previous || fresh.config?.id !== previous?.id || current.snapshot_task_id && fresh.config?.version !== previous?.version)
       throw new Error('配置已变化，请重新读取后再打开编辑工具');
     current = {...fresh,snapshot_task_id:current.snapshot_task_id};
@@ -94,7 +95,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     return ctx.current();
   }
   async function reloadSaved() {
-    if (!await latest()) return;
+    if (!await latest(ctx)) return;
     receipt.hidden = true; draw(); void deployment.refresh();
   }
   async function write(path, body, box, method = 'POST') {
@@ -179,10 +180,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       receipt.hidden = false; draw(); ctx.announce('配置已保存且任务已提交，状态读取失败。', 'error');
     }
   }
-  async function restrictions(target) {
+  function restrictions(target) {
+    return preparedDialog(ctx, '访问限制', ['访问策略', '允许的 IP / CIDR', '允许的域名'], local => restrictionsLoaded(local, target));
+  }
+  async function restrictionsLoaded(ctx, target) {
     if (current.snapshot_task_id) throw new Error('读取的节点配置尚未保存，请先保存并部署，再设置访问限制。');
     if (dirty()) throw new Error('配置源码有未保存修改，请先保存，再设置入站访问限制。');
-    if (!await latest() || !current.config) return;
+    if (!await latest(ctx) || !current.config) return;
     const config = current.config, draft = getDraft();
     const entries = list(await ctx.api('/access-controls')).filter(item => item.agent_id === agent.id && item.engine === engine);
     if (!ctx.current() || dirty() || draft !== getDraft() || current.config !== config) return;
@@ -202,8 +206,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     await copyText(result.content, active);
     if (active()) ctx.announce(result.source === 'snapshot' ? '已复制读取快照的连接' : '已复制面板保存的配置连接');
   }
-  async function inboundEdit(input, operation = 'modify') {
-    if (!await latest()) return;
+  function inboundEdit(input, operation = 'modify') {
+    return preparedDialog(ctx, operation === 'add' ? '添加入站' : `修改入站 · ${input.tag}`, ['协议', '入站标签', '监听地址', '监听端口', '传输与 TLS'], local => inboundEditLoaded(local, input, operation));
+  }
+  async function inboundEditLoaded(ctx, input, operation = 'modify') {
+    if (!await latest(ctx)) return;
     if (operation !== 'add') {
       const found = current.inbounds.find(item => item.tag === input.tag);
       if (!found) throw new Error('入站已变化，请重新选择');
@@ -377,14 +384,20 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     box=ctx.dialog(operation==='add'?'添加入站':`修改入站 · ${input.tag}`,form,{wide:true});
     track(form,box); await choose();
   }
-  async function inboundSource(target,parent,restoreDirty) {
-    if (!await latest() || !current.config) return;
+  function inboundSource(target,parent,restoreDirty) {
+    return preparedDialog(ctx, `${target.tag} · 入站源码`, ['入站源码'], local => inboundSourceLoaded(local, target, parent, restoreDirty));
+  }
+  async function inboundSourceLoaded(ctx, target,parent,restoreDirty) {
+    if (!await latest(ctx) || !current.config) return;
     const config=current.config, draft=getDraft();
     const child = await editInboundSource(ctx,{target,agent,engine,base,workspace:current,preparing,write,committed:async(result,editor)=>{parent?.close();await committed(result,editor);},track,isCurrent:()=>ctx.current()&&current.config===config&&getDraft()===draft});
     child?.addEventListener('close',()=>{if(parent?.isConnected&&parent.open)restoreDirty?.();},{once:true});
   }
-  async function files() {
-    if(!await latest()||!current.config)return;
+  function files() {
+    return preparedDialog(ctx, '展开源码', ['完整配置'], local => filesLoaded(local));
+  }
+  async function filesLoaded(ctx) {
+    if(!await latest(ctx)||!current.config)return;
     const editor=field('完整配置','content',current.config.content,{multiline:24,spellcheck:false,readonly:!editable});
     const form=ctx.form([node('div',{className:'a-editor'},editor)], '保存并部署',async()=>{
       if(!await preparing('deploy'))return;
@@ -396,8 +409,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if(!editable)form.querySelector('button[type=submit]').remove();
 
   }
-  async function commonEditor(inbound) {
-    if (!await latest() || !current.config) return;
+  function commonEditor(inbound) {
+    return preparedDialog(ctx, inbound ? `${inbound.tag} · 端口配置项` : '通用配置项', ['操作', '配置项', '字段片段'], local => commonEditorLoaded(local, inbound));
+  }
+  async function commonEditorLoaded(ctx, inbound) {
+    if (!await latest(ctx) || !current.config) return;
     const config = current.config, fields = inbound ? list(current.catalog?.fields).filter(item => ['inbound','override'].includes(item.scope)) : commonConfigFields(engine,list(current.catalog?.fields));
     const drafts = new Map(), baseline = new Map();
     const mutation = field('操作','mutation','add',{options:[['add','添加'],['modify','修改'],['delete','删除']]}),
@@ -442,28 +458,29 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     box=ctx.dialog(inbound?`${inbound.tag} · 端口配置项`:'通用配置项',form,{wide:true});
     track(form,box,true,()=>{ capture(); return [...drafts].some(([key,value])=>value!==baseline.get(key)); });choose();
   }
-  async function outbound(inbound,operation) {
-    if(dirty())throw new Error('配置源码有未保存修改，请先保存，再操作出站。');
-    const loading=ctx.dialog(`${inbound.tag} · 出站`,muted('正在读取出站配置…'),{wide:true});
-    try {
-      if(!await latest()||!loading.isConnected)return;
-      const binding=outboundBinding(inbound);
-      const chosen=list(current.managed_objects).find(item=>!item.inbound&&item.tag===binding);
-      if(['modify','delete'].includes(operation)&&!chosen)throw new Error('当前入站尚未绑定可编辑出站');
-      loading.close();
-      await outboundObject(['modify','delete'].includes(operation)?chosen:null,operation,inbound,true);
-    }catch(error){if(!ctx.current()||error.name==='AbortError')return;if(loading.isConnected)loading.querySelector('.a-dialog-body').replaceChildren(notice(error.message));else ctx.announce(error.message,'error');}
+  function outbound(inbound, operation) {
+    return preparedDialog(ctx, `${inbound.tag} · 出站`, ['出站类型', '名称', '出站配置', '绑定目标'], async local => {
+      if (dirty()) throw new Error('配置源码有未保存修改，请先保存，再操作出站。');
+      if (!await latest(local) || !local.current()) return;
+      const binding = outboundBinding(inbound);
+      const chosen = list(current.managed_objects).find(item => !item.inbound && item.tag === binding);
+      if (['modify', 'delete'].includes(operation) && !chosen) throw new Error('当前入站尚未绑定可编辑出站');
+      await outboundObjectLoaded(local, ['modify', 'delete'].includes(operation) ? chosen : null, operation, inbound, true);
+    });
   }
   function outboundBinding(inbound) {
     if(current.outbound_bindings)return current.outbound_bindings[inbound.tag]||'';
     return engine==='mihomo'?'':inboundOutbound(current.config.content,engine,inbound);
   }
-  async function outboundObject(object,operation='modify',inbound,loaded=false) {
-    const box=ctx.dialog(operation==='add'?'添加出站':operation==='bind'?'绑定已有出站':operation==='delete'?'删除出站':`${object.tag} · 出站`,muted('正在读取出站配置…'),{wide:true});
+  function outboundObject(object, operation = 'modify', inbound, loaded = false) {
+    return preparedDialog(ctx, operation === 'add' ? '添加出站' : operation === 'bind' ? '绑定已有出站' : operation === 'delete' ? '删除出站' : `${object.tag} · 出站`, ['出站类型', '名称', '出站配置', '绑定目标'], local => outboundObjectLoaded(local, object, operation, inbound, loaded));
+  }
+  async function outboundObjectLoaded(ctx,object,operation='modify',inbound,loaded=false) {
+    const box=ctx.dialog(operation==='add'?'添加出站':operation==='bind'?'绑定已有出站':operation==='delete'?'删除出站':`${object.tag} · 出站`,loadingForm(['出站类型', '名称', '出站配置', '绑定目标']),{wide:true});
     let preset;
     box.addEventListener('close',()=>preset?.dispose(),{once:true});
     try {
-      if(!loaded&&!await latest()||!ctx.current()||!box.isConnected||!current.config&&operation!=='add')return;
+      if(!loaded&&!await latest(ctx)||!ctx.current()||!box.isConnected||!current.config&&operation!=='add')return;
       const config=current.config||{version:0}, selecting=operation==='bind', deleting=operation==='delete';
       const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
       const sectionName=object?.section||sections[0][0];
@@ -492,7 +509,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       form.elements.fragment.setAttribute('aria-label',engine==='mihomo'?'出站配置 YAML':'出站配置 JSON');
       if(deleting)form.querySelector('button[type=submit]').classList.add('danger');
       const activePreset=()=>preset&&(form.elements.section?.value||sectionName)!=='proxy-groups';
-      box.querySelector('.a-dialog-body').replaceChildren(form);track(form,box);
+      box.setContent(form);track(form,box);
       if(selecting){
         let epoch=0;
         const preview=async()=>{
@@ -523,10 +540,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         form.elements.section?.addEventListener('change',choose);
         if(sectionName==='proxy-groups')host.hidden=true;
       }
-    }catch(error){if(ctx.current()&&box.isConnected&&error.name!=='AbortError')box.querySelector('.a-dialog-body').replaceChildren(notice(error.message));}
+    }catch(error){if(ctx.current()&&box.isConnected&&error.name!=='AbortError')throw error;}
   }
-  async function removeInbound(target) {
-    if (!await latest() || !current.config) return;
+  function removeInbound(target) {
+    return preparedDialog(ctx, '删除入站', ['入站', '监听端口'], local => removeInboundLoaded(local, target));
+  }
+  async function removeInboundLoaded(ctx, target) {
+    if (!await latest(ctx) || !current.config) return;
     const config = current.config;
     const fresh = list(current.inbound_targets).find(item => item.tag === target.tag && item.port === target.port);
     if (!fresh) throw new Error('入站已变化，请重新选择');
@@ -556,8 +576,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     deployment.resetPorts();
     const inbounds=list(current.inbounds),targets=list(current.inbound_targets);
     const managed=list(current.managed_objects);
-    const toggle=object=>button(object.enabled?'停用':'启用',event=>void ctx.mutate(event.currentTarget,async()=>{
-      if(!await latest())return;
+    const toggle=object=>button(object.enabled?'停用':'启用',()=>preparedDialog(ctx, object.enabled?'停用配置对象':'启用配置对象', ['配置对象', '替代出站'], async local=>{
+      if(!await latest(local))return;
       const fresh=list(current.managed_objects).find(item=>item.section===object.section&&item.tag===object.tag);
       if(!fresh||fresh.enabled!==object.enabled)throw new Error('配置状态已变化，请重新选择');
       const disabled=list(current.management?.disabled).filter(item=>item.section!==object.section||item.tag!==object.tag);
@@ -568,25 +588,25 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         const result=await write(`${base}/management`,{version:expectedVersion,disabled,intent:values.intent,outbound_tag:object.tag,replacement_tag:values.replacement_tag||''},box,'PUT');
         await committed(result,box);
       });
-      const box=ctx.dialog(object.enabled?'停用配置对象':'启用配置对象',form); track(form, box);
+      const box=local.dialog(object.enabled?'停用配置对象':'启用配置对象',form); track(form, box);
     }));
-    const controls=writable&&button('添加入站',event=>void ctx.mutate(event.currentTarget,()=>inboundEdit(null,'add')),{tone:'primary'});
+    const controls=writable&&button('添加入站',()=>inboundEdit(null,'add'),{tone:'primary'});
     const status=deployment.element;
     const rows=targets.map(target=>{
       const input=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
       const object=managed.find(item=>item.inbound&&item.tag===target.tag);
       return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),target.kind,
         deployment.inboundState(target.port,object?.enabled),actions(
-        ctx.can('agent-config.read')&&button('访问限制',event=>void ctx.mutate(event.currentTarget,()=>restrictions(target))),
+        ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target)),
         writable&&object&&toggle(object),
-        writable&&button('修改',event=>void ctx.mutate(event.currentTarget,()=>input?inboundEdit(input):inboundSource(target))),
+        writable&&button('修改',()=>input?inboundEdit(input):inboundSource(target)),
         ctx.can('client-access.read')&&input&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(input))),
-        writable&&button('删除',event=>void ctx.mutate(event.currentTarget,()=>removeInbound(target)),{tone:'danger'}),
+        writable&&button('删除',()=>removeInbound(target),{tone:'danger'}),
         writable&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
           let binding='';try{binding=outboundBinding(target);}catch(error){ctx.announce(error.message,'error');return;}
           const chooser=ctx.dialog(`${target.tag} · 出站操作`,actions(['add','bind','modify','delete'].map((operation,index)=>button(['添加并绑定','绑定已有出站','修改绑定出站','删除绑定出站'][index],()=>{chooser.close();void outbound(target,operation);},{disabled:['modify','delete'].includes(operation)&&!binding}))));
         }),
-        writable&&engine==='ss-rust'&&button('端口配置项',event=>void ctx.mutate(event.currentTarget,()=>fieldChooser(target))),
+        writable&&engine==='ss-rust'&&button('端口配置项',()=>fieldChooser(target)),
       )];
     });
     const outboundObjects=managed.filter(item=>!item.inbound);
@@ -600,11 +620,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     for(const row of portTable.querySelectorAll('tbody tr')) [...row.cells].forEach((cell,index)=>cell.dataset.label=headers[index]);
     const inboundSection=section('入站配置',stack(deployment.feedback,portTable),actions(status,controls),current.snapshot_task_id?'读取的节点配置':'面板保存的配置');
     surface.replaceChildren(receipt,inboundSection,
-      ['xray','sing-box','mihomo'].includes(engine)&&section('出站配置',table(['名称','类型','目标状态','操作'],outboundObjects.map(object=>[object.tag,object.kind||object.section,badge(object.enabled?'启用':'停用'),writable&&actions(toggle(object),button('修改',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object))),button('删除',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(object,'delete')),{tone:'danger'}))]),{label:'出站配置'}),writable&&button('添加出站',event=>void ctx.mutate(event.currentTarget,()=>outboundObject(null,'add')))),
+      ['xray','sing-box','mihomo'].includes(engine)&&section('出站配置',table(['名称','类型','目标状态','操作'],outboundObjects.map(object=>[object.tag,object.kind||object.section,badge(object.enabled?'启用':'停用'),writable&&actions(toggle(object),button('修改',()=>outboundObject(object)),button('删除',()=>outboundObject(object,'delete'),{tone:'danger'}))]),{label:'出站配置'}),writable&&button('添加出站',()=>outboundObject(null,'add'))),
     );
     sourceTools?.replaceChildren(...(current.config?[
-      button('展开源码',event=>void ctx.mutate(event.currentTarget,files)),
-      writable&&button('通用配置项',event=>void ctx.mutate(event.currentTarget,()=>fieldChooser())),
+      button('展开源码',files),
+      writable&&button('通用配置项',()=>fieldChooser()),
     ].filter(Boolean):[]));
   }
   function fieldChooser(inbound) {

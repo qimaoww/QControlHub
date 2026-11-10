@@ -1,8 +1,13 @@
+import { preparedDialog, readRegion } from "./loading.js";
 import { parseSharedPorts, formatSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB, agentShareStatus } from '../modules/user-model.js';
 import { node, button, actions, stack, grid, section, field, muted, notice, pathID, list } from './ui.js';
 import { bytes } from './operations.js';
 
-export async function editAgentSharing(ctx, agent) {
+export function editAgentSharing(ctx, agent) {
+  if (agent.can_manage === false || !ctx.can('agents.manage', agent)) return;
+  return preparedDialog(ctx, `${agent.name} · 共享 Agent`, ['用户名', '可用内核', '端口', '总额度 · GiB', 'HTTP-01 允许域名'], local => editAgentSharingLoaded(local, agent), { submit: '保存共享设置' });
+}
+async function editAgentSharingLoaded(ctx, agent) {
   if (agent.can_manage === false || !ctx.can('agents.manage', agent)) return;
   const data = ctx.state.data, current = () => ctx.current() && ctx.state.data === data;
   const path = `/agents/${pathID(agent.id)}/sharing`;
@@ -32,16 +37,17 @@ export async function editAgentSharing(ctx, agent) {
     ctx.setDirty(changed);
     submit.disabled = !supported || !changed || saving;
   }
-  const reload = button('重新读取', event => void ctx.mutate(event.currentTarget, async () => {
+  const reload = button('重新读取', () => void reloadRead.load());
+  const reloadRead = readRegion(ctx, '共享设置', async () => {
     if (changed && !await ctx.confirm('重新读取将丢弃此节点未保存的共享设置。', '重新读取') || !current()) return;
     const previous = JSON.stringify(values());
     const received = await ctx.api(path);
     if (!current()) return;
     if (previous !== JSON.stringify(values())) throw new Error('共享设置已修改，当前草稿已保留。');
     adopt(received);
-  }));
+  }, () => {});
   const form = ctx.form([
-    rows, actions(button('添加用户', () => { add({ enabled: true }); markChanged(); }), reload),
+    reloadRead.element, rows, actions(button('添加用户', () => { add({ enabled: true }); markChanged(); }), reload),
   ], '保存共享设置', async () => {
     if (!current() || saving || !supported || !changed) return;
     const shares = values().map((row, index) => ({

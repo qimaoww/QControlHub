@@ -1,9 +1,9 @@
+import { readRegion } from "./loading.js";
 import { applySiteBranding, renderSiteLogo } from "./site-brand.js";
 import { node, icon, button, actions, section, field, muted, notice } from "./ui.js";
 
-export async function siteBrandingSettings(ctx, setDirty) {
-  let saved = await ctx.api("/settings/branding"), draft = saved.logo || "", phase = "idle", reading = 0;
-  applySiteBranding(saved);
+export function siteBrandingSettings(ctx, setDirty) {
+  let saved = {}, draft = "", phase = "idle", reading = 0, ready = false;
   const mark = node("span", { className: "a-mark" }, icon("brand"));
   const status = muted("已保存"); status.setAttribute("role", "status");
   const feedback = notice("");
@@ -18,6 +18,7 @@ export async function siteBrandingSettings(ctx, setDirty) {
   const reset = button("恢复默认", () => { ++reading; draft = ""; file.value = ""; phase = "idle"; feedback.textContent = ""; sync(); });
   const preview = node("div", { className: "a-field" }, node("span", { className: "a-field-label" }, "预览"), actions(mark, "QControlHub", reset));
   const form = ctx.form([node("div", { className: "a-form-grid" }, upload, preview), status, feedback], "保存全站 Logo", async () => {
+    if (!ready) return;
     const submitted = draft;
     phase = "saving"; feedback.textContent = ""; sync();
     try {
@@ -30,12 +31,13 @@ export async function siteBrandingSettings(ctx, setDirty) {
   form.id = "site-branding-form";
   const save = form.querySelector('button[type="submit"]');
   function sync() {
-    const changed = draft !== (saved.logo || "");
+    const changed = ready && draft !== (saved.logo || "");
     setDirty(changed);
-    save.disabled = !changed || phase === "saving" || phase === "reading";
-    reset.disabled = phase === "saving" || (!draft && phase !== "reading");
+    choose.disabled = !ready; file.disabled = !ready;
+    save.disabled = !ready || !changed || phase === "saving" || phase === "reading";
+    reset.disabled = !ready || phase === "saving" || (!draft && phase !== "reading");
     filename.textContent = file.files[0]?.name || "未选择图片";
-    status.textContent = phase === "saving" ? "正在保存…" : phase === "reading" ? "正在读取图片…" : phase === "failed" ? "保存失败 · 预览尚未生效" : changed ? "未保存预览" : "已保存";
+    status.textContent = !ready ? "正在读取全站 Logo…" : phase === "saving" ? "正在保存…" : phase === "reading" ? "正在读取图片…" : phase === "failed" ? "保存失败 · 预览尚未生效" : changed ? "未保存预览" : "已保存";
     renderSiteLogo(mark, draft);
   }
   file.addEventListener("change", async () => {
@@ -61,12 +63,14 @@ export async function siteBrandingSettings(ctx, setDirty) {
   const refresh = async () => {
     const latest = await ctx.api("/settings/branding");
     if (!ctx.current()) return;
-    if (draft !== (saved.logo || "") || phase === "saving" || phase === "reading") {
+    if (ready && (draft !== (saved.logo || "") || phase === "saving" || phase === "reading")) {
       if (latest.revision !== saved.revision) feedback.textContent = "全站 Logo 已由其他会话修改，当前预览已保留。";
       return;
     }
-    saved = latest; draft = latest.logo || ""; applySiteBranding(latest); feedback.textContent = ""; phase = "idle"; sync();
+    ready = true; saved = latest; draft = latest.logo || ""; applySiteBranding(latest); feedback.textContent = ""; phase = "idle"; sync();
   };
   sync();
-  return { element: section("全站 Logo", node("div", { className: "a-card-body a-stack" }, muted("登录页与所有账号统一使用。"), form)), refresh };
+  const loading = readRegion(ctx, '全站 Logo', refresh, () => {}, { clear() { ready = false; saved = {}; draft = ''; sync(); } });
+  void loading.load();
+  return { element: section('全站 Logo', node('div', { className: 'a-card-body a-stack' }, muted('登录页与所有账号统一使用。'), loading.element, form)), refresh: loading.load };
 }

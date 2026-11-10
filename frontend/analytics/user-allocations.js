@@ -1,16 +1,22 @@
+import { preparedDialog, readRegion, loadingTable } from "./loading.js";
 import { bytes } from "./operations.js";
 import { parseSharedPorts, sharedLimitBytes, sharedLimitGiB, formatSharedPorts, sharedPortsLabel, agentShareStatus, mergeUserAllocation } from '../modules/user-model.js';
 import { node, button, actions, stack, grid, field, muted, notice, pathID, list, table, badge } from './ui.js';
 
-export async function editUserAllocations(ctx, user) {
+export function editUserAllocations(ctx, user) {
+  return preparedDialog(ctx, `${user.username} · 共享资源`, ['节点', '授权范围', '已用 / 总额度', '状态', '操作'], local => editUserAllocationsLoaded(local, user), { submit: '分配节点' });
+}
+async function editUserAllocationsLoaded(ctx, user) {
   const data = ctx.state.data;
   const current = () => ctx.current() && ctx.state.data === data;
   const path = `/users/${pathID(user.id)}/agent-access`;
   const drafts = data.userAllocationDrafts ||= new Map();
   const pending = data.userAllocationPending ||= new Set();
   if (pending.has(user.id)) return;
+  let directory = [], directoryReady = false, initialized = false;
+  const directoryRead = readRegion(ctx, '节点选项', signal => ctx.api('/agent-directory', { signal }), value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
+  void directoryRead.load();
   let saved = await ctx.api(path);
-  const directory = list(await ctx.api('/agent-directory'));
   if (!current()) return;
   const savedView = stack();
   const feedback = notice('');
@@ -28,7 +34,7 @@ export async function editUserAllocations(ctx, user) {
   };
   function closeEditor(discard = false) {
     editor = null;
-    content.replaceChildren(savedView, feedback); box.classList.add('wide');
+    content.replaceChildren(directoryRead.element, savedView, feedback); box.classList.add('wide');
     box.querySelector('.a-dialog-head h2').textContent = `${user.username} · 共享资源`;
     if (discard) drafts.delete(user.id);
     ctx.setDirty(false);
@@ -129,7 +135,7 @@ export async function editUserAllocations(ctx, user) {
   function draw() {
     const shares = list(saved.shares);
     const owned = directory.filter(agent => list(saved.owned_agent_ids).includes(agent.id));
-    const tools = actions(button('分配节点', () => open(null, 'add'), { disabled: !available().length }), button('重新读取', () => void reloadSaved()));
+    const tools = actions(button('分配节点', () => open(null, 'add'), { disabled: !directoryReady || !available().length }), button('重新读取', () => void reloadSaved()));
     const allocations = table(['节点', '授权范围', '已用 / 总额度', '状态', '操作'], shares.map(share => [
       name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`)),
       `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`, badge(agentShareStatus(share)),
@@ -153,8 +159,8 @@ export async function editUserAllocations(ctx, user) {
     savedView.replaceChildren(tools, allocations);
     if (owned.length) savedView.append(node('details', { className: 'a-disclosure' }, node('summary', {}, `自有节点 · ${owned.length}`), node('div', { className: 'a-disclosure-body' }, owned.map(agent => node('p', {}, agent.name)))));
   }
-  const content = stack(savedView, feedback);
-  draw();
+  const content = stack(directoryRead.element, savedView, feedback);
+  initialized = true; draw();
   const box = ctx.dialog(`${user.username} · 共享资源`, content, { wide: true });
   box.dataset.userAllocation = user.id;
   box.onRequestClose = () => {
@@ -163,5 +169,5 @@ export async function editUserAllocations(ctx, user) {
   };
   box.addEventListener('close', () => { closed = true; if (current()) ctx.setDirty(false); }, { once: true });
   const draft = drafts.get(user.id);
-  if (draft) open(draft.original, draft.mode, draft);
+  if (draft && directoryReady) open(draft.original, draft.mode, draft);
 }

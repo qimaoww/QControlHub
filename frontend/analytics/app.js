@@ -370,25 +370,11 @@ export function startAnalytics({ app, session }) {
       field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true }),
     ], "登录", async values => {
       const authenticated = await api("/auth/login", { method: "POST", body: values });
-      const preference = await accountRequest("/preferences/theme", {
-        session: authenticated, signal: lifetime.signal,
-        isCurrent: () => loginForm.isConnected && !state.session && !lifetime.signal.aborted,
-      });
       state.session = authenticated;
-      if (effectiveTheme(preference.theme_id) !== "analytics") {
-        // Authentication has completed. Release the old runtime before the
-        // deliberate theme boundary; its pending login is not an editor draft.
-        lifetime.abort();
-        routeAbort?.abort();
-        watch.stop();
-        presentation.dispose();
-        location.reload();
-        return;
-      }
       setStorageAccount(state.session);
       dirty = false;
       app.replaceChildren(layout);
-      await render();
+      void render();
     });
     loginForm.setAttribute("aria-label", "登录控制台");
     app.replaceChildren(node("main", { className: "a-login" },
@@ -400,7 +386,7 @@ export function startAnalytics({ app, session }) {
     app.querySelector("input")?.focus();
     motion?.page(app);
   }
-  async function render() {
+  async function render({ targetControl = "" } = {}) {
     if (!state.session) { login(); return; }
     routeAbort?.abort();
     routeAbort = new AbortController();
@@ -417,9 +403,17 @@ export function startAnalytics({ app, session }) {
     document.title = `${title} · QControlHub`;
     const stage = node("div", { className: "a-stack", "aria-busy": "true" }, empty("正在加载…"));
     main.append(stage);
-    let stagedActions = [];
+    let mounted = false;
     const context = {
-      pageActions(...items) { stagedActions = items; },
+      pageActions(...items) { if (!signal.aborted && epoch === routeEpoch) pageActions.replaceChildren(...items); },
+      mount(content) {
+        if (!signal.aborted && epoch === routeEpoch) { stage.replaceChildren(content); stage.removeAttribute('aria-busy'); mounted = true; }
+        return content;
+      },
+      restoreTargetFocus() {
+        if (!signal.aborted && epoch === routeEpoch && targetControl && [document.body, main].includes(document.activeElement))
+          main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({preventScroll:true});
+      },
       onRefresh(read, { local = false } = {}) { if (!signal.aborted && epoch === routeEpoch) { pageRefresh = read; refreshButton.hidden = local; } },
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
       can, session: state.session, signal, state, dialog, confirm, mutate, form, announce, recordFailure,
@@ -450,25 +444,23 @@ export function startAnalytics({ app, session }) {
         context.connectionScope = boundedRead(context.api, "/client-connections?scope_only=true", { signal: context.signal });
         void context.connectionScope.catch(() => {});
       }
-      if (route !== 'settings' && can('settings.read') && !state.data.settings) {
-        void context.api('/settings').catch(error => {
-          if (context.current() && error.name !== 'AbortError') showFailure(error);
-        });
-      }
       const module = await routeModules.load(descriptor[0]);
       if (!context.current()) return;
+      if (route !== 'settings' && can('settings.read') && !state.data.settings)
+        void context.api('/settings').catch(error => { if (context.current() && !error.intentionalCancellation) showFailure(error); });
       const page = module[descriptor[1]];
       const content = await page(context);
       if (context.current()) {
-        pageActions.replaceChildren(...stagedActions);
-        stage.replaceChildren(content);
+        if (stage.firstChild !== content) context.mount(content);
         warmup.scheduleRouteWarmup(route);
         if (previousRoute !== route) motion?.page(stage);
       }
     } catch (error) {
       if(context.current() && error.name!=="AbortError")await recordFailure(error,`页面 ${route}`,"page_loading");
-      if (context.current() && error.name !== "AbortError")
-        stage.replaceChildren(notice(error.message), actions(button("重试", () => void refresh())));
+      if (context.current() && error.name !== "AbortError") {
+        const failure = stack(notice(error.message), actions(button("重试", () => void refresh())));
+        if (mounted) stage.append(failure); else stage.replaceChildren(failure);
+      }
     } finally {
       if (context.current()) stage.removeAttribute("aria-busy");
     }
@@ -484,7 +476,7 @@ export function startAnalytics({ app, session }) {
     if (!allowed) { history.replaceState(null, "", currentHash || "#dashboard"); return; }
     currentHash = nextHash;
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
-    await render();
+    await render({ targetControl });
     if (attempt === navigation && targetControl)
       main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({ preventScroll: true });
   }, { signal: lifetime.signal });

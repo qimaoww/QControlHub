@@ -9,7 +9,7 @@ const pendingMigrationSource = {
   content: '{"inbounds":[{"tag":"original"}]}',
   taskId: "tsk_snapshot",
 };
-const migrationEditor = liveConfigEditorState({
+const migrationEditor = liveConfigEditorState({ sourceMode:"import",
   existingAvailable: true,
   canOperate: true,
   sourceContent: pendingMigrationSource.content,
@@ -118,3 +118,6 @@ for (const intent of ["validate", "deploy"]) {
 }
 assert.equal(requests.length, 2);
 }
+
+assert.equal(liveConfigEditorState({existingAvailable:true,canOperate:true,formContent:"manual",sourceContent:"external"}).content,"manual");
+assert.equal(liveConfigEditorState({existingAvailable:true,canOperate:true,formContent:"manual"}).readOnly,false);

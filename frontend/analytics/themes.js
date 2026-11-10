@@ -1,3 +1,4 @@
+import { readRegion } from "./loading.js";
 import { themes, createThemePreference } from "../modules/theme-registry.js";
 import { node, button, grid, stack, section, actions, badge, notice } from "./ui.js";
 
@@ -5,7 +6,6 @@ export async function themePage(ctx) {
   const model = createThemePreference({ api: (path, options) => ctx.api(path, {
     method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined,
   }), isCurrent: ctx.current });
-  await model.read();
   const status = notice("", "ok");
   const controls = [];
   const cards = themes.filter(theme => theme.available || theme.id === "analytics").map(theme => {
@@ -42,5 +42,8 @@ export async function themePage(ctx) {
       node("p", { className: "a-muted" }, theme.description), actions(select))),
     active ? badge("当前主题") : null);
   });
-  return stack(grid(cards), status);
+  const loading = readRegion(ctx, '主题偏好', () => model.read(), () => {});
+  ctx.onRefresh(loading.load);
+  void loading.load();
+  return stack(grid(cards), loading.element, status);
 }

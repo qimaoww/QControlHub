@@ -1,14 +1,14 @@
 // Source selection, snapshot freshness and atomic configuration submission.
 
 export function liveConfigEditorState({
-  existingAvailable,
+  sourceMode = "personal",
   canOperate,
   sourceContent,
   formContent,
 }) {
   return {
-    readOnly: Boolean(existingAvailable) || !canOperate,
-    content: existingAvailable ? String(sourceContent || "") : String(formContent || ""),
+    readOnly: sourceMode === "import" || !canOperate,
+    content: sourceMode === "import" ? String(sourceContent || "") : String(formContent || ""),
   };
 }
 

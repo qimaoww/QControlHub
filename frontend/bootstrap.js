@@ -1,6 +1,5 @@
 import { disposeTheme } from "./modules/theme-lifecycle.js";
 import { accountRequest } from "./modules/account-request.js";
-import { effectiveTheme, loginTheme } from "./modules/theme-registry.js";
 import { bindSiteLogo, refreshSiteBranding } from "./analytics/site-brand.js";
 
 const app = document.querySelector("#app");
@@ -51,23 +50,20 @@ async function start() {
     entryURL.searchParams.delete("theme");
     history.replaceState(null, "", entryURL);
   }
+  // Load the one shipped runtime and its required styles while identity is
+  // checked. Theme preference is a page setting, never a startup dependency.
+  const sheet = style("./analytics/theme.css", "analytics");
+  const runtimeReady = Promise.all([import(asset("./analytics/app.js")), sheet.ready]);
+  void runtimeReady.catch(() => {});
   let session = null;
-  let selected = "analytics";
   try {
     session = await accountRequest("/auth/session", { signal: timed() });
-    if (session) {
-      const preference = await accountRequest("/preferences/theme", { session, signal: timed() });
-      selected = effectiveTheme(preference.theme_id);
-    }
   } catch (error) {
     if (error.status === 401) session = null;
   }
 
-  if (!session) selected = loginTheme(document.querySelector('meta[name="qch-login-theme"]')?.content);
-
-  const sheet = style("./analytics/theme.css", "analytics");
   try {
-    const [runtime] = await Promise.all([import(asset("./analytics/app.js")), sheet.ready]);
+    const [runtime] = await runtimeReady;
     runtime.startAnalytics({ app, session });
   } catch (error) {
     disposeTheme();

@@ -1,7 +1,8 @@
 import { submitConfigImport } from "../modules/config-import.js";
+import { loadingForm, loadingTable, readRegion, dialogContext, preparedDialog } from "./loading.js";
 import { prepareConfigDeployment, configDeployBlockReason } from "../modules/core-install-state.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
-import { readOrderedNodes } from "../modules/node-order.js";
+import { orderNodesBySavedOrder, savedNodeOrder } from "../modules/node-order.js";
 import { requestConfigSnapshot } from "../modules/config-snapshot.js";
 import { createConfigMutations } from "../modules/config-mutations.js";
 import { liveConfigReadAction, submitLiveConfigChange } from "../modules/live-config-state.js";
@@ -33,7 +34,7 @@ async function waitTask(ctx, id) {
 }
 
 export async function liveConfigPage(ctx) {
-  const request = ctx.api;
+  const request = ctx.api, recordFailure = ctx.recordFailure;
   let recoverPortConflict;
   const mutations = createConfigMutations({state:ctx.state, api:(path, options={})=>request(path, {
     ...options, body:options.body === undefined ? undefined : JSON.parse(options.body),
@@ -45,7 +46,46 @@ export async function liveConfigPage(ctx) {
   const params = new URLSearchParams(location.hash.split("?")[1]);
   const requested = selection.agentId || location.hash.match(/^#preset-node-(.+)$/)?.[1] || "";
   const selectedEngine = selection.engine || "";
-  let agents = ctx.can("agents.read") ? await readOrderedNodes(ctx.api) : [];
+  const targetField = field('节点', 'agent', '', { options: [['', '正在读取节点…']], disabled: true });
+  const engineField = field('内核', 'engine', '', { options: [['', '正在读取内核…']], disabled: true });
+  const modeField = field('配置来源', 'source', '', { options: [['', '正在读取配置来源…']], disabled: true });
+  let selectedAgentID = '', selectedEngineID = '', selectedMode = '';
+  const select = node('form', { className: 'a-target-form', onsubmit(event) {
+    event.preventDefault();
+    const values = formData(event.currentTarget);
+    if (values.agent !== selectedAgentID) { delete values.engine; delete values.source; }
+    else if (values.engine !== selectedEngineID) delete values.source;
+    location.hash = `#live-config?${new URLSearchParams(values)}`;
+    targetField.querySelector('select').value = selectedAgentID;
+    engineField.querySelector('select').value = selectedEngineID;
+    modeField.querySelector('select').value = selectedMode;
+  } }, targetField, engineField, modeField);
+  select.addEventListener('change', () => select.requestSubmit());
+  const flagsHost = actions();
+  const studioHost = stack(section('入站配置', loadingTable(['端口', '监听', '协议', '状态', '操作'], '入站配置')),
+    section('出站配置', loadingTable(['名称', '类型', '目标状态', '操作'], '出站配置')));
+  const sourceBody = node('div', { className: 'a-card-body' }, loadingForm(['名称', '说明', '配置正文']));
+  const sourceActions = actions(button('保存历史', () => {}, { disabled: true }));
+  const page = stack(filterbar(select, flagsHost), studioHost, section('配置源码', sourceBody, sourceActions));
+  ctx.mount?.(page);
+  const setOptions = (root, options, value, disabled = false) => {
+    const input = root.querySelector('select'); input.replaceChildren(input.querySelector('button'), ...options.map(([id, label]) => node('option', { value: id }, label))); input.value = value; input.disabled = disabled;
+  };
+  const initialRead = readRegion(ctx, '节点配置', initialize, () => ctx.restoreTargetFocus?.(), {view:studioHost});
+  page.prepend(initialRead.element);
+  ctx.onRefresh(initialRead.load);
+  void initialRead.load();
+  return page;
+  async function initialize() {
+  let agents = ctx.can('agents.read') ? orderNodesBySavedOrder(list(await ctx.api('/agents')), savedNodeOrder()) : [];
+  const orderRead = readRegion(ctx, '节点排序', signal => ctx.api('/preferences/node-order', { signal }), value => {
+    if (!agents.length || !selectedAgentID) return;
+    agents = orderNodesBySavedOrder(agents, value.ids);
+    const input = targetField.querySelector('select');
+    if (input.matches(':open')) return;
+    setOptions(targetField, agents.filter(agent => agent.capabilities?.length).map(item => [item.id, nodeName(ctx, item)]), selectedAgentID);
+  });
+  page.prepend(orderRead.element); void orderRead.load();
   let workspace;
   if (!ctx.can("agents.read") && requested && engineIDs.includes(selectedEngine)) {
     workspace = await ctx.api(`/agents/${pathID(requested)}/configs/${pathID(selectedEngine)}/workspace`);
@@ -53,16 +93,20 @@ export async function liveConfigPage(ctx) {
   }
   const available = agents.filter(agent => agent.capabilities?.length);
   if (requested && !available.some(agent => agent.id === requested))
-    return notice("此节点不可用，或当前账号无权访问。");
+    { studioHost.replaceChildren(notice('此节点不可用，或当前账号无权访问。')); sourceBody.replaceChildren(); return page; }
   const target = available.find(agent => agent.id === requested) || available.find(agent => agent.status === "online" && agent.capabilities.some(id => agent.runtime?.[id]?.installed)) || available.find(agent => agent.status === "online") || available[0];
-  if (!target) return section("节点配置", empty("没有可配置的节点"));
+  if (!target) { studioHost.replaceChildren(section('节点配置', empty('没有可配置的节点'))); sourceBody.replaceChildren(); return page; }
   const engines = target.capabilities;
   const engine = engines.includes(selectedEngine) ? selectedEngine : engines.find(id => target.runtime?.[id]?.installed) || engines[0];
   const base = `/agents/${pathID(target.id)}/configs/${pathID(engine)}`;
   if (ctx.can("tasks.read")) void mutations.recover(target.id, engine, target.shared_allocation?.id || "");
+  selectedAgentID = target.id; selectedEngineID = engine;
+  setOptions(targetField, available.map(item => [item.id, nodeName(ctx, item)]), target.id);
+  setOptions(engineField, engines.map(id => [id, id]), engine);
   workspace ||= await ctx.api(`${base}/workspace`);
+  if (!ctx.current()) return page;
   const agent = workspace.agent || target;
-  const record = ctx.recordFailure;
+  const record = recordFailure;
   if (record) ctx = {...ctx,recordFailure:(error,operation,stage) => record(Object.assign(error,{agentID:agent.id,engine,resource:`/agents/${agent.id}/configs/${engine}`}),operation,stage)};
   const runtime = agent.runtime?.[engine] || {};
   let saved = workspace.config || null;
@@ -82,26 +126,9 @@ export async function liveConfigPage(ctx) {
   const flags = actions(status(agent.status), badge(agent.shared_allocation ? "共享实例" : "主实例"),
     agent.shared_allocation && muted(`本人端口 · ${formatSharedPorts(agent.shared_allocation.ports) || "未分配"}`),
     agent.shared_allocation && ctx.can("agents.read") && link("实例管理", `#settings-node-${pathID(agent.id)}`));
-  const targetField = field("节点", "agent", target.id, { options: available.map(item => [item.id, nodeName(ctx, item)]) });
-  const engineField = field("内核", "engine", engine, { options: engines });
-  const modeField = field("配置来源", "source", mode, { options: [
-    ["personal", "面板保存的配置"],
-    ...(hostManaged && canReadCurrent ? [["managed", "QAgent 托管配置"]] : []),
-    ...(canImport ? [["import", "可导入的系统服务配置"]] : []),
-  ] });
-  const select = node("form", { className: "a-target-form", onsubmit(event) {
-    event.preventDefault();
-    const values = formData(event.currentTarget);
-    if (values.agent !== agent.id) { delete values.engine; delete values.source; }
-    else if (values.engine !== engine) delete values.source;
-    location.hash = `#live-config?${new URLSearchParams(values)}`;
-    // The route guard owns draft confirmation. Until navigation is accepted,
-    // keep the controls bound to the configuration actually being edited.
-    targetField.querySelector("select").value = agent.id;
-    engineField.querySelector("select").value = engine;
-    modeField.querySelector("select").value = mode;
-  } }, targetField, engineField, modeField);
-  select.addEventListener("change", () => select.requestSubmit());
+  selectedMode = mode;
+  setOptions(modeField, [['personal', '面板保存的配置'], ...(hostManaged && canReadCurrent ? [['managed', 'QAgent 托管配置']] : []), ...(canImport ? [['import', '可导入的系统服务配置']] : [])], mode);
+  flagsHost.replaceChildren(flags);
   const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
   if(canReadHost && errorText)void ctx.recordFailure?.(new Error(errorText),`${agent.name} (${agent.id}) · ${engine} 系统配置导入`,"import_discovery");
@@ -306,13 +333,14 @@ export async function liveConfigPage(ctx) {
       syncDraft();
     } catch(error) { void ctx.recordFailure?.(error,`${agent.name || agent.id} · ${engine} JSON 格式化`,"format_validation");ctx.announce(`JSON 格式无效，请检查配置。\n${error.message}`,"error"); }
   });
-  const readHistory = ctx.can("configs.read") && button("保存历史", event => void ctx.mutate(event.currentTarget, async () => {
+  const readHistory = ctx.can("configs.read") && button("保存历史", () => preparedDialog(ctx, "节点配置历史", ["保存时间", "状态", "操作", "配置预览"], async ctx => {
     if (!saved) return;
     const records = list(await ctx.api(`/configs/${pathID(saved.id)}/revisions?limit=100`));
     const preview = node("div", {}, muted("选择一份记录预览"));
     const historyBox = ctx.dialog("节点配置历史", stack(table(["保存时间", "状态", "操作"], records.map(record => [
       date(record.updated_at), record.version === saved.version ? badge("当前") : "历史档案",
-      button("预览", event => void ctx.mutate(event.currentTarget, async () => {
+      button("预览", () => {
+        const previewRead = readRegion(dialogContext(ctx, historyBox), "配置预览", async () => {
         const revision = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${record.version}`);
         if (!ctx.current() || !historyBox.isConnected) return;
         preview.replaceChildren(stack(code(revision.content), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
@@ -329,7 +357,9 @@ export async function liveConfigPage(ctx) {
             ctx.announce("配置已恢复，节点部署保持原状");
           });
         }, { tone: "primary" })));
-      })),
+        }, () => {});
+        preview.prepend(previewRead.element); void previewRead.load();
+      }),
     ]), { label: "节点配置历史" }), preview), { wide: true });
   }));
   if (readHistory) readHistory.disabled = !saved;
@@ -350,8 +380,9 @@ export async function liveConfigPage(ctx) {
     },
     beforeDeploy,
   });
-  return stack(filterbar(select, flags),
-    canReadHost && errorText && node("details",{className:"a-disclosure"},node("summary",{},"系统配置导入不可用"),node("div",{className:"a-disclosure-body"},notice(errorText))),
-    inbounds,
-    section("配置源码", node("div", { className: "a-card-body" }, form), actions(sourceTools, read, reset, format, readHistory)));
+  studioHost.replaceChildren(...(canReadHost && errorText ? [node("details",{className:"a-disclosure"},node("summary",{},"系统配置导入不可用"),node("div",{className:"a-disclosure-body"},notice(errorText)))] : []), inbounds);
+  sourceBody.replaceChildren(form);
+  sourceActions.replaceChildren(actions(sourceTools, read, reset, format, readHistory));
+  return page;
+  }
 }

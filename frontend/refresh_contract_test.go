@@ -48,7 +48,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"{ isLogin: path === \"/auth/login\", isCurrent, onUnauthorized",
 		},
 		"modules/errors.js": {
-			"if (!isCurrent()) throw new DOMException(\"Account changed\", \"AbortError\")",
+			"if (!isCurrent()) throw Object.assign(new DOMException(\"Account changed\", \"AbortError\"), {intentionalCancellation:true})",
 			"options?.signal?.aborted",
 		},
 		"analytics/live-dom.js": {
@@ -72,7 +72,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"patch(results.firstElementChild, fresh)",
 			"dialogUpdates.forEach(update => update())",
 			"liveTable.updateRows(rows)",
-			"poll({ ...ctx, onRefreshError: failedRefresh }, load)",
+			"poll({ ...ctx, onRefreshError: failedRefresh }",
 			"if (error.status === 403",
 			"agents = []; draw(true)",
 		},
@@ -81,7 +81,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"patch(result, node('div'",
 			"row.key = clientAccessRecordKey(entry, item)",
 			"card.dataset.refreshKey = group.agent_id",
-			"ctx.onRefresh(reload)",
+			"entryRead.load()",
 			"ctx.setDirty(true)",
 		},
 		"analytics/observability.js": {
