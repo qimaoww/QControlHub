@@ -25,7 +25,10 @@ func validateManagedServiceTarget(ctx context.Context, engine core.Engine, manag
 			return "", err
 		}
 		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-		if err != nil || (status != "active" && status != "inactive" && status != "failed") {
+		if err != nil {
+			return "", fmt.Errorf("read managed OpenRC service state: %w", err)
+		}
+		if status != "active" && status != "inactive" && status != "failed" {
 			return "", errors.New("managed OpenRC service has an unsupported state")
 		}
 		marker := "# QControlHub managed OpenRC service: " + managed.Service
@@ -38,16 +41,25 @@ func validateManagedServiceTarget(ctx context.Context, engine core.Engine, manag
 	if strings.TrimSpace(loadState) == "not-found" {
 		return "not-found", nil
 	}
-	if err != nil || strings.TrimSpace(loadState) != "loaded" {
-		return "", errors.New("managed service unit is not loaded")
+	if err != nil {
+		return "", fmt.Errorf("read managed service LoadState: %w\n%s", err, core.DiagnosticText(loadState))
+	}
+	if strings.TrimSpace(loadState) != "loaded" {
+		return "", fmt.Errorf("managed service unit is not loaded: LoadState=%q", core.DiagnosticText(loadState))
 	}
 	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-	if err != nil || (status != "active" && status != "inactive" && status != "failed") {
+	if err != nil {
+		return "", fmt.Errorf("read managed service state: %w", err)
+	}
+	if status != "active" && status != "inactive" && status != "failed" {
 		return "", errors.New("managed service has an unsupported state")
 	}
 	fragmentPath, err := run(ctx, systemctlPath, "show", managed.Service, "--property=FragmentPath", "--value")
 	expectedFragmentPath := filepath.Join(existingDiscoveryManagedUnitRoot, managed.Service)
-	if err != nil || strings.TrimSpace(fragmentPath) != expectedFragmentPath {
+	if err != nil {
+		return "", fmt.Errorf("read managed service FragmentPath: %w\n%s", err, core.DiagnosticText(fragmentPath))
+	}
+	if strings.TrimSpace(fragmentPath) != expectedFragmentPath {
 		return "", errors.New("managed service fragment path is not the QAgent-owned location")
 	}
 	fragmentPath = strings.TrimSpace(fragmentPath)
@@ -79,22 +91,31 @@ func validateManagedServiceTarget(ctx context.Context, engine core.Engine, manag
 	}
 	for property, expected := range map[string]string{"Description": engineDisplayName(engine) + " core managed by QAgent", "User": "qcontrolhub-core", "Group": "qcontrolhub-core"} {
 		value, err := systemdUnitProperty(ctx, managed.Service, property)
-		if err != nil || value != expected {
+		if err != nil {
+			return "", fmt.Errorf("read managed service effective %s: %w", property, err)
+		}
+		if value != expected {
 			return "", fmt.Errorf("managed service effective %s is not %q", property, expected)
 		}
 	}
 	for _, property := range []string{"ExecCondition", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost"} {
 		value, err := systemdUnitProperty(ctx, managed.Service, property)
-		if err != nil || value != "" {
+		if err != nil {
+			return "", fmt.Errorf("read managed service effective %s: %w", property, err)
+		}
+		if value != "" {
 			return "", fmt.Errorf("managed service has an unsupported effective %s hook", property)
 		}
 	}
 	execStart, err := run(ctx, systemctlPath, "show", managed.Service, "--property=ExecStart", "--value")
 	if err != nil {
-		return "", errors.New("managed service ExecStart cannot be read")
+		return "", fmt.Errorf("read managed service ExecStart: %w\n%s", err, core.DiagnosticText(execStart))
 	}
 	executable, argv, err := parseSingleSystemdExecStart(execStart)
-	if err != nil || !supportedManagedExecStart(engine, managed, executable, argv) {
+	if err != nil {
+		return "", fmt.Errorf("parse managed service ExecStart: %w", err)
+	}
+	if !supportedManagedExecStart(engine, managed, executable, argv) {
 		return "", errors.New("managed service ExecStart is not the exact QAgent-owned command")
 	}
 	return status, nil

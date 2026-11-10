@@ -4,11 +4,50 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestManagedTargetReadFailureRetainsRedactedCause(t *testing.T) {
+	previous := systemctlPath
+	systemctlPath = filepath.Join(t.TempDir(), "systemctl")
+	t.Cleanup(func() { systemctlPath = previous })
+	writeExecutable(t, systemctlPath, "#!/bin/sh\nprintf '%s\\n' 'fixture systemd bus failure: permission denied; password=private-fixture-value' >&2\nexit 23\n")
+	manager := &ServiceManager{kind: ServiceManagerSystemd}
+	spec := DefaultSpecsForServiceManager(ServiceManagerSystemd)[core.EngineXray]
+	for _, read := range []struct {
+		name string
+		read func(context.Context) (string, error)
+	}{
+		{"managed target", func(ctx context.Context) (string, error) {
+			return validateManagedServiceTarget(ctx, core.EngineXray, spec, manager)
+		}},
+		{"effective property", func(ctx context.Context) (string, error) {
+			return systemdUnitProperty(ctx, spec.Service, "Description")
+		}},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			_, err := read.read(context.Background())
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 23 || !strings.Contains(err.Error(), "fixture systemd bus failure: permission denied") {
+				t.Fatalf("lost service read cause or exit status: %v", err)
+			}
+			if strings.Contains(err.Error(), "private-fixture-value") || !strings.Contains(err.Error(), "[redacted]") {
+				t.Fatal("service read diagnostic was not safely redacted")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if _, err := read.read(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("service read lost cancellation cause: %v", err)
+			}
+		})
+	}
+}
 
 func TestExternalSourceFailureDoesNotChangeManagedReadValidationOrRuntime(t *testing.T) {
 	requireAgentRoot(t)
