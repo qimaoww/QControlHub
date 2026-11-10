@@ -196,7 +196,7 @@ func TestCertificateDNSAccountsSaveRotateAndCheckWithoutZone(t *testing.T) {
 		body := ""
 		switch r.URL.Host {
 		case "api.cloudflare.com":
-			if r.URL.Query().Get("name") != "" || r.URL.Query().Get("per_page") != "1" {
+			if r.URL.Query().Get("name") != "" || r.URL.Query().Get("per_page") != "5" {
 				t.Fatal("domain-dependent account check")
 			}
 			reads["cloudflare"]++

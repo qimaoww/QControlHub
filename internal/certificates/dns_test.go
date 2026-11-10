@@ -89,8 +89,8 @@ func TestDNSProvidersWithoutAccountZone(t *testing.T) {
 					q := r.URL.Query()
 					if r.Method == "GET" && r.URL.Path == "/client/v4/zones" {
 						if q.Get("name") == "" {
-							if q.Get("per_page") != "1" {
-								t.Fatal("unbounded zone listing")
+							if q.Get("per_page") != "5" {
+								t.Fatal("zone check must use Cloudflare's minimum page size of five")
 							}
 							checks++
 							return dnsResponse(map[string]any{"success": true, "result": []any{}}), nil

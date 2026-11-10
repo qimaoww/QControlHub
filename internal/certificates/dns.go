@@ -249,7 +249,7 @@ func (d DNSClient) Check(ctx context.Context) error {
 	// not assert DNS write access to any certificate domain.
 	switch d.Provider {
 	case "cloudflare":
-		_, err := d.cf(ctx, "GET", "/zones?per_page=1", nil)
+		_, err := d.cf(ctx, "GET", "/zones?per_page=5", nil)
 		return err
 	case "alidns":
 		_, err := d.ali(ctx, "DescribeDomains", map[string]string{"PageSize": "1"})
