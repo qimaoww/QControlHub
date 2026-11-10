@@ -48,6 +48,7 @@ type Executor struct {
 	Services                   *ServiceManager
 	coreBootstrapper           *coreServiceBootstrapper
 	validationSystemdRunPath   string
+	importValidationIdentity   *commandIdentity // Explicit identity for custom-path validation fixtures; bundled services always use their installed account.
 	coreStateHelperPath        string
 	tlsFrontendHelperPath      string
 	specsMu                    sync.RWMutex

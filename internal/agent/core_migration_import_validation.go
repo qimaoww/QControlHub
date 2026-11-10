@@ -16,8 +16,16 @@ func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Eng
 		return "", err
 	}
 	identity, err := managedCoreServiceIdentity()
+	wantEngine, want, canonical := managedSpecForService(spec.Service, e.serviceManager().Kind())
+	canonical = canonical && wantEngine == engine && want == spec
+	if !canonical && e.importValidationIdentity != nil {
+		identity, err = *e.importValidationIdentity, nil
+	}
 	if err != nil {
 		return "", err
+	}
+	if identity.uid == 0 || identity.gid == 0 {
+		return "", fmt.Errorf("SS Rust startup validation requires a non-root identity")
 	}
 	if err := ensureManagedCoreBinaryAccess(engine, spec, e.serviceManager()); err != nil {
 		return "", err
@@ -30,7 +38,7 @@ func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Eng
 	if err != nil {
 		return "", err
 	}
-	if wantEngine, want, ok := managedSpecForService(spec.Service, e.serviceManager().Kind()); ok && wantEngine == engine && want == spec {
+	if canonical {
 		if err := e.prepareCoreUpdateStateDirectory(ctx, engine, spec); err != nil {
 			return "", err
 		}

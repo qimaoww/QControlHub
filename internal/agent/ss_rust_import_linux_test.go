@@ -285,6 +285,17 @@ func testSSRustScriptMigration(t *testing.T, failStart bool) {
 // simulated too; native namespace/core execution has a separate opt-in test.
 func configureSSRustImportPreflight(t *testing.T, fixture existingCoreMigrationFixture, fail bool) {
 	t.Helper()
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		identity, err = lookupCommandIdentity("nobody", "nogroup")
+		if err != nil {
+			identity, err = lookupCommandIdentity("nobody", "nobody")
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.executor.importValidationIdentity = &identity
 	launcher := filepath.Join(fixture.stateDirectory, "probe-launcher")
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", filepath.Join(fixture.stateDirectory, "probe-arguments"))
 	if fail {
@@ -334,7 +345,7 @@ func TestSSRustImportPreflightFailurePreservesOriginalService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, _ := managedCoreServiceIdentity()
+	identity := *fixture.executor.importValidationIdentity
 	for _, required := range []string{"--property=PrivateNetwork=yes", "--property=ReadWritePaths=\n", fmt.Sprintf("--property=User=%d", identity.uid), "--property=ProtectSystem=strict", "--property=ProtectHome=yes"} {
 		if !strings.Contains(string(args), required) {
 			t.Fatalf("preflight omitted %s", required)
