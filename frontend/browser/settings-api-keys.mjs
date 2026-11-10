@@ -63,6 +63,12 @@ export async function testSettingsAPIKeysRuntime() {
     assert.ok(row('first').cells[3].textContent.includes('18 项权限') && row('first').cells[3].textContent.includes('2 个来源') && row('first').textContent.includes('只读'), 'API Key scope summary missing');
     assert.ok(!row('first').textContent.includes('2001:db8:1234::/48'), 'full scope still expands the key row');
     assert.ok(row('first').cells[0].textContent.includes('2026') && row('expired').textContent.includes('已过期') && row('disabled').textContent.includes('已停用'), 'key dates/statuses lost');
+    for (const id of ['first', 'expired', 'disabled', 'revoked']) {
+      const statusCell = row(id).cells[2], pill = statusCell.querySelector('.a-badge');
+      assert.equal(statusCell.querySelectorAll('.a-badge').length, 1, 'key mode still duplicates status pills');
+      assert.ok(pill.getBoundingClientRect().width < 70, 'key status pill stretches across its column');
+      assert.ok(statusCell.querySelector('.a-muted').textContent === '只读', 'plain key mode missing');
+    }
     assert.equal(row('revoked').cells[6].querySelector('button'), null, 'revoked key retains mutation controls');
     const scopeButton = button('18 项权限', row('first')), tableScroll = scopeButton.closest('.a-table-scroll');
     tableScroll.scrollLeft = 110; scopeButton.focus();

@@ -95,7 +95,7 @@ function apiKeysPanel(ctx) {
     results.hidden = false;
     const items = list(resource.items);
     const fresh = table(["名称 / 创建时间", "前缀", "状态", "授权范围", "到期时间", "最近使用", "操作"], items.map(key => [
-      stack(key.name, muted(date(key.created_at))), `${key.prefix}…`, stack(badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status), badge(key.mode === "read_write" ? "读写" : "只读")),
+      stack(key.name, muted(date(key.created_at))), `${key.prefix}…`, stack(actions(badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status)), muted(key.mode === "read_write" ? "读写" : "只读")),
       stack(button(`${list(key.permissions).length} 项权限`, () => showScope(key.id), { "aria-haspopup": "dialog" }),
         muted(list(key.ip_allowlist).length ? `${key.ip_allowlist.length} 个来源` : "来源 IP 不限制")),
       key.expires_at ? date(key.expires_at) : "永不过期", date(key.last_used_at),
