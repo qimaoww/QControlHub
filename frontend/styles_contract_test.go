@@ -59,7 +59,7 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// proportional raster logo containment in the existing brand mark, and
 	// unavailable public-IP placeholders aligned with normal address rows, and
 	// readable connection country/node columns within their scroll container.
-	const expected = "4b6b3fee517d7814f9f0b59da5b78164f8e318e31eb45f82bfceb2fad3515d01"
+	const expected = "d18c927bbc72831a53581c0ffea8055293d4b2321866b8dcb41b53609bd05241"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

@@ -173,6 +173,11 @@ export async function testDashboardRuntime(mode, preview = false) {
     assert(current.dataset.state === "ready", `${key} sampled period is not ready`);
   }
   await waitFor(() => compact(summary()?.querySelector(".a-dashboard-node-count")?.textContent).includes("3/4个节点") && compact(live("节点速率合计")?.querySelector(".a-dashboard-rate")?.textContent) === "9KB/s", "online counts or valid fleet rates did not settle");
+  const overviewRegions = summary().querySelector(".a-dashboard-overview").children;
+  assert(overviewRegions[0].classList.contains("a-dashboard-live") && overviewRegions[1].classList.contains("a-dashboard-periods"), "live health is not prioritized over cumulative periods");
+  const primaryRegions = document.querySelector(".a-dashboard-main").children, diagnosticRegions = document.querySelector(".a-dashboard-secondary").children;
+  assert(primaryRegions[0] === traffic() && primaryRegions[1] === ranking(), "trend and ranking do not form the primary workspace");
+  assert(diagnosticRegions[0] === panel() && diagnosticRegions[1] === nodes(), "panel and fleet do not form the diagnostic workspace");
   const engineSummary = nodes()?.querySelector(".a-card-body")?.textContent || "";
   for (const text of ["Mihomo 1/2", "sing-box 1/3", "SS Rust 0/2", "Xray 1/2"]) assert(engineSummary.includes(text), `offline runtime counted as live or scoped installed cores lost: ${text}`);
   assert(compact(live("节点速率合计")?.querySelector(".a-dashboard-rate")?.textContent) === "9KB/s", "valid fleet rates missing or offline node counted");

@@ -130,7 +130,7 @@ function periodCard(key, title, range, value, state) {
   const usable = state === "ready";
   const message = state === "empty" ? "暂无采集记录" : state === "incomplete" ? "采集数据不完整" : state === "boundary" ? "正在切换统计周期" : state === "loading" ? "正在读取持久统计" : "统计不可用";
   return node("article", { className: "a-dashboard-period", "data-refresh-key": `period-${key}`, "data-state": state },
-    node("div", { className: "a-dashboard-period-head" }, node("h3", {}, title), badge("UTC")),
+    node("div", { className: "a-dashboard-period-head" }, node("h3", {}, title)),
     node("strong", { className: "a-dashboard-period-value" }, usable ? bytes(value.total_bytes) : "—"),
     directionValues(usable ? value.received_bytes : null, usable ? value.sent_bytes : null),
     node("div", { className: "a-dashboard-period-foot" }, muted(value?.start && state !== "boundary" ? `${value.start} 起 · ${range}` : range), !usable && muted(message)));
@@ -148,8 +148,8 @@ export async function dashboardPage(ctx) {
   const businessState = muted("正在读取节点状态");
   businessState.setAttribute("role", "status");
   const overviewCard = section("运行概况", node("div", { className: "a-dashboard-overview" },
-    can("traffic.read") && periodGrid, can("traffic.read") && periodState, liveGrid), businessState,
-    "当前周期与实时状态分区展示；流量仅统计获授权的持久监控端口记录");
+    liveGrid, can("traffic.read") && periodGrid, can("traffic.read") && periodState), businessState,
+    "节点实时状态与获授权监控端口流量 · 累计统计按 UTC 计算");
   overviewCard.classList.add("a-dashboard-hero");
 
   const resourceGrid = node("div", { className: "a-dashboard-resources" });
@@ -385,6 +385,6 @@ export async function dashboardPage(ctx) {
   poll(ctx, refreshLive, 5000);
   poll(ctx, refreshTraffic, 30000);
   return node("div", { className: "a-stack a-dashboard" }, overviewCard,
-    node("div", { className: "a-dashboard-main" }, trafficCard, host),
-    node("div", { className: "a-dashboard-secondary" }, rankingCard, nodes));
+    node("div", { className: "a-dashboard-main" }, trafficCard, rankingCard),
+    node("div", { className: "a-dashboard-secondary" }, host, nodes));
 }
