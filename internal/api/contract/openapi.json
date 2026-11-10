@@ -2224,6 +2224,27 @@
         },
         "type": "object"
       },
+      "core_ExistingCoreSource": {
+        "additionalProperties": false,
+        "properties": {
+          "config_directory": {
+            "type": "string"
+          },
+          "config_path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_HTTPChallengeGrant": {
         "additionalProperties": false,
         "properties": {
@@ -2507,6 +2528,27 @@
           },
           "next_run_at": {
             "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_ImportDependency": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "resolved": {
+            "type": "string"
+          },
+          "source": {
             "type": "string"
           }
         },
@@ -3236,6 +3278,15 @@
           "existing_config_unsupported_reason": {
             "type": "string"
           },
+          "existing_sources": {
+            "items": {
+              "$ref": "#/components/schemas/core_ExistingCoreSource"
+            },
+            "type": "array"
+          },
+          "imported_resource_update_error": {
+            "type": "string"
+          },
           "installed": {
             "type": "boolean"
           },
@@ -3708,6 +3759,9 @@
           "error": {
             "type": "string"
           },
+          "existing_source_id": {
+            "type": "string"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -3720,6 +3774,9 @@
             ]
           },
           "id": {
+            "type": "string"
+          },
+          "import_source_digest": {
             "type": "string"
           },
           "install_if_missing": {
@@ -3854,6 +3911,9 @@
           },
           "engine": {
             "$ref": "#/components/schemas/core_Engine"
+          },
+          "existing_source_id": {
+            "type": "string"
           },
           "expected_config_version": {
             "minimum": 1,
@@ -5782,8 +5842,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -7468,8 +7530,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -7927,8 +7991,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -8283,8 +8349,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -8554,8 +8622,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -9438,8 +9508,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -9816,8 +9888,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -15773,8 +15847,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -15860,8 +15936,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -21408,8 +21486,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -21605,8 +21685,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -21733,6 +21815,7 @@
                 "core_source": "example",
                 "core_version": "example",
                 "engine": "mihomo",
+                "existing_source_id": "example",
                 "expected_config_version": 1,
                 "expected_instance_id": "example",
                 "prefer_cached": false,
@@ -21758,6 +21841,9 @@
                   },
                   "engine": {
                     "$ref": "#/components/schemas/core_Engine"
+                  },
+                  "existing_source_id": {
+                    "type": "string"
                   },
                   "expected_config_version": {
                     "minimum": 1,
@@ -21823,8 +21909,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -21910,8 +21998,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -22286,8 +22376,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -22418,12 +22510,27 @@
             "content": {
               "application/json": {
                 "example": {
-                  "content": "mixed-port: 21001"
+                  "content": "mixed-port: 21001",
+                  "dependencies": [
+                    {
+                      "destination": "example",
+                      "field": "example",
+                      "kind": "example",
+                      "resolved": "example",
+                      "source": "example"
+                    }
+                  ]
                 },
                 "schema": {
                   "properties": {
                     "content": {
                       "type": "string"
+                    },
+                    "dependencies": {
+                      "items": {
+                        "$ref": "#/components/schemas/core_ImportDependency"
+                      },
+                      "type": "array"
                     }
                   },
                   "type": "object"
@@ -22679,8 +22786,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [
@@ -22844,8 +22953,10 @@
                   "created_at": "2026-11-10T12:00:00Z",
                   "engine": "mihomo",
                   "error": "example",
+                  "existing_source_id": "example",
                   "finished_at": "2026-11-10T12:00:00Z",
                   "id": "resource_example",
+                  "import_source_digest": "example",
                   "install_if_missing": false,
                   "lease_id": "example",
                   "mainland_access_policies": [
@@ -23014,8 +23125,10 @@
                     "created_at": "2026-11-10T12:00:00Z",
                     "engine": "mihomo",
                     "error": "example",
+                    "existing_source_id": "example",
                     "finished_at": "2026-11-10T12:00:00Z",
                     "id": "resource_example",
+                    "import_source_digest": "example",
                     "install_if_missing": false,
                     "lease_id": "example",
                     "mainland_access_policies": [

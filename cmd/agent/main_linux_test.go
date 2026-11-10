@@ -176,7 +176,7 @@ func TestExistingSingBoxSpecCapturesRelativeWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestInspectExistingOfficialSingBoxAllowsBoundedRelativeLogAndRejectsOtherRelativeResources(t *testing.T) {
+func TestInspectExistingOfficialSingBoxAllowsRelativeResourcesAndRejectsMissingInputs(t *testing.T) {
 	root := t.TempDir()
 	workingDirectory := filepath.Join(root, "work")
 	configDirectory := filepath.Join(root, "config")
@@ -232,8 +232,14 @@ func TestInspectExistingOfficialSingBoxAllowsBoundedRelativeLogAndRejectsOtherRe
 	if err := os.WriteFile(fragmentPath, []byte(`{"route":{"rule_set":[{"type":"local","tag":"blocked","path":"relative.srs"}]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := runUtilityCommand(map[core.Engine]agent.EngineSpec{core.EngineSingBox: spec}, []string{"inspect-existing", "sing-box"}); err == nil || !strings.Contains(err.Error(), "cannot be migrated safely") {
-		t.Fatalf("unrelated relative official sing-box resource was accepted: %v", err)
+	if err := runUtilityCommand(map[core.Engine]agent.EngineSpec{core.EngineSingBox: spec}, []string{"inspect-existing", "sing-box"}); err == nil || !strings.Contains(err.Error(), "route.rule_set[0].path") {
+		t.Fatalf("missing relative rule set did not report its configuration field: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workingDirectory, "relative.srs"), []byte("fixture rule set"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runUtilityCommand(map[core.Engine]agent.EngineSpec{core.EngineSingBox: spec}, []string{"inspect-existing", "sing-box"}); err != nil {
+		t.Fatalf("existing relative rule set was rejected: %v", err)
 	}
 }
 
@@ -242,7 +248,7 @@ func TestAgentStartupRefreshesAutomaticExistingCoreDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainSource := string(contents)
+	mainSource := strings.Join(strings.Fields(string(contents)), " ")
 	for _, required := range []string{
 		"manualExistingSpecs", "RefreshExistingCoreDiscovery", `statePath+".existing-cores"`,
 		"ExistingDiscoveryIssues: discoveryIssues", "MigrationMarkerPrefix:",
