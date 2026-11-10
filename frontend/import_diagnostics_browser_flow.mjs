@@ -18,13 +18,25 @@ async function run() {
   login.requestSubmit();
   await waitFor(() => document.querySelector('button[title="退出登录"]') && !document.querySelector('.a-login') && !document.querySelector('#app[aria-busy=true]'), "password login incomplete");
   location.hash = `#live-config?agent=${agentID}&engine=xray`;
-  const content = await waitFor(editor, "manual editor missing");
+  await waitFor(editor, "manual editor missing");
+  assert.ok(!document.body.textContent.includes("external service config permission denied"), "manual configuration shows an unrelated import error");
+  const selectSource = async source => {
+    const field = document.querySelector('.a-target-form [name=source]');
+    field.value = source;
+    field.dispatchEvent(new Event('change', {bubbles:true}));
+    await waitFor(() => editor() && document.querySelector('.a-target-form [name=source]')?.value === source, "source selection did not finish");
+  };
+  await selectSource("import");
+  await waitFor(() => editor()?.readOnly && document.body.textContent.includes("external service config permission denied"), "import failure is not available through source selection");
+  assert.ok(button("导入并迁移").disabled && button("读取系统配置").disabled, "unavailable source permits import operations");
+  await selectSource("personal");
+  const content = editor();
   const original = `{"inbounds":[{"tag":"manual","listen":"127.0.0.1","port":21000,"protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"protocol":"freedom","tag":"direct"}],"opaque":{"large":9007199254740993}}`;
   content.value = original;
   content.dispatchEvent(new Event("input", {bubbles:true}));
   assert.equal(content.readOnly, false, "external discovery made manual editor read-only");
   assert.equal(button("保存并部署").disabled, false, "external discovery blocked managed deployment");
-  assert.ok(document.body.textContent.includes("系统配置导入不可用"), "source failure disclosure missing");
+  assert.ok(!document.body.textContent.includes("external service config permission denied"), "manual configuration retained the import failure");
   if (query.has("preview")) {
     window.importDiagnosticsPreview = {agentID, original};
     return;

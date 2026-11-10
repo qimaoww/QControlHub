@@ -36,6 +36,15 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
   const form = () => dialog()?.querySelector('form');
   const close = async () => { dialog().querySelector('[aria-label=关闭]').click(); await waitFor(() => !dialog(), '共享弹窗未关闭'); };
   const idle = () => waitFor(() => !document.querySelector('#native-users-test[aria-busy=true]'), '前次写入未结束');
+  const revoke = async id => {
+    await idle();
+    const control = await waitFor(() => {
+      const target = allocationRow(id);
+      const control = target && button('撤销共享', target);
+      return control && !control.disabled && control;
+    }, `撤销共享未就绪：${id}`);
+    control.click();
+  };
   const open = async () => { await idle(); button('共享资源', row('alice')).click(); await waitFor(() => dialog()?.dataset.userAllocation === 'alice', '共享资源未打开'); };
   try {
     await open();
@@ -147,7 +156,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
       await idle(); button('重新读取', dialog()).click();
       await waitFor(() => !button('重新读取', dialog()).disabled, '恢复邀请场景未重读');
       const previous = structuredClone(access.shares[0]);
-      button('撤销共享', allocationRow('shared')).click(); await confirm('撤销共享');
+      await revoke('shared'); await confirm('撤销共享');
       await waitFor(() => allocationRow('shared').textContent.includes('已撤销'), '原邀请无法撤销');
       const beforeRestore = writes.length, revision = access.revision;
       button('重新邀请', allocationRow('shared')).click();
@@ -173,7 +182,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     assert.equal(access.shares[1].status, 'pending', '重新邀请未等待用户同意');
     assert.ok(writes.at(-1).shares.find(share => share.agent_id === 'other').reinvite, '重新邀请未显式发送');
     assert.ok(!writes.at(-1).shares.find(share => share.agent_id === 'shared').reinvite, '重新邀请污染其他节点');
-    await idle(); button('撤销共享', allocationRow('shared')).click(); await confirm('撤销共享');
+    await revoke('shared'); await confirm('撤销共享');
     await waitFor(() => allocationRow('shared').textContent.includes('已撤销'), '释放端口前未撤销');
     button('编辑分配', allocationRow('shared')).click(); input(form().elements.ports, '');
     form().requestSubmit(); await waitFor(() => !form(), '撤销后无法释放端口');
@@ -196,12 +205,12 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     }
     button('取消', dialog()).click();
     const beforeRevoke = writes.length;
-    await idle(); button('撤销共享', allocationRow('other')).click(); await modal('撤销共享');
+    await revoke('other'); await modal('撤销共享');
     button('取消', dialog()).click(); await delay(20);
     assert.equal(writes.length, beforeRevoke, '取消撤销仍提交');
     assert.ok(access.shares[1].enabled, '取消撤销使共享失效');
     const beforeStaleConfirm = writes.length;
-    button('撤销共享', allocationRow('other')).click(); await modal('撤销共享');
+    await revoke('other'); await modal('撤销共享');
     const staleConfirm = button('撤销共享', dialog());
     await restart({ ...session, user_id: 'confirmation-admin' });
     staleConfirm.dispatchEvent(new MouseEvent('click')); await delay(20);

@@ -117,7 +117,7 @@ export async function liveConfigPage(ctx) {
   const canReadCurrent = canReadHost || Boolean(agent.shared_allocation?.enabled && execute && ctx.can("tasks.read") && ["managed-config-read-v1","shared-core-instances-v1","shared-core-lifecycle-v1"].every(feature=>agent.features?.includes(feature)));
   const canImport = Boolean(runtime.existing_config_available && canReadHost);
   const hostManaged = Boolean(runtime.installed && (agent.can_manage !== false || agent.shared_allocation?.enabled));
-  const mode = params.get("source") === "import" && canImport ? "import" : params.get("source") === "managed" && hostManaged && canReadCurrent ? "managed" : "personal";
+  const mode = params.get("source") === "import" && canReadHost ? "import" : params.get("source") === "managed" && hostManaged && canReadCurrent ? "managed" : "personal";
   const importSource = mode === "import";
   const readAction = liveConfigReadAction({
     sourceMode: mode, managedReadSupported: agent.features?.includes("managed-config-read-v1"),
@@ -127,16 +127,17 @@ export async function liveConfigPage(ctx) {
     agent.shared_allocation && muted(`本人端口 · ${formatSharedPorts(agent.shared_allocation.ports) || "未分配"}`),
     agent.shared_allocation && ctx.can("agents.read") && link("实例管理", `#settings-node-${pathID(agent.id)}`));
   selectedMode = mode;
-  setOptions(modeField, [['personal', '面板保存的配置'], ...(hostManaged && canReadCurrent ? [['managed', 'QAgent 托管配置']] : []), ...(canImport ? [['import', '可导入的系统服务配置']] : [])], mode);
+  setOptions(modeField, [['personal', '面板保存的配置'], ...(hostManaged && canReadCurrent ? [['managed', 'QAgent 托管配置']] : []), ...(canReadHost ? [['import', '导入系统配置']] : [])], mode);
   flagsHost.replaceChildren(flags);
   const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
-  if(canReadHost && errorText)void ctx.recordFailure?.(new Error(errorText),`${agent.name} (${agent.id}) · ${engine} 系统配置导入`,"import_discovery");
+  if(importSource && errorText)void ctx.recordFailure?.(new Error(errorText),`${agent.name} (${agent.id}) · ${engine} 系统配置导入`,"import_discovery");
   const api = (path, options) => ctx.api(path, { method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });
   const beforeDeploy = () => {
     if (!ctx.current()) throw Object.assign(new Error("页面目标已变化，请重新打开配置后提交。"), { deployPreflight: true });
   };
   const snapshot = async (preferCached = false) => {
+    if (importSource && !canImport) throw new Error(errorText || "当前未发现可导入的系统服务配置。");
     if (!readAction || !canReadCurrent) throw new Error("当前节点或账号无法读取托管配置。");
     const result = await requestConfigSnapshot({ api, waitForTask: id => waitTask(ctx, id) }, agent, engine, readAction, {
       preferCached, isCurrent: ctx.current,
@@ -149,7 +150,7 @@ export async function liveConfigPage(ctx) {
   const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : saved?.content || defaultSource(engine), {
     multiline: 20, required: true, readonly: importSource || !editable, spellcheck: false,
   });
-  let sourceBlocked = false;
+  let sourceBlocked = importSource && !canImport;
   const recovery = stack();
   const form = ctx.form([
     node("div", { className: "a-grid" },
@@ -295,7 +296,7 @@ export async function liveConfigPage(ctx) {
   const deployNotice = notice(configDeployBlockReason(agent,engine,ctx.can));
   deployNotice.hidden = !deployNotice.textContent || importSource;
   if (!editable) form.querySelector('button[type="submit"]').remove();
-  else if (!importSource && !canDeploy) form.querySelector('button[type="submit"]').disabled = true;
+  else if (sourceBlocked || !importSource && !canDeploy) form.querySelector('button[type="submit"]').disabled = true;
   form.append(deployNotice);
   const read = canReadCurrent && readAction && button(mode === "import" ? "读取系统配置" : "读取托管配置", async event => {
     const control = event.currentTarget;
@@ -324,7 +325,7 @@ export async function liveConfigPage(ctx) {
         throw new Error(diagnosticError(error.message), { cause: error });
       }
     });
-  });
+  }, {disabled: importSource && !canImport});
   const format = editable && !importSource && engine !== "mihomo" && button("格式化 JSON", () => {
     if (form.getAttribute("aria-busy") === "true") return;
     try {
@@ -380,7 +381,7 @@ export async function liveConfigPage(ctx) {
     },
     beforeDeploy,
   });
-  studioHost.replaceChildren(...(canReadHost && errorText ? [node("details",{className:"a-disclosure"},node("summary",{},"系统配置导入不可用"),node("div",{className:"a-disclosure-body"},notice(errorText)))] : []), inbounds);
+  studioHost.replaceChildren(...(importSource && !canImport ? [notice(errorText || "当前未发现可导入的系统服务配置。")] : []), inbounds);
   sourceBody.replaceChildren(form);
   sourceActions.replaceChildren(actions(sourceTools, read, reset, format, readHistory));
   return page;
