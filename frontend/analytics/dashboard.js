@@ -137,6 +137,8 @@ function periodCard(key, title, range, value, state) {
 }
 
 export async function dashboardPage(ctx) {
+  document.body.classList.add("a-tech-dashboard");
+  ctx.signal.addEventListener("abort", () => document.body.classList.remove("a-tech-dashboard"), { once: true });
   let month = ctx.state.data.dashboardMonth || utcMonth();
   const can = permission => ctx.can(permission);
   const readings = new Map(), states = new Map(), requests = new Map(), reading = new Map();

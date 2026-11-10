@@ -329,6 +329,6 @@ export async function testDashboardRuntime(mode, preview = false) {
   // A pending optional resource cannot delay node/traffic refreshes or page navigation.
   let release;fixture.gate=new Promise(resolve=>{release=resolve;});const beforeGate=reads("/panel-metrics");refreshButton().click();await waitFor(() => reads("/panel-metrics") > beforeGate, "slow metrics read missing");
   const beforeNodes=reads("/agents");await delay(5300);assert(reads("/agents") > beforeNodes, "slow host read blocked node polling");
-  location.hash="#tasks";await waitFor(() => document.title.startsWith("任务"), "route departure blocked on metrics");const afterLeave=reads("/panel-metrics");fixture.gate=null;release();await delay(2200);assert(!panel() && reads("/panel-metrics") === afterLeave, "old metrics response/timer survived navigation");
+  location.hash="#tasks";await waitFor(() => document.title.startsWith("任务"), "route departure blocked on metrics");const afterLeave=reads("/panel-metrics");fixture.gate=null;release();await delay(2200);assert(!panel() && reads("/panel-metrics") === afterLeave, "old metrics response/timer survived navigation");assert(!document.body.classList.contains("a-tech-dashboard"), "dashboard tech theme survived navigation");
   assert(cspViolations.length === 0, `CSP violations: ${cspViolations.join(", ")}`);
 }
