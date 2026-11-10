@@ -20,12 +20,16 @@ export function notificationsPage(ctx) {
   const ruleHost = node('div', {}, loadingTable(['名称', '事件 / 范围', '接收渠道', '状态', '操作'], '通知规则'));
   const templateHost = node('div', { className: 'a-card-body' }, loadingForm(['事件', '格式', '标题', '正文'], '保存模板'));
   const serviceHost = loadingTable(['项目', '状态'], '通知服务状态');
-  let openChannel = () => {}, openRule = () => {}, refreshRecords = () => {}, acceptRecords;
-  let deliverySnapshot;
+  let openChannel = () => {}, openRule = () => {}, refreshRecords = () => {}, refreshTargets = () => {}, acceptRecords;
+  let deliverySnapshot, deliveryError;
   const addChannel = ctx.can('settings.manage') && button('添加渠道', () => openChannel(), { disabled: true });
   const addRule = ctx.can('settings.manage') && button('添加规则', () => openRule(), { disabled: true });
   const recordTable = loadingTable(['时间', '事件', '渠道', '状态', '尝试', '反馈'], '通知投递');
-  const deliveriesRead = readRegion(ctx, '投递记录', signal => ctx.api('/settings/notifications/deliveries', {signal}), value => {
+  const deliveriesRead = readRegion(ctx, '投递记录', async signal => {
+    deliveryError = null;
+    try { return await ctx.api('/settings/notifications/deliveries', {signal}); }
+    catch (error) { deliveryError = error; throw error; }
+  }, value => {
     deliverySnapshot = value;
     if (acceptRecords) acceptRecords(value);
     else recordTable.updateRows(value.map(d => [date(d.created_at), d.event.type, '正在读取渠道…', badge(statusNames[d.status] || d.status), String(d.attempts), d.error || '—']));
@@ -40,7 +44,7 @@ export function notificationsPage(ctx) {
       ctx.can('agents.read') && ctx.api('/agents', { signal }).then(value => { if (ctx.current()) agents = value; }),
       ctx.can('traffic.read') && ctx.api('/traffic-policies', { signal }).then(value => { if (ctx.current()) policies = value; }),
     ]);
-  }, () => { targetsReady = true; if (addRule) addRule.disabled = !ready; });
+  }, () => { targetsReady = true; if (addRule) addRule.disabled = !ready; refreshTargets(); });
   const configRead = readRegion(ctx, '通知配置', signal => ctx.api('/settings/notifications', { signal }), value => { resource = value; initialize(); }, { clear() { ready = false; if (addChannel) addChannel.disabled = true; if (addRule) addRule.disabled = true; channelHost.replaceChildren(); ruleHost.replaceChildren(); templateHost.replaceChildren(); } });
   page.prepend(configRead.element, targetRead.element);
   void targetRead.load();
@@ -49,14 +53,14 @@ export function notificationsPage(ctx) {
   return page;
   function initialize() {
   if (!ctx.current() || !resource) return;
-  openChannel = editChannel; openRule = editRule; refreshRecords = loadRecords;
+  openChannel = editChannel; openRule = editRule; refreshRecords = loadRecords; refreshTargets = draw;
   ready = true; if (addChannel) addChannel.disabled = false; if (addRule) addRule.disabled = !targetsReady;
   let config = resource.configuration;
   const writable = ctx.can("settings.manage");
   const feedback = notice("", "info");
   const channelList = node("div"), ruleList = node("div");
   const records = recordTable;
-  let recordSequence = 0, refreshSequence = 0, templateDirty = false, modalDirty = false, activeModal = null, pollTimer, activeTestID, hasPending = false, recordError = false;
+  let recordSequence = 0, refreshSequence = 0, templateDirty = false, modalDirty = false, activeModal = null, pollTimer, activeTestID, hasPending = false;
   ctx.signal.addEventListener("abort", () => clearTimeout(pollTimer), { once: true });
   const syncDirty = () => { if (ctx.current()) ctx.setDirty(templateDirty || modalDirty); };
   function protectDraft(box, form) {
@@ -211,8 +215,6 @@ export function notificationsPage(ctx) {
       records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? `测试${resource.events[d.event.type] ? ` · ${resource.events[d.event.type]}` : ""}` : resource.events[d.event.type] || d.event.type),
         config.channels.find(c => c.id === d.channel_id)?.name || "已删除", stack(node("div", {}, badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn")),
           d.status === "pending" && d.attempts > 0 ? muted(`重试：${date(d.next_at)}`) : null), String(d.attempts), d.error || "—"]));
-      if (recordError && !activeTestID) feedback.textContent = "";
-      recordError = false;
       const test = result.find(d => d.id === activeTestID);
       if (test) {
         feedback.textContent = test.status === "accepted" ? "测试消息已被平台接受。" : test.status === "failed" || test.status === "canceled" ? `测试${statusNames[test.status]}：${test.error || "请检查渠道配置"}` : test.attempts > 0 && test.status === "pending" ? `测试暂未成功，将于 ${date(test.next_at)} 重试。` : "测试正在投递，请稍候。";
@@ -229,12 +231,13 @@ export function notificationsPage(ctx) {
     try {
       await deliveriesRead.load();
       if (!ctx.current() || sequence !== recordSequence) return;
-      // The region applies this independently of configuration and targets.
+      // Region errors remain visible locally; the existing poll also needs the
+      // failure to keep following a pending delivery until it can be queried.
+      if (deliveryError) throw deliveryError;
     } catch (error) {
       if (!ctx.current() || sequence !== recordSequence) return;
-      if (error.status === 403) { records.updateRows([]); hasPending = false; activeTestID = null; }
+      if ([401, 403, 404].includes(error.status)) { records.updateRows([]); hasPending = false; activeTestID = null; feedback.textContent = ''; }
       else if (hasPending) pollTimer = setTimeout(() => void loadRecords(), 10000);
-      recordError = true; feedback.textContent = `读取投递记录失败：${error.message}`;
     }
   }
   async function refreshConfiguration() {

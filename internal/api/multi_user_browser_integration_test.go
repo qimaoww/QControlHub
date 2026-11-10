@@ -66,6 +66,45 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 			}
 			completeConfigScopeAPITask(t, analyticsScope, db, analyticsDeploy)
 			analyticsXray := enrollAnalyticsXray(t, analyticsScope, db)
+			// These two simulated Agents stay online during the complete browser
+			// journey, including the real 10s notification recovery interval.
+			// Metrics pushes preserve runtime/features and the normal 45s offline
+			// boundary, rather than letting fixture age disable unrelated actions.
+			pumpCtx, stopPump := context.WithCancel(ctx)
+			pumpDone, pumpErrors := make(chan struct{}), make(chan error, 1)
+			go func() {
+				defer close(pumpDone)
+				ticker := time.NewTicker(10 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-pumpCtx.Done():
+						return
+					case <-ticker.C:
+						for _, id := range []string{analyticsAgent.ID, analyticsXray.ID} {
+							agent, err := db.GetAgent(analyticsScope, id)
+							if err == nil {
+								err = db.UpdateAgentMetrics(pumpCtx, id, agent.Metrics)
+							}
+							if err != nil {
+								if pumpCtx.Err() == nil {
+									pumpErrors <- err
+								}
+								return
+							}
+						}
+					}
+				}
+			}()
+			defer func() {
+				stopPump()
+				<-pumpDone
+				select {
+				case err := <-pumpErrors:
+					t.Errorf("simulated Agent metrics: %v", err)
+				default:
+				}
+			}()
 			admin.call("POST", "/users", core.UserRequest{Username: "browser-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			admin.call("POST", "/users", core.UserRequest{Username: "no-permissions", Role: core.RoleUser, Password: "config scope password fixture"}, http.StatusCreated, nil)
 			owned := map[string]string{}

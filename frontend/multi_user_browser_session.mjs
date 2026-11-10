@@ -215,7 +215,7 @@ try {
   record(`${mode}: styled startup, reduced motion, animation cleanup, resource failure and keyboard retry`);
   record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
 
-  await runStructureLoadingBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, record });
+  await runStructureLoadingBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, record });
 
   await runAnalyticsBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, api, record });
 
