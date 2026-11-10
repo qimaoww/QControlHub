@@ -16,13 +16,8 @@ func supportedExistingService(engine core.Engine, service string) bool {
 }
 
 func supportedExistingServiceForManager(manager *ServiceManager, engine core.Engine, service string) bool {
-	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
-		return (engine == core.EngineXray && service == "xray") ||
-			(engine == core.EngineSingBox && (service == "sing-box" || service == "singbox"))
-	}
-	return (engine == core.EngineXray && service == "xray.service") ||
-		(engine == core.EngineShadowsocksRust && service == "shadowsocks-rust.service") ||
-		(engine == core.EngineSingBox && (service == "sing-box.service" || service == "singbox.service"))
+	return engine.Valid() && safeServiceName(service) && !strings.HasPrefix(service, "qagent-")
+
 }
 
 func validatePrivilegedExecutable(path string) error {
@@ -75,70 +70,14 @@ func existingServiceBinary(spec EngineSpec) string {
 // copied into the managed core namespace.
 func validateExistingServiceExecutable(spec EngineSpec) error {
 	serviceBinary := existingServiceBinary(spec)
-	if strings.ContainsAny(serviceBinary+spec.Binary, " \t\r\n") {
-		return errors.New("service executable mapping contains unsupported whitespace")
-	}
-	if serviceBinary == spec.Binary {
-		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
-			return fmt.Errorf("service executable parent chain: %w", err)
-		}
-		return validateExistingCoreExecutable(spec.Binary)
-	}
-	if !filepath.IsAbs(serviceBinary) {
-		return errors.New("service executable path is not absolute")
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(serviceBinary)); err != nil {
-		return fmt.Errorf("service executable parent chain: %w", err)
-	}
-	serviceInfo, err := os.Lstat(serviceBinary)
+	resolved, err := resolveDiscoveredExistingBinary(serviceBinary)
 	if err != nil {
 		return err
 	}
-	if serviceInfo.Mode()&os.ModeSymlink == 0 {
-		return errors.New("alternate service executable must be a symlink")
+	if resolved != spec.Binary {
+		return errors.New("service executable no longer resolves to the discovered core")
 	}
-	resolved, err := os.Readlink(serviceBinary)
-	if err != nil {
-		return err
-	}
-	if !filepath.IsAbs(resolved) {
-		resolved = filepath.Join(filepath.Dir(serviceBinary), resolved)
-	}
-	resolved = filepath.Clean(resolved)
-	resolvedInfo, err := os.Lstat(resolved)
-	if err != nil {
-		return err
-	}
-	if resolvedInfo.Mode()&os.ModeSymlink != 0 {
-		return errors.New("service executable must use at most one symlink")
-	}
-	if resolved == spec.Binary {
-		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
-			return fmt.Errorf("real core parent chain: %w", err)
-		}
-		return validateExistingCoreExecutable(spec.Binary)
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(resolved)); err != nil {
-		return fmt.Errorf("forwarder parent chain: %w", err)
-	}
-	if err := validatePrivilegedExecutable(resolved); err != nil {
-		return fmt.Errorf("forwarder script: %w", err)
-	}
-	contents, err := os.ReadFile(resolved)
-	if err != nil {
-		return err
-	}
-	if len(contents) > 1024 {
-		return errors.New("forwarder script exceeds the supported fixed form")
-	}
-	want := "#!/bin/sh\nexec " + spec.Binary + " \"$@\"\n"
-	if string(contents) != want {
-		return errors.New("service wrapper is not the supported fixed exec forwarder")
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
-		return fmt.Errorf("real core parent chain: %w", err)
-	}
-	return validateExistingCoreExecutable(spec.Binary)
+	return nil
 }
 
 func validateNativeCoreExecutable(path string) error {
@@ -378,11 +317,13 @@ func rootOwnedRootGroupDirectory(info os.FileInfo) bool {
 }
 
 // validateExistingSpecPaths checks the pure structural path constraints of an
-// existing core mapping: absolute executable and configuration paths, no
-// whitespace anywhere, and an absolute configuration/working directory for
-// sing-box. It is independent of the running UID so the same fail-closed rule
+// existing core mapping: absolute source paths outside the managed instance
+// namespace. It is independent of the running UID so the same fail-closed rule
 // can be asserted by tests running as root or as an unprivileged CI user.
 func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
+	if isManagedCoreSource(spec) {
+		return errors.New("managed core instances cannot be imported as external services")
+	}
 	// A directory-authoritative mapping carries no main configuration file, so
 	// the confdir stands in as the single required absolute source.
 	configPathMapped := filepath.IsAbs(spec.ConfigPath) ||
@@ -396,8 +337,8 @@ func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
 		"working directory": spec.WorkingDirectory,
 		"ACL":               spec.ACLPath,
 	} {
-		if strings.ContainsAny(path, " \t\r\n") {
-			return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
+		if strings.ContainsAny(path, "\x00\r\n") {
+			return fmt.Errorf("existing %s %s path contains control characters", engine, label)
 		}
 	}
 	// Xray reads a confdir via -confdir and sing-box via -C; both are supported.
@@ -405,10 +346,10 @@ func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
 	if spec.ConfigDirectory != "" && !filepath.IsAbs(spec.ConfigDirectory) {
 		return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
 	}
-	if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
+	if spec.WorkingDirectory != "" && !filepath.IsAbs(spec.WorkingDirectory) {
 		return fmt.Errorf("existing %s working directory is unsupported or not absolute", engine)
 	}
-	if spec.ACLPath != "" && (engine != core.EngineShadowsocksRust || spec.ACLPath != filepath.Join(filepath.Dir(spec.ConfigPath), "block_cn.acl")) {
+	if spec.ACLPath != "" && (engine != core.EngineShadowsocksRust || !filepath.IsAbs(spec.ACLPath)) {
 		return fmt.Errorf("existing %s ACL path is unsupported", engine)
 	}
 	if engine == core.EngineShadowsocksRust && spec.ConfigDirectory != "" {

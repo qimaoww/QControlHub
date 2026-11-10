@@ -30,13 +30,17 @@ func TestImportDiagnosticsBrowserSessions(t *testing.T) {
 		t.Run(fmt.Sprintf("mobile=%t", mobile), func(t *testing.T) {
 			db, ctx, _, owner, _ := newConfigScopeAPIFixtureWithin(t, 18*time.Minute)
 			node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "Import boundary", core.EngineXray)
-			features := append(node.Features, core.AgentFeatureImportIsolation)
+			features := append(node.Features, core.AgentFeatureImportIsolation, core.AgentFeatureImportDependencies)
 			heartbeat := func(available bool) error {
 				reason := ""
 				if !available {
 					reason = "检测到活动的 xray 服务，但配置源未通过受保护路径与真实内核校验：external service config permission denied"
 				}
-				return db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, Version: "26.2.6", ServiceStatus: "inactive", ExistingConfigAvailable: available, ExistingConfigUnsupportedReason: reason}}})
+				sources := []core.ExistingCoreSource{}
+				if available {
+					sources = []core.ExistingCoreSource{{ID: strings.Repeat("a", 64), Service: "自定义 service-one.service", ConfigPath: "/srv/配置 one/config.json", Status: "active"}, {ID: strings.Repeat("b", 64), Service: "service-two.service", ConfigPath: "/opt/second/config.json", Status: "inactive"}}
+				}
+				return db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, Version: "26.2.6", ServiceStatus: "inactive", ExistingConfigAvailable: available, ExistingConfigUnsupportedReason: reason, ExistingSources: sources}}})
 			}
 			if err := heartbeat(false); err != nil {
 				t.Fatal(err)
@@ -65,6 +69,8 @@ func TestImportDiagnosticsBrowserSessions(t *testing.T) {
 						result := core.TaskResultRequest{LeaseID: task.LeaseID, Success: true, Output: "托管配置已校验并部署。", TrafficSettled: true}
 						switch task.Action {
 						case core.ActionReadConfig:
+							result.ImportSourceDigest = strings.Repeat("d", 64)
+							result.ImportDependencies = []core.ImportDependency{{Field: "routing.rules[0].ip[0]", Source: "/srv/规则 集/地区 one.dat", Resolved: "/srv/archive/地区 one.dat", Destination: "/usr/local/lib/qagent/cores/imports/" + strings.Repeat("e", 64) + "/regions.dat", Kind: "input"}}
 							result.Output = `{"inbounds":[{"tag":"external-source","listen":"127.0.0.1","port":21002,"protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`
 						case core.ActionImportExisting, core.ActionValidate:
 							result.Success = false

@@ -170,7 +170,7 @@ func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
 	script := string(contents) + string(mapping)
 	for _, required := range []string{
 		"discover_existing_xray", "discover_existing_singbox", "systemctl is-active --quiet",
-		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
+		"existing-core-mapping.sh", `"$work_dir/qagent" discover-existing`,
 		"rc-service \"$service\" status", "openrc_supervised_child_pid",
 		"QCH_SERVICE_MANAGER", "apk add --no-cache", "deploy/openrc",
 		"install_nftables", "apt-get install -y --no-install-recommends nftables",

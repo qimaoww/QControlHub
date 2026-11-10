@@ -22,7 +22,9 @@ async function configFixture({ writable = true, executable = false, installed = 
     can_manage: owned,
     shared_allocation: owned ? undefined : { ports:[21001], limit_bytes:1024, used_bytes:0 },
     capabilities: ["mihomo"], features: ["managed-config-read-v1", "independent-egress-v1"],
-    runtime: { mihomo: { installed, existing_config_available: true } } };
+    runtime: { mihomo: { installed, existing_config_available: true, existing_sources: [
+      {id:"a".repeat(64),service:"private-host-source.service",config_path:"/srv/private-host/config.yaml",status:"active"},
+    ] } } };
   const state = { route: "live-config", navigationEpoch: 1, session: { role: "user", user_id: "alice" },
     data: { liveAgent: agent.id, liveEngine: "mihomo", liveSources: {
       "shared|mihomo": { content: "mixed-port: 21002\n# other-user-runtime-secret\n" },
@@ -35,6 +37,8 @@ async function configFixture({ writable = true, executable = false, installed = 
   const api = async (path, options = {}) => {
     records.calls.push(path);
     if (path === "/agents") return [agent];
+    if (path === "/preferences/node-order") return {ids:[agent.id],revision:1};
+    if (path === "/agent-access") return {shares:[],isolated:true,revision:1};
     if (path.endsWith("/workspace")) return { agent, config: workspace, deployment:{state:"pending",service_status:"unknown"} };
     if (path === "/configs") return archives;
     if (path.includes("/revisions")) return [];
@@ -64,7 +68,7 @@ async function configFixture({ writable = true, executable = false, installed = 
     startAnalytics({app:document.querySelector("#config-scope-test"),session});
     await waitFor(()=>document.querySelector(".a-main textarea[name=content],.a-main [aria-label=配置档案]")&&!document.querySelector(".a-main [aria-busy=true]"),"actual analytics workspace did not load");
   };
-  const pages = {liveConfig:()=>mount("#live-config?agent=shared&engine=mihomo"),archiveConfigs:()=>mount("#archive-config")};
+  const pages = {liveConfig:(source="")=>mount(`#live-config?agent=shared&engine=mihomo${source?`&source=${source}`:""}`),archiveConfigs:()=>mount("#archive-config")};
   await pages.liveConfig();
   const dispose = () => {window.dispatchEvent(new Event("pagehide"));document.querySelectorAll("dialog.a-dialog").forEach(box=>box.close());styles.remove();globalThis.fetch=nativeFetch;};
   return { state, pages, records, archives, dispose };
@@ -91,7 +95,11 @@ export async function testConfigScopeRuntime(preview = false) {
   assert(document.querySelector('.a-main').textContent.includes("本人端口 · 21001"),"shared workspace lacks recipient port scope");
   assert(document.querySelector('a[href="#settings-node-shared"]')?.textContent==="实例管理","shared workspace lacks instance management");
   assert(!button("读取托管配置")&&!button("读取系统配置"),"shared borrower was offered host snapshots");
-  assert(!button("启动")&&!button("重启"),"lifecycle controls leaked into source editing");shared.dispose();
+  assert(!button("启动")&&!button("重启"),"lifecycle controls leaked into source editing");
+  await shared.pages.liveConfig("import");
+  assert([...document.querySelector('.a-target-form [name="source"]').options].every(option=>option.value==="personal"),"shared recipient can select host discovery through a direct link");
+  assert(!document.querySelector('.a-main').textContent.includes("private-host-source")&&!document.querySelector('.a-main').textContent.includes("/srv/private-host"),"shared page exposes host discovery details");
+  assert(!shared.records.tasks.length&&!shared.records.calls.includes("/tasks"),"shared page created a host discovery task");shared.dispose();
   const owner=await configFixture({owned:true,executable:true});
   assert([...document.querySelector('.a-target-form [name="source"]').options].some(option=>option.value==="managed")&&[...document.querySelector('.a-target-form [name="source"]').options].some(option=>option.value==="import"),"owner cannot explicitly select authorized host sources");
   assert(!owner.records.tasks.length&&!owner.records.calls.includes("/tasks"),"personal source auto-read a host snapshot");owner.dispose();

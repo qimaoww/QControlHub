@@ -135,6 +135,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureProcessTimeZone,
 		core.AgentFeatureManagedConfigRead,
 		core.AgentFeatureImportIsolation,
+		core.AgentFeatureImportDependencies,
 		core.AgentFeatureConfigFiles,
 		core.AgentFeaturePairedConfigFiles,
 		core.AgentFeaturePresetAutoInstall,

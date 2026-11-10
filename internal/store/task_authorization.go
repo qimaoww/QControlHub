@@ -44,6 +44,11 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 		if err != nil {
 			return err
 		}
+		task.ImportSourceDigest = core.ImportSnapshotDigest(content)
+		task.ExistingSourceID = core.ImportSnapshotSource(content)
+		if (task.ExistingSourceID != "" || task.ImportSourceDigest != "") && !containsFeature(features, core.AgentFeatureImportDependencies) {
+			return fmt.Errorf("Agent 不再支持所选来源与依赖快照，任务无法安全分派；请升级 Agent 后重新读取")
+		}
 		task.CertificateSync = core.IsCertificateSyncSnapshot(content)
 		task.ManagedTLSCleanup = core.RequiresManagedTLSCleanup(content)
 		task.ConfigContent, task.TLSFrontends, err = core.DecodeExecutionSnapshot(content)

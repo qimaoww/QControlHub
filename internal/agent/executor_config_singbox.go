@@ -61,19 +61,23 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 		}
 		return mergeExistingConfigurationDirectory(spec, "")
 	}
-	primary, err := readConfigurationFile(spec.ConfigPath)
+	primary, err := readImportConfigurationFile(spec.ConfigPath)
 	if err != nil {
 		return "", "", err
 	}
 	if spec.ConfigDirectory == "" {
-		digest := sha256.Sum256([]byte(spec.ConfigPath + "\x00" + primary))
+		identity, err := importFileIdentity(spec.ConfigPath)
+		if err != nil {
+			return "", "", err
+		}
+		digest := sha256.Sum256([]byte(spec.ConfigPath + "\x00" + primary + "\x00" + identity))
 		return primary, hex.EncodeToString(digest[:]), nil
 	}
 	return mergeExistingConfigurationDirectory(spec, primary)
 }
 
 func mergeExistingConfigurationDirectory(spec EngineSpec, primary string) (string, string, error) {
-	if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
+	if err := validateImportDirectory(spec.ConfigDirectory); err != nil {
 		return "", "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
 	}
 	entries, err := os.ReadDir(spec.ConfigDirectory)
@@ -86,6 +90,9 @@ func mergeExistingConfigurationDirectory(spec EngineSpec, primary string) (strin
 	// primary at all is directory-authoritative for the same reason.
 	directoryPrimary := spec.ConfigPath == "" ||
 		filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json"))
+	if len(entries) > 4096 {
+		return "", "", errors.New("configuration directory exceeds 4096 entries")
+	}
 	sources := make([]existingConfigSource, 0, len(entries)+1)
 	if !directoryPrimary {
 		sources = append(sources, existingConfigSource{path: spec.ConfigPath, content: primary})
@@ -94,11 +101,11 @@ func mergeExistingConfigurationDirectory(spec EngineSpec, primary string) (strin
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+		if entry.IsDir() {
 			return "", "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink JSON file", entry.Name())
 		}
 		path := filepath.Join(spec.ConfigDirectory, entry.Name())
-		contents, err := readConfigurationFile(path)
+		contents, err := readImportConfigurationFile(path)
 		if err != nil {
 			return "", "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
 		}
@@ -116,6 +123,11 @@ func mergeExistingConfigurationDirectory(spec EngineSpec, primary string) (strin
 		digest.Write([]byte(source.path))
 		digest.Write([]byte{0})
 		digest.Write([]byte(source.content))
+		identity, err := importFileIdentity(source.path)
+		if err != nil {
+			return "", "", err
+		}
+		digest.Write([]byte(identity))
 		digest.Write([]byte{0})
 		decoded, err := decodeExtendedJSON(source.content)
 		if err != nil {

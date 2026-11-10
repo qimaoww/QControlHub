@@ -126,7 +126,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	// normal save/deploy must never silently adopt a system service.
 	for _, required := range []string{
 		`if (values.intent === "import")`, `请先读取可导入的系统服务配置`,
-		`导入此配置并迁移现有系统服务`, `canReadHost`, `ctx.can("host.manage", agent)`,
+		`导入此配置并迁移${selectedSource ? " " + selectedSource.service : "现有系统服务"}`, `canReadHost`, `ctx.can("host.manage", agent)`,
 		`runtime.existing_config_available && canReadHost`,
 	} {
 		if !strings.Contains(content, required) {

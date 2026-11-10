@@ -230,6 +230,14 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		LeaseID:         task.LeaseID, Success: executionErr == nil, Output: output,
 		IPQuality: ipQuality,
 	}
+	if c.executor != nil && task.Action == core.ActionReadConfig && executionErr == nil {
+		if digest, ok := c.executor.importSnapshotDigests.LoadAndDelete(task.ID); ok {
+			if plan, ok := digest.(coreImportPlan); ok {
+				result.ImportSourceDigest = plan.snapshotDigest
+				result.ImportDependencies = plan.dependencies
+			}
+		}
+	}
 	if task.SharedInstance && c.executor != nil && (task.Action.ChangesInstance() || task.Action == core.ActionStatus) {
 		if executionErr != nil && task.Action.ChangesInstance() {
 			spec, err := sharedInstanceSpec(task.Engine, c.executor.Specs[task.Engine], task.SharedTrafficID, c.executor.serviceManager().Kind())

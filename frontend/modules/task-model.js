@@ -70,6 +70,14 @@ export function taskRenderSignature(items, agents) {
 export function diagnoseTask(task) {
     if (task.status !== "failed") return null;
     if (task.action === "panel-failure") return {title:"面板操作未完成",advice:"此记录未进入 Agent 执行；请根据诊断修正后重新操作。"};
+    if (task.action === "import-existing") {
+      // The dialog already shows the failure and complete stage diagnostics.
+      // Add only a recovery result supported by the returned error.
+      const raw = String(task.error || "");
+      if (/rollback failed|回滚失败/i.test(raw)) return {rollback:"回滚失败，请核对节点服务状态后处理。"};
+      if (/previous configuration was restored|newly created configuration was removed/i.test(raw)) return {rollback:"已恢复此前配置，服务结果见节点诊断。"};
+      return null;
+    }
     const error = String(task.error || "").toLowerCase();
     if (error.includes("[阶段:") || error.includes("托管 tls") || error.includes("caddy")) {
       const raw = String(task.error || "");

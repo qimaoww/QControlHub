@@ -18,7 +18,7 @@ func (s *Store) ReadWorkspaceTaskConfigSnapshot(ctx context.Context, taskID, age
 	return s.readTaskConfigSnapshot(ctx, taskID, agentID, engine, true)
 }
 
-func (s *Store) readTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine, workspace bool) (string, error) {
+func (s *Store) readTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine, workspace bool, raw ...bool) (string, error) {
 	if err := requireConfigSnapshotAccess(ctx, s.pool, agentID, engine); err != nil {
 		return "", err
 	}
@@ -52,5 +52,22 @@ func (s *Store) readTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 	if err != nil {
 		return "", err
 	}
-	return s.decryptContent(content)
+	content, err = s.decryptContent(content)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) > 0 && raw[0] {
+		return content, nil
+	}
+	content, _, err = core.DecodeExecutionSnapshot(content)
+	return content, err
+}
+
+func (s *Store) ReadTaskSnapshotDetails(ctx context.Context, taskID, agentID string, engine core.Engine) (string, []core.ImportDependency, error) {
+	snapshot, err := s.readTaskConfigSnapshot(ctx, taskID, agentID, engine, false, true)
+	if err != nil {
+		return "", nil, err
+	}
+	content, _, err := core.DecodeExecutionSnapshot(snapshot)
+	return content, core.ImportSnapshotDependencies(snapshot), err
 }

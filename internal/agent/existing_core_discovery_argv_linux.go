@@ -34,7 +34,11 @@ func managedCoreAssetName(engine core.Engine) string {
 }
 
 func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, string, bool) {
-	return matchDiscoveredExistingArgv(engine, executable, strings.Fields(argv), configs)
+	fields, err := splitServiceWords(argv)
+	if err != nil {
+		return "", "", "", false
+	}
+	return matchDiscoveredExistingArgv(engine, executable, fields, configs)
 }
 
 // matchDiscoveredExistingArgv maps one already-split command line onto a
@@ -47,21 +51,26 @@ func matchDiscoveredExistingArgv(engine core.Engine, executable string, fields, 
 	if !ok {
 		return "", "", "", false
 	}
-	if configPath == "" {
-		if configDirectory == "" {
-			return "", "", "", false
-		}
-		return "", configDirectory, workDirectory, true
-	}
-	for _, candidate := range configs {
-		if configPath == candidate {
-			return configPath, configDirectory, workDirectory, true
-		}
-	}
-	return "", "", "", false
+	return configPath, configDirectory, workDirectory, true
+
 }
 
 func parseExistingArgv(engine core.Engine, executable string, fields []string) (string, string, string, bool) {
+	if file, dir, work, ok := parseLegacyExistingArgv(engine, executable, fields); ok {
+		return file, dir, work, true
+	}
+	spec, err := parseCoreServiceCommand(engine, executable, fields, "/")
+	if err != nil {
+		return "", "", "", false
+	}
+	work := spec.WorkingDirectory
+	if work == "/" {
+		work = ""
+	}
+	return spec.ConfigPath, spec.ConfigDirectory, work, true
+}
+
+func parseLegacyExistingArgv(engine core.Engine, executable string, fields []string) (string, string, string, bool) {
 	if len(fields) < 2 || fields[0] != executable {
 		return "", "", "", false
 	}
@@ -167,67 +176,48 @@ func safeExistingAbsolutePath(path string) bool {
 }
 
 func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {
-	if !filepath.IsAbs(serviceBinary) || strings.ContainsAny(serviceBinary, " \t\r\n") {
-		return "", errors.New("service executable path is unsafe")
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(serviceBinary)); err != nil {
-		return "", err
-	}
-	info, err := os.Lstat(serviceBinary)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		if err := validateExistingCoreExecutable(serviceBinary); err != nil {
-			return "", err
-		}
+	if validateExistingCoreExecutable(serviceBinary) == nil && validateProtectedDirectoryChain(filepath.Dir(serviceBinary)) == nil {
 		return serviceBinary, nil
 	}
-	target, err := os.Readlink(serviceBinary)
+	real, err := resolveImportSource(serviceBinary)
 	if err != nil {
 		return "", err
 	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(serviceBinary), target)
+	if err := validateExistingCoreExecutable(real); err == nil {
+		return real, nil
 	}
-	target = filepath.Clean(target)
-	targetInfo, err := os.Lstat(target)
+	info, err := os.Stat(real)
+	if err != nil || info.Size() > 4096 {
+		return "", errors.New("service wrapper exceeds the supported limit")
+	}
+	if err := validatePrivilegedExecutable(real); err != nil {
+		return "", err
+	}
+	data, _, err := readImportSource(real, 4096)
 	if err != nil {
 		return "", err
 	}
-	if targetInfo.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("service executable uses more than one symlink")
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(target)); err != nil {
-		return "", err
-	}
-	if err := validateExistingCoreExecutable(target); err == nil {
-		return target, nil
-	}
-	contents, err := os.ReadFile(target)
-	if err != nil || len(contents) > 1024 {
-		return "", errors.New("service executable wrapper is unsupported")
-	}
-	lines := strings.Split(string(contents), "\n")
+	lines := strings.Split(string(data), "\n")
 	if len(lines) != 3 || lines[0] != "#!/bin/sh" || lines[2] != "" {
-		return "", errors.New("service executable wrapper is not the fixed two-line form")
+		return "", errors.New("service wrapper must be a fixed exec forwarder")
 	}
-	const prefix = "exec "
 	const suffix = " \"$@\""
-	if !strings.HasPrefix(lines[1], prefix) || !strings.HasSuffix(lines[1], suffix) {
-		return "", errors.New("service executable wrapper is not an unconditional exec forwarder")
+	if !strings.HasPrefix(lines[1], "exec ") || !strings.HasSuffix(lines[1], suffix) {
+		return "", errors.New("service wrapper must unconditionally forward its arguments")
 	}
-	realBinary := strings.TrimSuffix(strings.TrimPrefix(lines[1], prefix), suffix)
-	if !filepath.IsAbs(realBinary) || strings.ContainsAny(realBinary, " \t\r\n") {
-		return "", errors.New("forwarded core path is unsafe")
+	command := strings.TrimSuffix(strings.TrimPrefix(lines[1], "exec "), suffix)
+	words, err := splitServiceWords(command)
+	if err != nil || len(words) != 1 || strings.ContainsAny(command, "$`;") {
+		return "", errors.New("service wrapper has an unverified command")
 	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(realBinary)); err != nil {
+	target, err := resolveImportSource(words[0])
+	if err != nil {
 		return "", err
 	}
-	if err := validateExistingCoreExecutable(realBinary); err != nil {
+	if err := validateExistingCoreExecutable(target); err != nil {
 		return "", err
 	}
-	return realBinary, nil
+	return target, nil
 }
 
 func stringInSlice(value string, values []string) bool {

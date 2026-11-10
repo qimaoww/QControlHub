@@ -24,12 +24,17 @@ var (
 )
 
 type coreImportResource struct {
+	field       string
+	identity    string
+	limit       int64
 	source      string
 	destination string
 	digest      string
 }
 
 type coreImportPlan struct {
+	dependencies     []core.ImportDependency
+	snapshotDigest   string
 	managedContent   string
 	resourceRoot     string
 	stateRoot        string
@@ -79,6 +84,22 @@ func prepareOUSBSingBoxImport(ctx context.Context, manager *ServiceManager, exis
 		return coreImportPlan{}, err
 	}
 	return plan, nil
+}
+
+// Keep the established OU-SB helper relationship when the generic resource
+// planner replaces its former fixed certificate-name mapping. A different
+// service using the same certificate does not acquire control of this helper.
+func inspectImportAuxiliary(ctx context.Context, manager *ServiceManager, engine core.Engine, existing EngineSpec, plan coreImportPlan) (coreMigrationAuxiliaryService, error) {
+	if engine != core.EngineSingBox || filepath.Clean(existing.ConfigPath) != filepath.Clean(ouSBConfigPath) ||
+		(existing.Service != "sing-box.service" && existing.Service != "sing-box") {
+		return coreMigrationAuxiliaryService{}, nil
+	}
+	for _, dependency := range plan.dependencies {
+		if pathWithin(dependency.Source, ouSBCertificateRoot) || pathWithin(dependency.Resolved, ouSBCertificateRoot) {
+			return inspectOUSBAuxiliaryService(ctx, manager)
+		}
+	}
+	return coreMigrationAuxiliaryService{}, nil
 }
 
 func rewriteOUSBSingBoxResources(content string, replacements map[string]string) (string, map[string]bool, error) {
@@ -149,6 +170,19 @@ func (plan *coreImportPlan) stage(identity commandIdentity) error {
 	if stateRoot == "" {
 		stateRoot = ouSBManagedStateRoot
 	}
+	if _, err := os.Lstat(stateRoot); errors.Is(err, os.ErrNotExist) {
+		if err := validateProtectedDirectoryChain(filepath.Dir(stateRoot)); err != nil {
+			return err
+		}
+		if err := os.Mkdir(stateRoot, 0o750); err != nil {
+			return err
+		}
+		if err := os.Chown(stateRoot, 0, int(identity.gid)); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
 	if _, err := os.Lstat(plan.resourceRoot); errors.Is(err, os.ErrNotExist) {
 		plan.createdDirectory = true
 	} else if err != nil {
@@ -160,7 +194,7 @@ func (plan *coreImportPlan) stage(identity commandIdentity) error {
 	for _, resource := range plan.resources {
 		// Reuse is read-only. A prior migration or an independently running
 		// managed service may already reference this content-addressed path.
-		digest, present, err := protectedCoreMigrationFileDigest(resource.source, ouSBResourceLimit)
+		digest, present, err := protectedCoreMigrationFileDigest(resource.source, importResourceLimit(resource))
 		if err != nil || !present {
 			return fmt.Errorf("read protected import source: %w", errors.Join(err, errors.New("resource unavailable")))
 		}
@@ -176,7 +210,7 @@ func (plan *coreImportPlan) stage(identity commandIdentity) error {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err := copyProtectedImportResource(resource.source, resource.destination, resource.digest, identity); err != nil {
+		if err := copyProtectedImportResource(resource.source, resource.destination, resource.digest, identity, importResourceLimit(resource)); err != nil {
 			return err
 		}
 		plan.createdResources = append(plan.createdResources, resource)
@@ -189,7 +223,7 @@ func (plan *coreImportPlan) cleanup() error {
 		return nil
 	}
 	for _, resource := range plan.createdResources {
-		digest, present, err := protectedCoreMigrationFileDigest(resource.destination, ouSBResourceLimit)
+		digest, present, err := protectedCoreMigrationFileDigest(resource.destination, importResourceLimit(resource))
 		if err != nil {
 			return err
 		}
@@ -214,7 +248,7 @@ func validateImportResourceReuse(resource coreImportResource, info os.FileInfo, 
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o640 || !known || uid != 0 || gid != int(identity.gid) {
 		return errors.New("existing imported resource has unsafe ownership or permissions")
 	}
-	digest, present, err := protectedCoreMigrationFileDigest(resource.destination, ouSBResourceLimit)
+	digest, present, err := protectedCoreMigrationFileDigest(resource.destination, importResourceLimit(resource))
 	if err != nil {
 		return err
 	}
@@ -275,12 +309,16 @@ func validateManagedStateRoot(path string, identity commandIdentity) error {
 	return validateProtectedDirectoryChain(filepath.Dir(path))
 }
 
-func copyProtectedImportResource(source, destination, expectedDigest string, identity commandIdentity) error {
+func copyProtectedImportResource(source, destination, expectedDigest string, identity commandIdentity, limits ...int64) error {
+	limit := int64(ouSBResourceLimit)
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
 	info, err := os.Lstat(source)
 	if err != nil {
 		return fmt.Errorf("inspect protected import resource %s: %w", source, err)
 	}
-	input, _, err := openProtectedCoreMigrationFile(source, info, ouSBResourceLimit)
+	input, _, err := openProtectedCoreMigrationFile(source, info, limit)
 	if err != nil {
 		return fmt.Errorf("open protected import resource %s: %w", source, err)
 	}
@@ -300,8 +338,8 @@ func copyProtectedImportResource(source, destination, expectedDigest string, ide
 		return err
 	}
 	digest := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, ouSBResourceLimit+1))
-	if copyErr == nil && (written <= 0 || written > ouSBResourceLimit) {
+	written, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, limit+1))
+	if copyErr == nil && (written <= 0 || written > limit) {
 		copyErr = errors.New("protected import resource is empty or exceeds the supported limit")
 	}
 	if copyErr == nil && expectedDigest != "" && hex.EncodeToString(digest.Sum(nil)) != expectedDigest {

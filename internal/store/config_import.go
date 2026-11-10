@@ -85,10 +85,12 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if !runtime[engine].ExistingConfigAvailable {
 		return core.Task{}, fmt.Errorf("%w: 没有待导入的系统服务来源", ErrConflict)
 	}
-	var content string
+	var content, sourceDigest, sourceID string
 	if retryID != "" {
 		content, err = s.decryptContent(retrySnapshot)
 		if err == nil {
+			sourceDigest = core.ImportSnapshotDigest(content)
+			sourceID = core.ImportSnapshotSource(content)
 			content, _, err = core.DecodeExecutionSnapshot(content)
 		}
 	} else {
@@ -98,8 +100,16 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 			content, err = s.decryptContent(content)
 		}
 	}
+	if retryID == "" && err == nil {
+		sourceDigest = core.ImportSnapshotDigest(content)
+		sourceID = core.ImportSnapshotSource(content)
+		content, _, err = core.DecodeExecutionSnapshot(content)
+	}
 	if err != nil {
 		return core.Task{}, mapError(err)
+	}
+	if containsFeature(features, core.AgentFeatureImportDependencies) && sourceDigest == "" {
+		return core.Task{}, fmt.Errorf("%w: 请重新读取系统服务及依赖后再确认导入", ErrConflict)
 	}
 	if err = core.ValidateConfig(engine, content); err != nil {
 		return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -128,7 +138,7 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if err != nil {
 		return core.Task{}, err
 	}
-	snapshot, err := core.EncodeExecutionSnapshot(content, nil, false, false)
+	snapshot, err := core.EncodeImportSnapshot(content, sourceDigest, sourceID)
 	if err != nil {
 		return core.Task{}, err
 	}

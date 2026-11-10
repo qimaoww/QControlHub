@@ -163,11 +163,14 @@ func ValidateACMEEmail(email string) error {
 }
 
 type executionSnapshot struct {
-	Version           int           `json:"qcontrolhub_deployment"`
-	Content           string        `json:"content"`
-	Frontends         []TLSFrontend `json:"tls_frontends"`
-	CertificateSync   bool          `json:"certificate_sync,omitempty"`
-	ManagedTLSCleanup bool          `json:"managed_tls_cleanup,omitempty"`
+	ImportDependencies []ImportDependency `json:"import_dependencies,omitempty"`
+	ExistingSourceID   string             `json:"existing_source_id,omitempty"`
+	ImportSourceDigest string             `json:"import_source_digest,omitempty"`
+	Version            int                `json:"qcontrolhub_deployment"`
+	Content            string             `json:"content"`
+	Frontends          []TLSFrontend      `json:"tls_frontends"`
+	CertificateSync    bool               `json:"certificate_sync,omitempty"`
+	ManagedTLSCleanup  bool               `json:"managed_tls_cleanup,omitempty"`
 }
 
 func EncodeExecutionSnapshot(content string, frontends []TLSFrontend, certificateSync ...bool) (string, error) {
@@ -213,4 +216,91 @@ func DecodeExecutionSnapshot(content string) (string, []TLSFrontend, error) {
 		}
 	}
 	return snapshot.Content, snapshot.Frontends, nil
+}
+
+// Import provenance travels only in the encrypted execution envelope. The
+// user-visible configuration remains native core configuration.
+func EncodeImportSnapshot(content, digest string, sourceIDs ...string) (string, error) {
+	sourceID := ""
+	if len(sourceIDs) > 0 {
+		sourceID = sourceIDs[0]
+	}
+	if sourceID != "" && !ValidExistingSourceID(sourceID) {
+		return "", fmt.Errorf("invalid existing source identity")
+	}
+	if digest == "" && sourceID == "" {
+		return EncodeExecutionSnapshot(content, nil)
+	}
+	if digest != "" && len(digest) != 64 {
+		return "", fmt.Errorf("invalid import source digest")
+	}
+	for _, r := range digest {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return "", fmt.Errorf("invalid import source digest")
+		}
+	}
+	data, err := json.Marshal(executionSnapshot{Version: 1, Content: content, ImportSourceDigest: digest, ExistingSourceID: sourceID})
+	return "qcontrolhub-deployment-v1\n" + string(data), err
+}
+
+func ImportSnapshotDigest(content string) string {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	if !strings.HasPrefix(content, prefix) {
+		return ""
+	}
+	var snapshot executionSnapshot
+	if json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) != nil || snapshot.Version != 1 {
+		return ""
+	}
+	return snapshot.ImportSourceDigest
+}
+
+func ValidExistingSourceID(id string) bool {
+	if len(id) != 64 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+func ImportSnapshotSource(content string) string {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	if !strings.HasPrefix(content, prefix) {
+		return ""
+	}
+	var snapshot executionSnapshot
+	if json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) != nil || snapshot.Version != 1 {
+		return ""
+	}
+	return snapshot.ExistingSourceID
+}
+
+func WithImportDependencies(content string, dependencies []ImportDependency) (string, error) {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	if len(dependencies) > 256 {
+		return "", fmt.Errorf("import dependency limit exceeded")
+	}
+	var snapshot executionSnapshot
+	if !strings.HasPrefix(content, prefix) || json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) != nil || snapshot.Version != 1 {
+		return "", fmt.Errorf("invalid import snapshot")
+	}
+	snapshot.ImportDependencies = dependencies
+	for _, item := range dependencies {
+		if len(item.Field) > 2048 || len(item.Source) > 4096 || len(item.Resolved) > 4096 || len(item.Destination) > 4096 {
+			return "", fmt.Errorf("import dependency field exceeds limit")
+		}
+	}
+	data, err := json.Marshal(snapshot)
+	return prefix + string(data), err
+}
+func ImportSnapshotDependencies(content string) []ImportDependency {
+	const prefix = "qcontrolhub-deployment-v1\n"
+	var snapshot executionSnapshot
+	if !strings.HasPrefix(content, prefix) || json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &snapshot) != nil || snapshot.Version != 1 {
+		return nil
+	}
+	return snapshot.ImportDependencies
 }

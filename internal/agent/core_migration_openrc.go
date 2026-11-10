@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -417,11 +418,16 @@ func openRCProcessArgvMatches(engine core.Engine, existing EngineSpec, argv []st
 	if len(argv) == 0 || (argv[0] != existingServiceBinary(existing) && argv[0] != existing.Binary) {
 		return false
 	}
-	// The official sing-box working-directory form has no supervised OpenRC
-	// binding this mapping could prove, so it stays rejected here.
+	if existing.SourceContext != "" {
+		var source existingServiceContext
+		if json.Unmarshal([]byte(existing.SourceContext), &source) != nil {
+			return false
+		}
+		mapped, err := parseCoreServiceCommand(engine, argv[0], argv, source.Directory)
+		return err == nil && mapped.ConfigPath == existing.ConfigPath && mapped.ConfigDirectory == existing.ConfigDirectory && mapped.WorkingDirectory == existing.WorkingDirectory && mapped.ACLPath == existing.ACLPath
+	}
 	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, argv[0], argv)
-	return ok && workDirectory == "" &&
-		configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory
+	return ok && workDirectory == "" && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory
 }
 
 func validateOpenRCServiceScript(service, ownershipMarker string) error {
@@ -488,7 +494,11 @@ func parseSingleSystemdExecStart(value string) (string, string, error) {
 
 func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv string) bool {
 	serviceBinary := existingServiceBinary(existing)
-	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, serviceBinary, strings.Fields(argv))
+	fields, err := splitServiceWords(argv)
+	if err != nil {
+		return false
+	}
+	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, serviceBinary, fields)
 	return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory &&
-		workDirectory == existing.WorkingDirectory && existingSSRustACLArg(engine, strings.Fields(argv)) == existing.ACLPath
+		workDirectory == existing.WorkingDirectory && existingSSRustACLArg(engine, fields) == existing.ACLPath
 }

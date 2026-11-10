@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"unicode/utf8"
-
-	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (existingCoreDiscoveryState, error) {
@@ -38,11 +36,11 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 		return existingCoreDiscoveryState{}, err
 	}
 	defer file.Close()
-	contents, err := io.ReadAll(io.LimitReader(file, (32<<10)+1))
+	contents, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
 	if err != nil {
 		return existingCoreDiscoveryState{}, err
 	}
-	if len(contents) > 32<<10 {
+	if len(contents) > 1<<20 {
 		return existingCoreDiscoveryState{}, errors.New("existing-core discovery state is too large")
 	}
 	var state existingCoreDiscoveryState
@@ -53,12 +51,39 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 		return existingCoreDiscoveryState{}, errors.New("existing-core discovery state version is unsupported")
 	}
 	for engine, issue := range state.Issues {
-		if (engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust) || issue == "" || len(issue) > 512 || !utf8.ValidString(issue) {
+		if !engine.Valid() || issue == "" || len(issue) > 512 || !utf8.ValidString(issue) {
 			return existingCoreDiscoveryState{}, errors.New("existing-core discovery issue is invalid")
 		}
 	}
+	for engine, sources := range state.Sources {
+		if !engine.Valid() || len(sources) > 64 {
+			return state, errors.New("discovered source limit or engine is invalid")
+		}
+		var external []existingDiscoverySpec
+		for _, source := range sources {
+			if isManagedCoreSource(source.engineSpec()) {
+				continue
+			}
+			if err := validateExistingSpecPaths(engine, source.engineSpec()); err != nil {
+				return state, err
+			}
+			external = append(external, source)
+		}
+		if len(external) == 0 {
+			delete(state.Sources, engine)
+		} else {
+			state.Sources[engine] = external
+		}
+	}
 	for engine, stored := range state.Specs {
+		if !engine.Valid() {
+			return existingCoreDiscoveryState{}, errors.New("existing-core discovery engine is invalid")
+		}
 		spec := stored.engineSpec()
+		if isManagedCoreSource(spec) {
+			delete(state.Specs, engine)
+			continue
+		}
 		if err := validateExistingSpecPaths(engine, spec); err != nil {
 			return existingCoreDiscoveryState{}, err
 		}
@@ -75,6 +100,13 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 }
 
 func saveExistingCoreDiscoveryState(path string, state existingCoreDiscoveryState) error {
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if len(encoded)+1 > 1<<20 {
+		return errors.New("existing-core discovery state exceeds 1 MiB; no truncated result was saved")
+	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
@@ -107,7 +139,7 @@ func saveExistingCoreDiscoveryState(path string, state existingCoreDiscoveryStat
 		return err
 	}
 	defer root.Remove(tempName)
-	if err := json.NewEncoder(temp).Encode(state); err != nil {
+	if _, err := temp.Write(append(encoded, '\n')); err != nil {
 		temp.Close()
 		return err
 	}

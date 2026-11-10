@@ -441,6 +441,7 @@ export async function nodesPage(ctx) {
             node('p', {}, muted(runtime.version || (runtime.installed === true ? '版本未上报' : runtime.installed === false ? '尚未安装' : '安装状态未知'))),
             instance && stack(muted(instance.version), instance.reason && notice(instance.reason)),
             runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
+            runtime.imported_resource_update_error && notice(runtime.imported_resource_update_error),
             controls, actions(install, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
               runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`)),
             agent.can_manage !== false && uninstall && actions(uninstall),

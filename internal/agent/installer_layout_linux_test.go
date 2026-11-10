@@ -101,7 +101,7 @@ func TestParseExistingArgvMapsInstallerLayouts(t *testing.T) {
 			configPath: "/usr/local/etc/xray/config.json", ok: true,
 		},
 		"xray relative confdir": {
-			engine: core.EngineXray, binary: agentXrayBinary, args: "run -confdir conf",
+			engine: core.EngineXray, binary: agentXrayBinary, args: "run -confdir conf", configDirectory: "/conf", ok: true,
 		},
 		"xray unknown trailing flag": {
 			engine: core.EngineXray, binary: boyXrayBinary,

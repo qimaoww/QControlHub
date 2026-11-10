@@ -67,7 +67,10 @@ run_discovery() {
       ;;
   esac
 }
-run_discovery Xray discover_existing_xray
-run_discovery sing-box discover_existing_singbox
+# Use the Agent discovery implementation at installation and after startup.
+# Automatic results must not become permanent explicit path overrides.
+QCH_SERVICE_MANAGER="$service_manager" "$work_dir/qagent" discover-existing || {
+  printf '%s\n' 'warning: existing discovery failed; QAgent will refresh it after startup' >&2
+}
 QCH_SERVICE_MANAGER="$service_manager" sh "$repository_dir/deploy/bootstrap-core-services.sh" --prepare-agent
 install -d -o root -g "$core_service_group" -m 0750 "$qagent_etc_dir"
