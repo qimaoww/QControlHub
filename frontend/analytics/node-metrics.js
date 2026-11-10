@@ -54,6 +54,12 @@ export function nodeMetrics(ctx, agent) {
   const local = dialogContext(ctx, box);
   const region = readRegion(local, '历史指标', read, () => {});
   content.before(region.element);
-  box.querySelector('.a-dialog-body').append(actions(button('刷新指标', () => void region.load())));
-  void region.load();
+  const refresh = button('刷新指标', () => void load());
+  async function load() {
+    refresh.disabled = true;
+    try { await region.load(); }
+    finally { if (local.current()) refresh.disabled = false; }
+  }
+  box.querySelector('.a-dialog-body').append(actions(refresh));
+  void load();
 }

@@ -434,7 +434,7 @@ export async function tasksPage(ctx) {
     const value = ctx.state.data.settings?.task_poll_interval_ms;
     return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
   };
-  let readSequence = 0, filtering = false;
+  let readSequence = 0, filtering = false, tasksLoaded = false;
   let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending;
   const agentField = field('节点', 'agent_id', filters.agent_id || '', { options: [['', '全部节点'], ...(filters.agent_id ? [[filters.agent_id, filters.agent_id]] : [])] });
   const agentPicker = agentField.querySelector('select');
@@ -571,11 +571,11 @@ export async function tasksPage(ctx) {
       void updateSettings().catch(() => {});
       const tasks = await ctx.api(query('/tasks', ctx.state.data.taskFilters || filters));
       if (!ctx.current() || sequence !== readSequence) return;
-      draw(tasks); refreshState.textContent = '正在实时更新';
+      draw(tasks); tasksLoaded = true; refreshState.textContent = '正在实时更新';
     } catch (error) {
       if (ctx.current() && sequence === readSequence) {
         if (error.status === 403) { draw([]); refreshState.textContent = '任务访问权限已变化'; }
-        else refreshState.textContent = '更新失败，保留上次数据';
+        else refreshState.textContent = tasksLoaded ? '更新失败，保留上次数据' : '任务读取失败，请重试';
       }
       throw error;
     }

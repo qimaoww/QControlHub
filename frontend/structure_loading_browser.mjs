@@ -66,6 +66,15 @@ export async function runStructureLoadingBrowser({ base, mode, createPage, login
   await wait(page, `!document.querySelector('[aria-busy=true]')`);
   assert.equal(await evaluate(page, `document.querySelectorAll('.a-main [data-agent-id]').length`), 0, 'late node results cannot populate another route');
   record(`${mode}: independent data beats held preferences/settings; navigation remains available and stale reads cannot repaint the next route`);
+  await call('Page.navigate', {url:`${base}/?structure=initial-failure#node-settings`}, page);
+  await wait(page, `window.__held?.some(read=>read.path.endsWith('/agents')) && !!document.querySelector('.a-main th')`);
+  await evaluate(page, `window.__failRead={path:'/agents',status:503};window.__releaseReads()`);
+  await wait(page, `!!document.querySelector('.a-main [role=alert]')?.textContent`);
+  assert.ok(await evaluate(page, `!document.querySelector('.a-main').innerText.includes('保留上次数据') && !document.querySelector('.a-main').innerText.includes('暂无节点')`), 'failed initial read cannot claim retained or empty business data');
+  await screenshot(page, 'structure-initial-failure');
+  await evaluate(page, `window.__failRead=null;[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='重新读取').click()`);
+  await wait(page, `!!document.querySelector('.a-main [data-agent-id]') && !document.querySelector('[aria-busy=true]')`);
+  record(`${mode}: initial read failure stays distinct from a successful empty list and failed refresh; retry recovers`);
   await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: script.identifier }, page);
   const navigate = async route => {
     await call('Page.navigate', {url:`${base}/?dialog=${encodeURIComponent(route)}#${route}`}, page);

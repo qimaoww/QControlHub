@@ -603,7 +603,7 @@ export async function nodesPage(ctx) {
     batchBox = openNodeBatch(ctx, (value = agents) => orderNodesBySavedOrder(value, ordering.ids()));
   }
 
-  const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : '更新失败，保留上次数据'; };
+  const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : loaded ? '更新失败，保留上次数据' : '节点读取失败，请重试'; };
   poll({ ...ctx, onRefreshError: failedRefresh }, async () => { if (loaded) await load(); });
   ctx.onRefresh(async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } });
   results.append(loadingTable(['节点','状态','CPU','内存','磁盘','网络收发','操作'], '节点监控'));

@@ -45,7 +45,7 @@ export async function tcpPage(ctx) {
     let fresh, taskItems, savedOrder;
     try { [fresh, taskItems, savedOrder] = await Promise.all([ctx.api('/agents'), ctx.can('tasks.read') ? ctx.api('/system-tcp/tasks') : [], ctx.api('/preferences/node-order')]); }
     catch (error) {
-      if (ctx.current() && sequence === serial) refreshStatus.textContent = '状态刷新失败，保留上次数据并重试。';
+      if (ctx.current() && sequence === serial) refreshStatus.textContent = agentsReady ? '状态刷新失败，保留上次数据并重试。' : '节点状态读取失败，请重试。';
       if (ctx.current() && sequence === serial && [401, 403].includes(error.status)) { agents = []; latest.clear(); drafts.clear(); draw(); syncDialogs(); }
       throw error;
     }
@@ -223,7 +223,7 @@ export async function tcpPage(ctx) {
       results.append(resultTable);
     }
   }
-  const agentRead = readRegion(ctx, '节点状态', async signal => { try { return await ctx.api('/agents', { signal }); } catch (error) { if (ctx.current()) refreshStatus.textContent = '状态刷新失败，保留上次数据并重试。'; throw error; } }, value => { agents = value; agentsReady = true; draw(); syncDialogs(); refreshStatus.textContent = '正在实时更新'; }, { view: resultTable, clear() { agents = []; agentsReady = true; drafts.clear(); draw(); syncDialogs(); } });
+  const agentRead = readRegion(ctx, '节点状态', async signal => { try { return await ctx.api('/agents', { signal }); } catch (error) { if (ctx.current()) refreshStatus.textContent = agentsReady ? '状态刷新失败，保留上次数据并重试。' : '节点状态读取失败，请重试。'; throw error; } }, value => { agents = value; agentsReady = true; draw(); syncDialogs(); refreshStatus.textContent = '正在实时更新'; }, { view: resultTable, clear() { agents = []; agentsReady = true; drafts.clear(); draw(); syncDialogs(); } });
   const rulesRead = readRegion(ctx, 'TCP 参数选项', signal => ctx.api('/system-tcp/parameters', { signal }), value => { rules = value; rulesReady = true; draw(); }, { clear() { rulesReady = false; draw(); } });
   const taskRead = readRegion(ctx, 'TCP 任务状态', signal => ctx.can('tasks.read') ? ctx.api('/system-tcp/tasks', { signal }) : [], value => { tasks = value; tasksReady = true; setTasks(tasks); draw(); syncDialogs(); }, { clear() { tasksReady = false; latest.clear(); draw(); syncDialogs(); } });
   const orderRead = readRegion(ctx, '节点排序', signal => ctx.api('/preferences/node-order', { signal }), value => { order = value; draw(); });

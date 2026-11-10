@@ -43,7 +43,7 @@ export function ipQualityPage(ctx) {
     if (!ctx.current()) return;
     lastSnapshot = snapshot;
     const { history, date: selectedDate, timezone, loading: reading, readFailed, submitting, creating, creationErrors, editable } = snapshot;
-    loading.textContent = readFailed ? "读取失败，保留已有报告" : reading ? "正在读取检测记录…" : "正在实时更新";
+    loading.textContent = readFailed ? history ? "读取失败，保留已有记录" : "检测记录读取失败，请刷新重试" : reading ? "正在读取检测记录…" : "正在实时更新";
     loading.title = snapshot.error || "";
     const available = snapshot.availableDates || [];
     const dates = selectedDate === ipQualityLatest || available.includes(selectedDate) ? available : [selectedDate, ...available];
