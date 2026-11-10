@@ -23,7 +23,7 @@ type Store struct {
 
 	certificateResolver certificates.DNSResolver
 	certificateDNSHTTP  *http.Client
-	pool                *pgxpool.Pool
+	pool                storePool
 	cryptor             *configCryptor
 	notificationTokenMu sync.RWMutex
 	notificationTokens  map[string][]core.Permission
@@ -97,7 +97,7 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 		pool.Close()
 		return nil, err
 	}
-	result := &Store{pool: pool, cryptor: cryptor}
+	result := &Store{pool: &requestPool{pool}, cryptor: cryptor}
 	if err := result.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err

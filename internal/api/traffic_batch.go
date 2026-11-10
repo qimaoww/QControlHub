@@ -26,7 +26,7 @@ func (s *Server) batchPortTraffic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for id := range changed {
-		s.DisconnectAgent(id)
+		afterRequestCommit(r.Context(), func() { s.DisconnectAgent(id) })
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	s.recordAudit(r, "traffic_batch.completed", input.RequestID, input.Action+" records: "+strconv.Itoa(len(input.IDs)))

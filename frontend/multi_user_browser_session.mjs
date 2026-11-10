@@ -1,6 +1,7 @@
 // Real Chromium contexts against isolated PostgreSQL and password/CSRF sessions.
 // Follow the repository's dependency-free native CDP browser convention.
 import assert from "node:assert/strict";
+import { runAPIManagementBrowser } from "./api_management_browser.mjs";
 import { runStructureLoadingBrowser } from './structure_loading_browser.mjs';
 import { runAnalyticsBrowser } from "./analytics_browser_session.mjs";
 import { spawn } from "node:child_process";
@@ -214,6 +215,8 @@ try {
   await wait(defaultPage, "!!document.querySelector('.a-top h1') && !document.querySelector('[aria-busy=true],#qch-startup-style')");
   record(`${mode}: styled startup, reduced motion, animation cleanup, resource failure and keyboard retry`);
   record(`${mode}: default analytics login, URL independence, account revision zero, refresh/relogin and failed-resource recovery through the production entry`);
+
+  await runAPIManagementBrowser({ base, mode, createPage, login, call, evaluate, wait, screenshot, api });
 
   await runStructureLoadingBrowser({ base, mode, fixture, createPage, login, call, evaluate, wait, screenshot, record });
 

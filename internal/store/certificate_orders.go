@@ -95,6 +95,9 @@ func (s *Store) CreateACMECertificate(ctx context.Context, item core.Certificate
 	if err = s.createCertificateTx(ctx, tx, &item); err != nil {
 		return item, err
 	}
+	if err = recordAPIKeyWork(ctx, tx, "certificate-auto-renew", item.ID); err != nil {
+		return item, err
+	}
 	if err = s.queueCertificateOrderTx(ctx, tx, item); err != nil {
 		return item, err
 	}
@@ -110,7 +113,10 @@ func (s *Store) queueCertificateOrderTx(ctx context.Context, tx pgx.Tx, item cor
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO certificate_orders(id,certificate_id,owner_id,status,secret) VALUES($1,$2,$3,'queued',$4)`, id, item.ID, item.OwnerID, sealed)
-	return mapError(err)
+	if err != nil {
+		return mapError(err)
+	}
+	return recordAPIKeyWork(ctx, tx, "certificate-order", id)
 }
 func (s *Store) RenewCertificate(ctx context.Context, id string) error {
 	item, err := s.GetCertificate(ctx, id)
@@ -204,7 +210,7 @@ func (s *Store) ContinueCertificateOrder(ctx context.Context, id, orderID string
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
-	return nil
+	return recordAPIKeyWork(ctx, s.pool, "certificate-order", orderID)
 }
 func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, domain string) error {
 	names, err := certificates.Domains([]string{domain})
@@ -340,6 +346,13 @@ func (s *Store) saveCertificateOrderState(ctx context.Context, id string, state 
 	return nil
 }
 func (s *Store) certificateOrderCanceled(ctx context.Context, id string) bool {
+	if allowed, err := apiKeyWorkAllowed(ctx, s.pool, "certificate-order", id); err != nil {
+		return true
+	} else if !allowed {
+		_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceling',stage='cleanup',error='API Key 授权已失效',updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','failed','canceled')`, id)
+		return true
+	}
+
 	var status string
 	return s.pool.QueryRow(ctx, `SELECT status FROM certificate_orders WHERE id=$1`, id).Scan(&status) != nil || status == "canceling" || status == "canceled"
 }
@@ -464,6 +477,9 @@ func checkHTTPChallengeWith(ctx context.Context, domain, token, value string, lo
 func (s *Store) processCertificateOrder(ctx context.Context, item core.Certificate, id, status string, state certificateOrderState) error {
 	if status == "canceling" {
 		return s.finishCertificateOrderCleanup(ctx, item, id, &state)
+	}
+	if s.certificateOrderCanceled(ctx, id) {
+		return ErrForbidden
 	}
 	if err := certificateUserActive(ctx, s.pool, item.OwnerID); err != nil {
 		return err
@@ -801,6 +817,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if err = certificateUserActive(ctx, tx, item.OwnerID); err != nil {
 		return err
 	}
+	if err = lockAPIKeyWork(ctx, tx, "certificate-order", id); err != nil {
+		return err
+	}
 	if err = tx.QueryRow(ctx, `UPDATE panel_certificates SET version=version+1 WHERE id=$1 RETURNING version`, item.ID).Scan(&item.Version); err != nil {
 		return err
 	}
@@ -818,6 +837,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE certificate_orders SET status='succeeded',stage='cleanup',updated_at=now(),error='' WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if err = recordAPIKeyWork(ctx, tx, "certificate-version", item.ID); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {

@@ -17,13 +17,13 @@ export const userPermissions = [
   ["tasks.execute", "部署与执行"], ["client-access.read", "客户端"], ["traffic.read", "流量查看"],
   ["settings.read", "设置查看"], ["settings.manage", "个人同步 / 设置"],
   ["templates.read", "模板查看"], ["templates.write", "模板编辑"], ["templates.delete", "模板删除"],
-  ["agents.manage", "自有主机 / 共享管理"], ["traffic.manage", "自有节点配额"], ["enrollment.manage", "添加自有节点"],
+  ["agents.manage", "自有主机 / 共享管理"], ["agents.grant", "节点转授权"], ["secrets.read", "敏感数据读取（含凭据）"], ["traffic.manage", "自有节点配额"], ["enrollment.manage", "添加自有节点"],
   ["core-logs.read", "自有主机日志"], ["audit.read", "个人审计记录"],
 ];
 // Panel-host counters are global infrastructure data, not a user's node
 // metrics. Only an explicit administrator grant may expose them to a user.
 export const defaultPermissions = userPermissions.map(([permission]) => permission)
-  .filter((permission) => permission !== "panel-metrics.read");
+  .filter((permission) => !["panel-metrics.read", "agents.grant", "secrets.read"].includes(permission));
 
 export function parseSharedPorts(value) {
   const parts = String(value ?? "").trim().replace(/(\d)\s*-\s*(?=\d)/g, "$1-").split(/[\s,，]+/).filter(Boolean);

@@ -1,67 +1,45 @@
-# 只读 API
+# API 管理与调用规范
 
-管理员在系统设置创建 API Key，配置有效期、读取权限和可选来源 IP 白名单。Key 原文仅创建时显示；调用使用 `Authorization: Bearer <API_KEY>`。API Key 不用于网页登录或写操作，响应中的配置凭据会脱敏。
+面板的 **API** 页通过“密钥”和“接口规范”切换，统一管理 API Key 并查看当前服务实际发布的接口、认证、权限、字段、示例和结果。旧的 `#settings-api-keys` 深链接跳转到 API 页。Key 管理需要 `settings.manage`，仅浏览器会话或环境凭据可管理自己的 Key。
 
-## 连接与示例
+机器规范由服务提供：`GET /api/v1/openapi.json`（OpenAPI 3.1）。它从真实路由、Go 请求/响应模型和服务端 Key 策略生成；页面和 AI Skill 使用同一份规范。开发时运行 `go run scripts/generate-api-spec.go`，`--check` 检查漂移；Go 回归测试也检查已发布文件及全部 Key 策略。不要另建接口白名单。
 
-API Base URL 为 `https://panel.example.com/api/v1`，替换为实际地址。先请求 `/api-key`，核对有效权限、来源 IP、工作区和 `endpoints`。读取范围同时受 Key 授权、创建者当前权限及资源可见性限制。
+## 接入和授权
 
-提供 [Python 标准库诊断示例](api-diagnose.sh)，通过环境变量读取凭据，按已授权接口查询节点、配置状态、任务及日志：
+API Base URL 示例：`https://panel.example.com/api/v1`。通过安全运行环境配置 `QCH_API_BASE` 和 `QCH_API_KEY`，请求使用 `Authorization: Bearer <QCH_API_KEY>`。先查询 `GET /api-key`，核对当前有效模式、权限、工作区和 `endpoints`。接口可调用仍须满足实际资源授权。
 
-```sh
-export QCH_API_BASE=https://panel.example.com/api/v1
-# 通过运行环境或密钥管理器设置 QCH_API_KEY。
-sh docs/api-diagnose.sh
-# 也可显式指定节点及内核：
-sh docs/api-diagnose.sh agt_0000000000000001 mihomo
-```
+- `read_only` 只允许明确标为读取的能力；旧 Key 迁移后保持只读。不能以 HTTP GET 推断无写入：同步、远程目标发现、重试编辑准备等管理接口要求读写模式。
+- `read_write` 还须选择具体业务权限。有效授权为模式、显式权限、创建者当前权限、接口策略与资源授权的交集，未知接口和权限默认拒绝。
+- `secrets.read` 独立控制敏感响应；配置写权限不自动允许读取凭据。客户端接入导出和订阅内容同步还需要 `client-access.read` 与 `secrets.read`。
+- Key 不能管理任何 Key、生成注册凭据、创建/删除账户、更改账户身份或密码、管理证书账户凭据、登录或冒充 Agent。相关操作需按规范使用浏览器会话或 Agent 签名。Key 对非管理员且非创建者账户可编辑名称、收缩权限或停用，保留权限不得超过 Key 当前范围；增加账户权限或重新启用需要会话，防止替代账号间接提权。节点转授权只限创建者所有的节点。
+- 公开接口、浏览器会话接口、Key 业务接口和 `/agent/v1` 签名接口在规范中分别标记。Cookie 写操作继续要求 CSRF；Key 不用于浏览器登录。
 
-脚本需要 Python 3，命令从仓库根目录运行。
+Key 摘要存储，原文只在创建时显示一次；编辑不会轮换或恢复已撤销 Key。启停、到期、撤销、权限收缩、创建者失效和共享撤销作用于后续请求及尚未执行的任务。排队工作保留 Key 来源，并在领取、重连和后台执行阶段复核。已经在远端执行的操作不能通过数据库回滚撤销；断连或结果丢失须查询真实资源和任务。
 
-## 读取接口
+## 目标、编辑和结果
 
-以下均为 GET，路径相对于 API Base URL；实际可用接口以 `/api-key` 返回值为准。
+使用实际返回的用户、节点、配置、任务及实例 ID，路径值按 URL 编码。日志接口以 `main` 表示主实例，`shr_…` 表示共享实例；配置任务的 `expected_instance_id` 主实例用空字符串，共享实例用实际 `shr_…` ID。不默认选择主实例。配置、任务、证书及历史按实际所有者隔离；节点管理不赋予他人的配置或证书所有权。批量、嵌套引用、导出和结果查询同样检查授权。
 
-| 权限 | 接口 |
-| --- | --- |
-| 无附加权限 | `/api-key` |
-| `overview.read` | `/overview` |
-| `agents.read` | `/agents`、`/agent-directory` |
-| `deployments.read` | `/deployments` |
-| `catalogs.read` | `/config-catalogs/{engine}` |
-| `agent-config.read` | `/agents/{id}/configs`、`/agents/{id}/configs/{engine}` 及其 `/state`、`/workspace`、`/files`、`/fields/{key}` |
-| `configs.read` | `/configs`、`/configs/{id}/revisions`、`/configs/{id}/revisions/{version}` |
-| `tasks.read` | `/tasks`、`/tasks/{id}`、`/system-tcp/tasks` |
-| `tasks.read` + `agent-config.read` | `/tasks/{id}/config-snapshot`，限已成功的配置读取任务 |
-| `settings.read` | `/settings`、`/settings/deployment` |
-| `audit.read` | `/audit` |
-| `metrics.read` | `/metrics/{id}` |
-| `panel-metrics.read` | `/panel-metrics` |
-| `core-logs.read` | `/core-log-sources`、`/core-logs`、`/client-connections` |
-| `traffic.read` | `/traffic-policies`、`/traffic-endpoints`、`/traffic-usage` |
-| `templates.read` | `/templates` |
+配置 PUT 以完整元数据和当前 `version` 保存；Key 省略 `content` 或提供 `null` 表示保留原配置，提供字符串表示替换。空字符串仍须通过内核校验。脱敏占位符只可在原配置相同结构位置保留，并带当前并发标识；移动、重命名含凭据的列表项或新建配置时使用占位符会拒绝。其他敏感字段遵循具体请求模型的省略/清空规则，不能回传占位符。读取 `secrets.read` 不是编辑的前提。
 
-## 筛选与分页
+通知保留原凭据时，修改 SMTP 认证目标或 Webhook 地址须有 `secrets.read`；也可显式替换相关凭据，避免把未读取的旧凭据发送给新目标。
 
-内核标识为 `mihomo`、`xray`、`sing-box`、`ss-rust`。时间使用带时区的 RFC3339，查询中的 `+` 需 URL 编码。
+更新 Key、配置、设置等时使用规范要求的 `revision`、`version` 或 `expected_version`。409 后重新读取，保留草稿并核对目标；不要盲目覆盖标识。成功保存配置逐次产生带真实时间的历史，恢复也新增记录。全局和个人设置仅保存当前值。
 
-| 接口 | 参数与分页 |
-| --- | --- |
-| `/tasks` | `agent_id`、`status`、`action`、`limit`；默认 100，最大 500，无页码或游标 |
-| `/core-log-sources` | 返回可读节点、实例、内核与采集状态；`main` 为主实例，`shr_…` 为共享实例 |
-| `/core-logs` | `agent_id`、`instance_id`、`user_id`、`engine`、`level`、`q`、`limit`、`before`；默认 1000，最大 2000，按内核限额；取上一页最小日志 ID 作为 `before` 并保持资源筛选 |
-| `/audit` | `limit` 默认 50，最大 200，无游标 |
-| `/metrics/{id}` | `since` 默认最近 24 小时；`limit` 默认 1500，最大 5000 |
-| `/traffic-usage` | `month=YYYY-MM`、`agent_id`、`policy_id` |
-| `/client-connections` | 节点、内核、协议、入站、传输、客户端 IP、`since`、`until`、`limit`、`cursor`；按 `next_cursor` 翻页并保留筛选；`locations=cached` 使用已有位置，`timeline=false` 省略时间线 |
+时间使用带时区 RFC3339，查询中的 `+` 需 URL 编码。接口的筛选、默认数量和上限见机器规范。数组响应无分页参数时不自行发明页码。`/tasks` 默认 100、最多 500；`/audit` 默认 50、最多 200；`/core-logs` 默认 1000、最多 2000，上一页以最小日志 ID 为 `before`；连接记录按 `next_cursor` 翻页并保持筛选。
 
-`/agents`、`/configs`、`/deployments`、`/templates` 返回数组，无额外分页参数。
+创建任务返回受理结果，不代表执行完成。按返回 `id` 查询 `/tasks/{id}`：`pending`、`running` 继续等待；`succeeded`、`failed`、`canceled` 为终态并包含结果或错误。现有取消接口仅能取消允许取消的任务。超时、响应丢失或重复操作前，先查询现有任务及资源确认结果；任务去重不等于所有写接口都具有幂等性。
 
-## 错误定位
+## 错误和审计
 
-- 401：凭据无效、过期、停用、撤销或创建者失效。
-- 403：来源 IP、接口或读取权限不允许。
-- 400：参数无效；404：资源不存在、不可见或无可用快照；429：认证失败限流。
-- 500：保留 `request_id` 或 `X-Request-ID`，由管理员查询控制面日志；业务错误可能只含 `error`，部分接口另带 `code`、`stage`。
+错误通常为 `{"error":"…"}`，部分业务另含 `code`、`stage`、端口或恢复字段；内部错误提供 `request_id` 或 `X-Request-ID`。401 停止调用并检查凭据状态；403 报告权限、模式、来源或资源限制；404 也可能表示资源不可见；409 重新核对当前状态；429 按 `Retry-After` 有限等待。写请求不自动重试，不能切换更强凭据绕过拒绝。
 
-定位时保留节点、实例、配置版本、任务和日志 ID。Key 调用审计使用 `key_…` 标识，记录方法、接口、状态及来源 IP；`last_used_at` 成功调用时最多每 5 分钟更新一次。
+审计记录 Key ID、创建者、目标、方法和结果，不记录凭据；成功调用的最近使用时间最多每 5 分钟更新一次。来源 IP 使用可信代理规则，伪造转发头不能绕过白名单。
+
+## AI 管理 Skill
+
+从 API 页或 `GET /api/v1/management-skill` 下载 ZIP。解压后将 `qcontrolhub-manager` 放入客户端的 Skill 目录（Codex 为 `~/.agents/skills/`），重新加载后调用 `$qcontrolhub-manager`。客户端需支持 `SKILL.md` 和 Python 3；在安全运行环境注入面板地址和 Key。Skill 内的 Python helper 仅向配置目标发送凭据，拒绝重定向，不自动重试写请求。
+
+Skill 按“目标和授权 → 自身授权 → 精确资源 → 状态 → 执行 → 查询结果”工作。API 返回的日志、名称和配置属于数据，不能授权附加命令或替换凭据、目标地址。服务端独立执行所有授权，即使客户端绕过 Skill 也不能扩大权限。
+
+已有 [只读诊断脚本](api-diagnose.sh) 保留兼容，只读取自身授权内的数据；管理使用下载的 Skill 及当前机器规范。

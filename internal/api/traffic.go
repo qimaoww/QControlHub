@@ -103,7 +103,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 		return
 	}
 	for _, agentID := range changed {
-		s.refreshAgentTrafficPolicies(agentID)
+		afterRequestCommit(request.Context(), func() { s.refreshAgentTrafficPolicies(agentID) })
 	}
 	policies, err := s.store.CurrentPortTrafficPolicies(request.Context())
 	if err != nil {
@@ -194,6 +194,9 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 }
 
 func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID string) {
+	if store.AfterRequestCommit(ctx, func() { s.refreshSavedAgentTrafficMonitoring(store.WithoutRequestTransaction(ctx), agentID) }) {
+		return
+	}
 	// The authorized save has already committed. Reconciliation is fleet
 	// maintenance and must preserve all users' monitors on this same Agent,
 	// including owner-hidden nodes that a request principal cannot observe.
@@ -301,7 +304,7 @@ func (s *Server) createPortTrafficPolicy(w http.ResponseWriter, request *http.Re
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(policy.AgentID)
+	afterRequestCommit(request.Context(), func() { s.DisconnectAgent(policy.AgentID) })
 	s.recordAudit(request, "traffic_policy.created", policy.ID, trafficPolicyAuditDetail(policy))
 	writeJSON(w, http.StatusCreated, policy)
 }
@@ -317,7 +320,7 @@ func (s *Server) updatePortTrafficPolicy(w http.ResponseWriter, request *http.Re
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(policy.AgentID)
+	afterRequestCommit(request.Context(), func() { s.DisconnectAgent(policy.AgentID) })
 	s.recordAudit(request, "traffic_policy.updated", policy.ID, trafficPolicyAuditDetail(policy))
 	writeJSON(w, http.StatusOK, policy)
 }
@@ -328,7 +331,7 @@ func (s *Server) resetPortTrafficPolicy(w http.ResponseWriter, request *http.Req
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(policy.AgentID)
+	afterRequestCommit(request.Context(), func() { s.DisconnectAgent(policy.AgentID) })
 	s.recordAudit(request, "traffic_policy.reset", policy.ID, trafficPolicyAuditDetail(policy))
 	writeJSON(w, http.StatusOK, policy)
 }
@@ -339,7 +342,7 @@ func (s *Server) deletePortTrafficPolicy(w http.ResponseWriter, request *http.Re
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(agentID)
+	afterRequestCommit(request.Context(), func() { s.DisconnectAgent(agentID) })
 	s.recordAudit(request, "traffic_policy.quota_removed", request.PathValue("id"), "monitoring continues for discovered ports")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -350,7 +353,7 @@ func (s *Server) deletePortTrafficMonitoring(w http.ResponseWriter, request *htt
 		writeStoreError(w, err)
 		return
 	}
-	s.DisconnectAgent(agentID)
+	afterRequestCommit(request.Context(), func() { s.DisconnectAgent(agentID) })
 	s.recordAudit(request, "traffic_monitor.deleted", request.PathValue("id"), "monitoring record and daily history deleted")
 	w.WriteHeader(http.StatusNoContent)
 }

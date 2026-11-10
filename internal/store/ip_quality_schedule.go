@@ -75,6 +75,9 @@ func (s *Store) SetIPQualitySchedule(ctx context.Context, agentID string, enable
 	if err != nil {
 		return core.IPQualitySchedule{}, err
 	}
+	if err := recordAPIKeyWork(ctx, tx, "ip-quality-schedule", agentID); err != nil {
+		return core.IPQualitySchedule{}, err
+	}
 	return result, tx.Commit(ctx)
 }
 
@@ -132,6 +135,14 @@ func (s *Store) queueIPQualityCheck(ctx context.Context, agentID, ownerID string
 		admin, authorized = role == core.RoleAdmin, err == nil && !disabled
 	}
 	scoped := WithConfigScope(ctx, ownerID, admin)
+	if keyContext, keyErr := s.apiKeyWorkContext(scoped, "ip-quality-schedule", agentID); keyErr != nil {
+		if !errors.Is(keyErr, ErrForbidden) {
+			return keyErr
+		}
+		authorized = false
+	} else {
+		scoped = keyContext
+	}
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&id); err != nil {
 		return mapError(err)
@@ -175,7 +186,7 @@ func (s *Store) queueIPQualityCheck(ctx context.Context, agentID, ownerID string
 		return err
 	}
 	if !task.Reused {
-		s.signalTaskReady(agentID)
+		s.signalTaskReadyAfterCommit(ctx, agentID)
 	}
 	return nil
 }

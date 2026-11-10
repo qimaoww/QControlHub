@@ -127,7 +127,8 @@ func requireHostConfigRead(ctx context.Context, executor storeExecutor, agentID 
 	if err := requireAgentAdministration(ctx, executor, agentID); err != nil {
 		return err
 	}
-	if scopeForConfig(ctx).Admin {
+	_, key := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth)
+	if scopeForConfig(ctx).Admin && !key {
 		return nil
 	}
 	var allowed bool

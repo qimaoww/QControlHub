@@ -140,7 +140,7 @@ func (s *Server) putAgentTimeZone(w http.ResponseWriter, request *http.Request) 
 		_ = s.store.SetAgentTimeZoneStatus(request.Context(), agentID, state.Revision, "unsupported", "请升级 Agent 后再应用时区")
 		state.Status, state.Error = "unsupported", "请升级 Agent 后再应用时区"
 	} else if state.TimeZone != "" && (state.Status == "pending" || input.Retry) {
-		s.refreshAgentTimeZone(agentID)
+		afterRequestCommit(request.Context(), func() { s.refreshAgentTimeZone(agentID) })
 	}
 	if mode == "auto" && state.Status == "failed" {
 		s.recordAudit(request, "agent.time_zone.updated", agentID, "automatic process time zone lookup failed")
@@ -176,7 +176,7 @@ func (s *Server) resolveAgentTimeZone(ctx context.Context, agentID string, force
 		return updated, updateErr
 	}
 	if updated.Revision != state.Revision || updated.TimeZone != state.TimeZone {
-		s.refreshAgentTimeZone(agentID)
+		afterRequestCommit(ctx, func() { s.refreshAgentTimeZone(agentID) })
 	}
 	return updated, nil
 }

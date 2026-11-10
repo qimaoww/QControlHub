@@ -87,6 +87,9 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	if err := tx.QueryRow(ctx, `SELECT role,agent_access_revision,agent_isolation FROM panel_users WHERE id=$1 FOR UPDATE`, userID).Scan(&role, &revision, &wasIsolated); err != nil {
 		return core.AgentAccess{}, mapError(err)
 	}
+	if _, key := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); key && (role == core.RoleAdmin || userID == scopeForConfig(ctx).OwnerID) {
+		return core.AgentAccess{}, ErrForbidden
+	}
 	if request.Revision != 0 && request.Revision != revision {
 		return core.AgentAccess{}, fmt.Errorf("%w: Agent allocation changed; reload before saving", ErrConflict)
 	}
@@ -120,6 +123,13 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return core.AgentAccess{}, err
+	}
+	if _, key := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); key {
+		for _, id := range affectedIDs {
+			if err := requireNodeOwner(ctx, tx, id); err != nil {
+				return core.AgentAccess{}, err
+			}
+		}
 	}
 	if err := lockAgentSharesTx(ctx, tx, affectedIDs); err != nil {
 		return core.AgentAccess{}, err

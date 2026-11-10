@@ -6,36 +6,48 @@ package core
 type Permission string
 
 const (
-	PermissionOverviewRead     Permission = "overview.read"
-	PermissionAgentsRead       Permission = "agents.read"
-	PermissionAgentsManage     Permission = "agents.manage"
-	PermissionClientAccessRead Permission = "client-access.read"
-	PermissionDeploymentsRead  Permission = "deployments.read"
-	PermissionCatalogsRead     Permission = "catalogs.read"
-	PermissionAgentConfigRead  Permission = "agent-config.read"
-	PermissionAgentConfigWrite Permission = "agent-config.write"
-	PermissionConfigsRead      Permission = "configs.read"
-	PermissionConfigsWrite     Permission = "configs.write"
-	PermissionConfigsDelete    Permission = "configs.delete"
-	PermissionConfigsRestore   Permission = "configs.restore"
-	PermissionTasksRead        Permission = "tasks.read"
-	PermissionTasksExecute     Permission = "tasks.execute"
-	PermissionEnrollmentManage Permission = "enrollment.manage"
-	PermissionSettingsRead     Permission = "settings.read"
-	PermissionSettingsManage   Permission = "settings.manage"
-	PermissionAuditRead        Permission = "audit.read"
-	PermissionMetricsRead      Permission = "metrics.read"
-	PermissionPanelMetricsRead Permission = "panel-metrics.read"
-	PermissionCoreLogsRead     Permission = "core-logs.read"
-	PermissionTrafficRead      Permission = "traffic.read"
-	PermissionTrafficManage    Permission = "traffic.manage"
-	PermissionUsersManage      Permission = "users.manage"
-	PermissionTemplatesRead    Permission = "templates.read"
-	PermissionTemplatesWrite   Permission = "templates.write"
-	PermissionTemplatesDelete  Permission = "templates.delete"
+	PermissionAgentsGrant        Permission = "agents.grant"
+	PermissionCertificatesRead   Permission = "certificates.read"
+	PermissionCertificatesManage Permission = "certificates.manage"
+	PermissionCertificatesGrant  Permission = "certificates.grant"
+	PermissionPreferencesRead    Permission = "preferences.read"
+	PermissionPreferencesWrite   Permission = "preferences.write"
+	PermissionAgentAccessRead    Permission = "agent-access.read"
+	PermissionAgentAccessWrite   Permission = "agent-access.write"
+	PermissionSecretsRead        Permission = "secrets.read"
+	PermissionOverviewRead       Permission = "overview.read"
+	PermissionAgentsRead         Permission = "agents.read"
+	PermissionAgentsManage       Permission = "agents.manage"
+	PermissionClientAccessRead   Permission = "client-access.read"
+	PermissionDeploymentsRead    Permission = "deployments.read"
+	PermissionCatalogsRead       Permission = "catalogs.read"
+	PermissionAgentConfigRead    Permission = "agent-config.read"
+	PermissionAgentConfigWrite   Permission = "agent-config.write"
+	PermissionConfigsRead        Permission = "configs.read"
+	PermissionConfigsWrite       Permission = "configs.write"
+	PermissionConfigsDelete      Permission = "configs.delete"
+	PermissionConfigsRestore     Permission = "configs.restore"
+	PermissionTasksRead          Permission = "tasks.read"
+	PermissionTasksExecute       Permission = "tasks.execute"
+	PermissionEnrollmentManage   Permission = "enrollment.manage"
+	PermissionSettingsRead       Permission = "settings.read"
+	PermissionSettingsManage     Permission = "settings.manage"
+	PermissionAuditRead          Permission = "audit.read"
+	PermissionMetricsRead        Permission = "metrics.read"
+	PermissionPanelMetricsRead   Permission = "panel-metrics.read"
+	PermissionCoreLogsRead       Permission = "core-logs.read"
+	PermissionTrafficRead        Permission = "traffic.read"
+	PermissionTrafficManage      Permission = "traffic.manage"
+	PermissionUsersManage        Permission = "users.manage"
+	PermissionTemplatesRead      Permission = "templates.read"
+	PermissionTemplatesWrite     Permission = "templates.write"
+	PermissionTemplatesDelete    Permission = "templates.delete"
 )
 
 var allPermissions = []Permission{
+	PermissionAgentsGrant,
+	PermissionCertificatesRead, PermissionCertificatesManage, PermissionCertificatesGrant,
+	PermissionPreferencesRead, PermissionPreferencesWrite, PermissionAgentAccessRead, PermissionAgentAccessWrite, PermissionSecretsRead,
 	PermissionOverviewRead, PermissionAgentsRead, PermissionAgentsManage,
 	PermissionClientAccessRead, PermissionDeploymentsRead, PermissionCatalogsRead,
 	PermissionAgentConfigRead, PermissionAgentConfigWrite, PermissionConfigsRead,
@@ -132,6 +144,17 @@ func HasPermission(values []Permission, wanted Permission) bool {
 		if value == wanted {
 			return true
 		}
+	}
+	return false
+}
+
+// PersonalPermission describes operations historically available to every active
+// session. Keys still need explicit grants for each of these capabilities.
+func PersonalPermission(p Permission) bool {
+	switch p {
+	case PermissionCertificatesRead, PermissionCertificatesManage, PermissionCertificatesGrant,
+		PermissionPreferencesRead, PermissionPreferencesWrite, PermissionAgentAccessRead, PermissionAgentAccessWrite:
+		return true
 	}
 	return false
 }
