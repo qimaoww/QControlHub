@@ -191,6 +191,7 @@ try {
   await wait(a,"!!document.querySelector('[data-certificate-action$=continue]')");
   assert.match(await detailText(),/等待人工 DNS 操作/);
   assert.match(await detailText(),/_acme-challenge.example.test/);
+  await screenshot(a,'order-waiting-dns');
   await evaluate(a,"document.querySelector('[data-certificate-action$=continue]').click();document.querySelector('[data-certificate-action$=continue]').click()");
   assert.equal(await evaluate(a,"window.certificateOrderFixture.requests"),1);
   assert.equal(await evaluate(a,"document.querySelector('[data-certificate-action$=synthetic-order]').disabled"),true);

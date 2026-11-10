@@ -152,18 +152,19 @@ export async function certificatesPage(ctx) {
           className: "a-button", href: `/api/v1/certificates/${pathID(id)}/public-chain`, download: "",
         }, "下载公开证书链"),
         owned && control("删除证书", "", "DELETE", undefined, "删除此证书及其历史记录？正在使用的证书可能无法删除。"));
-      const orders = section("申请与续期记录", table(["创建时间", "状态", "阶段", "错误", "操作"], list(data.orders).map(order => [
+      const challengeDetails = order => stack(...list(order.challenges).map(challenge => section(challenge.domain, node("div", { className: "a-card-body" }, stack(
+        actions(badge(challenge.type), challenge.status === "pending" ? badge("等待验证") : certStatus(challenge.status)),
+        stack(muted("记录名称"), code(challenge.name)), stack(muted("记录值"), code(challenge.value)),
+      )))));
+      const orders = section("申请与续期记录", stack(table(["创建时间", "状态", "阶段", "错误", "操作"], list(data.orders).map(order => [
         date(order.created_at), badge(certificateOrderPresentation(order, date).label, certificateOrderPresentation(order, date).tone),
         certificateOrderPresentation(order, date).info, stack(
           certificateOrderPresentation(order, date).error && notice(certificateOrderPresentation(order, date).error),
-          certificateOrderPresentation(order, date).cleanupError && notice(certificateOrderPresentation(order, date).cleanupError, "warn"),
-          ...list(order.challenges).map(challenge => stack(muted(challenge.domain), muted(challenge.name), code(challenge.value)))),
-        actions(button("查看认证记录", () => ctx.dialog("域名认证记录", table(["域名", "类型", "名称", "值", "状态"], list(order.challenges).map(challenge => [
-          challenge.domain, challenge.type, challenge.name, code(challenge.value), certStatus(challenge.status),
-        ])), { wide: true })),
+          certificateOrderPresentation(order, date).cleanupError && notice(certificateOrderPresentation(order, date).cleanupError, "warn")),
+        actions(list(order.challenges).length > 0 && order.status !== "waiting_dns" && button("查看认证记录", () => ctx.dialog("域名认证记录", challengeDetails(order), { wide: true })),
         owned && order.status === "waiting_dns" && control("继续认证", `/orders/${pathID(order.id)}/continue`, "POST"),
         owned && !["succeeded", "failed", "canceled"].includes(order.status) && control("取消订单", `/orders/${pathID(order.id)}`, "DELETE", undefined, "取消此签发订单？")),
-      ]), { label: "签发订单" }));
+      ]), { label: "签发订单" }), ...list(data.orders).filter(order => order.status === "waiting_dns").map(challengeDetails)));
       const bindings = section("部署绑定", table(["节点", "配置", "用户", "内核", "状态", "保存时间"], list(data.bindings).map(binding => [
         binding.agent_name || binding.agent_id, binding.config_name || binding.config_id, binding.username || "管理员",
         binding.engine, certStatus(binding.status), date(binding.saved_at),
