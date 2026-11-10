@@ -200,9 +200,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 			return core.Task{}, fmt.Errorf("%w: engine capability is disabled on this Agent", ErrConflict)
 		}
-		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
-			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
+		if reason := strings.TrimSpace(runtime[request.Engine].ManagedBlockReason(features, sharedRecipient)); reason != "" {
+			return core.Task{}, fmt.Errorf("%w: %s managed target cannot execute this operation: %s", ErrConflict, request.Engine, reason)
 		}
+	}
+	if !sharedRecipient && (request.Action == core.ActionReadConfig || request.Action == core.ActionImportExisting) && runtime[request.Engine].ExistingConfigUnsupportedReason != "" {
+		return core.Task{}, fmt.Errorf("%w: 导入来源不可用：%s", ErrConflict, runtime[request.Engine].ExistingConfigUnsupportedReason)
 	}
 	if (request.Action == core.ActionValidate || request.Action == core.ActionDeploy) &&
 		!containsFeature(features, core.AgentFeatureIndependentEgress) {

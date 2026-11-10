@@ -81,6 +81,10 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			return
 		}
 		s.adminLimiter.Success(key)
+		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		value, _ := s.sessionForRequest(request)
+		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))
+		w = &failureResponseWriter{ResponseWriter: w, server: s, request: request}
 		_, permissionsOK := s.sessionPermissions(request)
 		if !permissionsOK {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
@@ -111,8 +115,6 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
-		value, _ := s.sessionForRequest(request)
-		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))
 		if role == core.RoleAdmin {
 			request = request.WithContext(store.WithUserManagementAuth(request.Context(), s.sessionUserID(request), value.AuthRevision, s.tokenAdministratorAvailable()))
 		}

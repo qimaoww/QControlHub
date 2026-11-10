@@ -1,3 +1,4 @@
+import { submitConfigImport } from "../modules/config-import.js";
 import { prepareConfigDeployment, configDeployBlockReason } from "../modules/core-install-state.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
 import { readOrderedNodes } from "../modules/node-order.js";
@@ -61,6 +62,8 @@ export async function liveConfigPage(ctx) {
   if (ctx.can("tasks.read")) void mutations.recover(target.id, engine, target.shared_allocation?.id || "");
   workspace ||= await ctx.api(`${base}/workspace`);
   const agent = workspace.agent || target;
+  const record = ctx.recordFailure;
+  if (record) ctx = {...ctx,recordFailure:(error,operation,stage) => record(Object.assign(error,{agentID:agent.id,engine,resource:`/agents/${agent.id}/configs/${engine}`}),operation,stage)};
   const runtime = agent.runtime?.[engine] || {};
   let saved = workspace.config || null;
   let source = null;
@@ -101,6 +104,7 @@ export async function liveConfigPage(ctx) {
   select.addEventListener("change", () => select.requestSubmit());
   const liveNotice = node("p", { className: "a-save-state", role: "status" }, saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存");
   const errorText = runtime.existing_config_unsupported_reason;
+  if(canReadHost && errorText)void ctx.recordFailure?.(new Error(errorText),`${agent.name} (${agent.id}) · ${engine} 系统配置导入`,"import_discovery");
   const api = (path, options) => ctx.api(path, { method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });
   const beforeDeploy = () => {
     if (!ctx.current()) throw Object.assign(new Error("页面目标已变化，请重新打开配置后提交。"), { deployPreflight: true });
@@ -137,7 +141,7 @@ export async function liveConfigPage(ctx) {
     if (!ctx.current()) return;
     let pendingTask;
     try {
-      await submitLiveConfigChange({
+      await (importSource ? submitConfigImport : submitLiveConfigChange)({
         api, agent, engine, intent: values.intent, source, existingAvailable: importSource, savedConfig: saved,
         form: new Map(Object.entries({ ...values, version: saved?.version || 0 })),
         beforeDeploy,
@@ -167,6 +171,11 @@ export async function liveConfigPage(ctx) {
       throw error;
     }
     if (!ctx.current()) return;
+    if (importSource) {
+      ctx.announce("迁移任务已提交，完成前保留当前已保存配置");
+      if (pendingTask && ctx.can("tasks.read")) await taskDetail(ctx,pendingTask.id);
+      return;
+    }
     ctx.setDirty(false);
     try { await inbounds.reload(); }
     catch (error) {
@@ -295,7 +304,7 @@ export async function liveConfigPage(ctx) {
       const editor = form.elements.content;
       editor.value = formatConfigContent(editor.value, "JSON");
       syncDraft();
-    } catch { ctx.announce("JSON 格式无效，请检查配置。", "error"); }
+    } catch(error) { void ctx.recordFailure?.(error,`${agent.name || agent.id} · ${engine} JSON 格式化`,"format_validation");ctx.announce(`JSON 格式无效，请检查配置。\n${error.message}`,"error"); }
   });
   const readHistory = ctx.can("configs.read") && button("保存历史", event => void ctx.mutate(event.currentTarget, async () => {
     if (!saved) return;
@@ -329,9 +338,9 @@ export async function liveConfigPage(ctx) {
     onAgent(fresh) {
       canDeploy = !configDeployBlockReason(fresh, engine, ctx.can);
       deployNotice.textContent = configDeployBlockReason(fresh,engine,ctx.can);
-      deployNotice.hidden = !deployNotice.textContent;
+      deployNotice.hidden = !deployNotice.textContent || importSource;
       const submit = form.querySelector("button[type=submit]");
-      if (submit && !sourceBlocked && form.getAttribute("aria-busy") !== "true") submit.disabled = !canDeploy;
+      if (submit && !sourceBlocked && form.getAttribute("aria-busy") !== "true") submit.disabled = !importSource && !canDeploy;
     },
     sourceTools, readOnly: importSource,
     agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
@@ -342,7 +351,7 @@ export async function liveConfigPage(ctx) {
     beforeDeploy,
   });
   return stack(filterbar(select, flags),
-    errorText && notice(errorText),
+    canReadHost && errorText && node("details",{className:"a-disclosure"},node("summary",{},"系统配置导入不可用"),node("div",{className:"a-disclosure-body"},notice(errorText))),
     inbounds,
     section("配置源码", node("div", { className: "a-card-body" }, form), actions(sourceTools, read, reset, format, readHistory)));
 }

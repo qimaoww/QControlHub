@@ -9,7 +9,7 @@ import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
 import { coreSourceLabel, taskRetryState, taskTiming } from "../modules/task-model.js";
-import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice } from "./ui.js";
+import { autoFilter, filterbar, node, button, actions, stack, grid, section, table, badge, field, code, muted, link, query, pathID, list, notice, copyText } from "./ui.js";
 
 const byteFormatters = [0, 1].map(maximumFractionDigits => new Intl.NumberFormat("zh-CN", { maximumFractionDigits }));
 export const bytes = value => {
@@ -23,7 +23,7 @@ export const status = value => badge(({ online: "在线", offline: "离线", act
 export const actionName = value => ({
   validate: "校验配置", deploy: "部署并重启", start: "启动服务", stop: "停止服务", restart: "重启服务", status: "查询状态",
   install: "安装内核", uninstall: "卸载内核", "read-config": "读取可导入配置", "read-managed-config": "读取托管配置",
-  "import-existing": "导入现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用 BBR",
+  "panel-failure":"面板失败", "import-existing": "导入现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用 BBR",
   "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测",
 })[value] || value;
 
@@ -313,6 +313,7 @@ export async function dashboardPage(ctx) {
 }
 
 function taskEngine(task) {
+  if (task.action === 'panel-failure') return '面板';
   if (task.action === 'upgrade-agent') return 'QAgent';
   if (task.action === 'ip-quality') return 'IPQuality';
   if (['enable-bbr', 'disable-bbr', 'configure-tcp'].includes(task.action)) return 'BBR / TCP';
@@ -320,6 +321,7 @@ function taskEngine(task) {
 }
 
 function taskContext(ctx, task) {
+  if (task.action === "panel-failure") return stack(muted(`面板操作 · ${date(task.created_at)}`),muted("未进入 Agent 执行"));
   const agent = ctx.can('agents.read') && ctx.state.data.taskAgents?.find(agent => agent.id === task.agent_id);
   const source = coreSourceLabel(task.engine, task.core_version, task.core_source);
   return stack(muted(`节点 ${agent?.name || task.agent_id} · ${date(task.created_at)}`),
@@ -328,14 +330,16 @@ function taskContext(ctx, task) {
     task.install_if_missing && muted('缺少时安装稳定版；已有内核保持版本'));
 }
 
-export async function taskDetail(ctx, taskID) {
+export async function taskDetail(ctx, taskID, {title = "任务详情"} = {}) {
   if (!ctx.can("tasks.read")) return;
-  let task = await ctx.api(`/tasks/${pathID(taskID)}`);
+  let task = {id:taskID,status:"loading",error:"",output:""};
+  let diagnosticSignature = "";
   if (!ctx.current()) return;
   const state = status(task.status), failure = notice(diagnosticError(task.error || ""));
-  const output = code(redactDiagnostic(task.output).trim());
+  const output = code("");
   output.hidden = !output.textContent;
   const diagnosis = stack();
+  const previousAttempts = actions();
   let diagnosisSignature;
   function paintDiagnosis() {
     const value = taskRetryState(task).diagnostic;
@@ -348,10 +352,11 @@ export async function taskDetail(ctx, taskID) {
   paintDiagnosis();
   const timing = muted(taskTiming(task));
   const context = taskContext(ctx, task);
-  const heading = actions(state, badge(taskEngine(task)), badge(actionName(task.action)));
+  const engineLabel = badge(taskEngine(task)), actionLabel = badge(actionName(task.action));
+  const heading = actions(state, engineLabel, actionLabel);
   const content = stack(heading,
-    context, timing, failure, diagnosis, output);
-  const box = ctx.dialog("任务详情", content, { wide: true });
+    context, timing, failure, diagnosis, output, previousAttempts);
+  const box = ctx.dialog(title, content, { wide: true });
   box.classList.add("a-task-dialog");
   let timer, reading = false;
   const controller = new AbortController();
@@ -360,7 +365,10 @@ export async function taskDetail(ctx, taskID) {
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", event => void ctx.mutate(event.currentTarget, read));
   refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
-  content.append(actions(refresh));
+  content.append(actions(refresh,button("复制诊断",event=>void ctx.mutate(event.currentTarget,async()=>{
+    await copyText([taskID, failure.textContent, output.textContent].filter(Boolean).join("\n\n"));
+    ctx.announce("诊断已复制");
+  }))));
   async function read({ automatic = false } = {}) {
     if (reading || !active()) return;
     reading = true;
@@ -371,7 +379,7 @@ export async function taskDetail(ctx, taskID) {
       if (automatic && terminal) {
         const state = await ctx.api(`/tasks/${pathID(taskID)}?view=status`, { signal });
         if (!active()) return;
-        if (['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) {
+        if (diagnosticSignature && ['status', 'attempt', 'finished_at', 'error'].every(key => state[key] === task[key])) {
           failure.textContent = diagnosticError(task.error || '');
           return;
         }
@@ -379,6 +387,8 @@ export async function taskDetail(ctx, taskID) {
       const latest = await ctx.api(`/tasks/${pathID(taskID)}`, { signal });
       if (!active()) return;
       task = latest;
+      engineLabel.textContent = taskEngine(task);
+      actionLabel.textContent = actionName(task.action);
       timing.textContent = taskTiming(task);
       patch(context, taskContext(ctx, task));
       paintDiagnosis();
@@ -386,7 +396,29 @@ export async function taskDetail(ctx, taskID) {
       if (state.textContent !== next.textContent) { state.textContent = next.textContent; state.className = next.className; }
       const error = diagnosticError(task.error || "");
       if (failure.textContent !== error) failure.textContent = error;
-      const text = redactDiagnostic(task.output).trim();
+      let text = redactDiagnostic(task.output);
+      const signature = JSON.stringify([task.status,task.attempt,task.finished_at]);
+      if (["succeeded","failed","canceled"].includes(task.status) && diagnosticSignature !== signature) {
+        const diagnostic = await ctx.api(`/tasks/${pathID(taskID)}/diagnostics`, {signal});
+        if (!active()) return;
+        const metadata = diagnostic.attempts || [];
+        const attempts = [{...metadata.find(item=>item.attempt===task.attempt),attempt:task.attempt,error:diagnostic.error,output:diagnostic.output,source:diagnostic.source}];
+        previousAttempts.replaceChildren(...metadata.filter(item=>item.attempt!==task.attempt).map(item=>button(`查看第 ${item.attempt} 次记录`, event=>void ctx.mutate(event.currentTarget,async()=>{
+          const previous=await ctx.api(`/tasks/${pathID(taskID)}/diagnostics?attempt=${item.attempt}`,{signal});
+          if (!active()) return;
+          const detail=[`领取次数：${item.attempt}`,`来源：${previous.source}`,previous.error,previous.output].filter(Boolean).join("\n\n");
+          const history=ctx.dialog(`任务记录 · 第 ${item.attempt} 次`,stack(code(detail),actions(button("复制诊断",event=>void ctx.mutate(event.currentTarget,()=>copyText(detail))))),{wide:true});
+          history.classList.add('a-task-dialog');
+          box.addEventListener('close',()=>history.close(),{once:true});
+        }))));
+        text = [diagnostic.occurrences>1 && `发生次数：${diagnostic.occurrences} · 最近发生：${date(diagnostic.last_failure_at)}`,
+          diagnostic.retry_of && `重试来源：${diagnostic.retry_of}`,
+          ...attempts.map(item => [task.action!=="panel-failure" && `执行尝试：${item.attempt}`,
+            item.executed_attempt>0 && item.executed_attempt!==item.attempt && `Agent 返回此前第 ${item.executed_attempt} 次领取时的执行结果；本次为重传核对。`,
+            item.source==="legacy-agent" && "历史或旧 Agent 记录：来源未提供完整性信息；已丢失的内容无法恢复。",
+            item.error && `错误详情\n${redactDiagnostic(item.error)}`,item.output && `相关输出\n${redactDiagnostic(item.output)}`].filter(Boolean).join("\n\n"))].filter(Boolean).join("\n\n");
+        diagnosticSignature = signature;
+      } else if (diagnosticSignature === signature) text = output.textContent;
       if (output.textContent !== text) {
         const follow = output.scrollHeight-output.scrollTop-output.clientHeight<24;
         const selection = getSelection(), previous = output.firstChild;
@@ -418,6 +450,8 @@ export async function taskDetail(ctx, taskID) {
   }
   box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
+  try { await read(); }
+  catch(error) { if(active() && error.name!=="AbortError") failure.textContent=error.message; }
   timer=setTimeout(poll,2000);
 }
 
@@ -449,7 +483,7 @@ export async function tasksPage(ctx) {
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
       agentField,
-      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp"].map(action => [action, actionName(action)])] }),
+      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp", "panel-failure"].map(action => [action, actionName(action)])] }),
       field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
   ], async (values, _, request) => {
     const sequence = ++readSequence; filtering = true;
@@ -494,7 +528,7 @@ export async function tasksPage(ctx) {
     taskTable.updateRows(lastTasks.map(task => Object.assign(() => {
       const retryState = taskRetryState(task);
       return [
-        actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id, taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
+        actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id || "面板", taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
         node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
           ctx.can("tasks.execute") && retryState.canRetry && button(task.config_id ? "重试配置" : "重试任务", async event => {
             const control = event.currentTarget;

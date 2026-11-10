@@ -18,7 +18,7 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	var result nativeAccountingSnapshot
 	e.specsMu.RLock()
 	spec, ok := e.Specs[engine]
-	issue := e.ExistingDiscoveryIssues[engine]
+	issue := e.ManagedSafetyIssues[engine]
 	e.specsMu.RUnlock()
 	defaultSpec := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
 	if !ok || spec != defaultSpec || issue != "" {
@@ -65,7 +65,7 @@ func (e *Executor) sharedAccounting(ctx context.Context, engine core.Engine, sha
 	var result nativeAccountingSnapshot
 	e.specsMu.RLock()
 	base, ok := e.Specs[engine]
-	issue := e.ExistingDiscoveryIssues[engine]
+	issue := e.ManagedSafetyIssues[engine]
 	e.specsMu.RUnlock()
 	if !ok || base != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] || issue != "" {
 		return result, errors.New("shared accounting requires a verified managed core")

@@ -51,10 +51,10 @@ func TestFileReadersRejectMetadataDriftAfterValidatedOpen(t *testing.T) {
 				}
 				if executor != nil {
 					content := `{"log":{"output":"runtime.log"}}`
-					if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+					if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 						t.Fatal(err)
 					}
-					if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+					if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -145,7 +145,7 @@ func TestFileReadersRejectMetadataDriftAfterValidatedOpen(t *testing.T) {
 				}
 				if sourceKind == "openrc" {
 					waitContext, waitCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-					err := collector.PrepareImportedSingBoxSource(waitContext, nil, `{"log":{"level":"info"}}`)
+					err := collector.PrepareManagedSingBoxSource(waitContext, nil, `{"log":{"level":"info"}}`)
 					waitCancel()
 					if err == nil {
 						cancel()

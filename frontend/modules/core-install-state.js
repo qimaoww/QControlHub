@@ -1,3 +1,4 @@
+import { managedCoreBlockReason } from "./managed-core-state.js";
 // Execution and task visibility are independent grants. These reasons are
 // shared by rendering, live refresh and the final submit guard.
 export function coreInstallBlockReason(agent, engine, can, { automatic = false, pending = false } = {}) {
@@ -6,7 +7,7 @@ export function coreInstallBlockReason(agent, engine, can, { automatic = false, 
   if (!automatic && !shared && !can("host.manage", agent)) return "需要此节点的管理授权。";
   if (!(agent.supported_capabilities || agent.capabilities || []).includes(engine)) return "节点不支持此内核。";
   if (!(agent.capabilities || []).includes(engine)) return "内核能力未启用，请由所有者在内核设置中开启。";
-  if (agent.runtime?.[engine]?.existing_config_unsupported_reason) return agent.runtime[engine].existing_config_unsupported_reason;
+  if (managedCoreBlockReason(agent, engine)) return managedCoreBlockReason(agent, engine);
   if (agent.status !== "online") return "节点离线，上线后可提交安装任务。";
   if (pending) return "安装任务正在执行，请等待结果刷新。";
   if (shared) {
@@ -28,7 +29,7 @@ export function configDeployBlockReason(agent, engine, can) {
   if (!(agent.supported_capabilities || agent.capabilities || []).includes(engine)) return "节点不支持此内核。";
   if (!(agent.capabilities || []).includes(engine)) return "内核能力未启用，请联系节点所有者开启。";
   if (agent.status !== "online") return "节点离线，草稿已保留，上线后可再次提交。";
-  if (agent.runtime?.[engine]?.existing_config_unsupported_reason) return agent.runtime[engine].existing_config_unsupported_reason;
+  if (managedCoreBlockReason(agent, engine)) return managedCoreBlockReason(agent, engine);
   if (!agent.features?.includes("independent-egress-v1")) return "请联系节点所有者升级 Agent 后部署配置。";
   return agent.runtime?.[engine]?.installed ? "" : coreInstallBlockReason(agent, engine, can, {automatic:true});
 }

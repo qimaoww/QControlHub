@@ -94,6 +94,9 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
+	if err := c.pruneDiagnosticSpool(); err != nil {
+		slog.Warn("reclaim orphan task diagnostic cache", "error", core.DiagnosticText(err.Error()))
+	}
 	if err := c.executor.syncManagedCorePermissions(ctx); err != nil {
 		slog.Warn("synchronize installed core runtime permissions; customized services require administrator review", "error", err)
 	}

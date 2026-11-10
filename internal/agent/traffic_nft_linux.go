@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 type nftBackend struct {
@@ -183,14 +185,14 @@ func runNFTPackageCommand(ctx context.Context, backend *nftBackend, environment 
 		command.Env = append(command.Env, value)
 	}
 	configureCommand(command)
-	output := &boundedOutput{limit: 64 << 10}
+	output := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2}
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {
 		message := strings.TrimSpace(output.String())
 		if message == "" {
 			message = err.Error()
 		}
-		return errors.New(message)
+		return fmt.Errorf("%w; %s", err, message)
 	}
 	return nil
 }

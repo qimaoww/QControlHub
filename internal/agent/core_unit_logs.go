@@ -75,7 +75,7 @@ func ensureManagedCoreLogStreamingInternal(ctx context.Context, specs map[core.E
 		if !exists || spec != defaultSpec {
 			continue
 		}
-		status, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+		status, err := validateManagedServiceTarget(ctx, engine, spec, manager)
 		if err != nil {
 			return fmt.Errorf("validate managed log service %s: %w", spec.Service, err)
 		}

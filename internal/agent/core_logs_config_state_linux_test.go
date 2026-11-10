@@ -38,7 +38,7 @@ func TestLostSingBoxConfigurationSurvivesCollectorRestart(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := restarted.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := restarted.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	restarted.markCoreLogDelivery(core.EngineSingBox, core.CoreLogSourceJournalHost)
@@ -73,7 +73,7 @@ func TestSingBoxHistoryWriteFailureDoesNotStopWorkingTransport(t *testing.T) {
 	}}
 	collector := NewCoreLogCollectorForExecutor(executor)
 	collector.markCoreLogDelivery(core.EngineSingBox, core.CoreLogSourceJournalHost)
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	if status := collector.Status()[core.EngineSingBox]; status.Status != core.CoreLogStatusActive || status.Source != core.CoreLogSourceJournalHost {
@@ -86,7 +86,7 @@ func TestRunningSingBoxWithoutHistoryStillReportsLostConfiguration(t *testing.T)
 	executor := &Executor{Specs: map[core.Engine]EngineSpec{core.EngineSingBox: {Binary: "/bin/sh", ConfigPath: configPath, Service: "qagent-sing-box.service"}}}
 	collector := NewCoreLogCollectorForExecutor(executor)
 	collector.serviceState = staticCoreLogServiceState("active")
-	if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err == nil {
 		t.Fatal("an active process without its config was treated as never configured")
 	}
 	if status := collector.Status()[core.EngineSingBox]; status.Status != core.CoreLogStatusFailed || status.Error != core.CoreLogErrorConfigMissing {
@@ -109,7 +109,7 @@ func TestMissingSingBoxErrorDoesNotMaskRestoredOrRemovedConfiguration(t *testing
 			if err := os.Remove(configPath); err != nil {
 				t.Fatal(err)
 			}
-			if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+			if err := collector.RefreshManagedSingBoxSource(executor); err == nil {
 				t.Fatal("missing deployed config did not fail")
 			}
 			switch state {
@@ -124,7 +124,7 @@ func TestMissingSingBoxErrorDoesNotMaskRestoredOrRemovedConfiguration(t *testing
 			case "disabled-engine":
 				delete(executor.Specs, core.EngineSingBox)
 			}
-			err := collector.RefreshImportedSingBoxSource(executor)
+			err := collector.RefreshManagedSingBoxSource(executor)
 			status, exists := collector.Status()[core.EngineSingBox]
 			if state == "invalid-restoration" {
 				if err == nil || status.Status != core.CoreLogStatusFailed || status.Error != "config-invalid" {

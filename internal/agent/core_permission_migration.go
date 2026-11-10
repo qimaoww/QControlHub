@@ -22,7 +22,7 @@ func (e *Executor) syncManagedCorePermissions(ctx context.Context) error {
 	e.specsMu.RLock()
 	specs := make(map[core.Engine]EngineSpec, len(e.Specs))
 	for engine, spec := range e.Specs {
-		if _, pending := e.ExistingSpecs[engine]; !pending && e.ExistingDiscoveryIssues[engine] == "" {
+		if e.ManagedSafetyIssues[engine] == "" {
 			specs[engine] = spec
 		}
 	}
@@ -77,7 +77,7 @@ func (e *Executor) syncInstalledCorePermissions(ctx context.Context, engine core
 			return err
 		}
 	} else {
-		status, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+		status, err := validateManagedServiceTarget(ctx, engine, spec, manager)
 		if err != nil || status == "not-found" {
 			return err
 		}

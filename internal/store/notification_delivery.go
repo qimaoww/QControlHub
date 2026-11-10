@@ -143,7 +143,7 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	delay := time.Duration(0)
 	if sendErr != nil {
 		status = "failed"
-		message = "通知投递失败"
+		message = core.DiagnosticText(sendErr.Error())
 		var de *notify.DeliveryError
 		if errors.As(sendErr, &de) {
 			message = de.Reason
@@ -163,6 +163,14 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer finishCancel()
 	_, err = s.pool.Exec(finishCtx, `UPDATE notification_deliveries SET status=$3,error=$4,next_at=now()+$5::interval,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_id=$2 AND status='sending'`, d.ID, d.Lease, status, message, fmt.Sprintf("%f seconds", delay.Seconds()))
+	if err == nil && sendErr != nil {
+		detail := sendErr.Error()
+		var delivery *notify.DeliveryError
+		if errors.As(sendErr, &delivery) && delivery.Diagnostic != "" {
+			detail += "\n" + delivery.Diagnostic
+		}
+		err = s.retainBackgroundFailure(finishCtx, d.Owner, "通知投递", fmt.Sprintf("delivery:%d/channel:%s", d.ID, d.ChannelID), fmt.Sprintf("delivery_attempt_%d", d.Attempts+1), errors.New(detail))
+	}
 	return true, err
 }
 func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision int64) (int64, error) {

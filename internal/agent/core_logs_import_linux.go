@@ -16,11 +16,11 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Executor) error {
+func (collector *CoreLogCollector) RefreshManagedSingBoxSource(executor *Executor) error {
 	return collector.refreshImportedSingBoxSource(executor, nil)
 }
 
-func (collector *CoreLogCollector) CompleteImportedSingBoxSource(executor *Executor, succeeded bool) error {
+func (collector *CoreLogCollector) CompleteManagedSingBoxSource(executor *Executor, succeeded bool) error {
 	return collector.refreshImportedSingBoxSource(executor, &succeeded)
 }
 
@@ -164,7 +164,7 @@ func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Execut
 	return nil
 }
 
-func (collector *CoreLogCollector) PrepareImportedSingBoxSource(ctx context.Context, executor *Executor, content string) error {
+func (collector *CoreLogCollector) PrepareManagedSingBoxSource(ctx context.Context, executor *Executor, content string) error {
 	output, destination, err := singBoxLogOutput(content)
 	if err != nil {
 		return err
@@ -496,7 +496,7 @@ func (e *Executor) completedMigrationOwnership(parent context.Context, engine co
 	e.specsMu.RLock()
 	currentManaged, enabled := e.Specs[engine]
 	_, pending := e.ExistingSpecs[engine]
-	issue := strings.TrimSpace(e.ExistingDiscoveryIssues[engine])
+	issue := strings.TrimSpace(e.ManagedSafetyIssues[engine])
 	ownership, completed := e.completedMigrations[engine]
 	e.specsMu.RUnlock()
 	if !enabled || currentManaged != managed || pending || issue != "" || !completed || ownership.Managed != managed {

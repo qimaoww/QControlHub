@@ -56,19 +56,16 @@ func runInDirectoryWithEnvironmentAndIdentity(ctx context.Context, directory, en
 	command.Env = commandEnvironment(environment)
 	configureCommand(command)
 	configureCommandIdentity(command, identity)
-	output := &boundedOutput{limit: 64 << 10, onLimit: cancel}
+	output := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2, onLimit: cancel}
 	command.Stdout = output
 	command.Stderr = output
 	err := command.Run()
 	value := strings.TrimSpace(strings.ToValidUTF8(output.String(), "�"))
 	if output.Truncated() {
-		value += "\n… process terminated after exceeding the 64 KiB output limit"
-		if ctx.Err() == nil {
-			err = errors.New("command output limit exceeded")
-		}
+		err = errors.Join(err, errors.New("command output limit exceeded; process terminated and later output was not collected"))
 	}
 	if ctx.Err() != nil {
-		return value, ctx.Err()
+		err = errors.Join(err, ctx.Err())
 	}
 	return value, err
 }
@@ -112,7 +109,11 @@ func (w *boundedOutput) Write(input []byte) (int, error) {
 func (w *boundedOutput) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return string(append([]byte(nil), w.contents...))
+	value := string(append([]byte(nil), w.contents...))
+	if w.truncated {
+		value += "\n[output acquisition limit reached; later content was not collected; diagnostic is incomplete]"
+	}
+	return value
 }
 
 func (w *boundedOutput) Truncated() bool {

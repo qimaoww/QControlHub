@@ -59,7 +59,7 @@ func TestOpenRCConsoleReadinessFollowsInitializedFileCursor(t *testing.T) {
 	}()
 	ready := make(chan error, 1)
 	go func() {
-		ready <- collector.PrepareImportedSingBoxSource(context.Background(), nil,
+		ready <- collector.PrepareManagedSingBoxSource(context.Background(), nil,
 			`{"log":{"level":"info","timestamp":true}}`)
 	}()
 	select {

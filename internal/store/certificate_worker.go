@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
@@ -152,9 +153,9 @@ func (s *Store) RunCertificateMaintenance(ctx context.Context) error {
 func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, startedStatus string, attempt int, cause error) error {
 	retry := time.Duration(1<<min(attempt, 6)) * time.Minute
 	status, stage := "queued", "retry"
-	var secret, failedStage string
+	var secret, failedStage, owner string
 	var state certificateOrderState
-	if err := s.pool.QueryRow(ctx, `SELECT secret,stage FROM certificate_orders WHERE id=$1`, id).Scan(&secret, &failedStage); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT secret,stage,owner_id FROM certificate_orders WHERE id=$1`, id).Scan(&secret, &failedStage, &owner); err != nil {
 		return err
 	}
 	if err := s.openCertificate(secret, &state); err != nil {
@@ -179,6 +180,9 @@ func (s *Store) recordCertificateOrderFailure(ctx context.Context, id, method, s
 	}
 	// A cancellation received during validation must not inherit its long retry
 	// delay. Once cleanup itself fails, retain backoff to protect the provider.
-	_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET secret=$8,status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=CASE WHEN status='canceling' THEN 'cleanup' ELSE $3 END,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(cause.Error(), 1000), intervalString(retry), startedStatus, terminal, secret)
+	_, err = s.pool.Exec(ctx, `UPDATE certificate_orders SET secret=$8,status=CASE WHEN status='canceling' THEN 'canceling' ELSE $2 END,stage=CASE WHEN status='canceling' THEN 'cleanup' ELSE $3 END,error=$4,next_attempt=CASE WHEN (status='canceling' AND $6::text<>'canceling') OR $7::boolean THEN now() ELSE now()+$5::interval END,updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','canceled')`, id, status, stage, truncate(SafeFailureDiagnostic(cause), 1000), intervalString(retry), startedStatus, terminal, secret)
+	if err == nil {
+		err = s.retainBackgroundFailure(ctx, owner, "证书签发", id, fmt.Sprintf("%s/attempt_%d", failedStage, attempt+1), cause)
+	}
 	return err
 }

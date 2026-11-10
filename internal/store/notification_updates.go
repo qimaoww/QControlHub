@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 )
 
@@ -39,7 +40,7 @@ func (s *Store) RefreshNotificationUpdate(ctx context.Context, manual bool, fetc
 	version, published, fetchErr := fetch(ctx)
 	failure := ""
 	if fetchErr != nil {
-		failure = "检查 GHCR 最新镜像失败"
+		failure = "检查 GHCR 最新镜像失败：" + core.DiagnosticText(fetchErr.Error())
 	}
 	delay := "1 hour"
 	if failure != "" {

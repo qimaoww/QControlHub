@@ -163,8 +163,12 @@ func main() {
 	)
 	discoveryCancel()
 	if err != nil {
-		slog.Error("existing core discovery failed", "error", err)
-		os.Exit(1)
+		slog.Warn("existing core discovery unavailable; managed targets are checked separately", "error", core.DiagnosticText(err.Error()))
+		existingSpecs = manualExistingSpecs
+		discoveryIssues = make(map[core.Engine]string)
+		for engine := range enabledSpecs {
+			discoveryIssues[engine] = "导入发现失败：" + core.DiagnosticText(err.Error())
+		}
 	}
 
 	executor := &agent.Executor{

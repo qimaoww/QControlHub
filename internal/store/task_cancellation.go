@@ -46,8 +46,14 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	if err != nil {
 		return core.Task{}, err
 	}
+	if previous.Action == core.ActionPanelFailure {
+		return core.Task{}, fmt.Errorf("%w: 面板失败记录未进入 Agent 执行，请修正后重新操作", ErrConflict)
+	}
 	if previous.Status != core.TaskFailed && previous.Status != core.TaskCanceled {
 		return core.Task{}, fmt.Errorf("%w: only failed or canceled tasks can be retried", ErrConflict)
+	}
+	if previous.Action == core.ActionImportExisting && previous.ConfigID == "" {
+		return s.createConfigImport(ctx, previous.AgentID, previous.Engine, ConfigImportRequest{}, id)
 	}
 	var transition bool
 	if err := s.pool.QueryRow(ctx, `SELECT capability_transition FROM tasks WHERE id=$1`, id).Scan(&transition); err != nil {

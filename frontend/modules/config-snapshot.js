@@ -22,7 +22,7 @@ export async function requestConfigSnapshot(
       : await waitForTask(task.id, isCurrent);
     if (!finished || !isCurrent()) return null;
     if (finished.status !== "succeeded")
-      throw new Error(finished.error || "节点未能读取当前配置");
+      throw Object.assign(new Error(finished.error || "节点未能读取当前配置"),{failureTaskID:finished.id,failureSaved:true});
     return finished;
   };
   let task = await createReadTask(preferCached);

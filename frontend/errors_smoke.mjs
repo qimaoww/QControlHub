@@ -85,7 +85,7 @@ await assert.rejects(requestJSON("/api/v1/agents", { signal: expiredRoute.signal
 await assert.rejects(send(new Response("<html>Bad Gateway</html>", { status: 502 })), (error) => {
   assert.equal(error.status, 502);
   assert.match(error.message, /后端服务/);
-  assert.doesNotMatch(error.message, /html/);
+  assert.match(error.message, /<html>Bad Gateway<\/html>/, "proxy response remains available as inert diagnostic text");
   return true;
 });
 await assert.rejects(send(new Response('{"error":{"bad":"shape"}}', { status: 403 })), /请求被拒绝/);
@@ -134,9 +134,9 @@ for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {
     });
   }
 }
-await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error === abort);
-await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error === abort);
-await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error === abort);
+await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error !== abort && error.cause === abort && error.name === "Error");
+await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error.cause === abort);
+await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error.status === 503);
 for (const status of [200, 401, 403, 500]) {
   let current = true;
   await assert.rejects(send(null, {
@@ -172,7 +172,7 @@ assert.match(diagnosticError("GitHub download network failure: acceleration: con
 assert.match(diagnosticError("GitHub API metadata rate limit exhausted (HTTP 403); retry after reset"), /请求额度已耗尽/);
 assert.match(diagnosticError("GitHub API metadata returned HTTP 404"), /资源不存在/);
 assert.match(diagnosticError("downloaded release asset SHA-256 does not match GitHub metadata"), /校验失败/);
-assert.match(diagnosticError("context canceled"), /操作已取消/);
+assert.match(diagnosticError("context canceled"), /操作被中断/);
 
 const schemaMessage = '任务创建失败，尚未进入 Agent 执行。请检查控制面升级及数据库迁移状态。';
 await assert.rejects(send(new Response(JSON.stringify({ error: schemaMessage, code: 'task_schema_incompatible', stage: 'task_creation', request_id: 'req_fixture123' }), { status: 500 })), error => {

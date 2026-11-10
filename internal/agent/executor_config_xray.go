@@ -109,18 +109,18 @@ func dumpExistingXrayConfiguration(ctx context.Context, spec EngineSpec) (string
 	command.Env = commandEnvironment(spec.commandEnv)
 	configureCommand(command)
 	stdout := &boundedOutput{limit: core.MaxConfigBytes, onLimit: cancel}
-	stderr := &boundedOutput{limit: 64 << 10, onLimit: cancel}
+	stderr := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2, onLimit: cancel}
 	command.Stdout = stdout
 	command.Stderr = stderr
 	err := command.Run()
 	if ctx.Err() != nil {
-		return "", ctx.Err()
+		err = errors.Join(err, ctx.Err())
 	}
 	if stdout.Truncated() {
-		return "", fmt.Errorf("Xray merged configuration exceeds %d bytes", core.MaxConfigBytes)
+		err = errors.Join(err, fmt.Errorf("Xray merged configuration exceeds %d bytes; configuration was not collected", core.MaxConfigBytes))
 	}
 	if stderr.Truncated() {
-		return "", errors.New("Xray dump diagnostics exceeded the output limit")
+		err = errors.Join(err, errors.New("Xray dump diagnostics exceeded the 4 MiB acquisition limit"))
 	}
 	diagnostics := strings.TrimSpace(strings.ToValidUTF8(stderr.String(), "�"))
 	if err != nil {

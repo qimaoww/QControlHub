@@ -81,7 +81,7 @@ func TestOpenRCManagedDiscoveryAcceptsActiveAndInactiveCores(t *testing.T) {
 				t.Fatal(err)
 			}
 			manager := &ServiceManager{kind: ServiceManagerOpenRC, executable: helper}
-			status, err := validateManagedServiceForExistingDiscovery(context.Background(), engine, spec, manager)
+			status, err := validateManagedServiceTarget(context.Background(), engine, spec, manager)
 			if err != nil || status != want {
 				t.Fatalf("%s %s: %q %v", engine, want, status, err)
 			}

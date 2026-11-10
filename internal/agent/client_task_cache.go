@@ -28,6 +28,7 @@ func (c *Client) boundCompletedTaskCache(currentID string) error {
 			return errors.New("task result exceeds the credential cache size limit")
 		}
 		delete(c.creds.CompletedTasks, oldestID)
+		c.removeDiagnostic(oldestID)
 	}
 }
 

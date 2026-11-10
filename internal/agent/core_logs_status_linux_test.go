@@ -147,7 +147,7 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	if err := os.WriteFile(configPath, []byte(`{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	status = waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting after configuration appeared",
@@ -187,7 +187,7 @@ func TestManagedSingBoxConfigReadFailuresStayFailed(t *testing.T) {
 	if err := os.Chmod(configPath, 0o666); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err == nil {
 		t.Fatal("unsafe managed configuration was accepted")
 	}
 	status = collector.Status()[core.EngineSingBox]

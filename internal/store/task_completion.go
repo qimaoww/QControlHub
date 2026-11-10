@@ -13,6 +13,7 @@ import (
 )
 
 func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest, archives ...core.IPQualityArchive) error {
+	agentErrorSummary := result.Error
 	if len(result.LeaseID) < 32 {
 		return fmt.Errorf("%w: invalid task lease", ErrConflict)
 	}
@@ -77,10 +78,13 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			finished_at=now(),config_content=NULL,lease_id=NULL WHERE id=$1`, taskID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `DELETE FROM task_diagnostic_uploads WHERE task_id=$1`, taskID); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	versioned := containsFeature(features, core.AgentFeatureSharedCoreLifecycle)
-	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus) {
+	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus || action == core.ActionImportExisting) {
 		if result.InstanceStatus.Engine != engine {
 			return fmt.Errorf("%w: main instance result does not match its leased target", ErrInvalid)
 		}
@@ -133,9 +137,38 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
+	if result.DiagnosticDigest != "" {
+		diagnostic, err := s.uploadedTaskDiagnostic(ctx, tx, taskID, result.LeaseID, result.DiagnosticDigest)
+		if err != nil {
+			return err
+		}
+		result.Output = diagnostic.Output
+		// Server-side checks can add a cause; they must not replace the Agent cause.
+		if result.Error != agentErrorSummary && result.Error != "" {
+			diagnostic.Error += "\n控制面结果核对：" + result.Error
+		}
+		result.Error = diagnostic.Error
+	}
+	if (action != core.ActionReadConfig && action != core.ActionReadManagedConfig) || !result.Success {
+		result.Output = core.RedactDiagnostic(result.Output)
+	}
+	result.Error = core.RedactDiagnostic(result.Error)
+	if action == core.ActionImportExisting && result.Success {
+		importedID, importedVersion, err := s.commitConfigImportTx(ctx, tx, taskID, agentID, engine, runtimeSnapshot)
+		if errors.Is(err, ErrConflict) {
+			result.Success = false
+			status = core.TaskFailed
+			result.Error += "\n控制面保存阶段：" + err.Error()
+		} else if err != nil {
+			return err
+		}
+		if importedID != "" {
+			configID, configVersion = importedID, importedVersion
+		}
+	}
 	storedContent := ""
-	storedOutput := truncate(result.Output, 64<<10)
-	storedError := truncate(result.Error, 8<<10)
+	storedOutput := truncate(core.DiagnosticText(result.Output), 64<<10)
+	storedError := truncate(core.DiagnosticText(result.Error), 8<<10)
 	if action == core.ActionIPQuality && result.Success {
 		report, validationErr := core.NormalizeIPQualityResult(result.IPQuality)
 		if validationErr == nil {
@@ -172,6 +205,30 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			storedOutput = "current configuration read and validated"
 			storedError = ""
 		}
+	}
+	// Successful configuration reads are encrypted snapshots, never diagnostics.
+	if action != core.ActionReadConfig && action != core.ActionReadManagedConfig || status != core.TaskSucceeded {
+		var attempt int
+		if err := tx.QueryRow(ctx, `SELECT attempt FROM tasks WHERE id=$1`, taskID).Scan(&attempt); err != nil {
+			return err
+		}
+		fullOutput, fullError := core.DiagnosticText(result.Output), core.DiagnosticText(result.Error)
+		if storedError != "" && fullError == "" {
+			fullError = storedError
+		}
+		source := "legacy-agent"
+		if result.DiagnosticDigest != "" {
+			source = "agent-diagnostic-v1"
+		}
+		if result.ExecutedAttempt < 0 || result.ExecutedAttempt > attempt {
+			return fmt.Errorf("%w: invalid original execution attempt", ErrInvalid)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source,executed_attempt) VALUES($1,$2,$3,$4,$5,NULLIF($6,0)) ON CONFLICT DO NOTHING`, taskID, attempt, fullOutput, fullError, source, result.ExecutedAttempt); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM task_diagnostic_uploads WHERE task_id=$1`, taskID); err != nil {
+		return err
 	}
 	storedContent, err = s.encryptContent(storedContent)
 	if err != nil {
@@ -227,7 +284,7 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
-	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus) {
+	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus || action == core.ActionImportExisting) {
 		if err := recordHostInstanceObservationTx(ctx, tx, taskID, *result.InstanceStatus); err != nil {
 			return err
 		}

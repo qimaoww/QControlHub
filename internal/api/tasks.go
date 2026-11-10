@@ -28,7 +28,7 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	action := core.Action(request.URL.Query().Get("action"))
-	if action != "" && !action.Valid() {
+	if action != "" && !action.Valid() && action != core.ActionPanelFailure {
 		writeError(w, http.StatusBadRequest, "invalid task action filter")
 		return
 	}
