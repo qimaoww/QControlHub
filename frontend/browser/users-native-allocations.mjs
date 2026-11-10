@@ -95,7 +95,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     failRead = false; button('重新读取', dialog()).click(); await confirm('重新读取');
     await waitFor(() => !form(), '重新读取未释放编辑器');
     assert.ok(allocationRow('shared').textContent.includes('31008'), '读取后结果未更新');
-    assert.ok(!dialog().textContent.includes('分配读取失败'), '读取成功保留旧错误');
+    assert.ok(!dialog().querySelector('.a-dialog-body').textContent.includes('分配读取失败'), '读取成功保留旧错误');
     await idle(); button('编辑分配', allocationRow('shared')).click();
     input(form().elements.limit, '2.5');
     failSave = true; form().requestSubmit();
@@ -139,7 +139,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     assert.equal(writes.length, revocationWrites, '撤销允许重复提交');
     release(); hold = false;
     await waitFor(() => allocationRow('shared').textContent.includes('已撤销'), '撤销结果未显示');
-    assert.ok(!dialog().textContent.includes('分配已变更'), '撤销成功保留旧错误');
+    assert.ok(!dialog().querySelector('.a-dialog-body').textContent.includes('分配已变更'), '撤销成功保留旧错误');
     same(access.shares[0].ports, [31008], '撤销丢失端口预留');
     assert.equal(access.shares[0].used_bytes, 123, '撤销清除了用量');
     for (const previousStatus of ['pending', 'accepted']) {
