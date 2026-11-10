@@ -184,3 +184,19 @@ func TestChunkedTaskDiagnosticsSurviveSummaryLimitsAndLeaseRetry(t *testing.T) {
 		t.Fatal("successful retry removed old evidence")
 	}
 }
+
+// Failure records are durable task entries but must never enter scheduling.
+func executionTasks(t *testing.T, tasks []core.Task) []core.Task {
+	t.Helper()
+	var result []core.Task
+	for _, task := range tasks {
+		if task.Action != core.ActionPanelFailure {
+			result = append(result, task)
+			continue
+		}
+		if task.Status != core.TaskFailed || task.Attempt != 0 || task.StartedAt != nil || task.LeaseID != "" {
+			t.Fatalf("failure record acquired execution state: %+v", task)
+		}
+	}
+	return result
+}

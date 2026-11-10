@@ -172,7 +172,7 @@ func TestSharedXHTTPRequiresEveryAllocatedListener(t *testing.T) {
 			}
 			var tasks []core.Task
 			recipient.call("GET", "/tasks?agent_id="+agent.ID, nil, http.StatusOK, &tasks)
-			if len(tasks) != 0 {
+			if len(executionTasks(t, tasks)) != 0 {
 				t.Fatal("failed allocation check queued a deployment")
 			}
 		})

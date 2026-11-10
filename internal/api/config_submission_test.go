@@ -137,7 +137,7 @@ func TestSourceSubmissionRepairsBrokenSavedAccounting(t *testing.T) {
 			}
 			var tasks []core.Task
 			client.call("GET", "/tasks?agent_id="+agent.ID, nil, http.StatusOK, &tasks)
-			if len(tasks) != 0 {
+			if len(executionTasks(t, tasks)) != 0 {
 				t.Fatal("rejected source created a task")
 			}
 			source := `{"log":{"level":"warn"},"inbounds":[{"type":"http","tag":"edited","listen":"127.0.0.1","listen_port":21001}],"outbounds":[{"type":"direct","tag":"original"}],"route":{"rules":[{"domain":["example.test"],"outbound":"original"}]}}`

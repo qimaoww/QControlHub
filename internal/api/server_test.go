@@ -215,8 +215,12 @@ func TestConfigRevisionRoutesRejectInvalidRequestsBeforeStoreAccess(t *testing.T
 			if response.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusBadRequest, response.Body.String())
 			}
-			var failure map[string]string
-			if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil || failure["error"] == "" {
+			var failure struct {
+				Error, Code, Stage string
+				RequestID          string `json:"request_id"`
+				FailureSaved       bool   `json:"failure_saved"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil || failure.Error == "" {
 				t.Fatalf("invalid error response %q: %v", response.Body.String(), err)
 			}
 		})

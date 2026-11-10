@@ -50,7 +50,6 @@ export function nodeTimeZone(ctx, agent, canManage, form) {
   view.dataset.agentTimezone = agent.id;
   function sync() {
     const mode = form.elements.mode, input = form.elements.time_zone, allowed = canManage();
-    if (latest.status === 'failed') void ctx.recordFailure?.(Object.assign(new Error(latest.error || 'Agent 时区应用失败，来源未返回具体原因。'),{agentID:agent.id,resource:`/agents/${agent.id}/time-zone`}), `Agent 时区 · ${agent.name || agent.id}`, 'time_zone_application');
     const pending = busy || form.getAttribute('aria-busy') === 'true';
     mode.disabled = !allowed || pending;
     input.disabled = !allowed || pending || mode.value !== 'custom';
