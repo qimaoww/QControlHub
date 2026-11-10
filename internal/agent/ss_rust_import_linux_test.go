@@ -104,8 +104,8 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	if err := os.Symlink(aclPath+".original", aclPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareSSRustImport(spec, content); err == nil {
-		t.Fatal("symlinked ACL accepted")
+	if _, err := prepareSSRustImport(spec, content); err != nil {
+		t.Fatalf("legal symlinked ACL rejected: %v", err)
 	}
 }
 

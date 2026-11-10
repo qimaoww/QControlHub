@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -143,7 +144,11 @@ func TestOUSBSingBoxImportRewritesCertificatesAndKeepsRetryIdempotent(t *testing
 	if err := os.MkdirAll(stateRoot, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	for name, contents := range map[string]string{"fullchain.pem": "certificate\n", "privkey.pem": "private-key\n"} {
+	pair, pairErr := certificates.SelfSigned([]string{"import.example.test"}, "ecdsa256", 90)
+	if pairErr != nil {
+		t.Fatal(pairErr)
+	}
+	for name, contents := range map[string]string{"fullchain.pem": pair.Certificate, "privkey.pem": pair.PrivateKey} {
 		if err := os.WriteFile(filepath.Join(certificateRoot, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -167,6 +172,11 @@ func TestOUSBSingBoxImportRewritesCertificatesAndKeepsRetryIdempotent(t *testing
 		ouSBConfigPath, ouSBCertificateRoot, ouSBManagedStateRoot = previousConfigPath, previousCertificateRoot, previousStateRoot
 	})
 
+	snapshot, snapshotErr := fixture.executor.readExistingConfig(context.Background(), core.EngineSingBox, fixture.managed, fixture.existing)
+	if snapshotErr != nil {
+		t.Fatal(snapshotErr)
+	}
+	content = snapshot
 	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
 	})
@@ -177,7 +187,7 @@ func TestOUSBSingBoxImportRewritesCertificatesAndKeepsRetryIdempotent(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(managedContent), certificateRoot) || !strings.Contains(string(managedContent), stateRoot) {
+	if strings.Contains(string(managedContent), certificateRoot) || !strings.Contains(string(managedContent), filepath.Join(filepath.Dir(fixture.managed.ConfigPath), "imports")) {
 		t.Fatalf("managed OU-SB configuration was not rewritten:\n%s", managedContent)
 	}
 	output, err = fixture.executor.Execute(context.Background(), core.Task{

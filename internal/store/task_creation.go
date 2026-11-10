@@ -40,6 +40,9 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 // The caller commits before notifying the Agent. This also allows a preset
 // revision and its exact task snapshot to be published in one transaction.
 func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration, certificateSyncVersion ...int) (core.Task, error) {
+	if request.ExistingSourceID != "" && (request.Action != core.ActionReadConfig || !core.ValidExistingSourceID(request.ExistingSourceID)) {
+		return core.Task{}, fmt.Errorf("%w: invalid existing source selection", ErrInvalid)
+	}
 	scope := scopeForConfig(ctx)
 	var configIDs []string
 	if scope.Admin && request.ConfigID != "" {
@@ -243,6 +246,27 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
 	}
+	if request.Action == core.ActionReadConfig && !sharedRecipient && len(runtime[request.Engine].ExistingSources) > 1 && request.ExistingSourceID == "" {
+		return core.Task{}, fmt.Errorf("%w: select an existing system service", ErrInvalid)
+	}
+	if request.ExistingSourceID != "" && !containsFeature(features, core.AgentFeatureImportDependencies) {
+		return core.Task{}, fmt.Errorf("%w: upgrade Agent before selecting existing services", ErrConflict)
+	}
+	if request.ExistingSourceID != "" {
+		if sharedRecipient {
+			return core.Task{}, ErrForbidden
+		}
+		found := false
+		for _, source := range runtime[request.Engine].ExistingSources {
+			if source.ID == request.ExistingSourceID {
+				found = true
+			}
+		}
+		if !found {
+			return core.Task{}, fmt.Errorf("%w: discovered source changed; refresh the node", ErrConflict)
+		}
+		readCacheMaxAge = 0
+	}
 	if readCacheMaxAge > 0 && !sharedRecipient {
 		// Cache reuse is a task-creation optimization, never an authorization or
 		// validation shortcut. The Agent lock also serializes it with dispatch
@@ -258,6 +282,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 
 	task := core.Task{
+		ExistingSourceID: request.ExistingSourceID,
 		InstallIfMissing: request.InstallIfMissing,
 		TCPSettings:      request.TCPSettings,
 		AgentID:          request.AgentID, Action: request.Action, Engine: request.Engine,
@@ -479,6 +504,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
 		}
+		if task.Action == core.ActionReadConfig && !task.SharedInstance {
+			var stored string
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(config_content,'') FROM tasks WHERE id=$1`, existing.ID).Scan(&stored); err != nil {
+				return core.Task{}, err
+			}
+			plain, err := s.decryptContent(stored)
+			if err != nil {
+				return core.Task{}, err
+			}
+			if core.ImportSnapshotSource(plain) != task.ExistingSourceID {
+				return core.Task{}, fmt.Errorf("%w: another source read is still pending or running", ErrConflict)
+			}
+		}
 		existing.Reused = true
 		existing.SharedTrafficID = task.SharedTrafficID
 		return existing, nil
@@ -507,6 +545,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	snapshot, err := core.EncodeExecutionSnapshot(task.ConfigContent, task.TLSFrontends, task.CertificateSync, task.ManagedTLSCleanup)
 	if err != nil {
 		return core.Task{}, err
+	}
+	if task.ExistingSourceID != "" {
+		snapshot, err = core.EncodeImportSnapshot(task.ConfigContent, "", task.ExistingSourceID)
+		if err != nil {
+			return core.Task{}, err
+		}
 	}
 	task.TLSFrontends = nil
 	storedConfigContent, err := s.encryptContent(snapshot)

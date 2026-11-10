@@ -48,6 +48,11 @@ func reconnectBackoffLimit(rejected bool) time.Duration {
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	maintenance, stopMaintenance := context.WithCancel(ctx)
+	maintenanceDone := make(chan struct{})
+	go func() { defer close(maintenanceDone); c.maintainImportedResources(maintenance) }()
+	defer func() { stopMaintenance(); <-maintenanceDone }()
+
 	if executable, err := os.Executable(); err != nil {
 		slog.Warn("locate running Agent executable for upgrade cleanup", "error", err)
 	} else if removed, reclaimed, err := cleanupAgentUpgradeBackups(executable); err != nil {
@@ -568,6 +573,24 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			default:
 				return fmt.Errorf("unsupported control-plane message type %q", message.Type)
 			}
+		}
+	}
+}
+
+func (c *Client) maintainImportedResources(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		updateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := c.executor.RefreshImportedResources(updateCtx)
+		cancel()
+		if err != nil {
+			slog.Warn("refresh imported resource generation", "error", core.DiagnosticText(err.Error()))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

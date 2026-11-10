@@ -9,18 +9,34 @@ import (
 
 func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, existing EngineSpec, managers ...*ServiceManager) error {
 	manager := selectedServiceManager(managers...)
+	if existing.SourceContext != "" {
+		var found core.Engine
+		var current EngineSpec
+		var err error
+		if manager.Kind() == ServiceManagerOpenRC {
+			found, current, err = inspectOpenRCCoreSource(ctx, existing.Service, manager)
+		} else {
+			found, current, err = inspectSystemdCoreSource(ctx, existing.Service)
+		}
+		if err != nil {
+			return err
+		}
+		if found != engine || current != existing {
+			return fmt.Errorf("existing %s service context changed after discovery", engine)
+		}
+	}
 	status, err := serviceStatusWithManager(ctx, manager, existing.Service)
 	if err != nil {
 		return fmt.Errorf("query existing %s service before migration: %w", engine, err)
 	}
-	if status != "active" {
+	if status != "active" && (existing.SourceContext == "" || status != "inactive") {
 		return fmt.Errorf("existing %s service must remain active before migration (status %q)", engine, status)
 	}
 	if manager.Kind() == ServiceManagerOpenRC {
 		if err := validateOpenRCServiceScript(existing.Service, ""); err != nil {
 			return fmt.Errorf("existing %s OpenRC service script is unsafe: %w", engine, err)
 		}
-		if _, err := verifyOpenRCExistingServiceProcess(ctx, engine, existing); err != nil {
+		if _, err := verifyOpenRCExistingServiceProcess(ctx, engine, existing); status == "active" && err != nil {
 			return fmt.Errorf("inspect existing %s OpenRC process before migration: %w", engine, err)
 		}
 	} else {
@@ -29,7 +45,7 @@ func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, exist
 			return fmt.Errorf("query existing %s service ExecStart before migration: %w", engine, err)
 		}
 		executable, argv, err := parseSingleSystemdExecStart(output)
-		if err != nil || executable != existingServiceBinary(existing) || !supportedExistingExecStart(engine, existing, argv) {
+		if existing.SourceContext == "" && (err != nil || executable != existingServiceBinary(existing) || !supportedExistingExecStart(engine, existing, argv)) {
 			return fmt.Errorf("existing %s service ExecStart no longer matches the exact discovered binary and single configuration", engine)
 		}
 	}
@@ -40,7 +56,7 @@ func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, exist
 	if err != nil {
 		return fmt.Errorf("recheck existing %s service before migration: %w", engine, err)
 	}
-	if status != "active" {
+	if status != "active" && (existing.SourceContext == "" || status != "inactive") {
 		return fmt.Errorf("existing %s service changed to %q while its mapping was checked", engine, status)
 	}
 	return nil

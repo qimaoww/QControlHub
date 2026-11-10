@@ -4,7 +4,17 @@ import (
 	"time"
 )
 
+type ExistingCoreSource struct {
+	ID              string `json:"id"`
+	Service         string `json:"service"`
+	ConfigPath      string `json:"config_path,omitempty"`
+	ConfigDirectory string `json:"config_directory,omitempty"`
+	Status          string `json:"status"`
+}
+
 type RuntimeState struct {
+	ImportedResourceUpdateError     string                 `json:"imported_resource_update_error,omitempty"`
+	ExistingSources                 []ExistingCoreSource   `json:"existing_sources,omitempty"`
 	ManagedHostBlockedReason        string                 `json:"managed_host_blocked_reason,omitempty"`
 	ManagedOperationBlockedReason   string                 `json:"managed_operation_blocked_reason,omitempty"`
 	Instance                        *SharedInstanceRuntime `json:"instance,omitempty"`

@@ -24,12 +24,15 @@ func readExistingXraySourceDigest(spec EngineSpec) (string, error) {
 	if spec.ConfigDirectory == "" {
 		return "", errors.New("Xray configuration directory is empty")
 	}
-	if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
+	if err := validateImportDirectory(spec.ConfigDirectory); err != nil {
 		return "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
 	}
 	entries, err := os.ReadDir(spec.ConfigDirectory)
 	if err != nil {
 		return "", err
+	}
+	if len(entries) > 4096 {
+		return "", errors.New("configuration directory exceeds 4096 entries")
 	}
 	sources := make([]existingConfigSource, 0, len(entries)+1)
 	// Unlike sing-box's official -C-only form, any Xray ConfigPath here came
@@ -37,7 +40,7 @@ func readExistingXraySourceDigest(spec EngineSpec) (string, error) {
 	// it once from the flag and once from the directory, so preserve both source
 	// occurrences in the size budget and digest.
 	if spec.ConfigPath != "" {
-		primary, err := readConfigurationFile(spec.ConfigPath)
+		primary, err := readImportConfigurationFile(spec.ConfigPath)
 		if err != nil {
 			return "", err
 		}
@@ -47,11 +50,11 @@ func readExistingXraySourceDigest(spec EngineSpec) (string, error) {
 		if !isXrayConfigurationFilename(entry.Name()) {
 			continue
 		}
-		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+		if entry.IsDir() {
 			return "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink Xray configuration file", entry.Name())
 		}
 		path := filepath.Join(spec.ConfigDirectory, entry.Name())
-		contents, err := readConfigurationFile(path)
+		contents, err := readImportConfigurationFile(path)
 		if err != nil {
 			return "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
 		}
@@ -68,6 +71,11 @@ func readExistingXraySourceDigest(spec EngineSpec) (string, error) {
 		digest.Write([]byte(source.path))
 		digest.Write([]byte{0})
 		digest.Write([]byte(source.content))
+		identity, err := importFileIdentity(source.path)
+		if err != nil {
+			return "", err
+		}
+		digest.Write([]byte(identity))
 		digest.Write([]byte{0})
 	}
 	if len(sources) == 0 {

@@ -311,8 +311,6 @@ func TestExistingCoreMigrationRejectsUnsupportedSingBoxConfigDirectoryArgv(t *te
 	}
 	for name, argv := range map[string]string{
 		"unknown extra":      "/usr/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d --unknown",
-		"reordered":          "/usr/bin/sing-box run -C /etc/sing-box/conf.d -c /etc/sing-box/config.json",
-		"long directory":     "/usr/bin/sing-box run -c /etc/sing-box/config.json --config-directory /etc/sing-box/conf.d",
 		"multiple directory": "/usr/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d -C /etc/sing-box/other",
 	} {
 		t.Run(name, func(t *testing.T) {

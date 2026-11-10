@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ func (e *Executor) LoadCoreMigrationState() error {
 				}
 				_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 				delete(e.ExistingSpecs, engine)
+				delete(e.ExistingSources, engine)
 				delete(e.ManagedSafetyIssues, engine)
 			} else {
 				if e.ManagedSafetyIssues == nil {
@@ -81,6 +83,18 @@ func (e *Executor) LoadCoreMigrationState() error {
 				e.ManagedSafetyIssues[engine] = issue
 			}
 			e.specsMu.Unlock()
+			resources, resourceErr := readImportResourceState(e.MigrationMarkerPrefix, engine, managedSpecs[engine])
+			if resourceErr != nil && !errors.Is(resourceErr, os.ErrNotExist) {
+				e.blockManagedMigration(engine, fmt.Errorf("read imported resource recovery: %w", resourceErr))
+				failures = append(failures, resourceErr)
+			} else if resources.Pending != nil && ownershipErr == nil {
+				e.specsMu.Lock()
+				if e.ManagedSafetyIssues == nil {
+					e.ManagedSafetyIssues = make(map[core.Engine]string)
+				}
+				e.ManagedSafetyIssues[engine] = "导入资源更新尚未恢复：等待恢复完整资源组"
+				e.specsMu.Unlock()
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -188,6 +202,7 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 				Existing: existing, Managed: managed[engine], SourceDigest: migrationRecord.SourceDigest,
 			}
 			delete(e.ExistingSpecs, engine)
+			delete(e.ExistingSources, engine)
 			e.specsMu.Unlock()
 			return nil
 		}()

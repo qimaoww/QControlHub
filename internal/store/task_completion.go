@@ -202,6 +202,22 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			storedError = "agent returned an invalid current configuration: " + validationErr.Error()
 		} else {
 			storedContent = content
+			if action == core.ActionReadConfig && !shared && result.ImportSourceDigest != "" {
+				storedContent, err = func() (string, error) {
+					original, err := s.decryptContent(runtimeSnapshot)
+					if err != nil {
+						return "", err
+					}
+					snapshot, err := core.EncodeImportSnapshot(content, result.ImportSourceDigest, core.ImportSnapshotSource(original))
+					if err != nil {
+						return "", err
+					}
+					return core.WithImportDependencies(snapshot, result.ImportDependencies)
+				}()
+				if err != nil {
+					return fmt.Errorf("invalid Agent import provenance: %w", err)
+				}
+			}
 			storedOutput = "current configuration read and validated"
 			storedError = ""
 		}

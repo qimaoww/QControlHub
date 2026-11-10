@@ -49,17 +49,21 @@ export async function liveConfigPage(ctx) {
   const targetField = field('节点', 'agent', '', { options: [['', '正在读取节点…']], disabled: true });
   const engineField = field('内核', 'engine', '', { options: [['', '正在读取内核…']], disabled: true });
   const modeField = field('配置来源', 'source', '', { options: [['', '正在读取配置来源…']], disabled: true });
-  let selectedAgentID = '', selectedEngineID = '', selectedMode = '';
+  const sourceField = field('系统服务', 'source_id', '', { options: [['', '请选择服务']], disabled: true });
+  sourceField.hidden = true;
+  let selectedAgentID = '', selectedEngineID = '', selectedMode = '', selectedSourceID = '';
   const select = node('form', { className: 'a-target-form', onsubmit(event) {
     event.preventDefault();
     const values = formData(event.currentTarget);
-    if (values.agent !== selectedAgentID) { delete values.engine; delete values.source; }
-    else if (values.engine !== selectedEngineID) delete values.source;
+    if (values.agent !== selectedAgentID) { delete values.engine; delete values.source; delete values.source_id; }
+    else if (values.engine !== selectedEngineID) { delete values.source; delete values.source_id; }
+    else if (values.source !== 'import') delete values.source_id;
     location.hash = `#live-config?${new URLSearchParams(values)}`;
     targetField.querySelector('select').value = selectedAgentID;
     engineField.querySelector('select').value = selectedEngineID;
     modeField.querySelector('select').value = selectedMode;
-  } }, targetField, engineField, modeField);
+    sourceField.querySelector('select').value = selectedSourceID;
+  } }, targetField, engineField, modeField, sourceField);
   select.addEventListener('change', () => select.requestSubmit());
   const flagsHost = actions();
   const studioHost = stack(section('入站配置', loadingTable(['端口', '监听', '协议', '状态', '操作'], '入站配置')),
@@ -119,6 +123,13 @@ export async function liveConfigPage(ctx) {
   const hostManaged = Boolean(runtime.installed && (agent.can_manage !== false || agent.shared_allocation?.enabled));
   const mode = params.get("source") === "import" && canReadHost ? "import" : params.get("source") === "managed" && hostManaged && canReadCurrent ? "managed" : "personal";
   const importSource = mode === "import";
+  const sources = canReadHost ? runtime.existing_sources || [] : [];
+  const selectedSource = sources.find(source => source.id === params.get('source_id')) || (sources.length === 1 ? sources[0] : null);
+  selectedSourceID = selectedSource?.id || '';
+  sourceField.hidden = !importSource || !sources.length;
+  const serviceStates = { active: '运行中', inactive: '已停止', unknown: '未知', failed: '失败' };
+  setOptions(sourceField, [['', '请选择服务'], ...sources.map(source => [source.id, `${source.service} · ${serviceStates[source.status] || '未知'}`])], selectedSourceID, !importSource);
+
   const readAction = liveConfigReadAction({
     sourceMode: mode, managedReadSupported: agent.features?.includes("managed-config-read-v1"),
     existingAvailable: Boolean(runtime.existing_config_available),
@@ -139,8 +150,9 @@ export async function liveConfigPage(ctx) {
   const snapshot = async (preferCached = false) => {
     if (importSource && !canImport) throw new Error(errorText || "当前未发现可导入的系统服务配置。");
     if (!readAction || !canReadCurrent) throw new Error("当前节点或账号无法读取托管配置。");
+    if (importSource && sources.length > 1 && !selectedSourceID) throw new Error("请选择要读取的系统服务。");
     const result = await requestConfigSnapshot({ api, waitForTask: id => waitTask(ctx, id) }, agent, engine, readAction, {
-      preferCached, isCurrent: ctx.current,
+      preferCached, isCurrent: ctx.current, existingSourceID: importSource ? selectedSourceID : "",
     });
     if (!result || !ctx.current()) throw new DOMException("目标已切换", "AbortError");
     return result;
@@ -150,20 +162,22 @@ export async function liveConfigPage(ctx) {
   const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : saved?.content || defaultSource(engine), {
     multiline: 20, required: true, readonly: importSource || !editable, spellcheck: false,
   });
+  const dependencyPreview = node("details", {}, node("summary", {}, "依赖资源"));
+  dependencyPreview.hidden = true;
   let sourceBlocked = importSource && !canImport;
   const recovery = stack();
   const form = ctx.form([
     node("div", { className: "a-grid" },
       field("名称", "name", saved?.name || `${agent.name} ${engine}`, { required: true, maxlength: 100, readonly: !editable }),
       field("说明", "description", saved?.description || "", { maxlength: 300, readonly: !editable }), intent),
-    node("div", { className: "a-editor" }, content), liveNotice, recovery,
+    node("div", { className: "a-editor" }, content), dependencyPreview, liveNotice, recovery,
   ], importSource ? "导入并迁移" : "保存并部署", async (values, element) => {
     if (!editable || sourceBlocked) return;
     if (!importSource && !canDeploy) throw new Error("没有配置部署权限，草稿已保留。");
     values.intent = importSource ? "import" : "deploy";
     if (values.intent === "import") {
       if (!source?.content) throw new Error("请先读取可导入的系统服务配置。");
-      if (!await ctx.confirm("导入此配置并迁移现有系统服务？操作成功后由 QAgent 管理对应内核。", "导入并迁移")) return;
+      if (!await ctx.confirm(`导入此配置并迁移${selectedSource ? " " + selectedSource.service : "现有系统服务"}？操作成功后由 QAgent 管理对应内核。`, "导入并迁移")) return;
     }
     if (values.intent === "deploy" && !await prepareConfigDeployment(ctx, base, agent, engine)) return;
     if (!ctx.current()) return;
@@ -315,6 +329,11 @@ export async function liveConfigPage(ctx) {
         if (draft !== JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]))
           throw new Error("读取期间配置已修改，已保留当前草稿，请重新读取。");
         source = result;
+        dependencyPreview.hidden = !importSource || !source.dependencies?.length;
+        if (!dependencyPreview.hidden) dependencyPreview.replaceChildren(
+          node("summary", {}, `依赖资源 · ${source.dependencies.length}`),
+          table(["配置字段", "原资源", "托管去向"], source.dependencies.map(item => [item.field, item.source, item.destination])),
+        );
         form.elements.content.value = source.content;
         form.elements.content.defaultValue = source.content;
         syncDraft();

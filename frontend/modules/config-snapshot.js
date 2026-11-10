@@ -2,7 +2,7 @@ export async function requestConfigSnapshot(
   { api, waitForTask }, agent,
   engine,
   readAction,
-  { preferCached = false, isCurrent = () => true, onTask = () => {} } = {},
+  { preferCached = false, isCurrent = () => true, onTask = () => {}, existingSourceID = "" } = {},
 ) {
   if (!isCurrent()) return null;
   const createReadTask = (allowCached) => api("/tasks", {
@@ -11,6 +11,7 @@ export async function requestConfigSnapshot(
       agent_id: agent.id,
       engine,
       action: readAction,
+      ...(existingSourceID ? { existing_source_id: existingSourceID } : {}),
       ...(allowCached ? { prefer_cached: true } : {}),
     }),
   });
@@ -49,6 +50,7 @@ export async function requestConfigSnapshot(
     throw new Error("节点返回的配置快照已失效，请重新读取");
   return {
     content: snapshot.content,
+    dependencies: snapshot.dependencies || [],
     taskId: finished.id,
     cached: cacheHit,
     readAt: Number.isFinite(Date.parse(finished.finished_at || ""))

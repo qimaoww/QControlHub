@@ -48,12 +48,34 @@ func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []strin
 	if len(serviceManagers) > 0 && serviceManagers[0] != nil {
 		serviceManager = serviceManagers[0]
 	}
+	if len(arguments) == 1 && arguments[0] == "discover-existing" {
+		root, err := os.MkdirTemp("", "qagent-discover-existing-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(root)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		found, issues, err := agent.RefreshExistingCoreDiscovery(ctx, root+"/sources", root+"/migration", specs, nil, serviceManager)
+		if err != nil {
+			return err
+		}
+		for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+			if source, ok := found[engine]; ok {
+				fmt.Fprintf(os.Stdout, "%s: discovered %s\n", engine, source.Service)
+			}
+			if issue := issues[engine]; issue != "" {
+				fmt.Fprintf(os.Stderr, "%s: %s\n", engine, core.DiagnosticText(issue))
+			}
+		}
+		return nil
+	}
 	if len(arguments) != 2 || arguments[0] != "inspect-existing" {
-		return errors.New("usage: qagent inspect-existing <xray|sing-box|ss-rust>")
+		return errors.New("usage: qagent discover-existing | inspect-existing <mihomo|xray|sing-box|ss-rust>")
 	}
 	engine, err := core.ParseEngine(arguments[1])
-	if err != nil || (engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust) {
-		return errors.New("inspect-existing supports only xray, sing-box and ss-rust")
+	if err != nil || !engine.Valid() {
+		return errors.New("inspect-existing requires a supported core")
 	}
 	existing := specs[engine]
 	temporaryDirectory, err := os.MkdirTemp("", "qagent-inspect-existing-")

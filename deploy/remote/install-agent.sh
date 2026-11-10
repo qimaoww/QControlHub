@@ -372,8 +372,11 @@ run_discovery() {
       ;;
   esac
 }
-run_discovery Xray discover_existing_xray
-run_discovery sing-box discover_existing_singbox
+# Use the Agent discovery implementation at installation and after startup.
+# Automatic results must not become permanent explicit path overrides.
+QCH_SERVICE_MANAGER="$service_manager" "$work_dir/qagent" discover-existing || {
+  printf '%s\n' 'warning: existing discovery failed; QAgent will refresh it after startup' >&2
+}
 QCH_SERVICE_MANAGER="$service_manager" sh "$repository_dir/deploy/bootstrap-core-services.sh" --prepare-agent
 install -d -o root -g "$core_service_group" -m 0750 "$qagent_etc_dir"
 
@@ -430,7 +433,7 @@ if [ -x "$qagent_bin_dir/qagent" ] || [ -f "$agent_env_file" ] || \
 fi
 
 # 本次安装由脚本显式管理的配置键：这些始终以本次为准，不继承上次的值。
-managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
+managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER"
 
 install -d -o root -g root -m 0700 "$agent_conf_dir"
 install -d -o root -g root -m 0755 "$qagent_bin_dir"
@@ -506,24 +509,6 @@ umask 077
   printf '%s\n' "QCH_AGENT_STATE=$final_state"
   printf '%s\n' "QCH_AGENT_ENGINES=$final_engines"
   printf '%s\n' "QCH_SERVICE_MANAGER=$service_manager"
-  if [ -n "$mapped_xray_config" ] || [ -n "$mapped_xray_config_directory" ]; then
-    printf '%s\n' \
-      "QCH_EXISTING_XRAY_BINARY=$mapped_xray_binary" \
-      "QCH_EXISTING_XRAY_CONFIG=$mapped_xray_config" \
-      "QCH_EXISTING_XRAY_CONFIG_DIRECTORY=$mapped_xray_config_directory" \
-      "QCH_EXISTING_XRAY_SERVICE=$mapped_xray_service"
-  fi
-  if [ -n "$mapped_singbox_config" ]; then
-    printf '%s\n' \
-      "QCH_EXISTING_SING_BOX_BINARY=$mapped_singbox_binary" \
-      "QCH_EXISTING_SING_BOX_CONFIG=$mapped_singbox_config" \
-      "QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY=$mapped_singbox_config_directory" \
-      "QCH_EXISTING_SING_BOX_SERVICE_BINARY=$mapped_singbox_service_binary" \
-      "QCH_EXISTING_SING_BOX_SERVICE=$mapped_singbox_service"
-    if [ -n "$mapped_singbox_work_directory" ]; then
-      printf '%s\n' "QCH_EXISTING_SING_BOX_WORK_DIRECTORY=$mapped_singbox_work_directory"
-    fi
-  fi
   if [ -s "$inherited_env" ]; then cat "$inherited_env"; fi
 } > "$agent_env_file"
 chmod 0600 "$agent_env_file"
