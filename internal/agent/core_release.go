@@ -96,11 +96,18 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 	}
 	asset, err := selectCoreReleaseAsset(engine, updater.goarch, release, updater.libc)
 	if err != nil {
-		return resolvedCoreRelease{}, err
+		return resolvedCoreRelease{}, fmt.Errorf("select %s release %s (linux/%s, libc=%s): %w", engine, release.TagName, updater.goarch, updater.libc, err)
 	}
 	fallback, err := selectMihomoCompatibleFallback(engine, updater.goarch, release, asset)
 	if err != nil {
 		return resolvedCoreRelease{}, err
+	}
+	if engine == core.EngineShadowsocksRust && updater.libc == "gnu" {
+		fallback, err = selectCoreReleaseAsset(engine, updater.goarch, release, "musl")
+		var missing missingCoreReleaseAssetError
+		if err != nil && !errors.As(err, &missing) {
+			return resolvedCoreRelease{}, err
+		}
 	}
 	return resolvedCoreRelease{Tag: release.TagName, Asset: asset, FallbackAsset: fallback, Repository: repository}, nil
 }

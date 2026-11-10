@@ -73,7 +73,7 @@ func testCertificateHTTP01ProxyWithLocalACME(t *testing.T, provider string) {
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); log.Close() })
 	}
 	if provider == "caddy" {
-		content, err := renderCaddyFrontends(nil, root)
+		content, err := renderCaddyFrontends([]core.TLSFrontend{{Mode: "caddy", Domain: "http-node.example.test", PublicPort: 443, BackendPort: 8080, Path: "/"}}, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,6 +84,9 @@ func testCertificateHTTP01ProxyWithLocalACME(t *testing.T, provider string) {
 		apps := config["apps"].(map[string]any)
 		delete(apps, "tls")
 		server := apps["http"].(map[string]any)["servers"].(map[string]any)["http_challenges"].(map[string]any)
+		// Keep the production challenge route while isolating this fixture from
+		// the business TLS listener and Caddy's independent certificate manager.
+		apps["http"].(map[string]any)["servers"] = map[string]any{"http_challenges": server}
 		server["listen"] = []string{":" + strconv.Itoa(websitePort)}
 		routes := server["routes"].([]any)
 		routes[0].(map[string]any)["handle"].([]any)[0].(map[string]any)["upstreams"] = []any{map[string]any{"dial": strings.TrimPrefix(backend.URL, "http://")}}

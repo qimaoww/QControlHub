@@ -223,6 +223,7 @@ func (s *Server) createCertificateAccount(w http.ResponseWriter, r *http.Request
 	var secret any
 	switch input.Kind {
 	case "dns":
+		input.Credentials.Zone = ""
 		client := certificates.DNSClient{Provider: input.Provider, Credentials: input.Credentials}
 		if err := client.Validate(); err != nil {
 			writeError(w, 400, err.Error())
