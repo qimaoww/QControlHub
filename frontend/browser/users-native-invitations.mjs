@@ -114,9 +114,12 @@ export async function testNativeInvitations() {
     const before = writes.length; button('接受邀请', dialog()).click();
     button('拒绝邀请', dialog()).click();
     const reading = dialog(); reading.querySelector('[aria-label=关闭]').click();
-    assert.equal(dialog(), reading, '读取期间关闭邀请弹窗');
+    assert.ok(!dialog(), '普通读取阻止关闭邀请弹窗');
     assert.equal(writes.length, before, '读取期间对旧条款作出决策');
     holdRead = false; releaseRead();
+    await waitFor(() => cards().textContent.includes('21002'), '新条款未更新卡片');
+    assert.ok(!dialog(), '迟到读取重新打开了邀请弹窗');
+    await open();
     await waitFor(() => dialog()?.textContent.includes('21002') && !button('重新读取', dialog()).disabled, '新条款未显示');
     button('拒绝邀请', dialog()).click();
     await waitFor(() => !dialog() && cards().textContent.includes('已拒绝'), '待接受邀请不能明确拒绝');

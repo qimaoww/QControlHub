@@ -29,8 +29,8 @@ func TestMultiUserBrowserSessions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// This complete browser journey includes animation and screenshot
 			// checks; the API-only fixture's 45s budget can expire at its final
-			// isolation assertions. Keep the browser's own 60s limit bounded.
-			db, ctx, admin, alice, bob := newConfigScopeAPIFixtureWithin(t, 90*time.Second)
+			// isolation assertions. Include held-read checks within the browser's bounded 120s limit.
+			db, ctx, admin, alice, bob := newConfigScopeAPIFixtureWithin(t, 150*time.Second)
 			var analyticsUser core.User
 			admin.call("POST", "/users", core.UserRequest{Username: "analytics-admin", Role: core.RoleAdmin, Password: "config scope password fixture"}, http.StatusCreated, &analyticsUser)
 			analyticsAgent := enrollConfigScopeAPIAgent(t, store.WithConfigScope(ctx, analyticsUser.ID, false), db)

@@ -133,7 +133,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await evaluate(page, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
   await wait(page, "!document.querySelector('dialog[open]')");
   await evaluate(page, "[...document.querySelectorAll('tbody tr')].find(row=>row.textContent.includes('独立主题验证配置')).querySelectorAll('button')[1].click()");
-  await wait(page, "document.querySelector('dialog[open]')?.textContent.includes('保存历史')");
+  await wait(page, "[...document.querySelectorAll('dialog[open] button')].some(item=>item.textContent==='预览') && !document.querySelector('dialog[open] [aria-busy=true]')");
   await evaluate(page, "[...document.querySelectorAll('dialog[open] button')].find(item=>item.textContent==='预览').click()");
   await wait(page, "document.querySelector('dialog[open] pre')?.textContent.includes('mixed-port')");
   assert.ok(await evaluate(page, "!document.querySelector('dialog[open]').textContent.includes('版本 1')"));

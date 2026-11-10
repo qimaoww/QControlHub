@@ -87,7 +87,7 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 		`此节点不可用，或当前账号无权访问。`, `available.find(agent => agent.id === requested)`,
 		`engines.includes(selectedEngine) ? selectedEngine`,
 		`/agents/${pathID(target.id)}/configs/${pathID(engine)}`,
-		`const targetField = field("节点", "agent", target.id`,
+		`const targetField = field('节点', 'agent', ''`,
 	} {
 		if !strings.Contains(app, marker) {
 			t.Errorf("native scoped preset routing missing %q", marker)
@@ -106,16 +106,16 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	for _, required := range []string{
 		`importSource ? "导入并迁移" : "保存并部署"`,
 		`action: "import-existing"`, `existing_config_unsupported_reason`,
-		`["managed", "QAgent 托管配置"]`, `["import", "可导入的系统服务配置"]`,
+		`['managed', 'QAgent 托管配置']`, `['import', '可导入的系统服务配置']`,
 		`readonly: importSource || !editable`, `系统配置快照`,
 		`read-managed-config`, `prefer_cached: true`, `snapshot = async (preferCached = false)`,
 		`const result = await snapshot()`, `requestConfigSnapshot`, `liveConfigSnapshotReusable`,
 		`beforeDeploy`, `submitLiveConfigChange`, `if (!source?.content)`,
 		`source, existingAvailable: importSource`, `beforeDeploy,`,
-		`const errorText = runtime.existing_config_unsupported_reason`, `errorText && notice(errorText)`,
+		`const errorText = runtime.existing_config_unsupported_reason`, `errorText ? [notice(errorText)]`,
 		`canDeploy = !configDeployBlockReason(agent, engine, ctx.can)`,
-		`field("内核", "engine", engine, { options: engines })`,
-		`const engines = target.capabilities`, `if (values.agent !== agent.id)`,
+		`setOptions(engineField, engines.map(id => [id, id]), engine)`,
+		`const engines = target.capabilities`, `if (values.agent !== selectedAgentID)`,
 		`delete values.engine; delete values.source`,
 	} {
 		if !strings.Contains(content, required) {

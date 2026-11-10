@@ -1,3 +1,4 @@
+import { readRegion, loadingTable } from "./loading.js";
 import { editUserAllocations } from "./user-allocations.js";
 import { userPermissions, defaultPermissions, userActionRestriction } from "../modules/user-model.js";
 import { filterbar, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice } from "./ui.js";
@@ -5,11 +6,11 @@ import { date } from "./operations.js";
 import { patch } from "./live-dom.js";
 
 export async function usersPage(ctx) {
-  let users = list(await ctx.api("/users"));
-  const results = node("div");
+  let users = [], loaded = false;
+  const results = node("div", {}, loadingTable(["用户名", "显示名称", "角色", "状态", "最近登录", "操作"], "用户"));
   const query = field("搜索用户", "query", "", { type: "search", placeholder: "用户名或显示名称" });
   let refreshSequence = 0;
-  async function refresh() { const sequence = ++refreshSequence, result = list(await ctx.api("/users")); if (ctx.current() && sequence === refreshSequence) { users = result; draw(); } }
+  async function refresh() { const sequence = ++refreshSequence, result = list(await ctx.api("/users")); if (ctx.current() && sequence === refreshSequence) { users = result; loaded = true; draw(); } }
   const pendingActions = new Set();
   async function accountAction(user, control, run) {
     if (!ctx.current() || control.disabled || pendingActions.has(user.id)) return;
@@ -67,6 +68,7 @@ export async function usersPage(ctx) {
     };
   }
   function draw() {
+    if (!loaded) return;
     const text = query.querySelector("input").value.toLowerCase();
     const visible = users.filter(user =>
       [user.username, user.display_name].join(" ").toLowerCase().includes(text));
@@ -74,7 +76,7 @@ export async function usersPage(ctx) {
       user.username, user.display_name || "—", user.role === "admin" ? "管理员" : "普通用户",
       badge(user.disabled ? "已停用" : "正常", user.disabled ? "warn" : "ok"), date(user.last_login_at),
       actions(button("编辑", () => edit(user), { disabled: pendingActions.has(user.id) }),
-        user.role !== "admin" && button("共享资源", event => void ctx.mutate(event.currentTarget, () => editUserAllocations(ctx, user)), { disabled: pendingActions.has(user.id) }),
+        user.role !== "admin" && button("共享资源", () => editUserAllocations(ctx, user), { disabled: pendingActions.has(user.id) }),
         button(user.disabled ? "启用" : "停用", event => void accountAction(user, event.currentTarget, async () => {
           const reason = !user.disabled && userActionRestriction(user, ctx.session, "disable");
           if (reason) throw new Error(reason);
@@ -116,10 +118,11 @@ export async function usersPage(ctx) {
     if (results.firstChild) patch(results.firstChild, fresh);
     else results.append(fresh);
   }
-  draw();
+  const loading = readRegion(ctx, '用户', signal => ctx.api('/users', { signal }), value => { users = list(value); loaded = true; draw(); }, { view: results, clear() { users = []; loaded = true; draw(); } });
+  void loading.load();
   query.querySelector("input").addEventListener("input", draw);
   ctx.pageActions(button("创建用户", () => edit(), { tone: "primary" }));
-  ctx.onRefresh(refresh);
-  return stack(filterbar(query),
+  ctx.onRefresh(loading.load);
+  return stack(filterbar(query), loading.element,
     section(null, results));
 }

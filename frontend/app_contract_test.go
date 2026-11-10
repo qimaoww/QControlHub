@@ -27,7 +27,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 			`section('入站配置'`, `section('出站配置'`, `通用配置项`,
 		},
 		"analytics/live-config.js":      {`保存历史`, `/revisions?limit=100`, `恢复此档案`, `配置源码`},
-		"analytics/operations.js":       {`export async function tasksPage`, `export async function taskDetail`, `taskRetryState(task)`, `output.firstChild`},
+		"analytics/operations.js":       {`export async function tasksPage`, `export function taskDetail`, `taskRetryState(task)`, `output.firstChild`},
 		"analytics/settings.js":         {`保存设置`, `ctx.pageActions(submit)`, `section("API Key"`},
 		"analytics/themes.js":           {`createThemePreference`, `ctx.switchTheme`, `theme.id === "analytics"`},
 		"modules/enrollment-command.js": {`X-QControlHub-Enrollment`, `/install-agent.sh`, `created?.token`, `created?.name`},

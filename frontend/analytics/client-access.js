@@ -1,3 +1,4 @@
+import { readRegion, loadingTable } from "./loading.js";
 import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport, clientAccessBatchExport, clientAccessRecordKey, filterClientAccessEntries, normalizeClientAccessFilters, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
 import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { accountStorage } from '../modules/account-storage.js';
@@ -7,13 +8,12 @@ import { filterbar, copyText, node, button, actions, stack, section, table, fiel
 
 export async function clientAccessPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
-  let [entries, agents] = await Promise.all([ctx.api('/client-access'), ctx.can('agents.read') ? ctx.api('/agents') : [], ordering.load()]);
-  entries = list(entries); agents = orderNodesBySavedOrder(list(agents), ordering.ids());
+  let entries = [], agents = [], loaded = false;
   const search = field('搜索接入配置', 'search', '', { type: 'search', placeholder: '节点、协议、入站或地址' });
   const agentOptions = () => [['', '全部节点'], ...groupClientAccessEntries(entries, agents).map(group => [group.agent_id, group.entries[0].agent_name || group.agent_id])];
   const agentFilter = field('节点', 'agent', '', { options: agentOptions() });
   const format = field('导出格式', 'format', loadClientDisplayFormat(), { options: [['url', 'URL'], ['mihomo', 'Mihomo YAML']] });
-  const result = node('div', { className: 'a-stack' });
+  const result = node('div', { className: 'a-stack' }, section('接入配置', loadingTable(['入站', '协议', '客户端', '操作'], '客户端接入')));
   const scopes = new Map();
   let readSequence = 0;
   function updateOptions(control, options) {
@@ -138,9 +138,9 @@ export async function clientAccessPage(ctx) {
   }
   async function reload() {
     const sequence = ++readSequence;
-    const [received, nodes] = await Promise.all([ctx.api('/client-access'), ctx.can('agents.read') ? ctx.api('/agents') : [], ordering.load()]);
+    const received = await ctx.api('/client-access');
     if (!ctx.current() || sequence !== readSequence) return;
-    entries = list(received); agents = orderNodesBySavedOrder(list(nodes), ordering.ids());
+    entries = list(received); loaded = true; batchCopy.disabled = false;
     updateOptions(agentFilter, agentOptions());
     for (const [box, scope] of scopes) {
       if (matching(entries, scope.entry, scope.item) || scope.invalid) continue;
@@ -158,6 +158,7 @@ export async function clientAccessPage(ctx) {
     draw();
   }
   function draw() {
+    if (!loaded) return;
     // Export-only accounts group the authorized response without /agents.
     const available = groupClientAccessEntries(entries, agents).map(group => ({ id: group.agent_id }));
     const filters = normalizeClientAccessFilters(entries, available, {
@@ -197,7 +198,11 @@ export async function clientAccessPage(ctx) {
   }
   search.querySelector('input').addEventListener('input', draw);
   for (const control of [agentFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
-  ctx.onRefresh(reload);
-  draw();
-  return stack(filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter, format), button('复制全部节点', event => void copyBatch('', event.currentTarget))), result);
+  const entryRead = readRegion(ctx, '接入配置', reload, () => {}, { view: result, clear() { loaded = true; entries = []; batchCopy.disabled = true; scopes.forEach((_, box) => box.close()); draw(); } });
+  const nodeRead = readRegion(ctx, '节点名称', signal => ctx.api('/agents', { signal }), value => { agents = orderNodesBySavedOrder(list(value), ordering.ids()); draw(); }, { clear() { agents = []; draw(); } });
+  const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => { agents = orderNodesBySavedOrder(agents, ordering.ids()); draw(); });
+  const batchCopy = button('复制全部节点', event => void copyBatch('', event.currentTarget), { disabled: true });
+  void entryRead.load(); if (ctx.can('agents.read')) void nodeRead.load(); void orderRead.load();
+  ctx.onRefresh(() => Promise.all([entryRead.load(), ctx.can('agents.read') && nodeRead.load(), orderRead.load()]));
+  return stack(entryRead.element, ctx.can('agents.read') && nodeRead.element, orderRead.element, filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter, format), batchCopy), result);
 }

@@ -1,3 +1,4 @@
+import { readRegion, loadingTable } from "./loading.js";
 import { systemBBRState, validateTCPSelection, validateTCPAvailability, hasTCPParameter, taskLabel, actionLabel } from '../modules/system-bbr-model.js';
 import { systemTCPPresets, prepareTCPPreset } from '../modules/system-bbr-presets.js';
 import { orderNodesBySavedOrder } from '../modules/node-order.js';
@@ -8,16 +9,14 @@ import { node, button, actions, stack, grid, section, table, badge, field, muted
 import { date, taskDetail } from './operations.js';
 
 export async function tcpPage(ctx) {
-  let [agents, rules, tasks, order] = await Promise.all([
-    ctx.api('/agents'), ctx.api('/system-tcp/parameters'),
-    ctx.can('tasks.read') ? ctx.api('/system-tcp/tasks') : [], ctx.api('/preferences/node-order'),
-  ]);
+  let agents = [], rules = [], tasks = [], order = null, agentsReady = false, rulesReady = false, tasksReady = !ctx.can('tasks.read');
   const latest = new Map();
   const drafts = ctx.state?.data ? (ctx.state.data.analyticsTCPDrafts ||= new Map()) : new Map();
   const submitting = new Set();
   const results = node('div');
-  let resultTable;
-  const refreshStatus = muted('正在实时更新');
+  const resultTable = loadingTable(['节点', '状态', '拥塞控制', '队列', '持久配置', '最近任务', '操作'], 'TCP 调优', { rowKey: row => row.refreshKey, motion: false });
+  results.append(resultTable);
+  const refreshStatus = muted('正在读取节点状态…');
   refreshStatus.setAttribute('role', 'status');
   let serial = 0;
   const dialogs = new Set(), confirmations = new Map();
@@ -40,7 +39,7 @@ export async function tcpPage(ctx) {
   setTasks(tasks);
   const currentAgent = id => list(agents).find(agent => agent.id === id);
   const busy = id => submitting.has(id) || ['pending', 'running'].includes(latest.get(id)?.status);
-  const editable = agent => owned(agent) && ctx.can('tasks.execute') && systemBBRState(agent).controllable && !busy(agent.id);
+  const editable = agent => tasksReady && owned(agent) && ctx.can('tasks.execute') && systemBBRState(agent).controllable && !busy(agent.id);
   async function reload() {
     const sequence = ++serial;
     let fresh, taskItems, savedOrder;
@@ -51,7 +50,7 @@ export async function tcpPage(ctx) {
       throw error;
     }
     if (!ctx.current() || sequence !== serial) return;
-    agents = fresh; order = savedOrder;
+    agents = fresh; agentsReady = tasksReady = true; order = savedOrder;
     setTasks(taskItems);
     refreshStatus.textContent = '正在实时更新';
     draw(); syncDialogs();
@@ -203,6 +202,7 @@ export async function tcpPage(ctx) {
     refresh(); observe(refresh);
   }
   function draw() {
+    if (!agentsReady) return;
     const ordered = selected();
     const rows = ordered.map(agent => {
       const current = systemBBRState(agent), metrics = agent.metrics?.bbr || {};
@@ -212,7 +212,7 @@ export async function tcpPage(ctx) {
         task ? stack(date(task.created_at), badge(taskLabel(task.status)), task.error && muted(diagnosticError(task.error))) : '—',
         actions(owned(agent) && ctx.can('tasks.execute') && button('启用 BBR', event => void ctx.mutate(event.currentTarget, () => action(agent.id, 'enable-bbr')), { disabled: !editable(agent) || !hasTCPParameter(metrics.parameters, 'net.core.default_qdisc') || !hasTCPParameter(metrics.parameters, 'net.ipv4.tcp_congestion_control') }),
           owned(agent) && ctx.can('tasks.execute') && button('切换 CUBIC', event => void ctx.mutate(event.currentTarget, () => action(agent.id, 'disable-bbr')), { disabled: !editable(agent) || !hasTCPParameter(metrics.parameters, 'net.core.default_qdisc') || !hasTCPParameter(metrics.parameters, 'net.ipv4.tcp_congestion_control') }),
-          owned(agent) && ctx.can('tasks.execute') && button(drafts.has(agent.id) && Object.keys(drafts.get(agent.id)).length ? '自定义参数 · 有草稿' : '自定义参数', () => editor(agent.id), { disabled: !editable(agent) }),
+          owned(agent) && ctx.can('tasks.execute') && button(drafts.has(agent.id) && Object.keys(drafts.get(agent.id)).length ? '自定义参数 · 有草稿' : '自定义参数', () => editor(agent.id), { disabled: !editable(agent) || !rulesReady }),
           button('查看参数', () => parameters(agent.id)),
           task && ctx.can('tasks.read') && button('任务详情', event => void ctx.mutate(event.currentTarget, () => taskDetail(ctx, task.id))))];
       row.refreshKey = agent.id; return row;
@@ -223,8 +223,13 @@ export async function tcpPage(ctx) {
       results.append(resultTable);
     }
   }
-  ctx.onRefresh(reload);
-  poll({ ...ctx, onRefreshError: () => { refreshStatus.textContent = '状态刷新失败，保留上次数据并重试。'; } }, reload, 5000);
-  draw();
-  return stack(refreshStatus, section(null, results));
+  const agentRead = readRegion(ctx, '节点状态', async signal => { try { return await ctx.api('/agents', { signal }); } catch (error) { if (ctx.current()) refreshStatus.textContent = '状态刷新失败，保留上次数据并重试。'; throw error; } }, value => { agents = value; agentsReady = true; draw(); syncDialogs(); refreshStatus.textContent = '正在实时更新'; }, { view: resultTable, clear() { agents = []; agentsReady = true; drafts.clear(); draw(); syncDialogs(); } });
+  const rulesRead = readRegion(ctx, 'TCP 参数选项', signal => ctx.api('/system-tcp/parameters', { signal }), value => { rules = value; rulesReady = true; draw(); }, { clear() { rulesReady = false; draw(); } });
+  const taskRead = readRegion(ctx, 'TCP 任务状态', signal => ctx.can('tasks.read') ? ctx.api('/system-tcp/tasks', { signal }) : [], value => { tasks = value; tasksReady = true; setTasks(tasks); draw(); syncDialogs(); }, { clear() { tasksReady = false; latest.clear(); draw(); syncDialogs(); } });
+  const orderRead = readRegion(ctx, '节点排序', signal => ctx.api('/preferences/node-order', { signal }), value => { order = value; draw(); });
+  const refreshView = () => Promise.all([agentRead.load(), taskRead.load(), !rulesReady && rulesRead.load(), orderRead.load()]);
+  ctx.onRefresh(refreshView);
+  poll(ctx, refreshView, 5000);
+  void refreshView();
+  return stack(agentRead.element, taskRead.element, rulesRead.element, orderRead.element, refreshStatus, section(null, results));
 }

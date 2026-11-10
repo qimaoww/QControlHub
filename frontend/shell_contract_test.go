@@ -82,7 +82,7 @@ func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
 		`window.requestIdleCallback(warm, { timeout: 1500 })`,
 		`connection?.saveData`,
 		`connection?.effectiveType?.includes("2g")`,
-		`const [module] = await Promise.all([`,
+		`const module = await routeModules.load(descriptor[0])`,
 		`routeModules.load(descriptor[0])`,
 		`if (!context.current()) return;`,
 		`signal?.addEventListener('abort', stopRouteWarmup`,

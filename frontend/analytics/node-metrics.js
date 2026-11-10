@@ -1,3 +1,4 @@
+import { loadingTable, readRegion, dialogContext } from "./loading.js";
 import { node, button, actions, stack, table, muted, list, pathID } from './ui.js';
 import { bytes, date } from './operations.js';
 
@@ -29,14 +30,14 @@ function metricChart(samples, width, name) {
   return chart;
 }
 
-export async function nodeMetrics(ctx, agent) {
-  const content=node('div',{className:'a-stack'},muted('正在读取指标…'));
+export function nodeMetrics(ctx, agent) {
+  const content=node('div',{className:'a-stack'},muted('最近 24 小时 · 接收与发送速率'),loadingTable(['采样时间','CPU','内存','接收速率','发送速率'],'节点历史指标'));
   let box, sequence=0, observer;
   const stop=()=>observer?.disconnect();
   ctx.signal.addEventListener('abort',stop,{once:true});
   async function read() {
     const request=++sequence;
-    const samples=list(await ctx.api(`/metrics/${pathID(agent.id)}`));
+    const samples=list(await local.api(`/metrics/${pathID(agent.id)}`));
     if(!ctx.current()||request!==sequence||!box.open)return;
     stop();
     const summary=muted('最近 24 小时 · 接收与发送速率');
@@ -48,7 +49,11 @@ export async function nodeMetrics(ctx, agent) {
     observer=new ResizeObserver(entries=>{if(ctx.current()&&box.open)draw(entries[0].contentRect.width);});
     observer.observe(graph);
   }
-  box=ctx.dialog(`${agent.name} · 指标历史`,stack(content,actions(button('刷新指标',event=>void ctx.mutate(event.currentTarget,read)))),{wide:true});
+  box=ctx.dialog(`${agent.name} · 指标历史`,stack(content),{wide:true});
   box.addEventListener('close',stop,{once:true});
-  await read();
+  const local = dialogContext(ctx, box);
+  const region = readRegion(local, '历史指标', read, () => {});
+  content.before(region.element);
+  box.querySelector('.a-dialog-body').append(actions(button('刷新指标', () => void region.load())));
+  void region.load();
 }

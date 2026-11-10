@@ -10,7 +10,7 @@ func TestClientAccessUsesOneScopedNodeFilter(t *testing.T) {
 	for _, required := range []string{
 		`const agentFilter = field('节点', 'agent', ''`,
 		`const search = field('搜索接入配置'`, `normalizeClientAccessFilters`, `groupClientAccessEntries(entries, agents)`,
-		`orderNodesBySavedOrder(list(nodes), ordering.ids())`, `filterClientAccessEntries`,
+		`orderNodesBySavedOrder(list(value), ordering.ids())`, `filterClientAccessEntries`,
 		`agentFilter.querySelector('select').value`,
 		`loadClientDisplayFormat()`, `saveClientDisplayFormat`,
 		`button('参数详情', () => details(entry, item))`, `part.secret ? secret(part.label, part.value, false, check)`,
@@ -58,7 +58,7 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 		`subStoreSelectionPayload(profiles)`, `body: { target_id: target.id, selections }`,
 		`ctx.api("/substore-sync/selections"`, `ctx.api("/substore-sync/run"`,
 		`body: { target_id: target.id }`, `ctx.dialog("Sub-Store 连接设置"`, `ctx.api("/substore-sync/settings"`,
-		`ctx.api("/substore-sync/test"`, `ctx.api("/substore-sync/remote-targets")`,
+		`ctx.api("/substore-sync/test"`, `local.api('/substore-sync/remote-targets')`,
 		`/substore-sync/targets/${pathID(target.id)}/remote`, `"/substore-sync/targets/import"`,
 		`field("同步模式", "sync_mode"`, `"incremental"`, `"managed"`, `增量更新`, `完全托管`,
 		`field("同步组名称", "display_name"`, `field("同步格式", "sync_format"`, `rename_remote`,

@@ -1,3 +1,5 @@
+import { readRegion, loadingForm, loadingTable, preparedDialog } from "./loading.js";
+import { patch, listen } from "./live-dom.js";
 import { subStoreSelectionPayload, subStoreAddressChoices, groupSubStoreProfiles, filterSubStoreProfiles } from "../modules/substore-model.js";
 import { savedNodeOrder } from "../modules/node-order.js";
 import { geoRegionDetails } from "../modules/region-model.js";
@@ -6,23 +8,19 @@ import { bindSelectionSurface, node, button, actions, stack, section, table, bad
 import { date } from "./operations.js";
 
 export async function substorePage(ctx) {
-  const [initialResource, receivedAgents, preference] = await Promise.all([
-    ctx.api("/substore-sync"), ctx.can("agents.read") ? ctx.api("/agents") : [],
-    ctx.api("/preferences/node-order").catch(error => { if (error.name === "AbortError") throw error; return null; }),
-  ]);
-  let resource = initialResource;
-  const agents = list(receivedAgents);
-  const regions = new Map(agents.map(agent => [agent.id, geoRegionDetails(agent.labels?.region_code || agent.region_code)]));
+  let resource, agents = [], loaded = false;
+  const regions = new Map();
   const regionLoads = new Map();
-  const order = preference?.ids || savedNodeOrder();
-  const root = node("div", { className: "a-stack" });
-  let serial = 0, dirty = false;
+  let order = savedNodeOrder();
+  const root = stack(section('Sub-Store', node('div', { className: 'a-card-body' }, loadingForm(['同步组', '连接设置'], '保存连接'))),
+    section('同步节点', stack(node('div', { className: 'a-card-body' }, field('搜索节点', 'search', '', { type: 'search' }), field('节点', 'agent', '', { options: [['', '全部节点']], disabled: true })), loadingTable(['选择', '节点', '内核 / 入站', '同步名称', '地址', '状态'], '同步节点'))));
+  let serial = 0, dirty = false, refreshView, viewTarget;
   const writable = ctx.can("settings.manage");
-  async function reload(targetID = resource.target_id) {
+  async function reload(targetID = resource?.target_id) {
     const request = ++serial;
     const value = await ctx.api(query("/substore-sync", { target_id: targetID }));
     if (!ctx.current() || serial !== request) return;
-    resource = value;
+    resource = value; loaded = true;
     dirty = false;
     ctx.setDirty(false);
     draw();
@@ -58,7 +56,10 @@ export async function substorePage(ctx) {
   }
   function draw() {
     const target = list(resource.targets).find(item => item.id === resource.target_id);
-    const profiles = groupSubStoreProfiles(list(resource.profiles), agents, order).flatMap(group => group.profiles);
+    let profiles = groupSubStoreProfiles(list(resource.profiles), agents, order).flatMap(group => group.profiles);
+    const signature = JSON.stringify([target, resource.targets, resource.settings]);
+    if (refreshView && signature === viewTarget) { refreshView(profiles); return; }
+    viewTarget = signature;
     let baseline = JSON.stringify(subStoreSelectionPayload(profiles));
     const unavailable = profile => !profile.available || Boolean(target?.sync_format === "mihomo" && profile.mihomo_error);
     const selectTarget = field("同步组", "target", resource.target_id || "", {
@@ -106,22 +107,22 @@ export async function substorePage(ctx) {
       const content = table(["选择", "节点", "内核 / 入站", "同步名称", "地址", "状态"], visible.map(profile => {
         const blocked = unavailable(profile);
         const selected = field("同步", "selected", profile.selected, { type: "checkbox", disabled: !writable || !target || blocked });
-        selected.querySelector("input").addEventListener("change", event => {
+        listen(selected.querySelector("input"), "change", event => {
           profile.selected = event.target.checked;
           name.querySelector("input").disabled = address.querySelector("select").disabled = !profile.selected;
-          showParameters();
+          showParameters(event.target.closest("tr"));
           markDirty();
         });
         const name = field("名称", "name", profile.custom_name || profile.default_name || "", { maxlength: 100, disabled: !writable || !target || blocked || !profile.selected });
-        name.querySelector("input").addEventListener("input", event => { profile.custom_name = event.target.value; markDirty(); });
+        listen(name.querySelector("input"), "input", event => { profile.custom_name = event.target.value; markDirty(); });
         const address = field("地址", "address", profile.address_mode || "auto", { options: subStoreAddressChoices(profile).map(item => [item.value, item.label]),
           disabled: !writable || !target || blocked || !profile.selected });
-        address.querySelector("select").addEventListener("change", event => { profile.address_mode = event.target.value; markDirty(); });
-        const nameView = node("div"), addressView = node("div");
-        function showParameters() {
+        listen(address.querySelector("select"), "change", event => { profile.address_mode = event.target.value; markDirty(); });
+        const nameView = node("div", {"data-substore-name":""}), addressView = node("div", {"data-substore-address":""});
+        function showParameters(row) {
           const editing = writable && target && !blocked && profile.selected;
-          nameView.replaceChildren(editing ? name : muted(profile.custom_name || profile.default_name || "—"));
-          addressView.replaceChildren(editing ? address : muted(subStoreAddressChoices(profile).find(item => item.value === (profile.address_mode || "auto"))?.label || "自动选择"));
+          (row?.querySelector("[data-substore-name]") || nameView).replaceChildren(editing ? name : muted(profile.custom_name || profile.default_name || "—"));
+          (row?.querySelector("[data-substore-address]") || addressView).replaceChildren(editing ? address : muted(subStoreAddressChoices(profile).find(item => item.value === (profile.address_mode || "auto"))?.label || "自动选择"));
         }
         showParameters();
         return [selected, stack(actions(profileRegion(profile.agent_id), node("strong", {}, profile.agent_name || profile.agent_id)),
@@ -136,7 +137,7 @@ export async function substorePage(ctx) {
         const input = row.querySelector('input[type=checkbox]');
         if (input && !input.disabled) row.tabIndex = 0;
       });
-      rows.replaceChildren(content);
+      if (rows.firstElementChild) patch(rows.firstElementChild, content); else rows.append(content);
     }
     drawRows();
     search.querySelector("input").addEventListener("input", drawRows);
@@ -167,7 +168,7 @@ export async function substorePage(ctx) {
     if (save) save.addEventListener("mutationend", () => syncDraft());
     if (sync) sync.addEventListener("mutationend", () => syncDraft());
     syncDraft();
-    root.replaceChildren(
+    const fresh = stack(
       section("Sub-Store", node("div", { className: "a-card-body" }, stack(selectTarget,
         muted(resource.settings?.endpoint_hint || "尚未配置连接"),
         target && muted(target.last_synced_at ? `上次同步 · ${date(target.last_synced_at)}` : "尚未同步"),
@@ -186,8 +187,9 @@ export async function substorePage(ctx) {
           ctx.announce("Sub-Store 连接正常");
         })), writable && button("关联远端现有组", event => void ctx.mutate(event.currentTarget, async () => {
           if (dirty) { ctx.announce("请先保存同步选择。", "error"); return; }
-          const remote = list(await ctx.api("/substore-sync/remote-targets")).filter(item => !item.imported || item.subscription_name === target?.subscription_name);
-          const form = ctx.form([
+          preparedDialog(ctx, '关联远端现有组', ['远端组', '面板名称', '同步格式'], async local => {
+          const remote = list(await local.api('/substore-sync/remote-targets')).filter(item => !item.imported || item.subscription_name === target?.subscription_name);
+          const form = local.form([
             field("远端组", "subscription_name", "", { required: true, options: [["", "选择远端组"], ...remote.map(item => [item.subscription_name, `${item.subscription_name} · ${item.node_count} 个节点`])] }),
             field("面板名称", "display_name", target?.display_name || "", { required: true, maxlength: 100 }),
             field("同步格式", "sync_format", target?.sync_format || "url", { options: [["url", "URL / 原生格式"], ["mihomo", "Mihomo YAML"]] }),
@@ -196,11 +198,36 @@ export async function substorePage(ctx) {
             box.close();
             await reload(saved.id);
           });
-          const box = ctx.dialog("关联远端现有组", form);
+          const box = local.dialog('关联远端现有组', form);
+          }, { wide: false, submit: target ? '更换关联组' : '加入同步组' });
         }))))), tools),
       section("同步节点", stack(node("div", { className: "a-card-body" }, actions(search, agentFilter)), selectionFields,
         node("div", { className: "a-card-body" }, actions(save, sync)))));
+    root.replaceChildren(...fresh.childNodes);
+    refreshView = received => {
+      profiles = received;
+      baseline = JSON.stringify(subStoreSelectionPayload(profiles));
+      const filter = agentFilter.querySelector('select'), selected = filter.value;
+      const options = [...new Map(profiles.map(profile => [profile.agent_id, profile.agent_name || profile.agent_id]))];
+      const signature = JSON.stringify(options);
+      if (filter.dataset.options !== signature) {
+        filter.replaceChildren(filter.querySelector('button'), node('option', {value:''}, '全部节点'), ...options.map(([value, name]) => node('option', {value}, name)));
+        filter.value = options.some(([value]) => value === selected) ? selected : '';
+        filter.dataset.options = signature;
+      }
+      drawRows(); syncDraft();
+    };
   }
-  draw();
-  return root;
+  const resourceRead = readRegion(ctx, '订阅同步', async () => {
+    if (dirty) { ctx.announce('当前同步选择尚未保存。', 'error'); return; }
+    await reload();
+  }, () => {}, { clear() { resource = null; loaded = false; root.replaceChildren(notice('没有访问订阅同步的权限。')); } });
+  const agentRead = readRegion(ctx, '节点信息', signal => ctx.api('/agents', { signal }), value => {
+    agents = list(value); agents.forEach(agent => regions.set(agent.id, geoRegionDetails(agent.labels?.region_code || agent.region_code)));
+    if (loaded && !dirty) draw();
+  }, { clear() { agents = []; regions.clear(); } });
+  const orderRead = readRegion(ctx, '节点排序', signal => ctx.api('/preferences/node-order', { signal }), value => { order = value.ids || []; if (loaded && !dirty) draw(); });
+  void resourceRead.load(); if (ctx.can('agents.read')) void agentRead.load(); void orderRead.load();
+  ctx.onRefresh(() => Promise.all([resourceRead.load(), ctx.can('agents.read') && agentRead.load(), orderRead.load()]));
+  return stack(resourceRead.element, ctx.can('agents.read') && agentRead.element, orderRead.element, root);
 }

@@ -1,3 +1,5 @@
+import { patch } from "./live-dom.js";
+import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { configDeployBlockReason, configDeployConfirmation } from "../modules/core-install-state.js";
 import { readOrderedNodes } from "../modules/node-order.js";
 import { configDefaults } from "../modules/config-defaults.js";
@@ -11,22 +13,18 @@ const initial = engine => configDefaults[engine];
 
 
 export async function archivePage(ctx) {
-  const [configItems, templateItems, agents] = await Promise.all([
-    ctx.api("/configs"), ctx.can("templates.read") ? ctx.api("/templates") : [],
-    ctx.can("agents.read") ? readOrderedNodes(ctx.api) : [],
-  ]);
-  const items = list(configItems), templates = list(templateItems);
+  let items = [], templates = [], agents = [], agentsReady = !ctx.can('agents.read');
   const drafts = ctx.state.data.analyticsArchiveDrafts ||= new Map();
-  const results = node("div");
-  const templateResults = node("div");
+  const results = node("div", {}, loadingTable(["名称", "内核", "节点", "保存时间", "操作"], "配置档案"));
+  const templateResults = node("div", {}, loadingTable(["名称", "内核", "保存时间", "操作"], "配置模板"));
   function draw() {
-    results.replaceChildren(table(["名称", "内核", "节点", "保存时间", "操作"], list(items).map(config => [
+    patch(results, node("div", {}, table(["名称", "内核", "节点", "保存时间", "操作"], list(items).map(config => [
       config.name, badge(config.engine),
       list(agents).find(agent => agent.id === config.agent_id)?.name || (config.agent_id ? config.agent_id : "独立配置"),
       date(config.updated_at),
       actions(button("查看与编辑", () => edit(config)),
-        button("历史", event => void ctx.mutate(event.currentTarget, () => history(config))),
-        ctx.can("tasks.execute") && button("校验与部署", () => deliver(config)),
+        button("历史", () => history(config)),
+        ctx.can("tasks.execute") && button("校验与部署", () => deliver(config), { disabled: !agentsReady }),
         ctx.can("configs.delete") && button("删除", async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm(`删除“${config.name}”及其配置档案？相关任务记录会保留。此操作无法恢复。`, "删除配置") || !ctx.current()) return;
@@ -37,7 +35,7 @@ export async function archivePage(ctx) {
             ctx.announce("配置已删除");
           });
         }, { tone: "danger" })),
-    ]), { label: "配置档案" }));
+    ]), { label: "配置档案", rowKey: (_, index) => items[index].id })));
   }
   function edit(config = null) {
     let baseline = config || { name: "", description: "", engine: "mihomo", content: initial("mihomo"), version: 0 };
@@ -130,34 +128,35 @@ export async function archivePage(ctx) {
       box.close();
     }
   }
-  async function history(config) {
-    const records = list(await ctx.api(`/configs/${pathID(config.id)}/revisions?limit=100`));
-    if (!ctx.current()) return;
-    const preview = node("div", {}, muted("选择一份记录预览"));
-    const content = stack(
-      table(["保存时间", "名称", "状态", "操作"], records.map(record => [
-        date(record.updated_at), record.name, record.version === config.version ? badge("当前") : muted("历史档案"),
-        button("预览", event => void ctx.mutate(event.currentTarget, async () => {
-          const selected = await ctx.api(`/configs/${pathID(config.id)}/revisions/${record.version}`);
-          if (!ctx.current()) return;
-          const restore = ctx.can("configs.restore") && record.version !== config.version && button("恢复此档案", async event => {
-            const control = event.currentTarget;
-            if (!await ctx.confirm(`恢复 ${date(selected.updated_at)} 的配置？本次恢复会按当前时间新增记录，原档案保留。`, "恢复配置") || !ctx.current()) return;
-            await ctx.mutate(control, async () => {
-              const saved = await ctx.api(`/configs/${pathID(config.id)}/revisions/${selected.version}/restore`, {
-                method: "POST", body: { expected_version: config.version },
-              });
-              Object.assign(config, saved);
-              ctx.announce("配置已恢复");
-              box.close();
-              draw();
-            });
-          }, { tone: "primary" });
-          preview.replaceChildren(stack(node("h3", {}, `${selected.name} · ${date(selected.updated_at)}`),
-            code(selected.content), restore && actions(restore)));
-        })),
-      ]), { label: "配置保存历史" }), preview);
+  function history(config) {
+    const recordsView = loadingTable(['保存时间', '名称', '状态', '操作'], '配置保存历史');
+    const preview = node('div', {}, muted('选择一份记录预览'));
+    const content = stack(recordsView, preview);
     const box = ctx.dialog(`${config.name} · 保存历史`, content, { wide: true });
+    const local = dialogContext(ctx, box);
+    let previewRead;
+    const recordsRead = readRegion(local, '配置历史', signal => local.api(`/configs/${pathID(config.id)}/revisions?limit=100`, { signal }), records => {
+      recordsView.updateRows(list(records).map(record => [
+        date(record.updated_at), record.name, record.version === config.version ? badge('当前') : muted('历史档案'),
+        button('预览', () => {
+          previewRead?.stop(); preview.replaceChildren(node('h3', {}, '配置预览'), code('正在读取配置正文…'));
+          previewRead = readRegion(local, '配置预览', signal => local.api(`/configs/${pathID(config.id)}/revisions/${record.version}`, { signal }), selected => {
+            const restore = ctx.can('configs.restore') && record.version !== config.version && button('恢复此档案', async event => {
+              const control = event.currentTarget;
+              if (!await ctx.confirm(`恢复 ${date(selected.updated_at)} 的配置？本次恢复会按当前时间新增记录，原档案保留。`, '恢复配置') || !local.current()) return;
+              await ctx.mutate(control, async () => {
+                const saved = await local.api(`/configs/${pathID(config.id)}/revisions/${selected.version}/restore`, { method: 'POST', body: { expected_version: config.version } });
+                if (!local.current()) return;
+                Object.assign(config, saved); ctx.announce('配置已恢复'); box.close(); draw();
+              });
+            }, { tone: 'primary' });
+            preview.replaceChildren(stack(node('h3', {}, `${selected.name} · ${date(selected.updated_at)}`), code(selected.content), restore && actions(restore)));
+          }, { clear: () => preview.replaceChildren() });
+          preview.prepend(previewRead.element); void previewRead.load();
+        }),
+      ]));
+    }, { view: recordsView, clear: () => { recordsView.updateRows([]); preview.replaceChildren(); } });
+    content.prepend(recordsRead.element); void recordsRead.load();
   }
   function deliver(config) {
     const eligible = list(agents).filter(agent =>
@@ -194,7 +193,7 @@ export async function archivePage(ctx) {
     const box = ctx.dialog(`${config.name} · 校验与部署`, eligible.length ? form : muted("没有当前账号可用且支持此内核的节点"));
   }
   function drawTemplates() {
-    templateResults.replaceChildren(table(["名称", "内核", "保存时间", "操作"], list(templates).map(template => [
+    patch(templateResults, node("div", {}, table(["名称", "内核", "保存时间", "操作"], list(templates).map(template => [
       template.name, template.engine, date(template.updated_at),
       actions(button("预览", () => ctx.dialog(template.name, code(template.content), { wide: true })),
         ctx.can("templates.write") && ctx.can("agent-config.write") && button("应用到节点", () => {
@@ -208,7 +207,7 @@ export async function archivePage(ctx) {
             ctx.announce("模板已应用到节点配置");
           });
           const box = ctx.dialog("应用模板", eligible.length ? form : muted("没有可用节点"));
-        }),
+        }, { disabled: !agentsReady }),
         ctx.can("templates.delete") && button("删除", async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm(`删除模板“${template.name}”？`, "删除模板") || !ctx.current()) return;
@@ -218,10 +217,8 @@ export async function archivePage(ctx) {
             drawTemplates();
           });
         }, { tone: "danger" })),
-    ]), { label: "配置模板" }));
+    ]), { label: "配置模板", rowKey: (_, index) => templates[index].id })));
   }
-  draw();
-  drawTemplates();
   const addTemplate = ctx.can("templates.write") && button("新建模板", () => {
     const draft = ctx.state.data.analyticsTemplateDraft ||= createArchiveDraft();
     let activeEngine = draft.engine;
@@ -263,6 +260,16 @@ export async function archivePage(ctx) {
     };
   });
   ctx.pageActions(...(ctx.can("configs.write") ? [button("新建配置", () => edit(), { tone: "primary" })] : []));
-  return stack(section(null, results),
-    ctx.can("templates.read") && section("配置模板", templateResults, addTemplate));
+  let configsReady = false, templatesReady = false;
+  const configRead = readRegion(ctx, '配置档案', signal => ctx.api('/configs', { signal }), value => { items = list(value); configsReady = true; draw(); }, { view: results, clear: () => { items = []; draw(); } });
+  const templateRead = readRegion(ctx, '配置模板', signal => ctx.api('/templates', { signal }), value => { templates = list(value); templatesReady = true; drawTemplates(); }, { view: templateResults, clear: () => { templates = []; drawTemplates(); } });
+  const agentRead = readRegion(ctx, '节点选项', () => readOrderedNodes(ctx.api), value => {
+    agents = list(value); agentsReady = true; if (configsReady) draw(); if (templatesReady) drawTemplates();
+  }, { clear: () => { agents = []; agentsReady = false; if (configsReady) draw(); if (templatesReady) drawTemplates(); } });
+  void configRead.load();
+  if (ctx.can('templates.read')) void templateRead.load();
+  if (ctx.can('agents.read')) void agentRead.load();
+  ctx.onRefresh(() => Promise.all([configRead.load(), ctx.can('templates.read') && templateRead.load(), ctx.can('agents.read') && agentRead.load()]));
+  return stack(configRead.element, ctx.can('agents.read') && agentRead.element, section(null, results),
+    ctx.can('templates.read') && section('配置模板', stack(templateRead.element, templateResults), addTemplate));
 }

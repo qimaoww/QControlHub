@@ -1,3 +1,4 @@
+import { loadingTable } from "./loading.js";
 import { node, button, actions, stack, table, field, badge, muted, notice, list } from './ui.js';
 import { protocolName } from '../modules/traffic-model.js';
 
@@ -39,7 +40,7 @@ export function trafficSync(ctx, { agentName, matches, onSaved }) {
     const expected = ++generation;
     request?.abort(); request = new AbortController();
     loading = true; choices = []; snapshot = ''; selected.clear();
-    scan.disabled = true; feedback.textContent = ''; rows.replaceChildren(muted('正在扫描端口…')); selection();
+    scan.disabled = true; feedback.textContent = ''; rows.replaceChildren(loadingTable(['选择', '节点 / 归属', '端口 / 协议', '内核', '变更', '部署状态'], '端口同步预览')); selection();
     try {
       const preview = await ctx.api('/traffic-endpoints/sync', { signal: AbortSignal.any([ctx.signal, request.signal]) });
       if (!ctx.current() || !box.open || expected !== generation) return;

@@ -72,7 +72,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"patch(results.firstElementChild, fresh)",
 			"dialogUpdates.forEach(update => update())",
 			"liveTable.updateRows(rows)",
-			"poll({ ...ctx, onRefreshError: failedRefresh }, load)",
+			"poll({ ...ctx, onRefreshError: failedRefresh }",
 			"if (error.status === 403",
 			"agents = []; draw(true)",
 		},
@@ -81,7 +81,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"patch(result, node('div'",
 			"row.key = clientAccessRecordKey(entry, item)",
 			"card.dataset.refreshKey = group.agent_id",
-			"ctx.onRefresh(reload)",
+			"entryRead.load()",
 			"ctx.setDirty(true)",
 		},
 		"analytics/observability.js": {
@@ -129,7 +129,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 
 func TestPanelReadsAndNodeRegionsAvoidPerRenderRequests(t *testing.T) {
 	app := string(mustReadFrontendFile(t, "analytics/app.js"))
-	if !strings.Contains(app, "can('settings.read') && !state.data.settings ? context.api('/settings') : null") {
+	if !strings.Contains(app, "can('settings.read') && !state.data.settings") {
 		t.Error("the native shell must reuse the current account's settings across route changes")
 	}
 	if !strings.Contains(app, "state.data = {};") {

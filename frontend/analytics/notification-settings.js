@@ -1,3 +1,4 @@
+import { readRegion, loadingTable, loadingForm } from "./loading.js";
 import { node, button, actions, stack, section, table, badge, field, muted, notice } from "./ui.js";
 import { date } from "./operations.js";
 
@@ -13,15 +14,48 @@ const fields = {
 const statusNames = { pending: "等待投递", sending: "投递中", accepted: "平台已接受", failed: "投递失败", canceled: "已取消" };
 const id = () => crypto.randomUUID().replaceAll("-", "");
 
-export async function notificationsPage(ctx) {
-  let [resource, agents, policies] = await Promise.all([
-    ctx.api("/settings/notifications"), ctx.can("agents.read") ? ctx.api("/agents") : [], ctx.can("traffic.read") ? ctx.api("/traffic-policies") : [],
-  ]);
+export function notificationsPage(ctx) {
+  let agents = [], policies = [], resource, ready = false, targetsReady = !ctx.can('agents.read') && !ctx.can('traffic.read');
+  const channelHost = node('div', {}, loadingTable(['名称', '类型', '状态', '操作'], '通知渠道'));
+  const ruleHost = node('div', {}, loadingTable(['名称', '事件 / 范围', '接收渠道', '状态', '操作'], '通知规则'));
+  const templateHost = node('div', { className: 'a-card-body' }, loadingForm(['事件', '格式', '标题', '正文'], '保存模板'));
+  const serviceHost = loadingTable(['项目', '状态'], '通知服务状态');
+  let openChannel = () => {}, openRule = () => {}, refreshRecords = () => {}, acceptRecords;
+  let deliverySnapshot;
+  const addChannel = ctx.can('settings.manage') && button('添加渠道', () => openChannel(), { disabled: true });
+  const addRule = ctx.can('settings.manage') && button('添加规则', () => openRule(), { disabled: true });
+  const recordTable = loadingTable(['时间', '事件', '渠道', '状态', '尝试', '反馈'], '通知投递');
+  const deliveriesRead = readRegion(ctx, '投递记录', signal => ctx.api('/settings/notifications/deliveries', {signal}), value => {
+    deliverySnapshot = value;
+    if (acceptRecords) acceptRecords(value);
+    else recordTable.updateRows(value.map(d => [date(d.created_at), d.event.type, '正在读取渠道…', badge(statusNames[d.status] || d.status), String(d.attempts), d.error || '—']));
+  }, {clear() { deliverySnapshot = null; recordTable.updateRows([]); }});
+  const recordHost = stack(deliveriesRead.element, recordTable);
+  void deliveriesRead.load();
+  const page = stack(section('通知渠道', channelHost, addChannel), section('通知规则', ruleHost, addRule),
+    section('通知模板', templateHost), section('投递记录', recordHost, button('刷新记录', () => void refreshRecords())), section('通知服务状态', serviceHost));
+  ctx.mount?.(page);
+  const targetRead = readRegion(ctx, '通知目标选项', async signal => {
+    await Promise.all([
+      ctx.can('agents.read') && ctx.api('/agents', { signal }).then(value => { if (ctx.current()) agents = value; }),
+      ctx.can('traffic.read') && ctx.api('/traffic-policies', { signal }).then(value => { if (ctx.current()) policies = value; }),
+    ]);
+  }, () => { targetsReady = true; if (addRule) addRule.disabled = !ready; });
+  const configRead = readRegion(ctx, '通知配置', signal => ctx.api('/settings/notifications', { signal }), value => { resource = value; initialize(); }, { clear() { ready = false; if (addChannel) addChannel.disabled = true; if (addRule) addRule.disabled = true; channelHost.replaceChildren(); ruleHost.replaceChildren(); templateHost.replaceChildren(); } });
+  page.prepend(configRead.element, targetRead.element);
+  void targetRead.load();
+  void configRead.load();
+  ctx.onRefresh(() => Promise.all([configRead.load(), targetRead.load()]));
+  return page;
+  function initialize() {
+  if (!ctx.current() || !resource) return;
+  openChannel = editChannel; openRule = editRule; refreshRecords = loadRecords;
+  ready = true; if (addChannel) addChannel.disabled = false; if (addRule) addRule.disabled = !targetsReady;
   let config = resource.configuration;
   const writable = ctx.can("settings.manage");
   const feedback = notice("", "info");
   const channelList = node("div"), ruleList = node("div");
-  const records = table(["时间", "事件", "渠道", "状态", "尝试", "反馈"], [], { label: "通知投递", emptyText: "暂无投递记录", rowKey: row => row[0].dataset.deliveryId });
+  const records = recordTable;
   let recordSequence = 0, refreshSequence = 0, templateDirty = false, modalDirty = false, activeModal = null, pollTimer, activeTestID, hasPending = false, recordError = false;
   ctx.signal.addEventListener("abort", () => clearTimeout(pollTimer), { once: true });
   const syncDirty = () => { if (ctx.current()) ctx.setDirty(templateDirty || modalDirty); };
@@ -117,7 +151,7 @@ export async function notificationsPage(ctx) {
     ruleList.replaceChildren(table(["名称", "事件 / 范围", "接收渠道", "状态", "操作"], config.rules.map(r => [r.name,
       stack(resource.events[r.event], muted(r.policy_id ? (() => { const p = policies.find(p => p.id === r.policy_id); return p ? `${agents.find(a => a.id === p.agent_id)?.name || p.agent_id} · ${p.engine} · ${p.port} · ${p.name}` : "统计对象已不可用"; })() : agents.find(a => a.id === r.agent_id)?.name || (r.agent_id ? "节点已不可用" : r.event === "panel.update" ? "面板" : "有权接收的资源"))),
       r.channels.map(key => config.channels.find(c => c.id === key)?.name || "已删除").join("、") || "未选择", badge(r.enabled ? "启用" : "停用"), writable ? actions(
-        button("编辑", () => editRule(r)), button(r.enabled ? "停用" : "启用", event => void ctx.mutate(event.currentTarget, () => change(c => { c.rules.find(v => v.id === r.id).enabled = !r.enabled; }))),
+        button("编辑", () => editRule(r), { disabled: !targetsReady }), button(r.enabled ? "停用" : "启用", event => void ctx.mutate(event.currentTarget, () => change(c => { c.rules.find(v => v.id === r.id).enabled = !r.enabled; }))),
         button("删除", async event => { const control = event.currentTarget; if (await ctx.confirm(`删除“${r.name}”？`, "删除通知规则") && ctx.current()) await ctx.mutate(control, () => change(c => { c.rules = c.rules.filter(v => v.id !== r.id); })); }, { tone: "danger" })) : null,
     ]), { label: "通知规则", emptyText: "尚未添加通知规则" }));
     const selected = testChannel.value;
@@ -173,12 +207,7 @@ export async function notificationsPage(ctx) {
   templateForm.addEventListener("input", event => { if (!event.target.matches('[name="title"],[name="body"],[name="template_format"]')) return; templateDirty = true; syncDirty(); previewSequence++; preview.textContent = ""; });
   if (!writable) templateForm.querySelector('button[type="submit"]').remove();
   loadTemplate();
-  async function loadRecords() {
-    clearTimeout(pollTimer);
-    const sequence = ++recordSequence;
-    try {
-      const result = await ctx.api("/settings/notifications/deliveries");
-      if (!ctx.current() || sequence !== recordSequence) return;
+  function renderRecords(result) {
       records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? `测试${resource.events[d.event.type] ? ` · ${resource.events[d.event.type]}` : ""}` : resource.events[d.event.type] || d.event.type),
         config.channels.find(c => c.id === d.channel_id)?.name || "已删除", stack(node("div", {}, badge(statusNames[d.status] || d.status, d.status === "failed" ? "bad" : d.status === "accepted" ? "ok" : "warn")),
           d.status === "pending" && d.attempts > 0 ? muted(`重试：${date(d.next_at)}`) : null), String(d.attempts), d.error || "—"]));
@@ -191,6 +220,16 @@ export async function notificationsPage(ctx) {
       }
       hasPending = result.some(d => ["pending", "sending"].includes(d.status));
       if (hasPending) pollTimer = setTimeout(() => void loadRecords(), 3000);
+  }
+  acceptRecords = renderRecords;
+  if (deliverySnapshot) renderRecords(deliverySnapshot);
+  async function loadRecords() {
+    clearTimeout(pollTimer);
+    const sequence = ++recordSequence;
+    try {
+      await deliveriesRead.load();
+      if (!ctx.current() || sequence !== recordSequence) return;
+      // The region applies this independently of configuration and targets.
     } catch (error) {
       if (!ctx.current() || sequence !== recordSequence) return;
       if (error.status === 403) { records.updateRows([]); hasPending = false; activeTestID = null; }
@@ -216,8 +255,8 @@ export async function notificationsPage(ctx) {
     await loadRecords();
   }
   ctx.onRefresh(refreshConfiguration);
-  draw(); await loadRecords();
-  return stack(
+  draw();
+  const rendered = stack(
     section("通知渠道", node("div", { className: "a-card-body a-stack" }, feedback, channelList), writable && button("添加渠道", () => editChannel())),
     section("通知规则", node("div", { className: "a-card-body a-stack" }, muted("新规则先建立当前状态基线；速度异常与恢复均需满足持续窗口。"), ruleList), writable && button("添加规则", () => editRule())),
     section("通知模板", node("div", { className: "a-card-body" }, node("details", { className: "a-disclosure" }, node("summary", {}, "编辑事件模板"), node("div", { className: "a-disclosure-body" }, templateForm)))),
@@ -226,4 +265,11 @@ export async function notificationsPage(ctx) {
       ["原有 Webhook 默认签名", badge(resource.webhook_signing_configured ? "已配置" : "未配置", resource.webhook_signing_configured ? "ok" : "warn")],
     ], { label: "通知服务状态" }))),
   );
+  const sections = [...rendered.children];
+  channelHost.replaceChildren(...sections[0].querySelector('.a-card-body').childNodes);
+  ruleHost.replaceChildren(...sections[1].querySelector('.a-card-body').childNodes);
+  templateHost.replaceChildren(...sections[2].querySelector('.a-card-body').childNodes);
+  recordHost.replaceChildren(deliveriesRead.element, ...sections[3].querySelector('.a-card-body').childNodes);
+  serviceHost.replaceWith(sections[4].querySelector('.a-card-body'));
+  }
 }
