@@ -40,6 +40,7 @@ export async function runAPIManagementBrowser({ base, mode, createPage, login, c
   for (const [width,height] of viewports) {
     await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:mode !== 'desktop' }, page);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `API keys overflow ${width}`);
+    assert.ok(await evaluate(page, "[...document.querySelectorAll('.a-main tbody td')].every(cell=>cell.scrollWidth<=cell.clientWidth+1)"), `key metadata overlaps columns ${width}`);
     assert.ok(await evaluate(page, "document.querySelector('.a-main tbody tr').cells[3].getBoundingClientRect().height<130"), `scope stretches key row ${width}`);
     assert.ok(await evaluate(page, "(()=>{const cell=document.querySelector('.a-main tbody tr').cells[2];return cell.querySelectorAll('.a-badge').length===1&&cell.querySelector('.a-badge').getBoundingClientRect().width<70&&cell.querySelector('.a-muted').textContent==='读写';})()"), `key status pill stretches or duplicates mode ${width}`);
     if (mode !== 'desktop') await evaluate(page, "document.querySelector('.a-main tbody tr').cells[3].scrollIntoView({block:'nearest',inline:'center'})");

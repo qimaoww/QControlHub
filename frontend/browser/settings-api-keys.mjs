@@ -68,6 +68,7 @@ export async function testSettingsAPIKeysRuntime() {
       assert.equal(statusCell.querySelectorAll('.a-badge').length, 1, 'key mode still duplicates status pills');
       assert.ok(pill.getBoundingClientRect().width < 70, 'key status pill stretches across its column');
       assert.ok(statusCell.querySelector('.a-muted').textContent === '只读', 'plain key mode missing');
+      assert.ok([...row(id).cells].every(cell => cell.scrollWidth <= cell.clientWidth + 1), 'key metadata overlaps adjacent columns');
     }
     assert.equal(row('revoked').cells[6].querySelector('button'), null, 'revoked key retains mutation controls');
     const scopeButton = button('18 项权限', row('first')), tableScroll = scopeButton.closest('.a-table-scroll');
