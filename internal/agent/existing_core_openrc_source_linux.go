@@ -15,10 +15,21 @@ import (
 )
 
 func inspectOpenRCCoreSource(ctx context.Context, service string, manager *ServiceManager) (core.Engine, EngineSpec, error) {
+	if isManagedCoreSource(EngineSpec{Service: service}) {
+		return "", EngineSpec{}, nil
+	}
 	path := filepath.Join(openRCInitRoot, service)
-	data, _, err := readExternalImportSource(path, 256<<10)
+	data, resolved, err := readExternalImportSource(path, 256<<10)
 	if err != nil {
 		return "", EngineSpec{}, err
+	}
+	if filepath.Dir(resolved) == openRCInitRoot && strings.HasPrefix(filepath.Base(resolved), "qagent-") {
+		return "", EngineSpec{}, nil
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "# QControlHub managed OpenRC service: "); ok && safeServiceName(name) && strings.HasPrefix(name, "qagent-") {
+			return "", EngineSpec{}, nil
+		}
 	}
 	values := map[string]string{"RC_SVCNAME": service, "SVCNAME": service}
 	assignments := []string{}
@@ -110,6 +121,9 @@ func inspectOpenRCCoreSource(ctx context.Context, service string, manager *Servi
 	}
 	spec.Binary = real
 	spec.Service = service
+	if isManagedCoreSource(spec) {
+		return "", EngineSpec{}, nil
+	}
 	user, group, _ := strings.Cut(values["command_user"], ":")
 	context := existingServiceContext{Argv: argv, Directory: cwd, User: user, Group: group, UnitDigest: coreMigrationConfigDigest(string(data) + "\x00" + string(confData))}
 	encoded, _ := json.Marshal(context)

@@ -59,14 +59,31 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 		if !engine.Valid() || len(sources) > 64 {
 			return state, errors.New("discovered source limit or engine is invalid")
 		}
+		var external []existingDiscoverySpec
 		for _, source := range sources {
+			if isManagedCoreSource(source.engineSpec()) {
+				continue
+			}
 			if err := validateExistingSpecPaths(engine, source.engineSpec()); err != nil {
 				return state, err
 			}
+			external = append(external, source)
+		}
+		if len(external) == 0 {
+			delete(state.Sources, engine)
+		} else {
+			state.Sources[engine] = external
 		}
 	}
 	for engine, stored := range state.Specs {
+		if !engine.Valid() {
+			return existingCoreDiscoveryState{}, errors.New("existing-core discovery engine is invalid")
+		}
 		spec := stored.engineSpec()
+		if isManagedCoreSource(spec) {
+			delete(state.Specs, engine)
+			continue
+		}
 		if err := validateExistingSpecPaths(engine, spec); err != nil {
 			return existingCoreDiscoveryState{}, err
 		}

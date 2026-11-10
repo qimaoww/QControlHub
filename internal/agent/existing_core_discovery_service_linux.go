@@ -108,6 +108,9 @@ func discoverLegacyExistingCoreService(ctx context.Context, engine core.Engine, 
 }
 
 func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, managed, spec EngineSpec, validationDirectory string, manager *ServiceManager) (EngineSpec, bool, string) {
+	if isManagedCoreSource(spec) {
+		return EngineSpec{}, false, ""
+	}
 	managedStatus, err := validateManagedServiceTarget(ctx, engine, managed, manager)
 	if err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全 unit：%s", engine, core.DiagnosticText(err.Error()))

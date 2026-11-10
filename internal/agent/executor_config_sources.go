@@ -35,6 +35,9 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 }
 
 func (e *Executor) readExistingConfigPlan(ctx context.Context, engine core.Engine, managed, existing EngineSpec) (coreImportPlan, error) {
+	if isManagedCoreSource(existing) {
+		return coreImportPlan{}, errors.New("managed core instances cannot be imported as external services")
+	}
 	if existing.SourceContext != "" {
 		if err := verifyExistingServiceMapping(ctx, engine, existing, e.serviceManager()); err != nil {
 			return coreImportPlan{}, err

@@ -14,7 +14,7 @@ func TestImportSourceSelectionPinsProvenanceAndAuthorization(t *testing.T) {
 	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "source selection", core.EngineXray)
 	first, second := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	features := append(node.Features, core.AgentFeatureImportIsolation, core.AgentFeatureImportDependencies)
-	sources := []core.ExistingCoreSource{{ID: first, Service: "custom-one.service", Status: "active"}, {ID: second, Service: "custom-two.service", Status: "inactive"}}
+	sources := []core.ExistingCoreSource{{ID: first, Service: "custom-one.service", ConfigPath: "/srv/host secret/config.json", Status: "active"}, {ID: second, Service: "custom-two.service", ConfigDirectory: "/opt/host config", Status: "inactive"}}
 	if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ExistingConfigAvailable: true, ExistingSources: sources}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,16 @@ func TestImportSourceSelectionPinsProvenanceAndAuthorization(t *testing.T) {
 	create("", http.StatusBadRequest)
 	create(strings.Repeat("c", 64), http.StatusConflict)
 	grantConfigScopeAPIAgent(t, ctx, db, node, shared, 21001)
+	for _, path := range []string{"/agents", "/agents/" + node.ID + "/configs/xray/state", "/agents/" + node.ID + "/configs/xray/workspace"} {
+		body := shared.call("GET", path, nil, http.StatusOK, nil)
+		for _, forbidden := range []string{"existing_sources", "existing_config_available\":true", "custom-one.service", "custom-two.service", "/srv/host secret", "/opt/host config", first, second} {
+			if strings.Contains(string(body), forbidden) {
+				t.Fatalf("shared response %s exposes host discovery: %s", path, forbidden)
+			}
+		}
+	}
 	shared.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineXray, Action: core.ActionReadConfig, ExistingSourceID: first}, http.StatusForbidden, nil)
+	shared.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineXray, Action: core.ActionImportExisting}, http.StatusForbidden, nil)
 	read := create(first, http.StatusCreated)
 	create(second, http.StatusConflict)
 	claim, err := db.ClaimTask(ctx, node.ID)
@@ -49,6 +58,7 @@ func TestImportSourceSelectionPinsProvenanceAndAuthorization(t *testing.T) {
 		t.Fatalf("protected snapshot lost manifest: %+v", snapshot)
 	}
 	shared.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusNotFound, nil)
+	shared.call("POST", "/agents/"+node.ID+"/configs/xray/import", store.ConfigImportRequest{SnapshotTaskID: read.ID, Name: "denied shared import"}, http.StatusForbidden, nil)
 	var task core.Task
 	owner.call("POST", "/agents/"+node.ID+"/configs/xray/import", store.ConfigImportRequest{SnapshotTaskID: read.ID, Name: "selected service"}, http.StatusCreated, &task)
 	claim, err = db.ClaimTask(ctx, node.ID)

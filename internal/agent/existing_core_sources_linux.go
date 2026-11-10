@@ -143,6 +143,9 @@ func inspectSystemdCoreSource(ctx context.Context, service string) (core.Engine,
 	if id != "" && safeServiceName(id) {
 		service = id
 	}
+	if isManagedCoreSource(EngineSpec{Service: service}) {
+		return "", EngineSpec{}, nil
+	}
 	unit, err := run(ctx, systemctlPath, "cat", service, "--no-pager")
 	if err != nil {
 		return "", EngineSpec{}, err
@@ -254,6 +257,9 @@ func inspectSystemdCoreSource(ctx context.Context, service string) (core.Engine,
 	}
 	spec.Binary = real
 	spec.Service = service
+	if isManagedCoreSource(spec) {
+		return "", EngineSpec{}, nil
+	}
 	pidText, err := property("MainPID")
 	if err != nil {
 		return engine, EngineSpec{}, err

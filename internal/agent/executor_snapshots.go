@@ -149,7 +149,7 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 		if issue := discoveryIssues[engine]; issue != "" {
 			state.ExistingConfigUnsupportedReason = issue
 		}
-		if _, ok := existingSpecs[engine]; ok && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
+		if existing, ok := existingSpecs[engine]; ok && !isManagedCoreSource(existing) && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
 			state.ExistingConfigAvailable = true
 		}
 		if path, err := exec.LookPath(spec.Binary); err == nil {

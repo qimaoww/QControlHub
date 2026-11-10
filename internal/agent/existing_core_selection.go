@@ -4,22 +4,50 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func existingSourceID(spec EngineSpec) string { return coreMigrationSourceDigest(spec) }
 
+// Managed base and shared instances already have an ownership and lifecycle
+// mapping. An alias or a renamed service must not turn them into external input.
+func isManagedCoreSource(spec EngineSpec) bool {
+	if strings.HasPrefix(spec.Service, "qagent-") {
+		return true
+	}
+	for _, path := range []string{spec.ConfigPath, spec.ConfigDirectory} {
+		if path == "" {
+			continue
+		}
+		if filepath.Clean(path) == managedCoreConfigurationRoot || pathWithin(path, managedCoreConfigurationRoot) {
+			return true
+		}
+		if resolved, err := filepath.EvalSymlinks(path); err == nil && (resolved == managedCoreConfigurationRoot || pathWithin(resolved, managedCoreConfigurationRoot)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Executor) existingSources(engine core.Engine) []EngineSpec {
 	e.specsMu.RLock()
-	defer e.specsMu.RUnlock()
-	if values := e.ExistingSources[engine]; len(values) > 0 {
-		return append([]EngineSpec(nil), values...)
+	values := append([]EngineSpec(nil), e.ExistingSources[engine]...)
+	if len(values) == 0 {
+		if value, ok := e.ExistingSpecs[engine]; ok {
+			values = append(values, value)
+		}
 	}
-	if value, ok := e.ExistingSpecs[engine]; ok {
-		return []EngineSpec{value}
+	e.specsMu.RUnlock()
+	var sources []EngineSpec
+	for _, value := range values {
+		if !isManagedCoreSource(value) {
+			sources = append(sources, value)
+		}
 	}
-	return nil
+	return sources
 }
 
 func (e *Executor) LoadExistingCoreSources() error {

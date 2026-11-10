@@ -317,11 +317,13 @@ func rootOwnedRootGroupDirectory(info os.FileInfo) bool {
 }
 
 // validateExistingSpecPaths checks the pure structural path constraints of an
-// existing core mapping: absolute executable and configuration paths, no
-// whitespace anywhere, and an absolute configuration/working directory for
-// sing-box. It is independent of the running UID so the same fail-closed rule
+// existing core mapping: absolute source paths outside the managed instance
+// namespace. It is independent of the running UID so the same fail-closed rule
 // can be asserted by tests running as root or as an unprivileged CI user.
 func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
+	if isManagedCoreSource(spec) {
+		return errors.New("managed core instances cannot be imported as external services")
+	}
 	// A directory-authoritative mapping carries no main configuration file, so
 	// the confdir stands in as the single required absolute source.
 	configPathMapped := filepath.IsAbs(spec.ConfigPath) ||
