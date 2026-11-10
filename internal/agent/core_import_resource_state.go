@@ -97,7 +97,7 @@ func cleanupDurableImportResources(prefix string, engine core.Engine, managed En
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 		return errors.New("unsafe import resource recovery manifest")
 	}
-	data, _, err := readImportSource(path, 1<<20)
+	data, _, err := readImportSource(path, 16<<20)
 	if err != nil {
 		return err
 	}

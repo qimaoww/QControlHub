@@ -53,6 +53,42 @@ func TestImportedResourceReferenceSemantics(t *testing.T) {
 	}
 }
 
+func TestImportResourceRecoveryReadsAcceptedManifest(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	managed := EngineSpec{ConfigPath: filepath.Join(root, "config.json")}
+	prefix := filepath.Join(root, "migration")
+	resources := filepath.Join(root, "imports", "instance")
+	if err := os.MkdirAll(resources, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(resources, "input.pem")
+	if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := durableImportResources{Version: 1, Root: resources, Resources: []durableImportResource{{Path: path, Digest: coreMigrationConfigDigest("fixture"), Created: true, Limit: 4096}}}
+	// Repeated references to a single file still carry each long source path.
+	for range 256 {
+		source := "/" + strings.Repeat("directory/", 300) + "input.pem"
+		state.Dependencies = append(state.Dependencies, core.ImportDependency{Field: "tls.certificate_path", Source: source, Resolved: source, Destination: path, Kind: "input"})
+	}
+	if err := writeImportResourceState(prefix, core.EngineSingBox, state); err != nil {
+		t.Fatal(err)
+	}
+	manifest := importResourceStatePath(prefix, core.EngineSingBox)
+	if info, err := os.Stat(manifest); err != nil || info.Size() <= 1<<20 {
+		t.Fatalf("fixture did not exceed the former recovery limit: %v", err)
+	}
+	if err := cleanupDurableImportResources(prefix, core.EngineSingBox, managed); err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{path, resources, manifest} {
+		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
+			t.Fatalf("transaction resource retained after rollback: %s: %v", removed, err)
+		}
+	}
+}
+
 func TestImportDependencyIdentityAndPathMapping(t *testing.T) {
 	requireAgentRoot(t)
 	root := t.TempDir()
