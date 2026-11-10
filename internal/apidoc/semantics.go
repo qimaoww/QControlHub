@@ -125,7 +125,7 @@ func (g *generator) annotate(op object, handler, method, path string) {
 	case "runSubStoreSync":
 		op["description"] = "向已配置 Sub-Store 同步本人选中客户端接入数据，需要独立敏感读取授权。远程写入不具备数据库回滚能力；响应丢失先查询目标和同步结果。"
 	case "updateUser":
-		op["description"] = "Key 只能管理非管理员且非创建者账户的业务权限/状态；不能修改 role、password，不能授予超过 Key 当前范围的权限；账户创建、删除、清理需要会话。"
+		op["description"] = "Key 只能编辑非管理员且非创建者账户的显示名称、收缩权限或停用；保留权限不能超过 Key 当前范围。增加账户权限、重新启用及身份/凭据操作需要会话，以防通过替代账号扩大能力。账户创建、删除、清理也需要会话。"
 	case "putAgentSharing", "putUserAgentAccess":
 		op["description"] = "Key 转授权仅允许创建者所有的节点，不能借管理员角色转授他人节点；用户授权不能操作管理员或创建者。批量与旧授权逐项复核。"
 	case "saveServerInbound", "saveManagedOutbound", "saveConfigField", "savePresetSource":

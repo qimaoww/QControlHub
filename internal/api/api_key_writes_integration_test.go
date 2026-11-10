@@ -117,6 +117,35 @@ func TestAPIKeyTaskRevocationAndCompoundCapabilities(t *testing.T) {
 	admin.call("POST", "/settings/api-keys", map[string]any{"name": "forged", "permissions": []string{"agents.read"}, "owner_id": "other"}, 400, nil)
 }
 
+func TestAPIKeyCannotExpandOrActivateAlternateAccount(t *testing.T) {
+	_, _, admin, _, _ := newConfigScopeAPIFixture(t)
+	var alternate core.User
+	admin.call("POST", "/users", core.UserRequest{Username: "alternate-key-target", Role: core.RoleUser, Password: "isolated-account-password", Permissions: []core.Permission{core.PermissionAgentsRead}}, 201, &alternate)
+	key, _ := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionUsersManage, core.PermissionSettingsManage, core.PermissionAgentsRead})
+	// Even a numerically bounded grant would unlock browser credential
+	// management and its implicit capabilities through an alternate account.
+	key.call("PUT", "/users/"+alternate.ID, map[string]any{"permissions": []string{"agents.read", "settings.manage"}}, 403, nil)
+	var users []core.User
+	admin.call("GET", "/users", nil, 200, &users)
+	for _, user := range users {
+		if user.ID == alternate.ID && (user.AuthRevision != alternate.AuthRevision || len(user.Permissions) != 1 || user.Permissions[0] != core.PermissionAgentsRead) {
+			t.Fatal("denied account grant changed authority")
+		}
+	}
+	key.call("PUT", "/users/"+alternate.ID, map[string]any{"display_name": "Managed account", "disabled": true}, 200, &alternate)
+	key.call("PUT", "/users/"+alternate.ID, map[string]any{"disabled": false}, 403, nil)
+	var reduced core.User
+	key.call("PUT", "/users/"+alternate.ID, map[string]any{"permissions": []string{}}, 200, &reduced)
+	if !reduced.Disabled || len(reduced.Permissions) != 0 || reduced.DisplayName != "Managed account" {
+		t.Fatal("bounded account management result is incorrect")
+	}
+	// The existing stronger authentication path retains the complete operation.
+	admin.call("PUT", "/users/"+alternate.ID, map[string]any{"disabled": false, "permissions": []string{"agents.read", "settings.manage"}}, 200, &alternate)
+	if alternate.Disabled || !core.HasPermission(alternate.Permissions, core.PermissionSettingsManage) {
+		t.Fatal("session account grant was not preserved")
+	}
+}
+
 func TestAPIKeyContractIsUsableWithoutSecretReading(t *testing.T) {
 	_, _, admin, _, _ := newConfigScopeAPIFixture(t)
 	key, _ := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionAgentsRead})
