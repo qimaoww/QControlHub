@@ -17,10 +17,9 @@ func (e *Executor) migrateNativeAccounting(ctx context.Context) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
 		e.specsMu.RLock()
 		spec, ok := e.Specs[engine]
-		issue := e.ExistingDiscoveryIssues[engine]
-		_, pendingImport := e.ExistingSpecs[engine]
+		issue := e.ManagedSafetyIssues[engine]
 		e.specsMu.RUnlock()
-		if !ok || pendingImport || issue != "" || spec != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
+		if !ok || issue != "" || spec != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
 			continue
 		}
 		migration, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -40,7 +39,7 @@ func (e *Executor) migrateNativeAccounting(ctx context.Context) {
 					return
 				}
 			}
-			if _, err := validateManagedServiceForExistingDiscovery(migration, engine, spec, e.serviceManager()); err != nil {
+			if _, err := validateManagedServiceTarget(migration, engine, spec, e.serviceManager()); err != nil {
 				slog.Warn("managed traffic migration refused unrecognized service", "engine", engine, "error", err)
 				return
 			}

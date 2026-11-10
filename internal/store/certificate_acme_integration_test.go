@@ -25,6 +25,17 @@ type certificateTestTransport func(*http.Request) (*http.Response, error)
 
 func (f certificateTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// challtestsrv serves real TXT answers but returns NOTIMP for NS. Its isolated
+// fixture namespace has no delegated child zones; model that explicitly.
+type certificateLocalResolver struct{ *net.Resolver }
+
+func (r certificateLocalResolver) LookupNS(_ context.Context, name string) ([]*net.NS, error) {
+	if name == "example.test" || name == "other.test" {
+		return []*net.NS{{Host: "ns.local-fixture.test."}}, nil
+	}
+	return nil, &net.DNSError{Err: "no child delegation in local fixture", Name: name, IsNotFound: true}
+}
+
 // Optional real local CA gate. DNS vendor HTTP is a deterministic fixture;
 // Pebble performs actual DNS-01 validation through its own resolver.
 func TestCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T) {
@@ -70,7 +81,7 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 	if err != nil {
 		t.Fatal(err)
 	}
-	dnsAccount, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor fixture", Kind: "dns", Provider: "cloudflare"}, certificates.DNSCredentials{Zone: "example.test", Token: "local-only-token"})
+	dnsAccount, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor fixture", Kind: "dns", Provider: "cloudflare"}, certificates.DNSCredentials{Token: "local-only-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,9 +105,9 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 		}
 	}
 	configure := func(target *Store) {
-		target.certificateResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		target.certificateResolver = certificateLocalResolver{Resolver: &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, network, dnsAddress)
-		}}
+		}}}
 		target.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -112,12 +123,25 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 					raw, _ := json.Marshal(map[string]any{"success": true, "result": result})
 					body = string(raw)
 				} else {
-					body = `{"success":true,"result":[{"id":"local-zone"}]}`
+					body = `{"success":true,"result":[]}`
+					if r.URL.Query().Get("name") == "example.test" {
+						body = `{"success":true,"result":[{"id":"local-zone","name":"example.test"}]}`
+					}
+					if r.URL.Query().Get("name") == "other.test" {
+						body = `{"success":true,"result":[{"id":"other-zone","name":"other.test"}]}`
+					}
 				}
 			} else if r.Method == "POST" {
 				var input struct{ Name, Content string }
 				if json.NewDecoder(r.Body).Decode(&input) != nil {
 					t.Fatal("bad DNS payload")
+				}
+				expectedZone := "local-zone"
+				if strings.HasSuffix(input.Name, ".other.test") {
+					expectedZone = "other-zone"
+				}
+				if r.URL.Path != "/client/v4/zones/"+expectedZone+"/dns_records" {
+					t.Fatalf("wrong SAN zone: %s for %s", r.URL.Path, input.Name)
 				}
 				nextID++
 				id := fmt.Sprintf("local-record-%d", nextID)
@@ -146,6 +170,9 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 					}
 				}
 			}
+			if r.URL.Path == "/client/v4/zones" && r.URL.Query().Get("name") != "example.test" && r.URL.Query().Get("name") != "other.test" {
+				body = `{"success":true,"result":[]}`
+			}
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 		})}
 	}
@@ -155,7 +182,7 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 			manage("/clear-txt", map[string]string{"host": name + "."})
 		}
 	}()
-	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "automatic local ACME", Domains: []string{"restart.example.test", "*.restart.example.test"}, Method: "dns-api", AccountID: account.ID, DNSAccountID: dnsAccount.ID, KeyType: "ecdsa256", AutoRenew: true})
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "automatic local ACME", Domains: []string{"restart.example.test", "*.restart.example.test", "alt.other.test"}, Method: "dns-api", AccountID: account.ID, DNSAccountID: dnsAccount.ID, KeyType: "ecdsa256", AutoRenew: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +266,9 @@ func testCertificateLocalACMEPersistenceRenewalAndCancellation(t *testing.T, leg
 	}
 	if strings.Contains(stored, "PRIVATE KEY") || !strings.HasPrefix(stored, keyedEncryptedPrefix) {
 		t.Fatal("private key stored unencrypted")
+	}
+	if _, err = reopened.UpdateCertificateDNSCredentials(owner, dnsAccount.ID, "rotated vendor", certificates.DNSCredentials{Token: "rotated-local-token", Zone: "obsolete.invalid"}); err != nil {
+		t.Fatal(err)
 	}
 	if err = reopened.RenewCertificate(owner, item.ID); err != nil {
 		t.Fatal(err)
@@ -397,7 +427,7 @@ func TestCertificateDNSResponseLossRecoveryPreservesExistingRecords(t *testing.T
 	client := certificates.DNSClient{Provider: "cloudflare", Credentials: certificates.DNSCredentials{Zone: "example.test", Token: "fixture"}, HTTP: &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
 		response := body
 		if r.URL.Path == "/client/v4/zones" {
-			response = `{"success":true,"result":[{"id":"zone"}]}`
+			response = `{"success":true,"result":[{"id":"zone","name":"example.test"}]}`
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(response)), Header: http.Header{}}, nil
 	})}}
@@ -413,6 +443,11 @@ func TestCertificateDNSResponseLossRecoveryPreservesExistingRecords(t *testing.T
 	challenge.CreatePending = true
 	if err := db.recoverDNSCreate(ctx, client, &challenge); err == nil || challenge.Record.ID != "" {
 		t.Fatal("ambiguous response claimed another writer's record")
+	}
+	client.Credentials.Zone = "removed.example.test"
+	challenge.Zone = certificates.DNSZone{}
+	if err := db.recoverDNSCreate(ctx, client, &challenge); err == nil || !strings.Contains(err.Error(), "原 DNS 区域") || challenge.Record.ID != "" {
+		t.Fatalf("legacy recovery fell back to another zone: %+v %v", challenge, err)
 	}
 }
 
@@ -711,6 +746,8 @@ func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
 					w.WriteHeader(200)
 				case "/order":
 					fmt.Fprintf(w, `{"status":"pending","authorizations":[%q],"finalize":%q}`, caURL+"/auth", caURL+"/finalize")
+				case "/auth":
+					fmt.Fprint(w, `{"status":"pending","identifier":{"type":"dns","value":"receipt.example.test"},"challenges":[]}`)
 				default:
 					http.Error(w, "fixture stops before challenge validation", 400)
 				}
@@ -741,7 +778,7 @@ func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
 			writes := 0
 			db.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
 				status := 200
-				body := `{"success":true,"result":[{"id":"zone"}]}`
+				body := `{"success":true,"result":[{"id":"zone","name":"example.test"}]}`
 				if r.Method != "GET" {
 					writes++
 					status = 503
@@ -754,9 +791,12 @@ func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
 						status = 503
 					}
 				}
+				if r.URL.Path == "/client/v4/zones" && r.URL.Query().Get("name") != "example.test" {
+					body = `{"success":true,"result":[]}`
+				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 			})}
-			state := certificateOrderState{URL: caURL + "/order", Challenges: []certificateChallengeState{{Public: core.CertificateChallenge{Domain: "receipt.example.test", Name: "_acme-challenge.receipt.example.test", Value: "proof", Type: "dns-01", Status: "pending"}, AuthURL: caURL + "/auth", Record: certificates.DNSRecord{ID: "receipt", Zone: "zone"}}}}
+			state := certificateOrderState{URL: caURL + "/order", Challenges: []certificateChallengeState{{Public: core.CertificateChallenge{Domain: "receipt.example.test", Name: "_acme-challenge.receipt.example.test", Value: "proof", Type: "dns-01", Status: "pending"}, AuthURL: caURL + "/auth", Record: certificates.DNSRecord{ID: "receipt", Zone: "zone"}, Zone: certificates.DNSZone{ID: "zone", Name: "example.test"}}}}
 			if err = db.saveCertificateOrderState(owner, id, state, "dns_created"); err != nil {
 				t.Fatal(err)
 			}
@@ -764,9 +804,6 @@ func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
 				t.Fatal("fixture must fail")
 			}
 			expected := 0
-			if scenario == "missing" {
-				expected = 1
-			}
 			if writes != expected {
 				t.Fatalf("vendor writes=%d, want %d", writes, expected)
 			}
@@ -780,7 +817,7 @@ func TestCertificateDNSRetryRechecksPersistedReceipt(t *testing.T) {
 					t.Fatal(err)
 				}
 				c := saved.Challenges[0]
-				if !c.CreatePending || len(c.BeforeIDs) != 1 || c.BeforeIDs[0] != "peer" {
+				if c.CreatePending || !c.Borrowed || c.Record.ID != "peer" {
 					t.Fatalf("lost peer ownership boundary: %+v", c)
 				}
 			}
@@ -815,13 +852,23 @@ func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
 	if err = db.ContinueCertificateOrder(other, item.ID, id, true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("peer cancel: %v", err)
 	}
+	if _, err = db.UpdateCertificateDNSCredentials(owner, dns.ID, "rotated", certificates.DNSCredentials{Token: "rotated", Zone: "other.test"}); err != nil {
+		t.Fatal(err)
+	}
+	var rotated certificates.DNSCredentials
+	if _, err = db.CertificateAccountSecret(owner, dns.ID, "dns", &rotated); err != nil || rotated.Zone != "example.test" {
+		t.Fatalf("lost legacy recovery hint: %v", err)
+	}
 	records := map[string]string{"first": "value-a", "second": "value-b", "peer": "value-a"}
 	deletes := map[string]int{}
 	failures := 2
 	configure := func(target *Store) {
 		target.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/client/v4/zones" {
+				t.Fatal("cleanup rediscovered an acknowledged record's region")
+			}
 			status := 200
-			body := `{"success":true,"result":[{"id":"zone"}]}`
+			body := `{"success":true,"result":[{"id":"zone","name":"example.test"}]}`
 			if strings.Contains(r.URL.Path, "dns_records") {
 				if r.Method == "DELETE" {
 					parts := strings.Split(r.URL.Path, "/")
@@ -842,6 +889,9 @@ func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
 					raw, _ := json.Marshal(map[string]any{"success": true, "result": result})
 					body = string(raw)
 				}
+			}
+			if r.URL.Path == "/client/v4/zones" && r.URL.Query().Get("name") != "example.test" {
+				body = `{"success":true,"result":[]}`
 			}
 			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 		})}
@@ -889,6 +939,93 @@ func TestCertificateCleanupPartialRetryAcrossRestartIsIsolated(t *testing.T) {
 	var versions int
 	if err = db.pool.QueryRow(ctx, `SELECT count(*) FROM certificate_versions WHERE certificate_id=$1`, item.ID).Scan(&versions); err != nil || versions != 0 {
 		t.Fatalf("cleanup saved certificates: %d %v", versions, err)
+	}
+}
+
+func TestCertificateDNSPodCleanupWithDelayedRecordIndex(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_dnspod_cleanup", false)
+	acct, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "local", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "vendor", Kind: "dns", Provider: "dnspod"}, certificates.DNSCredentials{SecretID: "local", SecretKey: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "delayed index", Domains: []string{"example.test"}, Method: "dns-api", AccountID: acct.ID, DNSAccountID: dns.ID, KeyType: "ecdsa256"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.CertificateOrders(owner, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	db.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+		var input struct {
+			Domain   string
+			RecordID uint64 `json:"RecordId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Domain != "example.test" {
+			t.Fatal("cleanup did not use the saved zone")
+		}
+		body := `{"Response":{"Error":{"Code":"ResourceNotFound.NoDataOfRecord"}}}`
+		switch r.Header.Get("X-TC-Action") {
+		case "DescribeRecordList": // DNSPod's new-record search index is delayed.
+		case "DescribeRecord":
+			if input.RecordID != 42 {
+				t.Fatal("cleanup did not query the saved record")
+			}
+			body = `{"Response":{"RecordInfo":{"Id":42,"SubDomain":"_acme-challenge","RecordType":"TXT","Value":"proof"}}}`
+		case "DeleteRecord":
+			if input.RecordID != 42 {
+				t.Fatal("cleanup selected another record")
+			}
+			deleted = true
+			body = `{"Response":{}}`
+		default:
+			t.Fatalf("unexpected action: %s", r.Header.Get("X-TC-Action"))
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	state := certificateOrderState{Challenges: []certificateChallengeState{{
+		Public: core.CertificateChallenge{Name: "_acme-challenge.example.test", Value: "proof"},
+		Record: certificates.DNSRecord{ID: "42", Zone: "example.test"},
+	}}}
+	if err = db.cleanupCertificateOrder(owner, item, orders[0].ID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted || !state.Cleanup || state.Challenges[0].Record.ID != "" {
+		t.Fatalf("acknowledged record lost during delayed indexing: deleted=%v state=%+v", deleted, state)
+	}
+}
+
+func TestCertificateDNSPodUncertainCreateWaitsForIndex(t *testing.T) {
+	started := time.Now().UTC()
+	state := certificateChallengeState{CreatePending: true, CreateStarted: &started,
+		Zone:   certificates.DNSZone{ID: "example.test", Name: "example.test"},
+		Public: core.CertificateChallenge{Name: "_acme-challenge.example.test", Value: "proof"}}
+	requests := 0
+	client := certificates.DNSClient{Provider: "dnspod", Credentials: certificates.DNSCredentials{SecretID: "local", SecretKey: "local"},
+		HTTP: &http.Client{Transport: certificateTestTransport(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if r.Header.Get("X-TC-Action") != "DescribeRecordList" {
+				t.Fatal("recovery queried another zone or wrote records")
+			}
+			body := `{"Response":{"RecordList":[{"RecordId":42,"Name":"_acme-challenge","Type":"TXT","Value":"proof"}]}}`
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		})}}
+	db := &Store{}
+	if err := db.recoverDNSCreate(context.Background(), client, &state); err == nil || !state.CreatePending || requests != 0 {
+		t.Fatalf("premature recovery: state=%+v requests=%d err=%v", state, requests, err)
+	}
+	started = started.Add(-31 * time.Second)
+	if err := db.recoverDNSCreate(context.Background(), client, &state); err != nil || state.CreatePending || state.CreateStarted != nil || state.Record.ID != "42" || requests != 1 {
+		t.Fatalf("delayed recovery: state=%+v requests=%d err=%v", state, requests, err)
 	}
 }
 
@@ -1035,6 +1172,131 @@ func TestCertificateHTTPRetryRetainsRoutesAndOfflineIsTemporary(t *testing.T) {
 			orders, err = db.CertificateOrders(owner, targets[0].item.ID)
 			if err != nil || orders[0].Status != "canceled" || orders[0].Attempt != expectedAttempts {
 				t.Fatalf("cancellation counted as issuance: %+v %v", orders, err)
+			}
+		})
+	}
+}
+
+func TestCertificateResumesCAOutcomeWithoutRepublishingOrRefinalizing(t *testing.T) {
+	for _, scenario := range []string{"processing", "missing certificate URL", "download response lost", "CA temporarily unavailable", "CA rate limited", "invalid order"} {
+		t.Run(scenario, func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			owner := WithConfigScope(ctx, "token_ca_recovery", false)
+			pair, err := certificates.SelfSigned([]string{"resume.example.test"}, "ecdsa256", 90)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var caURL string
+			orderReads, finalizes, authReads, downloads := 0, 0, 0, 0
+			ca := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Replay-Nonce", "local-fixture-nonce")
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/dir":
+					fmt.Fprintf(w, `{"newNonce":%q,"newAccount":%q,"newOrder":%q}`, caURL+"/nonce", caURL+"/acct", caURL+"/new-order")
+				case "/nonce":
+					w.WriteHeader(200)
+				case "/order":
+					orderReads++
+					if orderReads == 1 && (scenario == "CA temporarily unavailable" || scenario == "CA rate limited") {
+						status := http.StatusServiceUnavailable
+						problem := "serverInternal"
+						if scenario == "CA rate limited" {
+							status = http.StatusTooManyRequests
+							problem = "rateLimited"
+						}
+						w.Header().Set("Retry-After", "1")
+						w.WriteHeader(status)
+						fmt.Fprintf(w, `{"type":"urn:ietf:params:acme:error:%s","detail":"local fixture retry"}`, problem)
+						return
+					}
+					status := "valid"
+					link := `,"certificate":"` + caURL + `/cert"`
+					if scenario == "invalid order" {
+						status = "invalid"
+						link = ""
+					}
+					if scenario == "processing" && orderReads == 1 {
+						status = "processing"
+						link = ""
+					}
+					if scenario == "missing certificate URL" {
+						link = ""
+					}
+					fmt.Fprintf(w, `{"status":%q,"authorizations":[%q],"finalize":%q%s}`, status, caURL+"/auth", caURL+"/finalize", link)
+				case "/cert":
+					downloads++
+					if scenario == "download response lost" && downloads == 1 {
+						http.Error(w, "fixture response loss", 400)
+						return
+					}
+					w.Header().Set("Content-Type", "application/pem-certificate-chain")
+					fmt.Fprint(w, pair.Certificate)
+				case "/finalize":
+					finalizes++
+					http.Error(w, "must not finalize again", 400)
+				default:
+					authReads++
+					http.Error(w, "must not read old challenge", 400)
+				}
+			}))
+			defer ca.Close()
+			caURL = ca.URL
+			old := certificates.Directories["letsencrypt-staging"]
+			certificates.Directories["letsencrypt-staging"] = caURL + "/dir"
+			defer func() { certificates.Directories["letsencrypt-staging"] = old }()
+			_, key, err := certificates.NewKey("ecdsa256")
+			if err != nil {
+				t.Fatal(err)
+			}
+			account, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "recovery", Kind: "acme", CA: "letsencrypt-staging"}, certificates.ACMEAccount{Key: key, URL: caURL + "/acct/1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			dns, err := db.CreateCertificateAccount(owner, core.CertificateAccount{Name: "DNS", Kind: "dns", Provider: "cloudflare"}, certificates.DNSCredentials{Token: "fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, err := db.CreateACMECertificate(owner, core.Certificate{Name: "recovery", Domains: []string{"resume.example.test"}, Method: "dns-api", KeyType: "ecdsa256", AccountID: account.ID, DNSAccountID: dns.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			orders, _ := db.CertificateOrders(owner, item.ID)
+			id := orders[0].ID
+			state := certificateOrderState{URL: caURL + "/order", Key: pair.PrivateKey, Challenges: []certificateChallengeState{{URL: caURL + "/challenge", AuthURL: caURL + "/auth", Public: core.CertificateChallenge{Name: "_acme-challenge.resume.example.test", Value: "old-proof", Status: "pending"}}}}
+			if err = db.saveCertificateOrderState(owner, id, state, "finalizing"); err != nil {
+				t.Fatal(err)
+			}
+			db.certificateDNSHTTP = &http.Client{Transport: certificateTestTransport(func(*http.Request) (*http.Response, error) {
+				t.Error("republished DNS after CA progressed")
+				return nil, errors.New("unexpected DNS call")
+			})}
+			err = db.processCertificateOrder(owner, item, id, "queued", state)
+			if scenario == "invalid order" {
+				if !errors.Is(err, errCertificateOrderInvalid) || downloads != 0 {
+					t.Fatalf("invalid order did not stop safely: %v downloads=%d", err, downloads)
+				}
+			} else if scenario == "missing certificate URL" {
+				if err == nil {
+					t.Fatal("missing link claimed success")
+				}
+			} else {
+				if scenario == "download response lost" {
+					if err == nil {
+						t.Fatal("expected first download failure")
+					}
+					err = db.processCertificateOrder(owner, item, id, "queued", state)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				issued, err := db.GetCertificate(owner, item.ID)
+				if err != nil || issued.Version != 1 {
+					t.Fatalf("certificate not saved: %+v %v", issued, err)
+				}
+			}
+			if finalizes != 0 || authReads != 0 {
+				t.Fatalf("replayed CA operations: finalize=%d auth=%d", finalizes, authReads)
 			}
 		})
 	}

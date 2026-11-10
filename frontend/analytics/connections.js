@@ -27,22 +27,24 @@ const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing
 export async function connectionsPage(ctx) {
   const data = ctx.state.data;
   const cache = data.analyticsConnectionCache ||= createConnectionCache({ storage: connectionSessionStorage() });
-  // No storage candidate means no extra cold-start gate. The lightweight
-  // scope read overlaps module/order initialization and the first history API.
-  if (cache.hasStored() || cache.scope) {
+  let scopeReady = !(cache.hasStored() || cache.scope), scopePending = ctx.connectionScope;
+  async function verifyScope() {
+    const pending = scopePending ||= boundedRead(ctx.api, '/client-connections?scope_only=true', {signal:ctx.signal});
     try {
-      const verified = await ctx.connectionScope;
-      if (!ctx.current()) return;
-      cache.restore(verified.scope);
-    } catch (failure) { if (ctx.current()) cache.clear(); throw failure; }
+      const verified = await pending;
+      if (!ctx.current()) throw new DOMException('页面已切换', 'AbortError');
+      if (!scopeReady) { cache.restore(verified.scope); scopeReady = true; }
+      return verified;
+    } catch (error) { cache.clear(); scopeReady = false; throw error; }
+    finally { if (scopePending === pending) scopePending = null; }
   }
   const today = defaultConnectionFilters().date;
-  const restored = cache.selection;
+  const restored = null;
   let filters = data.analyticsConnectionFilters ||= restored?.filters || defaultConnectionFilters();
   let initialOrder = ctx.connectionNodeOrder;
   // Filter changes can share the route's pending order read. Once settled,
   // later refreshes continue to read the current authenticated preference.
-  initialOrder?.finally(() => { initialOrder = null; }).catch(() => {});
+
   let sources = restored?.sources || [], result = null, loading = true, reading = false, failures = 0, forcePending = false, controller, serial = 0, cursor = restored?.cursor || "", cursors = restored?.cursors || [], nextCursor = "", nodeOrder = restored?.nodeOrder || savedNodeOrder();
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
@@ -133,10 +135,13 @@ export async function connectionsPage(ctx) {
     view.root.setAttribute("aria-busy", "true");
     status.textContent = "正在读取…";
     try {
+      if (!scopeReady) await verifyScope();
+      if (!current()) return;
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
       if (force || initialOrder || !sources.length) {
-        const order = await (!force && initialOrder || boundedRead(ctx.api, "/preferences/node-order", { signal }));
+        const pendingOrder = !force && initialOrder; initialOrder = null;
+        const order = await (pendingOrder || boundedRead(ctx.api, "/preferences/node-order", { signal }));
         if (!current()) return;
         if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; changedScope = true; }
         nodeOrder = order.ids;
@@ -245,13 +250,40 @@ export async function connectionsPage(ctx) {
   const visibility = () => document.hidden ? scopeWatch.stop() : void scopeWatch.trigger();
   document.addEventListener("visibilitychange", visibility, { signal: ctx.signal });
   window.addEventListener("focus", () => void scopeWatch.trigger(), { signal: ctx.signal });
-  scopeWatch.start();
+
   ctx.signal.addEventListener("abort", () => { controller?.abort(); clearTimeout(timer); scopeWatch.stop(); cache.flush(); }, { once: true });
   ctx.onRefresh(() => load({ target: cursor, history: cursors, force: true }), { local: true });
   updateSources(); paint();
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
-  void load({ target: cursor, history: cursors, changedScope: true });
+  async function initialize() {
+    const before = JSON.stringify(formData(controls));
+    if (cache.hasStored() || cache.scope) {
+      try {
+        await verifyScope();
+        if (!ctx.current()) return;
+        const selection = cache.selection;
+        if (selection && before === JSON.stringify(formData(controls))) {
+          filters = data.analyticsConnectionFilters = selection.filters;
+          sources = selection.sources || []; nodeOrder = selection.nodeOrder || nodeOrder;
+          cursor = selection.cursor || ""; cursors = selection.cursors || [];
+          updateSources(); updateRegions();
+          for (const [name, value] of Object.entries(filters)) {
+            const control = controls.elements.namedItem(name);
+            if (control) { if (control.type === 'checkbox') control.checked = value === 'true'; else control.value = value; }
+          }
+        }
+      } catch (failure) {
+        if (!ctx.current()) return;
+        cache.clear(); loading = false; error.textContent = redactDiagnostic(failure.message); paint();
+        return;
+      }
+    }
+    if (!ctx.current()) return;
+    void load({ target: cursor, history: cursors, changedScope: true });
+    scopeWatch.start();
+  }
+  void initialize();
   return stack(filterbar(controls), error, section("客户端连接", stack(summary, node("div", { className: "a-card-body a-stack" }, muted("根据内核日志观测，不代表当前在线会话数"), status), view.root,
     node("div", { className: "a-card-body" }, actions(page, previous, next))), collection.trigger));
 }

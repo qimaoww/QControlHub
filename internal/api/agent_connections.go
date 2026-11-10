@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) chan struct{} {
@@ -85,5 +87,12 @@ func (s *Server) DisconnectAllAgents() {
 	s.connectionsMu.Unlock()
 	for _, connection := range connections {
 		connection.cancel()
+	}
+}
+
+// Notify Agents only after a Key mutation commits its authorization and data.
+func afterRequestCommit(ctx context.Context, callback func()) {
+	if !store.AfterRequestCommit(ctx, callback) {
+		callback()
 	}
 }

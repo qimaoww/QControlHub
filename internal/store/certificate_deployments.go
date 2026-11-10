@@ -150,7 +150,12 @@ func (s *Store) prepareCertificateExecutionTx(ctx context.Context, tx pgx.Tx, ta
 		return errors.New("Agent 不再支持证书中心，请升级后重新部署")
 	}
 	var owner string
-	if err = tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`, task.ConfigID).Scan(&owner); err != nil {
+	if task.Action == core.ActionImportExisting {
+		err = tx.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1 AND action='import-existing'`, task.ID).Scan(&owner)
+	} else {
+		err = tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`, task.ConfigID).Scan(&owner)
+	}
+	if err != nil {
 		return err
 	}
 	for _, id := range ids {
@@ -273,6 +278,35 @@ func (s *Store) syncCertificateBindings(ctx context.Context) error {
 		}
 		task, e := s.createTaskTx(ownerCtx, tx, core.TaskRequest{AgentID: b.agent, Engine: b.engine, Action: core.ActionDeploy, ConfigID: b.config, ExpectedConfigVersion: b.version}, 0, b.applied)
 		if e == nil {
+			rows, queryErr := tx.Query(ctx, `SELECT DISTINCT certificate_id FROM certificate_bindings WHERE config_id=$1 AND enabled`, b.config)
+			var certificates []string
+			if queryErr != nil {
+				e = queryErr
+			} else {
+				for rows.Next() {
+					var id string
+					if scanErr := rows.Scan(&id); scanErr != nil {
+						e = scanErr
+						break
+					}
+					certificates = append(certificates, id)
+				}
+				if e == nil {
+					e = rows.Err()
+				}
+				rows.Close()
+			}
+			for _, id := range certificates {
+				if e != nil {
+					break
+				}
+				if e = lockAPIKeyWork(ctx, tx, "certificate-version", id); e != nil {
+					break
+				}
+				e = copyAPIKeyWork(ctx, tx, "certificate-version", id, "certificate-sync-task:"+id, task.ID)
+			}
+		}
+		if e == nil {
 			_, e = tx.Exec(ctx, `UPDATE certificate_bindings SET task_id=$2,status='pending',error='',retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND enabled`, b.config, task.ID)
 		}
 		if e == nil {
@@ -281,12 +315,15 @@ func (s *Store) syncCertificateBindings(ctx context.Context) error {
 			_ = tx.Rollback(ctx)
 		}
 		if e != nil {
-			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(e.Error(), 1000))
+			_, err = s.pool.Exec(ctx, `UPDATE certificate_bindings SET status='blocked',error=$2,retry_at=now()+interval '5 minutes' WHERE config_id=$1 AND status<>'running' AND enabled AND NOT EXISTS(SELECT 1 FROM tasks WHERE config_id=$1 AND status IN ('pending','running'))`, b.config, truncate(SafeFailureDiagnostic(e), 1000))
 			if err != nil {
 				return err
 			}
+			if err = s.retainBackgroundFailure(ctx, b.owner, "证书部署任务创建", b.config, "task_creation", e); err != nil {
+				return err
+			}
 		} else if !task.Reused {
-			s.signalTaskReady(task.AgentID)
+			s.signalTaskReadyAfterCommit(ctx, task.AgentID)
 		}
 	}
 	return nil

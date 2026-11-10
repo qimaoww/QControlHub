@@ -19,6 +19,7 @@ import (
 const validationCleanupBinary = "/usr/bin/rm"
 
 type EngineSpec struct {
+	SourceContext    string
 	Binary           string
 	ConfigPath       string
 	ConfigDirectory  string
@@ -31,25 +32,33 @@ type EngineSpec struct {
 }
 
 type Executor struct {
-	coreLogReady             func(context.Context, core.Engine, EngineSpec) error
-	Specs                    map[core.Engine]EngineSpec
-	ExistingSpecs            map[core.Engine]EngineSpec
-	ExistingDiscoveryIssues  map[core.Engine]string
-	MigrationMarkerPrefix    string
-	Updater                  *CoreUpdater
-	Services                 *ServiceManager
-	coreBootstrapper         *coreServiceBootstrapper
-	validationSystemdRunPath string
-	coreStateHelperPath      string
-	tlsFrontendHelperPath    string
-	specsMu                  sync.RWMutex
-	migrationMu              sync.Mutex
-	accountingConfigMu       sync.Mutex
-	sharedStateMu            sync.Mutex
-	sharedAccountingLocks    sync.Map
-	accountingConfigs        map[string]nativeAccountingConfigEntry
-	completedMigrations      map[core.Engine]completedCoreMigration
-	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
+	mainOperationMu            sync.Mutex
+	importSnapshotDigests      sync.Map
+	coreLogReady               func(context.Context, core.Engine, EngineSpec) error
+	Specs                      map[core.Engine]EngineSpec
+	ExistingSpecs              map[core.Engine]EngineSpec
+	ExistingSources            map[core.Engine][]EngineSpec
+	ExistingDiscoveryStatePath string
+	RefreshExistingSources     func(context.Context) error
+	ExistingDiscoveryIssues    map[core.Engine]string
+	ManagedSafetyIssues        map[core.Engine]string
+	importedResourceIssues     map[core.Engine]string
+	MigrationMarkerPrefix      string
+	Updater                    *CoreUpdater
+	Services                   *ServiceManager
+	coreBootstrapper           *coreServiceBootstrapper
+	validationSystemdRunPath   string
+	importValidationIdentity   *commandIdentity // Explicit identity for custom-path validation fixtures; bundled services always use their installed account.
+	coreStateHelperPath        string
+	tlsFrontendHelperPath      string
+	specsMu                    sync.RWMutex
+	migrationMu                sync.Mutex
+	accountingConfigMu         sync.Mutex
+	sharedStateMu              sync.Mutex
+	sharedAccountingLocks      sync.Map
+	accountingConfigs          map[string]nativeAccountingConfigEntry
+	completedMigrations        map[core.Engine]completedCoreMigration
+	verifyCompletedMigration   func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
 }
 
 type completedCoreMigration struct {
@@ -88,6 +97,18 @@ func (e *Executor) serviceManager() *ServiceManager {
 }
 
 func (e *Executor) Validate() error {
+	if err := e.validateManagedTargets(); err != nil {
+		return err
+	}
+	for engine, spec := range e.ExistingSpecs {
+		if err := e.validateImportMapping(engine, spec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Executor) validateManagedTargets() error {
 	if e == nil {
 		return errors.New("agent executor is required")
 	}
@@ -96,9 +117,6 @@ func (e *Executor) Validate() error {
 	}
 	if err := e.serviceManager().validate(); err != nil {
 		return err
-	}
-	if len(e.ExistingSpecs) > 0 && strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
-		return errors.New("existing core mappings require a migration state path")
 	}
 	for engine, spec := range e.Specs {
 		if !engine.Valid() {
@@ -119,30 +137,40 @@ func (e *Executor) Validate() error {
 			}
 		}
 	}
-	for engine, spec := range e.ExistingSpecs {
-		if _, enabled := e.Specs[engine]; !enabled {
-			return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
-		}
-		if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
-			return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
-		}
-		if err := validateExistingSpecPaths(engine, spec); err != nil {
-			return err
-		}
-		if err := validateExistingCoreExecutable(spec.Binary); err != nil {
-			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
-		}
-		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
-			return fmt.Errorf("unsafe existing %s binary parent chain: %w", engine, err)
-		}
-		if err := validateExistingServiceExecutable(spec); err != nil {
-			return fmt.Errorf("unsafe existing %s service executable: %w", engine, err)
-		}
+	return nil
+}
+
+func (e *Executor) validateImportMapping(engine core.Engine, spec EngineSpec) error {
+	if strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
+		return errors.New("existing core mappings require a migration state path")
+	}
+	if _, enabled := e.Specs[engine]; !enabled {
+		return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
+	}
+	if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
+		return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
+	}
+	if err := validateExistingSpecPaths(engine, spec); err != nil {
+		return err
+	}
+	if err := validateExistingCoreExecutable(spec.Binary); err != nil {
+		return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+		return fmt.Errorf("unsafe existing %s binary parent chain: %w", engine, err)
+	}
+	if err := validateExistingServiceExecutable(spec); err != nil {
+		return fmt.Errorf("unsafe existing %s service executable: %w", engine, err)
 	}
 	return nil
 }
 
 func (e *Executor) Execute(parent context.Context, task core.Task) (output string, resultErr error) {
+	if !task.SharedInstance {
+		e.mainOperationMu.Lock()
+		defer e.mainOperationMu.Unlock()
+	}
+
 	if task.SharedInstance && task.Action.ChangesInstance() && task.Engine.Valid() && core.ValidAgentShareID(task.SharedTrafficID) {
 		lock := e.sharedAccountingLock(task.Engine, task.SharedTrafficID)
 		lock.Lock()
@@ -165,16 +193,47 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 	if !task.Action.Valid() || !task.Engine.Valid() {
 		return "", errors.New("task contains an unsupported action or engine")
 	}
+	if !task.SharedInstance && task.Action == core.ActionReadConfig && e.RefreshExistingSources != nil {
+		if err := e.RefreshExistingSources(parent); err != nil {
+			return "", fmt.Errorf("refresh existing service discovery: %w", err)
+		}
+	}
 	e.specsMu.RLock()
 	spec, ok := e.Specs[task.Engine]
 	existing, hasExisting := e.ExistingSpecs[task.Engine]
 	discoveryIssue := strings.TrimSpace(e.ExistingDiscoveryIssues[task.Engine])
+	managedIssue := strings.TrimSpace(e.ManagedSafetyIssues[task.Engine])
 	e.specsMu.RUnlock()
+	if !task.SharedInstance && task.Action == core.ActionReadConfig && task.ExistingSourceID == "" && len(e.existingSources(task.Engine)) > 1 {
+		return "", errors.New("select one of the discovered existing services before reading")
+	}
+	if !task.SharedInstance && task.ExistingSourceID != "" {
+		var found bool
+		for _, candidate := range e.existingSources(task.Engine) {
+			if existingSourceID(candidate) == task.ExistingSourceID {
+				existing, hasExisting, found = candidate, true, true
+				break
+			}
+		}
+		if !found {
+			// A reconnect may redeliver the acknowledged import after discovery
+			// has retired that source. Only its durable completed record may pass.
+			record, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, task.Engine)
+			matches, matchErr := completedCoreMigrationMatches(e.MigrationMarkerPrefix, task.Engine, task.ConfigContent)
+			if task.Action != core.ActionImportExisting || err != nil || matchErr != nil || record.State != coreMigrationComplete || record.SourceDigest != task.ExistingSourceID || !matches {
+				return "", errors.New("selected existing source changed or is no longer available; refresh discovery")
+			}
+		}
+		discoveryIssue = ""
+	}
 	if !ok {
 		return "", fmt.Errorf("engine %s is not enabled on this agent", task.Engine)
 	}
-	if discoveryIssue != "" {
-		return "", fmt.Errorf("%s core tasks are disabled because an existing service could not be mapped safely: %s", task.Engine, discoveryIssue)
+	if managedIssue != "" {
+		return "", fmt.Errorf("managed %s target is unsafe: %s", task.Engine, managedIssue)
+	}
+	if !task.SharedInstance && discoveryIssue != "" && (task.Action == core.ActionImportExisting || task.Action == core.ActionReadConfig) {
+		return "", fmt.Errorf("%s existing configuration source is unavailable: %s", task.Engine, discoveryIssue)
 	}
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
@@ -184,6 +243,11 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 			task.ConfigVersion < 1 || task.ConfigContent == "" || (task.SharedTrafficID != "" && !task.SharedInstance) ||
 			task.CoreVersion != "" || task.CoreSource != "" {
 			return "", errors.New("invalid automatic core installation task")
+		}
+	}
+	if !task.SharedInstance && spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] {
+		if _, err := validateManagedServiceTarget(parent, task.Engine, spec, e.serviceManager()); err != nil {
+			return "", fmt.Errorf("verify managed %s service target: %w", task.Engine, err)
 		}
 	}
 	if task.Action == core.ActionInstall && (task.SharedInstance || task.SharedTrafficID != "") && !validSharedCoreInstallTask(task) {
@@ -352,10 +416,30 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 		// for import. All other actions below continue to target the independent
 		// QAgent-managed service so the two installations can coexist.
 		if hasExisting {
-			return e.readExistingConfig(ctx, task.Engine, spec, existing)
+			plan, err := e.readExistingConfigPlan(ctx, task.Engine, spec, existing)
+			if err != nil {
+				return "", err
+			}
+			if task.ID != "" {
+				e.importSnapshotDigests.Store(task.ID, plan)
+			}
+			return plan.managedContent, nil
 		}
 		return e.readCurrentConfig(ctx, task.Engine, spec)
 	case core.ActionImportExisting:
+		defer func() {
+			if resultErr == nil && task.ConfigID != "" && task.ConfigVersion > 0 {
+				actual, err := readConfigurationFile(spec.ConfigPath)
+				if err == nil {
+					identity := task
+					identity.ConfigContent = actual
+					err = e.commitSharedDeployment(spec, identity)
+				}
+				if err != nil {
+					resultErr = fmt.Errorf("迁移完成，但托管配置关联未能留存，请核对服务后重试：%w", err)
+				}
+			}
+		}()
 		if !hasExisting {
 			completed, err := completedCoreMigrationMatches(e.MigrationMarkerPrefix, task.Engine, task.ConfigContent)
 			if err != nil {
@@ -369,7 +453,7 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 		if err := e.prepareManagedCoreService(ctx, task.Engine, spec, true); err != nil {
 			return "", err
 		}
-		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
+		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent, task.ImportSourceDigest)
 	case core.ActionValidate:
 		var report strings.Builder
 		if err := e.executeTLSFrontend(ctx, spec, task, true, &report); err != nil {

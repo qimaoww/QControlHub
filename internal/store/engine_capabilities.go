@@ -52,8 +52,9 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 	}
 	var selected, supported []core.Engine
 	var runtime map[core.Engine]core.RuntimeState
-	err = tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities),runtime
-		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&selected, &supported, &runtime)
+	var features []string
+	err = tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities),runtime,features
+		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&selected, &supported, &runtime, &features)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return change, ErrNotFound
 	}
@@ -79,7 +80,7 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 	}
 	// Unsafe discovery can report an active service with Installed=false.
 	// Reject it before the uninstalled fast path can change management access.
-	if reason := runtime[engine].ExistingConfigUnsupportedReason; reason != "" {
+	if reason := runtime[engine].ManagedBlockReason(features); reason != "" {
 		return change, fmt.Errorf("%w: %s", ErrConflict, reason)
 	}
 	if runtime[engine].Installed {
@@ -124,7 +125,7 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		if err := tx.Commit(ctx); err != nil {
 			return change, err
 		}
-		s.signalTaskReady(id)
+		s.signalTaskReadyAfterCommit(ctx, id)
 		return change, nil
 	}
 	if err := setEngineCapability(ctx, tx, id, engine, enabled, selected); err != nil {

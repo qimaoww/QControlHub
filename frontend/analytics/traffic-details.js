@@ -1,3 +1,4 @@
+import { loadingTable } from "./loading.js";
 import { node, button, actions, stack, table, field, query, list, notice } from './ui.js';
 import { bytes, date } from './operations.js';
 import { protocolName, cycleName, dateInputValue, trafficAccountingState } from '../modules/traffic-model.js';
@@ -39,7 +40,7 @@ export function trafficDetails(ctx, policy, agent, options = {}) {
   }
   update();
   const month = field('月份（UTC）', 'month', new Date().toISOString().slice(0, 7), { type: 'month', required: true });
-  const history = node('div');
+  const history = node('div', {}, loadingTable(['日期（UTC）', '接收', '发送', '合计', '接收峰值', '发送峰值'], '每日流量'));
   let sequence = 0, request;
   async function read() {
     request?.abort(); request = new AbortController();

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -32,6 +33,7 @@ const (
 )
 
 var existingDiscoveryCandidates = map[core.Engine]existingDiscoveryCandidateSet{
+	core.EngineMihomo: {services: []string{"mihomo.service", "clash.service"}, executables: []string{"/usr/local/bin/mihomo", "/usr/bin/mihomo"}, configs: []string{"/etc/mihomo/config.yaml"}},
 	core.EngineShadowsocksRust: {
 		services:    []string{"shadowsocks-rust.service"},
 		executables: []string{"/usr/local/bin/ssserver"},
@@ -75,12 +77,14 @@ func installerCoreAllowsOrphanOwner(path string) bool {
 var existingDiscoveryManagedUnitRoot = "/etc/systemd/system"
 
 type existingCoreDiscoveryState struct {
-	Version int                                   `json:"version"`
-	Specs   map[core.Engine]existingDiscoverySpec `json:"specs,omitempty"`
-	Issues  map[core.Engine]string                `json:"issues,omitempty"`
+	Sources map[core.Engine][]existingDiscoverySpec `json:"sources,omitempty"`
+	Version int                                     `json:"version"`
+	Specs   map[core.Engine]existingDiscoverySpec   `json:"specs,omitempty"`
+	Issues  map[core.Engine]string                  `json:"issues,omitempty"`
 }
 
 type existingDiscoverySpec struct {
+	SourceContext    string `json:"source_context,omitempty"`
 	Binary           string `json:"binary"`
 	ConfigPath       string `json:"config_path"`
 	ConfigDirectory  string `json:"config_directory,omitempty"`
@@ -92,7 +96,7 @@ type existingDiscoverySpec struct {
 
 func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 	return existingDiscoverySpec{
-		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
+		SourceContext: spec.SourceContext, Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
 		ACLPath:          spec.ACLPath,
 		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
@@ -100,7 +104,7 @@ func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 
 func (spec existingDiscoverySpec) engineSpec() EngineSpec {
 	return EngineSpec{
-		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
+		SourceContext: spec.SourceContext, Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
 		ACLPath:          spec.ACLPath,
 		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
@@ -139,9 +143,11 @@ func RefreshExistingCoreDiscovery(
 	}
 	defer os.RemoveAll(validationRoot)
 
+	scanned, scanIssues, scanErr := discoverAllInstalledCoreSources(ctx, manager)
+	allSources := make(map[core.Engine][]existingDiscoverySpec)
 	automatic := make(map[core.Engine]EngineSpec)
 	issues := make(map[core.Engine]string)
-	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
 		if _, explicit := manualSpecs[engine]; explicit {
 			continue
 		}
@@ -156,26 +162,55 @@ func RefreshExistingCoreDiscovery(
 		if record.State == coreMigrationInProgress || record.State == coreMigrationComplete {
 			previousSpec, ok := previous.Specs[engine]
 			if !ok || record.SourceDigest != coreMigrationSourceDigest(previousSpec.engineSpec()) {
+				for _, candidate := range previous.Sources[engine] {
+					if record.SourceDigest == coreMigrationSourceDigest(candidate.engineSpec()) {
+						previousSpec, ok = candidate, true
+						break
+					}
+				}
+			}
+			allSources[engine] = previous.Sources[engine]
+			if !ok || record.SourceDigest != coreMigrationSourceDigest(previousSpec.engineSpec()) {
 				return nil, nil, fmt.Errorf("persisted %s discovery mapping does not match the recorded migration", engine)
 			}
 			automatic[engine] = previousSpec.engineSpec()
 			continue
 		}
-		spec, found, issue := discoverExistingCoreService(ctx, engine, managed, filepath.Join(validationRoot, string(engine)), manager)
+		candidates, failures := scanned[engine], scanIssues[engine]
+		if scanErr != nil {
+			failures = append(failures, "service enumeration: "+scanErr.Error())
+		}
+		if len(candidates) == 0 && len(failures) == 0 {
+			spec, found, issue := discoverLegacyExistingCoreService(ctx, engine, managed, filepath.Join(validationRoot, string(engine)), manager)
+			if found {
+				candidates = append(candidates, spec)
+			} else if issue != "" {
+				failures = append(failures, issue)
+			}
+		}
+		for index, candidate := range candidates {
+			spec, found, issue := validateDiscoveredExistingSpec(ctx, engine, managed, candidate, filepath.Join(validationRoot, fmt.Sprintf("%s-%d", engine, index)), manager)
+			if found {
+				allSources[engine] = append(allSources[engine], discoverySpecFromEngineSpec(spec))
+			} else if issue != "" {
+				failures = append(failures, issue)
+			}
+		}
 		if ctx.Err() != nil {
 			return nil, nil, fmt.Errorf("discover existing %s service: %w", engine, ctx.Err())
 		}
-		if found {
-			automatic[engine] = spec
-			continue
+		if len(allSources[engine]) == 1 {
+			automatic[engine] = allSources[engine][0].engineSpec()
 		}
-		if issue != "" {
-			issues[engine] = limitDiscoveryIssue(issue)
+		if len(allSources[engine]) == 0 && len(failures) > 0 {
+			issues[engine] = limitDiscoveryIssue(strings.Join(failures, "; "))
 		}
+
 	}
 
 	state := existingCoreDiscoveryState{
 		Version: existingCoreDiscoveryStateVersion,
+		Sources: allSources,
 		Specs:   make(map[core.Engine]existingDiscoverySpec, len(automatic)),
 		Issues:  issues,
 	}

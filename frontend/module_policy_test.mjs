@@ -60,7 +60,7 @@ const sharedLogic = new Set([
   "config-file-model.js", "config-field-model.js", "config-outbound-model.js", "outbound-preset-model.js", "outbound-preset-controller.js",
   "code-format.js", "core-log-selection.js",
   "certificate-order.js", "record-display.js", "client-access-model.js", "config-snapshot.js", "dashboard-model.js",
-  "errors.js", "ip-quality-model.js", "ip-quality-controller.js", "live-config-state.js", "node-order.js",
+  "errors.js", "failure-records.js", "config-import.js", "managed-core-state.js", "ip-quality-model.js", "ip-quality-controller.js", "live-config-state.js", "node-order.js",
   "permissions.js", "poller.js", "preset-route.js", "routes.js", "route-loader.js", "route-warmup.js",
   "session-watch.js", "substore-model.js", "system-bbr-model.js", "system-bbr-presets.js",
   "task-model.js",

@@ -17,6 +17,6 @@ export async function recoverConfigInstance(ctx, agent, engine, active = ctx.cur
     if (!matches(result)) throw new Error('实例状态回执与当前目标不一致，草稿已保留。');
   }
   if (!active()) throw new DOMException('目标已切换','AbortError');
-  if (result.status !== 'succeeded') throw new Error(result.error || '实例状态尚未确认，请在执行记录中核对。草稿已保留。');
+  if (result.status !== 'succeeded') throw Object.assign(new Error(result.error || '实例状态尚未确认，请在执行记录中核对。草稿已保留。'),{failureTaskID:result.id,failureSaved:true});
   return result;
 }

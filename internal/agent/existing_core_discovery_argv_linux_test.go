@@ -184,7 +184,7 @@ func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.
 	}
 }
 
-func TestExistingCoreDiscoveryAcceptsOfficialSingBoxAbsoluteLocalResource(t *testing.T) {
+func TestExistingCoreDiscoveryRejectsUnpreparedAbsoluteResource(t *testing.T) {
 	tests := map[string]string{
 		"absolute local rule set path":           `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"/etc/sing-box/ruleset.srs"}]}}`,
 		"absolute clash external ui":             `{"experimental":{"clash_api":{"external_ui":"/srv/sing-box/dashboard"}}}`,
@@ -233,8 +233,8 @@ func TestExistingCoreDiscoveryAcceptsOfficialSingBoxAbsoluteLocalResource(t *tes
 			if err != nil {
 				t.Fatalf("accept official sing-box absolute resource: %v", err)
 			}
-			if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
-				t.Fatalf("absolute official sing-box resource was rejected: specs=%+v issues=%+v", specs, issues)
+			if len(specs) != 0 || issues[core.EngineSingBox] == "" {
+				t.Fatalf("unprepared resource accepted: specs=%+v issues=%+v", specs, issues)
 			}
 		})
 	}
@@ -259,14 +259,13 @@ func TestExistingCoreDiscoveryRejectsUnsupportedOfficialSingBoxArgv(t *testing.T
 		configs:     []string{configPath},
 	}
 	variants := map[string]string{
-		"relative working":  fixture.serviceBinary + " -D work -C " + configDirectory + " run",
-		"relative config":   fixture.serviceBinary + " -D " + workDirectory + " -C etc-sing-box run",
-		"missing run":       fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory,
-		"unknown flag":      fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run --unknown",
-		"duplicate config":  fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " -C " + configDirectory + " run",
-		"repeated working":  fixture.serviceBinary + " -D " + workDirectory + " -D " + workDirectory + " -C " + configDirectory + " run",
-		"wrong config file": fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run -c " + configPath,
-		"wrapper command":   fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run; /bin/true",
+		"relative working": fixture.serviceBinary + " -D work -C " + configDirectory + " run",
+		"relative config":  fixture.serviceBinary + " -D " + workDirectory + " -C etc-sing-box run",
+		"missing run":      fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory,
+		"unknown flag":     fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run --unknown",
+		"duplicate config": fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " -C " + configDirectory + " run",
+		"repeated working": fixture.serviceBinary + " -D " + workDirectory + " -D " + workDirectory + " -C " + configDirectory + " run",
+		"wrapper command":  fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run; /bin/true",
 	}
 	for name, argv := range variants {
 		t.Run(name, func(t *testing.T) {

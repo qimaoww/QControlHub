@@ -21,8 +21,12 @@ import (
 )
 
 type certificateChallengeState struct {
+	TargetName    string                    `json:"target_name,omitempty"`
+	Zone          certificates.DNSZone      `json:"zone,omitempty"`
+	Borrowed      bool                      `json:"borrowed,omitempty"`
 	BeforeIDs     []string                  `json:"before_ids,omitempty"`
 	CreatePending bool                      `json:"create_pending,omitempty"`
+	CreateStarted *time.Time                `json:"create_started,omitempty"`
 	Public        core.CertificateChallenge `json:"public"`
 	URL           string                    `json:"url"`
 	AuthURL       string                    `json:"auth_url,omitempty"`
@@ -91,6 +95,9 @@ func (s *Store) CreateACMECertificate(ctx context.Context, item core.Certificate
 	if err = s.createCertificateTx(ctx, tx, &item); err != nil {
 		return item, err
 	}
+	if err = recordAPIKeyWork(ctx, tx, "certificate-auto-renew", item.ID); err != nil {
+		return item, err
+	}
 	if err = s.queueCertificateOrderTx(ctx, tx, item); err != nil {
 		return item, err
 	}
@@ -106,7 +113,10 @@ func (s *Store) queueCertificateOrderTx(ctx context.Context, tx pgx.Tx, item cor
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO certificate_orders(id,certificate_id,owner_id,status,secret) VALUES($1,$2,$3,'queued',$4)`, id, item.ID, item.OwnerID, sealed)
-	return mapError(err)
+	if err != nil {
+		return mapError(err)
+	}
+	return recordAPIKeyWork(ctx, tx, "certificate-order", id)
 }
 func (s *Store) RenewCertificate(ctx context.Context, id string) error {
 	item, err := s.GetCertificate(ctx, id)
@@ -200,7 +210,7 @@ func (s *Store) ContinueCertificateOrder(ctx context.Context, id, orderID string
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
-	return nil
+	return recordAPIKeyWork(ctx, s.pool, "certificate-order", orderID)
 }
 func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, domain string) error {
 	names, err := certificates.Domains([]string{domain})
@@ -336,6 +346,13 @@ func (s *Store) saveCertificateOrderState(ctx context.Context, id string, state 
 	return nil
 }
 func (s *Store) certificateOrderCanceled(ctx context.Context, id string) bool {
+	if allowed, err := apiKeyWorkAllowed(ctx, s.pool, "certificate-order", id); err != nil {
+		return true
+	} else if !allowed {
+		_, _ = s.pool.Exec(ctx, `UPDATE certificate_orders SET status='canceling',stage='cleanup',error='API Key 授权已失效',updated_at=now() WHERE id=$1 AND status NOT IN ('succeeded','failed','canceled')`, id)
+		return true
+	}
+
 	var status string
 	return s.pool.QueryRow(ctx, `SELECT status FROM certificate_orders WHERE id=$1`, id).Scan(&status) != nil || status == "canceling" || status == "canceled"
 }
@@ -345,7 +362,7 @@ func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certifica
 	}
 	needsDNS := false
 	for _, c := range state.Challenges {
-		needsDNS = needsDNS || c.CreatePending || c.Record.ID != ""
+		needsDNS = needsDNS || c.CreatePending || (c.Record.ID != "" && !c.Borrowed)
 	}
 	if item.Method == "dns-api" && needsDNS {
 		var credentials certificates.DNSCredentials
@@ -361,18 +378,16 @@ func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certifica
 				}
 			}
 			r := state.Challenges[i].Record
-			if r.ID != "" {
+			if r.ID != "" && !state.Challenges[i].Borrowed {
 				// A prior cleanup may have deleted the record just before a
 				// crash. Exact lookup makes retry safe without touching peers.
-				records, findErr := client.Find(ctx, state.Challenges[i].Public.Name, state.Challenges[i].Public.Value)
+				found, findErr := client.Matches(ctx, r, state.Challenges[i].dnsName(), state.Challenges[i].Public.Value)
 				if findErr != nil {
 					return findErr
 				}
-				for _, existing := range records {
-					if existing.ID == r.ID {
-						if err = client.Delete(ctx, r); err != nil {
-							return err
-						}
+				if found {
+					if err = client.Delete(ctx, r); err != nil {
+						return err
 					}
 				}
 				state.Challenges[i].Record = certificates.DNSRecord{}
@@ -463,6 +478,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if status == "canceling" {
 		return s.finishCertificateOrderCleanup(ctx, item, id, &state)
 	}
+	if s.certificateOrderCanceled(ctx, id) {
+		return ErrForbidden
+	}
 	if err := certificateUserActive(ctx, s.pool, item.OwnerID); err != nil {
 		return err
 	}
@@ -505,7 +523,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if order.Status == acme.StatusInvalid {
 		return fmt.Errorf("%w，请重新申请", errCertificateOrderInvalid)
 	}
-	if len(state.Challenges) == 0 {
+	if order.Status == acme.StatusPending && len(state.Challenges) == 0 {
 		for _, authURL := range order.AuthzURLs {
 			auth, err := client.GetAuthorization(ctx, authURL)
 			if err != nil {
@@ -553,6 +571,29 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			return err
 		}
 	}
+	// Refresh authorizations before touching providers. A CA may already have
+	// validated one SAN while another still waits for propagation after restart.
+	if order.Status == acme.StatusPending {
+		for i := range state.Challenges {
+			c := &state.Challenges[i]
+			if c.AuthURL != "" {
+				auth, authErr := client.GetAuthorization(ctx, c.AuthURL)
+				if authErr != nil {
+					return errors.New("ACME 域名授权状态读取失败")
+				}
+				c.Public.Status = auth.Status
+				for _, challenge := range auth.Challenges {
+					if challenge.URI == c.URL && challenge.Status == acme.StatusProcessing {
+						c.Public.Status = acme.StatusProcessing
+					}
+				}
+				switch auth.Status {
+				case acme.StatusInvalid, acme.StatusExpired, acme.StatusDeactivated, acme.StatusRevoked:
+					return fmt.Errorf("%w: 域名 %s 验证失败；请检查 DNS 或公网挑战入口后重新申请", errCertificateOrderInvalid, c.Public.Domain)
+				}
+			}
+		}
+	}
 	pending := false
 	for _, challenge := range state.Challenges {
 		pending = pending || challenge.Public.Status != acme.StatusValid
@@ -560,7 +601,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	// Newly prepared records wait for consent. Once continued, the durable
 	// stage lets a restarted running worker resume validation without asking
 	// the user to submit the same consent again.
-	if item.Method == "dns-manual" && pending {
+	if order.Status == acme.StatusPending && item.Method == "dns-manual" && pending {
 		var stage string
 		if err = s.pool.QueryRow(ctx, `SELECT stage FROM certificate_orders WHERE id=$1`, id).Scan(&stage); err != nil {
 			return err
@@ -570,7 +611,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			return err
 		}
 	}
-	if item.Method == "dns-api" {
+	if order.Status == acme.StatusPending && item.Method == "dns-api" {
 		var credentials certificates.DNSCredentials
 		meta, err := s.CertificateAccountSecret(ctx, item.DNSAccountID, "dns", &credentials)
 		if err != nil {
@@ -594,43 +635,55 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 				// A restart/retry can retain a receipt after the TXT record has
 				// disappeared. Recreate only after an exact successful lookup;
 				// lookup failures must never trigger another provider write.
-				records, findErr := dns.Find(ctx, c.Public.Name, c.Public.Value)
+				found, findErr := dns.Matches(ctx, c.Record, c.dnsName(), c.Public.Value)
 				if findErr != nil {
 					return findErr
 				}
-				found := false
-				for _, record := range records {
-					found = found || record == c.Record
-				}
 				if !found {
 					c.Record = certificates.DNSRecord{}
+					c.Borrowed = false
 				}
 			}
 			if c.Record.ID == "" {
-				tag, leaseErr := s.pool.Exec(ctx, `INSERT INTO certificate_dns_leases(name,value,order_id) VALUES($1,$2,$3) ON CONFLICT(name,value) DO UPDATE SET order_id=EXCLUDED.order_id WHERE certificate_dns_leases.order_id=EXCLUDED.order_id`, c.Public.Name, c.Public.Value, id)
+				if c.Zone.Name == "" {
+					c.TargetName, c.Zone, err = dns.Target(ctx, s.certificateTXTResolver(), c.Public.Name)
+					if err != nil {
+						return err
+					}
+				}
+				tag, leaseErr := s.pool.Exec(ctx, `INSERT INTO certificate_dns_leases(name,value,order_id) VALUES($1,$2,$3) ON CONFLICT(name,value) DO UPDATE SET order_id=EXCLUDED.order_id WHERE certificate_dns_leases.order_id=EXCLUDED.order_id`, c.dnsName(), c.Public.Value, id)
 				if leaseErr != nil {
 					return leaseErr
 				}
 				if tag.RowsAffected() == 0 {
 					return errors.New("同名 DNS 挑战正在由其他订单处理，稍后重试")
 				}
-				previous, findErr := dns.Find(ctx, c.Public.Name, c.Public.Value)
+				previous, findErr := dns.FindInZone(ctx, c.Zone.ID, c.dnsName(), c.Public.Value)
 				if findErr != nil {
 					return findErr
 				}
-				c.BeforeIDs = nil
-				for _, record := range previous {
-					c.BeforeIDs = append(c.BeforeIDs, record.ID)
+				if len(previous) > 0 {
+					// This value already satisfies validation, but belongs to
+					// someone else. Reuse it without claiming cleanup ownership.
+					c.Record, c.Borrowed = previous[0], true
+					if err = s.saveCertificateOrderState(ctx, id, state, "dns_created"); err != nil {
+						return err
+					}
+					continue
 				}
+				c.BeforeIDs = nil
 				c.CreatePending = true
+				started := time.Now().UTC()
+				c.CreateStarted = &started
 				if err = s.saveCertificateOrderState(ctx, id, state, "dns_create_intent"); err != nil {
 					return err
 				}
-				c.Record, err = dns.Create(ctx, c.Public.Name, c.Public.Value)
+				c.Record, err = dns.CreateInZone(ctx, c.Zone, c.dnsName(), c.Public.Value)
 				if err != nil {
 					return err
 				}
 				c.CreatePending = false
+				c.CreateStarted = nil
 				if err = s.saveCertificateOrderState(ctx, id, state, "dns_created"); err != nil {
 					cleanup, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 					defer done()
@@ -640,7 +693,7 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			}
 		}
 	}
-	if item.Method == "http-01" {
+	if order.Status == acme.StatusPending && item.Method == "http-01" {
 		for _, challenge := range state.Challenges {
 			if challenge.Public.Status == acme.StatusValid {
 				continue
@@ -657,53 +710,45 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			return err
 		}
 	}
-	for i := range state.Challenges {
-		c := &state.Challenges[i]
-		if c.AuthURL != "" {
-			auth, authErr := client.GetAuthorization(ctx, c.AuthURL)
-			if authErr != nil {
-				return errors.New("ACME 域名授权状态读取失败")
+	if order.Status == acme.StatusPending {
+		for i := range state.Challenges {
+			c := &state.Challenges[i]
+
+			if c.Public.Status == acme.StatusValid || c.Public.Status == acme.StatusProcessing {
+				continue
 			}
-			c.Public.Status = auth.Status
-			switch auth.Status {
-			case acme.StatusInvalid, acme.StatusExpired, acme.StatusDeactivated, acme.StatusRevoked:
-				return fmt.Errorf("%w: 域名 %s 验证失败；请检查 DNS 或公网挑战入口后重新申请", errCertificateOrderInvalid, c.Public.Domain)
+			if s.certificateOrderCanceled(ctx, id) {
+				return errors.New("订单已取消")
 			}
-		}
-		if c.Public.Status == acme.StatusValid {
-			continue
-		}
-		if s.certificateOrderCanceled(ctx, id) {
-			return errors.New("订单已取消")
-		}
-		if item.Method == "http-01" {
-			if err = waitHTTPChallenge(ctx, func(probeCtx context.Context) error {
-				if s.certificateOrderCanceled(probeCtx, id) {
-					return context.Canceled
+			if item.Method == "http-01" {
+				if err = waitHTTPChallenge(ctx, func(probeCtx context.Context) error {
+					if s.certificateOrderCanceled(probeCtx, id) {
+						return context.Canceled
+					}
+					if err := s.CheckCertificateHTTPPermission(probeCtx, item.AgentID, c.Public.Domain); err != nil {
+						return err
+					}
+					return checkHTTPChallenge(probeCtx, c.Public.Domain, c.Public.Token, c.Public.Value)
+				}); err != nil {
+					return fmt.Errorf("域名 %s: %w", c.Public.Domain, err)
 				}
-				if err := s.CheckCertificateHTTPPermission(probeCtx, item.AgentID, c.Public.Domain); err != nil {
-					return err
+			} else {
+				values, lookupErr := s.certificateTXTResolver().LookupTXT(ctx, c.Public.Name)
+				found := false
+				for _, v := range values {
+					found = found || v == c.Public.Value
 				}
-				return checkHTTPChallenge(probeCtx, c.Public.Domain, c.Public.Token, c.Public.Value)
-			}); err != nil {
-				return fmt.Errorf("域名 %s: %w", c.Public.Domain, err)
+				if lookupErr != nil || !found {
+					return fmt.Errorf("DNS TXT 尚未传播: %s；请保留已有记录，等待后继续", c.Public.Name)
+				}
 			}
-		} else {
-			values, lookupErr := s.certificateTXTResolver().LookupTXT(ctx, c.Public.Name)
-			found := false
-			for _, v := range values {
-				found = found || v == c.Public.Value
+			if _, err = client.Accept(ctx, &acme.Challenge{URI: c.URL}); err != nil {
+				return errors.New("CA 拒绝挑战；检查验证入口后重新申请")
 			}
-			if lookupErr != nil || !found {
-				return fmt.Errorf("DNS TXT 尚未传播: %s；请保留已有记录，等待后继续", c.Public.Name)
+			c.Public.Status = "processing"
+			if err = s.saveCertificateOrderState(ctx, id, state, "validating"); err != nil {
+				return err
 			}
-		}
-		if _, err = client.Accept(ctx, &acme.Challenge{URI: c.URL}); err != nil {
-			return errors.New("CA 拒绝挑战；检查验证入口后重新申请")
-		}
-		c.Public.Status = "processing"
-		if err = s.saveCertificateOrderState(ctx, id, state, "validating"); err != nil {
-			return err
 		}
 	}
 	order, err = client.WaitOrder(ctx, state.URL)
@@ -737,12 +782,14 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			return errors.New("CA 证书下载失败")
 		}
 		pair = certificatePairFromDER(chain, state.Key)
-	} else {
+	} else if order.Status == acme.StatusReady {
 		order.URI = state.URL
 		pair, err = certificates.Finalize(ctx, client, order, state.CSR, state.Key)
 		if err != nil {
 			return err
 		}
+	} else {
+		return errors.New("CA 尚未返回证书下载地址，将按原订单重试")
 	}
 	if err = certificates.Covers(pair, item.Domains); err != nil {
 		return err
@@ -770,6 +817,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if err = certificateUserActive(ctx, tx, item.OwnerID); err != nil {
 		return err
 	}
+	if err = lockAPIKeyWork(ctx, tx, "certificate-order", id); err != nil {
+		return err
+	}
 	if err = tx.QueryRow(ctx, `UPDATE panel_certificates SET version=version+1 WHERE id=$1 RETURNING version`, item.ID).Scan(&item.Version); err != nil {
 		return err
 	}
@@ -789,6 +839,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 	if _, err = tx.Exec(ctx, `UPDATE certificate_orders SET status='succeeded',stage='cleanup',updated_at=now(),error='' WHERE id=$1`, id); err != nil {
 		return err
 	}
+	if err = recordAPIKeyWork(ctx, tx, "certificate-version", item.ID); err != nil {
+		return err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
@@ -805,7 +858,7 @@ func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Cer
 	defer cancel()
 	state.CleanupError = ""
 	if cleanupErr != nil {
-		state.CleanupError = truncate(cleanupErr.Error(), 1000)
+		state.CleanupError = truncate(core.DiagnosticText(cleanupErr.Error()), 1000)
 	}
 	sealed, err := s.sealCertificate(state)
 	if err != nil {
@@ -813,13 +866,16 @@ func (s *Store) finishCertificateOrderCleanup(ctx context.Context, item core.Cer
 	}
 	if cleanupErr != nil {
 		_, updateErr := s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1`, id, sealed)
+		if updateErr == nil {
+			updateErr = s.retainBackgroundFailure(persistCtx, item.OwnerID, "证书清理", id, "cleanup", cleanupErr)
+		}
 		return updateErr
 	}
 	_, err = s.pool.Exec(persistCtx, `UPDATE certificate_orders SET secret=$2,status=CASE WHEN status='canceling' THEN 'canceled' ELSE status END,stage='complete',error=CASE WHEN status='failed' THEN error ELSE '' END,updated_at=now() WHERE id=$1`, id, sealed)
 	return err
 }
 
-func (s *Store) certificateTXTResolver() *net.Resolver {
+func (s *Store) certificateTXTResolver() certificates.DNSResolver {
 	if s.certificateResolver != nil {
 		return s.certificateResolver
 	}
@@ -827,7 +883,30 @@ func (s *Store) certificateTXTResolver() *net.Resolver {
 }
 
 func (s *Store) recoverDNSCreate(ctx context.Context, client certificates.DNSClient, c *certificateChallengeState) error {
-	records, err := client.Find(ctx, c.Public.Name, c.Public.Value)
+	// DNSPod documents a short index delay and recommends retrying record
+	// searches after 30 seconds. A cancellation may arrive sooner than the
+	// normal worker backoff; retain the intent until that search is meaningful.
+	if client.Provider == "dnspod" && c.CreateStarted != nil && time.Since(*c.CreateStarted) < 30*time.Second {
+		return errors.New("DNSPod 创建结果尚在索引中，请稍后重试")
+	}
+	// Legacy intents predate zone snapshots. Resolve their saved zone only;
+	// never use a newly selected zone for an uncertain historical write.
+	zone := c.Zone.ID
+	if zone == "" {
+		if client.Credentials.Zone == "" {
+			return errors.New("旧订单的 DNS 区域回执缺失，已保留记录，请检查原订单")
+		}
+		resolved, resolveErr := client.Resolve(ctx, client.Credentials.Zone)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !strings.EqualFold(strings.TrimSuffix(client.Credentials.Zone, "."), resolved.Name) {
+			return errors.New("旧订单的原 DNS 区域已不可用，已保留记录，请检查原订单")
+		}
+		c.Zone = resolved
+		zone = resolved.ID
+	}
+	records, err := client.FindInZone(ctx, zone, c.dnsName(), c.Public.Value)
 	if err != nil {
 		return err
 	}
@@ -848,5 +927,13 @@ func (s *Store) recoverDNSCreate(ctx context.Context, client certificates.DNSCli
 		c.Record = created[0]
 	}
 	c.CreatePending = false
+	c.CreateStarted = nil
 	return nil
+}
+
+func (c certificateChallengeState) dnsName() string {
+	if c.TargetName != "" {
+		return c.TargetName
+	}
+	return c.Public.Name
 }

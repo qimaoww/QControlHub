@@ -4,7 +4,19 @@ import (
 	"time"
 )
 
+type ExistingCoreSource struct {
+	ID              string `json:"id"`
+	Service         string `json:"service"`
+	ConfigPath      string `json:"config_path,omitempty"`
+	ConfigDirectory string `json:"config_directory,omitempty"`
+	Status          string `json:"status"`
+}
+
 type RuntimeState struct {
+	ImportedResourceUpdateError     string                 `json:"imported_resource_update_error,omitempty"`
+	ExistingSources                 []ExistingCoreSource   `json:"existing_sources,omitempty"`
+	ManagedHostBlockedReason        string                 `json:"managed_host_blocked_reason,omitempty"`
+	ManagedOperationBlockedReason   string                 `json:"managed_operation_blocked_reason,omitempty"`
 	Instance                        *SharedInstanceRuntime `json:"instance,omitempty"`
 	Installed                       bool                   `json:"installed"`
 	Version                         string                 `json:"version,omitempty"`
@@ -105,4 +117,25 @@ type AgentDirectoryEntry struct {
 	CanManage     bool      `json:"can_manage"`
 	EnrolledAt    time.Time `json:"enrolled_at"`
 	LastSeen      time.Time `json:"last_seen"`
+}
+
+// ManagedBlockReason keeps older Agents fail closed when the scope of a
+// discovery issue cannot be established. No policy depends on error text.
+func (s RuntimeState) ManagedBlockReason(features []string, shared ...bool) string {
+	if s.ManagedOperationBlockedReason != "" {
+		return s.ManagedOperationBlockedReason
+	}
+	if (len(shared) == 0 || !shared[0]) && s.ManagedHostBlockedReason != "" {
+		return s.ManagedHostBlockedReason
+	}
+	isolated := false
+	for _, feature := range features {
+		if feature == AgentFeatureImportIsolation {
+			isolated = true
+		}
+	}
+	if !isolated && s.ExistingConfigUnsupportedReason != "" {
+		return "请先升级 Agent，以区分外部导入限制和托管目标安全状态：" + s.ExistingConfigUnsupportedReason
+	}
+	return ""
 }

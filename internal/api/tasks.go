@@ -28,7 +28,7 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	action := core.Action(request.URL.Query().Get("action"))
-	if action != "" && !action.Valid() {
+	if action != "" && !action.Valid() && action != core.ActionPanelFailure {
 		writeError(w, http.StatusBadRequest, "invalid task action filter")
 		return
 	}
@@ -113,12 +113,12 @@ func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, store.ErrNotFound)
 		return
 	}
-	content, err := s.store.ReadTaskConfigSnapshot(request.Context(), task.ID, task.AgentID, task.Engine)
+	content, dependencies, err := s.store.ReadTaskSnapshotDetails(request.Context(), task.ID, task.AgentID, task.Engine)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"content": content})
+	writeJSON(w, http.StatusOK, map[string]any{"content": content, "dependencies": dependencies})
 }
 
 func (s *Server) cancelTask(w http.ResponseWriter, request *http.Request) {

@@ -124,7 +124,7 @@ func TestImportedSingBoxConsoleOutputsKeepManagedServiceSource(t *testing.T) {
 					core.EngineSingBox: {ConfigPath: configPath, Service: service},
 				}, Services: manager}
 				collector := NewCoreLogCollectorForServiceManager(manager, executor.Specs)
-				if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+				if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 					t.Fatal(err)
 				}
 				collector.mu.Lock()
@@ -174,7 +174,7 @@ func TestImportedSingBoxConsoleTransitionWaitsForCollectorReadiness(t *testing.T
 				defer cancel()
 			}
 			go func() {
-				result <- collector.PrepareImportedSingBoxSource(waitContext, nil, content)
+				result <- collector.PrepareManagedSingBoxSource(waitContext, nil, content)
 			}()
 			select {
 			case err := <-result:
@@ -209,7 +209,7 @@ func TestImportedSingBoxFileSourceCapturesOnlyMigrationWindow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { collector.Run(ctx); close(done) }()
-	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+	if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
@@ -218,7 +218,7 @@ func TestImportedSingBoxFileSourceCapturesOnlyMigrationWindow(t *testing.T) {
 	}
 	_, _ = file.WriteString("migration startup log\n")
 	_ = file.Close()
-	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+	if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := waitForLine(t, collector, "migration startup log"); !ok {
@@ -248,7 +248,7 @@ func TestImportedSingBoxSourceRequiresVerifiedOwnershipAndReplacesAtomically(t *
 	executor := newImportedSingBoxLogExecutor(t, content)
 	delete(executor.completedMigrations, core.EngineSingBox)
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err == nil {
 		t.Fatal("complete marker without verified migration ownership was accepted")
 	}
 	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
@@ -265,7 +265,7 @@ func TestImportedSingBoxSourceRequiresVerifiedOwnershipAndReplacesAtomically(t *
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+			if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 				t.Errorf("concurrent refresh: %v", err)
 			}
 		}()
@@ -275,7 +275,7 @@ func TestImportedSingBoxSourceRequiresVerifiedOwnershipAndReplacesAtomically(t *
 	if err := os.WriteFile(executor.Specs[core.EngineSingBox].ConfigPath, []byte(replacement), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	collector.mu.Lock()
@@ -295,7 +295,7 @@ func TestImportedSingBoxSourceRequiresVerifiedOwnershipAndReplacesAtomically(t *
 	if err := os.WriteFile(executor.Specs[core.EngineSingBox].ConfigPath, []byte(console), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	collector.mu.Lock()
@@ -331,10 +331,10 @@ func TestImportedSingBoxFileSourceStopsOnServiceOwnershipDrift(t *testing.T) {
 		return nil
 	}
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+	if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+	if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -373,10 +373,10 @@ func TestImportedSingBoxFileSourceRevalidatesDuringContinuousWrites(t *testing.T
 	content := `{"log":{"output":"runtime.log"}}`
 	executor := newImportedSingBoxLogExecutor(t, content)
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
-	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+	if err := collector.PrepareManagedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
+	if err := collector.CompleteManagedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

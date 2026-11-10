@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,25 @@ import (
 
 func discoverExistingCoreService(ctx context.Context, engine core.Engine, managed EngineSpec, validationDirectory string, managers ...*ServiceManager) (EngineSpec, bool, string) {
 	manager := selectedServiceManager(managers...)
+	if sources, issues, err := discoverInstalledCoreSources(ctx, engine, manager); err == nil {
+		if len(sources) > 1 {
+			names := make([]string, len(sources))
+			for i, spec := range sources {
+				names[i] = spec.Service
+			}
+			return EngineSpec{}, false, fmt.Sprintf("检测到多个 %s 服务，请明确来源：%s", engine, strings.Join(names, "、"))
+		}
+		if len(issues) > 0 {
+			return EngineSpec{}, false, strings.Join(issues, "；")
+		}
+		if len(sources) == 1 {
+			return validateDiscoveredExistingSpec(ctx, engine, managed, sources[0], validationDirectory, manager)
+		}
+	}
+	return discoverLegacyExistingCoreService(ctx, engine, managed, validationDirectory, manager)
+}
+
+func discoverLegacyExistingCoreService(ctx context.Context, engine core.Engine, managed EngineSpec, validationDirectory string, manager *ServiceManager) (EngineSpec, bool, string) {
 	if engine == core.EngineShadowsocksRust && manager.Kind() == ServiceManagerOpenRC {
 		return EngineSpec{}, false, ""
 	}
@@ -68,46 +86,52 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	realBinary := ""
 	if stringInSlice(executable, candidates.directExecutables) {
 		if err := validateProtectedDirectoryChain(filepath.Dir(executable)); err != nil {
-			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验", engine)
+			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验：%s", engine, core.DiagnosticText(err.Error()))
 		}
 		if err := validateExistingCoreExecutable(executable); err != nil {
-			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验", engine)
+			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验：%s", engine, core.DiagnosticText(err.Error()))
 		}
 		realBinary = executable
 	} else {
 		var err error
 		realBinary, err = resolveDiscoveredExistingBinary(executable)
 		if err != nil {
-			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和配置，但 executable wrapper 不在安全支持范围；请改为真实二进制、一跳二进制链接或固定 exec 转发器", engine)
+			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和配置，但 executable wrapper 不在安全支持范围；请改为真实二进制、一跳二进制链接或固定 exec 转发器：%s", engine, core.DiagnosticText(err.Error()))
 		}
 	}
 	spec := EngineSpec{
 		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
 		WorkingDirectory: workDirectory, ServiceBinary: executable, Service: service,
-		ACLPath: existingSSRustACLArg(engine, strings.Fields(argv)),
+		ACLPath: existingACLFromCommand(engine, argv),
 	}
 	return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
 }
 
 func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, managed, spec EngineSpec, validationDirectory string, manager *ServiceManager) (EngineSpec, bool, string) {
-	managedStatus, err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager)
+	if isManagedCoreSource(spec) {
+		return EngineSpec{}, false, ""
+	}
+	managedStatus, err := validateManagedServiceTarget(ctx, engine, managed, manager)
 	if err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全 unit", engine)
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全 unit：%s", engine, core.DiagnosticText(err.Error()))
 	}
 	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在核验期间发生变化", engine)
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在核验期间发生变化：%s", engine, core.DiagnosticText(err.Error()))
 	}
 	validationSpec := managed
 	validationSpec.ConfigPath = filepath.Join(validationDirectory, "config.json")
 	probe := &Executor{Specs: map[core.Engine]EngineSpec{engine: validationSpec}, ExistingSpecs: map[core.Engine]EngineSpec{engine: spec}, Services: manager}
 	if _, err := probe.readExistingConfig(ctx, engine, validationSpec, spec); err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但配置源未通过受保护路径与真实内核校验", engine)
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但配置源未通过受保护路径与真实内核校验：%s", engine, core.DiagnosticText(err.Error()))
 	}
 	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在配置核验期间发生变化", engine)
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在配置核验期间发生变化：%s", engine, core.DiagnosticText(err.Error()))
 	}
-	managedStatusAfter, err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager)
-	if err != nil || managedStatusAfter != managedStatus {
+	managedStatusAfter, err := validateManagedServiceTarget(ctx, engine, managed, manager)
+	if err != nil {
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务在配置核验期间读取失败：%s", engine, core.DiagnosticText(err.Error()))
+	}
+	if managedStatusAfter != managedStatus {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务在配置核验期间发生变化", engine)
 	}
 	return spec, true, ""
@@ -168,92 +192,4 @@ func parseDiscoveredOpenRCArgv(engine core.Engine, argv, configs []string) (stri
 		return "", "", false
 	}
 	return configPath, configDirectory, true
-}
-
-func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) (string, error) {
-	manager := selectedServiceManager(managers...)
-	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[engine]
-	if !ok || managed != defaultSpec {
-		return "", errors.New("managed service mapping is not the QAgent default")
-	}
-	if manager.Kind() == ServiceManagerOpenRC {
-		if _, err := os.Lstat(filepath.Join(openRCInitRoot, managed.Service)); errors.Is(err, os.ErrNotExist) {
-			return "not-found", nil
-		} else if err != nil {
-			return "", err
-		}
-		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-		if err != nil || (status != "active" && status != "inactive" && status != "failed") {
-			return "", errors.New("managed OpenRC service has an unsupported state")
-		}
-		marker := "# QControlHub managed OpenRC service: " + managed.Service
-		if err := validateOpenRCServiceScript(managed.Service, marker); err != nil {
-			return "", err
-		}
-		return status, nil
-	}
-	loadState, err := run(ctx, systemctlPath, "show", managed.Service, "--property=LoadState", "--value")
-	if strings.TrimSpace(loadState) == "not-found" {
-		return "not-found", nil
-	}
-	if err != nil || strings.TrimSpace(loadState) != "loaded" {
-		return "", errors.New("managed service unit is not loaded")
-	}
-	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-	if err != nil || (status != "active" && status != "inactive" && status != "failed") {
-		return "", errors.New("managed service has an unsupported state")
-	}
-	fragmentPath, err := run(ctx, systemctlPath, "show", managed.Service, "--property=FragmentPath", "--value")
-	expectedFragmentPath := filepath.Join(existingDiscoveryManagedUnitRoot, managed.Service)
-	if err != nil || strings.TrimSpace(fragmentPath) != expectedFragmentPath {
-		return "", errors.New("managed service fragment path is not the QAgent-owned location")
-	}
-	fragmentPath = strings.TrimSpace(fragmentPath)
-	if err := validateProtectedDirectoryChain(filepath.Dir(fragmentPath)); err != nil {
-		return "", err
-	}
-	info, err := os.Lstat(fragmentPath)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return "", errors.New("managed service unit file is unsafe")
-	}
-	if err := validateOwner(info, "managed service unit file"); err != nil {
-		return "", err
-	}
-	contents, err := os.ReadFile(fragmentPath)
-	if err != nil {
-		return "", err
-	}
-	if err := validateManagedUnitFragment(contents, engine, managed); err != nil {
-		return "", err
-	}
-	if err := validateManagedServiceExecutionContext(ctx, engine, managed); err != nil {
-		return "", err
-	}
-	if err := validateManagedUnitDropIns(ctx, managed.Service); err != nil {
-		return "", err
-	}
-	for property, expected := range map[string]string{"Description": engineDisplayName(engine) + " core managed by QAgent", "User": "qcontrolhub-core", "Group": "qcontrolhub-core"} {
-		value, err := systemdUnitProperty(ctx, managed.Service, property)
-		if err != nil || value != expected {
-			return "", fmt.Errorf("managed service effective %s is not %q", property, expected)
-		}
-	}
-	for _, property := range []string{"ExecCondition", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost"} {
-		value, err := systemdUnitProperty(ctx, managed.Service, property)
-		if err != nil || value != "" {
-			return "", fmt.Errorf("managed service has an unsupported effective %s hook", property)
-		}
-	}
-	execStart, err := run(ctx, systemctlPath, "show", managed.Service, "--property=ExecStart", "--value")
-	if err != nil {
-		return "", errors.New("managed service ExecStart cannot be read")
-	}
-	executable, argv, err := parseSingleSystemdExecStart(execStart)
-	if err != nil || !supportedManagedExecStart(engine, managed, executable, argv) {
-		return "", errors.New("managed service ExecStart is not the exact QAgent-owned command")
-	}
-	return status, nil
 }

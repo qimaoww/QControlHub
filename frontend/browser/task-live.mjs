@@ -29,6 +29,7 @@ export async function testLiveTaskRuntime(preview = false) {
       if (failed) return reply({error:'临时任务读取失败'},503);
       return reply(result);
     }
+    if (path==='/tasks/failures' && options.method==='POST') return reply({id:'fixture-failure'});
     if (path.startsWith('/tasks/')) {
       if (options.method === 'DELETE') {
         assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'),'tasks-live-fixture','取消任务缺少 CSRF');
@@ -36,6 +37,7 @@ export async function testLiveTaskRuntime(preview = false) {
       }
       if (detailDenied) return reply({error:'任务详情访问已撤销'},detailDenied);
       const task = tasks.find(task=>task.id===path.split('/')[2]);
+      if (path.endsWith('/diagnostics')) return reply({source:'fixture',output:parsed.searchParams.get('attempt')==='2' ? '先前执行的私有诊断' : task?.output || '',error:task?.error || '',attempts:task?.attempt===3 ? [{attempt:2,source:'fixture'},{attempt:3,source:'fixture'}] : []});
       if (parsed.searchParams.get('view') === 'status') { statusReads++; return reply({ ...task, output: '' }); }
       detailReads++; return reply(task);
     }
@@ -78,7 +80,7 @@ export async function testLiveTaskRuntime(preview = false) {
     assert.equal(row('live-13'),current,'失败清空有效任务');failed=false;
     await refresh(()=>document.querySelector('.a-main [role=status]')?.textContent==='正在实时更新');
     button('详情',current).click();
-    const box=await waitFor(()=>document.querySelector('dialog[open] pre')?.closest('dialog'),'任务详情未打开');
+    const box=await waitFor(()=>!document.querySelector('dialog[open] [aria-busy=true]') && document.querySelector('dialog[open] pre')?.closest('dialog'),'任务详情未打开');
     const output=box.querySelector('pre');
     assert.ok(box.textContent.includes('第 2 次执行')&&box.textContent.includes('缺少时安装稳定版'),'配置任务缺少执行次数或自动安装上下文');
     assert.ok(!box.textContent.includes('内核版本'),'配置任务错误展示安装版本');
@@ -98,13 +100,17 @@ export async function testLiveTaskRuntime(preview = false) {
     assert.ok(statusReads>beforeStatus,'终态任务未继续核验资源权限');
     assert.ok(output.textContent.endsWith('新的输出'),'状态响应清空了已完成的任务输出');
     assert.ok(reads>beforePoll,'任务列表未持续刷新');assert.ok(box.open&&row('live-13')===current,'轮询打断任务详情');
+    button('查看第 2 次记录',box).click();
+    const historyBox=await waitFor(()=>[...document.querySelectorAll('dialog[open]')].find(item=>item.querySelector('h2')?.textContent==='任务记录 · 第 2 次'),'先前执行详情未打开');
+    assert.ok(historyBox.textContent.includes('先前执行的私有诊断'),'先前执行详情内容缺失');
     detailDenied=403;
     await waitFor(()=>output.hidden&&box.textContent.includes('无权读取'),'已结束任务权限撤销后未自动清除旧输出');
+    assert.ok(!historyBox.open&&!button('查看第 2 次记录',box),'权限撤销后仍显示先前执行详情');
     assert.ok(!box.textContent.includes('第 3 次执行')&&!box.textContent.includes('缺少时安装稳定版'),'任务权限撤销仍显示上下文');
     box.querySelector('[aria-label=关闭]').click();detailDenied=0;
     for (const deniedStatus of [403, 404]) {
       button('详情',current).click();
-      const deniedBox=await waitFor(()=>document.querySelector('dialog[open] pre')?.closest('dialog'),'手动拒绝测试未打开任务详情');
+      const deniedBox=await waitFor(()=>!document.querySelector('dialog[open] [aria-busy=true]') && document.querySelector('dialog[open] pre')?.closest('dialog'),'手动拒绝测试未打开任务详情');
       detailDenied=deniedStatus;
       const resultRefresh=button('刷新结果',deniedBox);resultRefresh.click();
       await waitFor(()=>deniedBox.querySelector('pre').hidden&&!resultRefresh.hasAttribute('aria-busy'),'手动权限拒绝未完成收尾');
@@ -148,9 +154,11 @@ export async function testLiveTaskRuntime(preview = false) {
     document.body.replaceChildren(Object.assign(document.createElement('div'),{id:'task-preferences-test'}));
     startAnalytics({app:document.querySelector('#task-preferences-test'),session});
     await waitFor(()=>row('live-0'),'带设置的任务页面未加载');
+    await waitFor(()=>document.querySelector('.a-main input[name=limit]').value==='50' && row('live-0').cells[1].textContent==='节点 Alpha', '独立任务偏好与节点名称未读取');
     assert.equal(document.querySelector('.a-main input[name=limit]').value,'50','任务条数未读取账号设置');
     assert.equal(settingsReads,1,'首次加载重复读取设置');
-    assert.equal(delays.at(-1),5000,'首次轮询未使用设置间隔');
+    await waitFor(()=>delays.at(-1)===5000, '设置晚到后轮询未采用账号间隔');
+    assert.equal(delays.at(-1),5000,'轮询未使用设置间隔');
     assert.equal(pollTimers.size,1,'任务页首次加载没有只保留一个轮询计时器');
     const picker=document.querySelector('.a-main select[name=agent_id]');
     assert.equal(agentReads,1,'首次任务读取重复加载节点目录');
@@ -161,7 +169,7 @@ export async function testLiveTaskRuntime(preview = false) {
     assert.equal(row('live-2').cells[2].textContent,'IPQuality','IP 质量任务没有区分检测工具');
     assert.equal(row('live-3').cells[2].textContent,'BBR / TCP','TCP 任务没有区分系统操作');
     button('详情',row('live-0')).click();
-    const install=await waitFor(()=>document.querySelector('dialog[open]'),'安装任务详情未打开');
+    const install=await waitFor(()=>!document.querySelector('dialog[open] [aria-busy=true]') && document.querySelector('dialog[open]'),'安装任务详情未打开');
     assert.ok(install.textContent.includes('节点 Alpha')&&install.textContent.includes('development')&&install.textContent.includes('vernesong/mihomo 镜像（第三方）'),'任务详情缺少节点名称、安装版本或来源');
     install.querySelector('[aria-label=关闭]').click();
     const updatedName='节点 Alpha · 更新后 '+ 'LongNodeNameWithoutSpaces'.repeat(30);

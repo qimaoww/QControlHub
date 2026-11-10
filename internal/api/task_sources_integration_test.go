@@ -17,7 +17,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
-func TestTaskAPIRejectsEveryCoreActionForUnsupportedExistingService(t *testing.T) {
+func TestLegacyAgentRequiresUpgradeForAmbiguousDiscoverySafety(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("QCH_TEST_DATABASE_URL is not configured")
@@ -85,7 +85,7 @@ func TestTaskAPIRejectsEveryCoreActionForUnsupportedExistingService(t *testing.T
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "已禁用该内核的任务") || !strings.Contains(response.Body.String(), reason) {
+			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "请先升级 Agent") || !strings.Contains(response.Body.String(), reason) {
 				t.Fatalf("POST %s status=%d body=%s", action, response.Code, response.Body.String())
 			}
 		})

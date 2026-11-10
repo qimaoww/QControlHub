@@ -81,6 +81,7 @@ export async function logsPage(ctx) {
     if (sourceUnavailable) { collection.unavailable(); return; }
     collection.update(relevant.map(source => {
       const state = coreLogSourceState(source);
+      if (source.status === "failed" && state.detail) void ctx.recordFailure?.(Object.assign(new Error(state.detail), {agentID:source.agent_id,engine:source.engine,resource:`/core-log-sources/${source.agent_id}/${source.instance_id}/${source.engine}`}), `日志采集 · ${source.name || source.agent_id} · ${source.engine}`, "log_collection");
       const attention = ["failed", "offline", "unsupported", "not-installed", "status-unavailable"].includes(source.status);
       return { agentID: source.agent_id, agentName: source.name || source.agent_id,
         instanceID: source.instance_id, instance: instanceLabel(source), engine: engineName(source.engine),
@@ -234,7 +235,7 @@ export async function logsPage(ctx) {
         } else {
           collection.unavailable();
           if (windowComplete) {
-            failures++; error.textContent = "来源状态读取失败，请刷新重试。";
+            failures++; error.textContent = `来源状态读取失败，请刷新重试。${failure.message}`;
             status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
           }
         }
@@ -275,7 +276,7 @@ export async function logsPage(ctx) {
       scope = coreLogScopeKey(filters);
       if (directoryReady) cache.set(scope, result);
       failures = sourceFailure ? failures + 1 : 0;
-      error.textContent = sourceFailure ? "来源状态读取失败，请刷新重试。" : ""; draw();
+      error.textContent = sourceFailure ? `来源状态读取失败，请刷新重试。${sourceFailure.message}` : ""; draw();
       status.textContent = directoryReady || sourceFailure ? automatic ? "正在实时更新" : "自动更新已暂停" : "日志已加载，正在读取来源状态…";
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;

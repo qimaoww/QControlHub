@@ -17,17 +17,34 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
-// Opt in only inside a disposable systemd node. Downloads, core validation,
+// Opt in only inside a disposable node. Downloads, core validation,
 // file publication and service verification use the production executor.
 func TestConfigCorePrepareRealNode(t *testing.T) {
 	if os.Getenv("QCH_CONFIG_PREPARE_REAL_NODE") != "1" {
-		t.Skip("requires disposable systemd node and official release downloads")
+		t.Skip("requires disposable node and official release downloads")
 	}
 	if _, err := os.Stat("/.dockerenv"); err != nil {
 		t.Fatal("requires disposable Docker node")
 	}
 	db, ctx, _, owner, recipient := newConfigScopeAPIFixtureWithin(t, 18*time.Minute)
-	executor := &agentexec.Executor{Specs: agentexec.DefaultSpecs(), Updater: agentexec.NewCoreUpdater()}
+	manager, err := agentexec.NewServiceManager(os.Getenv("QCH_CONFIG_PREPARE_MANAGER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &agentexec.Executor{Specs: agentexec.DefaultSpecsForServiceManager(manager.Kind()), Updater: agentexec.NewCoreUpdater(), Services: manager}
+	serviceCommand := func(ctx context.Context, service, action string) ([]byte, error) {
+		if manager.Kind() == agentexec.ServiceManagerOpenRC {
+			if action == "is-active" {
+				output, err := exec.CommandContext(ctx, "rc-service", service, "status").CombinedOutput()
+				if err == nil {
+					return []byte("active"), nil
+				}
+				return output, err
+			}
+			return exec.CommandContext(ctx, "rc-service", service, action).CombinedOutput()
+		}
+		return exec.CommandContext(ctx, "systemctl", action, service).CombinedOutput()
+	}
 	for _, engine := range core.AllEngines() {
 		t.Run(string(engine), func(t *testing.T) {
 			owner.t = t
@@ -41,7 +58,7 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 			}
 			heartbeat()
 			spec := executor.Specs[engine]
-			t.Cleanup(func() { _ = exec.Command("systemctl", "stop", spec.Service).Run() })
+			t.Cleanup(func() { _, _ = serviceCommand(context.Background(), spec.Service, "stop") })
 			if _, err := os.Stat(spec.Binary); !os.IsNotExist(err) {
 				t.Fatal("node must start with missing core", err)
 			}
@@ -64,11 +81,33 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 				}
 				output, executionErr := executor.Execute(ctx, *task)
 				receipt := core.TaskResultRequest{LeaseID: task.LeaseID, Success: executionErr == nil, Output: output, TrafficSettled: true}
+				if task.SharedInstance && task.Action.ChangesInstance() {
+					for _, observed := range executor.SharedInstanceStatuses(ctx) {
+						if observed.Engine == task.Engine && observed.ShareID == task.SharedTrafficID {
+							observed.TaskID = task.ID
+							receipt.InstanceStatus = &observed
+							break
+						}
+					}
+				}
 				if executionErr != nil {
 					receipt.Error = executionErr.Error()
 				}
 				if err := db.CompleteTask(ctx, node.ID, task.ID, receipt); err != nil {
 					t.Fatal(err)
+				}
+				reader := owner
+				if task.SharedInstance {
+					reader = recipient
+				}
+				var stored core.Task
+				reader.call("GET", "/tasks/"+task.ID, nil, http.StatusOK, &stored)
+				status := core.TaskSucceeded
+				if executionErr != nil {
+					status = core.TaskFailed
+				}
+				if stored.Status != status || stored.Output != output || stored.ConfigVersion != task.ConfigVersion || stored.SharedTrafficID != task.SharedTrafficID {
+					t.Fatalf("task API disagrees with execution: %+v", stored)
 				}
 				heartbeat()
 				if executionErr != nil {
@@ -90,9 +129,9 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 				if executor.Runtime(ctx)[engine].ServiceStatus == "active" {
 					t.Fatal("shared preparation activated main service")
 				}
-				service := strings.TrimSuffix(spec.Service, ".service") + "@" + result.Task.SharedTrafficID + ".service"
-				t.Cleanup(func() { _ = exec.Command("systemctl", "stop", service).Run() })
-				if output, err := exec.CommandContext(ctx, "systemctl", "is-active", service).CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "active" {
+				service := privateService(spec.Service, result.Task.SharedTrafficID, manager.Kind())
+				t.Cleanup(func() { _, _ = serviceCommand(context.Background(), service, "stop") })
+				if output, err := serviceCommand(ctx, service, "is-active"); err != nil || strings.TrimSpace(string(output)) != "active" {
 					t.Fatalf("private service is not running: %v %s", err, output)
 				}
 				// Preparing a private instance can be the first installation
@@ -113,10 +152,10 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 				if err != nil || sha256.Sum256(after) != sha256.Sum256(binary) {
 					t.Fatal("main deployment replaced shared binary", err)
 				}
-				if output, err := exec.CommandContext(ctx, "systemctl", "is-active", service).CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "active" {
+				if output, err := serviceCommand(ctx, service, "is-active"); err != nil || strings.TrimSpace(string(output)) != "active" {
 					t.Fatalf("main deployment affected private service: %v %s", err, output)
 				}
-				if output, err := exec.CommandContext(ctx, "systemctl", "stop", service).CombinedOutput(); err != nil {
+				if output, err := serviceCommand(ctx, service, "stop"); err != nil {
 					t.Fatalf("stop private instance: %v %s", err, output)
 				}
 				return
@@ -169,7 +208,7 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 				if executor.Runtime(ctx)[engine].ServiceStatus != "active" {
 					t.Fatal("retry did not start the instance")
 				}
-				if output, err := exec.CommandContext(ctx, "systemctl", "stop", spec.Service).CombinedOutput(); err != nil {
+				if output, err := serviceCommand(ctx, spec.Service, "stop"); err != nil {
 					t.Fatalf("stop retry service: %v %s", err, output)
 				}
 				return
@@ -180,7 +219,7 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 				if executor.Runtime(ctx)[engine].ServiceStatus != "active" {
 					t.Fatal("fresh inbound deployment is not running")
 				}
-				if output, err := exec.CommandContext(ctx, "systemctl", "stop", spec.Service).CombinedOutput(); err != nil {
+				if output, err := serviceCommand(ctx, spec.Service, "stop"); err != nil {
 					t.Fatalf("stop: %v %s", err, output)
 				}
 				return
@@ -192,7 +231,7 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 			if _, err := os.Stat(spec.ConfigPath); !os.IsNotExist(err) {
 				t.Fatalf("validate published main configuration: %v", err)
 			}
-			if output, _ := exec.CommandContext(ctx, "systemctl", "is-active", spec.Service).CombinedOutput(); strings.TrimSpace(string(output)) == "active" {
+			if output, _ := serviceCommand(ctx, spec.Service, "is-active"); strings.TrimSpace(string(output)) == "active" {
 				t.Fatal("validation started service")
 			}
 			binary, err := os.ReadFile(spec.Binary)
@@ -245,11 +284,22 @@ func TestConfigCorePrepareRealNode(t *testing.T) {
 			if sha256.Sum256(after) != digest {
 				t.Fatal("shared deployment replaced common binary")
 			}
-			for _, service := range []string{spec.Service, strings.TrimSuffix(spec.Service, ".service") + "@" + result.Task.SharedTrafficID + ".service"} {
-				if output, err := exec.CommandContext(context.Background(), "systemctl", "stop", service).CombinedOutput(); err != nil {
+			for _, service := range []string{spec.Service, privateService(spec.Service, result.Task.SharedTrafficID, manager.Kind())} {
+				if output, err := serviceCommand(context.Background(), service, "stop"); err != nil {
 					t.Fatalf("stop %s: %v %s", service, err, output)
 				}
 			}
 		})
 	}
+}
+
+func privateService(base, instance, manager string) string {
+	if manager == agentexec.ServiceManagerOpenRC {
+		return base + "-" + instance
+	}
+	service := strings.TrimSuffix(base, ".service") + "@" + instance
+	if manager == agentexec.ServiceManagerSystemd {
+		service += ".service"
+	}
+	return service
 }

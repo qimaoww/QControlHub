@@ -32,7 +32,7 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 		return core.Task{}, err
 	}
 	if !task.Reused {
-		s.signalTaskReady(task.AgentID)
+		s.signalTaskReadyAfterCommit(ctx, task.AgentID)
 	}
 	return task, nil
 }
@@ -40,6 +40,9 @@ func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCa
 // The caller commits before notifying the Agent. This also allows a preset
 // revision and its exact task snapshot to be published in one transaction.
 func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration, certificateSyncVersion ...int) (core.Task, error) {
+	if request.ExistingSourceID != "" && (request.Action != core.ActionReadConfig || !core.ValidExistingSourceID(request.ExistingSourceID)) {
+		return core.Task{}, fmt.Errorf("%w: invalid existing source selection", ErrInvalid)
+	}
 	scope := scopeForConfig(ctx)
 	var configIDs []string
 	if scope.Admin && request.ConfigID != "" {
@@ -200,9 +203,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			}
 			return core.Task{}, fmt.Errorf("%w: engine capability is disabled on this Agent", ErrConflict)
 		}
-		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
-			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
+		if reason := strings.TrimSpace(runtime[request.Engine].ManagedBlockReason(features, sharedRecipient)); reason != "" {
+			return core.Task{}, fmt.Errorf("%w: %s managed target cannot execute this operation: %s", ErrConflict, request.Engine, reason)
 		}
+	}
+	if !sharedRecipient && (request.Action == core.ActionReadConfig || request.Action == core.ActionImportExisting) && runtime[request.Engine].ExistingConfigUnsupportedReason != "" {
+		return core.Task{}, fmt.Errorf("%w: 导入来源不可用：%s", ErrConflict, runtime[request.Engine].ExistingConfigUnsupportedReason)
 	}
 	if (request.Action == core.ActionValidate || request.Action == core.ActionDeploy) &&
 		!containsFeature(features, core.AgentFeatureIndependentEgress) {
@@ -240,6 +246,27 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
 	}
+	if request.Action == core.ActionReadConfig && !sharedRecipient && len(runtime[request.Engine].ExistingSources) > 1 && request.ExistingSourceID == "" {
+		return core.Task{}, fmt.Errorf("%w: select an existing system service", ErrInvalid)
+	}
+	if request.ExistingSourceID != "" && !containsFeature(features, core.AgentFeatureImportDependencies) {
+		return core.Task{}, fmt.Errorf("%w: upgrade Agent before selecting existing services", ErrConflict)
+	}
+	if request.ExistingSourceID != "" {
+		if sharedRecipient {
+			return core.Task{}, ErrForbidden
+		}
+		found := false
+		for _, source := range runtime[request.Engine].ExistingSources {
+			if source.ID == request.ExistingSourceID {
+				found = true
+			}
+		}
+		if !found {
+			return core.Task{}, fmt.Errorf("%w: discovered source changed; refresh the node", ErrConflict)
+		}
+		readCacheMaxAge = 0
+	}
 	if readCacheMaxAge > 0 && !sharedRecipient {
 		// Cache reuse is a task-creation optimization, never an authorization or
 		// validation shortcut. The Agent lock also serializes it with dispatch
@@ -255,6 +282,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 
 	task := core.Task{
+		ExistingSourceID: request.ExistingSourceID,
 		InstallIfMissing: request.InstallIfMissing,
 		TCPSettings:      request.TCPSettings,
 		AgentID:          request.AgentID, Action: request.Action, Engine: request.Engine,
@@ -463,7 +491,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		            THEN 'official' ELSE COALESCE($7,'') END)
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
-		  AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
+		  AND api_key_id=$12 AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
 		  AND shared_traffic_id=$10 AND shared_instance=$11
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
@@ -471,10 +499,23 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }()), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
+		}
+		if task.Action == core.ActionReadConfig && !task.SharedInstance {
+			var stored string
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(config_content,'') FROM tasks WHERE id=$1`, existing.ID).Scan(&stored); err != nil {
+				return core.Task{}, err
+			}
+			plain, err := s.decryptContent(stored)
+			if err != nil {
+				return core.Task{}, err
+			}
+			if core.ImportSnapshotSource(plain) != task.ExistingSourceID {
+				return core.Task{}, fmt.Errorf("%w: another source read is still pending or running", ErrConflict)
+			}
 		}
 		existing.Reused = true
 		existing.SharedTrafficID = task.SharedTrafficID
@@ -505,6 +546,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err != nil {
 		return core.Task{}, err
 	}
+	if task.ExistingSourceID != "" {
+		snapshot, err = core.EncodeImportSnapshot(task.ConfigContent, "", task.ExistingSourceID)
+		if err != nil {
+			return core.Task{}, err
+		}
+	}
 	task.TLSFrontends = nil
 	storedConfigContent, err := s.encryptContent(snapshot)
 	if err != nil {
@@ -514,10 +561,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err != nil {
 		return core.Task{}, err
 	}
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		key.Permissions = core.NormalizePermissions(append(key.Permissions, taskAPIKeyPermissions(request.Action, false)...))
+		ctx = context.WithValue(ctx, apiKeyAuthContextKey{}, key)
+	}
+	apiKeyID, apiKeyPermissions := apiKeyTaskIdentity(ctx)
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing,shared_instance)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing,shared_instance,api_key_id,api_key_permissions)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance, apiKeyID, apiKeyPermissions)
 	if err != nil {
 		return core.Task{}, taskInsertError(err, task)
 	}

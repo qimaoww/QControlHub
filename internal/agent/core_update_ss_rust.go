@@ -22,19 +22,25 @@ import (
 // still come from the deployed revision. A missing isolation helper rejects
 // the update before any installed file or running service changes.
 func (e *Executor) validateSSRustUpdateCandidate(ctx context.Context, spec EngineSpec, content, binary string, identity commandIdentity, metadata fileMetadata) error {
-	if err := validateNoPersistentCoreLogs(core.EngineShadowsocksRust, content); err != nil {
-		return err
-	}
-	probeContent, endpoints, err := ssRustUpdateProbeConfiguration(content)
-	if err != nil {
-		return err
-	}
 	acl := spec.ACLPath
 	if acl == "" {
 		acl = shadowsocksRustACLPath
 	}
 	if _, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, acl); err != nil {
 		return fmt.Errorf("read service ACL: %w", err)
+	}
+	return e.validateSSRustStartupCandidate(ctx, spec, content, binary, acl, identity, metadata)
+}
+
+// Imports carry their ACLs in the mapped configuration. An empty command-line
+// ACL preserves those per-server policies instead of introducing the preset ACL.
+func (e *Executor) validateSSRustStartupCandidate(ctx context.Context, spec EngineSpec, content, binary, acl string, identity commandIdentity, metadata fileMetadata) error {
+	if err := validateNoPersistentCoreLogs(core.EngineShadowsocksRust, content); err != nil {
+		return err
+	}
+	probeContent, endpoints, err := ssRustUpdateProbeConfiguration(content)
+	if err != nil {
+		return err
 	}
 	shell, err := coreUpdateProbeHelper("sh")
 	if err != nil {
@@ -74,6 +80,9 @@ func (e *Executor) validateSSRustUpdateCandidate(ctx context.Context, spec Engin
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	state := coreCertificateWorkingDirectory(core.EngineShadowsocksRust, spec, e.serviceManager().Kind())
+	if spec.WorkingDirectory != "" {
+		state = spec.WorkingDirectory
+	}
 	var output string
 	if e.serviceManager().Kind() == ServiceManagerSystemd {
 		output, err = e.runSystemdValidationCommand(probeCtx, state, "", shell, identity, []string{
@@ -121,9 +130,6 @@ func (e *Executor) validateSSRustUpdateCandidate(ctx context.Context, spec Engin
 	if err != nil || !strings.Contains(output, ssRustUpdateProbeReady) {
 		redact := coreDiagnosticRedactor(core.EngineShadowsocksRust, content)
 		output = redact(output)
-		if len(output) > 2048 {
-			output = strings.ToValidUTF8(output[len(output)-2048:], "�")
-		}
 		return fmt.Errorf("target ss-rust did not pass the isolated service startup check (requires private-network support and ss): %v; %s", err, output)
 	}
 	return nil
@@ -133,7 +139,8 @@ const ssRustUpdateProbeReady = "QCH_UPDATE_LISTENERS_READY"
 
 const ssRustUpdateProbeScript = `set -eu
 binary=$1; config=$2; acl=$3; ss=$4; pause=$5; endpoints=$6
-"$binary" -c "$config" --acl "$acl" &
+if [ -n "$acl" ]; then set -- --acl "$acl"; else set --; fi
+"$binary" -c "$config" "$@" &
 child=$!
 trap 'kill "$child" 2>/dev/null || :; wait "$child" 2>/dev/null || :' EXIT
 trap 'exit 1' HUP INT TERM
@@ -238,7 +245,11 @@ func ssRustUpdateProbeConfiguration(content string) (string, []string, error) {
 			return "", nil, err
 		}
 	}
-	if value, exists := config["servers"]; exists {
+	for _, key := range []string{"servers", "shadowsocks"} {
+		value, exists := config[key]
+		if !exists {
+			continue
+		}
 		servers, ok := value.([]any)
 		if !ok {
 			return "", nil, errors.New("ss-rust servers is not an array")

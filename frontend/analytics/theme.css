@@ -593,7 +593,7 @@ strong, b { font-weight: 600; }
   .a-filterbar > .a-field, .a-filterbar > .a-filter-fields { flex-basis: 100%; width: 100%; }
   .a-filterbar > .a-actions { width: 100%; }
   .a-target-form { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .a-target-form > .a-field:first-child { grid-column: 1 / -1; }
+  .a-target-form > .a-field:first-child, .a-target-form > .a-field:has(select[name="source_id"]) { grid-column: 1 / -1; }
   .a-target-form > .a-actions { width: 100%; grid-column: 1 / -1; }
   .a-target-form > .a-actions > .a-button { width: 100%; }
 }

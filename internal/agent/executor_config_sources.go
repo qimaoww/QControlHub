@@ -30,6 +30,19 @@ func (e *Executor) readCurrentConfig(ctx context.Context, engine core.Engine, sp
 }
 
 func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec) (string, error) {
+	plan, err := e.readExistingConfigPlan(ctx, engine, managed, existing)
+	return plan.managedContent, err
+}
+
+func (e *Executor) readExistingConfigPlan(ctx context.Context, engine core.Engine, managed, existing EngineSpec) (coreImportPlan, error) {
+	if isManagedCoreSource(existing) {
+		return coreImportPlan{}, errors.New("managed core instances cannot be imported as external services")
+	}
+	if existing.SourceContext != "" {
+		if err := verifyExistingServiceMapping(ctx, engine, existing, e.serviceManager()); err != nil {
+			return coreImportPlan{}, err
+		}
+	}
 	var content, sourceDigest string
 	var err error
 	if engine == core.EngineXray && existing.ConfigDirectory != "" {
@@ -38,25 +51,28 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		content, sourceDigest, err = readExistingConfigurationSources(existing)
 	}
 	if err != nil {
-		return "", fmt.Errorf("read existing %s configuration: %w", engine, err)
-	}
-	if existing.WorkingDirectory != "" {
-		if err := validateNoRelativeSingBoxResources(content); err != nil {
-			return "", fmt.Errorf("existing %s configuration has a resource that cannot be migrated safely: %w", engine, err)
-		}
+		return coreImportPlan{}, fmt.Errorf("read existing %s configuration: %w", engine, err)
 	}
 	if err := validateExistingCoreExecutable(existing.Binary); err != nil {
-		return "", fmt.Errorf("cannot safely invoke existing %s binary: %w", engine, err)
+		return coreImportPlan{}, fmt.Errorf("cannot safely invoke existing %s binary: %w", engine, err)
 	}
 	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
-		return "", fmt.Errorf("cannot safely traverse existing %s binary path: %w", engine, err)
+		return coreImportPlan{}, fmt.Errorf("cannot safely traverse existing %s binary path: %w", engine, err)
 	}
 	if err := validateExistingServiceExecutable(existing); err != nil {
-		return "", fmt.Errorf("cannot safely map existing %s service executable: %w", engine, err)
+		return coreImportPlan{}, fmt.Errorf("cannot safely map existing %s service executable: %w", engine, err)
+	}
+	binaryDigest, present, err := protectedExistingCoreMigrationFileDigest(existing.Binary, maxReleaseAssetSize)
+	if err != nil || !present {
+		return coreImportPlan{}, fmt.Errorf("fingerprint existing %s binary: %w", engine, errors.Join(err, errors.New("binary unavailable")))
+	}
+	binaryIdentity, err := importFileIdentity(existing.Binary, true)
+	if err != nil {
+		return coreImportPlan{}, err
 	}
 	invocationSpec, cleanupInvocation, err := e.existingCoreInvocationSpec(engine, managed, existing)
 	if err != nil {
-		return "", fmt.Errorf("prepare existing %s binary for protected invocation: %w", engine, err)
+		return coreImportPlan{}, fmt.Errorf("prepare existing %s binary for protected invocation: %w", engine, err)
 	}
 	defer cleanupInvocation()
 	validationSpec := managed
@@ -71,33 +87,55 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		// one.
 		content, err = dumpExistingXrayConfiguration(ctx, invocationSpec)
 		if err != nil {
-			return "", fmt.Errorf("dump existing Xray configuration sources: %w", err)
+			return coreImportPlan{}, fmt.Errorf("dump existing Xray configuration sources: %w", err)
 		}
 	} else if engine != core.EngineXray {
 		if err := validateExistingSourceInvocation(ctx, engine, invocationSpec); err != nil {
-			return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
+			return coreImportPlan{}, fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
 		}
 	}
+	plan := coreImportPlan{managedContent: content}
 	switch engine {
 	case core.EngineShadowsocksRust:
-		plan, planErr := prepareSSRustImport(existing, content)
+		var planErr error
+		plan, planErr = prepareSSRustImport(existing, content, managed)
 		if planErr != nil {
-			return "", planErr
+			return coreImportPlan{}, planErr
 		}
 		content = plan.managedContent
 	case core.EngineXray:
 		content, err = normalizeImportedXrayLogDestinations(content)
 		if err != nil {
-			return "", fmt.Errorf("normalize existing Xray log destinations: %w", err)
+			return coreImportPlan{}, fmt.Errorf("normalize existing Xray log destinations: %w", err)
 		}
 	case core.EngineSingBox:
 		content, err = normalizeImportedSingBoxLogDestination(content)
 		if err != nil {
-			return "", fmt.Errorf("normalize existing sing-box log destination: %w", err)
+			return coreImportPlan{}, fmt.Errorf("normalize existing sing-box log destination: %w", err)
 		}
 	}
-	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
-		return "", fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
+	if engine == core.EngineMihomo {
+		plan, err = prepareMihomoDependencyImport(existing, managed, content)
+		if err != nil {
+			return coreImportPlan{}, fmt.Errorf("resolve existing Mihomo dependencies: %w", err)
+		}
+	}
+	if engine == core.EngineXray || engine == core.EngineSingBox {
+		plan, err = prepareJSONDependencyImport(engine, existing, managed, content)
+		if err != nil {
+			return coreImportPlan{}, fmt.Errorf("resolve existing %s dependencies: %w", engine, err)
+		}
+	}
+	plan.managedContent = contentIfEmpty(plan.managedContent, content)
+	plan.auxiliary, err = inspectImportAuxiliary(ctx, e.serviceManager(), engine, existing, plan)
+	if err != nil {
+		return coreImportPlan{}, fmt.Errorf("inspect existing auxiliary service: %w", err)
+	}
+	if err := e.validateImportPlanSnapshot(ctx, engine, validationSpec, plan); err != nil {
+		return coreImportPlan{}, fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
+	}
+	if err := plan.verifySources(); err != nil {
+		return coreImportPlan{}, err
 	}
 	var currentDigest string
 	if engine == core.EngineXray && existing.ConfigDirectory != "" {
@@ -109,7 +147,25 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		if err == nil {
 			err = errors.New("configuration sources changed while the snapshot was validated")
 		}
-		return "", fmt.Errorf("recheck existing %s configuration sources: %w", engine, err)
+		return coreImportPlan{}, fmt.Errorf("recheck existing %s configuration sources: %w", engine, err)
 	}
-	return content, nil
+	currentBinary, present, err := protectedExistingCoreMigrationFileDigest(existing.Binary, maxReleaseAssetSize)
+	currentBinaryIdentity, identityErr := importFileIdentity(existing.Binary, true)
+	if err != nil || identityErr != nil || !present || currentBinary != binaryDigest || currentBinaryIdentity != binaryIdentity {
+		return coreImportPlan{}, errors.New("existing core binary changed while the snapshot was validated")
+	}
+	if existing.SourceContext != "" {
+		if err := verifyExistingServiceMapping(ctx, engine, existing, e.serviceManager()); err != nil {
+			return coreImportPlan{}, err
+		}
+	}
+	plan.snapshotDigest = coreMigrationConfigDigest(coreMigrationSourceDigest(existing) + "\x00" + sourceDigest + "\x00" + binaryDigest + "\x00" + binaryIdentity + "\x00" + importPlanFingerprint(plan))
+	return plan, nil
+}
+
+func contentIfEmpty(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

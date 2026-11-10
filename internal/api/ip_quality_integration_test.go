@@ -103,18 +103,22 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connectionDB.Close(context.Background())
-	if _, err := connectionDB.Exec(ctx, `ALTER TABLE tasks ADD CHECK
+	if _, err := connectionDB.Exec(ctx, `DELETE FROM tasks WHERE action='panel-failure'; ALTER TABLE tasks ADD CHECK
 		(engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
 		DELETE FROM qcontrolhub_schema_migrations;
 		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(73)`); err != nil {
 		t.Fatal(err)
 	}
 	response := call("POST", "/ip-quality", "quality-admin", input, 500)
-	var failure map[string]string
+	var failure struct {
+		Error, Code, Stage string
+		RequestID          string `json:"request_id"`
+		FailureSaved       bool   `json:"failure_saved"`
+	}
 	if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil ||
-		failure["code"] != "task_schema_incompatible" || failure["stage"] != "task_creation" ||
-		failure["request_id"] == "" || response.Header().Get("X-Request-ID") != failure["request_id"] ||
-		!strings.Contains(failure["error"], "尚未进入 Agent") {
+		failure.Code != "task_schema_incompatible" || failure.Stage != "task_creation" ||
+		failure.RequestID == "" || response.Header().Get("X-Request-ID") != failure.RequestID ||
+		!strings.Contains(failure.Error, "尚未进入 Agent") {
 		t.Fatalf("schema error lost actionable feedback: %s %v", response.Body.String(), err)
 	}
 	call("POST", "/tasks", "quality-admin", generic, 500)

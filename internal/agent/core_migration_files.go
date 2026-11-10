@@ -26,7 +26,7 @@ const (
 	coreMigrationRestoreRemove
 )
 
-func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord) (coreMigrationRecord, error) {
+func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord, dependencyManifestAssets ...bool) (coreMigrationRecord, error) {
 	current, err := readCoreMigrationRecord(prefix, engine)
 	if err != nil {
 		return coreMigrationRecord{}, err
@@ -75,7 +75,9 @@ func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existin
 	record.AssetBackupDigests = [2]string{coreMigrationMissingBackup, coreMigrationMissingBackup}
 	record.StagedAssetDigests = [2]string{coreMigrationMissingBackup, coreMigrationMissingBackup}
 	record.HasAssetRollback = true
-	if engine == core.EngineXray {
+	// New imports stage only resources referenced by the dependency manifest.
+	// Keep the former asset journal reader/writer for existing transactions.
+	if engine == core.EngineXray && !(len(dependencyManifestAssets) > 0 && dependencyManifestAssets[0]) {
 		for index, name := range xrayMigrationAssetNames {
 			sourcePath := filepath.Join(filepath.Dir(existing.Binary), name)
 			stagedDigest, assetExists, digestErr := protectedCoreMigrationFileDigest(sourcePath, maxReleaseAssetSize)

@@ -59,7 +59,7 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 	if err := os.Symlink(filepath.Join(configDirectory, "10-outbounds.json"), filepath.Join(configDirectory, "30-linked.json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executor.readExistingConfig(context.Background(), core.EngineSingBox, managed, existing); err == nil || !strings.Contains(err.Error(), "non-symlink") {
+	if _, err := executor.readExistingConfig(context.Background(), core.EngineSingBox, managed, existing); err != nil {
 		t.Fatalf("symlinked config-directory entry error = %v", err)
 	}
 	if err := os.Remove(filepath.Join(configDirectory, "30-linked.json")); err != nil {
@@ -81,7 +81,7 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 	if err := os.Symlink(realDirectory, configDirectory); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executor.readExistingConfig(context.Background(), core.EngineSingBox, managed, existing); err == nil || !strings.Contains(err.Error(), "not a real directory") {
+	if _, err := executor.readExistingConfig(context.Background(), core.EngineSingBox, managed, existing); err != nil {
 		t.Fatalf("symlinked config-directory error = %v", err)
 	}
 }

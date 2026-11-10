@@ -9,48 +9,36 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// Explicitly reviewed read operations. GET routes with management behavior
-// (retry-editor, remote synchronization, credential export) are not included.
-// A new route is unavailable to API Keys until it is reviewed here.
-var diagnosticRoutes = map[string][]core.Permission{
-	"GET /api/v1/api-key":                                   {},
-	"GET /api/v1/overview":                                  {core.PermissionOverviewRead},
-	"GET /api/v1/agents":                                    {core.PermissionAgentsRead},
-	"GET /api/v1/agent-directory":                           {core.PermissionAgentsRead},
-	"GET /api/v1/deployments":                               {core.PermissionDeploymentsRead},
-	"GET /api/v1/config-catalogs/{engine}":                  {core.PermissionCatalogsRead},
-	"GET /api/v1/agents/{id}/configs":                       {core.PermissionAgentConfigRead},
-	"GET /api/v1/agents/{id}/configs/{engine}":              {core.PermissionAgentConfigRead},
-	"GET /api/v1/agents/{id}/configs/{engine}/files":        {core.PermissionAgentConfigRead},
-	"GET /api/v1/agents/{id}/configs/{engine}/workspace":    {core.PermissionAgentConfigRead},
-	"GET /api/v1/agents/{id}/configs/{engine}/state":        {core.PermissionAgentConfigRead},
-	"GET /api/v1/agents/{id}/configs/{engine}/fields/{key}": {core.PermissionAgentConfigRead},
-	"GET /api/v1/configs":                                   {core.PermissionConfigsRead},
-	"GET /api/v1/configs/{id}/revisions":                    {core.PermissionConfigsRead},
-	"GET /api/v1/configs/{id}/revisions/{version}":          {core.PermissionConfigsRead},
-	"GET /api/v1/tasks":                                     {core.PermissionTasksRead},
-	"GET /api/v1/tasks/{id}":                                {core.PermissionTasksRead},
-	"GET /api/v1/tasks/{id}/config-snapshot":                {core.PermissionTasksRead, core.PermissionAgentConfigRead},
-	"GET /api/v1/system-tcp/tasks":                          {core.PermissionTasksRead},
-	"GET /api/v1/settings":                                  {core.PermissionSettingsRead},
-	"GET /api/v1/settings/deployment":                       {core.PermissionSettingsRead},
-	"GET /api/v1/audit":                                     {core.PermissionAuditRead},
-	"GET /api/v1/panel-metrics":                             {core.PermissionPanelMetricsRead},
-	"GET /api/v1/metrics/{id}":                              {core.PermissionMetricsRead},
-	"GET /api/v1/core-log-sources":                          {core.PermissionCoreLogsRead},
-	"GET /api/v1/core-logs":                                 {core.PermissionCoreLogsRead},
-	"GET /api/v1/client-connections":                        {core.PermissionCoreLogsRead},
-	"GET /api/v1/traffic-policies":                          {core.PermissionTrafficRead},
-	"GET /api/v1/traffic-endpoints":                         {core.PermissionTrafficRead},
-	"GET /api/v1/traffic-usage":                             {core.PermissionTrafficRead},
-	"GET /api/v1/templates":                                 {core.PermissionTemplatesRead},
+type apiKeyPolicy struct {
+	Write       bool
+	Any         bool
+	Permissions []core.Permission
+}
+
+func (p apiKeyPolicy) allows(mode core.APIKeyMode, permissions []core.Permission) bool {
+	if p.Write && mode != core.APIKeyReadWrite {
+		return false
+	}
+	allowed := !p.Any
+	for _, required := range p.Permissions {
+		has := core.HasPermission(permissions, required)
+		if p.Any && has {
+			return true
+		}
+		if !p.Any && !has {
+			return false
+		}
+	}
+	return allowed
 }
 
 type apiKeyResponseWriter struct {
 	http.ResponseWriter
-	body   bytes.Buffer
-	status int
-	secret string
+	body          bytes.Buffer
+	status        int
+	secret        string
+	revealSecrets bool
+	failure       func(int, any) any
 }
 
 func (w *apiKeyResponseWriter) WriteHeader(status int) {
@@ -74,7 +62,14 @@ func (w *apiKeyResponseWriter) finish() int {
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
 		if err := decoder.Decode(&value); err == nil {
-			redacted, err := json.Marshal(core.RedactDiagnosticValue(value))
+			safe := core.RedactDiagnosticValue(value)
+			if w.revealSecrets {
+				safe = value
+			}
+			if w.failure != nil && w.status >= 400 {
+				safe = w.failure(w.status, safe)
+			}
+			redacted, err := json.Marshal(safe)
 			if err == nil {
 				data = append(redacted, '\n')
 			} else {
@@ -82,7 +77,9 @@ func (w *apiKeyResponseWriter) finish() int {
 				data = []byte(`{"error":"诊断输出无法脱敏"}`)
 			}
 		} else {
-			data = []byte(core.RedactDiagnostic(string(data)))
+			if !w.revealSecrets {
+				data = []byte(core.RedactDiagnostic(string(data)))
+			}
 		}
 		// Last line of defense for reflected request text in legacy handlers.
 		data = bytes.ReplaceAll(data, []byte(w.secret), []byte("[redacted]"))
@@ -98,18 +95,17 @@ func (w *apiKeyResponseWriter) finish() int {
 	return w.status
 }
 
-func diagnosticRouteList(permissions []core.Permission) []string {
+func apiKeyRouteList(mode core.APIKeyMode, permissions []core.Permission) []string {
 	result := []string{}
-	for pattern, required := range diagnosticRoutes {
-		allowed := true
-		for _, p := range required {
-			if !core.HasPermission(permissions, p) {
-				allowed = false
-			}
-		}
-		if allowed {
+	for pattern, policy := range apiKeyPolicies {
+		if policy.allows(mode, permissions) {
 			result = append(result, strings.TrimSpace(pattern))
 		}
 	}
 	return result
+}
+
+// Historical helper keeps diagnostic integrations pinned to read-only semantics.
+func diagnosticRouteList(permissions []core.Permission) []string {
+	return apiKeyRouteList(core.APIKeyReadOnly, permissions)
 }

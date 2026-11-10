@@ -19,9 +19,7 @@ func (s *Server) latestSystemTCPTasks(w http.ResponseWriter, request *http.Reque
 // The generic task create/retry routes must not bypass node-management
 // authorization for system-wide network changes.
 func (s *Server) authorizeSystemBBR(w http.ResponseWriter, request *http.Request, agentID string) bool {
-	role, _ := s.sessionRole(request)
-	permissions, _ := s.sessionPermissions(request)
-	if !role.Allows(core.PermissionAgentsManage) && !core.HasPermission(permissions, core.PermissionAgentsManage) {
+	if !s.sessionAllows(request, core.PermissionAgentsManage) {
 		writeError(w, http.StatusForbidden, "system BBR requires agents.manage and tasks.execute")
 		return false
 	}

@@ -147,7 +147,7 @@ export function autoFilter(ctx, fields, load, resetValues = {}) {
 }
 export const notice = (message, tone = "error") => node("p", { className: `a-notice ${tone}`, role: tone === "error" ? "alert" : "status" }, message);
 
-export function table(columns, rows, { emptyText, paginate = 12, label = "记录", rowKey, motion = true, columnWidths } = {}) {
+export function table(columns, rows, { emptyText, paginate = 12, label = "记录", rowKey, motion = true, columnWidths, loading = false } = {}) {
   const body = node("tbody");
   const scroll = node("div", { className: "a-table-scroll", tabindex: "0", role: "region", "aria-label": label },
     node("table", {}, columnWidths && node("colgroup", {}, columnWidths.map(width => node("col", { width }))),
@@ -171,16 +171,21 @@ export function table(columns, rows, { emptyText, paginate = 12, label = "记录
     if (animate) currentTheme("analytics")?.motion?.list(body);
   }
   show(1);
-  const noRows = empty(emptyText);
+  const noRows = empty(loading ? '正在读取…' : emptyText);
   noRows.hidden = rows.length > 0;
-  scroll.hidden = !rows.length;
+  scroll.hidden = !rows.length && !loading;
   const pagination = node("div", { className: "a-pagination" }, count, actions(previous, next));
   pagination.hidden = last <= 1;
   const result = node("div", {}, noRows, scroll, pagination);
-  result.tableState = { signature: JSON.stringify([columns, paginate, label, columnWidths, emptyText]), rows };
-  result.updateRows = value => { rows = value; result.tableState.rows = value; if (!paginate) size = Math.max(1, rows.length); last = Math.max(1, Math.ceil(rows.length / size)); show(page, false); pagination.hidden = last <= 1; noRows.hidden = rows.length > 0; scroll.hidden = !rows.length; };
+  if (loading) result.dataset.readingTable = '';
+  result.setReadError = () => { noRows.textContent = '尚未读取到数据'; noRows.hidden = rows.length > 0; scroll.hidden = false; };
+  result.tableState = { signature: JSON.stringify([columns, paginate, label, columnWidths, emptyText]), rows, rowKey };
+  result.setLoading = value => { loading = value; if (value) result.dataset.readingTable = ''; else delete result.dataset.readingTable; noRows.textContent = loading ? '正在读取…' : emptyText || '暂无记录'; noRows.hidden = rows.length > 0; scroll.hidden = !rows.length && !loading; };
+  result.updateRows = value => { rows = value; result.tableState.rows = value; if (!paginate) size = Math.max(1, rows.length); last = Math.max(1, Math.ceil(rows.length / size)); show(page, false); pagination.hidden = last <= 1; result.setLoading(false); };
   result.reconcileTable = fresh => {
     if (result.tableState.signature !== fresh.tableState?.signature) return false;
+    rowKey = fresh.tableState.rowKey;
+    result.tableState.rowKey = rowKey;
     result.updateRows(fresh.tableState.rows); return true;
   };
   return result;
@@ -235,7 +240,7 @@ export function query(path, params) {
 export const list = value => Array.isArray(value) ? value : [];
 
 export async function copyText(value, isCurrent = () => true) {
-  const check = () => { if (!isCurrent()) throw new DOMException('复制目标已变化', 'AbortError'); };
+  const check = () => { if (!isCurrent()) throw Object.assign(new DOMException('复制目标已变化', 'AbortError'), {intentionalCancellation:true}); };
   check();
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(String(value)); return; }

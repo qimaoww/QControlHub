@@ -19,7 +19,13 @@ func (s *Store) checkTaskPortUseTx(ctx context.Context, tx pgx.Tx, task *core.Ta
 		return nil
 	}
 	owner := scopeForConfig(ctx).OwnerID
-	if task.ConfigID != "" {
+	if task.Action == core.ActionImportExisting && task.ID != "" {
+		// The reserved import target does not exist until migration succeeds.
+		// Its authenticated task owner remains authoritative during dispatch.
+		if err := tx.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1 AND agent_id=$2 AND action='import-existing'`, task.ID, task.AgentID).Scan(&owner); err != nil {
+			return err
+		}
+	} else if task.ConfigID != "" {
 		if err := tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1`, task.ConfigID).Scan(&owner); err != nil {
 			return err
 		}

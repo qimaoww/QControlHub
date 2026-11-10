@@ -10,12 +10,16 @@ export async function testNativeInvitations() {
     { id: 'revoked', agent_id: 'revoked', agent_name: '已撤销节点', enabled: false, status: 'pending', invitation_revision: 8, engines: [], ports: [], limit_bytes: 0, used_bytes: 0 },
   ] };
   const writes = [];
-  let hold = false, release, failRead = false, conflict = false, holdRead = false, releaseRead;
+  let hold = false, release, failRead = false, conflict = false, holdRead = false, releaseRead, retainedFailures = 0;
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith('/api/v1')) return nativeFetch(url, options);
     const path = String(url).slice(7), method = options.method || 'GET';
     if (path === '/auth/session') return reply(session);
+    if (path === '/tasks/failures' && method === 'POST') {
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), session.csrf_token, '失败留存缺少 CSRF');
+      return reply({id:`fixture-failure-${++retainedFailures}`});
+    }
     if (path === '/agent-access') {
       if (failRead) return reply({ error: '邀请读取失败' }, 503);
       const value = structuredClone(access);
@@ -114,9 +118,12 @@ export async function testNativeInvitations() {
     const before = writes.length; button('接受邀请', dialog()).click();
     button('拒绝邀请', dialog()).click();
     const reading = dialog(); reading.querySelector('[aria-label=关闭]').click();
-    assert.equal(dialog(), reading, '读取期间关闭邀请弹窗');
+    assert.ok(!dialog(), '普通读取阻止关闭邀请弹窗');
     assert.equal(writes.length, before, '读取期间对旧条款作出决策');
     holdRead = false; releaseRead();
+    await waitFor(() => cards().textContent.includes('21002'), '新条款未更新卡片');
+    assert.ok(!dialog(), '迟到读取重新打开了邀请弹窗');
+    await open();
     await waitFor(() => dialog()?.textContent.includes('21002') && !button('重新读取', dialog()).disabled, '新条款未显示');
     button('拒绝邀请', dialog()).click();
     await waitFor(() => !dialog() && cards().textContent.includes('已拒绝'), '待接受邀请不能明确拒绝');

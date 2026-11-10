@@ -93,7 +93,7 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	if err := plan.cleanup(); err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []string{`{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`, `{"servers":[],"shadowsocks":[]}`, `{"server_port":20001,"servers":[]}`, `{"servers":null}`, `{"servers":{}}`, `{"shadowsocks":false}`, `{"servers":[]}`, `{"server":"::","servers":[{}]}`} {
+	for _, invalid := range []string{`{"manager_address":"/run/external-manager.sock"}`, `{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`, `{"servers":[],"shadowsocks":[]}`, `{"server_port":20001,"servers":[]}`, `{"servers":null}`, `{"servers":{}}`, `{"shadowsocks":false}`, `{"servers":[]}`, `{"server":"::","servers":[{}]}`} {
 		if _, err := prepareSSRustImport(spec, invalid); err == nil {
 			t.Fatalf("unsupported import accepted: %s", invalid)
 		}
@@ -104,8 +104,8 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	if err := os.Symlink(aclPath+".original", aclPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareSSRustImport(spec, content); err == nil {
-		t.Fatal("symlinked ACL accepted")
+	if _, err := prepareSSRustImport(spec, content); err != nil {
+		t.Fatalf("legal symlinked ACL rejected: %v", err)
 	}
 }
 
@@ -150,6 +150,7 @@ func TestSSRustMigrationLifecycleWithACLAndActiveManagedService(t *testing.T) {
 			}
 			fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.managed}
 			fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.existing}
+			configureSSRustImportPreflight(t, fixture, false)
 			writeMigrationServiceState(t, fixture.stateDirectory, fixture.existing.Service, "active", "enabled")
 			writeMigrationServiceState(t, fixture.stateDirectory, fixture.managed.Service, "active", "enabled-runtime")
 			writeMigrationExecStart(t, fixture.stateDirectory, fixture.existing.Service, systemdExecStart(fixture.existing.Binary,
@@ -248,6 +249,7 @@ func testSSRustScriptMigration(t *testing.T, failStart bool) {
 	writeMigrationExecStart(t, fixture.stateDirectory, fixture.existing.Service, systemdExecStart(fixture.existing.Binary, fixture.existing.Binary+" -c "+fixture.existing.ConfigPath))
 	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.managed}
 	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.existing}
+	configureSSRustImportPreflight(t, fixture, false)
 	task := core.Task{Engine: core.EngineShadowsocksRust, Action: core.ActionImportExisting, ConfigContent: content}
 	output, err := fixture.executor.Execute(context.Background(), task)
 	if failStart {
@@ -276,6 +278,78 @@ func testSSRustScriptMigration(t *testing.T, failStart bool) {
 	}
 	if _, err := fixture.executor.Execute(context.Background(), task); err != nil {
 		t.Fatalf("idempotent import retry: %v", err)
+	}
+}
+
+// The fixture's service manager is simulated. Keep the transient-unit receipt
+// simulated too; native namespace/core execution has a separate opt-in test.
+func configureSSRustImportPreflight(t *testing.T, fixture existingCoreMigrationFixture, fail bool) {
+	t.Helper()
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		identity, err = lookupCommandIdentity("nobody", "nogroup")
+		if err != nil {
+			identity, err = lookupCommandIdentity("nobody", "nobody")
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.executor.importValidationIdentity = &identity
+	launcher := filepath.Join(fixture.stateDirectory, "probe-launcher")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", filepath.Join(fixture.stateDirectory, "probe-arguments"))
+	if fail {
+		script += "echo 'fixture startup dependency rejected' >&2\necho test-password >&2\ni=0\nwhile [ \"$i\" -lt 100 ]; do echo 'fixture nested startup diagnostic repeated detail for complete collection'; i=$((i+1)); done\necho fixture-probe-end\nexit 17\n"
+	} else {
+		script += "echo QCH_UPDATE_LISTENERS_READY\n"
+	}
+	if err := os.WriteFile(launcher, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture.executor.validationSystemdRunPath = launcher
+}
+
+func TestSSRustImportPreflightFailurePreservesOriginalService(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	fixture.existing.Service = "shadowsocks-rust.service"
+	fixture.managed.Service = "qagent-shadowsocks-rust.service"
+	content := `{"server":"127.0.0.1","server_port":20001,"method":"aes-256-gcm","password":"test-password"}`
+	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeMigrationServiceState(t, fixture.stateDirectory, fixture.existing.Service, "active", "enabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, fixture.managed.Service, "inactive", "disabled")
+	writeMigrationExecStart(t, fixture.stateDirectory, fixture.existing.Service, systemdExecStart(fixture.existing.Binary, fixture.existing.Binary+" -c "+fixture.existing.ConfigPath))
+	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.managed}
+	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineShadowsocksRust: fixture.existing}
+	configureSSRustImportPreflight(t, fixture, true)
+	_, err := fixture.executor.Execute(context.Background(), core.Task{Engine: core.EngineShadowsocksRust, Action: core.ActionImportExisting, ConfigContent: content})
+	if err == nil || !strings.Contains(err.Error(), "fixture startup dependency rejected") {
+		t.Fatalf("startup preflight was not required: %v", err)
+	}
+	if !strings.Contains(err.Error(), "fixture-probe-end") || strings.Contains(err.Error(), "test-password") {
+		t.Fatal("startup diagnostics lost their end or disclosed the password")
+	}
+	fixture.assertServiceState(t, fixture.existing.Service, "active", "enabled")
+	fixture.assertServiceState(t, fixture.managed.Service, "inactive", "disabled")
+	commands, _ := os.ReadFile(filepath.Join(fixture.stateDirectory, "commands.log"))
+	if strings.Contains(string(commands), "stop "+fixture.existing.Service) {
+		t.Fatal("original service stopped before startup preflight passed")
+	}
+	restored, err := os.ReadFile(fixture.managed.ConfigPath)
+	if err != nil || string(restored) != fixture.originalManagedConfig {
+		t.Fatalf("failed preflight changed managed configuration: %v", err)
+	}
+	args, err := os.ReadFile(filepath.Join(fixture.stateDirectory, "probe-arguments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := *fixture.executor.importValidationIdentity
+	for _, required := range []string{"--property=PrivateNetwork=yes", "--property=ReadWritePaths=\n", fmt.Sprintf("--property=User=%d", identity.uid), "--property=ProtectSystem=strict", "--property=ProtectHome=yes"} {
+		if !strings.Contains(string(args), required) {
+			t.Fatalf("preflight omitted %s", required)
+		}
 	}
 }
 

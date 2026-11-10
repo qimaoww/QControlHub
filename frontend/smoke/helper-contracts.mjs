@@ -42,4 +42,10 @@ await import("../browser_fixture_smoke.mjs");
 await import("../session_api_smoke.mjs");
 await import("../shell_modules_smoke.mjs");
 
+const unrelatedPhase=diagnoseTask({status:"failed",action:"validate",error:"[阶段:真实内核校验] permission denied"});
+assert.doesNotMatch(unrelatedPhase.advice,/ACME|TCP 80/);
+assert.match(unrelatedPhase.advice,/实际原因/);
+assert.equal(diagnoseTask({status:"failed",action:"import-existing",error:"[阶段:真实内核校验] permission denied"}),null);
+assert.match(diagnoseTask({status:"failed",action:"import-existing",error:"rollback failed"}).rollback,/回滚失败/);
+
 }

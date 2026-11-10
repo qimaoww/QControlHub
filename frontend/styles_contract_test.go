@@ -58,8 +58,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// card-selection header, node network column, settings section selection
 	// proportional raster logo containment in the existing brand mark, and
 	// unavailable public-IP placeholders aligned with normal address rows, and
-	// readable connection country/node columns within their scroll container.
-	const expected = "3b7b7e0c69ff15281a56ee93b078fedd5489ad3dd69d2378f18d7c2fc511c7b1"
+	// readable connection country/node columns within their scroll container,
+	// and a complete source-service selector row on mobile import forms.
+	const expected = "c3eb393e805bd4b6a94c007149180931da4a4ec9fac2b2b03260bcb248092967"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

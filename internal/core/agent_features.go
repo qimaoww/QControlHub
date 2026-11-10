@@ -92,3 +92,10 @@ const AgentFeatureInstanceStatus = "core-instance-status-v1"
 
 // AgentFeatureHostPorts reports complete host socket observations on status tasks.
 const AgentFeatureHostPorts = "host-port-observation-v1"
+
+// Explicit separation of import discovery failures from managed safety failures.
+const AgentFeatureImportIsolation = "import-isolation-v1"
+
+// Source identities and dependency fingerprints are required for selecting and
+// confirming imports without reusing another service's read snapshot.
+const AgentFeatureImportDependencies = "import-dependencies-v1"

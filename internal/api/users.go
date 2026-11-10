@@ -97,6 +97,10 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "display name must be at most 100 characters")
 		return
 	}
+	if _, key := requestAPIKey(request); key && (input.Password != nil || input.Role != nil || request.PathValue("id") == s.sessionUserID(request)) {
+		writeError(w, 403, "API Key 无法更改身份、密码或创建者账号")
+		return
+	}
 	passwordHash := ""
 	if input.Password != nil {
 		hash, err := authn.HashPassword(*input.Password)

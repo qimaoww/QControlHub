@@ -13,7 +13,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
   const settled = async () => { await waitFor(() => target() && editor() && !document.querySelector('#app[aria-busy=true],.a-main [aria-busy=true]'), "配置页面未就绪"); await delay(30); };
   const change = (control, value) => { control.focus(); control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); };
   const input = (control, value) => { control.value = value; control.dispatchEvent(new Event("input", { bubbles: true })); };
-  const confirm = async label => { const dialog = await waitFor(() => [...document.querySelectorAll("dialog[open]")].find(box => box.querySelector("h2")?.textContent === label), `缺少确认：${label}`); return dialog; };
+  const confirm = async label => { const dialog = await waitFor(() => [...document.querySelectorAll("dialog[open]")].find(box => box.querySelector("h2")?.textContent === label && !box.querySelector('[aria-busy=true]')), `缺少确认：${label}`); return dialog; };
   const close = async dialog => { dialog.querySelector('[aria-label="关闭"]').click(); await waitFor(() => !dialog.open, "弹窗未关闭"); await delay(30); };
   const cancel = async label => { const box = await confirm(label); button("取消", box).click(); await waitFor(() => !box.open, "确认未取消"); await delay(30); };
   const accepts = async label => { const box = await confirm(label); button(label, box).click(); await waitFor(() => !box.open, "确认未接受"); await settled(); };

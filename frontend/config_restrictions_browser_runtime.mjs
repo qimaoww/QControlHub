@@ -15,9 +15,13 @@ export async function testConfigRestrictionsRuntime(){
       assert(Boolean(editor.querySelector('[type=submit]'))===!locked,'readonly policy exposes submission');
       if(engine==='ss-rust')assert(editor.elements.block_mainland_destination.disabled,'multi-port Rust target restriction enabled');
       if(locked)continue;
-      editor.elements.block_mainland_source.click();test.topDialog().querySelector('[aria-label=关闭]').click();await pause();
+      editor.elements.block_mainland_source.click();test.topDialog().querySelector('[aria-label=关闭]').click();
+      await waitFor(()=>test.topDialog()===box&&test.confirmations.some(item=>item.title==='放弃更改'),'dirty-close cancellation did not finish');
       assert(form()===editor&&editor.elements.block_mainland_source.checked,'canceling dirty close lost policy draft');
-      editor.requestSubmit();await pause();assert(!test.accessWrites?.length,'canceled deployment wrote policy');
+      const confirmations=test.confirmations.length;
+      editor.requestSubmit();
+      await waitFor(()=>test.confirmations.length>confirmations&&!editor.hasAttribute('aria-busy')&&!test.root.hasAttribute('aria-busy'),'canceled deployment did not finish');
+      assert(!test.accessWrites?.length,'canceled deployment wrote policy');
       test.confirm=true;test.accessError=409;editor.requestSubmit();await waitFor(()=>alerts().includes('测试访问限制保存失败')&&!editor.hasAttribute('aria-busy'),'policy conflict hid error');
       assert(!test.accessWrites?.length&&editor.elements.block_mainland_source.checked,'policy conflict lost draft or wrote');
       test.accessError=null;let release;test.accessGate=new Promise(resolve=>{release=resolve});editor.requestSubmit();editor.requestSubmit();await pause();

@@ -83,6 +83,8 @@ const (
 )
 
 type Task struct {
+	ExistingSourceID       string                  `json:"existing_source_id,omitempty"`
+	ImportSourceDigest     string                  `json:"import_source_digest,omitempty"`
 	CertificateSync        bool                    `json:"-"`
 	ManagedTLSCleanup      bool                    `json:"-"`
 	Certificates           []DeploymentCertificate `json:"certificates,omitempty"`
@@ -114,6 +116,7 @@ type Task struct {
 }
 
 type TaskRequest struct {
+	ExistingSourceID string `json:"existing_source_id,omitempty"`
 	// Optional comparison guard; the authenticated allocation still determines
 	// the target. An empty value pins the main instance.
 	ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
@@ -131,13 +134,25 @@ type TaskRequest struct {
 	CoreSource            string      `json:"core_source,omitempty"`
 }
 
+type ImportDependency struct {
+	Field       string `json:"field"`
+	Source      string `json:"source"`
+	Resolved    string `json:"resolved"`
+	Destination string `json:"destination"`
+	Kind        string `json:"kind"`
+}
+
 type TaskResultRequest struct {
-	HostPorts      *HostPortObservation  `json:"host_ports,omitempty"`
-	InstanceStatus *SharedInstanceStatus `json:"instance_status,omitempty"`
-	LeaseID        string                `json:"lease_id"`
-	Success        bool                  `json:"success"`
-	Output         string                `json:"output,omitempty"`
-	Error          string                `json:"error,omitempty"`
-	TrafficSettled bool                  `json:"traffic_settled,omitempty"`
-	IPQuality      *IPQualityResult      `json:"ip_quality,omitempty"`
+	ImportDependencies []ImportDependency    `json:"import_dependencies,omitempty"`
+	ImportSourceDigest string                `json:"import_source_digest,omitempty"`
+	ExecutedAttempt    int                   `json:"executed_attempt,omitempty"`
+	DiagnosticDigest   string                `json:"diagnostic_digest,omitempty"`
+	HostPorts          *HostPortObservation  `json:"host_ports,omitempty"`
+	InstanceStatus     *SharedInstanceStatus `json:"instance_status,omitempty"`
+	LeaseID            string                `json:"lease_id"`
+	Success            bool                  `json:"success"`
+	Output             string                `json:"output,omitempty"`
+	Error              string                `json:"error,omitempty"`
+	TrafficSettled     bool                  `json:"traffic_settled,omitempty"`
+	IPQuality          *IPQualityResult      `json:"ip_quality,omitempty"`
 }

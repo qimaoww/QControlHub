@@ -3,17 +3,18 @@ import { node, button, actions, stack, grid, section, badge, muted, notice, path
 import { bytes } from './operations.js';
 import { patch } from './live-dom.js';
 
-export async function quotaInvitations(ctx) {
+export function quotaInvitations(ctx) {
   const data = ctx.state.data;
   const model = data.quotaInvitations ||= { serial: 0, access: null, pending: false, openID: null, listeners: new Set() };
   const current = () => ctx.current() && ctx.state.data === data;
+  model.access = null;
   const view = stack();
   let box = null, loading = false, drawDetails = () => {};
   const feedback = notice('');
   const own = () => list(model.access?.shares);
   const actionable = share => share?.enabled && ['pending', 'accepted'].includes(share.status);
   function close() {
-    if (model.pending || loading) return;
+    if (model.pending) return;
     model.openID = null; box?.close(); box = null;
   }
   function open(share) {
@@ -107,12 +108,11 @@ export async function quotaInvitations(ctx) {
       notify();
     }
   }
-  await read();
-  if (!current()) return view;
-  // An explicit page refresh can resume an open invitation, while route and
-  // account changes dispose its dialog through the existing theme lifecycle.
-  const previous = own().find(share => share.id === model.openID);
-  if (previous && !model.pending) open(previous);
+  void read().then(() => {
+    if (!current()) return;
+    const previous = own().find(share => share.id === model.openID);
+    if (previous && !model.pending) open(previous);
+  });
   const result = section('我使用的共享与额度', node('div', { className: 'a-card-body a-stack' }, view, feedback));
   result.refresh = () => read(drawDetails);
   return result;

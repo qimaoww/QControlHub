@@ -238,6 +238,31 @@ func TestExistingCoreMigrationAcceptsExactSupportedExecStartForms(t *testing.T) 
 	}
 }
 
+func TestExistingCoreMigrationLeavesUnreferencedXrayAssetsAlone(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	for _, name := range xrayMigrationAssetNames {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(fixture.existing.Binary), name), []byte("unrelated untrusted input"), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	managedGeoIP := filepath.Join(filepath.Dir(fixture.managed.Binary), "geoip.dat")
+	if err := os.WriteFile(managedGeoIP, []byte("independent managed asset"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := fixture.executor.readExistingConfig(context.Background(), core.EngineXray, fixture.managed, fixture.existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: snapshot}); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentAndMode(t, managedGeoIP, "independent managed asset", 0o640)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(fixture.managed.Binary), "geosite.dat")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unreferenced geosite.dat was imported: %v", err)
+	}
+}
+
 func TestExistingXrayMigrationStagesAndRollsBackGeoAssets(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
@@ -311,8 +336,6 @@ func TestExistingCoreMigrationRejectsUnsupportedSingBoxConfigDirectoryArgv(t *te
 	}
 	for name, argv := range map[string]string{
 		"unknown extra":      "/usr/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d --unknown",
-		"reordered":          "/usr/bin/sing-box run -C /etc/sing-box/conf.d -c /etc/sing-box/config.json",
-		"long directory":     "/usr/bin/sing-box run -c /etc/sing-box/config.json --config-directory /etc/sing-box/conf.d",
 		"multiple directory": "/usr/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d -C /etc/sing-box/other",
 	} {
 		t.Run(name, func(t *testing.T) {

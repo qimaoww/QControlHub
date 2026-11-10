@@ -1,3 +1,5 @@
+import { managedCoreBlockReason } from "../modules/managed-core-state.js";
+import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { accountStorage } from "../modules/account-storage.js";
 import { nodeTimeZone } from "./node-time-zone.js";
@@ -25,14 +27,13 @@ const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.s
 const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels || {}, agent.features || []);
 export async function nodesPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
-  const [receivedAgents, savedView] = await Promise.all([ctx.api('/agents'), ctx.api('/preferences/node-view'), ordering.load()]);
-  let agents = list(receivedAgents), preference = savedView;
+  let agents = [], preference = null, loaded = false;
   let liveTable, loadSequence = 0, renderSignature;
   const dialogUpdates = new Set();
   const actionBusy = new Set();
   const uninstallTasks = ctx.state.data.coreUninstallTasks ||= {};
   const coreKey = (agent, engine) => `${agent.id}:${engine}`;
-  const refreshState = muted('正在实时更新');
+  const refreshState = muted('正在读取节点…');
   refreshState.setAttribute('role', 'status');
 
   const canManage = agent => ctx.can('agents.manage', agent) && agent.can_manage !== false;
@@ -43,12 +44,13 @@ export async function nodesPage(ctx) {
     enabled: () => true,
     order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
   });
-  let view = preference.view === 'list' ? 'list' : 'cards';
+  let view = 'cards';
   let batchBox;
   const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
   const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
   const batchToggle = ctx.can('tasks.execute') && button('批量操作', batch);
   async function setView(value) {
+    if (!preference) return;
     if (value === view) return;
     cardToggle.disabled = listToggle.disabled = true;
     try {
@@ -83,7 +85,7 @@ export async function nodesPage(ctx) {
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
   function dragControl(agent) { return dragHandle(agent.id, agent.name); }
   function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
-    button(compact?'设置':'查看设置',event=>void ctx.mutate(event.currentTarget,()=>settings(agent)),{title:'查看设置'}),
+    button(compact?'设置':'查看设置',()=>settings(agent),{title:'查看设置'}),
     dragControl(agent));}
   function traffic(agent, key, rate = false) {
     const metrics = agent.metrics || {}, value = metrics[key];
@@ -107,7 +109,7 @@ export async function nodesPage(ctx) {
       if (code) agent.labels.region_code = code; else { delete agent.labels.region_code; agent.region_code = ''; }
       draw();
       try { await load(); }
-      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.announce('国家／地区已保存，节点刷新失败，请刷新重试。', 'error'); }
+      catch (error) { if (ctx.current() && error.name !== 'AbortError') ctx.announce(`国家／地区已保存，节点刷新失败。\n${error.message}`, 'error'); }
     });
   }
   function addresses(agent) {
@@ -132,15 +134,16 @@ export async function nodesPage(ctx) {
   async function load() {
     const sequence = ++loadSequence;
     let received;
-    let uninstallStates;
+    if (ctx.can('tasks.read')) void Promise.all(Object.entries(uninstallTasks).map(async ([key, id]) => {
+      try { return [key, id, await ctx.api(`/tasks/${pathID(id)}`)]; }
+      catch { return [key, id, null]; }
+    })).then(states => {
+      if (!ctx.current() || sequence !== loadSequence) return;
+      for (const [key, id, task] of states) if (task && taskTerminal(task) && uninstallTasks[key] === id) delete uninstallTasks[key];
+      if (loaded) { draw(true); dialogUpdates.forEach(update => update()); }
+    });
     try {
-      [received, uninstallStates] = await Promise.all([
-        ctx.api('/agents'),
-        ctx.can('tasks.read') ? Promise.all(Object.entries(uninstallTasks).map(async ([key, id]) => {
-          try { return [key, id, await ctx.api(`/tasks/${pathID(id)}`)]; }
-          catch (error) { if (error.name === 'AbortError') throw error; return [key, id, null]; }
-        })) : [],
-      ]);
+      received = await ctx.api('/agents');
       received = list(received);
     }
     catch (error) {
@@ -151,8 +154,8 @@ export async function nodesPage(ctx) {
       throw error;
     }
     if (!ctx.current() || sequence !== loadSequence) return;
-    for (const [key, id, task] of uninstallStates) if (task && taskTerminal(task) && uninstallTasks[key] === id) delete uninstallTasks[key];
     const existing = new Map(agents.map(agent => [agent.id, agent]));
+    loaded = true;
     agents = received.map(agent => { const current = existing.get(agent.id); if (!current) return agent; for (const name of Object.keys(current)) if (!(name in agent)) delete current[name]; return Object.assign(current, agent); });
     if (refreshState.textContent !== '正在实时更新') refreshState.textContent = '正在实时更新';
     draw(true);
@@ -171,6 +174,7 @@ export async function nodesPage(ctx) {
   }
   function draw(live = false) {
     if (dragging.active()) return;
+    if (!loaded) return;
     const shown = shownAgents();
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
     // Only retain the current projection, within this page/account lifetime.
@@ -275,20 +279,23 @@ export async function nodesPage(ctx) {
       if (ctx.current() && box.open && error.name !== 'AbortError') records.replaceChildren(notice(error.message));
     });
   }
-  async function directory() {
-    const entries = list(await ctx.api('/agent-directory'));
-    if (!ctx.current()) return;
-    const content = node('div');
-    const box = ctx.dialog('节点目录', content, { wide: true });
+  function directory() {
+    let entries = [];
+    const content = node('div', {}, loadingTable(['节点', '所有者', '状态', '内核', '操作'], '节点目录'));
+    const body = stack(content);
+    const box = ctx.dialog('节点目录', body, { wide: true });
+    const local = dialogContext(ctx, box);
     function drawDirectory() {
       content.replaceChildren(table(['节点', '所有者', '状态', '内核', '操作'], entries.map(entry => [
         stack(entry.name, muted(entry.id)), entry.owner_username || '未分配账号', status(entry.status), (entry.capabilities || []).join(' · '),
-        nodeDeleteControl(ctx, entry, { available: () => box.open && ctx.can('users.manage'), onDeleted() {
+        nodeDeleteControl(local, entry, { available: () => box.open && ctx.can('users.manage'), onDeleted() {
           entries.splice(entries.indexOf(entry), 1); agents = agents.filter(agent => agent.id !== entry.id); drawDirectory(); draw(true);
         }, refresh: load }),
       ]), { label: '节点目录' }));
     }
-    drawDirectory(); return box;
+    const read = readRegion(local, '节点目录', signal => local.api('/agent-directory', { signal }), value => { entries = list(value); drawDirectory(); }, { view:content, clear() { entries = []; drawDirectory(); } });
+    body.prepend(read.element); void read.load();
+    return box;
   }
   async function settings(agent) {
     const base = `/agents/${pathID(agent.id)}`;
@@ -340,7 +347,7 @@ export async function nodesPage(ctx) {
         if (!available()) return;
         ctx.announce('节点设置已保存');
         try { await load(); }
-        catch (error) { if (available() && error.name !== 'AbortError') ctx.announce('节点设置已保存，刷新失败，请刷新重试。', 'error'); }
+        catch (error) { if (available() && error.name !== 'AbortError') ctx.announce(`节点设置已保存，刷新失败。\n${error.message}`, 'error'); }
       } catch (error) {
         if (savedCount && available()) throw new Error(`部分设置已保存，其余更改尚未保存：${error.message}`);
         throw error;
@@ -366,7 +373,7 @@ export async function nodesPage(ctx) {
         const input = inputField.querySelector('input');
         input.dataset.engineCapability = engine;
         const transitionState = notice('');
-        const task = button('查看启停任务', event => void ctx.mutate(event.currentTarget, () => taskDetail(ctx, capability.taskID)));
+        const task = button('查看启停任务', () => taskDetail(ctx, capability.taskID));
         const capability = { input, view: stack(inputField, transitionState, actions(task)), saved: input.checked, failure: '', taskID: '' };
         const update = () => {
           const latest = agent.capabilities.includes(engine), transition = agent.capability_transitions?.[engine];
@@ -401,7 +408,7 @@ export async function nodesPage(ctx) {
           const busy = actionBusy.has(coreKey(agent, engine));
           const uninstallReason = () => !agents.includes(agent) || agent.can_manage === false || !ctx.can('host.manage', agent) || !ctx.can('tasks.execute') ||
             !agent.features?.includes('core-uninstall-v1') || agent.status !== 'online' || !agent.runtime?.[engine]?.installed ||
-            Boolean(agent.runtime?.[engine]?.existing_config_unsupported_reason) || Boolean(uninstallTasks[coreKey(agent, engine)]);
+            Boolean(managedCoreBlockReason(agent, engine)) || Boolean(uninstallTasks[coreKey(agent, engine)]);
           const reason = coreInstallBlockReason(agent, engine, ctx.can);
           const controls = actions(['status', 'start', 'stop', 'restart'].map(action => button(actionName(action), async event => {
             const control = event.currentTarget;
@@ -434,6 +441,7 @@ export async function nodesPage(ctx) {
             node('p', {}, muted(runtime.version || (runtime.installed === true ? '版本未上报' : runtime.installed === false ? '尚未安装' : '安装状态未知'))),
             instance && stack(muted(instance.version), instance.reason && notice(instance.reason)),
             runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
+            runtime.imported_resource_update_error && notice(runtime.imported_resource_update_error),
             controls, actions(install, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
               runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`)),
             agent.can_manage !== false && uninstall && actions(uninstall),
@@ -491,7 +499,7 @@ export async function nodesPage(ctx) {
     corePanel.dataset.settingsPanel = 'core'; corePanel.setAttribute('role', 'region'); corePanel.setAttribute('aria-label', '内核设置'); corePanel.hidden = true;
     renderRuntimes();
     const renderNodeOperations = () => actions(
-      ctx.can('metrics.read') && button('查看指标历史',event=>void ctx.mutate(event.currentTarget,()=>nodeMetrics(ctx,agent))),
+      ctx.can('metrics.read') && button('查看指标历史',()=>nodeMetrics(ctx,agent)),
       ctx.can('host.manage',agent) && button('升级 Agent',async event=>{
         const control=event.currentTarget;
         if(!await ctx.confirm('升级此节点的 QAgent？替换后自动重连，期间节点会短暂离线。','升级 Agent')||!ctx.current())return;
@@ -597,22 +605,34 @@ export async function nodesPage(ctx) {
     batchBox = openNodeBatch(ctx, (value = agents) => orderNodesBySavedOrder(value, ordering.ids()));
   }
 
-  const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : '更新失败，保留上次数据'; };
-  poll({ ...ctx, onRefreshError: failedRefresh }, load);
+  const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : loaded ? '更新失败，保留上次数据' : '节点读取失败，请重试'; };
+  poll({ ...ctx, onRefreshError: failedRefresh }, async () => { if (loaded) await load(); });
   ctx.onRefresh(async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } });
-  draw(); search.querySelector('input').addEventListener('input', draw);
+  results.append(loadingTable(['节点','状态','CPU','内存','磁盘','网络收发','操作'], '节点监控'));
+  search.querySelector('input').addEventListener('input', draw);
   const deepID = location.hash.match(/^#(?:settings-node-|node-(?!settings(?:\?|$)))([^?]+)/)?.[1]
     || new URLSearchParams(location.hash.split('?')[1] || '').get('agent');
-  if (deepID) queueMicrotask(() => {
-    if (!ctx.current()) return;
-    const agent = agents.find(agent => agent.id === deepID);
-    if (agent) void settings(agent);
-    else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
+  let openedDeep = false;
+  const nodeRead = readRegion(ctx, '节点', async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } }, () => {
+    if (deepID && !openedDeep) {
+      openedDeep = true;
+      const agent = agents.find(agent => agent.id === deepID);
+      if (agent) settings(agent);
+      else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
+    }
+  }, {view:results});
+  const preferenceRead = readRegion(ctx, '视图偏好', signal => ctx.api('/preferences/node-view', { signal }), value => {
+    preference = value; view = value.view === 'list' ? 'list' : 'cards';
+    cardToggle.disabled = listToggle.disabled = false; draw();
   });
+  cardToggle.disabled = listToggle.disabled = true;
+  const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => draw(true));
+  void nodeRead.load(); void preferenceRead.load(); void orderRead.load();
+  ctx.onRefresh(() => Promise.all([nodeRead.load(), !preference && preferenceRead.load(), orderRead.load()]));
   return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
     cardToggle, listToggle,
-    ctx.can('enrollment.manage') && button('添加节点', event => void ctx.mutate(event.currentTarget, enrollment), { tone: 'primary' }),
-    ctx.can('users.manage') && button('节点目录', event => void ctx.mutate(event.currentTarget, directory)),
+    ctx.can('enrollment.manage') && button('添加节点', enrollment, { tone: 'primary' }),
+    ctx.can('users.manage') && button('节点目录', directory),
     batchToggle,
-  )), refreshState, results);
+  )), nodeRead.element, preferenceRead.element, orderRead.element, refreshState, results);
 }

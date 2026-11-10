@@ -68,7 +68,8 @@ func requestConfigScope(ctx context.Context) (configScope, bool) {
 // content. Column names are constants supplied by store code, never input.
 func ownerClause(ctx context.Context, column string, args *[]any) string {
 	scope := scopeForConfig(ctx)
-	if scope.Admin {
+	_, key := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth)
+	if scope.Admin && !key {
 		return ""
 	}
 	*args = append(*args, scope.OwnerID)

@@ -65,8 +65,10 @@ async function run() {
     assert.ok(rect.width > 0 && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1, "installation form clips a control");
   }
   form.requestSubmit(); await confirmation("提交安装");
-  const failed = await waitFor(() => dialog("任务详情")?.querySelector('.a-notice')?.textContent.includes("fixture download failure") && dialog("任务详情"), "installation failure was not visible");
+  const failed = await waitFor(() => dialog("任务详情")?.querySelector('pre')?.textContent.includes("fixture download failure") && dialog("任务详情"), "installation failure was not visible");
   const failure = failed.querySelector('.a-notice');
+  assert.ok(failure.textContent.includes("失败"), "installation failure summary missing");
+  assert.ok(failed.querySelector('pre').textContent.includes("download checksum diagnostic"), "installation failure lost its raw diagnostic");
   assert.ok(failure.scrollWidth <= failure.clientWidth + 1, "long installation error overflows");
   failed.querySelector('[aria-label=关闭]').click();
   await waitFor(() => !submit.disabled, "failed install cannot retry");

@@ -17,9 +17,7 @@ func (s *Server) authorizeRetryConfig(w http.ResponseWriter, r *http.Request, co
 			permission = core.PermissionAgentConfigWrite
 		}
 	}
-	role, _ := s.sessionRole(r)
-	granted, _ := s.sessionPermissions(r)
-	if !role.Allows(permission) && !core.HasPermission(granted, permission) {
+	if !s.sessionAllows(r, permission) {
 		writeError(w, http.StatusForbidden, "没有此配置的读写权限")
 		return false
 	}
@@ -45,13 +43,18 @@ func (s *Server) editRetryTask(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRetryConfig(w, r, config, false) || !s.authorizeRetryConfig(w, r, config, true) {
 		return
 	}
-	var input struct {
-		Content string `json:"content"`
-		Version int    `json:"expected_version"`
-	}
+	var input configRetryInput
 	if err := decodeJSON(w, r, &input, 2<<20); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if _, key := requestAPIKey(r); key {
+		var err error
+		input.Content, err = core.PreserveRedactedConfig(config.Content, input.Content)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
 	}
 	saved, task, err := s.store.SaveEditedRetry(r.Context(), r.PathValue("id"), input.Content, input.Version)
 	if err != nil {
@@ -62,4 +65,9 @@ func (s *Server) editRetryTask(w http.ResponseWriter, r *http.Request) {
 	task.TLSFrontends = nil
 	s.recordAudit(r, "task.edited-retry", task.ID, "")
 	writeJSON(w, http.StatusCreated, map[string]any{"config": saved, "task": task})
+}
+
+type configRetryInput struct {
+	Content string `json:"content"`
+	Version int    `json:"expected_version"`
 }

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,9 +33,11 @@ func (s *Server) putAgentConfig(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var input core.Config
-	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	input, err := decodeEditableConfig(w, request, func(version int) (core.Config, error) {
+		return s.store.AgentConfig(request.Context(), request.PathValue("id"), engine)
+	})
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
 	if input.Engine != "" && input.Engine != engine {
@@ -50,6 +54,13 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeStoreError(w, err)
 		return
+	}
+	if _, key := requestAPIKey(request); key && err == nil {
+		input.Content, err = core.PreserveRedactedConfig(current.Content, input.Content)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
 	}
 	if err == nil && current.Version != input.Version {
 		writeStoreError(w, store.ErrConflict)
@@ -98,6 +109,11 @@ func (s *Server) createConfig(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if _, key := requestAPIKey(request); key && strings.Contains(input.Content, "[redacted") {
+		writeError(w, 400, "新配置不能使用脱敏占位符")
+		return
+	}
+
 	config, err := s.store.CreateConfig(request.Context(), input)
 	if err != nil {
 		writeStoreError(w, err)
@@ -108,11 +124,14 @@ func (s *Server) createConfig(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, request *http.Request) {
-	var input core.Config
-	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	input, err := decodeEditableConfig(w, request, func(version int) (core.Config, error) {
+		return s.store.ConfigRevision(request.Context(), request.PathValue("id"), version)
+	})
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
+
 	config, err := s.store.UpdateConfig(request.Context(), request.PathValue("id"), input)
 	if err != nil {
 		writeStoreError(w, err)
@@ -229,3 +248,52 @@ func (s *Server) createConfigExecutionTask(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, status, task)
 }
+
+// configEditInput distinguishes omitted/null content from an explicit replacement.
+// Metadata remains a complete PUT representation, as in the browser API.
+type configEditInput struct {
+	core.Config
+	Content *string `json:"content"`
+}
+
+func decodeEditableConfig(w http.ResponseWriter, request *http.Request, read func(int) (core.Config, error)) (core.Config, error) {
+	if _, key := requestAPIKey(request); !key {
+		var input core.Config
+		if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
+			return input, fmtInvalidConfig(err)
+		}
+		return input, nil
+	}
+	var input configEditInput
+	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
+		return core.Config{}, fmtInvalidConfig(err)
+	}
+	if input.Content != nil {
+		input.Config.Content = *input.Content
+	}
+	metadata := input.Config
+	metadata.Content = ""
+	raw, _ := json.Marshal(metadata)
+	if strings.Contains(string(raw), "[redacted") {
+		return core.Config{}, fmtInvalidConfig(errors.New("配置元数据不能使用脱敏占位符"))
+	}
+	if input.Content == nil || strings.Contains(input.Config.Content, "[redacted") {
+		current, err := read(input.Version)
+		if err != nil {
+			return core.Config{}, err
+		}
+		if input.Version != current.Version {
+			return core.Config{}, store.ErrConflict
+		}
+		if input.Content == nil {
+			input.Config.Content = current.Content
+		} else {
+			input.Config.Content, err = core.PreserveRedactedConfig(current.Content, *input.Content)
+			if err != nil {
+				return core.Config{}, fmtInvalidConfig(err)
+			}
+		}
+	}
+	return input.Config, nil
+}
+func fmtInvalidConfig(err error) error { return fmt.Errorf("%w: %v", store.ErrInvalid, err) }

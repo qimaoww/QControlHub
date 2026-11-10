@@ -94,7 +94,7 @@ func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engin
 		return nil
 	}
 	if spec == defaultSpec {
-		if _, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager); err != nil {
+		if _, err := validateManagedServiceTarget(ctx, engine, spec, manager); err != nil {
 			return fmt.Errorf("kernel %s service %s: permission sync refused custom service/override: %w; restore the bundled service or maintain its permissions manually", engine, spec.Service, err)
 		}
 		if manager.Kind() == ServiceManagerSystemd && engine == core.EngineMihomo {
@@ -272,14 +272,14 @@ func (syncer coreUnitCapabilitySyncer) runHelper(ctx context.Context, input []by
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
 	command.Stdin = bytes.NewReader(input)
 	configureCommand(command)
-	output := &boundedOutput{limit: 16 << 10}
+	output := &boundedOutput{limit: core.MaxTaskDiagnosticBytes / 2}
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {
 		message := strings.TrimSpace(strings.ToValidUTF8(output.String(), "�"))
 		if message == "" {
 			message = err.Error()
 		}
-		return errors.New(message)
+		return fmt.Errorf("%w; %s", err, message)
 	}
 	return nil
 }

@@ -104,6 +104,12 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 		auxiliaryEnableState = record.AuxiliaryEnableState
 		auxiliaryInitialState = record.AuxiliaryInitialState
 	}
+	if record.ExistingInitialState == "" {
+		record.ExistingInitialState = "active"
+	}
+	if record.ExistingInitialState != "active" && record.ExistingInitialState != "inactive" {
+		return errors.New("invalid original service state")
+	}
 	contents := strings.Join([]string{
 		coreMigrationPreparedToken,
 		record.ConfigDigest,
@@ -122,6 +128,7 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 		auxiliaryService,
 		auxiliaryEnableState,
 		auxiliaryInitialState,
+		record.ExistingInitialState,
 	}, " ") + "\n"
 	return writeCoreMigrationMarkerContents(prefix, engine, contents)
 }

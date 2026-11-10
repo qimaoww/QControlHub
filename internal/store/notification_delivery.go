@@ -69,8 +69,16 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 			}
 		}
 	}
+	keyAllowed, keyErr := apiKeyWorkAllowed(ctx, tx, "notification-test", fmt.Sprint(d.ID))
+	configurationAllowed, configurationErr := apiKeyWorkAllowed(ctx, tx, "notification-configuration", d.Owner)
+	if configurationErr != nil {
+		return false, configurationErr
+	}
 	currentAuthorization, authErr := s.notificationAuthorization(ctx, tx, d.Owner)
-	if authErr != nil || currentAuthorization != authorization || !enabled || channel == nil || !s.notificationActive(ctx, tx, d.Owner) || !s.notificationEventAllowed(ctx, tx, d.Owner, d.Event, d.ResourceOwner) {
+	if keyErr != nil {
+		return false, keyErr
+	}
+	if !keyAllowed || !configurationAllowed || authErr != nil || currentAuthorization != authorization || !enabled || channel == nil || !s.notificationActive(ctx, tx, d.Owner) || !s.notificationEventAllowed(ctx, tx, d.Owner, d.Event, d.ResourceOwner) {
 		_, err = tx.Exec(ctx, `UPDATE notification_deliveries SET status='canceled',error='订阅或资源权限已失效',updated_at=now() WHERE id=$1`, d.ID)
 		if err != nil {
 			return false, err
@@ -135,6 +143,16 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 		rendered, _ := notify.RenderFormatted(template, d.Event, settings.PanelName, settings.TimeZone)
 		d.Event.Title, d.Event.Message, d.Event.Entities = rendered.Title, rendered.Body, rendered.Entities
 	}
+	for _, source := range []struct{ kind, id string }{{"notification-test", fmt.Sprint(d.ID)}, {"notification-configuration", d.Owner}} {
+		allowed, authErr := apiKeyWorkAllowed(ctx, s.pool, source.kind, source.id)
+		if authErr != nil {
+			return false, authErr
+		}
+		if !allowed {
+			_, err = s.pool.Exec(ctx, `UPDATE notification_deliveries SET status='canceled',error='API Key 授权已失效',lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_id=$2`, d.ID, d.Lease)
+			return true, err
+		}
+	}
 	sendCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	sendErr := sender.Send(sendCtx, *channel, d.Event)
 	cancel()
@@ -143,7 +161,7 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	delay := time.Duration(0)
 	if sendErr != nil {
 		status = "failed"
-		message = "通知投递失败"
+		message = core.DiagnosticText(sendErr.Error())
 		var de *notify.DeliveryError
 		if errors.As(sendErr, &de) {
 			message = de.Reason
@@ -163,6 +181,18 @@ func (s *Store) DeliverNotification(ctx context.Context, sender *notify.Sender, 
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer finishCancel()
 	_, err = s.pool.Exec(finishCtx, `UPDATE notification_deliveries SET status=$3,error=$4,next_at=now()+$5::interval,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_id=$2 AND status='sending'`, d.ID, d.Lease, status, message, fmt.Sprintf("%f seconds", delay.Seconds()))
+	if err == nil && sendErr != nil {
+		detail := sendErr.Error()
+		var delivery *notify.DeliveryError
+		if errors.As(sendErr, &delivery) && delivery.Diagnostic != "" {
+			detail += "\n" + delivery.Diagnostic
+		}
+		err = s.retainBackgroundFailure(finishCtx, d.Owner, "通知投递", fmt.Sprintf("delivery:%d/channel:%s", d.ID, d.ChannelID), fmt.Sprintf("delivery_attempt_%d", d.Attempts+1), errors.New(detail))
+		if err != nil {
+			_, markerErr := s.pool.Exec(finishCtx, `UPDATE notification_deliveries SET error=$2 WHERE id=$1`, d.ID, truncate(message, 750)+"\n未能保存到任务："+truncate(SafeFailureDiagnostic(err), 200))
+			err = errors.Join(err, markerErr)
+		}
+	}
 	return true, err
 }
 func (s *Store) QueueNotificationTest(ctx context.Context, id string, revision int64) (int64, error) {
@@ -243,6 +273,9 @@ func (s *Store) QueueNotificationTemplateTest(ctx context.Context, id string, re
 	var result int64
 	err = tx.QueryRow(ctx, `INSERT INTO notification_deliveries(owner_id,rule_id,channel_id,dedupe,event,principal_stamp) VALUES($1,'test',$2,$3,$4,$5) RETURNING id`, owner, id, rand.Text(), b, authorization).Scan(&result)
 	if err != nil {
+		return 0, err
+	}
+	if err := recordAPIKeyWork(ctx, tx, "notification-test", fmt.Sprint(result)); err != nil {
 		return 0, err
 	}
 	return result, tx.Commit(ctx)

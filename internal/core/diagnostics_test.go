@@ -48,9 +48,10 @@ func FuzzDiagnosticRedactionEquivalent(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
-		want := diagnosticPrivatePEM.ReplaceAllString(raw, "[redacted private PEM]")
-		want = diagnosticAssignments.ReplaceAllString(want, "${1}[redacted]")
+		want := diagnosticPrivatePEM.ReplaceAllString(redactDiagnosticContainers(raw), "[redacted private PEM]")
 		want = diagnosticBearer.ReplaceAllString(want, "Bearer [redacted]")
+		want = diagnosticHeaders.ReplaceAllString(want, "${1}[redacted]")
+		want = diagnosticAssignments.ReplaceAllString(want, "${1}[redacted]")
 		want = diagnosticAPIKey.ReplaceAllString(want, "[redacted]")
 		want = diagnosticUUID.ReplaceAllString(want, "[redacted UUID]")
 		want = diagnosticURLCredentials.ReplaceAllString(want, "${1}[redacted]@")
@@ -61,4 +62,26 @@ func FuzzDiagnosticRedactionEquivalent(f *testing.F) {
 			t.Fatalf("redaction differs for %q: got %q, want %q", raw, got, want)
 		}
 	})
+}
+
+func TestDiagnosticRedactionIsIdempotentAndMasksWholeCredentials(t *testing.T) {
+	raw := "operation failed\nAuthorization: Bearer secret-token\nCookie: session=secret-cookie; csrf=second-cookie\npassword=secret-password\nroot cause: permission denied"
+	once := DiagnosticText(raw)
+	if strings.Contains(once, "secret-") || strings.Contains(once, "second-cookie") || !strings.Contains(once, "root cause: permission denied") {
+		t.Fatalf("redaction lost safety or cause: %q", once)
+	}
+	if again := DiagnosticText(once); again != once {
+		t.Fatalf("redaction is not idempotent: %q", again)
+	}
+}
+
+func TestDiagnosticCredentialContainersPreserveSurroundingCauses(t *testing.T) {
+	raw := `validation failed at inbound.authentication: {"passwords":["first-secret","second-secret"],"tokens":{"a":"third-secret"}}; nested cause: bind failed`
+	got := DiagnosticText(raw)
+	if strings.Contains(got, "-secret") || !strings.Contains(got, "nested cause: bind failed") || !strings.Contains(got, "inbound.authentication") {
+		t.Fatalf("unsafe or incomplete diagnostic: %s", got)
+	}
+	if next := DiagnosticText(got); next != got {
+		t.Fatalf("container redaction changed twice: %s", next)
+	}
 }

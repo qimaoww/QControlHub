@@ -130,6 +130,14 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 		return core.Config{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
 
+	var importing bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t JOIN task_imports i ON i.task_id=t.id
+	 WHERE t.agent_id=$1 AND t.engine=$2 AND t.owner_id=$3 AND t.status IN ('pending','running'))`, input.AgentID, input.Engine, scopeForConfig(ctx).OwnerID).Scan(&importing); err != nil {
+		return core.Config{}, err
+	}
+	if importing {
+		return core.Config{}, fmt.Errorf("%w: 同一托管目标正在迁移，草稿已保留，请等待迁移结束后再保存", ErrConflict)
+	}
 	var currentID string
 	var currentVersion int
 	ownerID := scopeForConfig(ctx).OwnerID

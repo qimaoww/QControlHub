@@ -6,12 +6,13 @@ import { applyAppearance } from "./appearance.js";
 import { bindSiteLogo, refreshSiteBranding } from "./site-brand.js";
 import { setStorageAccount } from "../modules/account-storage.js";
 import { clearConnectionStorage } from "../modules/client-connection-cache.js";
-import { accountRequest } from "../modules/account-request.js";
+import { accountRequest, accountFailureRecorder } from "../modules/account-request.js";
+import { errorDiagnostic, errorMessage } from "../modules/errors.js";
 import { effectiveTheme } from "../modules/theme-registry.js";
 import { createPermissionChecker } from "../modules/permissions.js";
 import { routeForHash } from "../modules/routes.js";
 import { createSessionWatch } from "../modules/session-watch.js";
-import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog } from "./ui.js";
+import { node, icon, button, actions, stack, section, notice, empty, field, formData, openDialog, code, copyText } from "./ui.js";
 import { createNotifications } from "./notifications.js";
 import { createRouteModuleLoader } from "../modules/route-loader.js";
 import { createRouteWarmup } from "../modules/route-warmup.js";
@@ -34,6 +35,7 @@ const destinations = [
     ["system-bbr", "TCP 调优", "settings", "system-bbr.read"], ["ip-quality", "IP 质量", "activity", "agents.read"],
   ]],
   ["面板", [
+    ["api", "API", "link", "agent-access.read"],
     ["settings", "面板设置", "settings", "settings.read"], ["users", "用户管理", "users", "users.manage"],
     ["my-quota", "共享与额度", "users", "agent-access.read"], ["themes", "主题", "palette", "agent-access.read"],
   ]],
@@ -42,7 +44,7 @@ const pageModules = {
   dashboard: ['dashboard', 'dashboardPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
   'my-quota': ['quota', 'quotaPage'], 'archive-config': ['archives', 'archivePage'], themes: ['themes', 'themePage'],
   certificates: ['certificates', 'certificatesPage'], 'ip-quality': ['ip-quality', 'ipQualityPage'], users: ['users', 'usersPage'],
-  notifications: ['notifications', 'notificationsPage'],
+  notifications: ['notifications', 'notificationsPage'], api: ['api-management', 'apiPage'],
   traffic: ['traffic', 'trafficPage'], settings: ['settings', 'settingsPage'], 'substore-sync': ['substore-sync', 'substorePage'],
   'live-config': ['configs', 'liveConfigPage'], 'system-bbr': ['system-bbr', 'tcpPage'],
   'core-logs': ['core-logs', 'logsPage'], 'client-connections': ['client-connections', 'connectionsPage'], 'client-access': ['client-access', 'clientAccessPage'],
@@ -52,7 +54,7 @@ const routeModules = createRouteModuleLoader({
   dashboard: () => import('./dashboard.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
   agents: () => import('./nodes.js'), archives: () => import('./configs.js'), themes: () => import('./themes.js'),
   certificates: () => import('./certificates.js'), 'ip-quality': () => import('./ip-quality.js'), users: () => import('./users.js'),
-  notifications: () => import('./notification-settings.js'),
+  notifications: () => import('./notification-settings.js'), 'api-management': () => import('./api-management.js'),
   traffic: () => import('./traffic.js'), settings: () => import('./settings.js'), 'substore-sync': () => import('./substore.js'),
   configs: () => import('./live-config.js'), 'system-bbr': () => import('./tcp.js'),
   'core-logs': () => import('./observability.js'), 'client-connections': () => import('./observability.js'), 'client-access': () => import('./client-access.js'),
@@ -76,6 +78,8 @@ export function startAnalytics({ app, session }) {
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
   const notifications = createNotifications(presentation);
   const work = node("div", { className: "a-work" });
+  let activeContext;
+  const shownFailures = new Map();
   let drawer, shellTitle, navigationToggle, pageActions, refreshButton, pageRefresh;
   document.body.className = "analytics";
   app.replaceChildren(layout);
@@ -104,7 +108,11 @@ export function startAnalytics({ app, session }) {
       isCurrent: () => state.session === bound && !lifetime.signal.aborted,
       onUnauthorized: message => login(message),
     }) : reader.read(path, { ...options, signal: options.signal || lifetime.signal }))
-      .finally(() => { if (writing) invalidate(); });
+      .finally(() => { if (writing) invalidate(); })
+      .catch(error => {
+        if (state.session === bound && !lifetime.signal.aborted && error.name !== 'AbortError') showFailure(error);
+        throw error;
+      });
     if (path === "/settings" && state.session === bound && !lifetime.signal.aborted) {
       state.data.settings = result;
       applyAppearance(result);
@@ -124,11 +132,44 @@ export function startAnalytics({ app, session }) {
     shellTitle = null;
     void render();
   } });
-  const announce = notifications.show;
+  const recordFailure = (error,operation,stage) => {
+    const bound=state.session;
+    return accountFailureRecorder(bound,()=>state.session===bound && !lifetime.signal.aborted)(error,operation,stage);
+  };
+  const captureRuntimeFailure=event=> {
+    const cause=event.reason ?? event.error;
+    const error=cause instanceof Error ? cause : new Error(typeof cause === "string" ? cause : event.message || "页面运行失败，浏览器未提供具体原因。", {cause});
+    if (!error.intentionalCancellation) void recordFailure(error,`页面 ${route}`,"browser_runtime").then(()=>showFailure(error));
+  };
+  window.addEventListener("unhandledrejection",captureRuntimeFailure,{signal:lifetime.signal});
+  window.addEventListener("error",captureRuntimeFailure,{signal:lifetime.signal});
+  const failureSummary=error=> {
+    const first=errorMessage(error.message).split("\n")[0];
+    return first.slice(0,300)+(first.length>300 ? "…" : "")+(error.failureSaved===false ? "\n未能保存到任务。" : "");
+  };
+  const openFailure=async error=> {
+    if(error.failureTaskID && activeContext?.current() && can("tasks.read")) {
+      const {taskDetail}=await routeModules.load("tasks");
+      return taskDetail(activeContext,error.failureTaskID);
+    }
+    const detail=errorDiagnostic(error);
+    dialog("失败详情",stack(notice(failureSummary(error)),code(detail),actions(button("复制诊断",event=>void mutate(event.currentTarget,()=>copyText(detail))))),{wide:true});
+  };
+  const showFailure = error => {
+    const key = error.failureTaskID || error.message;
+    if (shownFailures.get(key)?.isConnected) return;
+    shownFailures.set(key, notifications.show(failureSummary(error), "error", () => void openFailure(error).catch(cause => notifications.show(cause.message,"error"))));
+    while (shownFailures.size>64) shownFailures.delete(shownFailures.keys().next().value);
+  };
+  const announce = (message,tone) => {
+    if(tone!=="error") {notifications.show(message,tone);return;}
+    const error=new Error(message);
+    void recordFailure(error,`页面 ${route}`,"panel_feedback").then(showFailure);
+  };
   function dialog(title, content, { wide = false } = {}) {
     const active = document.activeElement;
     const closeButton = button("", () => {
-      if (pending) { announce("操作正在提交，请等待结果。", "error"); return; }
+      if (pending) { announce("操作正在提交，请等待结果。", "warn"); return; }
       if (box.onRequestClose) void box.onRequestClose();
       else box.close();
     }, { glyph: "close", title: "关闭", className: "a-icon-button" });
@@ -161,9 +202,10 @@ export function startAnalytics({ app, session }) {
     });
   }
   async function mutate(control, run) {
-    if (pending) { announce("操作正在提交，请等待结果。", "error"); return; }
+    if (pending) { announce("操作正在提交，请等待结果。", "warn"); return; }
     if (control?.disabled) return;
     const disabled = control?.disabled;
+    const operationSession = state.session, operationEpoch = routeEpoch;
     if (control) { control.disabled = true; control.setAttribute("aria-busy", "true"); }
     pending++;
     // A write may replace its form or table cell before its readback finishes.
@@ -171,7 +213,7 @@ export function startAnalytics({ app, session }) {
     app.setAttribute("aria-busy", "true");
     try { return await run(); }
     catch (error) {
-      if (error.name !== "AbortError") announce(error.message, "error");
+      if (!error.intentionalCancellation && state.session === operationSession && routeEpoch === operationEpoch) { error = await recordFailure(error,control?.textContent || `页面 ${route}`,"panel_action"); showFailure(error); }
     } finally {
       pending--;
       if (!pending) app.removeAttribute("aria-busy");
@@ -179,6 +221,7 @@ export function startAnalytics({ app, session }) {
     }
   }
   function form(fields, label, save) {
+    const formSession = state.session, formEpoch = routeEpoch;
     const feedback = notice("");
     const submit = node("button", { type: "submit", className: "a-button primary" }, label);
     const controls = node("fieldset", { className: "a-form-fields a-stack" }, fields);
@@ -189,6 +232,7 @@ export function startAnalytics({ app, session }) {
         if (parent.tagName === "DETAILS") parent.open = true;
       const first = [...element.elements].find(control => control.willValidate && !control.validity.valid);
       if (first === event.target) {
+        void recordFailure(Object.assign(new Error(`${first.labels?.[0]?.textContent || first.name}：${first.validationMessage}`),{field:first.name}),label,"form_validation");
         first.focus();
         const inline = document.getElementById(first.getAttribute("aria-errormessage"));
         feedback.textContent = inline?.matches(".a-validation") ? "" : first.validity.customError ? first.validationMessage : first.validity.valueMissing ? "请填写此项。" : "请检查此项的格式或取值范围。";
@@ -205,8 +249,9 @@ export function startAnalytics({ app, session }) {
         let invalid;
         try { await save(values, element); }
         catch (error) {
-          if (error.name === "AbortError") return;
-          feedback.textContent = error.message;
+          if (error.intentionalCancellation || state.session !== formSession || routeEpoch !== formEpoch) return;
+          error = await recordFailure(error,label,"form_submission");
+          feedback.replaceChildren(node("span",{},failureSummary(error)),node("br"),button("查看详情",()=>void openFailure(error).catch(showFailure)));
           invalid = error.field && element.elements.namedItem(error.field);
         } finally {
           controls.disabled = false;
@@ -282,7 +327,7 @@ export function startAnalytics({ app, session }) {
     main.replaceChildren();
   }
   async function leave() {
-    if (pending) { announce("操作正在提交，请等待结果。", "error"); return false; }
+    if (pending) { announce("操作正在提交，请等待结果。", "warn"); return false; }
     if (dirty && !await confirm("存在未保存的更改，确定离开？", "离开页面")) return false;
     dirty = false;
     return true;
@@ -328,25 +373,11 @@ export function startAnalytics({ app, session }) {
       field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true }),
     ], "登录", async values => {
       const authenticated = await api("/auth/login", { method: "POST", body: values });
-      const preference = await accountRequest("/preferences/theme", {
-        session: authenticated, signal: lifetime.signal,
-        isCurrent: () => loginForm.isConnected && !state.session && !lifetime.signal.aborted,
-      });
       state.session = authenticated;
-      if (effectiveTheme(preference.theme_id) !== "analytics") {
-        // Authentication has completed. Release the old runtime before the
-        // deliberate theme boundary; its pending login is not an editor draft.
-        lifetime.abort();
-        routeAbort?.abort();
-        watch.stop();
-        presentation.dispose();
-        location.reload();
-        return;
-      }
       setStorageAccount(state.session);
       dirty = false;
       app.replaceChildren(layout);
-      await render();
+      void render();
     });
     loginForm.setAttribute("aria-label", "登录控制台");
     app.replaceChildren(node("main", { className: "a-login" },
@@ -358,7 +389,7 @@ export function startAnalytics({ app, session }) {
     app.querySelector("input")?.focus();
     motion?.page(app);
   }
-  async function render() {
+  async function render({ targetControl = "" } = {}) {
     if (!state.session) { login(); return; }
     routeAbort?.abort();
     routeAbort = new AbortController();
@@ -375,12 +406,20 @@ export function startAnalytics({ app, session }) {
     document.title = `${title} · QControlHub`;
     const stage = node("div", { className: "a-stack", "aria-busy": "true" }, empty("正在加载…"));
     main.append(stage);
-    let stagedActions = [];
+    let mounted = false;
     const context = {
-      pageActions(...items) { stagedActions = items; },
+      pageActions(...items) { if (!signal.aborted && epoch === routeEpoch) pageActions.replaceChildren(...items); },
+      mount(content) {
+        if (!signal.aborted && epoch === routeEpoch) { stage.replaceChildren(content); stage.removeAttribute('aria-busy'); mounted = true; }
+        return content;
+      },
+      restoreTargetFocus() {
+        if (!signal.aborted && epoch === routeEpoch && targetControl && [document.body, main].includes(document.activeElement))
+          main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({preventScroll:true});
+      },
       onRefresh(read, { local = false } = {}) { if (!signal.aborted && epoch === routeEpoch) { pageRefresh = read; refreshButton.hidden = local; } },
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
-      can, session: state.session, signal, state, dialog, confirm, mutate, form, announce,
+      can, session: state.session, signal, state, dialog, confirm, mutate, form, announce, recordFailure,
       motion,
       refresh, visible: (...args) => motion ? motion.visible(...args) : (args[0].hidden = !args[1]), setDirty(value) { dirty = value; },
       async switchTheme(save) {
@@ -392,6 +431,7 @@ export function startAnalytics({ app, session }) {
       },
       current: () => !signal.aborted && epoch === routeEpoch && Boolean(state.session),
     };
+    activeContext=context;
     try {
       if (entry && route !== "themes" && !can(entry[3])) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
       const descriptor = pageModules[route];
@@ -407,22 +447,23 @@ export function startAnalytics({ app, session }) {
         context.connectionScope = boundedRead(context.api, "/client-connections?scope_only=true", { signal: context.signal });
         void context.connectionScope.catch(() => {});
       }
-      const [module] = await Promise.all([
-        routeModules.load(descriptor[0]),
-        route !== 'settings' && can('settings.read') && !state.data.settings ? context.api('/settings') : null,
-      ]);
+      const module = await routeModules.load(descriptor[0]);
       if (!context.current()) return;
+      if (route !== 'settings' && can('settings.read') && !state.data.settings)
+        void context.api('/settings').catch(error => { if (context.current() && !error.intentionalCancellation) showFailure(error); });
       const page = module[descriptor[1]];
       const content = await page(context);
       if (context.current()) {
-        pageActions.replaceChildren(...stagedActions);
-        stage.replaceChildren(content);
+        if (stage.firstChild !== content) context.mount(content);
         warmup.scheduleRouteWarmup(route);
         if (previousRoute !== route) motion?.page(stage);
       }
     } catch (error) {
-      if (context.current() && error.name !== "AbortError")
-        stage.replaceChildren(notice(error.message), actions(button("重试", () => void refresh())));
+      if(context.current() && error.name!=="AbortError")await recordFailure(error,`页面 ${route}`,"page_loading");
+      if (context.current() && error.name !== "AbortError") {
+        const failure = stack(notice(error.message), actions(button("重试", () => void refresh())));
+        if (mounted) stage.append(failure); else stage.replaceChildren(failure);
+      }
     } finally {
       if (context.current()) stage.removeAttribute("aria-busy");
     }
@@ -438,7 +479,7 @@ export function startAnalytics({ app, session }) {
     if (!allowed) { history.replaceState(null, "", currentHash || "#dashboard"); return; }
     currentHash = nextHash;
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
-    await render();
+    await render({ targetControl });
     if (attempt === navigation && targetControl)
       main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({ preventScroll: true });
   }, { signal: lifetime.signal });

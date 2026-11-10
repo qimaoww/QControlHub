@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -20,9 +21,9 @@ type Store struct {
 	connectionSyncMu sync.Mutex
 	connectionSync   map[string]*connectionSnapshot
 
-	certificateResolver *net.Resolver
+	certificateResolver certificates.DNSResolver
 	certificateDNSHTTP  *http.Client
-	pool                *pgxpool.Pool
+	pool                storePool
 	cryptor             *configCryptor
 	notificationTokenMu sync.RWMutex
 	notificationTokens  map[string][]core.Permission
@@ -96,7 +97,7 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 		pool.Close()
 		return nil, err
 	}
-	result := &Store{pool: pool, cryptor: cryptor}
+	result := &Store{pool: &requestPool{pool}, cryptor: cryptor}
 	if err := result.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err

@@ -119,6 +119,27 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	} else if err != nil {
 		return core.User{}, err
 	}
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		if current.User.Role == core.RoleAdmin || id == scopeForConfig(ctx).OwnerID || update.Role != nil || update.Password != nil || passwordHash != "" {
+			return core.User{}, ErrForbidden
+		}
+		// Browser accounts can read unmasked values and manage credentials.
+		// A Key must not activate an alternate identity or increase its grants
+		// to obtain capabilities unavailable to delegated API credentials.
+		if current.User.Disabled && update.Disabled != nil && !*update.Disabled {
+			return core.User{}, ErrForbidden
+		}
+		if update.Permissions != nil {
+			for _, p := range *update.Permissions {
+				if core.PermissionGrantsAdministration(p) {
+					return core.User{}, fmt.Errorf("%w: administrator-only permission", ErrInvalid)
+				}
+				if !core.HasPermission(key.Effective, p) || !core.HasPermission(current.User.Permissions, p) {
+					return core.User{}, ErrForbidden
+				}
+			}
+		}
+	}
 	role := current.User.Role
 	disabled := current.User.Disabled
 	displayName := current.User.DisplayName

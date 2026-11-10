@@ -143,6 +143,9 @@ func main() {
 	}
 	statePath := env("QCH_AGENT_STATE", "./data/agent-state.json")
 	manualExistingSpecs := make(map[core.Engine]agent.EngineSpec)
+	if spec, ok := existingSpec("MIHOMO"); ok {
+		manualExistingSpecs[core.EngineMihomo] = spec
+	}
 	if spec, ok := existingSpec("XRAY"); ok {
 		manualExistingSpecs[core.EngineXray] = spec
 	}
@@ -163,15 +166,28 @@ func main() {
 	)
 	discoveryCancel()
 	if err != nil {
-		slog.Error("existing core discovery failed", "error", err)
-		os.Exit(1)
+		slog.Warn("existing core discovery unavailable; managed targets are checked separately", "error", core.DiagnosticText(err.Error()))
+		existingSpecs = manualExistingSpecs
+		discoveryIssues = make(map[core.Engine]string)
+		for engine := range enabledSpecs {
+			discoveryIssues[engine] = "导入发现失败：" + core.DiagnosticText(err.Error())
+		}
 	}
 
 	executor := &agent.Executor{
 		Specs: enabledSpecs, ExistingSpecs: existingSpecs,
-		ExistingDiscoveryIssues: discoveryIssues,
-		MigrationMarkerPrefix:   statePath + ".core-migration",
-		Services:                serviceManager,
+		ExistingDiscoveryStatePath: statePath + ".existing-cores",
+		ExistingDiscoveryIssues:    discoveryIssues,
+		MigrationMarkerPrefix:      statePath + ".core-migration",
+		Services:                   serviceManager,
+	}
+	executor.RefreshExistingSources = func(parent context.Context) error {
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		defer cancel()
+		return executor.RefreshDiscoveredSources(ctx, enabledSpecs, manualExistingSpecs)
+	}
+	if err := executor.LoadExistingCoreSources(); err != nil {
+		slog.Warn("load discovered sources", "error", err)
 	}
 	client, err := agent.NewClient(agent.ClientConfig{
 		ServerURL:         env("QCH_SERVER_URL", "http://localhost:8080"),

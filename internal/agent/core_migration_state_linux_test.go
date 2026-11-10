@@ -51,18 +51,18 @@ func TestCompletedCoreMigrationStateDriftBlocksExplicitMappingTasksAfterRestart(
 			if _, ok := restarted.completedMigrations[core.EngineXray]; ok {
 				t.Fatal("unsafe completion state was recorded as verified ownership")
 			}
-			issue := restarted.ExistingDiscoveryIssues[core.EngineXray]
+			issue := restarted.ManagedSafetyIssues[core.EngineXray]
 			if !strings.Contains(issue, "迁移状态不再安全") {
 				t.Fatalf("unsafe completed migration issue = %q", issue)
 			}
 			runtime := restarted.Runtime(context.Background())[core.EngineXray]
-			if runtime.ExistingConfigUnsupportedReason != issue || runtime.ExistingConfigAvailable {
+			if runtime.ManagedOperationBlockedReason != issue || runtime.ExistingConfigAvailable {
 				t.Fatalf("unsafe completed migration runtime = %+v", runtime)
 			}
 			for _, action := range []core.Action{core.ActionStart, core.ActionInstall, core.ActionImportExisting} {
 				if _, err := restarted.Execute(context.Background(), core.Task{
 					Action: action, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
-				}); err == nil || !strings.Contains(err.Error(), "core tasks are disabled") {
+				}); err == nil || !strings.Contains(err.Error(), "target is unsafe") {
 					t.Fatalf("unsafe completed migration %s error = %v", action, err)
 				}
 			}
@@ -99,7 +99,7 @@ func TestCompletedCoreMigrationKeepsOwnershipWhenManagedServiceStopped(t *testin
 	if _, ok := restarted.completedMigrations[core.EngineXray]; !ok {
 		t.Fatal("verified migration ownership was dropped when the managed service was stopped")
 	}
-	if issue := restarted.ExistingDiscoveryIssues[core.EngineXray]; issue != "" {
+	if issue := restarted.ManagedSafetyIssues[core.EngineXray]; issue != "" {
 		t.Fatalf("stopped managed service produced a discovery issue: %q", issue)
 	}
 	runtime := restarted.Runtime(context.Background())[core.EngineXray]
@@ -159,7 +159,7 @@ func TestCompletedCoreMigrationKeepsOwnershipForRetiredServiceStates(t *testing.
 			if _, ok := restarted.completedMigrations[core.EngineXray]; !ok {
 				t.Fatal("verified migration ownership was dropped for a retired legacy service")
 			}
-			if issue := restarted.ExistingDiscoveryIssues[core.EngineXray]; issue != "" {
+			if issue := restarted.ManagedSafetyIssues[core.EngineXray]; issue != "" {
 				t.Fatalf("a retired legacy service produced a discovery issue: %q", issue)
 			}
 		})
@@ -267,7 +267,7 @@ esac
 		if _, ok := restarted.completedMigrations[engine]; !ok {
 			t.Fatalf("%s: verified migration ownership was dropped when the managed service was stopped", engine)
 		}
-		if issue := restarted.ExistingDiscoveryIssues[engine]; issue != "" {
+		if issue := restarted.ManagedSafetyIssues[engine]; issue != "" {
 			t.Fatalf("%s: stopped managed service produced a discovery issue: %q", engine, issue)
 		}
 		runtime := restarted.Runtime(context.Background())[engine]

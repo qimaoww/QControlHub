@@ -147,12 +147,14 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	if err := os.WriteFile(configPath, []byte(`{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		t.Fatal(err)
 	}
 	status = waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting after configuration appeared",
 		func(status CoreLogSourceStatus) bool {
-			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog
+			// The host fallback can arm before the namespace follower. Wait
+			// for the exact source whose readiness is asserted below.
+			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == core.CoreLogSourceJournal
 		})
 	if status.Source != core.CoreLogSourceJournal || status.LastAt != nil {
 		t.Fatalf("armed status after configuration appeared = %+v", status)
@@ -187,7 +189,7 @@ func TestManagedSingBoxConfigReadFailuresStayFailed(t *testing.T) {
 	if err := os.Chmod(configPath, 0o666); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err == nil {
 		t.Fatal("unsafe managed configuration was accepted")
 	}
 	status = collector.Status()[core.EngineSingBox]
@@ -210,7 +212,7 @@ func TestJournalSourceReportsWaitingUntilFirstDeliveredLine(t *testing.T) {
 	runCoreLogCollector(t, collector)
 	status := waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting before the first line",
 		func(status CoreLogSourceStatus) bool {
-			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog
+			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == core.CoreLogSourceJournal
 		})
 	if status.Source != core.CoreLogSourceJournal || status.LastAt != nil {
 		t.Fatalf("armed journal status = %+v", status)
@@ -259,6 +261,7 @@ func TestHostJournalFailureKeepsNamespaceSourceActive(t *testing.T) {
 	})
 	collector.serviceState = staticCoreLogServiceState("active")
 	runCoreLogCollector(t, collector)
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournal, core.CoreLogStatusActive)
 	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, core.CoreLogSourceJournalHost, core.CoreLogStatusFailed)
 	status := collector.Status()[core.EngineSingBox]
 	if status.Status != core.CoreLogStatusActive || status.Source != core.CoreLogSourceJournal || status.LastAt == nil {

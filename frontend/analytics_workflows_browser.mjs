@@ -168,7 +168,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"!document.querySelector('[aria-busy=true]') && document.querySelector('.a-main').textContent.includes('theme-inbound')");
   const workspace=await api(page,identity,'GET',`/agents/${agentID}/configs/mihomo/workspace`);assert.ok(workspace.inbounds.some(input=>input.tag==='theme-inbound'&&input.port===23477));assert.ok(workspace.config?.version);await close();
   for(const task of (await api(page,identity,'GET',`/tasks?agent_id=${agentID}&limit=100`)).filter(task=>['pending','running'].includes(task.status)))await api(page,identity,'DELETE',`/tasks/${task.id}`,undefined,204);
-  await click('展开源码','.a-main');await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='展开源码')");await screenshot(page,'analytics-config-files');
+  await click('展开源码','.a-main');await wait(page,"!!document.querySelector('dialog[open] [name=content]') && !document.querySelector('dialog[open] [aria-busy=true]')");await screenshot(page,'analytics-config-files');
   await api(page,identity,'PUT',`/agents/${agentID}/configs/mihomo`,{name:workspace.config.name,description:workspace.config.description,content:workspace.config.content,version:workspace.config.version});
   await evaluate(page,"document.querySelector('dialog[open] [name=content]').form.requestSubmit()");
   await confirmDeploy(false);
@@ -298,9 +298,11 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await wait(page,"window.__oldQueryReady");
   await evaluate(page,"const select=document.querySelector('.a-auto-filter [name=status]');select.value='failed';select.dispatchEvent(new Event('change',{bubbles:true}))");
   await wait(page,"window.__queryCalls.some(url=>url.includes('status=failed')) && !document.querySelector('[aria-busy=true]')");
-  const filtered=await evaluate(page,"document.querySelector('.a-main section').textContent");
+  const resultIdentity="[...document.querySelectorAll('.a-main section tbody tr')].map(row=>({id:row.dataset.refreshKey,status:row.querySelector('[data-column=状态] .a-badge')?.textContent}))";
+  const filtered=await evaluate(page,resultIdentity);
+  assert.ok(filtered.length && filtered.every(row=>row.id && row.status==='失败'),'current filter shows identified failed task records');
   await wait(page,"window.__oldQueryFinished");
-  assert.equal(await evaluate(page,"document.querySelector('.a-main section').textContent"),filtered,'old query cannot replace current results');
+  assert.deepEqual(await evaluate(page,resultIdentity),filtered,'old query cannot replace current task identities or status');
   await evaluate(page,"window.fetch=window.__queryFetch;delete window.__queryFetch;delete window.__queryCalls;delete window.__oldQueryFinished;delete window.__oldQueryReady");
   await evaluate(page,"[...document.querySelectorAll('.a-auto-filter button')].find(button=>button.textContent==='重置').click()");
   await wait(page,"document.querySelector('.a-auto-filter [name=status]').value==='' && !document.querySelector('[aria-busy=true]')");

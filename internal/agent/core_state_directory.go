@@ -84,7 +84,7 @@ func PrepareCoreStateDirectory(ctx context.Context, service string) error {
 			return err
 		}
 	} else {
-		status, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec)
+		status, err := validateManagedServiceTarget(ctx, engine, spec)
 		if err != nil {
 			return err
 		}

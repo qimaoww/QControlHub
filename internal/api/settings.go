@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func panelSettingsResponse(settings core.PanelSettings) core.PanelSettings { return settings }
@@ -46,6 +47,10 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	if _, key := requestAPIKey(request); key && settings.Revision < 1 {
+		writeError(w, 400, "Key 更新设置必须提供当前 revision")
+		return
+	}
 	expectedRevision := settings.Revision
 	var saved core.PanelSettings
 	if expectedRevision > 0 {
@@ -62,8 +67,13 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	s.recordAudit(request, "settings.saved", "", "api")
 	if agentPolicyChanged(previous, saved) {
-		for _, id := range ids {
-			s.DisconnectAgent(id)
+		disconnect := func() {
+			for _, id := range ids {
+				s.DisconnectAgent(id)
+			}
+		}
+		if !store.AfterRequestCommit(request.Context(), disconnect) {
+			disconnect()
 		}
 	}
 	writeJSON(w, http.StatusOK, panelSettingsResponse(saved))

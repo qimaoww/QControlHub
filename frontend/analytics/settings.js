@@ -1,3 +1,4 @@
+import { readRegion, loadingTable } from "./loading.js";
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
 import { date } from "./operations.js";
@@ -24,12 +25,12 @@ const numericFields = [
 const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 
 export async function settingsPage(ctx) {
-  let [settings, deployment] = await Promise.all([ctx.api("/settings"), ctx.api("/settings/deployment")]);
+  let settings = {}, ready = false;
   const writable = ctx.can("settings.manage");
   let brandingDirty = false;
-  const input = (name, label, attrs = {}) => field(label, name, settings[name], { ...attrs, disabled: !writable });
+  const input = (name, label, attrs = {}) => field(label, name, settings[name] ?? "", { ...attrs, disabled: true });
   const numeric = numericFields.map(([name, label, options]) => input(name, label, { options }));
-  const saveState = muted("已保存");
+  const saveState = muted("正在读取设置…");
   saveState.setAttribute("role", "status");
   let baseline, phase = "idle";
   const content = [
@@ -41,7 +42,7 @@ export async function settingsPage(ctx) {
       input("ui_font_scale", "文字大小", { options: [[90, "较小"], [100, "标准"], [110, "较大"]] }),
       input("default_config_editor", "默认配置编辑器", { options: [["structured", "结构化编辑"], ["source", "源码编辑"]] }))),
     section("默认内核能力", node("div", { className: "a-card-body a-actions" },
-      engineIDs.map(engine => field(engine, `engine:${engine}`, settings.default_agent_engines?.includes(engine), { type: "checkbox", disabled: !writable })))),
+      engineIDs.map(engine => field(engine, `engine:${engine}`, settings.default_agent_engines?.includes(engine), { type: "checkbox", disabled: !ready || !writable })))),
     section("节点上报", node("div", { className: "a-card-body a-stack" },
       muted("仅影响当前账号及自有节点，借用节点不受影响。"),
       node("div", { className: "a-form-grid a-settings-metrics" }, [2, 3, 4, 8].map(index => numeric[index])))),
@@ -52,12 +53,12 @@ export async function settingsPage(ctx) {
     section("数据清理", node("div", { className: "a-card-body a-form-grid a-settings-metrics" }, numeric.slice(12))),
     section("证书与地址库", node("div", { className: "a-card-body a-form-grid" },
       input("acme_email", "ACME 邮箱", { type: "email" }),
-      field("大陆 IPv4 数据源", "cnip_ipv4_url", settings.cnip_source?.ipv4_url || "", { type: "url", disabled: !writable }),
-      field("大陆 IPv6 数据源", "cnip_ipv6_url", settings.cnip_source?.ipv6_url || "", { type: "url", disabled: !writable }))),
+      field("大陆 IPv4 数据源", "cnip_ipv4_url", settings.cnip_source?.ipv4_url || "", { type: "url", disabled: !ready || !writable }),
+      field("大陆 IPv6 数据源", "cnip_ipv6_url", settings.cnip_source?.ipv6_url || "", { type: "url", disabled: !ready || !writable }))),
     saveState,
   ];
   const form = ctx.form(content, "保存设置", async (values, element) => {
-    if (!writable) return;
+    if (!writable || !ready) return;
     const submitted = snapshot();
     const body = { ...settings, ...values, revision: settings.revision,
       default_agent_engines: engineIDs.filter(engine => element.elements.namedItem(`engine:${engine}`).checked),
@@ -86,10 +87,10 @@ export async function settingsPage(ctx) {
     .map(control => [control.name, control.type === "checkbox" ? control.checked : control.value]));
   function sync() {
     if (!ctx.current()) return;
-    const changed = writable && snapshot() !== baseline;
+    const changed = ready && writable && snapshot() !== baseline;
     ctx.setDirty(changed || brandingDirty);
-    submit.disabled = !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
-    saveState.textContent = phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
+    submit.disabled = !ready || !changed || phase === "saving" || form.getAttribute("aria-busy") === "true";
+    saveState.textContent = !ready ? "正在读取设置…" : phase === "saving" ? "正在保存…" : phase === "failed" ? "保存失败 · 有未保存更改" : changed ? "有未保存更改" : "已保存";
     const heartbeat = form.elements.agent_heartbeat_interval_seconds, offline = form.elements.agent_offline_threshold_seconds;
     offline.setCustomValidity(Number(offline.value) < Number(heartbeat.value) * 3 ? "离线阈值不得少于心跳间隔的 3 倍。" : "");
   }
@@ -103,23 +104,23 @@ export async function settingsPage(ctx) {
   form.addEventListener("change", changed);
   submit.addEventListener("mutationend", sync);
   const refreshState = notice('');
-  const branding = ctx.session.role === "admin" && writable ? await siteBrandingSettings(ctx, changed => { brandingDirty = changed; sync(); }) : null;
+  const branding = ctx.session.role === "admin" && writable ? siteBrandingSettings(ctx, changed => { brandingDirty = changed; sync(); }) : null;
   let refreshSequence = 0;
   const refreshSettings = async () => {
-    if (branding) await branding.refresh();
     const sequence = ++refreshSequence;
     const latest = await ctx.api('/settings');
     if (!ctx.current() || sequence !== refreshSequence) return;
-    if (snapshot() !== baseline || phase === 'saving') {
+    if (ready && (snapshot() !== baseline || phase === 'saving')) {
       refreshState.textContent = latest.revision !== settings.revision ? '设置已由其他会话修改，当前草稿已保留。' : '';
       return;
     }
-    settings = latest;
+    settings = latest; ready = true;
     for (const control of [...form.elements].filter(control => control.name)) {
       const name = control.name;
       const value = name.startsWith('engine:') ? latest.default_agent_engines?.includes(name.slice(7))
         : name === 'cnip_ipv4_url' ? latest.cnip_source?.ipv4_url || ''
         : name === 'cnip_ipv6_url' ? latest.cnip_source?.ipv6_url || '' : latest[name];
+      control.disabled = !writable;
       if (control.type === 'checkbox') control.checked = Boolean(value);
       else if (control.value !== String(value ?? '')) control.value = value ?? '';
     }
@@ -146,97 +147,20 @@ export async function settingsPage(ctx) {
       if (ctx.current()) updateResult.textContent = `检查失败：${error.message}`;
     }
   }));
-  const security = [
-    ["控制面安全传输", deployment.secure_transport], ["数据库 TLS 校验", deployment.database_tls_verified],
-    ["配置加密", deployment.config_encryption_configured],
-  ];
-  const extra = stack(section("部署状态", node("div", { className: "a-card-body" }, stack(
-    table(["项目", "状态"], [...security.map(([name, enabled]) => [name, badge(enabled ? "已配置" : "未配置", enabled ? "ok" : "warn")]),
-      ["可信代理", `${deployment.trusted_proxy_count ?? 0} 条网段`],
-      ["控制面发行版本", deployment.control_plane_version || "尚未上报"],
-      ["QAgent 安装包版本", deployment.agent_package_version || "尚未上报"]]),
-    updateResult, actions(check)))));
-  if (ctx.session.role === "admin" && writable) extra.append(await apiKeys(ctx));
-  ctx.onRefresh(refreshSettings);
-  return stack(branding?.element, form, refreshState, extra);
-}
-
-async function apiKeys(ctx) {
-  let resource = { items: [], read_permissions: [] }, sequence = 0;
-  const results = node("div", { hidden: true });
-  const feedback = notice("");
-  const create = button("创建 Key", () => edit(), { tone: "primary", disabled: true });
-  const retry = button("重新读取", event => void ctx.mutate(event.currentTarget, load));
-  const recovery = node("div", { className: "a-card-body a-stack" }, feedback, actions(retry)); recovery.hidden = true;
-  const labels = Object.fromEntries(userPermissions);
-  async function load() {
-    const request = ++sequence;
-    try {
-      const latest = await ctx.api("/settings/api-keys");
-      if (!ctx.current() || request !== sequence) return;
-      resource = latest; draw();
-      feedback.textContent = ""; recovery.hidden = true; create.disabled = false;
-    } catch (error) {
-      if (!ctx.current() || request !== sequence || error.name === "AbortError") return;
-      feedback.textContent = `无法读取 API Key：${error.message}`; recovery.hidden = false;
-      if (error.status === 403) { results.replaceChildren(); results.hidden = true; resource = { items: [], read_permissions: [] }; create.disabled = true; }
-    }
-  }
-  const body = key => ({ name: key.name, permissions: key.permissions, ip_allowlist: key.ip_allowlist,
-    expires_at: key.expires_at, revision: key.revision, disabled: key.disabled });
-  function edit(key = null) {
-    const controls = list(resource.read_permissions).map(permission => field(labels[permission] || permission, `permission:${permission}`,
-      key ? key.permissions.includes(permission) : true, { type: "checkbox" }));
-    const localTime = key?.expires_at ? new Date(new Date(key.expires_at).getTime() - new Date(key.expires_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
-    const form = ctx.form([
-      field("名称", "name", key?.name || "", { required: true, maxlength: 100 }),
-      field("到期时间", "expires_at", localTime, { type: "datetime-local", hint: "留空为永不过期" }),
-      field("来源 IP / CIDR", "ip_allowlist", key?.ip_allowlist?.join("\n") || "", { multiline: 3, hint: "每行一个，留空不限制" }),
-      section("读取权限", node("div", { className: "a-card-body a-grid" }, controls)),
-    ], key ? "保存授权" : "创建 Key", async (values, element) => {
-      const payload = { name: values.name, expires_at: values.expires_at === localTime ? key?.expires_at || null : values.expires_at ? new Date(values.expires_at).toISOString() : null,
-        ip_allowlist: values.ip_allowlist.split(/[\s,，]+/).filter(Boolean),
-        permissions: list(resource.read_permissions).filter(permission => element.elements.namedItem(`permission:${permission}`).checked),
-        ...(key ? { revision: key.revision, disabled: key.disabled } : {}),
-      };
-      const saved = await ctx.api(key ? `/settings/api-keys/${pathID(key.id)}` : "/settings/api-keys", { method: key ? "PUT" : "POST", body: payload });
-      box.close();
-      if (!key && saved.secret) {
-        const secret = code(saved.secret); saved.secret = "";
-        secret.setAttribute("data-sensitive", "");
-        const revealed = ctx.dialog("API Key 已创建", stack(muted("密钥仅显示一次，请妥善保存。"), secret,
-          actions(button("复制 Key", event => void ctx.mutate(event.currentTarget, async () => {
-            await copyText(secret.textContent);
-            if (ctx.current() && revealed.isConnected) ctx.announce("已复制");
-          })))));
-        revealed.addEventListener("close", () => { secret.textContent = ""; }, { once: true });
-      }
-      await load();
-      ctx.announce(key ? "授权已保存" : "API Key 已创建");
-    });
-    const box = ctx.dialog(key ? "编辑 API Key" : "创建 API Key", form, { wide: true });
-  }
-  function draw() {
-    results.hidden = false;
-    results.replaceChildren(table(["名称 / 创建时间", "前缀", "状态", "读取范围", "到期时间", "最近使用", "操作"], list(resource.items).map(key => [
-      stack(key.name, muted(date(key.created_at))), `${key.prefix}…`, badge(({ active: "有效", expired: "已过期", disabled: "已停用", revoked: "已撤销" })[key.status] || key.status),
-      stack(list(key.ip_allowlist).length ? list(key.ip_allowlist).map(address => muted(address)) : "来源 IP 不限制", muted(`${list(key.permissions).length} 项读取权限`)),
-      key.expires_at ? date(key.expires_at) : "永不过期", date(key.last_used_at),
-      !key.revoked_at && actions(button("编辑授权", () => edit(key)),
-        button(key.disabled ? "启用" : "停用", event => void ctx.mutate(event.currentTarget, async () => {
-          await ctx.api(`/settings/api-keys/${pathID(key.id)}`, { method: "PUT", body: { ...body(key), disabled: !key.disabled } });
-          await load();
-        })),
-        button("撤销", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm(`撤销“${key.name}”后无法恢复，确定撤销？`, "撤销 API Key") || !ctx.current()) return;
-          await ctx.mutate(control, async () => {
-            await ctx.api(`/settings/api-keys/${pathID(key.id)}`, { method: "DELETE" });
-            await load();
-          });
-        }, { tone: "danger" })),
-    ]), { label: "API Key" }));
-  }
-  await load();
-  return section("API Key", stack(recovery, results), create);
+  const deploymentTable = loadingTable(['项目', '状态'], '部署状态');
+  const deploymentRead = readRegion(ctx, '部署状态', signal => ctx.api('/settings/deployment', { signal }), deployment => {
+    const security = [['控制面安全传输', deployment.secure_transport], ['数据库 TLS 校验', deployment.database_tls_verified], ['配置加密', deployment.config_encryption_configured]];
+    deploymentTable.updateRows([...security.map(([name, enabled]) => [name, badge(enabled ? '已配置' : '未配置', enabled ? 'ok' : 'warn')]),
+      ['可信代理', `${deployment.trusted_proxy_count ?? 0} 条网段`], ['控制面发行版本', deployment.control_plane_version || '尚未上报'], ['QAgent 安装包版本', deployment.agent_package_version || '尚未上报']]);
+  }, { view:deploymentTable, clear: () => deploymentTable.updateRows([]) });
+  const settingsRead = readRegion(ctx, '面板设置', refreshSettings, () => {}, { clear() {
+    ready = false; settings = {}; baseline = undefined;
+    for (const control of [...form.elements].filter(control => control.name)) { control.disabled = true; if (control.type === 'checkbox') control.checked = false; else control.value = ''; }
+    sync();
+  } });
+  const extra = stack(section("部署状态", node('div', { className: 'a-card-body' }, stack(deploymentRead.element, deploymentTable, updateResult, actions(check)))));
+  if (writable) extra.append(section("API", node("div", { className: "a-card-body" }, link("管理 API Key", "#api"))));
+  ctx.onRefresh(() => Promise.all([settingsRead.load(), deploymentRead.load(), branding?.refresh()]));
+  void settingsRead.load(); void deploymentRead.load();
+  return stack(branding?.element, settingsRead.element, form, refreshState, extra);
 }

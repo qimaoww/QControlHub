@@ -1,19 +1,20 @@
+import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { patch } from "./live-dom.js";
 import { certificateOrderPresentation, certificateOrderDiagnostic } from "../modules/certificate-order.js";
 import { filterbar, node, button, actions, stack, grid, section, table, badge, field, muted, list, pathID, notice, code } from "./ui.js";
 import { date } from "./operations.js";
 
-const certStatus = value => badge(({ ready: "可用", pending: "等待签发", issuing: "签发中", failed: "失败", expired: "已过期", revoked: "已撤销",
+const certStatus = value => badge(({ ready: "可用", issued: "已签发", queued: "排队中", running: "签发中", validating: "验证中", canceling: "取消中", retrying: "等待重试", pending: "等待签发", issuing: "签发中", failed: "失败", expired: "已过期", revoked: "已撤销",
   waiting_dns: "等待 DNS", succeeded: "成功", canceled: "已取消", active: "有效", processing: "处理中" })[value] || value || "未知");
 const sourceName = value => ({ acme: "ACME", import: "导入", "self-signed": "自签", caddy: "Caddy", node: "节点证书" })[value] || value;
 
 export async function certificatesPage(ctx) {
-  let resource = await ctx.api("/certificates");
-  const results = node("div");
+  let resource = { items: [] }, loaded = false;
+  const results = node("div", {}, loadingTable(["名称 / 域名", "来源", "归属", "状态", "到期时间", "操作"], "证书"));
   const search = field("搜索证书", "search", "", { type: "search", placeholder: "名称或域名" });
-  let modalRead = 0;
+  let modalRead = 0, accountManager;
   let listRead = 0;
-  async function reload() { const request = ++listRead; const value = await ctx.api("/certificates"); if (ctx.current() && request === listRead) { resource = value; draw(); } }
+  async function reload() { const request = ++listRead; const value = await ctx.api("/certificates"); if (ctx.current() && request === listRead) { resource = value; loaded = true; draw(); syncCreate(); } }
   const run = (control, action) => ctx.mutate(control, action);
   async function readOnly(control, action) {
     if (control?.disabled) return;
@@ -29,26 +30,29 @@ export async function certificatesPage(ctx) {
     ];
   }
   async function create(source) {
-    const sequence = ++modalRead;
-    let finished = false;
-    const loading = ctx.dialog('正在读取证书资源', notice('正在读取账号与认证节点…'));
-    loading.addEventListener('close', () => { if (!finished && sequence === modalRead) modalRead++; }, { once: true });
-    let accounts = [], nodes = [];
-    try {
-      if (source === "acme") [accounts, nodes] = (await Promise.all([ctx.api("/certificate-accounts"), ctx.api("/certificate-http-nodes")])).map(list);
-    } catch (error) { finished = true; loading.close(); throw error; }
-    if (!ctx.current() || sequence !== modalRead || !loading.open) return;
-    finished = true;
-    loading.close();
+    let accounts = [], nodes = [], accountsReady = source !== 'acme', nodesReady = source !== 'acme';
     const method = field("认证方式", "method", "dns-api", { options: [["dns-api", "DNS API"], ["dns-manual", "手工 DNS"], ["http-01", "HTTP-01"]] });
     const dns = field("DNS 账号", "dns_account_id", "", { options: [["", "选择 DNS 账号"], ...accounts.filter(account => account.kind === "dns").map(account => [account.id, account.name])] });
     const host = field("认证节点", "agent_id", "", { options: [["", "选择节点"], ...nodes.map(agent => [agent.id, `${agent.name}${agent.available ? "" : " · 暂不可用"}`])] });
+    const autoRenew = field("自动续期", "auto_renew", false, { type: "checkbox" });
+    const accountField = field('ACME 账号', 'account_id', '', { required: true, options: [['', '正在读取账号…']], disabled: true });
     const methodInput = method.querySelector("select");
+    const syncReady = () => {
+      if (source !== 'acme') return;
+      const submit = form.querySelector('[type=submit]');
+      submit.disabled = !accountsReady || methodInput.value === 'http-01' && !nodesReady;
+      accountField.querySelector('select').disabled = !accountsReady;
+      dns.querySelector('select').disabled = !accountsReady;
+      host.querySelector('select').disabled = !nodesReady;
+    };
     const updateMethod = () => {
       ctx.visible(dns, methodInput.value === "dns-api");
       ctx.visible(host, methodInput.value === "http-01");
       dns.querySelector("select").required = methodInput.value === "dns-api";
       host.querySelector("select").required = methodInput.value === "http-01";
+      const manual = methodInput.value === "dns-manual";
+      autoRenew.querySelector("input").disabled = manual;
+      if (manual) autoRenew.querySelector("input").checked = false;
     };
     methodInput.addEventListener("change", updateMethod);
     updateMethod();
@@ -58,8 +62,8 @@ export async function certificatesPage(ctx) {
         field("域名", "domains", "", { multiline: 3, required: true, hint: "每行一个域名" }),
         field("密钥类型", "key_type", "ecdsa256", { options: [["ecdsa256", "ECDSA P-256"], ["ecdsa384", "ECDSA P-384"], ["rsa2048", "RSA 2048"], ["rsa4096", "RSA 4096"]] }),
         source === "self-signed" ? field("有效天数", "days", 365, { type: "number", min: 1, max: 3650, required: true }) : [
-          field("ACME 账号", "account_id", "", { required: true, options: [["", "选择 ACME 账号"], ...accounts.filter(account => account.kind === "acme").map(account => [account.id, account.name])] }),
-          method, dns, host, field("自动续期", "auto_renew", false, { type: "checkbox" }),
+          accountField,
+          method, dns, host, autoRenew,
         ],
       ],
     ], source === "acme" ? "申请证书" : "保存证书", async (values, element) => {
@@ -82,14 +86,29 @@ export async function certificatesPage(ctx) {
     });
     form.dataset.certificateForm = source;
     const box = ctx.dialog(`新建证书 · ${sourceName(source)}`, form, { wide: true });
-    box.addEventListener("close", () => { if (sequence === modalRead) modalRead++; }, { once: true });
+    methodInput.addEventListener('change', syncReady);
+    syncReady();
+    if (source === 'acme') {
+      const local = dialogContext(ctx, box);
+      const fill = (root, options, placeholder) => { const input = root.querySelector('select'), value = input.value; input.replaceChildren(input.querySelector('button'), node('option', { value: '' }, placeholder), ...options.map(item => node('option', { value: item.id }, item.name))); input.value = options.some(item => item.id === value) ? value : ''; };
+      const accountRead = readRegion(local, '证书账号', signal => local.api('/certificate-accounts', { signal }), value => {
+        accounts = list(value); accountsReady = true;
+        fill(accountField, accounts.filter(item => item.kind === 'acme'), '选择 ACME 账号');
+        fill(dns, accounts.filter(item => item.kind === 'dns'), '选择 DNS 账号'); syncReady();
+      }, { clear() { accountsReady = false; fill(accountField, [], '账号不可用'); fill(dns, [], '账号不可用'); syncReady(); } });
+      const nodeRead = readRegion(local, '认证节点', signal => local.api('/certificate-http-nodes', { signal }), value => { nodes = list(value); nodesReady = true; fill(host, nodes, '选择节点'); syncReady(); }, { clear() { nodesReady = false; fill(host, [], '节点不可用'); syncReady(); } });
+      form.prepend(accountRead.element, nodeRead.element); void accountRead.load(); void nodeRead.load();
+    }
   }
-  async function detail(id) {
-    const request = ++modalRead;
-    let data = await ctx.api(`/certificates/${pathID(id)}`);
-    if (!ctx.current() || request !== modalRead) return;
-    const body = node("div", { className: "a-stack" });
-    const box = ctx.dialog(data.certificate.name, body, { wide: true });
+  function detail(id) {
+    let data;
+    const detailView = stack(
+      table(['项目', '内容'], ['域名', '密钥类型', '有效期开始', '有效期截止', '保存时间', '指纹'].map(label => [label, '正在读取…'])),
+      section('申请与续期记录', loadingTable(['创建时间', '状态', '阶段', '错误', '操作'], '签发订单')),
+      section('部署绑定', loadingTable(['节点', '配置', '用户', '内核', '状态', '保存时间'], '证书绑定')),
+      section('证书历史', loadingTable(['保存时间', '有效期截止', '状态'], '证书历史')));
+    const body = stack(detailView);
+    const box = ctx.dialog('证书详情', body, { wide: true });
     box.dataset.certificateId = id;
     const controller = new AbortController();
     const signal = AbortSignal.any([ctx.signal, controller.signal]);
@@ -99,6 +118,7 @@ export async function certificatesPage(ctx) {
         const next = await ctx.api(`/certificates/${pathID(id)}`, { signal });
         if (!ctx.current() || !box.open || sequence !== modalRead) return;
         data = next;
+        box.querySelector("h2").textContent = data.certificate.name;
         drawDetail();
       } catch (error) {
         if (ctx.current() && box.open && [403, 404].includes(error.status)) {
@@ -133,7 +153,7 @@ export async function certificatesPage(ctx) {
       const tools = actions(
         button("刷新", event => void readOnly(event.currentTarget, read), { "data-certificate-refresh": id }),
         owned && certificate.source === "acme" && control("立即续期", "/renew", "POST", undefined, "提交证书续期申请？"),
-        owned && certificate.source === "acme" && control(certificate.auto_renew ? "关闭自动续期" : "启用自动续期", "/auto-renew", "PUT", { enabled: !certificate.auto_renew }),
+        owned && certificate.source === "acme" && certificate.method !== "dns-manual" && control(certificate.auto_renew ? "关闭自动续期" : "启用自动续期", "/auto-renew", "PUT", { enabled: !certificate.auto_renew }),
         owned && button("替换证书", () => {
           const form = ctx.form(pairFields(), "保存替换", async values => {
             await ctx.api(`/certificates/${pathID(id)}/replace`, { method: "POST", body: values });
@@ -144,22 +164,23 @@ export async function certificatesPage(ctx) {
           });
           const replace = ctx.dialog("替换证书", form, { wide: true });
         }),
-        certificate.version && node("a", {
+        certificate.version > 0 && node("a", {
           className: "a-button", href: `/api/v1/certificates/${pathID(id)}/public-chain`, download: "",
         }, "下载公开证书链"),
         owned && control("删除证书", "", "DELETE", undefined, "删除此证书及其历史记录？正在使用的证书可能无法删除。"));
-      const orders = section("申请与续期记录", table(["创建时间", "状态", "阶段", "错误", "操作"], list(data.orders).map(order => [
+      const challengeDetails = order => stack(...list(order.challenges).map(challenge => section(challenge.domain, node("div", { className: "a-card-body" }, stack(
+        actions(badge(challenge.type), challenge.status === "pending" ? badge("等待验证") : certStatus(challenge.status)),
+        stack(muted("记录名称"), code(challenge.name)), stack(muted("记录值"), code(challenge.value)),
+      )))));
+      const orders = section("申请与续期记录", stack(table(["创建时间", "状态", "阶段", "错误", "操作"], list(data.orders).map(order => [
         date(order.created_at), badge(certificateOrderPresentation(order, date).label, certificateOrderPresentation(order, date).tone),
         certificateOrderPresentation(order, date).info, stack(
           certificateOrderPresentation(order, date).error && notice(certificateOrderPresentation(order, date).error),
-          certificateOrderPresentation(order, date).cleanupError && notice(certificateOrderPresentation(order, date).cleanupError, "warn"),
-          ...list(order.challenges).map(challenge => stack(muted(challenge.domain), muted(challenge.name), code(challenge.value)))),
-        actions(button("查看认证记录", () => ctx.dialog("域名认证记录", table(["域名", "类型", "名称", "值", "状态"], list(order.challenges).map(challenge => [
-          challenge.domain, challenge.type, challenge.name, code(challenge.value), certStatus(challenge.status),
-        ])), { wide: true })),
+          certificateOrderPresentation(order, date).cleanupError && notice(certificateOrderPresentation(order, date).cleanupError, "warn")),
+        actions(list(order.challenges).length > 0 && order.status !== "waiting_dns" && button("查看认证记录", () => ctx.dialog("域名认证记录", challengeDetails(order), { wide: true })),
         owned && order.status === "waiting_dns" && control("继续认证", `/orders/${pathID(order.id)}/continue`, "POST"),
         owned && !["succeeded", "failed", "canceled"].includes(order.status) && control("取消订单", `/orders/${pathID(order.id)}`, "DELETE", undefined, "取消此签发订单？")),
-      ]), { label: "签发订单" }));
+      ]), { label: "签发订单" }), ...list(data.orders).filter(order => order.status === "waiting_dns").map(challengeDetails)));
       const bindings = section("部署绑定", table(["节点", "配置", "用户", "内核", "状态", "保存时间"], list(data.bindings).map(binding => [
         binding.agent_name || binding.agent_id, binding.config_name || binding.config_id, binding.username || "管理员",
         binding.engine, certStatus(binding.status), date(binding.saved_at),
@@ -193,9 +214,10 @@ export async function certificatesPage(ctx) {
         section("证书历史", table(["保存时间", "有效期截止", "状态"], list(data.versions).map(version => [
           date(version.saved_at || version.created_at), date(version.not_after), version.version === certificate.version ? badge("当前") : "历史证书",
         ]))));
-      if (body.firstChild) patch(body.firstChild, fresh); else body.append(fresh);
+      patch(detailView, fresh);
     }
-    drawDetail();
+    const initialRead = readRegion(dialogContext(ctx, box), '证书详情', read, () => {}, {view:detailView});
+    body.prepend(initialRead.element);
     let timer;
     async function poll() {
       if (!ctx.current() || !box.open) return;
@@ -207,58 +229,58 @@ export async function certificatesPage(ctx) {
       } finally { if (ctx.current() && box.open) timer = setTimeout(poll, 3000); }
     }
     // Grant forms remain stable; the refresh control also updates every order.
-    timer = setTimeout(poll, 3000);
+    void initialRead.load().finally(() => { if (ctx.current() && box.open) timer = setTimeout(poll, 3000); });
     const stop = () => { clearTimeout(timer); controller.abort(); };
     box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, { once: true });
     ctx.signal.addEventListener("abort", stop, { once: true });
   }
-  async function accounts() {
-    const request = ++modalRead;
-    const [items, nodes, grants] = await Promise.all([
-      ctx.api("/certificate-accounts"), ctx.api("/certificate-http-nodes"), ctx.api("/certificate-http-grants"),
-    ]);
-    if (!ctx.current() || request !== modalRead) return;
-    const body = node("div", { className: "a-stack" });
-    document.querySelectorAll("dialog[data-certificate-accounts]").forEach(box => box.close());
-    const box = ctx.dialog("证书账号与认证授权", body, { wide: true });
-    box.dataset.certificateAccounts = "";
-    body.append(
-      section("证书账号", table(["名称", "类型", "CA / DNS 服务商", "操作"], list(items).map(account => [
-        account.name, account.kind === "acme" ? "ACME" : "DNS", account.ca || account.provider,
-        actions(account.kind === "dns" && button("检查连接", event => void run(event.currentTarget, async () => {
-          await ctx.api(`/certificate-accounts/${pathID(account.id)}/check`, { method: "POST" });
-          ctx.announce("DNS 读取连接正常");
-        })), account.kind === "dns" && button("更新凭据", () => accountForm("dns", account)),
-        button("删除", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm(`删除账号“${account.name}”？`, "删除证书账号") || !ctx.current()) return;
-          await run(control, async () => {
-            await ctx.api(`/certificate-accounts/${pathID(account.id)}`, { method: "DELETE" });
-            box.close();
-            await accounts();
-          });
-        }, { tone: "danger" })),
-      ]), { label: "证书账号" }), actions(button("添加 ACME 账号", () => accountForm("acme")), button("添加 DNS 账号", () => accountForm("dns"), { "data-certificate-new-dns": "" }))),
-      section("HTTP-01 授权", stack(table(["节点", "用户", "域名", "操作"], list(grants).map(grant => [
-        list(nodes).find(node => node.id === grant.agent_id)?.name || grant.agent_id, grant.username, grant.domain,
-        button("撤销", async event => {
-          const control = event.currentTarget;
-          if (!await ctx.confirm("撤销此域名的 HTTP-01 认证权限？", "撤销授权") || !ctx.current()) return;
-          await run(control, async () => {
-            await ctx.api("/certificate-http-grants", { method: "DELETE", body: grant });
-            box.close();
-            await accounts();
-          });
-        }, { tone: "danger" }),
-      ])), node("div", { className: "a-card-body" }, ctx.form([
-        field("自有节点", "agent_id", "", { required: true, options: [["", "选择节点"], ...list(nodes).filter(node => node.owned).map(node => [node.id, node.name])] }),
-        field("用户名", "username", "", { required: true }), field("域名", "domain", "", { required: true }),
-      ], "授权 HTTP-01", async values => {
-        await ctx.api("/certificate-http-grants", { method: "POST", body: values });
-        box.close();
-        await accounts();
-        ctx.announce("HTTP-01 授权已保存");
-      })))));
+  function accounts() {
+    if (accountManager?.box.open) return accountManager.refresh();
+    let nodes = [], nodesReady = false;
+    const accountRows = loadingTable(['名称', '类型', 'CA / DNS 服务商', '操作'], '证书账号');
+    const grantRows = loadingTable(['节点', '用户', '域名', '操作'], 'HTTP-01 授权');
+    const target = field('自有节点', 'agent_id', '', { required: true, disabled: true, options: [['', '正在读取节点…']] });
+    const form = ctx.form([target, field('用户名', 'username', '', { required: true }), field('域名', 'domain', '', { required: true })], '授权 HTTP-01', async values => {
+      if (!nodesReady) return;
+      await local.api('/certificate-http-grants', { method: 'POST', body: values });
+      if (!local.current()) return;
+      await grantRead.load(); ctx.announce('HTTP-01 授权已保存');
+    });
+    const submit = form.querySelector('[type=submit]'); submit.disabled = true;
+    const body = stack(section('证书账号', accountRows, actions(button('添加 ACME 账号', () => accountForm('acme')), button('添加 DNS 账号', () => accountForm('dns'), { 'data-certificate-new-dns': '' }))),
+      section('HTTP-01 授权', stack(grantRows, node('div', { className: 'a-card-body' }, form))));
+    document.querySelectorAll('dialog[data-certificate-accounts]').forEach(box => box.close());
+    const box = ctx.dialog('证书账号与认证授权', body, { wide: true }); box.dataset.certificateAccounts = '';
+    const local = dialogContext(ctx, box);
+    const accountRead = readRegion(local, '证书账号', signal => local.api('/certificate-accounts', { signal }), items => {
+      accountRows.updateRows(list(items).map(account => [account.name, account.kind === 'acme' ? 'ACME' : 'DNS', ({ cloudflare: 'Cloudflare', alidns: '阿里云 DNS', dnspod: 'DNSPod', letsencrypt: "Let's Encrypt", 'letsencrypt-staging': "Let's Encrypt 测试环境", zerossl: 'ZeroSSL' })[account.ca || account.provider] || account.ca || account.provider,
+        actions(account.kind === 'dns' && button('检查连接', event => void run(event.currentTarget, async () => { await local.api(`/certificate-accounts/${pathID(account.id)}/check`, { method: 'POST' }); ctx.announce('DNS 读取连接正常'); })),
+          account.kind === 'dns' && button('更新凭据', () => accountForm('dns', account)), button('删除', async event => {
+            const control = event.currentTarget;
+            if (!await ctx.confirm(`删除账号“${account.name}”？`, '删除证书账号') || !local.current()) return;
+            await run(control, async () => { await local.api(`/certificate-accounts/${pathID(account.id)}`, { method: 'DELETE' }); await accountRead.load(); });
+          }, { tone: 'danger' }))]));
+    }, { view:accountRows, clear: () => accountRows.updateRows([]) });
+    let grants = [];
+    const drawGrants = () => grantRows.updateRows(grants.map(grant => [nodes.find(item => item.id === grant.agent_id)?.name || grant.agent_id, grant.username, grant.domain,
+      button('撤销', async event => {
+        const control = event.currentTarget;
+        if (!await ctx.confirm('撤销此域名的 HTTP-01 认证权限？', '撤销授权') || !local.current()) return;
+        await run(control, async () => { await local.api('/certificate-http-grants', { method: 'DELETE', body: grant }); await grantRead.load(); });
+      }, { tone: 'danger' })]));
+    const grantRead = readRegion(local, 'HTTP-01 授权', signal => local.api('/certificate-http-grants', { signal }), value => { grants = list(value); drawGrants(); }, { view:grantRows, clear() { grants = []; drawGrants(); } });
+    const nodeRead = readRegion(local, '认证节点', signal => local.api('/certificate-http-nodes', { signal }), value => {
+      nodes = list(value); nodesReady = true;
+      const input = target.querySelector('select'), selected = input.value;
+      input.replaceChildren(input.querySelector('button'), node('option', { value: '' }, '选择节点'), ...nodes.filter(item => item.owned).map(item => node('option', { value: item.id }, item.name)));
+      input.value = nodes.some(item => item.owned && item.id === selected) ? selected : ''; input.disabled = submit.disabled = false;
+      if (grantRead.ready) drawGrants();
+    }, { clear() { nodes = []; nodesReady = false; target.querySelector('select').disabled = submit.disabled = true; } });
+    body.prepend(accountRead.element, grantRead.element, nodeRead.element);
+    const refresh = () => Promise.all([accountRead.load(), grantRead.load(), nodeRead.load()]);
+    accountManager = {box, refresh};
+    box.addEventListener('close', () => { if (accountManager?.box === box) accountManager = null; }, {once:true});
+    void refresh();
   }
   function accountForm(kind, account = null) {
     const provider = field("DNS 服务商", "provider", account?.provider || "cloudflare", { options: [["cloudflare", "Cloudflare"], ["alidns", "阿里云 DNS"], ["dnspod", "DNSPod"]], disabled: Boolean(account) });
@@ -273,6 +295,7 @@ export async function certificatesPage(ctx) {
         const relevant = selected === "cloudflare" ? name === "token" : selected === "alidns" ? name.startsWith("access_key") : name.startsWith("secret_");
         ctx.visible(control, relevant);
         control.querySelector("input").required = relevant;
+        control.querySelector("input").disabled = !relevant;
       });
     };
     provider.querySelector("select").addEventListener("change", sync);
@@ -285,28 +308,40 @@ export async function certificatesPage(ctx) {
         field("EAB ID", "eab_id", "", { autocomplete: "off" }),
         field("EAB Key", "eab_key", "", { type: "password", autocomplete: "new-password" }),
         field("同意所选 CA 的服务条款", "accept_terms", false, { type: "checkbox", required: true }),
-      ] : [provider, field("Zone", "zone", "", { required: true }), credentials],
+      ] : [provider, credentials],
     ], "保存账号", async (values, element) => {
       const payload = { name: values.name, kind,
         ...(kind === "acme" ? { ca: values.ca, email: values.email, eab_id: values.eab_id, eab_key: values.eab_key, accept_terms: element.elements.accept_terms.checked } :
-          { provider: account?.provider || values.provider, credentials: Object.fromEntries(["zone", "token", "access_key_id", "access_key_secret", "secret_id", "secret_key"].filter(key => values[key]).map(key => [key, values[key]])) }),
+          { provider: account?.provider || values.provider, credentials: Object.fromEntries(["token", "access_key_id", "access_key_secret", "secret_id", "secret_key"].filter(key => values[key]).map(key => [key, values[key]])) }),
       };
       await ctx.api(account ? `/certificate-accounts/${pathID(account.id)}/credentials` : "/certificate-accounts", { method: account ? "PUT" : "POST", body: account ? { name: payload.name, credentials: payload.credentials } : payload });
       box.close();
       ctx.announce("证书账号已保存");
       await accounts();
     });
+    if (kind === "acme") {
+      const syncEAB = () => {
+        const required = form.elements.ca.value === "zerossl" || Boolean(form.elements.eab_id.value || form.elements.eab_key.value);
+        form.elements.eab_id.required = required;
+        form.elements.eab_key.required = required;
+      };
+      form.elements.ca.addEventListener("change", syncEAB);
+      form.elements.eab_id.addEventListener("input", syncEAB);
+      form.elements.eab_key.addEventListener("input", syncEAB);
+      syncEAB();
+    }
     form.dataset.certificateAccount = kind;
     const box = ctx.dialog(account ? "更新 DNS 凭据" : `添加 ${kind === "acme" ? "ACME" : "DNS"} 账号`, form);
   }
-  async function sources() {
-    const request = ++modalRead;
-    const sourceItems = list(await ctx.api("/certificate-managed-sources"));
-    if (!ctx.current() || request !== modalRead) return;
-    const content = node("div");
-    const box = ctx.dialog("节点证书来源", content, { wide: true });
-    box.dataset.certificateSources = "";
-    content.append(table(["节点", "域名", "内核", "状态", "最近同步", "操作"], sourceItems.map(source => [
+  function sources() {
+    const records = loadingTable(['节点', '域名', '内核', '状态', '最近同步', '操作'], '节点证书来源');
+    const content = stack(records);
+    const box = ctx.dialog('节点证书来源', content, { wide: true });
+    box.dataset.certificateSources = '';
+    const local = dialogContext(ctx, box);
+    const sourceRead = readRegion(local, '节点证书来源', signal => local.api('/certificate-managed-sources', { signal }), value => {
+      const sourceItems = list(value);
+    records.updateRows(sourceItems.map(source => [
       source.agent_name || source.agent_id, source.domain, source.engine, certStatus(source.status), date(source.last_synced),
       actions(source.certificate_id && button('查看证书', event => void readOnly(event.currentTarget, () => detail(source.certificate_id)), { 'data-certificate-detail': source.certificate_id }),
         source.status === 'unsupported' && muted('升级节点 Agent 后重试'),
@@ -317,28 +352,31 @@ export async function certificatesPage(ctx) {
         if (!await ctx.confirm(message, "更新证书来源") || !ctx.current()) return;
         await run(control, async () => {
           await ctx.api(`/certificate-managed-sources/${pathID(source.id)}`, { method: "PUT", body: { action } });
-          box.close();
-          await sourcesReload();
+          await Promise.all([reload(), sourceRead.load()]);
         });
       }, { "data-certificate-source": source.id, "data-certificate-source-action": action }))),
-    ]), { label: "节点证书来源" }));
-    async function sourcesReload() { await reload(); await sourcesPage(); }
-    async function sourcesPage() { await sources(); }
+    ]));
+    }, { view:records, clear: () => records.updateRows([]) });
+    content.prepend(sourceRead.element); void sourceRead.load();
   }
   function draw() {
+    if (!loaded) return;
     const q = search.querySelector("input").value.toLowerCase();
-    results.replaceChildren(table(["名称 / 域名", "来源", "归属", "状态", "到期时间", "操作"], list(resource.items).filter(cert =>
+    patch(results, node("div", {}, table(["名称 / 域名", "来源", "归属", "状态", "到期时间", "操作"], list(resource.items).filter(cert =>
       [cert.name, ...(cert.domains || [])].join(" ").toLowerCase().includes(q)).map(cert => [
       stack(node("strong", {}, cert.name), muted(cert.domains.join(" · "))),
       sourceName(cert.source), cert.owned ? "自有" : "共享授权", certStatus(cert.status), date(cert.not_after),
       button("详情", event => void readOnly(event.currentTarget, () => detail(cert.id)), { "data-certificate-detail": cert.id }),
-    ]), { label: "证书" }));
+    ]), { label: "证书" })));
   }
-  draw();
+  const initialRead = readRegion(ctx, '证书', reload, () => {}, { view:results, clear() { resource = { items: [] }; loaded = true; draw(); syncCreate(); } });
+  void initialRead.load(); ctx.onRefresh(initialRead.load);
   search.querySelector("input").addEventListener("input", draw);
-  return stack(filterbar(search, actions(
+  const content = stack(filterbar(search, actions(
       button("账号与认证授权", event => void readOnly(event.currentTarget, accounts), { "data-certificate-accounts-open": "" }),
       button("节点证书来源", event => void readOnly(event.currentTarget, sources), { "data-certificate-sources-open": "" }),
       ...["acme", "import", "self-signed"].map(source => button(source === "acme" ? "申请证书" : source === "import" ? "导入证书" : "自签证书",
-        () => void create(source).catch(error => { if (ctx.current() && error.name !== "AbortError") ctx.announce(error.message, "error"); }), { "data-certificate-create": source, disabled: !resource.encryption_ready, tone: source === "acme" ? "primary" : "" })))), section(null, results));
+        () => void create(source).catch(error => { if (ctx.current() && error.name !== "AbortError") ctx.announce(error.message, "error"); }), { "data-certificate-create": source, disabled: !resource.encryption_ready, tone: source === "acme" ? "primary" : "" })))), initialRead.element, section(null, results));
+  const syncCreate = () => content.querySelectorAll('[data-certificate-create]').forEach(control => { control.disabled = !resource.encryption_ready; });
+  return content;
 }

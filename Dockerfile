@@ -107,6 +107,9 @@ COPY frontend/modules/read-coordinator.js frontend/modules/account-request.js \
     frontend/modules/dashboard-model.js \
     frontend/modules/enrollment-command.js \
     frontend/modules/errors.js \
+    frontend/modules/failure-records.js \
+    frontend/modules/config-import.js \
+    frontend/modules/managed-core-state.js \
     frontend/modules/inbound-options-model.js \
     frontend/modules/ip-quality-controller.js \
     frontend/modules/ip-quality-model.js \

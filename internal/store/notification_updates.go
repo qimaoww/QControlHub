@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 )
 
@@ -39,7 +41,7 @@ func (s *Store) RefreshNotificationUpdate(ctx context.Context, manual bool, fetc
 	version, published, fetchErr := fetch(ctx)
 	failure := ""
 	if fetchErr != nil {
-		failure = "检查 GHCR 最新镜像失败"
+		failure = "检查 GHCR 最新镜像失败：" + core.DiagnosticText(fetchErr.Error())
 	}
 	delay := "1 hour"
 	if failure != "" {
@@ -48,6 +50,35 @@ func (s *Store) RefreshNotificationUpdate(ctx context.Context, manual bool, fetc
 	_, err = s.pool.Exec(ctx, `UPDATE notification_update_cache SET version=CASE WHEN $2='' THEN $1 ELSE version END,error=$2,checked_at=now(),next_at=now()+$3::interval,lease_until=NULL,published_at=CASE WHEN $2='' THEN $4 ELSE published_at END WHERE id=1`, version, failure, delay, published)
 	if err != nil {
 		return NotificationUpdate{}, err
+	}
+	if fetchErr != nil {
+		owners := map[string]bool{}
+		if scope, ok := requestConfigScope(ctx); ok {
+			owners[scope.OwnerID] = true
+		}
+		rows, readErr := s.pool.Query(ctx, `SELECT DISTINCT owner_id FROM notification_rule_states WHERE resource='update'`)
+		if readErr != nil {
+			return NotificationUpdate{}, errors.Join(fetchErr, readErr)
+		}
+		for rows.Next() {
+			var owner string
+			if readErr = rows.Scan(&owner); readErr != nil {
+				break
+			}
+			owners[owner] = true
+		}
+		if readErr == nil {
+			readErr = rows.Err()
+		}
+		rows.Close()
+		if readErr != nil {
+			return NotificationUpdate{}, errors.Join(fetchErr, readErr)
+		}
+		for owner := range owners {
+			if retainErr := s.retainBackgroundFailure(ctx, owner, "面板更新检查", "GHCR", "update_check", fetchErr); retainErr != nil {
+				return NotificationUpdate{}, errors.Join(fetchErr, fmt.Errorf("未能保存到任务: %w", retainErr))
+			}
+		}
 	}
 	return s.NotificationUpdateStatus(ctx)
 }

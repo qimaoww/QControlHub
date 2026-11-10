@@ -3,7 +3,7 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 
 export async function testEditedRetryDialog(preview = false) {
   const nativeFetch = globalThis.fetch;
-  const task = { id: "failed", agent_id: "node", engine: "sing-box", action: "deploy", config_id: "cfg", config_version: 2, status: "failed", error: "模拟部署失败\n" + "诊断内容，保留草稿后可重新校验。".repeat(80), created_at: "2026-11-04T10:00:00Z" };
+  const task = { id: "failed", agent_id: "node", engine: "sing-box", action: "deploy", config_id: "cfg", config_version: 2, status: "failed", attempt:1, error: "模拟部署失败\n" + "诊断内容，保留草稿后可重新校验。".repeat(80), created_at: "2026-11-04T10:00:00Z" };
   const originalTask = structuredClone(task);
   const config = { id: "cfg", name: "重试测试配置", agent_id: "node", engine: "sing-box", version: 5, content: '{"inbounds":[]}', updated_at: "2026-11-04T11:00:00Z" };
   const gate = {};
@@ -12,10 +12,12 @@ export async function testEditedRetryDialog(preview = false) {
   const ordinaryRetries = [];
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith("/api/v1")) return nativeFetch(url, options);
-    const path = String(url).slice(7), method = options.method || "GET";
+    const path = new URL(String(url),location.href).pathname.slice(7), method = options.method || "GET";
     let value;
     if (path === "/auth/session") value = session;
-    else if (path.startsWith("/tasks?")) { reads++; value = [task]; }
+    else if (path === "/tasks") { reads++; value = [task]; }
+    else if (path === "/tasks/failures" && method === "POST") value = {id:"fixture-failure"};
+    else if (path.endsWith("/diagnostics")) value = {source:"fixture",output:path.includes("/retry/") ? "部署完成" : "",error:path.includes("/retry/") ? "" : task.error};
     else if (path === "/tasks/failed") value = task;
     else if (path === "/tasks/failed/retry" && method === 'POST') {
       assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), 'retry-fixture', 'ordinary retry missing CSRF');
@@ -62,7 +64,8 @@ export async function testEditedRetryDialog(preview = false) {
       assert.ok(document.querySelector('[aria-label="任务"]').textContent.includes('缺少配置历史关联'), 'historical task lacks association status');
       assert.ok(button('编辑后重试'), 'historical task lost its editable recovery path');
       button('详情').click();
-      const detail = await waitFor(() => box('任务详情'), 'historical task detail missing');
+      const detail = await waitFor(() => box('任务详情') && !box('任务详情').querySelector('[aria-busy=true]') && box('任务详情'), 'historical task detail missing');
+      await waitFor(() => !detail.querySelector('[aria-busy=true]'), 'task detail data did not finish');
       assert.ok(detail.textContent.includes('缺少配置历史关联') && detail.textContent.includes('编辑后重试或重新部署'), 'historical detail lost recovery guidance');
       assert.ok(!/vundefined|vnull|版本 0/.test(detail.textContent), 'historical task exposes fabricated revisions');
       await settled(); detail.querySelector('[aria-label="关闭"]').click();
@@ -73,19 +76,19 @@ export async function testEditedRetryDialog(preview = false) {
     button('重试配置').click();
     let retryConfirmation = await waitFor(() => box('重试任务'), 'configuration retry confirmation missing');
     button('重试任务', retryConfirmation).click();
-    await waitFor(() => box('任务详情'), 'configuration retry receipt missing'); await settled();
+    await waitFor(() => box('任务详情') && !box('任务详情').querySelector('[aria-busy=true]') && box('任务详情'), 'configuration retry receipt missing'); await settled();
     assert.equal(ordinaryRetries.length, 1); assert.equal(ordinaryRetries[0].expected_config_version, 3, 'ordinary retry lost its exact configuration association');
     box('任务详情').querySelector('[aria-label="关闭"]').click();
     Object.assign(task, originalTask, { action: 'status', config_id: '', config_version: undefined }); await mount();
     assert.ok(button('重试任务') && !button('编辑后重试'), 'operational retry incorrectly requires configuration history');
     button('重试任务').click(); retryConfirmation = await waitFor(() => box('重试任务'), 'operational retry confirmation missing');
     button('重试任务', retryConfirmation).click();
-    await waitFor(() => box('任务详情'), 'operational retry receipt missing'); await settled();
+    await waitFor(() => box('任务详情') && !box('任务详情').querySelector('[aria-busy=true]') && box('任务详情'), 'operational retry receipt missing'); await settled();
     assert.equal(ordinaryRetries.length, 2); assert.equal(JSON.stringify(ordinaryRetries[1]), '{}', 'operational retry fabricated configuration history');
     box('任务详情').querySelector('[aria-label="关闭"]').click();
     Object.assign(task, originalTask, { config_version: undefined, error: 'Caddy rollback failed token=fixture-secret' }); await mount();
     button('详情').click();
-    const rollback = await waitFor(() => box('任务详情'), 'rollback task detail missing');
+    const rollback = await waitFor(() => box('任务详情') && !box('任务详情').querySelector('[aria-busy=true]') && box('任务详情'), 'rollback task detail missing');
     assert.ok(rollback.textContent.includes('回滚失败：需检查节点最终服务与路由状态') && rollback.textContent.includes('缺少配置历史关联'), 'rollback guidance or missing-history recovery was discarded');
     assert.ok(!rollback.textContent.includes('fixture-secret'), 'task diagnostic exposes credentials');
     await settled(); rollback.querySelector('[aria-label="关闭"]').click();

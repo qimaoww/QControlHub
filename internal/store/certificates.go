@@ -399,6 +399,9 @@ func (s *Store) SaveCertificatePair(ctx context.Context, id, name, source string
 	if err != nil {
 		return item, err
 	}
+	if err = recordAPIKeyWork(ctx, tx, "certificate-version", item.ID); err != nil {
+		return item, err
+	}
 	return item, tx.Commit(ctx)
 }
 
@@ -531,7 +534,10 @@ func (s *Store) SetCertificateAutoRenew(ctx context.Context, id string, enabled 
 		return fmt.Errorf("%w: 此来源需人工续期或替换", ErrInvalid)
 	}
 	_, err = s.pool.Exec(ctx, `UPDATE panel_certificates SET auto_renew=$3,next_attempt=now() WHERE id=$1 AND owner_id=$2`, id, certificateActor(ctx), enabled)
-	return err
+	if err != nil {
+		return err
+	}
+	return recordAPIKeyWork(ctx, s.pool, "certificate-auto-renew", id)
 }
 
 func (s *Store) CertificateVersionHistory(ctx context.Context, id string) ([]core.Certificate, error) {
@@ -636,8 +642,9 @@ func (s *Store) UpdateCertificateDNSCredentials(ctx context.Context, id, name st
 		return core.CertificateAccount{}, err
 	}
 	var raw []byte
+	var previousSecret string
 	var item core.CertificateAccount
-	if err = tx.QueryRow(ctx, `SELECT metadata FROM certificate_accounts WHERE id=$1 AND owner_id=$2 AND kind='dns' FOR UPDATE`, id, certificateActor(ctx)).Scan(&raw); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT metadata,secret FROM certificate_accounts WHERE id=$1 AND owner_id=$2 AND kind='dns' FOR UPDATE`, id, certificateActor(ctx)).Scan(&raw, &previousSecret); err != nil {
 		return item, mapError(err)
 	}
 	if err = json.Unmarshal(raw, &item); err != nil {
@@ -650,6 +657,12 @@ func (s *Store) UpdateCertificateDNSCredentials(ctx context.Context, id, name st
 	if err = (certificates.DNSClient{Provider: item.Provider, Credentials: credentials}).Validate(); err != nil {
 		return item, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	// Preserve only the pre-upgrade hint for legacy create intents that did not
+	// snapshot a zone. New operations ignore it; callers cannot change the zone
+	// of an uncertain historical write when rotating credentials.
+	var previous certificates.DNSCredentials
+	_ = s.openCertificate(previousSecret, &previous)
+	credentials.Zone = previous.Zone
 	sealed, err := s.sealCertificate(credentials)
 	if err != nil {
 		return item, err

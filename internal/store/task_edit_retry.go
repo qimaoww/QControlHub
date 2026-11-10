@@ -64,6 +64,15 @@ func (s *Store) SaveEditedRetry(ctx context.Context, id, content string, version
 	if input.AgentID != "" {
 		permission = core.PermissionAgentConfigWrite
 	}
+	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
+		readPermission := core.PermissionConfigsRead
+		if input.AgentID != "" {
+			readPermission = core.PermissionAgentConfigRead
+		}
+		if !core.HasPermission(key.Effective, permission) || !core.HasPermission(key.Effective, readPermission) {
+			return core.Config{}, core.Task{}, ErrForbidden
+		}
+	}
 	if !scopeForConfig(ctx).Admin {
 		readPermission := core.PermissionConfigsRead
 		if input.AgentID != "" {
@@ -97,6 +106,6 @@ func (s *Store) SaveEditedRetry(ctx context.Context, id, content string, version
 	if err = tx.Commit(ctx); err != nil {
 		return core.Config{}, core.Task{}, err
 	}
-	s.signalTaskReady(task.AgentID)
+	s.signalTaskReadyAfterCommit(ctx, task.AgentID)
 	return saved, task, nil
 }

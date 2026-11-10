@@ -76,6 +76,29 @@ func coreDiagnosticRedactor(engine core.Engine, content string) func(string) str
 	for _, secret := range coreInlineDiagnosticKeys(engine, content) {
 		secrets = append(secrets, secret)
 	}
+	if engine == core.EngineShadowsocksRust {
+		// ssserver can echo a password without a field label. Its configurations
+		// have no TLS file fields, so collect passwords from both single-server
+		// and extended/per-user configurations before handling native output.
+		var collect func(any)
+		collect = func(value any) {
+			switch node := value.(type) {
+			case map[string]any:
+				if password, ok := node["password"].(string); ok && password != "" {
+					secrets = append(secrets, password)
+				}
+				for _, child := range node {
+					collect(child)
+				}
+			case []any:
+				for _, child := range node {
+					collect(child)
+				}
+			}
+		}
+		root, _ := importJSONDocument(content)
+		collect(root)
+	}
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 	return func(value string) string {
 		for _, secret := range secrets {

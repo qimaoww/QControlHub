@@ -339,10 +339,10 @@ func TestExistingCoreReconcileKeepsLegacyMarkerFailClosedAfterSafeServiceRecover
 	if record, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray); err != nil || record.State != coreMigrationInProgress || record.HasFileRollback {
 		t.Fatalf("legacy migration marker = %+v, %v", record, err)
 	}
-	if issue := fixture.executor.ExistingDiscoveryIssues[core.EngineXray]; !strings.Contains(issue, "缺少可验证的托管文件回滚信息") {
+	if issue := fixture.executor.ManagedSafetyIssues[core.EngineXray]; !strings.Contains(issue, "缺少可验证的托管文件回滚信息") {
 		t.Fatalf("legacy migration issue = %q", issue)
 	}
-	if _, err := fixture.executor.Execute(context.Background(), core.Task{Action: core.ActionStart, Engine: core.EngineXray}); err == nil || !strings.Contains(err.Error(), "core tasks are disabled") {
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{Action: core.ActionStart, Engine: core.EngineXray}); err == nil || !strings.Contains(err.Error(), "target is unsafe") {
 		t.Fatalf("legacy migration task error = %v", err)
 	}
 }

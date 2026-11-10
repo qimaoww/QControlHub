@@ -126,10 +126,31 @@ try {
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-summary').length"),0);
   assert.equal(await evaluate(a,"document.querySelectorAll('.cert-card,.context-steps').length"),0);
   await click(a,"[data-certificate-accounts-open]");await wait(a,"!!document.querySelector('[data-certificate-new-dns]')");await click(a,"[data-certificate-new-dns]");await wait(a,"!!document.querySelector('[data-certificate-account]')");
-  await set(a,'[name=name]','Alice DNS');await set(a,'[name=zone]','example.test');await set(a,'[name=token]','local-browser-fixture-token');
+  assert.equal(await evaluate(a,"!!document.querySelector('[name=zone]')"),false);
+  await screenshot(a,'dns-account-form');
+  await set(a,'[name=name]','Alice DNS');await set(a,'[name=token]','local-browser-fixture-token');
   await evaluate(a,"document.querySelector('[data-certificate-account]').requestSubmit()");
   await wait(a,"!!document.querySelector('[data-certificate-new-dns]') && !document.querySelector('[data-certificate-account],[aria-busy=true]')");
-  assert.equal((await api(a,alice,'GET','/certificate-accounts')).length,1);
+  const cloudflare=(await api(a,alice,'GET','/certificate-accounts'))[0];
+  await evaluate(a,"[...document.querySelectorAll('dialog[open]:last-of-type button')].find(b=>b.textContent==='更新凭据').click()");
+  await wait(a,"!!document.querySelector('[data-certificate-account]')");
+  assert.equal(await evaluate(a,"!!document.querySelector('[name=zone]')"),false);
+  await set(a,'[name=token]','rotated-browser-fixture');
+  await evaluate(a,"document.querySelector('[data-certificate-account]').requestSubmit()");
+  await wait(a,"!document.querySelector('[data-certificate-account],[aria-busy=true]')");
+  assert.equal((await api(a,alice,'GET','/certificate-accounts'))[0].id,cloudflare.id);
+  for(const provider of ['alidns','dnspod']){
+    await click(a,'[data-certificate-new-dns]');await wait(a,"!!document.querySelector('[data-certificate-account]')");
+    await set(a,'[name=provider]',provider);await set(a,'[name=name]',provider+' 测试账号');
+    const keys=provider==='alidns'?['access_key_id','access_key_secret']:['secret_id','secret_key'];
+    for(const key of keys)await set(a,'[name='+key+']','local-browser-fixture');
+    assert.equal(await evaluate(a,"!!document.querySelector('[name=zone]')"),false);
+    assert.deepEqual(await evaluate(a,"[...new FormData(document.querySelector('[data-certificate-account]')).keys()].filter(k=>k!=='name'&&k!=='provider')"),keys);
+    await screenshot(a,'dns-account-'+provider);
+    await evaluate(a,"document.querySelector('[data-certificate-account]').requestSubmit()");
+    await wait(a,"!document.querySelector('[data-certificate-account],[aria-busy=true]')");
+  }
+  assert.equal((await api(a,alice,'GET','/certificate-accounts')).length,3);
   assert.deepEqual(await api(b,bob,'GET','/certificate-accounts'),[]);
   await click(a,'dialog[open]:last-of-type [aria-label=关闭]');await click(a,'[data-certificate-create=self-signed]');await wait(a,"!!document.querySelector('[name=days]')");
   await set(a,'[name=name]','边缘入口证书');await set(a,'[name=domains]','edge.example.test');await evaluate(a,"document.querySelector('[data-certificate-form]').requestSubmit()");
@@ -170,6 +191,7 @@ try {
   await wait(a,"!!document.querySelector('[data-certificate-action$=continue]')");
   assert.match(await detailText(),/等待人工 DNS 操作/);
   assert.match(await detailText(),/_acme-challenge.example.test/);
+  await screenshot(a,'order-waiting-dns');
   await evaluate(a,"document.querySelector('[data-certificate-action$=continue]').click();document.querySelector('[data-certificate-action$=continue]').click()");
   assert.equal(await evaluate(a,"window.certificateOrderFixture.requests"),1);
   assert.equal(await evaluate(a,"document.querySelector('[data-certificate-action$=synthetic-order]').disabled"),true);

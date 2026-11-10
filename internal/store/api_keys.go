@@ -13,12 +13,12 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const apiKeyColumns = `id,name,prefix,creator_type,creator_id,owner_id,permissions,ip_allowlist,disabled,created_at,expires_at,last_used_at,revoked_at,revision`
+const apiKeyColumns = `id,name,mode,prefix,creator_type,creator_id,owner_id,permissions,ip_allowlist,disabled,created_at,expires_at,last_used_at,revoked_at,revision`
 
 func scanAPIKey(row pgx.Row) (core.APIKey, error) {
 	var k core.APIKey
 	var permissions, ips []byte
-	err := row.Scan(&k.ID, &k.Name, &k.Prefix, &k.CreatorType, &k.CreatorID, &k.OwnerID, &permissions, &ips, &k.Disabled, &k.CreatedAt, &k.ExpiresAt, &k.LastUsedAt, &k.RevokedAt, &k.Revision)
+	err := row.Scan(&k.ID, &k.Name, &k.Mode, &k.Prefix, &k.CreatorType, &k.CreatorID, &k.OwnerID, &permissions, &ips, &k.Disabled, &k.CreatedAt, &k.ExpiresAt, &k.LastUsedAt, &k.RevokedAt, &k.Revision)
 	if err != nil {
 		return k, mapError(err)
 	}
@@ -42,16 +42,22 @@ func scanAPIKey(row pgx.Row) (core.APIKey, error) {
 }
 
 func validateAPIKeyInput(input *core.APIKeyInput) error {
+	if input.Mode == "" {
+		input.Mode = core.APIKeyReadOnly
+	}
+	if input.Mode != core.APIKeyReadOnly && input.Mode != core.APIKeyReadWrite {
+		return fmt.Errorf("%w: API Key 模式无效", ErrInvalid)
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if len(input.Name) == 0 || utf8.RuneCountInString(input.Name) > 100 {
 		return fmt.Errorf("%w: 名称须为 1–100 个字符", ErrInvalid)
 	}
 	if len(input.Permissions) == 0 {
-		return fmt.Errorf("%w: 至少选择一项读取权限", ErrInvalid)
+		return fmt.Errorf("%w: 至少选择一项业务权限", ErrInvalid)
 	}
 	for _, p := range input.Permissions {
-		if !core.HasPermission(core.DiagnosticPermissions(), p) {
-			return fmt.Errorf("%w: API Key 仅支持诊断读取权限", ErrInvalid)
+		if !core.HasPermission(core.APIKeyPermissions(), p) || input.Mode == core.APIKeyReadOnly && !core.ReadOnlyAPIKeyPermission(p) {
+			return fmt.Errorf("%w: API Key 权限与模式不匹配", ErrInvalid)
 		}
 	}
 	input.Permissions = core.NormalizePermissions(input.Permissions)
@@ -66,7 +72,7 @@ func validateAPIKeyInput(input *core.APIKeyInput) error {
 // Mutations and their audit entries commit together. Creator scope is never
 // accepted from JSON; it comes from the authenticated administrator.
 func (s *Store) CreateAPIKey(ctx context.Context, creatorType, creatorID string, input core.APIKeyInput, audit core.AuditLogEntry) (core.APIKey, string, error) {
-	if !scopeForConfig(ctx).Admin {
+	if !scopeForConfig(ctx).Admin && scopeForConfig(ctx).OwnerID != creatorID {
 		return core.APIKey{}, "", ErrForbidden
 	}
 	if err := validateAPIKeyInput(&input); err != nil {
@@ -95,14 +101,14 @@ func (s *Store) CreateAPIKey(ctx context.Context, creatorType, creatorID string,
 	if err = lockAgentUser(ctx, tx); err != nil {
 		return core.APIKey{}, "", err
 	}
-	k, err := scanAPIKey(tx.QueryRow(ctx, `INSERT INTO admin_api_keys(id,name,prefix,digest,creator_type,creator_id,owner_id,permissions,ip_allowlist,expires_at,disabled)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+apiKeyColumns, id, input.Name, secret[:16], digest[:], creatorType, creatorID, scopeForConfig(ctx).OwnerID, permissions, ips, input.ExpiresAt, input.Disabled))
+	k, err := scanAPIKey(tx.QueryRow(ctx, `INSERT INTO admin_api_keys(id,name,prefix,digest,creator_type,creator_id,owner_id,permissions,ip_allowlist,expires_at,disabled,mode)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+apiKeyColumns, id, input.Name, secret[:16], digest[:], creatorType, creatorID, scopeForConfig(ctx).OwnerID, permissions, ips, input.ExpiresAt, input.Disabled, input.Mode))
 	if err != nil {
 		return k, "", err
 	}
 	audit.Action = "api_key.created"
 	audit.Target = k.ID
-	audit.Detail = "diagnostic read permissions and IP allowlist configured"
+	audit.Detail = "explicit permissions, mode and IP allowlist configured"
 	if err = recordAuditWithExecutor(ctx, tx, audit); err != nil {
 		return core.APIKey{}, "", err
 	}
@@ -114,7 +120,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, creatorType, creatorID string,
 }
 
 func (s *Store) ListAPIKeys(ctx context.Context, creatorType, creatorID string) ([]core.APIKey, error) {
-	if !scopeForConfig(ctx).Admin {
+	if !scopeForConfig(ctx).Admin && scopeForConfig(ctx).OwnerID != creatorID {
 		return nil, ErrForbidden
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+apiKeyColumns+` FROM admin_api_keys WHERE creator_type=$1 AND creator_id=$2 AND owner_id=$3 ORDER BY created_at DESC,id DESC`, creatorType, creatorID, scopeForConfig(ctx).OwnerID)
@@ -134,7 +140,7 @@ func (s *Store) ListAPIKeys(ctx context.Context, creatorType, creatorID string) 
 }
 
 func (s *Store) UpdateAPIKey(ctx context.Context, creatorType, creatorID, id string, input core.APIKeyInput, revoke bool, audit core.AuditLogEntry) (core.APIKey, error) {
-	if !scopeForConfig(ctx).Admin {
+	if !scopeForConfig(ctx).Admin && scopeForConfig(ctx).OwnerID != creatorID {
 		return core.APIKey{}, ErrForbidden
 	}
 	if !revoke {
@@ -170,7 +176,7 @@ func (s *Store) UpdateAPIKey(ctx context.Context, creatorType, creatorID, id str
 	} else {
 		p, _ := json.Marshal(input.Permissions)
 		ips, _ := json.Marshal(input.IPAllowlist)
-		_, err = tx.Exec(ctx, `UPDATE admin_api_keys SET name=$2,permissions=$3,ip_allowlist=$4,expires_at=$5,disabled=$6,revision=revision+1 WHERE id=$1`, id, input.Name, p, ips, input.ExpiresAt, input.Disabled)
+		_, err = tx.Exec(ctx, `UPDATE admin_api_keys SET name=$2,permissions=$3,ip_allowlist=$4,expires_at=$5,disabled=$6,mode=$7,revision=revision+1 WHERE id=$1`, id, input.Name, p, ips, input.ExpiresAt, input.Disabled, input.Mode)
 		if input.Disabled && !k.Disabled {
 			action = "api_key.disabled"
 		}

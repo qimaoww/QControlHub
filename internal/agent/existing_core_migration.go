@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func (e *Executor) LoadCoreMigrationState() error {
-	if e == nil || e.MigrationMarkerPrefix == "" || len(e.ExistingSpecs) == 0 {
+	if e == nil || e.MigrationMarkerPrefix == "" {
 		return nil
 	}
 	loadContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -19,23 +20,38 @@ func (e *Executor) LoadCoreMigrationState() error {
 	e.specsMu.RLock()
 	existingSpecs := make(map[core.Engine]EngineSpec, len(e.ExistingSpecs))
 	managedSpecs := make(map[core.Engine]EngineSpec, len(e.ExistingSpecs))
-	for engine, existing := range e.ExistingSpecs {
-		existingSpecs[engine] = existing
-		managedSpecs[engine] = e.Specs[engine]
+	for engine, managed := range e.Specs {
+		existingSpecs[engine] = e.ExistingSpecs[engine]
+		managedSpecs[engine] = managed
 	}
 	e.specsMu.RUnlock()
+	var failures []error
 	for engine, existing := range existingSpecs {
 		record, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, engine)
 		if err != nil {
-			return err
+			e.blockManagedMigration(engine, err)
+			failures = append(failures, err)
+			continue
+		}
+		if record.State != "" && existing.Binary == "" {
+			issue := fmt.Errorf("%s 迁移记录缺少可验证的原服务映射，请检查发现状态和迁移记录", engine)
+			e.blockManagedMigration(engine, issue)
+			failures = append(failures, issue)
+			continue
 		}
 		if record.State == coreMigrationInProgress && !record.HasFileRollback {
 			e.specsMu.Lock()
-			if e.ExistingDiscoveryIssues == nil {
-				e.ExistingDiscoveryIssues = make(map[core.Engine]string)
+			if e.ManagedSafetyIssues == nil {
+				e.ManagedSafetyIssues = make(map[core.Engine]string)
 			}
-			e.ExistingDiscoveryIssues[engine] = fmt.Sprintf("检测到旧版未完成的 %s 服务迁移记录；缺少可验证的托管文件回滚信息，相关内核任务已禁用", engine)
+			e.ManagedSafetyIssues[engine] = fmt.Sprintf("检测到旧版未完成的 %s 服务迁移记录；缺少可验证的托管文件回滚信息，相关内核任务已禁用", engine)
 			e.specsMu.Unlock()
+		}
+		if record.State == coreMigrationComplete && record.SourceDigest != coreMigrationSourceDigest(existing) {
+			issue := fmt.Errorf("%s 已完成迁移的来源映射已变化，无法确认原服务归属；请核对迁移记录与系统服务", engine)
+			e.blockManagedMigration(engine, issue)
+			failures = append(failures, issue)
+			continue
 		}
 		if record.State == coreMigrationComplete && record.SourceDigest == coreMigrationSourceDigest(existing) {
 			// A completed migration is re-checked on every Agent start. Only the
@@ -54,21 +70,34 @@ func (e *Executor) LoadCoreMigrationState() error {
 				}
 				_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 				delete(e.ExistingSpecs, engine)
-				delete(e.ExistingDiscoveryIssues, engine)
+				delete(e.ExistingSources, engine)
+				delete(e.ManagedSafetyIssues, engine)
 			} else {
-				if e.ExistingDiscoveryIssues == nil {
-					e.ExistingDiscoveryIssues = make(map[core.Engine]string)
+				if e.ManagedSafetyIssues == nil {
+					e.ManagedSafetyIssues = make(map[core.Engine]string)
 				}
 				issue := strings.ToValidUTF8(fmt.Sprintf("已完成的 %s 服务迁移状态不再安全，相关内核任务已禁用：%v", engine, ownershipErr), "�")
 				if len(issue) > 512 {
 					issue = strings.ToValidUTF8(issue[:512], "�")
 				}
-				e.ExistingDiscoveryIssues[engine] = issue
+				e.ManagedSafetyIssues[engine] = issue
 			}
 			e.specsMu.Unlock()
+			resources, resourceErr := readImportResourceState(e.MigrationMarkerPrefix, engine, managedSpecs[engine])
+			if resourceErr != nil && !errors.Is(resourceErr, os.ErrNotExist) {
+				e.blockManagedMigration(engine, fmt.Errorf("read imported resource recovery: %w", resourceErr))
+				failures = append(failures, resourceErr)
+			} else if resources.Pending != nil && ownershipErr == nil {
+				e.specsMu.Lock()
+				if e.ManagedSafetyIssues == nil {
+					e.ManagedSafetyIssues = make(map[core.Engine]string)
+				}
+				e.ManagedSafetyIssues[engine] = "导入资源更新尚未恢复：等待恢复完整资源组"
+				e.specsMu.Unlock()
+			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // ReconcileExistingCoreServices closes the small crash window between a
@@ -89,88 +118,109 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		managed[engine] = e.Specs[engine]
 	}
 	e.specsMu.RUnlock()
+	var failures []error
 	for engine, existing := range pending {
-		migrationRecord, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, engine)
-		if err != nil {
-			return err
-		}
-		if migrationRecord.State != coreMigrationInProgress {
-			continue
-		}
-		if migrationRecord.SourceDigest != coreMigrationSourceDigest(existing) {
-			return fmt.Errorf("existing %s mapping changed during an incomplete migration", engine)
-		}
-		if !migrationRecord.HasFileRollback {
+		err := func() error {
+			migrationRecord, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, engine)
+			if err != nil {
+				return err
+			}
+			if migrationRecord.State != coreMigrationInProgress {
+				return nil
+			}
+			if e.ExistingDiscoveryIssues[engine] != "" {
+				return fmt.Errorf("%s migration source is unsafe: %s", engine, e.ExistingDiscoveryIssues[engine])
+			}
+			if migrationRecord.SourceDigest != coreMigrationSourceDigest(existing) {
+				return fmt.Errorf("existing %s mapping changed during an incomplete migration", engine)
+			}
+			if !migrationRecord.HasFileRollback {
+				e.specsMu.Lock()
+				if e.ManagedSafetyIssues == nil {
+					e.ManagedSafetyIssues = make(map[core.Engine]string)
+				}
+				e.ManagedSafetyIssues[engine] = fmt.Sprintf("检测到旧版未完成的 %s 服务迁移记录；缺少可验证的托管文件回滚信息，相关内核任务已禁用", engine)
+				e.specsMu.Unlock()
+				if err := restoreLegacyInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, e.serviceManager()); err != nil {
+					return err
+				}
+				return nil
+			}
+			manager := e.serviceManager()
+			managedStatus, managedStatusErr := serviceStatusWithManager(ctx, manager, managed[engine].Service)
+			existingStatus, existingStatusErr := serviceStatusWithManager(ctx, manager, existing.Service)
+			rollback := func(cause error) error {
+				restoreErr := restoreInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, manager)
+				return errors.Join(cause, restoreErr)
+			}
+			if managedStatusErr != nil || existingStatusErr != nil {
+				return rollback(errors.Join(managedStatusErr, existingStatusErr))
+			}
+			if !migrationEnableStatesSupported(migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState) {
+				if err := rollback(nil); err != nil {
+					return err
+				}
+				return nil
+			}
+			if existingStatus != "inactive" || managedStatus != "active" {
+				if err := rollback(nil); err != nil {
+					return err
+				}
+				return nil
+			}
+			existingStatus, managedStatus, err = waitForCoreMigrationServicePairStable(ctx, existing.Service, managed[engine].Service, manager)
+			if err != nil || existingStatus != "inactive" || managedStatus != "active" {
+				if rollbackErr := rollback(err); rollbackErr != nil {
+					return rollbackErr
+				}
+				return nil
+			}
+			if err := verifyCoreMigrationStagedFiles(managed[engine], migrationRecord); err != nil {
+				return rollback(fmt.Errorf("verify staged managed files before migration completion: %w", err))
+			}
+			if err := setServiceEnabled(ctx, managed[engine].Service, true, manager); err != nil {
+				return rollback(err)
+			}
+			if err := stopAndDisableMigrationAuxiliary(ctx, migrationRecord, manager); err != nil {
+				return rollback(fmt.Errorf("stop OU-SB auxiliary service: %w", err))
+			}
+			if err := disableServiceCompletely(ctx, existing.Service, manager); err != nil {
+				return rollback(err)
+			}
+			if err := verifyCoreMigrationCompletionState(ctx, existing, managed[engine], manager); err != nil {
+				return rollback(fmt.Errorf("verify service state before migration completion: %w", err))
+			}
+			if err := writeCoreMigrationMarkerWithRequestDigest(e.MigrationMarkerPrefix, engine, coreMigrationComplete, migrationRecord.ConfigDigest, migrationRecord.RequestConfigDigest, migrationRecord.SourceDigest, migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState); err != nil {
+				return rollback(err)
+			}
+			_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 			e.specsMu.Lock()
-			if e.ExistingDiscoveryIssues == nil {
-				e.ExistingDiscoveryIssues = make(map[core.Engine]string)
+			if e.completedMigrations == nil {
+				e.completedMigrations = make(map[core.Engine]completedCoreMigration)
 			}
-			e.ExistingDiscoveryIssues[engine] = fmt.Sprintf("检测到旧版未完成的 %s 服务迁移记录；缺少可验证的托管文件回滚信息，相关内核任务已禁用", engine)
+			e.completedMigrations[engine] = completedCoreMigration{
+				Existing: existing, Managed: managed[engine], SourceDigest: migrationRecord.SourceDigest,
+			}
+			delete(e.ExistingSpecs, engine)
+			delete(e.ExistingSources, engine)
 			e.specsMu.Unlock()
-			if err := restoreLegacyInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, e.serviceManager()); err != nil {
-				return err
-			}
-			continue
+			return nil
+		}()
+		if err != nil {
+			e.blockManagedMigration(engine, err)
+			failures = append(failures, err)
 		}
-		manager := e.serviceManager()
-		managedStatus, managedStatusErr := serviceStatusWithManager(ctx, manager, managed[engine].Service)
-		existingStatus, existingStatusErr := serviceStatusWithManager(ctx, manager, existing.Service)
-		rollback := func(cause error) error {
-			restoreErr := restoreInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, manager)
-			return errors.Join(cause, restoreErr)
-		}
-		if managedStatusErr != nil || existingStatusErr != nil {
-			return rollback(errors.Join(managedStatusErr, existingStatusErr))
-		}
-		if !migrationEnableStatesSupported(migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState) {
-			if err := rollback(nil); err != nil {
-				return err
-			}
-			continue
-		}
-		if existingStatus != "inactive" || managedStatus != "active" {
-			if err := rollback(nil); err != nil {
-				return err
-			}
-			continue
-		}
-		existingStatus, managedStatus, err = waitForCoreMigrationServicePairStable(ctx, existing.Service, managed[engine].Service, manager)
-		if err != nil || existingStatus != "inactive" || managedStatus != "active" {
-			if rollbackErr := rollback(err); rollbackErr != nil {
-				return rollbackErr
-			}
-			continue
-		}
-		if err := verifyCoreMigrationStagedFiles(managed[engine], migrationRecord); err != nil {
-			return rollback(fmt.Errorf("verify staged managed files before migration completion: %w", err))
-		}
-		if err := setServiceEnabled(ctx, managed[engine].Service, true, manager); err != nil {
-			return rollback(err)
-		}
-		if err := stopAndDisableMigrationAuxiliary(ctx, migrationRecord, manager); err != nil {
-			return rollback(fmt.Errorf("stop OU-SB auxiliary service: %w", err))
-		}
-		if err := disableServiceCompletely(ctx, existing.Service, manager); err != nil {
-			return rollback(err)
-		}
-		if err := verifyCoreMigrationCompletionState(ctx, existing, managed[engine], manager); err != nil {
-			return rollback(fmt.Errorf("verify service state before migration completion: %w", err))
-		}
-		if err := writeCoreMigrationMarkerWithRequestDigest(e.MigrationMarkerPrefix, engine, coreMigrationComplete, migrationRecord.ConfigDigest, migrationRecord.RequestConfigDigest, migrationRecord.SourceDigest, migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState); err != nil {
-			return rollback(err)
-		}
-		_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
-		e.specsMu.Lock()
-		if e.completedMigrations == nil {
-			e.completedMigrations = make(map[core.Engine]completedCoreMigration)
-		}
-		e.completedMigrations[engine] = completedCoreMigration{
-			Existing: existing, Managed: managed[engine], SourceDigest: migrationRecord.SourceDigest,
-		}
-		delete(e.ExistingSpecs, engine)
-		e.specsMu.Unlock()
 	}
-	return nil
+	return errors.Join(failures...)
+}
+
+func (e *Executor) blockManagedMigration(engine core.Engine, cause error) {
+	e.specsMu.Lock()
+	defer e.specsMu.Unlock()
+	if e.ManagedSafetyIssues == nil {
+		e.ManagedSafetyIssues = make(map[core.Engine]string)
+	}
+	e.ManagedSafetyIssues[engine] = "迁移安全核对失败：" + core.DiagnosticText(cause.Error())
 }
 
 func waitForCoreMigrationServicePairStable(ctx context.Context, existingService, managedService string, managers ...*ServiceManager) (string, string, error) {

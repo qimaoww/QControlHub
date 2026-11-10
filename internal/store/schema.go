@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 95
+const currentSchemaVersion = 97
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -264,9 +264,9 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
-    agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
-	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
+    agent_id text REFERENCES agents(id),
+    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure')),
+	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -297,7 +297,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -305,7 +305,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine=''));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure') AND engine=''));
 
 -- Reports inherit the task's durable ownership, lifecycle and retention.
 -- Large provider payloads stay out of ordinary task/status polling.
@@ -1108,6 +1108,20 @@ CREATE TABLE IF NOT EXISTS admin_api_keys (
  revoked_at timestamptz,
  revision bigint NOT NULL DEFAULT 1
 );
+ALTER TABLE admin_api_keys ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'read_only'
+ CHECK(mode IN ('read_only','read_write'));
+CREATE TABLE IF NOT EXISTS api_key_environment_creators (id text PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS api_key_work (
+ kind text NOT NULL,
+ work_id text NOT NULL,
+ api_key_id text NOT NULL REFERENCES admin_api_keys(id) ON DELETE CASCADE,
+ permissions jsonb NOT NULL,
+ PRIMARY KEY(kind,work_id)
+);
+CREATE INDEX IF NOT EXISTS api_key_work_target_idx ON api_key_work(work_id,kind);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS api_key_id text NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS api_key_permissions jsonb NOT NULL DEFAULT '[]'::jsonb;
+
 CREATE INDEX IF NOT EXISTS admin_api_keys_creator_idx ON admin_api_keys(creator_type,creator_id,created_at DESC);
 
 CREATE OR REPLACE FUNCTION revoke_admin_api_keys_for_user() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -1117,7 +1131,7 @@ BEGIN
    WHERE creator_type='user' AND creator_id=OLD.id AND revoked_at IS NULL;
   RETURN OLD;
  END IF;
- IF NEW.disabled OR NEW.role<>'admin' THEN
+ IF NEW.disabled OR NEW.role<>OLD.role OR NEW.auth_revision<>OLD.auth_revision THEN
   UPDATE admin_api_keys SET revoked_at=now(),revision=revision+1
    WHERE creator_type='user' AND creator_id=NEW.id AND revoked_at IS NULL;
  END IF;
@@ -1170,4 +1184,41 @@ INSERT INTO notification_update_cache(id) VALUES(1) ON CONFLICT DO NOTHING;
 INSERT INTO notification_configs(owner_id) SELECT id FROM panel_users ON CONFLICT DO NOTHING;
 INSERT INTO notification_configs(owner_id) SELECT owner_id FROM user_panel_settings ON CONFLICT DO NOTHING;
 INSERT INTO notification_configs(owner_id) VALUES('') ON CONFLICT DO NOTHING;
+ALTER TABLE tasks ALTER COLUMN agent_id DROP NOT NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS failure_key text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS failure_count integer NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_failure_at timestamptz;
+CREATE INDEX IF NOT EXISTS tasks_failure_key_idx ON tasks(owner_id,failure_key,created_at DESC) WHERE failure_key IS NOT NULL;
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_panel_failure_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_panel_failure_check CHECK (
+ (action='panel-failure' AND status='failed' AND attempt=0 AND started_at IS NULL AND lease_id IS NULL)
+ OR (action<>'panel-failure' AND agent_id IS NOT NULL)
+);
+CREATE TABLE IF NOT EXISTS task_diagnostics (
+ task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ attempt integer NOT NULL,
+ output text NOT NULL,
+ error text NOT NULL,
+ source text NOT NULL DEFAULT 'legacy-agent',
+ PRIMARY KEY(task_id,attempt)
+);
+ALTER TABLE task_diagnostics ADD COLUMN IF NOT EXISTS executed_attempt integer;
+CREATE TABLE IF NOT EXISTS task_diagnostic_uploads (
+ task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ lease_id text NOT NULL,
+ chunk_index integer NOT NULL,
+ chunk_count integer NOT NULL,
+ digest text NOT NULL,
+ content text NOT NULL,
+ PRIMARY KEY(task_id,lease_id,chunk_index)
+);
+
+CREATE TABLE IF NOT EXISTS task_imports (
+ task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+ snapshot_task_id text REFERENCES tasks(id) ON DELETE SET NULL,
+ expected_config_id text NOT NULL DEFAULT '', expected_version integer NOT NULL,
+ name varchar(100) NOT NULL, description varchar(300) NOT NULL DEFAULT '',
+ snapshot text NOT NULL, target_config_id text NOT NULL, retry_of text REFERENCES tasks(id) ON DELETE SET NULL
+);
+
 `

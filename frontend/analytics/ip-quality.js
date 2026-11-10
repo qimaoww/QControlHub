@@ -7,12 +7,16 @@ import { node, button, actions, stack, grid, section, badge, field, muted, list,
 import { date, status, taskDetail } from "./operations.js";
 
 export function ipQualityPage(ctx) {
-  let nodeOrder = savedNodeOrder();
+  let nodeOrder = savedNodeOrder(), lastSnapshot;
   const orderReady = ctx.api('/preferences/node-order').then(order => {
-    if (ctx.current() && Array.isArray(order?.ids)) nodeOrder = order.ids;
+    if (ctx.current() && Array.isArray(order?.ids)) { nodeOrder = order.ids; if (lastSnapshot) draw(lastSnapshot); }
   }).catch(() => {});
   const navigation = node("nav", { className: "a-ipq-nodes", "aria-label": "检测节点" });
-  const results = node("div", { className: "a-ipq-detail a-stack" });
+  const pendingReport = () => section('检测报告', node('div', {className:'a-card-body a-stack'},
+    node('dl', {className:'a-traffic-facts'}, ['节点', '检测时间', '状态'].map(label => node('div', {}, node('dt', {}, label), node('dd', {}, '正在读取…')))),
+    grid(section('IPv4 报告', node('div', {className:'a-card-body'}, muted('正在读取检测记录…'))), section('IPv6 报告', node('div', {className:'a-card-body'}, muted('正在读取检测记录…'))))),
+    actions(button('立即检测', () => {}, {disabled:true}), button('启用定时检测', () => {}, {disabled:true})));
+  const results = node("div", { className: "a-ipq-detail a-stack" }, pendingReport());
   const archiveStates = new Map();
   const loading = muted("正在读取检测记录…");
   loading.setAttribute("role", "status");
@@ -32,14 +36,14 @@ export function ipQualityPage(ctx) {
   const controller = createIPQualityController({ state, can: ctx.can, notify: ctx.announce, confirmAction: ctx.confirm,
     api: async (path, options = {}) => {
       const read = ctx.api(path, { ...options, body: typeof options.body === "string" ? JSON.parse(options.body) : options.body });
-      if (path === '/agents') { const [value] = await Promise.all([read, orderReady]); return value; }
       return read;
     },
   }, draw);
   function draw(snapshot) {
     if (!ctx.current()) return;
+    lastSnapshot = snapshot;
     const { history, date: selectedDate, timezone, loading: reading, readFailed, submitting, creating, creationErrors, editable } = snapshot;
-    loading.textContent = readFailed ? "读取失败，保留已有报告" : reading ? "正在读取检测记录…" : "正在实时更新";
+    loading.textContent = readFailed ? history ? "读取失败，保留已有记录" : "检测记录读取失败，请刷新重试" : reading ? "正在读取检测记录…" : "正在实时更新";
     loading.title = snapshot.error || "";
     const available = snapshot.availableDates || [];
     const dates = selectedDate === ipQualityLatest || available.includes(selectedDate) ? available : [selectedDate, ...available];
@@ -64,6 +68,7 @@ export function ipQualityPage(ctx) {
       }))));
     const agent = nodes.selected;
     if (!agent) {
+      if (!history && reading && !readFailed) { if (!results.querySelector('.a-card')) results.replaceChildren(pendingReport()); return; }
       results.replaceChildren(node("p", { className: "a-empty" }, !history ? readFailed ? "检测记录读取失败，可刷新重试" : "正在读取检测记录…" : selectedDate === ipQualityLatest ? "暂无可检测的节点" : "所选日期暂无检测记录"));
       return;
     }
@@ -83,6 +88,7 @@ export function ipQualityPage(ctx) {
       const link = `/api/v1/ip-quality/${pathID(report.task_id)}/archives/${archive.family}`;
       const preview = `${link}?layout=aligned`;
       const update = (image, failed) => {
+        if (failed && !state.failed) void ctx.recordFailure?.(Object.assign(new Error(`报告图片加载失败：${agent.name} · IPv${archive.family} · ${report.task_id}；浏览器未提供具体网络或图片解码原因。`),{agentID:agent.id,resource:preview}), "IP 质量报告图片", "image_loading");
         state.failed = failed;
         if (!failed && image.naturalWidth && image.naturalHeight) {
           state.width = image.naturalWidth; state.height = image.naturalHeight;

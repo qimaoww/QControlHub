@@ -277,7 +277,7 @@ func NewCoreLogCollectorForExecutor(executor *Executor) *CoreLogCollector {
 	collector.sharedJournalUpdates = [2]chan struct{}{make(chan struct{}, 1), make(chan struct{}, 1)}
 	collector.executor = executor
 	executor.coreLogReady = collector.prepareSharedLogSource
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.RefreshManagedSingBoxSource(executor); err != nil {
 		slog.Warn("configure imported sing-box log source", "error", err)
 	}
 	return collector

@@ -109,6 +109,14 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 	e.specsMu.RLock()
 	specs := make(map[core.Engine]EngineSpec, len(e.Specs))
 	existingSpecs := make(map[core.Engine]EngineSpec, len(e.ExistingSpecs))
+	managedIssues := make(map[core.Engine]string, len(e.ManagedSafetyIssues))
+	resourceIssues := make(map[core.Engine]string, len(e.importedResourceIssues))
+	for engine, issue := range e.importedResourceIssues {
+		resourceIssues[engine] = issue
+	}
+	for engine, issue := range e.ManagedSafetyIssues {
+		managedIssues[engine] = issue
+	}
 	discoveryIssues := make(map[core.Engine]string, len(e.ExistingDiscoveryIssues))
 	for engine, spec := range e.Specs {
 		specs[engine] = spec
@@ -122,14 +130,26 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 	e.specsMu.RUnlock()
 	result := make(map[core.Engine]core.RuntimeState, len(specs))
 	for engine, spec := range specs {
-		state := core.RuntimeState{}
-		if issue := discoveryIssues[engine]; issue != "" {
-			state.ServiceStatus = "active"
-			state.ExistingConfigUnsupportedReason = issue
-			result[engine] = state
-			continue
+		state := core.RuntimeState{ManagedOperationBlockedReason: managedIssues[engine], ImportedResourceUpdateError: resourceIssues[engine]}
+		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
+			if _, err := validateManagedServiceTarget(ctx, engine, spec, e.serviceManager()); err != nil {
+				state.ManagedHostBlockedReason = fmt.Sprintf("verify managed %s service target: %v", engine, err)
+			}
 		}
-		if _, ok := existingSpecs[engine]; ok {
+		for _, source := range e.existingSources(engine) {
+			status, err := serviceStatusWithManager(ctx, e.serviceManager(), source.Service)
+			if err != nil {
+				status = "unknown"
+			}
+			state.ExistingSources = append(state.ExistingSources, core.ExistingCoreSource{ID: existingSourceID(source), Service: source.Service, ConfigPath: source.ConfigPath, ConfigDirectory: source.ConfigDirectory, Status: status})
+		}
+		if len(state.ExistingSources) > 0 && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
+			state.ExistingConfigAvailable = true
+		}
+		if issue := discoveryIssues[engine]; issue != "" {
+			state.ExistingConfigUnsupportedReason = issue
+		}
+		if existing, ok := existingSpecs[engine]; ok && !isManagedCoreSource(existing) && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
 			state.ExistingConfigAvailable = true
 		}
 		if path, err := exec.LookPath(spec.Binary); err == nil {
