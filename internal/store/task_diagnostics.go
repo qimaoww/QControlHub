@@ -123,8 +123,8 @@ func (s *Store) RecordPanelFailure(ctx context.Context, input core.PanelFailure)
 	if err != nil {
 		return "", err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,owner_id,agent_id,engine,action,status,attempt,error,output,created_at,finished_at,failure_key,last_failure_at)
-	 VALUES($1,$2,NULLIF($3,''),$4,'panel-failure','failed',0,$5,$6,now(),now(),$7,now())`, id, scope.OwnerID, input.AgentID, input.Engine, truncate(input.Summary, 8<<10), "未进入 Agent 执行\n"+input.Operation+"\n阶段："+input.Stage, key)
+	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,owner_id,agent_id,engine,action,status,attempt,error,output,created_at,finished_at,failure_key,last_failure_at,shared_instance,shared_traffic_id)
+	 VALUES($1,$2,NULLIF($3,''),$4,'panel-failure','failed',0,$5,$6,now(),now(),$7,now(),$8,$9)`, id, scope.OwnerID, input.AgentID, input.Engine, truncate(input.Summary, 8<<10), "未进入 Agent 执行\n"+input.Operation+"\n阶段："+input.Stage, key, input.InstanceID != "", input.InstanceID)
 	if err != nil {
 		return "", err
 	}
@@ -139,7 +139,9 @@ func taskAccessClause(ctx context.Context, args *[]any) string {
 	access := agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", args)
 	if scope, ok := requestConfigScope(ctx); ok {
 		*args = append(*args, scope.OwnerID)
-		return fmt.Sprintf(" AND ((action='panel-failure' AND owner_id=$%d) OR (action<>'panel-failure' %s))", len(*args), access)
+		// Private failure ownership does not preserve a revoked resource grant.
+		// Unbound panel failures remain available to their submitting user.
+		return fmt.Sprintf(" AND ((action='panel-failure' AND owner_id=$%d AND (tasks.agent_id IS NULL OR (EXISTS(SELECT 1 FROM agents failure_agent WHERE failure_agent.id=tasks.agent_id AND failure_agent.revoked_at IS NULL) %s AND (NOT tasks.shared_instance OR EXISTS(SELECT 1 FROM agent_shares failure_share WHERE failure_share.id=tasks.shared_traffic_id AND failure_share.user_id=tasks.owner_id AND failure_share.agent_id=tasks.agent_id AND failure_share.enabled AND failure_share.status='accepted' AND tasks.engine=ANY(failure_share.engines)))))) OR (action<>'panel-failure' %s))", len(*args), access, access)
 	}
 	return access
 }

@@ -144,6 +144,41 @@ func TestPanelFailuresAreDurableScopedNonExecutableTasks(t *testing.T) {
 	}
 }
 
+func TestPanelFailureResourceRevocationHidesDiagnostics(t *testing.T) {
+	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
+	agent := enrollConfigScopeAPIAgent(t, ctx, db)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 21001)
+	input := core.PanelFailure{Operation: "共享实例配置校验", Stage: "form_validation", Summary: "校验失败", Detail: "private shared-instance diagnostic", AgentID: agent.ID, Engine: core.EngineMihomo}
+	var record struct {
+		ID string `json:"id"`
+	}
+	alice.call("POST", "/tasks/failures", input, 201, &record)
+	var bound core.Task
+	alice.call("GET", "/tasks/"+record.ID, nil, 200, &bound)
+	if !bound.SharedInstance || bound.SharedTrafficID == "" || bound.AgentID != agent.ID || bound.Engine != input.Engine {
+		t.Fatalf("failure lost real shared instance: %+v", bound)
+	}
+	alice.call("GET", "/tasks/"+record.ID+"/diagnostics", nil, 200, nil)
+	bob.call("GET", "/tasks/"+record.ID+"/diagnostics", nil, 404, nil)
+	access, err := db.UserAgentAccess(ctx, alice.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.SetUserAgentAccess(ctx, alice.userID, core.AgentAccessRequest{Isolated: true, Revision: access.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	alice.call("GET", "/tasks/"+record.ID, nil, 404, nil)
+	alice.call("GET", "/tasks/"+record.ID+"?view=status", nil, 404, nil)
+	alice.call("GET", "/tasks/"+record.ID+"/diagnostics", nil, 404, nil)
+	var tasks []core.Task
+	alice.call("GET", "/tasks", nil, 200, &tasks)
+	for _, task := range tasks {
+		if task.ID == record.ID {
+			t.Fatal("revoked diagnostic remains in task list")
+		}
+	}
+}
+
 func TestChunkedTaskDiagnosticsSurviveSummaryLimitsAndLeaseRetry(t *testing.T) {
 	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
 	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "diagnostic node", core.EngineXray)

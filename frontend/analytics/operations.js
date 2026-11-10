@@ -342,6 +342,7 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
   output.hidden = !output.textContent;
   const diagnosis = stack();
   const previousAttempts = actions();
+  const historyDialogs = new Set();
   let diagnosisSignature;
   function paintDiagnosis() {
     const value = taskRetryState(task).diagnostic;
@@ -412,6 +413,8 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
           const detail=[`领取次数：${item.attempt}`,`来源：${previous.source}`,previous.error,previous.output].filter(Boolean).join("\n\n");
           const history=ctx.dialog(`任务记录 · 第 ${item.attempt} 次`,stack(code(detail),actions(button("复制诊断",event=>void ctx.mutate(event.currentTarget,()=>copyText(detail))))),{wide:true});
           history.classList.add('a-task-dialog');
+          historyDialogs.add(history);
+          history.addEventListener('close',()=>historyDialogs.delete(history),{once:true});
           box.addEventListener('close',()=>history.close(),{once:true});
         }))));
         text = [diagnostic.occurrences>1 && `发生次数：${diagnostic.occurrences} · 最近发生：${date(diagnostic.last_failure_at)}`,
@@ -438,6 +441,8 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
       }
     } catch (error) {
       if (active() && [403, 404].includes(error.status)) {
+        for (const history of historyDialogs) history.close();
+        previousAttempts.replaceChildren();
         output.textContent = ''; output.hidden = true; state.textContent = '无权读取';
         timing.textContent = '';
         context.replaceChildren();
