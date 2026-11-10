@@ -240,6 +240,41 @@ qch_stage_gzip_binary() {
   "$qch_gzip_binary" "$@"
 }
 
+# A nonzero version probe stays fatal unless every line is the GNU loader's
+# missing GLIBC version diagnostic for this exact candidate.
+qch_ssrust_missing_glibc() {
+  awk -v candidate="$1" '
+    BEGIN {
+      prefix = candidate ": "; suffix = " (required by " candidate ")"
+      pattern = "^/[^:]+: version `GLIBC_[0-9]+\\.[0-9]+(\\.[0-9]+)?" sprintf("%c", 39) " not found$"
+    }
+    {
+      if (index($0, prefix) != 1 || substr($0, length($0)-length(suffix)+1) != suffix) exit 1
+      body = substr($0, length(prefix)+1, length($0)-length(prefix)-length(suffix))
+      if (body !~ pattern) exit 1
+      found = 1
+    }
+    END { if (!found) exit 1 }
+  ' "$2"
+}
+
+qch_ssrust_version() {
+  qch_ssrust_status=0
+  # Bound runtime and output even when the command runs in a substitution.
+  (ulimit -f 128; exec timeout 15 "$1" --version) > "$3" 2>&1 || qch_ssrust_status=$?
+  if [ "$qch_ssrust_status" -ne 0 ]; then
+    head -c 2048 "$3" >&2
+    return "$qch_ssrust_status"
+  fi
+  qch_ssrust_line=$(head -n1 "$3")
+  [ "$qch_ssrust_line" = "shadowsocks $2" ] || {
+    printf '%s\n' 'ss-rust version does not match the selected release' >&2
+    head -c 2048 "$3" >&2
+    return 1
+  }
+  printf '%s\n' "$qch_ssrust_line"
+}
+
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'must run as root' >&2; exit 1; }
 if [ -f /etc/alpine-release ]; then
   apk add --no-cache coreutils curl findutils gzip jq tar unzip xz >/dev/null
@@ -247,7 +282,7 @@ if [ -f /etc/alpine-release ]; then
 else
   linux_libc=gnu
 fi
-for tool in curl find gunzip install jq sha256sum tar unzip xz; do
+for tool in awk curl find gunzip install jq sha256sum tar timeout unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -322,7 +357,22 @@ mkdir -p "$work/ssrust"
 tar -xJf "$work/shadowsocks-rust.txz" -C "$work/ssrust"
 ssserver_binary=$(find "$work/ssrust" -type f -name ssserver -print -quit)
 [ -n "$ssserver_binary" ] || { printf '%s\n' 'ssserver binary is missing from release archive' >&2; exit 1; }
-version_output=$("$ssserver_binary" --version)
+probe_status=0
+version_output=$(qch_ssrust_version "$ssserver_binary" 1.25.0 "$work/ssrust-version") || probe_status=$?
+if [ "$probe_status" -ne 0 ]; then
+  if [ "$linux_libc" = gnu ] && [ "$probe_status" -eq 1 ] && qch_ssrust_missing_glibc "$ssserver_binary" "$work/ssrust-version"; then
+    printf '%s\n' 'GNU ss-rust requires unavailable GLIBC versions; verifying same-release musl asset' >&2
+    ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/shadowsocks-v1.25.0.x86_64-unknown-linux-musl.tar.xz"
+    verified_download "$ssrust_txz" "$work/shadowsocks-rust-musl.txz"
+    mkdir -p "$work/ssrust-musl"
+    tar -xJf "$work/shadowsocks-rust-musl.txz" -C "$work/ssrust-musl"
+    ssserver_binary=$(find "$work/ssrust-musl" -type f -name ssserver -print -quit)
+    [ -n "$ssserver_binary" ] || { printf '%s\n' 'ssserver binary is missing from musl release archive' >&2; exit 1; }
+    version_output=$(qch_ssrust_version "$ssserver_binary" 1.25.0 "$work/ssrust-musl-version")
+  else
+    exit "$probe_status"
+  fi
+fi
 printf '%s\n' "$version_output" | head -n1
 
 atomic_install "$work/mihomo" mihomo 0755

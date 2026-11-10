@@ -187,6 +187,44 @@ func TestCoreInstallExecuteAndReadPermissionsAreIndependent(t *testing.T) {
 	}
 }
 
+func TestCoreInstallFailureDiagnosticAccess(t *testing.T) {
+	db, ctx, admin, owner, shared := newConfigScopeAPIFixture(t)
+	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "ss-rust-diagnostics", core.EngineShadowsocksRust)
+	if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: append(node.Features, core.AgentFeatureSharedCorePrepare)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []bool{false, true} {
+		reader := owner
+		if private {
+			grantConfigScopeAPIAgent(t, ctx, db, node, shared, 21001)
+			reader = shared
+		}
+		var task core.Task
+		reader.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineShadowsocksRust,
+			Action: core.ActionInstall, CoreVersion: "stable"}, http.StatusCreated, &task)
+		lease, err := db.ClaimTask(ctx, node.ID)
+		if err != nil || lease == nil || lease.ID != task.ID {
+			t.Fatalf("claim: %+v %v", lease, err)
+		}
+		const output = "ss-rust release v1.25.0; asset=shadowsocks-v1.25.0.x86_64-unknown-linux-gnu.tar.xz; linux/amd64; host libc=gnu; stage=version probe\n/lib/libc.so.6: version `GLIBC_2.39' not found"
+		const failure = "downloaded ss-rust binary could not report its version: exit status 1"
+		if err := db.CompleteTask(ctx, node.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Output: output, Error: failure}); err != nil {
+			t.Fatal(err)
+		}
+		var stored core.Task
+		reader.call("GET", "/tasks/"+task.ID, nil, http.StatusOK, &stored)
+		if stored.Status != core.TaskFailed || stored.Output != output || stored.Error != failure || stored.SharedTrafficID != task.SharedTrafficID {
+			t.Fatalf("lost task diagnostic or scope: %+v", stored)
+		}
+		if !private {
+			shared.call("GET", "/tasks/"+task.ID, nil, http.StatusNotFound, nil)
+			admin.call("GET", "/tasks/"+task.ID, nil, http.StatusOK, &stored)
+		} else {
+			owner.call("GET", "/tasks/"+task.ID, nil, http.StatusNotFound, nil)
+		}
+	}
+}
+
 func loginCoreInstallUser(t *testing.T, client configScopeAPIClient, username string) configScopeAPIClient {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"username": username, "token": "config scope password fixture"})
