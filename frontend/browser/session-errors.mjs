@@ -3,14 +3,14 @@ import { assert, waitFor, delay } from './assertions.mjs';
 // Exercise the shipped shell and transport with isolated HTTP responses.
 export async function testSessionErrors(preview = '') {
   const app = document.querySelector('#app');
-  let session = null, failure = null, loginFailure = null, holds = [], failures = 0, loginCalls = 0;
+  let session = null, failure = null, loginFailure = null, logoutReply = null, holds = [], failures = 0, loginCalls = 0, logoutCalls = 0;
   const identity = id => ({ user_id: id, username: id, role: 'user', csrf_token: `fixture-${id}`, permissions: ['tasks.read', 'settings.read'] });
   const expired = { error: '登录已过期，请重新登录。', detail: 'session expired' };
   const reply = (body, status = 200) => Response.json(body, { status });
   window.fetch = async (url, options = {}) => {
     const path = new URL(url, location.href).pathname.replace(/^\/api\/v1/, '');
     if (path === '/auth/login') { loginCalls++; if (loginFailure) return reply(loginFailure.body, loginFailure.status); session = identity('second'); return reply(session); }
-    if (path === '/auth/logout') { session = null; return new Response(null, { status: 204 }); }
+    if (path === '/auth/logout') { logoutCalls++; session = null; return logoutReply || new Response(null, { status: 204 }); }
     if (path === '/auth/session') return session ? reply(session) : reply(expired, 401);
     if (path === '/tasks/failures') { failures++; return reply({ id: 'tsk_unexpected' }); }
     if (path === '/site-branding') return reply({});
@@ -34,7 +34,7 @@ export async function testSessionErrors(preview = '') {
     form.requestSubmit();
     await waitFor(() => !form.matches('[aria-busy=true]'), 'login did not settle');
   };
-  if (preview) {
+  if (preview && preview !== 'logout') {
     if (preview === 'expired') { failure = { body: expired, status: 401 }; start(identity('first')); }
     else { start(null); if (preview !== 'initial') { loginFailure = { body: { error: preview === 'forbidden' ? '当前账号没有执行此操作的权限，请联系管理员。' : '用户名、密码或管理员令牌不正确，请检查后重试。', detail: preview === 'forbidden' ? 'token role does not permit this operation' : 'invalid admin token' }, status: preview === 'forbidden' ? 403 : 401 }; await submit(); } }
     await waitFor(login, 'preview login missing');
@@ -59,9 +59,24 @@ export async function testSessionErrors(preview = '') {
   await waitFor(() => app.querySelector('.a-main'), 'login recovery did not show shell');
   assert.equal(loginCalls, 7, 'login submits were duplicated');
   assert.ok(!app.textContent.includes('登录失败次数过多'), 'successful login retained an old error');
-  app.querySelector('[title="退出登录"]').click();
+  const logoutButton = app.querySelector('[title="退出登录"]');
+  logoutButton.click(); logoutButton.click();
   await waitFor(login, 'logout did not show login');
   assert.ok(!app.textContent.includes('过期'), 'logout claims expiration');
+
+  failure = 'hold'; holds = []; start(identity('leaving'));
+  await waitFor(() => holds.length >= 3, 'logout race reads were not started');
+  let finishLogout;
+  logoutReply = new Promise(resolve => { finishLogout = resolve; });
+  app.querySelector('[title="退出登录"]').click();
+  await waitFor(() => logoutCalls === 2, 'logout request was not started');
+  for (const request of holds) request.resolve(reply(expired, 401));
+  await waitFor(login, 'concurrent 401 did not settle logout');
+  finishLogout(new Response(null, { status: 204 })); logoutReply = null;
+  await waitFor(() => !app.matches('[aria-busy=true]'), 'logout did not settle');
+  assert.ok(!app.textContent.includes('过期'), 'a concurrent 401 made explicit logout claim expiration');
+  assert.equal(logoutCalls, 2, 'logout clicks started duplicate requests');
+  if (preview === 'logout') return;
 
   for (const body of [expired, { error: 'session expired' }]) {
     failure = 'hold'; holds = []; start(identity('first'));

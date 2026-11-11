@@ -75,7 +75,7 @@ export function startAnalytics({ app, session }) {
   const stopSessionRequests = () => { sessionAbort.abort(); sessionAbort = new AbortController(); };
   const warmup = createRouteWarmup(routeModules, { moduleName: pageModuleName, signal: lifetime.signal });
   warmup.bindNavigationPreload();
-  let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0;
+  let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0, loggingOut = false;
   let currentHash = location.hash, route = "", dialogSequence = 0, navigation = 0;
   const layout = node("div", { className: "a-layout" });
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
@@ -367,16 +367,20 @@ export function startAnalytics({ app, session }) {
   window.addEventListener("pagehide", () => void preferences?.flush(), { signal: lifetime.signal });
   document.addEventListener("visibilitychange", () => { if (document.hidden) void preferences?.flush(); }, { signal: lifetime.signal });
   async function logout() {
-    if (!await leave()) return;
-    await preferences?.flush();
-    await mutate(null, async () => {
-      try { await api("/auth/logout", { method: "POST", body: {}, signal: AbortSignal.timeout(15000) }); }
-      catch (error) { if (error.status !== 401) throw error; }
-      login();
-    });
+    if (!await leave() || loggingOut) return;
+    loggingOut = true;
+    try {
+      await preferences?.flush();
+      await mutate(null, async () => {
+        try { await api("/auth/logout", { method: "POST", body: {}, signal: AbortSignal.timeout(15000) }); }
+        catch (error) { if (error.status !== 401) throw error; }
+        login();
+      });
+    } finally { loggingOut = false; }
   }
   function login(message = "") {
     if (!state.session && app.querySelector('.a-login')) return;
+    if (loggingOut) message = "";
     stopSessionRequests();
     void refreshSiteBranding();
     preferences?.dispose(); preferences = null;
