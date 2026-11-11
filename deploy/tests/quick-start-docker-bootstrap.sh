@@ -12,7 +12,8 @@ export XDG_CONFIG_HOME="$test_root/config"
 
 # Simulate the default socket independently of any Docker on the test runner.
 function [ {
-    if builtin [ "${1:-}" = -S ] && builtin [ "${2:-}" = /var/run/docker.sock ]; then return 1; fi
+    if builtin [ "${1:-}" = '!' ] && builtin [ "${2:-}" = -x ] && builtin [ "${3:-}" = /usr/bin/docker ]; then return 0; fi
+    if builtin [ "${1:-}" = -S ] && builtin [ "${2:-}" = /var/run/docker.sock ]; then builtin [ "${fixture_socket:-false}" = true ]; return; fi
     if builtin [ "${1:-}" = '!' ] && builtin [ "${2:-}" = -S ] && builtin [ "${3:-}" = /var/run/docker.sock ]; then return 0; fi
     builtin [ "$@"
 }
@@ -20,7 +21,7 @@ function [ {
 record() { printf '%s\n' "$*" >> "$test_root/calls"; }
 command() {
     if [ "$*" = '-v docker' ] && [ ! -f "$test_root/cli" ]; then return 1; fi
-    if [ "$*" = '-v dockerd' ]; then return 1; fi
+    if [ "$*" = '-v dockerd' ]; then [ "${fixture_daemon:-false}" = true ] && printf /usr/sbin/dockerd; return; fi
     builtin command "$@"
 }
 docker() {
@@ -35,6 +36,7 @@ docker() {
         *) record "unexpected docker $*"; return 1 ;;
     esac
 }
+docker_probe() { docker "$@"; }
 docker_install_privileges() {
     record privileges
     [ "${deny_privileges:-false}" = false ] || die '需要 root 权限'
@@ -54,6 +56,7 @@ install_docker_compose() {
     [ "${fail_compose:-false}" = false ] || die '安装 Compose v2 失败'
     touch "$test_root/compose"
 }
+timeout() { shift; "$@"; }
 systemctl() {
     record "systemctl $*"
     case "$*" in
@@ -79,6 +82,7 @@ reset_case() {
     rm -f "$test_root/cli" "$test_root/ready" "$test_root/compose"
     : > "$test_root/calls"
     ACTION=install
+    fixture_socket=false fixture_daemon=false
     fixture_endpoint=unix:///var/run/docker.sock
     bad_context=false deny_privileges=false unsupported_init=false
     fail_install=false fail_compose=false fail_start=false active=false fixture_manager=systemd
@@ -143,6 +147,43 @@ expect_failure '无法读取 Docker context'
 reset_case; touch "$test_root/cli"; active=true
 expect_failure 'Docker 服务已运行但连接失败'
 assert_absent 'systemctl start'
+# Missing CLI after an interrupted distro installation can recover on rerun.
+dpkg-query() {
+    [ "${fixture_distro_owned:-true}" = true ] || return 1
+    case "$*" in
+        *'${Status}'*) printf 'install ok installed' ;;
+        '-S /usr/sbin/dockerd') printf 'docker.io: /usr/sbin/dockerd' ;;
+        *) return 1 ;;
+    esac
+}
+reset_case
+fixture_daemon=true
+require_commands
+grep -Fxq engine "$test_root/calls"
+: > "$test_root/calls"
+require_commands
+[ ! -s "$test_root/calls" ]
+reset_case
+fixture_daemon=true fixture_distro_owned=false
+expect_failure '请修复原安装来源'
+assert_absent engine
+unset -f dpkg-query
+reset_case
+fail_install=true
+expect_failure '安装 Docker Engine 失败'
+fail_install=false
+require_commands
+grep -Fxq 'systemctl start docker' "$test_root/calls"
+reset_case
+DOCKER_HOST=tcp://remote.invalid:2376
+expect_failure '指定了 Docker 连接地址'
+[ ! -s "$test_root/calls" ]
+unset DOCKER_HOST
+reset_case
+DOCKER_CONTEXT=remote
+expect_failure '指定了 Docker context'
+[ ! -s "$test_root/calls" ]
+unset DOCKER_CONTEXT
 for operation in update uninstall; do
     reset_case
     ACTION="$operation"
@@ -164,6 +205,33 @@ uname() {
 reset_case
 native_install_docker_engine
 grep -Eq '^(apt-get|apk|dnf|zypper) ' "$test_root/calls"
+# Debian package split regression: package-manager success alone never
+# supplies the CLI in this fixture. Check the actual requested package set.
+apt-cache() {
+    [ "${split_cli:-true}" = true ] || return 100
+    printf 'Package: docker-cli\n'
+}
+dpkg-query() {
+    case "$*" in
+        *'${Status}'*) [ "${cli_installed:-false}" = true ] || return 1; printf 'install ok installed' ;;
+        *'${Version}'*) printf '26.1.5+fixture' ;;
+        *) return 1 ;;
+    esac
+}
+reset_case
+split_cli=true cli_installed=false
+install_debian_docker
+grep -Fq -- '--no-upgrade docker.io docker-cli' "$test_root/calls"
+reset_case
+split_cli=false
+install_debian_docker
+grep -Eq -- '--no-upgrade docker.io$' "$test_root/calls"
+reset_case
+split_cli=true cli_installed=true
+install_debian_docker
+grep -Fq -- '--reinstall docker-cli=26.1.5+fixture' "$test_root/calls"
+assert_absent --no-upgrade
+unset -f apt-cache dpkg-query
 fixture_arch=unsupported
 if (native_install_docker_engine) > "$test_root/output" 2>&1; then exit 1; fi
 grep -Fq '不支持当前架构' "$test_root/output"
@@ -190,8 +258,8 @@ start_services
 grep -Fxq buildx "$test_root/calls"
 # Real checksum calculation with simulated downloads/install commands verifies
 # that corrupt or incomplete plugins never reach the installation command.
-curl() {
-    local destination="${*: -1}"
+qch_github_download() {
+    local destination="$2"
     printf '%s' "$destination" > "$test_root/download-path"
     printf fixture > "$destination"
     [ "${fail_download:-false}" = false ]

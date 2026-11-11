@@ -188,6 +188,7 @@ bootstrap_streamed_script() {
     qch_github_download "$base_url/deploy/quick-start.sh" "$script_temp" 2097152 20 || die "下载 quick-start.sh 失败"
     qch_github_download "$base_url/docker-compose.yml" "$compose_temp" 2097152 20 || die "下载 docker-compose.yml 失败"
     bash -n "$script_temp" || die "下载的 quick-start.sh 语法无效"
+    tail -n 1 "$script_temp" | grep -Fxq '} # complete quick-start entry' || die "下载的 quick-start.sh 内容不完整"
     grep -Fq 'name: qcontrolhub' "$compose_temp" || die "下载的 docker-compose.yml 内容无效"
     chmod 0755 "$script_temp"
     chmod 0644 "$compose_temp"

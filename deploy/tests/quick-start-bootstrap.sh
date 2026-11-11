@@ -26,17 +26,27 @@ while [ "$#" -gt 0 ]; do
         *) shift ;;
     esac
 done
-if [ "$entry" = true ]; then
-    cat "$QCH_BOOTSTRAP_TEST_SOURCE" > "$output"
+if [ "$entry" = true ] || [ -z "$output" ]; then
+    if [ -n "$output" ]; then
+        cat "$QCH_BOOTSTRAP_TEST_SOURCE" > "$output"
+    else
+        case "${QCH_BOOTSTRAP_TEST_DOWNLOAD_MODE:-complete}" in
+            complete) cat "$QCH_BOOTSTRAP_TEST_SOURCE" ;;
+            empty) : ;;
+            truncated) head -c 20000 "$QCH_BOOTSTRAP_TEST_SOURCE" ;;
+        esac
+    fi
     exit "${QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS:-0}"
 fi
 case "$url" in
     */deploy/quick-start.sh)
         cat > "$output" <<'QUICK_START'
 #!/usr/bin/env bash
+{
 printf '%s\n' "$@" > "$QCH_BOOTSTRAP_TEST_ARGS"
 printf '%s\n' "${QCH_INSTALL_DIR:-}" > "$QCH_BOOTSTRAP_TEST_WORK_DIR"
 exit "${QCH_BOOTSTRAP_TEST_EXIT_STATUS:-0}"
+} # complete quick-start entry
 QUICK_START
         ;;
     */docker-compose.yml)
@@ -184,9 +194,8 @@ producer=$!
 wait "$producer"
 [ ! -s "$test_root/producer.err" ]
 
-# Execute the exact documented download-first entry. A failed download may
-# leave partial source, but it must not be executed. Child exit status survives.
-entry="$(sed -n '/^(script=$(mktemp)/p' "$repo_root/README.md")"
+# Execute the exact README process-substitution entry using the candidate file.
+entry="$(sed -n '/^bash <(curl -fsSL /p' "$repo_root/README.md")"
 [ -n "$entry" ]
 for status in 0 37; do
     export QCH_BOOTSTRAP_TEST_EXIT_STATUS="$status"
@@ -195,11 +204,16 @@ for status in 0 37; do
     [ "$result" -eq "$status" ]
 done
 unset QCH_BOOTSTRAP_TEST_EXIT_STATUS
-rm -f "$QCH_BOOTSTRAP_TEST_ARGS"
-result=0
-PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS=23 \
-    bash -c "$entry" >"$test_root/entry-download-failed.out" 2>&1 || result=$?
-[ "$result" -eq 23 ]
-[ ! -e "$QCH_BOOTSTRAP_TEST_ARGS" ]
+for mode in empty truncated; do
+    rm -f "$QCH_BOOTSTRAP_TEST_ARGS"
+    result=0
+    PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" QCH_BOOTSTRAP_TEST_DOWNLOAD_MODE="$mode" \
+        QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS=23 bash -c "$entry" >"$test_root/entry-$mode.out" 2>&1 || result=$?
+    # Bash cannot propagate the producer status of <(...). An empty script
+    # returns zero but must never execute installation or print success.
+    [ "$mode" = empty ] || [ "$result" -ne 0 ]
+    [ ! -e "$QCH_BOOTSTRAP_TEST_ARGS" ]
+    ! grep -Eq '部署完成|安装成功|更新完成' "$test_root/entry-$mode.out"
+done
 
 printf '%s\n' 'streamed quick-start bootstrap regression passed'
