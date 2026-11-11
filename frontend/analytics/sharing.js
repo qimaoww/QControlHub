@@ -18,7 +18,7 @@ async function editAgentSharingLoaded(ctx, agent) {
   const draft = drafts.get(agent.id);
   const rows = node('div', { className: 'a-stack' });
   const supported = ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1'].every(feature => agent.features?.includes(feature));
-  let baseline, revision = draft?.revision ?? saved.revision, changed = false, saving = false;
+  let baseline, revision = draft?.revision ?? saved.revision, changed = false, saving = false, reading = false, available = true, edits = 0;
   const values = () => [...rows.children].map(row => ({
     username: row.querySelector('[name=username]').value,
     enabled: row.querySelector('[name=enabled]').checked,
@@ -31,27 +31,41 @@ async function editAgentSharingLoaded(ctx, agent) {
   }));
   function markChanged(event) {
     if (!current()) return;
-    if (event) form.querySelector(':scope > [role=alert]').textContent = '';
+    if (event) { edits++; form.querySelector(':scope > [role=alert]').textContent = ''; }
     const snapshot = values();
     changed = JSON.stringify(snapshot) !== baseline;
     if (changed) drafts.set(agent.id, { revision, rows: snapshot, baseline });
     else drafts.delete(agent.id);
     ctx.setDirty(changed);
-    submit.disabled = !supported || !changed || saving;
+    submit.disabled = !available || !supported || !changed || saving || reading;
   }
-  const reload = button('重新读取', () => void reloadRead.load());
-  const reloadRead = readRegion(ctx, '共享设置', async () => {
-    if (changed && !await ctx.confirm('重新读取将丢弃此节点未保存的共享设置。', '重新读取') || !current()) return;
-    const previous = JSON.stringify(values());
-    const received = await ctx.api(path);
-    if (!current()) return;
-    if (previous !== JSON.stringify(values())) throw new Error('共享设置已修改，当前草稿已保留。');
-    adopt(received);
-  }, () => {});
+  const reload = button('重新读取', async () => {
+    if (!current() || reading || saving) return;
+    reading = true; reload.disabled = true; markChanged();
+    try {
+      if (changed && !await ctx.confirm('重新读取将丢弃此节点未保存的共享设置。', '重新读取') || !current()) return;
+      await reloadRead.load();
+    } finally {
+      reading = false;
+      if (current()) { reload.disabled = false; markChanged(); }
+    }
+  });
+  const reloadRead = readRegion(ctx, '共享设置', async signal => {
+    const previous = edits;
+    const received = await ctx.api(path, { signal });
+    return { received, previous };
+  }, ({ received, previous }) => {
+    if (previous !== edits) throw Object.assign(new Error('共享设置已修改，当前草稿已保留。'), { readOnly: true });
+    available = true; addUser.disabled = false; adopt(received);
+  }, { retry: false, showRefresh: true, clear() {
+    available = false; rows.replaceChildren(); baseline = JSON.stringify(values());
+    drafts.delete(agent.id); addUser.disabled = true; markChanged();
+  } });
+  const addUser = button('添加用户', () => { if (!available) return; edits++; add({ enabled: true }); markChanged(); });
   const form = ctx.form([
-    reloadRead.element, rows, actions(button('添加用户', () => { add({ enabled: true }); markChanged(); }), reload),
+    rows, reloadRead.element, actions(addUser, reload),
   ], '保存共享设置', async () => {
-    if (!current() || saving || !supported || !changed) return;
+    if (!current() || saving || reading || !available || !supported || !changed) return;
     const shares = values().map((row, index) => ({
       username: row.username.trim(), enabled: row.enabled,
       ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
@@ -83,9 +97,9 @@ async function editAgentSharingLoaded(ctx, agent) {
       actions(field('启用共享', 'enabled', share.enabled !== false, { type: 'checkbox' }),
         share.status === 'rejected' && button('重新邀请', event => {
           row.dataset.reinvite = 'true'; event.currentTarget.disabled = true;
-          row.querySelector('[name=enabled]').checked = true; shareState.textContent = '待发送'; markChanged();
+          row.querySelector('[name=enabled]').checked = true; shareState.textContent = '待发送'; edits++; markChanged();
         }, { disabled: Boolean(share.reinvite) }),
-        !share.user_id && button('移除', () => { row.remove(); markChanged(); })),
+        !share.user_id && button('移除', () => { row.remove(); edits++; markChanged(); })),
       muted(`托管入口 · ${proxyIngressLabel(share)}`),
       actions(shareState, share.user_id && muted(`已用 ${bytes(share.used_bytes)}`)),
     ));
@@ -94,8 +108,9 @@ async function editAgentSharingLoaded(ctx, agent) {
     rows.append(row);
   }
   function adopt(received) {
+    const unchanged = rows.children.length === received.shares.length && !changed && JSON.stringify(saved.shares) === JSON.stringify(received.shares);
     saved = received; revision = saved.revision;
-    rows.replaceChildren(); saved.shares.forEach(add);
+    if (!unchanged) { rows.replaceChildren(); saved.shares.forEach(add); }
     baseline = JSON.stringify(values()); changed = false;
     drafts.delete(agent.id); ctx.setDirty(false); form.querySelector(':scope > [role=alert]').textContent = ''; markChanged();
   }
@@ -104,10 +119,11 @@ async function editAgentSharingLoaded(ctx, agent) {
   const submit = form.querySelector('button[type=submit]');
   form.addEventListener('input', markChanged);
   form.addEventListener('change', markChanged);
-  submit.addEventListener('mutationend', () => { submit.disabled = !supported || !changed || saving; });
+  submit.addEventListener('mutationend', () => markChanged());
   markChanged();
   const box = ctx.dialog(`${agent.name} · 共享 Agent`, stack(!supported && notice('请先升级 Agent，再启用共享'), form), { wide: true });
   box.onRequestClose = () => {
+    if (saving) { ctx.announce('操作正在提交，请等待结果。', 'warn'); return; }
     markChanged(); ctx.setDirty(false); box.close();
   };
   box.addEventListener('close', () => { if (current()) ctx.setDirty(false); }, { once: true });
