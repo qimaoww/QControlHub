@@ -59,7 +59,7 @@ export async function logsPage(ctx) {
     actions(button("清除筛选", () => {
       for (const name of ["engine", "level", "q"]) controls.elements[name].value = "";
       preferenceFields.save({ engine: '', level: '', q: '' }); changed();
-    }), toggle, button("刷新", () => { if (automatic) void poller.trigger(); else void load(); })));
+    }), toggle, button("刷新", () => { void ctx.preferences?.flush(); void ctx.preferences?.ready(); if (automatic) void poller.trigger(); else void load(); })));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild));
   function remember() {
     if (!ctx.current()) return;

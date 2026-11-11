@@ -69,7 +69,7 @@ export async function connectionsPage(ctx) {
     button("清除筛选", () => {
       for (const name of ["agent_id", "engine", "client_ip", "country_code"]) controls.elements[name].value = "";
       controls.elements.include_non_public.checked = false; preferenceFields.save({ agent_id: "", engine: "", client_ip: "", country_code: "", include_non_public: false }); changed();
-    }), button("刷新", () => void load({ target: cursor, history: cursors, force: true }))));
+    }), button("刷新", () => { void ctx.preferences?.flush(); void ctx.preferences?.ready(); void load({ target: cursor, history: cursors, force: true }); })));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild, controls.querySelector(".a-check")));
   function updateRegions() {
     const select = controls.elements.country_code, value = filters.country_code || "";
