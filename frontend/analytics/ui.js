@@ -21,6 +21,23 @@ export function bindSelectionSurface(root, { selector, active = () => true, pres
   root.addEventListener('keydown', toggle, { capture: true, signal });
 }
 const icons = {
+  "config-live": '<path d="M4 4h16v16H4zM8 8h8M8 12h3m3 0h2M8 16h8"/><circle cx="13" cy="12" r="2"/>',
+  "config-archive": '<path d="M3 4h18v5H3zM5 9v12h14V9M9 13h6M9 17h6"/>',
+  "plug": '<path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+  "sync": '<path d="M4 8h15l-4-4M20 16H5l4 4M4 8v5m16-5v8"/>',
+  "clipboard": '<path d="M9 4H5v17h14V4h-4M8 11l2 2 5-5M8 17h8"/><rect x="9" y="2" width="6" height="4" rx="1"/>',
+  "terminal": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 1h4"/>',
+  "connections": '<rect x="2" y="8" width="6" height="8" rx="1"/><rect x="16" y="8" width="6" height="8" rx="1"/><path d="M8 12h8m-5-3 3 3-3 3"/>',
+  "chart": '<path d="M4 3v17h17M8 16v-4m5 4V7m5 9V4"/>',
+  "bell": '<path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5zM10 21h4M12 2v2"/>',
+  "tcp": '<path d="M3 7h18M3 17h18M8 4v6m8 4v6"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="17" r="2"/>',
+  "globe-check": '<circle cx="11" cy="11" r="8"/><path d="M3 11h16M11 3a15 15 0 0 0 0 16m0-16a15 15 0 0 1 3 9m1 6 2 2 4-5"/>',
+  "braces": '<path d="m8 5-6 7 6 7m8-14 6 7-6 7m-3-16-2 20"/>',
+  "cog": '<path d="m9 3-1 3-3 1-2 4 2 2v4l4 2 3-1 3 1 4-2v-4l2-2-2-4-3-1-1-3z"/><circle cx="12" cy="11" r="3"/>',
+  "user-shield": '<circle cx="9" cy="7" r="3"/><path d="M2 20v-3a5 5 0 0 1 5-5h4m6-1 5 2v4l-5 5-5-5v-4z"/>',
+  "quota": '<path d="M4 4h16v16H4zM4 10h16M10 10v10M7 7h.01M13 14h4m-4 3h2"/>',
+  "tools": '<path d="m14 5 5 5m-4-7a6 6 0 0 0-7 7l-5 7a3 3 0 0 0 4 4l7-7a6 6 0 0 0 7-7l-4 4-4-4z"/>',
+
   brand: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',

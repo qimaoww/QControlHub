@@ -1,0 +1,6 @@
+FROM debian:trixie-slim
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates iperf3 iproute2 nftables procps systemd && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /usr/local/lib/qagent/cores /etc/qagent/mihomo /var/lib/qcontrolhub
+COPY bin/qagent /usr/local/bin/qagent
+COPY nexttrace /usr/local/lib/qagent/network-tools/nexttrace
+ENTRYPOINT ["/usr/local/bin/qagent"]

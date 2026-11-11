@@ -64,7 +64,8 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 		c.traffic.collect(ctx, false)
 	}
 	heartbeat := &core.HeartbeatRequest{
-		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
+		Diagnostics: &c.diagnosticCapabilities,
+		Version:     c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 		SharedInstances:     sharedInstances,
 		ProxyIngressReports: c.ingressReports(),
@@ -111,6 +112,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 // systemd nodes stream them from the volatile journal namespace.
 func (c *Client) advertisedFeatures() []string {
 	features := []string{
+		core.AgentFeatureNetworkDiagnostics,
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
 		core.AgentFeatureSharedProxyIngress,

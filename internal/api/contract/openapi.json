@@ -958,6 +958,7 @@
           "import-existing",
           "install",
           "ip-quality",
+          "network-diagnostic",
           "panel-failure",
           "read-config",
           "read-managed-config",
@@ -2254,6 +2255,228 @@
             "type": "string"
           },
           "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "tools": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/core_DiagnosticTool"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticNode": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/core_DiagnosticCapabilities"
+          },
+          "context": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "bandwidth": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "duration": {
+            "type": "integer"
+          },
+          "interval_ms": {
+            "type": "integer"
+          },
+          "max_hops": {
+            "type": "integer"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "streams": {
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "bidirectional": {
+            "type": "boolean"
+          },
+          "node1": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "node2": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/core_DiagnosticParameters"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "target_mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticResult": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cleaned": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "output": {},
+          "state": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticSession": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deadline": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "身份与资源归属由服务端决定；API Key 不得修改账户身份或指定其他所有者。",
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/core_DiagnosticRequest"
+          },
+          "results": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/core_DiagnosticResult"
+            },
+            "type": "object"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DiagnosticTool": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "version": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
             "type": "string"
           }
         },
@@ -11411,6 +11634,203 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/agents/{id}/diagnostic-grants": {
+      "get": {
+        "operationId": "diagnosticGrants_api_v1_agents_{id}_diagnostic-grants",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {},
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/core_DiagnosticGrant"
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "diagnosticGrants",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.manage"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.manage"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/diagnostic-grants/{share}": {
+      "put": {
+        "operationId": "setDiagnosticGrant_api_v1_agents_{id}_diagnostic-grants_{share}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "share",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "enabled": false,
+                "revision": 1
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "revision": {
+                    "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "设置DiagnosticGrant",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.manage"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.manage"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/agents/{id}/enrollment-command": {
       "post": {
         "operationId": "getAgentEnrollmentCommand_api_v1_agents_{id}_enrollment-command",
@@ -18557,6 +18977,579 @@
           "any": false,
           "permissions": [
             "metrics.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/network-diagnostics": {
+      "get": {
+        "operationId": "listDiagnostics_api_v1_network-diagnostics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2026-11-10T12:00:00Z",
+                    "deadline": "2026-11-10T12:00:00Z",
+                    "id": "resource_example",
+                    "owner_id": "example",
+                    "request": {
+                      "bidirectional": false,
+                      "node1": {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      },
+                      "node2": {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      },
+                      "parameters": {
+                        "bandwidth": null,
+                        "count": null,
+                        "duration": null,
+                        "interval_ms": null,
+                        "max_hops": null,
+                        "port": null,
+                        "protocol": null,
+                        "provider": null,
+                        "size": null,
+                        "streams": null,
+                        "timeout_ms": null,
+                        "tool": null
+                      },
+                      "request_id": "example",
+                      "target_mode": "example"
+                    },
+                    "results": {},
+                    "state": "example"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/core_DiagnosticSession"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "列出Diagnostics",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      },
+      "post": {
+        "operationId": "createDiagnostic_api_v1_network-diagnostics",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "bidirectional": false,
+                "node1": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "node2": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "parameters": {
+                  "bandwidth": 1,
+                  "count": 1,
+                  "duration": 1,
+                  "interval_ms": 1,
+                  "max_hops": 1,
+                  "port": 1,
+                  "protocol": "example",
+                  "provider": "example",
+                  "size": 1,
+                  "streams": 1,
+                  "timeout_ms": 1,
+                  "tool": "example"
+                },
+                "request_id": "example",
+                "target_mode": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "bidirectional": {
+                    "type": "boolean"
+                  },
+                  "node1": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "node2": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "parameters": {
+                    "$ref": "#/components/schemas/core_DiagnosticParameters"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "target_mode": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "deadline": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "owner_id": "example",
+                  "request": {
+                    "bidirectional": false,
+                    "node1": {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    },
+                    "node2": {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    },
+                    "parameters": {
+                      "bandwidth": 1,
+                      "count": 1,
+                      "duration": 1,
+                      "interval_ms": 1,
+                      "max_hops": 1,
+                      "port": 1,
+                      "protocol": "example",
+                      "provider": "example",
+                      "size": 1,
+                      "streams": 1,
+                      "timeout_ms": 1,
+                      "tool": "example"
+                    },
+                    "request_id": "example",
+                    "target_mode": "example"
+                  },
+                  "results": {},
+                  "state": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DiagnosticSession"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "创建Diagnostic",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/network-diagnostics/nodes": {
+      "get": {
+        "operationId": "diagnosticNodes_api_v1_network-diagnostics_nodes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "agent_id": "example",
+                    "capabilities": {
+                      "addresses": [
+                        "example"
+                      ],
+                      "providers": {},
+                      "tools": {}
+                    },
+                    "context": "example",
+                    "instance_id": "example",
+                    "name": "example",
+                    "online": false
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/core_DiagnosticNode"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "diagnosticNodes",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/network-diagnostics/{id}": {
+      "get": {
+        "operationId": "getDiagnostic_api_v1_network-diagnostics_{id}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "deadline": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "owner_id": "example",
+                  "request": {
+                    "bidirectional": false,
+                    "node1": {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    },
+                    "node2": {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    },
+                    "parameters": {
+                      "bandwidth": 1,
+                      "count": 1,
+                      "duration": 1,
+                      "interval_ms": 1,
+                      "max_hops": 1,
+                      "port": 1,
+                      "protocol": "example",
+                      "provider": "example",
+                      "size": 1,
+                      "streams": 1,
+                      "timeout_ms": 1,
+                      "tool": "example"
+                    },
+                    "request_id": "example",
+                    "target_mode": "example"
+                  },
+                  "results": {},
+                  "state": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DiagnosticSession"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询Diagnostic",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/network-diagnostics/{id}/stop": {
+      "post": {
+        "operationId": "stopDiagnostic_api_v1_network-diagnostics_{id}_stop",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "stopDiagnostic",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"

@@ -47,8 +47,8 @@ NoNewPrivileges=true
 # CAP_NET_BIND_SERVICE allows the temporary HTTP-01 challenge listener.
 # CAP_NET_ADMIN is limited to the Agent's dedicated nftables table for
 # engine-independent per-port traffic accounting and quota enforcement.
-CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

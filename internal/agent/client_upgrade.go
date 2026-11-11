@@ -159,6 +159,9 @@ func (c *Client) reexecAfterUpgrade() {
 	time.Sleep(150 * time.Millisecond)
 	c.taskLifecycleMu.Lock()
 	defer c.taskLifecycleMu.Unlock()
+	if c.diagnostics != nil && c.diagnostics.Active() {
+		return
+	}
 	if !c.upgradePending || c.upgradeCommitted == nil {
 		return
 	}

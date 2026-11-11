@@ -27,7 +27,7 @@ export const actionName = value => ({
   validate: "校验配置", deploy: "部署并重启", start: "启动服务", stop: "停止服务", restart: "重启服务", status: "查询状态",
   install: "安装内核", uninstall: "卸载内核", "read-config": "读取可导入配置", "read-managed-config": "读取托管配置",
   "panel-failure":"面板失败", "import-existing": "导入现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用 BBR",
-  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测",
+  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
 function responsiveChart(days, signal) {
@@ -321,6 +321,7 @@ export async function dashboardPage(ctx) {
 }
 
 function taskEngine(task) {
+  if (task.action === 'network-diagnostic') return '节点网络';
   if (task.action === 'panel-failure') return '面板';
   if (task.action === 'upgrade-agent') return 'QAgent';
   if (task.action === 'ip-quality') return 'IPQuality';
@@ -329,6 +330,7 @@ function taskEngine(task) {
 }
 
 function taskContext(ctx, task, targetAgent) {
+  if (task.action === "network-diagnostic") return stack(muted(`节点网络测量 · ${date(task.created_at)}`),link("查看测量结果", `#network-tools?measurement=${pathID(task.id)}`));
   if (task.action === "panel-failure") return stack(muted(`面板操作 · ${date(task.created_at)}`),muted("未进入 Agent 执行"));
   const agent = targetAgent?.id === task.agent_id ? targetAgent : ctx.can('agents.read') && ctx.state.data.taskAgents?.find(agent => agent.id === task.agent_id);
   const source = coreSourceLabel(task.engine, task.core_version, task.core_source);
@@ -509,7 +511,7 @@ export async function tasksPage(ctx) {
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
       agentField,
-      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp", "panel-failure"].map(action => [action, actionName(action)])] }),
+      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "network-diagnostic", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp", "panel-failure"].map(action => [action, actionName(action)])] }),
       field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
   ], async (values, _, request) => {
     const sequence = ++readSequence; filtering = true;
@@ -566,7 +568,7 @@ export async function tasksPage(ctx) {
     taskTable.updateRows(lastTasks.map(task => Object.assign(() => {
       const retryState = taskRetryState(task);
       return [
-        actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id || "面板", taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
+        actionName(task.action), agents.find(agent => agent.id === task.agent_id)?.name || task.agent_id || (task.action === "network-diagnostic" ? "节点网络" : "面板"), taskEngine(task), stack(actions(status(task.status)), muted(taskTiming(task)), retryState.missingConfigVersion && muted("缺少配置历史关联")), date(task.created_at),
         node('div', { className: 'a-actions', 'data-task-id': task.id }, button("详情", () => void ctx.mutate(null, () => taskDetail(ctx, task.id))),
           ctx.can("tasks.execute") && retryState.canRetry && button(task.config_id ? "重试配置" : "重试任务", async event => {
             const control = event.currentTarget;

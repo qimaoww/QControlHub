@@ -58,6 +58,13 @@ ENTRYPOINT ["/usr/local/bin/qcontrol-plane"]
 FROM runtime-base AS qagent
 
 COPY --from=build-binaries /out/qagent /usr/local/bin/qagent
+USER root
+RUN apk add --no-cache openrc iproute2 nftables \
+    && chown root:root /var/lib/qcontrolhub \
+    && chmod 0700 /var/lib/qcontrolhub \
+    && install -d -m 0755 /usr/local/lib/qagent/cores /etc/qagent \
+    && /usr/local/bin/qagent prepare-network-tools
+ENV QCH_SERVICE_MANAGER=openrc
 
 VOLUME ["/var/lib/qcontrolhub"]
 ENTRYPOINT ["/usr/local/bin/qagent"]

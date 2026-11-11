@@ -116,6 +116,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// unknown core_source. Once the heartbeat is committed, ClaimTask and
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
+	var networkDiagnostics bool
 	var agentHasFeatureFromStore bool
 	var agentHasManagedCertificates bool
 	var lastManagedScan time.Time
@@ -272,9 +273,21 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				// Never log the envelope or its key material. Failed imports are
 				// persisted as sanitized source status and retried on next scan.
 				_ = s.store.ImportManagedCertificate(ctx, id, *message.ManagedCertificateReport)
+			case core.WireDiagnosticResult:
+				if !networkDiagnostics || message.DiagnosticResult == nil {
+					return
+				}
+				if err := s.store.CompleteDiagnosticCommand(ctx, id, *message.DiagnosticResult); err != nil {
+					slog.Warn("store diagnostic result", "error", err)
+					return
+				}
 			case core.WireHeartbeat:
 				if message.Heartbeat == nil {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid heartbeat")
+					return
+				}
+				networkDiagnostics = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureNetworkDiagnostics)
+				if err := s.store.UpdateDiagnosticCapabilities(ctx, id, message.Heartbeat.Diagnostics); err != nil {
 					return
 				}
 				if message.Heartbeat.Metrics != nil {
@@ -438,6 +451,18 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				return
 			}
 		case <-taskTicker.C:
+			if heartbeatReceived && networkDiagnostics {
+				commands, err := s.store.AgentDiagnosticCommands(ctx, id)
+				if err != nil {
+					slog.Warn("reconcile diagnostics", "error", err)
+					return
+				}
+				if len(commands) > 0 {
+					if err = writeWire(ctx, connection, core.WireMessage{Type: core.WireDiagnostics, Diagnostics: commands}); err != nil {
+						return
+					}
+				}
+			}
 			if !timeZoneAckDeadline.IsZero() && !time.Now().Before(timeZoneAckDeadline) {
 				_ = s.store.SetAgentTimeZoneStatus(ctx, id, timeZoneAckRevision, "failed", "Agent 响应超时，请重试")
 				timeZoneAckDeadline = time.Time{}

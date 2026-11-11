@@ -32,11 +32,12 @@ const (
 	ActionDisableBBR        Action = "disable-bbr"
 	ActionConfigureTCP      Action = "configure-tcp"
 	ActionIPQuality         Action = "ip-quality"
+	ActionNetworkDiagnostic Action = "network-diagnostic"
 )
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
+	case ActionNetworkDiagnostic, ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
 		return true
 	default:
 		return false
@@ -48,7 +49,7 @@ func (a Action) SystemBBR() bool {
 }
 
 func (a Action) AgentLevel() bool {
-	return a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality
+	return a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality || a == ActionNetworkDiagnostic
 }
 
 func (a Action) RequiresAgentManagement() bool { return a.SystemBBR() || a == ActionIPQuality }

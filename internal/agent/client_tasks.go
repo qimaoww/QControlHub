@@ -100,7 +100,9 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	var executionErr error
 	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
-	if policyErr != nil {
+	if c.diagnostics != nil && c.diagnostics.Active() {
+		executionErr = errors.New("节点正在执行网络诊断，请稍后重试")
+	} else if policyErr != nil {
 		executionErr = fmt.Errorf("节点入口授权同步失败: %w", policyErr)
 	} else if c.upgradePending {
 		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")

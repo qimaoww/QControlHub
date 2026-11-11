@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/networkdiag"
 )
 
 type ClientConfig struct {
@@ -58,6 +59,8 @@ type completedTask struct {
 }
 
 type Client struct {
+	diagnostics            *networkdiag.Manager
+	diagnosticCapabilities core.DiagnosticCapabilities
 	config                 ClientConfig
 	executor               *Executor
 	http                   *http.Client

@@ -30,7 +30,7 @@ func TestSettingsDoesNotRepeatTheContextNavigation(t *testing.T) {
 func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	appContent := frontendSources(t, "analytics/app.js", "modules/routes.js", "analytics/appearance.js")
 	for _, required := range []string{
-		`["settings", "面板设置", "settings", "settings.read"]`,
+		`["settings", "面板设置", "cog", "settings.read"]`,
 		`"settings-engines": "settings"`, `"settings-data": "settings"`,
 		`"settings-certificates": "settings"`, `"settings-api-keys": "api"`,
 		`applyAppearance(result)`, `document.documentElement.style.fontSize`,
@@ -63,7 +63,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 			t.Errorf("panel settings still contains notification concern %q", notification)
 		}
 	}
-	for _, required := range []string{`["notifications", "通知", "activity", "settings.read"]`, `notifications: ['notifications', 'notificationsPage']`, `"settings-notify": "notifications"`} {
+	for _, required := range []string{`["notifications", "通知", "bell", "settings.read"]`, `notifications: ['notifications', 'notificationsPage']`, `"settings-notify": "notifications"`} {
 		if !strings.Contains(appContent, required) {
 			t.Errorf("independent notification route missing %q", required)
 		}

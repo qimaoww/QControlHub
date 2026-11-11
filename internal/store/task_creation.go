@@ -43,6 +43,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.ExistingSourceID != "" && (request.Action != core.ActionReadConfig || !core.ValidExistingSourceID(request.ExistingSourceID)) {
 		return core.Task{}, fmt.Errorf("%w: invalid existing source selection", ErrInvalid)
 	}
+	if request.Action == core.ActionNetworkDiagnostic {
+		return core.Task{}, fmt.Errorf("%w: use network-diagnostics API", ErrInvalid)
+	}
 	scope := scopeForConfig(ctx)
 	var configIDs []string
 	if scope.Admin && request.ConfigID != "" {

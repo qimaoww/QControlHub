@@ -145,10 +145,11 @@ func (s *Store) RecordPanelFailure(ctx context.Context, input core.PanelFailure)
 func taskAccessClause(ctx context.Context, args *[]any) string {
 	access := agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", args)
 	if scope, ok := requestConfigScope(ctx); ok {
+		diag := diagnosticTaskAccessClause(ctx, args)
 		*args = append(*args, scope.OwnerID)
 		// Private failure ownership does not preserve a revoked resource grant.
 		// Unbound panel failures remain available to their submitting user.
-		return fmt.Sprintf(" AND ((action='panel-failure' AND owner_id=$%d AND (tasks.agent_id IS NULL OR (EXISTS(SELECT 1 FROM agents failure_agent WHERE failure_agent.id=tasks.agent_id AND failure_agent.revoked_at IS NULL) %s AND (NOT tasks.shared_instance OR EXISTS(SELECT 1 FROM agent_shares failure_share WHERE failure_share.id=tasks.shared_traffic_id AND failure_share.user_id=tasks.owner_id AND failure_share.agent_id=tasks.agent_id AND failure_share.enabled AND failure_share.status='accepted' AND tasks.engine=ANY(failure_share.engines)))))) OR (action<>'panel-failure' %s))", len(*args), access, access)
+		return fmt.Sprintf(" AND ((action='network-diagnostic' AND "+diag+") OR (action='panel-failure' AND owner_id=$%d AND (tasks.agent_id IS NULL OR (EXISTS(SELECT 1 FROM agents failure_agent WHERE failure_agent.id=tasks.agent_id AND failure_agent.revoked_at IS NULL) %s AND (NOT tasks.shared_instance OR EXISTS(SELECT 1 FROM agent_shares failure_share WHERE failure_share.id=tasks.shared_traffic_id AND failure_share.user_id=tasks.owner_id AND failure_share.agent_id=tasks.agent_id AND failure_share.enabled AND failure_share.status='accepted' AND tasks.engine=ANY(failure_share.engines)))))) OR (action NOT IN ('panel-failure','network-diagnostic') %s))", len(*args), access, access)
 	}
 	return access
 }
