@@ -59,8 +59,10 @@ export function quotaInvitations(ctx) {
         node('dl', { className: 'a-traffic-facts' }, [
           ['已用 / 总额度', node('strong', {}, `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`)],
           ['可用内核', list(share.engines).join(' / ') || '未分配'],
-          ['授权端口', sharedPortsLabel(share.ports)], ['托管入口', proxyIngressLabel(share)],
-        ].map(([label, value]) => node('div', {}, node('dt', {}, label), node('dd', {}, value))))),
+          ['授权端口', sharedPortsLabel(share.ports)],
+        ].map(([label, value]) => node('div', {}, node('dt', {}, label), node('dd', {}, value)))),
+        node('div', { className: 'a-field' }, node('span', { className: 'a-field-label' }, '托管入口'),
+          node('span', {}, proxyIngressLabel(share)))),
       badge(agentShareStatus(share)), `所有者 · ${share.owner_username || '管理员'}`);
       if (actionable(share)) card.append(node('footer', { className: 'a-probe-footer' },
         actions(button(share.status === 'pending' ? '查看邀请' : '共享详情', () => open(share), { disabled: model.pending || loading }))));
