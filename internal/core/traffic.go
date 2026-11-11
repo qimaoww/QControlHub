@@ -240,6 +240,59 @@ type PortTrafficDailyUsage struct {
 	LastReportedAt  time.Time       `json:"last_reported_at"`
 }
 
+// PortTrafficDashboard is a SQL-aggregated view of monitored-port
+// history. Days covers every day in Month, including days without records.
+// CurrentPeriod is anchored to GeneratedAt rather than the selected month.
+type PortTrafficDashboard struct {
+	Month         string                         `json:"month"`
+	GeneratedAt   time.Time                      `json:"generated_at"`
+	CurrentDay    string                         `json:"current_day"`
+	Timezone      string                         `json:"timezone"`
+	Scope         string                         `json:"scope"`
+	Days          []PortTrafficDashboardDay      `json:"days"`
+	Nodes         []PortTrafficDashboardNode     `json:"nodes"`
+	CurrentPeriod PortTrafficDashboardCurrentSet `json:"current_period"`
+}
+
+type PortTrafficDashboardDay struct {
+	Day            string     `json:"day"`
+	ReceivedBytes  uint64     `json:"received_bytes"`
+	SentBytes      uint64     `json:"sent_bytes"`
+	TotalBytes     uint64     `json:"total_bytes"`
+	PeakReceiveBPS uint64     `json:"peak_receive_bps"`
+	PeakSendBPS    uint64     `json:"peak_send_bps"`
+	RecordCount    uint64     `json:"record_count"`
+	SampleCount    uint64     `json:"sample_count"`
+	LastReportedAt *time.Time `json:"last_reported_at"`
+}
+
+type PortTrafficDashboardNode struct {
+	AgentID        string     `json:"agent_id"`
+	Name           string     `json:"name"`
+	ReceivedBytes  uint64     `json:"received_bytes"`
+	SentBytes      uint64     `json:"sent_bytes"`
+	TotalBytes     uint64     `json:"total_bytes"`
+	RecordCount    uint64     `json:"record_count"`
+	SampleCount    uint64     `json:"sample_count"`
+	LastReportedAt *time.Time `json:"last_reported_at"`
+}
+
+type PortTrafficDashboardCurrentSet struct {
+	Today PortTrafficDashboardPeriod `json:"today"`
+	Week  PortTrafficDashboardPeriod `json:"week"`
+	Month PortTrafficDashboardPeriod `json:"month"`
+}
+
+type PortTrafficDashboardPeriod struct {
+	Start          string     `json:"start"`
+	ReceivedBytes  uint64     `json:"received_bytes"`
+	SentBytes      uint64     `json:"sent_bytes"`
+	TotalBytes     uint64     `json:"total_bytes"`
+	RecordCount    uint64     `json:"record_count"`
+	SampleCount    uint64     `json:"sample_count"`
+	LastReportedAt *time.Time `json:"last_reported_at"`
+}
+
 func ValidPortTrafficPolicyID(value string) bool {
 	if len(value) != 20 || !strings.HasPrefix(value, "trf_") {
 		return false

@@ -2984,6 +2984,172 @@
         },
         "type": "object"
       },
+      "core_PortTrafficDashboard": {
+        "additionalProperties": false,
+        "properties": {
+          "current_day": {
+            "type": "string"
+          },
+          "current_period": {
+            "$ref": "#/components/schemas/core_PortTrafficDashboardCurrentSet"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/core_PortTrafficDashboardDay"
+            },
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "month": {
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/core_PortTrafficDashboardNode"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_PortTrafficDashboardCurrentSet": {
+        "additionalProperties": false,
+        "properties": {
+          "month": {
+            "$ref": "#/components/schemas/core_PortTrafficDashboardPeriod"
+          },
+          "today": {
+            "$ref": "#/components/schemas/core_PortTrafficDashboardPeriod"
+          },
+          "week": {
+            "$ref": "#/components/schemas/core_PortTrafficDashboardPeriod"
+          }
+        },
+        "type": "object"
+      },
+      "core_PortTrafficDashboardDay": {
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "last_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "peak_receive_bps": {
+            "type": "integer"
+          },
+          "peak_send_bps": {
+            "type": "integer"
+          },
+          "received_bytes": {
+            "type": "integer"
+          },
+          "record_count": {
+            "type": "integer"
+          },
+          "sample_count": {
+            "type": "integer"
+          },
+          "sent_bytes": {
+            "type": "integer"
+          },
+          "total_bytes": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "core_PortTrafficDashboardNode": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "last_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "received_bytes": {
+            "type": "integer"
+          },
+          "record_count": {
+            "type": "integer"
+          },
+          "sample_count": {
+            "type": "integer"
+          },
+          "sent_bytes": {
+            "type": "integer"
+          },
+          "total_bytes": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "core_PortTrafficDashboardPeriod": {
+        "additionalProperties": false,
+        "properties": {
+          "last_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "received_bytes": {
+            "type": "integer"
+          },
+          "record_count": {
+            "type": "integer"
+          },
+          "sample_count": {
+            "type": "integer"
+          },
+          "sent_bytes": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          },
+          "total_bytes": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "core_PortTrafficEndpoint": {
         "additionalProperties": false,
         "properties": {
@@ -24897,6 +25063,15 @@
             "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
             "in": "query",
             "name": "policy_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "view",
             "required": false,
             "schema": {
               "type": "string"

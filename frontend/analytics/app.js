@@ -51,7 +51,7 @@ const pageModules = {
 };
 const pageModuleName = route => pageModules[route]?.[0] || 'dashboard';
 const routeModules = createRouteModuleLoader({
-  dashboard: () => import('./operations.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
+  dashboard: () => import('./dashboard.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
   agents: () => import('./nodes.js'), archives: () => import('./configs.js'), themes: () => import('./themes.js'),
   certificates: () => import('./certificates.js'), 'ip-quality': () => import('./ip-quality.js'), users: () => import('./users.js'),
   notifications: () => import('./notification-settings.js'), 'api-management': () => import('./api-management.js'),

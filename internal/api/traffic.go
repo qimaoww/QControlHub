@@ -83,6 +83,16 @@ func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, "policy_id is invalid")
 		return
 	}
+	if request.URL.Query().Get("view") == "dashboard" {
+		result, err := s.store.DashboardPortTrafficUsage(request.Context(), agentID, policyID, month, time.Now().UTC())
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	usage, err := s.store.ListPortTrafficDailyUsage(request.Context(), agentID, policyID, month)
 	if err != nil {
 		writeInternalError(w, err)

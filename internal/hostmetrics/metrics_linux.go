@@ -169,6 +169,7 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 				// inflate byte-per-second rates; they report zero instead.
 				if seconds >= 0.5 {
 					rateAvailable = true
+					metrics.NetworkSampledAt = now
 					metrics.NetworkRXBPS = bytesPerSecond(rx-previous.networkRX, seconds)
 					metrics.NetworkTXBPS = bytesPerSecond(tx-previous.networkTX, seconds)
 				}

@@ -7,7 +7,7 @@ export async function run() {
   for (const [path, names] of [
     ['nodes', ['nodesPage']], ['client-access', ['clientAccessPage']],
     ['configs', ['archivePage']], ['live-config', ['liveConfigPage']],
-    ['operations', ['dashboardPage', 'tasksPage']], ['settings', ['settingsPage']],
+    ['dashboard', ['dashboardPage']], ['operations', ['tasksPage']], ['settings', ['settingsPage']],
     ['traffic', ['trafficPage']],
   ]) {
     const module = await import(`../analytics/${path}.js`);
