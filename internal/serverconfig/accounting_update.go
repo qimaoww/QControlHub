@@ -116,8 +116,8 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 			}
 			delete(entry, "outbound_fwmark")
 		}
-		data, err := json.Marshal(root)
-		return string(data), err
+		data, err := json.MarshalIndent(root, "", "  ")
+		return string(data) + "\n", err
 	}
 	outsKey, tagKey, routeKey, targetKey := "outbounds", "tag", "route", "outbound"
 	if engine == core.EngineXray {

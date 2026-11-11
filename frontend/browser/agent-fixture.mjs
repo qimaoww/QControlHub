@@ -271,7 +271,7 @@ if (mode.startsWith("motion-cards")) {
 }
 if (mode.startsWith("motion-cards")) location.hash = initialAnchor || "#node-settings";
 else if (mode.startsWith("motion")) location.hash = "#node-settings";
-const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
+const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp",fast_open:true,ipv6_first:false,timeout:300,unknown:{nested:[true,false,"fixture"],large:"9007199254740993"}}).replace(/"large":"9007199254740993"/,'"large":9007199254740993') : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
 if (mode.startsWith("motion")) testAPI.settings = { panel_name: "Motion preview", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 if (mode.startsWith("capabilities-settings")) {
   location.hash = "#settings-engines";
@@ -455,7 +455,9 @@ window.fetch = async (input, options = {}) => {
       const [, , agentID, , engine] = path.split("/"), key = `${agentID}-${engine}`, previous = testAPI.layoutConfigs.get(key), input = JSON.parse(options.body);
       if (input.version !== previous.version || input.intent !== "deploy") return json({error:"配置已变化或部署方式无效"},409);
       if (testAPI.layoutSaveGate) await testAPI.layoutSaveGate;
-      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"}; testAPI.layoutConfigs.set(key,saved);
+      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"};
+      if (engine === "ss-rust") saved.content = saved.content.replace(/\n +|\n$/g, "");
+      testAPI.layoutConfigs.set(key,saved);
       const task = {id:options.headers?.["X-Config-Task-ID"] || `layout-${testAPI.layoutTasks.size}`,agent_id:agentID,engine,config_id:saved.id,config_version:saved.version,action:"deploy",status:"succeeded"};
       testAPI.layoutTasks.set(task.id,task);return json({config:saved,task});
     }
@@ -463,7 +465,9 @@ window.fetch = async (input, options = {}) => {
       const [, , agentID, , engine] = path.split("/"), key = `${agentID}-${engine}`, previous = testAPI.layoutConfigs.get(key), input = JSON.parse(options.body);
       if (input.version !== previous.version) return json({error:"配置已变化"},409);
       if (testAPI.layoutSaveGate) await testAPI.layoutSaveGate;
-      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"}; testAPI.layoutConfigs.set(key,saved); return json(saved);
+      const saved = {...previous,...input,version:previous.version+1,updated_at:"2026-11-05T10:00:01Z"};
+      if (engine === "ss-rust") saved.content = saved.content.replace(/\n +|\n$/g, "");
+      testAPI.layoutConfigs.set(key,saved); return json(saved);
     }
     if (path === "/tasks" && method === "POST") {
       const input = JSON.parse(options.body);

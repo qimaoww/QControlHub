@@ -1,3 +1,4 @@
+import { formatConfigContent } from "../modules/code-format.js";
 import { requestConfigSnapshot } from "../modules/config-snapshot.js";
 import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mjs";
 
@@ -78,7 +79,7 @@ export async function testNativeConfigReadCacheRuntime() {
         assert(test.readRequests.length === (missing ? 2 : 1) && test.readRequests.every(body=>body.prefer_cached === undefined && body.agent_id === "node" && body.engine === engine && body.action === (imported ? "read-config" : "read-managed-config")), "explicit read reused cache or targeted another source/engine");
         assert(!test.calls.some(call=>/^\/tasks\/read-\d+\?/.test(call.path)), "native terminal read redundantly polled");
         if (missing === 2) assert(input.value === original && document.body.textContent.includes("配置快照已失效"), "failed native read cleared source or hid error");
-        else assert(input.value === content && input.defaultValue === content && form.textContent.includes("已读取"), "native read lost full source or baseline");
+        else assert(input.value === (engine === "ss-rust" ? formatConfigContent(content,"JSON") : content) && input.defaultValue === input.value && form.textContent.includes("已读取"), "native read lost full source or baseline");
         assert(test.writes.length === 0 && test.saved().version === 1, "reading a snapshot saved or deployed configuration");
         if (!missing) {
           const reads = test.readRequests.length;

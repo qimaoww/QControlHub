@@ -619,9 +619,9 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     }
     for(const row of portTable.querySelectorAll('tbody tr')) [...row.cells].forEach((cell,index)=>cell.dataset.label=headers[index]);
     const inboundSection=section('入站配置',stack(deployment.feedback,portTable),actions(status,controls),current.snapshot_task_id?'读取的节点配置':'面板保存的配置');
-    surface.replaceChildren(receipt,inboundSection,
+    surface.replaceChildren(...[receipt,inboundSection,
       ['xray','sing-box','mihomo'].includes(engine)&&section('出站配置',table(['名称','类型','目标状态','操作'],outboundObjects.map(object=>[object.tag,object.kind||object.section,badge(object.enabled?'启用':'停用'),writable&&actions(toggle(object),button('修改',()=>outboundObject(object)),button('删除',()=>outboundObject(object,'delete'),{tone:'danger'}))]),{label:'出站配置'}),writable&&button('添加出站',()=>outboundObject(null,'add'))),
-    );
+    ].filter(Boolean));
     sourceTools?.replaceChildren(...(current.config?[
       button('展开源码',files),
       writable&&button('通用配置项',()=>fieldChooser()),

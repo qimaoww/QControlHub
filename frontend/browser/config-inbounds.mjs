@@ -1,3 +1,4 @@
+import { formatConfigContent } from "../modules/code-format.js";
 import { assert, pause, waitFor, createConfigFixture as fixture } from './config-fixture.mjs';
 import { testConfigOutboundsRuntime } from './config-outbounds.mjs';
 import { testCommonConfigRuntime } from './config-common.mjs';
@@ -231,7 +232,7 @@ async function testNodeConfigHistory(){
     test.restoreError=403;test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.saved().version===2,'authorization failure changed config');
     test.restoreError=null;let release;test.restoreGate=new Promise(resolve=>{release=resolve;});test.clickButton('恢复此档案',test.topDialog());test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.topDialog()?.open,'pending restore closed early');release();await waitFor(()=>test.saved().version===3&&!test.topDialog(),'restore failed');
     assert(test.restores.length===1&&test.restores[0].expected_version===2&&test.revisions.size===3,'restore replaced history or used historical CAS');assert(!test.calls.some(call=>call.path==='/tasks'),'restore implicitly deployed');
-    assert(!source.querySelector('[type=submit]').disabled&&!source.textContent.includes('测试源码保存失败')&&source.elements.content.value===test.saved().content&&source.querySelector('.a-save-state').textContent.includes('已保存'),'successful restore retained the old source conflict or draft');
+    assert(!source.querySelector('[type=submit]').disabled&&!source.textContent.includes('测试源码保存失败')&&source.elements.content.value===(engine==='ss-rust'?formatConfigContent(test.saved().content,"JSON"):test.saved().content)&&source.querySelector('.a-save-state').textContent.includes('已保存'),'successful restore retained the old source conflict or draft');
     test.click('history');await waitFor(()=>test.topDialog()?.querySelector('tbody tr'),'restored history missing');test.clickButton('预览',test.topDialog().querySelector('tbody tr'));await waitFor(()=>test.topDialog()?.querySelector('pre'),'current archive preview missing');assert(![...test.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'current revision permits duplicate restore');test.dispose();
   }
   const readonly=await fixture('xray',{history:true,readonly:true});readonly.click('history');await waitFor(()=>readonly.topDialog()?.querySelector('tbody tr'),'readonly history missing');readonly.clickButton('预览',[...readonly.topDialog().querySelectorAll('tbody tr')].at(-1));await waitFor(()=>readonly.topDialog()?.querySelector('pre'),'readonly preview missing');assert(![...readonly.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'readonly restore exposed');readonly.dispose();
