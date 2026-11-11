@@ -1,3 +1,4 @@
+import { checkNotificationSettings } from "./notification_settings_browser.mjs";
 import { checkAnalyticsTraffic } from './analytics_traffic_browser.mjs';
 import assert from 'node:assert/strict';
 import { checkNodeAddress } from './analytics_node_address_browser.mjs';
@@ -375,6 +376,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   assert.ok(await evaluate(page,"document.querySelector('textarea[name=body]').value.includes('Unicode')"),'explicit refresh loads the saved template and current channels');
   await screenshot(page,'analytics-notification-templates');
   record(`${mode}: notification dynamic fields, disabled channel save, redacted API, template preview/save, stale-save conflict and explicit refresh draft preservation passed`);
+  await checkNotificationSettings({page,mode,evaluate,wait,screenshot,api,identity,call,record});
   await evaluate(page,"location.hash='#archive-config'");
   await wait(page,"document.querySelector('.a-top h1')?.textContent==='配置档案' && !document.querySelector('[aria-busy=true]')");
 
