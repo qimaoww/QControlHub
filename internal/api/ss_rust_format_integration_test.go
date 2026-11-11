@@ -46,9 +46,13 @@ func TestSSRustReadableSourceRoundTrip(t *testing.T) {
 		initial = workspace.Config.Content
 	}
 	check("initial workspace", initial)
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, []byte(source), "", "  "); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 2; i++ {
 		var result configMutationResult
-		owner.call("POST", base+"/source", map[string]any{"name": first.Name, "content": source, "version": first.Version, "intent": "validate"}, http.StatusOK, &result)
+		owner.call("POST", base+"/source", map[string]any{"name": first.Name, "content": formatted.String() + "\n", "version": first.Version, "intent": "validate"}, http.StatusOK, &result)
 		check("save response", result.Config.Content)
 		completeConfigScopeAPITask(t, ctx, db, result.Task)
 		var fetched core.Config
