@@ -66,6 +66,7 @@ func TestAccountUIPreferences(t *testing.T) {
 		map[string]any{"logs": map[string]any{"agent_id": "../other"}},
 		map[string]any{"tasks": map[string]any{"limit": "501"}},
 		map[string]any{"connections": map[string]any{"date": "2026-02-30"}},
+		map[string]any{"connections": map[string]any{"date": ""}},
 		map[string]any{"connections": map[string]any{"client_ip": "invalid"}},
 		map[string]any{"connections": map[string]any{"country_code": "ZZ"}},
 		map[string]any{"unknown": map[string]any{"search": "test"}},
