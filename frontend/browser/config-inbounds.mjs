@@ -157,8 +157,8 @@ export async function testConfigInboundsRuntime(preview = false) {
 }
 
 async function testSourceCorrection() {
-  for (const shared of [false, true]) {
-    const test = await fixture('sing-box', {shared});
+  for (const engine of ['sing-box', 'ss-rust']) for (const shared of [false, true]) {
+    const test = await fixture(engine, {shared});
     const form = test.root.querySelector('form:has([name=content])'), input = form.elements.content;
     const edit = value => { input.value=value; input.dispatchEvent(new Event('input',{bubbles:true})); };
     test.confirm=true;
@@ -166,8 +166,8 @@ async function testSourceCorrection() {
     assert(form.querySelector('.a-save-state').textContent==='有未保存的修改','source draft still claims saved');
     await waitFor(()=>form.textContent.includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'source rejection did not settle');
     assert(input.value==='{}'&&!form.querySelector('[type=submit]').disabled&&!test.writes.length,'validation failure discarded or permanently blocked draft');
-    const valid=JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
-    test.sourceFailure=null; test.normalizedSource=JSON.stringify({...JSON.parse(valid),log:{level:'warn'}},null,2);
+    const valid=engine==='ss-rust'?test.saved().content:JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
+    test.sourceFailure=null; test.normalizedSource=engine==='ss-rust'?formatConfigContent(valid,"JSON"):JSON.stringify({...JSON.parse(valid),log:{level:'warn'}},null,2);
     edit(valid); form.requestSubmit(); form.requestSubmit(); await test.settle(1);
     assert(test.writes[0].content===valid&&test.writes[0].version===1,'retry submitted old source or baseline');
     assert(input.value===test.normalizedSource&&input.defaultValue===test.normalizedSource,'saved editor does not match normalized server source');

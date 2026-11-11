@@ -90,8 +90,8 @@ export async function testNativeConfigReadCacheRuntime() {
       } finally { test.dispose(); }
     }
   }
-  for (const changed of ["content", "name", "description"]) {
-    const test = await createConfigFixture("xray");
+  for (const engine of ["xray", "ss-rust"]) for (const changed of ["content", "name", "description"]) {
+    const test = await createConfigFixture(engine);
     const gate = deferred(); test.snapshotGate = gate.promise;
     try {
       const form = test.root.querySelector('form:has([name=content])'), input = form.elements[changed];
