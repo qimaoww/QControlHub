@@ -28,7 +28,7 @@ export async function createConfigFixture(engine, options = {}) {
     basePlan.private_key_path ||= '/etc/qcontrolhub/tls/server.key';
   }
   let controller = new AbortController();
-  const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
+  const agent = {id:"node", name:"香港 · HK-01", region_code:"HK", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, ...(options.shared ? {shared_allocation:{id:"share",enabled:true,status:"accepted"}} : {}), capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1", "shared-core-instances-v1", "shared-core-lifecycle-v1",
       ...(options.legacy ? [] : ["preset-auto-install-v2","import-isolation-v1"])],
     runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, service_status:options.serviceStatus || "active", version:"test-development", existing_config_available:Boolean(options.import)}}};
@@ -110,6 +110,7 @@ export async function createConfigFixture(engine, options = {}) {
     if (path === "/branding") return {logo:""};
     if (path === "/auth/session") return session;
     if (path === "/settings") return {};
+    if (path === "/preferences/node-order") return { ids: [agent.id, ...(options.additionalAgents || []).map(item => item.id)], revision: 1 };
     if (path === "/agent-access") return {revision:1,shares:[]};
     if (path === "/certificates") {
       if (test.certificateGate) await test.certificateGate;
