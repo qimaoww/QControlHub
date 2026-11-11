@@ -66,11 +66,11 @@ func TestEncryptedConfigStorageRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if task.ConfigContent != content {
+	if task.ConfigContent != accountingSnapshotContent(t, core.EngineMihomo, content) {
 		t.Fatalf("task config content = %q, want plaintext", task.ConfigContent)
 	}
 	claimed, err := dataStore.ClaimTask(ctx, agent.ID)
-	if err != nil || claimed == nil || claimed.ConfigContent != content {
+	if err != nil || claimed == nil || claimed.ConfigContent != accountingSnapshotContent(t, core.EngineMihomo, content) {
 		t.Fatalf("claimed task content = %+v, %v", claimed, err)
 	}
 

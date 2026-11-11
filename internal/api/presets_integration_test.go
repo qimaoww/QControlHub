@@ -100,7 +100,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 					t.Fatalf("save did not enqueue its exact revision: %+v", result.Task)
 				}
 				compiled, err := serverconfig.PrepareAccounting(engine, result.Config.Content)
-				if err != nil || compiled.Content != result.Config.Content || len(compiled.Ports) != step.ports {
+				if err != nil || strings.Contains(result.Config.Content, "qch-trf-") || strings.Contains(result.Config.Content, "outbound_fwmark") || len(compiled.Ports) != step.ports {
 					t.Fatalf("saved config does not contain current independent exits: %v", err)
 				}
 				if len(compiled.Ports) == 2 {
@@ -161,6 +161,12 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 			if engine == core.EngineMihomo {
 				from, to = `port: 21001`, `port: 22001`
 			}
+			if engine != core.EngineMihomo && !strings.Contains(current.Content, from) {
+				from, to = strings.ReplaceAll(from, ": ", ":"), strings.ReplaceAll(to, ": ", ":")
+			}
+			if !strings.Contains(current.Content, from) {
+				t.Fatal("source fixture has no listener port to edit")
+			}
 			source := map[string]any{"name": current.Name, "content": strings.Replace(current.Content, from, to, 1), "version": version, "intent": "deploy"}
 			updated := call("/source", source, http.StatusOK)
 			statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+updated.Task.ID+"?view=status", nil)
@@ -191,7 +197,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 				}
 			}
 			compiled, err := serverconfig.PrepareAccounting(engine, updated.Config.Content)
-			if err != nil || len(compiled.Ports) != 1 || compiled.Ports[0].Port != 22001 || compiled.Content != updated.Config.Content {
+			if err != nil || len(compiled.Ports) != 1 || compiled.Ports[0].Port != 22001 || strings.Contains(updated.Config.Content, "qch-trf-") || strings.Contains(updated.Config.Content, "outbound_fwmark") {
 				t.Fatalf("source did not replan: %+v %v", compiled.Ports, err)
 			}
 			call("/source", source, http.StatusConflict)
@@ -210,7 +216,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 			updated = call("/fields/"+field, fields, http.StatusOK)
 			call("/fields/"+field, fields, http.StatusConflict)
 			compiled, err = serverconfig.PrepareAccounting(engine, updated.Config.Content)
-			if err != nil || compiled.Content != updated.Config.Content {
+			if err != nil || strings.Contains(updated.Config.Content, "qch-trf-") || strings.Contains(updated.Config.Content, "outbound_fwmark") {
 				t.Fatalf("field edit lost independent exits: %v", err)
 			}
 			if engine == core.EngineXray || engine == core.EngineSingBox {
@@ -231,7 +237,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 				data, _ := json.Marshal(root)
 				updated = call("/source", map[string]any{"name": current.Name, "content": string(data), "version": version, "intent": "validate"}, http.StatusOK)
 				compiled, err = serverconfig.PrepareAccounting(engine, updated.Config.Content)
-				if err != nil || compiled.Source != "nft-dual" || compiled.Ports[0].Mark != uint32(0x51430000|22001) || compiled.Content != updated.Config.Content {
+				if err != nil || compiled.Source != "nft-dual" || compiled.Ports[0].Mark != uint32(0x51430000|22001) || strings.Contains(updated.Config.Content, "qch-trf-") || strings.Contains(updated.Config.Content, "outbound_fwmark") {
 					t.Fatalf("atomic outbound source save omitted required mark: %v", err)
 				}
 			}

@@ -373,9 +373,12 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			task.CNIPSource = &source
 		}
 		if request.Action == core.ActionValidate || request.Action == core.ActionDeploy {
-			if err := serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent); err != nil {
-				return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			plan, err := serverconfig.PrepareIndependentEgress(task.Engine, task.ConfigContent)
+			if err != nil {
+				return core.Task{}, fmt.Errorf("%w: 独立出口校验失败：%v", ErrInvalid, err)
 			}
+			// Snapshot the actual compiled plan; the saved revision stays editable.
+			task.ConfigContent = plan.Content
 		}
 		task.TLSFrontends, err = s.managedTLSFrontendsTx(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
 		if err != nil {
@@ -491,7 +494,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		            THEN 'official' ELSE COALESCE($7,'') END)
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
-		  AND api_key_id=$12 AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
+		  AND api_key_id=$12 AND owner_id=$8 AND install_if_missing=$9
+		  AND (status IN ('pending','running') OR ($13 AND status='succeeded' AND
+		    ($2='validate' OR (NOT $11 AND EXISTS(SELECT 1 FROM agent_engine_ownership o WHERE o.agent_id=$1 AND o.engine=$3 AND o.owner_id=$8 AND o.config_id=$4 AND o.config_version=$5 AND NOT o.config_uncertain AND NOT o.uncertain))
+		      OR ($11 AND EXISTS(SELECT 1 FROM agent_shared_instance_ownership o WHERE o.agent_id=$1 AND o.engine=$3 AND o.owner_id=$8 AND o.share_id=$10 AND o.config_id=$4 AND o.config_version=$5 AND NOT o.config_uncertain AND NOT o.uncertain)))))
 		  AND shared_traffic_id=$10 AND shared_instance=$11
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
@@ -499,7 +505,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }()), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }(), ctx.Value(unchangedBindingTaskKey{}) == true), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
@@ -536,6 +542,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 	}
 	task.ID = request.MutationTaskID
+	if task.ID != "" {
+		var reserved bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM config_binding_receipts WHERE submission_id=$1)`, task.ID).Scan(&reserved); err != nil {
+			return core.Task{}, err
+		}
+		if reserved {
+			return core.Task{}, ErrConflict
+		}
+	}
 	if task.ID == "" {
 		task.ID, err = core.NewID("tsk")
 		if err != nil {

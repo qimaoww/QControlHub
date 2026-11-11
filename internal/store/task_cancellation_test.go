@@ -104,7 +104,7 @@ func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 	}
 	assertTaskOverview(t, ctx, dataStore, baselineOverview, 1, 1, 0)
 	claimed, err := dataStore.ClaimTask(ctx, agent.ID)
-	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != secondContent || claimed.ConfigVersion != updated.Version || claimed.Attempt != 1 || claimed.LeaseID == "" {
+	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != accountingSnapshotContent(t, core.EngineMihomo, secondContent) || claimed.ConfigVersion != updated.Version || claimed.Attempt != 1 || claimed.LeaseID == "" {
 		t.Fatalf("claimed retry = %+v, %v", claimed, err)
 	}
 	assertTaskOverview(t, ctx, dataStore, baselineOverview, 1, 0, 1)

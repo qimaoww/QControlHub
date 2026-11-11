@@ -184,7 +184,7 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 		t.Fatalf("retried task = %+v", retried)
 	}
 	claimed, err := dataStore.ClaimTask(ctx, primaryAgent.ID)
-	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != secondContent || claimed.ConfigVersion != updated.Version+1 {
+	if err != nil || claimed == nil || claimed.ID != retried.ID || claimed.ConfigContent != expectedTaskContent(t, core.EngineMihomo, secondContent) || claimed.ConfigVersion != updated.Version+1 {
 		t.Fatalf("claimed retried task = %+v, %v", claimed, err)
 	}
 	original, err := dataStore.GetTask(ctx, canceledTask.ID)

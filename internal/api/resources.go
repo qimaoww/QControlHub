@@ -23,6 +23,7 @@ type configInboundTargetResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
+	SourceContent    string                           `json:"source_content,omitempty"`
 	OutboundBindings map[string]string                `json:"outbound_bindings"`
 	ClientSource     string                           `json:"client_source,omitempty"`
 	Deployment       store.ConfigManagementDeployment `json:"deployment"`
@@ -121,7 +122,8 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result := agentConfigWorkspaceResource{
+	var result agentConfigWorkspaceResource
+	result = agentConfigWorkspaceResource{
 		Agent: agent, Catalog: catalog, Protocols: serverconfig.Protocols(engine),
 		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
 		InboundTargets: []configInboundTargetResource{},
@@ -160,7 +162,13 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			result.Deployment.TaskID = ""
 			result.Deployment.TaskStatus = ""
 		}
-		result.ManagedObjects, err = serverconfig.ManagedObjects(engine, config.Content, result.Management)
+		source, sourceErr := s.presetAccountingSource(request.Context(), config)
+		if sourceErr == nil {
+			result.SourceContent = source
+		} else {
+			source = config.Content
+		}
+		result.ManagedObjects, err = serverconfig.ManagedObjects(engine, source, result.Management)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

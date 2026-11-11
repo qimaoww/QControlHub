@@ -5,7 +5,8 @@ import { trafficDetails } from './traffic-details.js';
 import { trafficTable } from './traffic-table.js';
 import { metricTrack } from './metric-track.js';
 import { bindNodeOrdering } from './node-ordering.js';
-import { nodeName } from './node-region.js';
+import { pageSizePreference } from './page-size.js';
+import { nodeName, nodeRegionFlag } from './node-region.js';
 import { mergeTrafficPorts, orderTrafficItems, trafficCardIdentity, trafficPolicyEditable, trafficCardOrderKey, eligibleAgents, policyStatus, policyStatusKey, trafficRateForDisplay, protocolName, dateInputValue, reusableTrafficSnapshot } from '../modules/traffic-model.js';
 import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { accountStorage } from '../modules/account-storage.js';
@@ -27,8 +28,11 @@ export async function trafficPage(ctx) {
   let savedView = 'cards';
   try { savedView = accountStorage.getItem('qcontrolhub:traffic-view') === 'list' ? 'list' : 'cards'; } catch { /* The view remains usable without storage. */ }
   const policies = [], results = trafficTable(['节点 / 归属', '端口 / 协议', '状态', '累计流量', '累计接收', '累计发送', '操作'], {
-    view: savedView, canSwitch: () => !dragging.active(), onViewChange: view => { try { accountStorage.setItem('qcontrolhub:traffic-view', view); } catch { /* In-memory view remains selected. */ } },
+    view: savedView, canSwitch: () => !dragging.active(), onViewChange: view => { pageSize.element.hidden = view !== 'list'; try { accountStorage.setItem('qcontrolhub:traffic-view', view); } catch { /* In-memory view remains selected. */ } },
   });
+  const pageSize = pageSizePreference(ctx, 'traffic', size => results.setPageSize(size));
+  pageSize.element.hidden = savedView !== 'list';
+  results.tools.prepend(pageSize.element);
   const initial = ctx.state.data.analyticsTrafficFilters || {};
   const route = new URLSearchParams(location.hash.split('?')[1] || '');
   const search = field('搜索端口', 'search', initial.search || '', { type: 'search', placeholder: '节点、名称、内核或端口' });
@@ -218,7 +222,7 @@ export async function trafficPage(ctx) {
         !item.policy && eligibleAgents([agent].filter(Boolean)).length > 0 && ctx.can('traffic.manage', agent) && button('设置配额', () => edit(null, value), { disabled: !policiesReady || !agentsReady }),
         dragHandle(item.key, `端口 ${value.port}`));
       const state = () => item.policy ? badge(...policyStatus(value, agent)) : badge(policiesReady ? '等待同步' : '正在读取配额…', 'warn');
-      const identity = () => stack(node('span', {}, agent?.name || value.agent_id), !value.is_current_user && muted(value.owner_name || '其他用户'), (value.shared_quota || value.share_id) && muted('共享实例'));
+      const identity = () => stack(nodeName(ctx, agent || { id: value.agent_id, name: value.agent_id, region_code: '' }), !value.is_current_user && muted(value.owner_name || '其他用户'), (value.shared_quota || value.share_id) && muted('共享实例'));
       const cumulative = () => item.policy && value.used_bytes != null && Number.isFinite(Number(value.used_bytes)) ? bytes(value.used_bytes) : '—';
       const quota = () => {
         const shared = value.shared_quota, source = shared || value;
@@ -244,7 +248,7 @@ export async function trafficPage(ctx) {
       const [amount, unit = ''] = cumulative().split('\u00a0');
       return { key: item.key, card: () => node('article', { className: 'a-card a-probe', 'data-traffic-key': item.key },
         node('div', { className: 'a-probe-head' }, node('div', {},
-          node('h2', {}, agent?.name || value.agent_id),
+          node('div', { className: 'a-probe-name' }, nodeRegionFlag(ctx, agent), node('h2', {}, agent?.name || value.agent_id)),
           actions(node('b', {}, String(value.port)), muted(`${value.engine} · ${protocolName(value.protocol)}`)),
           !value.is_current_user && muted(value.owner_name || '其他用户'),
           (value.shared_quota || value.share_id) && muted('共享实例')), node('div', {}, state())),
@@ -252,7 +256,7 @@ export async function trafficPage(ctx) {
           muted('累计流量'), actions(node('strong', {}, amount), muted(unit)),
           quota(),
           node('div', { className: 'a-probe-network' }, transfer('累计接收', 'received_bytes', 'receive_bps'), transfer('累计发送', 'sent_bytes', 'send_bps'))),
-        node('div', { className: 'a-probe-footer' }, controls())), cells: [
+        node('div', { className: 'a-probe-footer' }, controls())), cells: () => [
         identity(),
         stack(node('strong', {}, `${value.port}`), muted(`${value.engine} · ${protocolName(value.protocol)}`)),
         item.policy ? actions(badge(...policyStatus(value, agent))) : badge(policiesReady ? '等待同步' : '正在读取配额…', 'warn'),
@@ -268,7 +272,7 @@ export async function trafficPage(ctx) {
   const manage = actions();
   manage.hidden = true;
   const addQuota = ctx.can('traffic.manage') && button('添加配额', () => edit(), { tone: 'primary', disabled: true });
-  const toolbar = filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter), actions(
+  const toolbar = filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, agentFilter, search), actions(
     button('更多筛选', event => { advanced.hidden = !advanced.hidden; event.currentTarget.setAttribute('aria-expanded', String(!advanced.hidden)); }, { 'aria-expanded': 'false' }),
     button('管理', event => { manage.hidden = !manage.hidden; event.currentTarget.setAttribute('aria-expanded', String(!manage.hidden)); }, { 'aria-expanded': 'false' }),
     addQuota));
@@ -292,7 +296,7 @@ export async function trafficPage(ctx) {
   const firstTable = loadingTable(['节点 / 归属', '端口 / 协议', '状态', '累计流量', '累计接收', '累计发送', '操作'], '端口流量');
   const firstRegion = section('端口流量', firstTable);
   results.root.hidden = true;
-  const content = stack(toolbar, advanced, manage, initialRead.element, refreshStatus, firstRegion, results.root);
+  const content = stack(toolbar, advanced, manage, initialRead.element, pageSize.status, refreshStatus, firstRegion, results.root);
   void initialRead.load().finally(() => { if (ctx.current()) poller.start(); });
   content.classList.add('a-traffic-page');
   return content;

@@ -193,6 +193,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 		// overwriting the administrator's existing command.
 		`UPDATE enrollment_tokens SET owner_id='',admin_hidden=false,reusable=false,
 			revoked_at=COALESCE(revoked_at,now()),token_ciphertext=NULL WHERE owner_id=$1`,
+		`DELETE FROM config_binding_receipts WHERE owner_id=$1`,
 		`DELETE FROM tasks WHERE owner_id=$1 AND action='panel-failure'`,
 		`UPDATE tasks SET owner_id='' WHERE owner_id=$1`,
 		`UPDATE agent_engine_ownership SET owner_id='' WHERE owner_id=$1`,
@@ -207,6 +208,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 		`DELETE FROM account_traffic_orders WHERE account_id=$1`,
 		`DELETE FROM account_themes WHERE account_id=$1`,
 		`DELETE FROM account_node_views WHERE account_id=$1`,
+		`DELETE FROM account_page_sizes WHERE account_id=$1`,
 		`DELETE FROM traffic_batch_requests WHERE account_id=$1`,
 		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
 		`DELETE FROM ip_quality_schedules WHERE owner_id=$1`,
