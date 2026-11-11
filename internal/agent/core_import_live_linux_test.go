@@ -24,6 +24,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/certificates"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"golang.org/x/net/proxy"
+	"golang.org/x/sys/unix"
 )
 
 func TestSSRustImportIsolatedStartupWithRealCore(t *testing.T) {
@@ -182,6 +183,11 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 			if len(plan.resources) == 0 || len(plan.dependencies) == 0 {
 				t.Fatal("native fixture has no dependencies")
 			}
+			compiled, warning := (&Executor{}).prepareNativeAccountingContent(context.Background(), engine, managed, plan.managedContent)
+			if warning != "" {
+				t.Fatal(warning)
+			}
+			plan.managedContent = compiled
 			if err := (&Executor{}).validateImportPlanSnapshot(context.Background(), engine, managed, plan); err != nil {
 				t.Fatal(err)
 			}
@@ -209,6 +215,8 @@ func TestImportedDependenciesRunWithRealCores(t *testing.T) {
 				command.Env = append(os.Environ(), "SAFE_PATHS="+target)
 				configureCommand(command)
 				configureCommandIdentity(command, &identity)
+				// Managed cores receive CAP_NET_RAW for per-listener socket marks.
+				command.SysProcAttr.AmbientCaps = []uintptr{unix.CAP_NET_RAW}
 				output := &boundedOutput{limit: 65536}
 				command.Stdout, command.Stderr = output, output
 				if err := command.Start(); err != nil {

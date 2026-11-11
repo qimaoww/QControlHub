@@ -46,6 +46,14 @@ func TestNativeTrafficCores(t *testing.T) {
 	if output, err := exec.Command("ip", "addr", "add", "192.0.2.1/32", "dev", "lo").CombinedOutput(); err != nil {
 		t.Fatalf("isolated target address: %v %s", err, output)
 	}
+	routedImport := os.Getenv("QCH_TEST_IMPORTED_INBOUNDS") == "routed"
+	if routedImport {
+		for _, address := range []string{"192.0.2.2/32", "192.0.2.3/32"} {
+			if output, err := exec.Command("ip", "addr", "add", address, "dev", "lo").CombinedOutput(); err != nil {
+				t.Fatalf("isolated exit address: %v %s", err, output)
+			}
+		}
+	}
 	engines := []core.Engine{core.EngineXray, core.EngineSingBox}
 	if os.Getenv("QCH_TEST_MIHOMO_BIN") != "" {
 		engines = append(engines, core.EngineMihomo)
@@ -54,6 +62,9 @@ func TestNativeTrafficCores(t *testing.T) {
 		engines = append(engines, core.EngineShadowsocksRust)
 	}
 	for _, engine := range engines {
+		if routedImport && engine != core.EngineXray && engine != core.EngineSingBox {
+			continue
+		}
 		t.Run(string(engine), func(t *testing.T) {
 			binary := os.Getenv("QCH_TEST_XRAY_BIN")
 			if engine == core.EngineSingBox {
@@ -87,6 +98,32 @@ func TestNativeTrafficCores(t *testing.T) {
 				content = string(data)
 				t.Log("testing untagged VLESS protocol outbounds with explicitly disabled multiplexing")
 			}
+			if os.Getenv("QCH_TEST_IMPORTED_INBOUNDS") != "" && (engine == core.EngineXray || engine == core.EngineSingBox) {
+				var root map[string]any
+				if err := json.Unmarshal([]byte(content), &root); err != nil {
+					t.Fatal(err)
+				}
+				inbounds := root["inbounds"].([]any)
+				for _, raw := range inbounds {
+					delete(raw.(map[string]any), "tag")
+				}
+				if routedImport {
+					inbounds[0].(map[string]any)["tag"] = "imported tag"
+					if engine == core.EngineXray {
+						root["outbounds"] = []any{map[string]any{"tag": "default", "protocol": "freedom", "sendThrough": "192.0.2.3"}, map[string]any{"tag": "policy", "protocol": "freedom", "sendThrough": "192.0.2.2"}}
+						root["routing"] = map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"imported tag"}, "outboundTag": "policy"}}}
+					} else {
+						root["outbounds"] = []any{map[string]any{"tag": "default", "type": "direct", "inet4_bind_address": "192.0.2.3"}, map[string]any{"tag": "policy", "type": "direct", "inet4_bind_address": "192.0.2.2"}}
+						root["route"] = map[string]any{"final": "default", "rules": []any{map[string]any{"inbound": []string{"imported tag"}, "outbound": "policy"}}}
+					}
+				} else if engine == core.EngineXray {
+					inbounds[0].(map[string]any)["port"] = "1080-1081"
+					root["inbounds"] = inbounds[:1]
+				}
+				data, _ := json.Marshal(root)
+				content = string(data)
+				t.Log("testing imported listeners without tags and static Xray port ranges")
+			}
 			plan, err := serverconfig.PlanPresetAccounting(engine, content)
 			if engine == core.EngineSingBox && os.Getenv("QCH_TEST_SINGBOX_MARKS") == "1" {
 				if err != nil {
@@ -95,7 +132,11 @@ func TestNativeTrafficCores(t *testing.T) {
 				plan, err = serverconfig.PrepareMarkedSingBoxAccounting(plan.Content)
 			}
 			if engine == core.EngineMihomo {
-				plan, err = serverconfig.PrepareAccounting(engine, "listeners: [{name: a, type: socks, listen: 127.0.0.1, port: 1080, udp: true}, {name: b, type: socks, listen: 127.0.0.1, port: 1081, udp: true}]\nrules: ['MATCH,DIRECT']\n")
+				source := "listeners: [{name: a, type: socks, listen: 127.0.0.1, port: 1080, udp: true}, {name: b, type: socks, listen: 127.0.0.1, port: 1081, udp: true}]\nrules: ['MATCH,DIRECT']\n"
+				if os.Getenv("QCH_TEST_IMPORTED_INBOUNDS") == "1" {
+					source = strings.NewReplacer("name: a, ", "", "name: b, ", "").Replace(source)
+				}
+				plan, err = serverconfig.PrepareAccounting(engine, source)
 			}
 			if engine == core.EngineShadowsocksRust {
 				plan, err = serverconfig.PrepareAccounting(engine, `{"mode":"tcp_and_udp","servers":[{"server":"127.0.0.1","server_port":1080,"method":"aes-256-gcm","password":"qch-test-password"},{"server":"127.0.0.1","server_port":1081,"method":"aes-256-gcm","password":"qch-test-password"}]}`)
@@ -206,6 +247,15 @@ func TestNativeTrafficCores(t *testing.T) {
 						return
 					}
 					_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
+					if routedImport {
+						host, _, _ := net.SplitHostPort(connection.RemoteAddr().String())
+						want := fmt.Sprintf("192.0.2.%d", i+2)
+						if host != want {
+							_ = connection.Close()
+							serveErrors <- fmt.Errorf("inbound %d used exit %s, want %s", 1080+i, host, want)
+							return
+						}
+					}
 					_, err = io.ReadFull(connection, make([]byte, 16))
 					if err == nil {
 						_, err = io.WriteString(connection, strings.Repeat("d", 4096*(i+1)))
@@ -297,6 +347,17 @@ func TestNativeTrafficCores(t *testing.T) {
 	}
 }
 
+func TestImportedNativeTrafficCores(t *testing.T) {
+	t.Setenv("QCH_TEST_IMPORTED_INBOUNDS", "1")
+	TestNativeTrafficCores(t)
+}
+
+func TestImportedRoutedNativeTrafficCores(t *testing.T) {
+	t.Setenv("QCH_TEST_IMPORTED_INBOUNDS", "routed")
+	t.Setenv("QCH_TEST_PROTOCOL_OUTBOUNDS", "0")
+	TestNativeTrafficCores(t)
+}
+
 // A real second-hop VLESS server in the same isolated network verifies that
 // independent accounting applies to protocol exits, not only direct sockets.
 func nativeTestVLESSExit(t *testing.T, engine core.Engine, binary string) map[string]any {
@@ -306,7 +367,9 @@ func nativeTestVLESSExit(t *testing.T, engine core.Engine, binary string) map[st
 	var inbound, outbound, exit map[string]any
 	if engine == core.EngineXray {
 		inbound = map[string]any{"tag": "relay", "listen": "127.0.0.1", "port": port, "protocol": "vless", "settings": map[string]any{"decryption": "none", "clients": []any{map[string]any{"id": uuid}}}}
-		outbound = map[string]any{"protocol": "freedom"}
+		// Recent Xray versions block private destinations behind VLESS by
+		// default. Allow only this namespace's fixture target on the relay.
+		outbound = map[string]any{"protocol": "freedom", "settings": map[string]any{"finalRules": []any{map[string]any{"action": "allow", "ip": []string{"192.0.2.1/32"}}}}}
 		exit = map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": port, "users": []any{map[string]any{"id": uuid, "encryption": "none"}}}}}, "mux": map[string]any{"enabled": false}}
 	} else {
 		inbound = map[string]any{"tag": "relay", "listen": "127.0.0.1", "listen_port": port, "type": "vless", "users": []any{map[string]any{"uuid": uuid}}}

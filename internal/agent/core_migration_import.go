@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec, content string, expectedDigests ...string) (string, error) {
@@ -46,9 +47,13 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	}
 	currentContent := resourcePlan.managedContent
 	if currentContent != content {
-		return "", fmt.Errorf("existing %s configuration or dependencies changed after the saved snapshot; both services were left unchanged", engine)
+		// New servers dispatch the compiled plan while retaining the original
+		// source digest. Older raw snapshots are still compared verbatim.
+		plan, err := serverconfig.PrepareIndependentEgress(engine, currentContent)
+		if err != nil || plan.Content != content {
+			return "", fmt.Errorf("existing %s configuration or dependencies changed after the saved snapshot; both services were left unchanged", engine)
+		}
 	}
-	managedContent := resourcePlan.managedContent
 	existingEnableState, err := serviceEnableState(ctx, existing.Service, manager)
 	if err != nil {
 		return "", err
@@ -69,7 +74,15 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	defer cleanupInvocation()
 	validationSpec.Binary = invocationSpec.Binary
 	validationSpec.commandEnv = invocationSpec.commandEnv
-	if err := e.validateImportPlanSnapshot(ctx, engine, validationSpec, resourcePlan); err != nil {
+	// Keep the provenance plan intact for the second source check and rollback.
+	// Validate and deploy the same compiled candidate used by ordinary tasks.
+	managedContent, warning := e.prepareNativeAccountingContent(ctx, engine, validationSpec, content)
+	if warning != "" {
+		return "", fmt.Errorf("导入配置无法建立独立出口：%s", warning)
+	}
+	validationPlan := resourcePlan
+	validationPlan.managedContent = managedContent
+	if err := e.validateImportPlanSnapshot(ctx, engine, validationSpec, validationPlan); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
 	configDigest := coreMigrationConfigDigest(managedContent)
@@ -181,7 +194,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if err != nil {
 		return rollbackMigration(err)
 	}
-	if currentContent != content || currentPlan.snapshotDigest != resourcePlan.snapshotDigest {
+	if currentContent != resourcePlan.managedContent || currentPlan.snapshotDigest != resourcePlan.snapshotDigest {
 		return rollbackMigration(fmt.Errorf("existing %s configuration sources changed during migration preparation; both services were left unchanged", engine))
 	}
 	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {

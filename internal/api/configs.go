@@ -68,7 +68,7 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 	}
 	if err == nil && (strings.Contains(current.Content, "qch-trf-") || strings.Contains(input.Content, "qch-trf-") || input.Engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark")) {
 		input.Content, err = s.accountingUpdateSource(request.Context(), current, input.Content)
-		if err == nil && len(serverconfig.DiscoverTrafficPorts(input.Engine, input.Content)) > 0 {
+		if err == nil {
 			var plan serverconfig.AccountingPlan
 			plan, err = serverconfig.PlanPresetAccounting(input.Engine, input.Content)
 			input.Content = plan.Content

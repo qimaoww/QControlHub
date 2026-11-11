@@ -44,6 +44,9 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 	if err != nil {
 		return AccountingPlan{}, err
 	}
+	if err := normalizeAccountingInbounds(engine, root); err != nil {
+		return AccountingPlan{}, err
+	}
 	plan := AccountingPlan{Source: "core-api"}
 	if engine == core.EngineShadowsocksRust {
 		plan.Source = "nft-dual"

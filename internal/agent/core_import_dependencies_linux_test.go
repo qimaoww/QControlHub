@@ -293,7 +293,7 @@ func TestImportedCertificateRenewalKeepsSourceAndRestoresInterruptedPair(t *test
 	if err := os.WriteFile(filepath.Join(root, "rules.json"), []byte(rules), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	source := `{"inbounds":[{"type":"trojan","tls":{"certificate_path":"chain.p&em","key_path":"key.p&em"}}],"outbounds":[{"type":"direct"}],"route":{"rule_set":[{"type":"local","tag":"fixture","format":"source","path":"rules.json"}]}}`
+	source := `{"inbounds":[{"type":"trojan","listen_port":21001,"tls":{"certificate_path":"chain.p&em","key_path":"key.p&em"}}],"outbounds":[{"type":"direct"}],"route":{"rule_set":[{"type":"local","tag":"fixture","format":"source","path":"rules.json"}]}}`
 	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 type ConfigImportRequest struct {
@@ -114,6 +115,10 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if err = core.ValidateConfig(engine, content); err != nil {
 		return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	plan, err := serverconfig.PrepareIndependentEgress(engine, content)
+	if err != nil {
+		return core.Task{}, fmt.Errorf("%w: 无法导入独立出口配置：%v", ErrInvalid, err)
+	}
 	var id string
 	var version int
 	err = tx.QueryRow(ctx, `SELECT id,version FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL FOR UPDATE`, agentID, engine, scopeForConfig(ctx).OwnerID).Scan(&id, &version)
@@ -130,7 +135,7 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if busy {
 		return core.Task{}, fmt.Errorf("%w: 同一托管目标已有任务，请完成后再确认迁移", ErrConflict)
 	}
-	task := core.Task{AgentID: agentID, Engine: engine, Action: core.ActionImportExisting, Status: core.TaskPending, CreatedAt: time.Now().UTC(), ConfigContent: content}
+	task := core.Task{AgentID: agentID, Engine: engine, Action: core.ActionImportExisting, Status: core.TaskPending, CreatedAt: time.Now().UTC(), ConfigContent: plan.Content}
 	if err = s.checkTaskPortUseTx(ctx, tx, &task, true); err != nil {
 		return core.Task{}, err
 	}
@@ -146,12 +151,22 @@ func (s *Store) createConfigImport(ctx context.Context, agentID string, engine c
 	if err != nil {
 		return core.Task{}, err
 	}
+	// Preserve the original snapshot for retries and provenance. The immutable
+	// execution snapshot contains the exact plan that will be saved on success.
+	executionSnapshot, err := core.EncodeImportSnapshot(plan.Content, sourceDigest, sourceID)
+	if err != nil {
+		return core.Task{}, err
+	}
+	executionStored, err := s.encryptContent(executionSnapshot)
+	if err != nil {
+		return core.Task{}, err
+	}
 	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
 		key.Permissions = core.NormalizePermissions(append(key.Permissions, taskAPIKeyPermissions(core.ActionImportExisting, false)...))
 		ctx = context.WithValue(ctx, apiKeyAuthContextKey{}, key)
 	}
 	apiKeyID, apiKeyPermissions := apiKeyTaskIdentity(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,owner_id,config_content,api_key_id,api_key_permissions) VALUES($1,$2,$3,'import-existing','pending',$4,$5,$6,$7,$8)`, task.ID, agentID, engine, task.CreatedAt, scopeForConfig(ctx).OwnerID, stored, apiKeyID, apiKeyPermissions)
+	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,owner_id,config_content,api_key_id,api_key_permissions) VALUES($1,$2,$3,'import-existing','pending',$4,$5,$6,$7,$8)`, task.ID, agentID, engine, task.CreatedAt, scopeForConfig(ctx).OwnerID, executionStored, apiKeyID, apiKeyPermissions)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -200,6 +215,11 @@ func (s *Store) commitConfigImportTx(ctx context.Context, tx pgx.Tx, taskID, age
 	if err != nil {
 		return "", 0, err
 	}
+	plan, err := serverconfig.PrepareIndependentEgress(engine, content)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: 无法留存导入配置的独立出口：%v", ErrInvalid, err)
+	}
+	content = plan.Content
 	var id string
 	var version int
 	err = tx.QueryRow(ctx, `SELECT id,version FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL FOR UPDATE`, agentID, engine, owner).Scan(&id, &version)

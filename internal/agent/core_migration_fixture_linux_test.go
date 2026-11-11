@@ -61,11 +61,11 @@ func configureSingBoxDirectoryFixture(t *testing.T, fixture existingCoreMigratio
 	if err := os.Mkdir(configDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"log":{"output":"runtime.log"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"log":{"output":"runtime.log"},"inbounds":[{"tag":"primary","type":"http","listen_port":21001}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	overlay := filepath.Join(configDirectory, "10-outbounds.json")
-	if err := os.WriteFile(overlay, []byte(`{"outbounds":[{"tag":"direct"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(overlay, []byte(`{"outbounds":[{"tag":"direct","type":"direct"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeMigrationServiceState(t, fixture.stateDirectory, "sing-box.service", "active", "enabled")
@@ -102,10 +102,10 @@ func configureSingBoxOfficialFixture(t *testing.T, fixture existingCoreMigration
 		}
 	}
 	officialConfig := filepath.Join(configDirectory, "config.json")
-	if err := os.WriteFile(officialConfig, []byte(`{"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(officialConfig, []byte(`{"inbounds":[{"tag":"primary","type":"http","listen_port":21001}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[{"tag":"direct"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[{"tag":"direct","type":"direct"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeMigrationServiceState(t, fixture.stateDirectory, "sing-box.service", "active", "enabled")
@@ -146,7 +146,7 @@ func newExistingCoreMigrationFixture(t *testing.T, failManagedStart bool) existi
 		t.Fatal(err)
 	}
 	existingConfig := filepath.Join(existingDirectory, "config.json")
-	importedConfig := `{"inbounds":[],"outbounds":[],"tag":"imported"}`
+	importedConfig := `{"inbounds":[],"outbounds":[],"log":{"loglevel":"warning"}}`
 	if err := os.WriteFile(existingConfig, []byte(importedConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
