@@ -63,7 +63,7 @@ async function editAgentSharingLoaded(ctx, agent) {
   } });
   const addUser = button('添加用户', () => { if (!available) return; edits++; add({ enabled: true }); markChanged(); });
   const form = ctx.form([
-    reloadRead.element, rows, actions(addUser, reload),
+    rows, reloadRead.element, actions(addUser, reload),
   ], '保存共享设置', async () => {
     if (!current() || saving || reading || !available || !supported || !changed) return;
     const shares = values().map((row, index) => ({
