@@ -20,7 +20,7 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	handler := form[start:end]
 	for _, required := range []string{
 		`form.elements.namedItem(name)`, `ctx.mutate(event.currentTarget`,
-		`body: { protocol: selected.key, input: read() }`,
+		`body: { protocol: selected.key, input: read(), ...(name === 'port' ? {generate_port:true} : {}) }`,
 		`!ctx.current() || !box.isConnected || selected !== protocol`,
 		`requestedRevision !== revision || draft !== JSON.stringify(read())`,
 		`for (const key of requested)`, `Object.hasOwn(generated, key)`,
