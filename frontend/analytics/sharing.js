@@ -108,8 +108,9 @@ async function editAgentSharingLoaded(ctx, agent) {
     rows.append(row);
   }
   function adopt(received) {
+    const unchanged = !changed && JSON.stringify(saved.shares) === JSON.stringify(received.shares);
     saved = received; revision = saved.revision;
-    rows.replaceChildren(); saved.shares.forEach(add);
+    if (!unchanged) { rows.replaceChildren(); saved.shares.forEach(add); }
     baseline = JSON.stringify(values()); changed = false;
     drafts.delete(agent.id); ctx.setDirty(false); form.querySelector(':scope > [role=alert]').textContent = ''; markChanged();
   }

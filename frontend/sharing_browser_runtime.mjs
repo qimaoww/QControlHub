@@ -92,6 +92,12 @@ export async function testAgentSharingRuntime() {
     const beforeRead = getCount(), beforeFailures = retainedFailures;
     button('重新读取').click();await waitFor(idle,'无修改重新读取未结束');
     assert.equal(getCount(),beforeRead+1,'无修改重新读取请求数');assert.ok(!loading());
+    holdRead=true;button('重新读取').click();await waitFor(()=>pendingReads.length,'保留交互状态的读取未开始');
+    const originalPorts=field('ports'), disclosure=form().querySelector('details');
+    disclosure.open=true;originalPorts.focus();originalPorts.setSelectionRange(1,3);
+    holdRead=false;pendingReads.shift()();await waitFor(idle,'无变化读取未结束');
+    assert.ok(field('ports')===originalPorts&&document.activeElement===originalPorts&&disclosure.open,'无变化读取重建字段或丢失焦点和展开状态');
+    assert.equal(originalPorts.selectionStart,1);assert.equal(originalPorts.selectionEnd,3);
     holdRead=true;button('重新读取').click();await waitFor(()=>pendingReads.length,'重新读取未开始');
     assert.ok(loading()&&button('重新读取').disabled,'实际读取未显示状态或未防重复');
     input(field('ports'),'21004');assert.ok(form().querySelector('[type=submit]').disabled,'读取期间允许保存');
